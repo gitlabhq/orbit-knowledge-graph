@@ -1,3 +1,15 @@
+## [0.148.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.147.0...v0.148.0) (2026-10-18)
+
+### Features
+
+* **grpc:** cap the total size of chunked query results ([d8ebeca](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d8ebecae4559dbc1c0535f16bcf1eca805856473)) by Michael Angelo Rivera
+* **observability:** expanded logs policy with request tenant context ([8a56562](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8a56562b0ef19b0f318720aeaadc49a8f90a8491)) by Bohdan Parkhomchuk
+
+### Other
+
+* **query:** add the prod performance query corpus ([1c2e603](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1c2e603bae02ff0f42c3e781b921d36cda38e503)) by Jean-Gabriel Doyon
+* **schema:** bump schema to 109 to force a full backfill ([9db32c2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9db32c235440e5d3d0212830f4de1134e52498de)) by Jean-Gabriel Doyon
+
 ## [0.147.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.146.0...v0.147.0) (2026-10-17)
 
 ### Features

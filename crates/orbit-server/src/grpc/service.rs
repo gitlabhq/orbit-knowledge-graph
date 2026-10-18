@@ -15,7 +15,7 @@ use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{Instrument, info, instrument, warn};
+use tracing::{Instrument, info, warn};
 
 use super::auth::extract_request_context;
 use crate::active_schema::ActiveSchema;
@@ -26,8 +26,8 @@ use crate::graph_status::GraphStatusService;
 use crate::indexing_status::{IndexingStatusService, build_indexing_status_response};
 use crate::item_counts::{ItemCountService, build_item_counts_response};
 use crate::pipeline::{
-    QueryPipelineService, QueryServiceOutput, RawQuery, receive_query_request, result_messages,
-    send_invalid_request_error, send_query_error,
+    QueryPipelineService, QueryServiceOutput, RawQuery, ResultChunking, receive_query_request,
+    result_messages, send_invalid_request_error, send_query_error,
 };
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
@@ -168,7 +168,7 @@ pub struct OrbitServiceImpl {
     indexing_status: IndexingStatusService,
     item_counts: ItemCountService,
     quota: Arc<QuotaService>,
-    result_chunk_bytes: usize,
+    result_chunking: ResultChunking,
 }
 
 impl OrbitServiceImpl {
@@ -200,7 +200,7 @@ impl OrbitServiceImpl {
             indexing_status,
             item_counts,
             quota: Arc::new(QuotaService::disabled()),
-            result_chunk_bytes: grpc.result_chunk_bytes,
+            result_chunking: ResultChunking::from(grpc),
         }
     }
 
@@ -230,16 +230,11 @@ type ExecuteQueryStream =
 
 #[tonic::async_trait]
 impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn list_tools(
         &self,
         request: Request<ListToolsRequest>,
     ) -> Result<Response<ListToolsResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
 
         info!("Listing tools for user");
 
@@ -270,16 +265,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         Ok(Response::new(ListToolsResponse { tools }))
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn list_agent_commands(
         &self,
         request: Request<ListAgentCommandsRequest>,
     ) -> Result<Response<ListAgentCommandsResponse>, Status> {
-        let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
+        extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
         let requested = &req.command_names;
@@ -332,16 +322,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         }))
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn invoke_agent_command(
         &self,
         request: Request<InvokeAgentCommandRequest>,
     ) -> Result<Response<InvokeAgentCommandResponse>, Status> {
-        let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
+        extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
         let frontend = query_frontend(req.language).map_err(Status::invalid_argument)?;
@@ -397,16 +382,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
     type ExecuteQueryStream = ExecuteQueryStream;
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn execute_query(
         &self,
         request: Request<Streaming<ExecuteQueryMessage>>,
     ) -> Result<Response<Self::ExecuteQueryStream>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
         self.quota
             .check(&QuotaCheckInputs::from(&ctx.claims))
             .await?;
@@ -415,7 +395,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let (tx, rx) = mpsc::channel(4);
 
         let pipeline = self.pipeline.clone();
-        let result_chunk_bytes = self.result_chunk_bytes;
+        let result_chunking = self.result_chunking;
         let schema = self.active_schema.snapshot()?;
         let span = tracing::Span::current();
 
@@ -476,11 +456,8 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 };
                 let result = pipeline
                     .run_query(&schema, ctx, query, &tx, stream, |output| {
-                        render(output).map(|result| {
-                            result_messages(
-                                result,
-                                req.chunked_result.then_some(result_chunk_bytes),
-                            )
+                        render(output).and_then(|result| {
+                            result_messages(result, req.chunked_result.then_some(result_chunking))
                         })
                     })
                     .await;
@@ -507,16 +484,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn get_graph_schema(
         &self,
         request: Request<GetGraphSchemaRequest>,
     ) -> Result<Response<GetGraphSchemaResponse>, Status> {
-        let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
+        extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching graph schema for user");
@@ -538,16 +510,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         Ok(Response::new(response))
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn get_response_format(
         &self,
         request: Request<GetResponseFormatRequest>,
     ) -> Result<Response<GetResponseFormatResponse>, Status> {
-        let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
+        extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching query response format for user");
@@ -575,16 +542,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         Ok(Response::new(response))
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn get_query_dsl(
         &self,
         request: Request<GetQueryDslRequest>,
     ) -> Result<Response<GetQueryDslResponse>, Status> {
-        let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
+        extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
         if query_frontend(req.language).map_err(Status::invalid_argument)? == Frontend::Gql {
@@ -613,16 +575,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         Ok(Response::new(response))
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn list_skills(
         &self,
         request: Request<ListSkillsRequest>,
     ) -> Result<Response<ListSkillsResponse>, Status> {
-        let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
+        extract_request_context(&request, &self.validator)?;
         let frontend =
             query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
 
@@ -643,16 +600,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         }))
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn get_skill(
         &self,
         request: Request<GetSkillRequest>,
     ) -> Result<Response<GetSkillResponse>, Status> {
-        let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
+        extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
         let frontend = query_frontend(req.language).map_err(Status::invalid_argument)?;
@@ -680,16 +632,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         }))
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn list_named_queries(
         &self,
         request: Request<ListNamedQueriesRequest>,
     ) -> Result<Response<ListNamedQueriesResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
 
         let frontend =
             query_frontend(request.get_ref().language).map_err(Status::invalid_argument)?;
@@ -704,16 +651,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         Ok(Response::new(ListNamedQueriesResponse { queries }))
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn get_cluster_health(
         &self,
         request: Request<GetClusterHealthRequest>,
     ) -> Result<Response<GetClusterHealthResponse>, Status> {
-        let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
+        extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching cluster health for user");
@@ -722,21 +664,15 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         Ok(Response::new(response))
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn get_graph_status(
         &self,
         request: Request<GetGraphStatusRequest>,
     ) -> Result<Response<GetGraphStatusResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
         let claims = ctx.claims;
 
         let req = request.get_ref();
-        let traversal_path = TraversalPath::new_unchecked(req.traversal_path.clone());
-        authorize_traversal_path(&claims, &traversal_path)?;
+        let traversal_path = parse_authorized_path(&claims, &req.traversal_path)?;
 
         let security_context =
             build_security_context(&claims).map_err(|e| Status::unauthenticated(e.to_string()))?;
@@ -751,16 +687,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         Ok(Response::new(response))
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn get_indexing_status(
         &self,
         request: Request<GetIndexingStatusRequest>,
     ) -> Result<Response<GetIndexingStatusResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
         let paths = parse_authorized_paths(&ctx.claims, &request.get_ref().traversal_paths)?;
 
         info!(
@@ -775,16 +706,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         Ok(Response::new(build_indexing_status_response(&statuses)))
     }
 
-    #[instrument(
-        skip(self, request),
-        fields(user_id, source_type, ai_session_id, client_request_id, coding_agent)
-    )]
     async fn get_item_counts(
         &self,
         request: Request<GetItemCountsRequest>,
     ) -> Result<Response<GetItemCountsResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        ctx.record_in_current_span();
         let path = parse_authorized_path(&ctx.claims, &request.get_ref().traversal_path)?;
         let security_context = build_security_context(&ctx.claims)
             .map_err(|e| Status::unauthenticated(e.to_string()))?;
@@ -1013,6 +939,7 @@ mod tests {
     mod commands;
     mod query_errors;
     mod quota;
+    mod request_span;
     mod skills;
     mod status;
 

@@ -381,8 +381,14 @@ Required for code indexing (repository archive download) and authorization.
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `metrics.log_level` | None | Rust log filter string |
+| `metrics.expanded_logs.global_override` | `true` | Write expanded fields (file paths, query text, error text) on every log line. Turn it off to write them only for `root_namespace_ids` and for requests that Rails marks for verbose logs |
+| `metrics.expanded_logs.root_namespace_ids` | `[]` | Root namespace IDs whose requests and indexing work are always logged with expanded fields |
 
 Example: `info,orbit_server=debug,gkg_indexer=trace`
+
+Debug and trace lines are written only when they are expanded (see `metrics.expanded_logs`). The server adds `ra_ap=off` to the filter.
+
+A span directive such as `[orbit_request]=debug` in `metrics.log_level` also enables the lines of dependencies inside that span.
 
 ### OpenTelemetry
 
@@ -465,6 +471,7 @@ Enabling `tls.internal` changes what clients must send:
 | `grpc.stream_timeout_secs` | `60` | Stream timeout |
 | `grpc.max_header_list_size_bytes` | `65536` (64 KiB) | HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` advertised to clients. tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs. |
 | `grpc.result_chunk_bytes` | `524288` (512 KiB) | Largest `ResultChunk` the server sends when a client sets `chunked_result`. Must be between 64 KiB and 4 MiB, because GitLab Rails rejects gRPC messages over 8 MiB. Chunks split on UTF-8 boundaries, so a chunk can be up to 3 bytes larger. |
+| `grpc.max_result_bytes` | `67108864` (64 MiB) | Largest result text the server sends in chunks. A larger result fails with a client-safe `compile_error` before the first chunk. Must be at least 1 MiB. |
 
 ### Query settings
 

@@ -16,6 +16,9 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 109
+  scope: "*"
+  note: Forces a full re-index to backfill existing graph rows.
 - version: 108
   scope: none
   note: >-

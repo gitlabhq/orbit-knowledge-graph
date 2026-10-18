@@ -184,6 +184,7 @@ grpc:
   stream_timeout_secs: 60
   max_header_list_size_bytes: 65536 # 64 KiB; tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs
   result_chunk_bytes: 524288
+  max_result_bytes: 67108864
 
 query:
   default:
@@ -196,6 +197,9 @@ query:
 
 metrics:
   # log_level: "info"
+  expanded_logs:
+    global_override: true
+    root_namespace_ids: []
   otel:
     enabled: false
     endpoint: "http://localhost:4317"

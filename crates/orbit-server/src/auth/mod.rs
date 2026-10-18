@@ -6,6 +6,6 @@ mod validator;
 
 pub use authz::build_security_context;
 pub use claims::{Claims, SourceType, TraversalPathClaim};
-pub(crate) use context::RequestContext;
+pub(crate) use context::{RequestContext, request_span};
 pub use error::AuthError;
 pub use validator::JwtValidator;
