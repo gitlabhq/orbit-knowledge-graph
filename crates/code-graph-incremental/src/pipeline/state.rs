@@ -17,12 +17,15 @@ use crate::treesitter::SupportLang;
 
 pub struct SourceFile {
     pub path: String,
-    pub content: String,
+    pub content: std::sync::Arc<[u8]>,
 }
 
 impl From<(String, String)> for SourceFile {
     fn from((path, content): (String, String)) -> Self {
-        Self { path, content }
+        Self {
+            path,
+            content: content.into_bytes().into(),
+        }
     }
 }
 
@@ -226,7 +229,7 @@ impl From<TreeSnapshot> for Tree<Compact> {
                 .into_iter()
                 .map(|(node, tags)| (node, SmallVec::from_vec(tags)))
                 .collect(),
-            source: std::sync::Arc::from(""),
+            source: std::sync::Arc::from([]),
         }
     }
 }
@@ -315,7 +318,14 @@ impl State {
             configs: self
                 .configs
                 .iter()
-                .map(|c| (c.path.clone(), c.content.clone()))
+                .map(|c| {
+                    (
+                        c.path.clone(),
+                        std::str::from_utf8(&c.content)
+                            .expect("validated manifest")
+                            .to_owned(),
+                    )
+                })
                 .collect(),
             trees: self.trees.len() as u64,
         };

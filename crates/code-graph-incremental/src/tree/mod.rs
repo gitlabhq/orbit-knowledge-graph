@@ -22,7 +22,7 @@ pub struct Tree<S: Storage = Mutable> {
     pub(crate) root: S::Id,
     pub label: String,
     pub tags: FxHashMap<u32, SmallVec<[Tag; 2]>>,
-    pub source: std::sync::Arc<str>,
+    pub source: std::sync::Arc<[u8]>,
 }
 
 impl<N> Tree<Mutable<N>> {
@@ -34,7 +34,7 @@ impl<N> Tree<Mutable<N>> {
             root,
             label: String::new(),
             tags: FxHashMap::default(),
-            source: std::sync::Arc::from(""),
+            source: std::sync::Arc::from([]),
         }
     }
 

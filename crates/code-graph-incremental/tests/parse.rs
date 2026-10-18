@@ -17,12 +17,19 @@ fn write_all(root: &Path, files: &[(&str, &[u8])]) {
 
 fn parse_repo(env: &Env, root: &Path) -> Workset<Vec<Parsed>> {
     let sources = common::walk(root);
-    Pipeline::new(Context::new(env, sources), ())
+    let workset = Pipeline::new(Context::new(env, sources.clone()), ())
         .then(Prepare)
         .unwrap()
         .then(Each(Parse))
         .unwrap()
-        .into_value()
+        .into_value();
+    for Parsed(tree) in &workset.items {
+        assert!(
+            std::sync::Arc::ptr_eq(&tree.source, &sources.read(&tree.label).unwrap()),
+            "parsed trees share the resident VFS source buffer"
+        );
+    }
+    workset
 }
 
 fn error_nodes(tree: &Tree, env: &Env) -> usize {

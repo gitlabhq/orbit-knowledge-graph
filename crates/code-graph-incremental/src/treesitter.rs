@@ -238,7 +238,7 @@ fn grammar_to_ts_language(grammar: &str) -> tree_sitter::Language {
 }
 
 fn from_tree_sitter(
-    source: &str,
+    source: std::sync::Arc<[u8]>,
     ts_tree: &tree_sitter::Tree,
     lang: &Lang,
     kind_map: &[u16],
@@ -257,7 +257,9 @@ fn from_tree_sitter(
     let root_sym = if !label.is_empty() {
         lang.syms.intern(label)
     } else if cursor.node().is_named() {
-        let text = &source[cursor.node().start_byte()..cursor.node().end_byte()];
+        let text =
+            std::str::from_utf8(&source[cursor.node().start_byte()..cursor.node().end_byte()])
+                .expect("source was validated before parsing");
         lang.syms.intern(text)
     } else {
         0
@@ -280,7 +282,7 @@ fn from_tree_sitter(
         },
     );
     tree.label = label.to_string();
-    tree.source = std::sync::Arc::from(source);
+    tree.source = source;
 
     let root_nid = tree.root;
     let mut parent_stack: Vec<indextree::NodeId> = vec![root_nid];
@@ -374,24 +376,8 @@ thread_local! {
     });
 }
 
-/// `None` from tree-sitter means its own timeout or cancellation tripped.
-pub fn parse(
-    source: &str,
-    support_lang: SupportLang,
-    lang: &Lang,
-    label: &str,
-) -> Result<Tree, Killed> {
-    parse_with_sentinel(
-        source,
-        support_lang,
-        lang,
-        label,
-        &crate::sentinel::Sentinel::disabled(),
-    )
-}
-
 pub fn parse_with_sentinel(
-    source: &str,
+    source: std::sync::Arc<[u8]>,
     support_lang: SupportLang,
     lang: &Lang,
     label: &str,
@@ -411,7 +397,7 @@ pub fn parse_with_sentinel(
                 ControlFlow::Break(())
             }
         };
-        let mut input = |offset: usize, _: tree_sitter::Point| &source.as_bytes()[offset..];
+        let mut input = |offset: usize, _: tree_sitter::Point| &source[offset..];
         let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
         let ts_tree = c
             .parser
@@ -480,9 +466,15 @@ mod tests {
             }));
         let lang = Lang::default();
         let source = "def example():\n    return 42\n".repeat(20000);
-        let error = parse_with_sentinel(&source, SupportLang::Python, &lang, "large.py", &sentinel)
-            .err()
-            .unwrap();
+        let error = parse_with_sentinel(
+            source.into_bytes().into(),
+            SupportLang::Python,
+            &lang,
+            "large.py",
+            &sentinel,
+        )
+        .err()
+        .unwrap();
         assert_eq!(error.label, "tree-sitter");
         assert!(error.cancelled);
         assert_eq!(error.to_string(), "tree-sitter cancelled");
@@ -490,11 +482,12 @@ mod tests {
         assert_eq!(error.budget, Duration::from_millis(u64::MAX));
         assert!(checks.load(Ordering::Relaxed) >= 2);
         assert!(
-            parse(
-                "def valid(): pass\n",
+            parse_with_sentinel(
+                b"def valid(): pass\n".as_slice().into(),
                 SupportLang::Python,
                 &lang,
-                "valid.py"
+                "valid.py",
+                &crate::sentinel::Sentinel::disabled(),
             )
             .is_ok()
         );

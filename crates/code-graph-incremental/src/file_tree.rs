@@ -145,7 +145,7 @@ impl<'a> ProjectTree<'a> {
             .files
             .unwrap_or(&[])
             .iter()
-            .map(|f| (f.path.as_str(), f.content.as_str()))
+            .filter_map(|f| Some((f.path.as_str(), std::str::from_utf8(&f.content).ok()?)))
             .collect();
 
         let mut children: FxHashMap<String, FxHashSet<(String, bool)>> = FxHashMap::default();

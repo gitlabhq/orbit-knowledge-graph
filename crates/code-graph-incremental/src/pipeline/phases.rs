@@ -36,9 +36,14 @@ impl Phase<()> for Prepare {
     }
 }
 
-fn read(repository: &orbit_utils::vfs::Vfs<()>, path: &str) -> std::io::Result<String> {
-    String::from_utf8(repository.read(path)?.to_vec())
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+fn read(
+    repository: &orbit_utils::vfs::Vfs<()>,
+    path: &str,
+) -> std::io::Result<std::sync::Arc<[u8]>> {
+    let bytes = repository.read(path)?;
+    std::str::from_utf8(&bytes)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    Ok(bytes)
 }
 
 fn workset(
@@ -288,7 +293,7 @@ impl ItemPhase<SourceFile> for Parse {
         let budget = run
             .child("tree-sitter", &file.path, env.limits.file_parse_ms)
             .on_thread_cpu();
-        treesitter::parse_with_sentinel(&file.content, grammar, &env.lang, &file.path, &budget)
+        treesitter::parse_with_sentinel(file.content, grammar, &env.lang, &file.path, &budget)
             .map(Parsed)
     }
 }
@@ -354,7 +359,7 @@ impl ItemPhase<Rewritten> for Canonicalize {
         for (node, path) in imports {
             tree.set_tag(node, key, path);
         }
-        tree.source = std::sync::Arc::from("");
+        tree.source = std::sync::Arc::from([]);
         Ok(Canonical(tree.compact_and_remap()))
     }
 }
