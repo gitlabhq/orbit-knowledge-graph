@@ -85,7 +85,7 @@ pub async fn find_droppable_entities(
             if !known_names.contains(base_name)
                 && matches_preserve_pattern(base_name, &preserve_patterns)
             {
-                tracing::info!(version = dead_version, entity = %name, "GC: preserving (matches preserve pattern)");
+                tracing::info!(schema_version = dead_version, entity = %name, "GC: preserving (matches preserve pattern)");
                 continue;
             }
 
@@ -121,7 +121,7 @@ pub async fn drop_entities(
             }
             Err(error) => {
                 tracing::warn!(
-                    version = entity.version,
+                    schema_version = entity.version,
                     entity = %entity.name,
                     %error,
                     "GC: drop failed"
@@ -142,7 +142,7 @@ pub async fn mark_dropped_versions(graph: &ArrowClickHouseClient, versions: &[u3
     let mut marked = Vec::new();
     for &version in versions {
         if let Err(error) = mark_version_dropped(graph, version).await {
-            tracing::warn!(version, %error, "GC: failed to mark version as dropped");
+            tracing::warn!(schema_version = version, %error, "GC: failed to mark version as dropped");
             continue;
         }
         marked.push(version);

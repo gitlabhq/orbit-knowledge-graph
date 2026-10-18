@@ -249,6 +249,23 @@ Rate-limit and timeout alerts were retired with the per-class threat counters. O
 
 All logs are structured JSON, shipped to Logstash and Elasticsearch. Every log entry includes a correlation ID so you can trace a request across services.
 
+#### Red data in logs
+
+The server writes logs through the labkit expanded logs policy. Each field is safe or expanded:
+
+- A **safe** field can never hold customer data: numeric IDs, traversal paths, counts, sizes, durations, flags, and names that Orbit defines. Every log line has its safe fields.
+- An **expanded** field is every other field: file paths, branch names, query text, SQL, error text, URLs and free text. A log line has its expanded fields only when the line is expanded.
+
+A log line is expanded when one of these conditions is true:
+
+1. `metrics.expanded_logs.global_override` is on. It is on by default, so a deployment keeps its full logs until it turns the override off. Keep it on until every log call names its fields from the field registry (a later change). Until then, the call sites are not classified.
+2. The line is inside a span whose `gl_root_namespace_id`, or the root namespace in its `traversal_path`, is in `metrics.expanded_logs.root_namespace_ids`. Each field comes from the nearest span that has it. When a line has both, the nearest `gl_root_namespace_id` and the nearest `traversal_path` must both be in the list. For a gRPC request, the root namespace is the one that all traversal paths of the JWT are under. A request with no paths, with paths under several root namespaces, or from an admin has none.
+3. The line is inside a gRPC request for which Rails sends the `verbose_gkg_logs` token in the `x-gitlab-enabled-feature-flags` header. Rails sends it on every GitLab.com request when its `gkg_verbose_logs` feature flag is on.
+
+A line outside any span is never expanded. Debug lines are written only when they are expanded. The message text is always written, so it is fixed text and values go in fields.
+
+The server also turns off the log targets of the rust-analyzer crates (`ra_ap`) and ignores configured `ra_ap` directives. Their messages contain crate names and paths of the parsed repository. A panic is logged as an error line with the panic text in an expanded field, not printed to stderr.
+
 ## Logging Structure and Format
 
 All log output is JSON. Each entry has standard fields plus context-specific data.

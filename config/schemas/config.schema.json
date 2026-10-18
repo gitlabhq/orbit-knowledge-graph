@@ -1058,6 +1058,9 @@
             "null"
           ]
         },
+        "expanded_logs": {
+          "$ref": "#/$defs/ExpandedLogsConfig"
+        },
         "otel": {
           "$ref": "#/$defs/OtelConfig"
         },
@@ -1067,8 +1070,33 @@
       },
       "additionalProperties": false,
       "required": [
+        "expanded_logs",
         "otel",
         "prometheus"
+      ]
+    },
+    "ExpandedLogsConfig": {
+      "description": "Which log lines carry expanded fields; other lines carry only safe fields.",
+      "type": "object",
+      "properties": {
+        "global_override": {
+          "description": "Expand every log line.",
+          "type": "boolean"
+        },
+        "root_namespace_ids": {
+          "description": "Root namespace IDs whose logs are always expanded.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "global_override",
+        "root_namespace_ids"
       ]
     },
     "OtelConfig": {
