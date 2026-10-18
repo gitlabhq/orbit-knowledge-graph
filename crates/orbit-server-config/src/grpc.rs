@@ -21,9 +21,12 @@ pub struct GrpcConfig {
     pub max_header_list_size_bytes: u32,
     #[schemars(range(min = 65536, max = 4194304))]
     pub result_chunk_bytes: usize,
+    #[schemars(range(min = 1048576))]
+    pub max_result_bytes: usize,
 }
 
 const RESULT_CHUNK_BYTES: std::ops::RangeInclusive<usize> = 64 * 1024..=4 * 1024 * 1024;
+const MAX_RESULT_BYTES_FLOOR: usize = 1024 * 1024;
 
 impl GrpcConfig {
     pub fn validate(&self) -> Result<(), GrpcConfigError> {
@@ -31,6 +34,9 @@ impl GrpcConfig {
             return Err(GrpcConfigError::ResultChunkBytesOutOfRange(
                 self.result_chunk_bytes,
             ));
+        }
+        if self.max_result_bytes < MAX_RESULT_BYTES_FLOOR {
+            return Err(GrpcConfigError::MaxResultBytesTooLow(self.max_result_bytes));
         }
         Ok(())
     }
@@ -43,6 +49,9 @@ pub enum GrpcConfigError {
          GitLab Rails rejects gRPC messages over 8 MiB"
     )]
     ResultChunkBytesOutOfRange(usize),
+
+    #[error("grpc.max_result_bytes must be at least 1048576 (got {0})")]
+    MaxResultBytesTooLow(usize),
 }
 
 #[cfg(test)]
@@ -87,6 +96,13 @@ mod tests {
             cfg.result_chunk_bytes = bytes;
             assert!(cfg.validate().is_err(), "{bytes} must be rejected");
         }
+    }
+
+    #[test]
+    fn max_result_bytes_has_a_floor() {
+        let mut cfg = AppConfig::embedded_defaults().grpc;
+        cfg.max_result_bytes = 1024;
+        assert!(cfg.validate().is_err());
     }
 
     #[test]

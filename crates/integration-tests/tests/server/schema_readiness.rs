@@ -116,6 +116,32 @@ async fn chunked_results_join_to_the_same_json_as_one_result() {
 }
 
 #[tokio::test]
+async fn chunked_results_over_the_limit_fail_before_any_chunk() {
+    let mut cluster = Cluster::start(1).await;
+    cluster.create_tables(&[1]).await;
+    cluster.promote(1).await;
+    cluster.await_serving(Some(1)).await;
+
+    let schema = ExecuteQueryRequest {
+        query: "CALL db.schema()".into(),
+        language: QueryLanguage::Gql as i32,
+        chunked_result: true,
+        ..Default::default()
+    };
+    let mut query = cluster.open_query(Some(schema)).await;
+    let Content::Error(error) = query.next().await else {
+        panic!("expected the size error before any chunk");
+    };
+
+    assert_eq!(error.code, "compile_error");
+    assert!(
+        error.message.contains("over the 1024-byte limit"),
+        "{}",
+        error.message
+    );
+}
+
+#[tokio::test]
 async fn named_queries_follow_the_active_schema() {
     let mut cluster = Cluster::start(2).await;
     cluster.publish_archive(1).await;
@@ -774,6 +800,7 @@ fn webserver_config(graph: &TestContext, nats_address: &str) -> AppConfig {
     config.nats.url = format!("nats://{nats_address}");
     config.grpc.stream_timeout_secs = WAIT_LIMIT.as_secs();
     config.grpc.result_chunk_bytes = 16;
+    config.grpc.max_result_bytes = 1024;
     config
 }
 
