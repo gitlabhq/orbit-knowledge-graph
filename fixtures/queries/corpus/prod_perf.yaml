@@ -2,9 +2,7 @@
 #
 # 131 GQL queries over real gitlab-org shapes: point lookups, filtered scans,
 # 1-hop and multi-hop traversals, aggregations, neighbors, path finding,
-# pagination, and code graph. Used for the prod A/B runs of
-# `use_statistics=0` (!2865), neighbors per-arm kinds (!2868), and
-# FINAL-free latest-row reads (!2942) at scope 1/9970/.
+# pagination, and code graph.
 # Canonical corpus entry: desc / category / suite / query (inline GQL).
 #
 # Date windows are literal: 7, 30, and 90 days before the 2026-10-17 run.
