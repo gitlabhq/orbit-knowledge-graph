@@ -838,7 +838,7 @@ cli-integration-test:
       docker pull nats:2.11-alpine &
       wait
   script:
-    - cargo nextest run --profile ci --all-features --test containers -E "$NEXTEST_FILTER"
+    - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --test indexer_containers -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
 
 integration-test:
@@ -883,7 +883,7 @@ corpus-smoke-test:
   script:
     # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
     # against a real ClickHouse schema (no correctness assertions).
-    - cargo nextest run --profile ci --all-features --test containers --no-capture -E "$NEXTEST_FILTER"
+    - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --no-capture -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
 
 # Benchmark Stage

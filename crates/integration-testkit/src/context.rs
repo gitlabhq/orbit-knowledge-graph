@@ -7,10 +7,6 @@ use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use query_engine::compiler::ParameterizedQuery;
-use testcontainers::bollard::Docker;
-use testcontainers::bollard::query_parameters::{
-    ListContainersOptionsBuilder, RemoveContainerOptionsBuilder,
-};
 use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
@@ -25,26 +21,17 @@ const CLICKHOUSE_HTTP_PORT: u16 = 8123;
 const TEST_DATABASE: &str = "test";
 const TEST_USERNAME: &str = "default";
 const TEST_PASSWORD: &str = "testpass";
-
-const CONTAINER_LABEL_KEY: &str = "gkg-integration-test";
-const SESSION_LABEL_KEY: &str = "gkg-session-id";
-
-fn session_id() -> &'static str {
-    use std::sync::OnceLock;
-    static ID: OnceLock<String> = OnceLock::new();
-    ID.get_or_init(|| {
-        std::env::var("NEXTEST_RUN_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string())
-    })
-}
+const SHARED_CLICKHOUSE_URL: &str = "GKG_TEST_CLICKHOUSE_URL";
+const DATABASE_PREFIX: &str = "GKG_TEST_DATABASE_PREFIX";
 
 const MAX_CONNECTION_ATTEMPTS: u32 = 200;
 const CONNECTION_RETRY_DELAY: Duration = Duration::from_millis(50);
 
 #[derive(Clone)]
 pub struct TestContext {
-    _container: Arc<ContainerAsync<GenericImage>>,
+    _container: Option<Arc<ContainerAsync<GenericImage>>>,
     pub config: ClickHouseConfiguration,
-    url: String,
+    client: ArrowClickHouseClient,
     schema_sqls: Arc<Vec<String>>,
 }
 
@@ -52,29 +39,22 @@ impl TestContext {
     pub async fn new(schema_sqls: &[&str]) -> Self {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let t = std::time::Instant::now();
-        let container = Self::start_container().await;
+        let url = std::env::var(SHARED_CLICKHOUSE_URL)
+            .unwrap_or_else(|_| panic!("run integration tests through mise"));
+        let database = unique_database(TEST_DATABASE);
+        Self::create_database(&url, &database).await;
+        Self::run_schema_in(&url, &database, schema_sqls).await;
+        eprintln!("[context] new(): {:.2?}", t.elapsed());
+        Self::from_database(None, url, database, schema_sqls)
+    }
+
+    pub async fn dedicated(schema_sqls: &[&str]) -> Self {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let container = Arc::new(Self::start_container().await);
         let url = Self::extract_url(&container).await;
         Self::wait_for_ready(&url).await;
         Self::run_schema_in(&url, TEST_DATABASE, schema_sqls).await;
-        eprintln!("[context] new(): {:.2?}", t.elapsed());
-
-        let config = ClickHouseConfiguration {
-            database: TEST_DATABASE.to_string(),
-            url: url.clone(),
-            username: TEST_USERNAME.to_string(),
-            password: Some(TEST_PASSWORD.to_string()),
-            session_settings: std::collections::HashMap::new(),
-            replicated: false,
-            insert_settings: std::collections::HashMap::new(),
-            profiling: AppConfig::embedded_defaults().graph.profiling,
-        };
-
-        Self {
-            _container: Arc::new(container),
-            config,
-            url,
-            schema_sqls: Arc::new(schema_sqls.iter().map(|s| s.to_string()).collect()),
-        }
+        Self::from_database(Some(container), url, TEST_DATABASE.to_string(), schema_sqls)
     }
 
     pub async fn query(&self, sql: &str) -> Vec<RecordBatch> {
@@ -134,11 +114,25 @@ impl TestContext {
     /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see
     /// every inserted row.
     pub async fn optimize_all(&self) {
+        self.optimize(false).await;
+    }
+
+    pub async fn optimize_if_needed(&self) {
+        self.optimize(true).await;
+    }
+
+    async fn optimize(&self, multiple_parts_only: bool) {
         let t = std::time::Instant::now();
+        let having = if multiple_parts_only {
+            " HAVING count() > 1"
+        } else {
+            ""
+        };
         let batches = self
             .query(&format!(
-                "SELECT table FROM system.parts WHERE database = '{}' AND active GROUP BY table",
-                self.config.database
+                "SELECT table FROM system.parts WHERE database = '{}' AND active \
+                 GROUP BY table{having}",
+                self.config.database,
             ))
             .await;
 
@@ -161,88 +155,46 @@ impl TestContext {
         );
     }
 
-    pub async fn truncate_all_tables(&self) {
-        let batches = self
-            .query(&format!(
-                "SELECT name FROM system.tables WHERE database = '{}' AND engine NOT IN ('View', 'Dictionary')",
-                self.config.database
-            ))
-            .await;
-        for batch in &batches {
-            let names =
-                ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
-            for i in 0..batch.num_rows() {
-                self.execute(&format!("TRUNCATE TABLE `{}`", names.value(i)))
-                    .await;
-            }
-        }
-    }
-
     pub fn create_client(&self) -> ArrowClickHouseClient {
-        self.config.build_client("graph")
+        self.client.clone()
     }
 
     pub async fn fork(&self, name: &str) -> Self {
-        let admin = ArrowClickHouseClient::new(
-            &self.url,
-            "default",
-            TEST_USERNAME,
-            Some(TEST_PASSWORD),
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-            "graph",
-        );
-        admin
-            .execute(&format!("CREATE DATABASE IF NOT EXISTS `{name}`"))
-            .await
-            .unwrap_or_else(|e| panic!("failed to create database {name}: {e}"));
+        let database = self.fork_database_name(name);
+        let schema_refs: Vec<&str> = self.schema_sqls.iter().map(String::as_str).collect();
+        Self::clone_database(
+            &self.config.url,
+            &self.config.database,
+            &database,
+            &schema_refs,
+        )
+        .await;
+        Self::from_database(
+            self._container.clone(),
+            self.config.url.clone(),
+            database,
+            &schema_refs,
+        )
+    }
 
-        let schema_refs: Vec<&str> = self.schema_sqls.iter().map(|s| s.as_str()).collect();
-        Self::run_schema_in(&self.url, name, &schema_refs).await;
+    pub fn fork_database_name(&self, name: &str) -> String {
+        let hash = ontology::migrations::sha256_hex(name);
+        format!(
+            "{}_{}_{}",
+            self.config.database,
+            database_label(name).chars().take(24).collect::<String>(),
+            &hash[..8]
+        )
+    }
 
-        let src = &self.config.database;
-        let batches = self
-            .query(&format!(
-                "SELECT name FROM system.tables WHERE database = '{name}' AND engine NOT IN ('View', 'Dictionary')"
-            ))
+    pub async fn drop_fork(&self, name: &str) {
+        let database = self.fork_database_name(name);
+        self.execute(&format!("DROP DATABASE IF EXISTS `{database}` SYNC"))
             .await;
-        for batch in &batches {
-            let names =
-                ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
-            for i in 0..batch.num_rows() {
-                let table = names.value(i);
-                admin
-                    .execute(&format!(
-                        "INSERT INTO `{name}`.`{table}` SELECT * FROM `{src}`.`{table}`"
-                    ))
-                    .await
-                    .unwrap_or_else(|e| {
-                        panic!("failed to copy {src}.{table} -> {name}.{table}: {e}")
-                    });
-            }
-        }
-
-        Self {
-            _container: Arc::clone(&self._container),
-            config: ClickHouseConfiguration {
-                database: name.to_string(),
-                url: self.url.clone(),
-                username: TEST_USERNAME.to_string(),
-                password: Some(TEST_PASSWORD.to_string()),
-                session_settings: std::collections::HashMap::new(),
-                replicated: false,
-                insert_settings: std::collections::HashMap::new(),
-                profiling: AppConfig::embedded_defaults().graph.profiling,
-            },
-            url: self.url.clone(),
-            schema_sqls: Arc::clone(&self.schema_sqls),
-        }
     }
 
     async fn start_container() -> ContainerAsync<GenericImage> {
         let t = std::time::Instant::now();
-        Self::cleanup_stale_containers().await;
-
         let port = ContainerPort::Tcp(CLICKHOUSE_HTTP_PORT);
 
         let container = GenericImage::new(CLICKHOUSE_IMAGE, CLICKHOUSE_TAG)
@@ -251,62 +203,11 @@ impl TestContext {
             .with_env_var("CLICKHOUSE_PASSWORD", TEST_PASSWORD)
             .with_env_var("CLICKHOUSE_DB", TEST_DATABASE)
             .with_env_var("CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT", "1")
-            .with_label(CONTAINER_LABEL_KEY, "true")
-            .with_label(SESSION_LABEL_KEY, session_id())
             .start()
             .await
             .expect("failed to start ClickHouse container");
         eprintln!("[context] start_container: {:.2?}", t.elapsed());
         container
-    }
-
-    /// Remove containers from previous test runs that weren't cleaned up
-    /// (e.g. because the process was killed without running Drop handlers).
-    /// Only targets containers with the `gkg-integration-test` label whose
-    /// `gkg-session-id` differs from the current run, so concurrent tests
-    /// within the same nextest invocation never kill each other.
-    async fn cleanup_stale_containers() {
-        let docker = match Docker::connect_with_defaults() {
-            Ok(d) => d,
-            Err(_) => return,
-        };
-
-        let current_session = session_id();
-
-        let filters = HashMap::from([(
-            "label".to_string(),
-            vec![format!("{CONTAINER_LABEL_KEY}=true")],
-        )]);
-
-        let options = ListContainersOptionsBuilder::default()
-            .all(true)
-            .filters(&filters)
-            .build();
-
-        let containers = docker
-            .list_containers(Some(options))
-            .await
-            .unwrap_or_default();
-
-        let remove_opts = RemoveContainerOptionsBuilder::default().force(true).build();
-
-        for container in containers {
-            let is_current_session = container
-                .labels
-                .as_ref()
-                .and_then(|labels| labels.get(SESSION_LABEL_KEY))
-                .is_some_and(|id| id == current_session);
-
-            if is_current_session {
-                continue;
-            }
-
-            if let Some(id) = container.id {
-                let _ = docker
-                    .remove_container(&id, Some(remove_opts.clone()))
-                    .await;
-            }
-        }
     }
 
     async fn extract_url(container: &ContainerAsync<GenericImage>) -> String {
@@ -333,13 +234,14 @@ impl TestContext {
 
     async fn wait_for_ready(url: &str) {
         let t = std::time::Instant::now();
+        let settings = test_settings();
         for attempt in 1..=MAX_CONNECTION_ATTEMPTS {
             let client = ArrowClickHouseClient::new(
                 url,
                 "default",
                 TEST_USERNAME,
                 Some(TEST_PASSWORD),
-                &std::collections::HashMap::new(),
+                &settings,
                 &std::collections::HashMap::new(),
                 "graph",
             );
@@ -356,33 +258,154 @@ impl TestContext {
 
     async fn run_schema_in(url: &str, database: &str, schema_sqls: &[&str]) {
         let t = std::time::Instant::now();
-        let client = ArrowClickHouseClient::new(
-            url,
-            database,
-            TEST_USERNAME,
-            Some(TEST_PASSWORD),
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-            "graph",
-        );
+        let client = test_client(url, database);
+        Self::execute_statements(&client, schema_statements(database, schema_sqls)).await;
+        eprintln!("[context] run_schema: {:.2?}", t.elapsed());
+    }
 
-        for schema_sql in schema_sqls {
-            let schema_sql = schema_sql
+    fn from_database(
+        container: Option<Arc<ContainerAsync<GenericImage>>>,
+        url: String,
+        database: String,
+        schema_sqls: &[&str],
+    ) -> Self {
+        let config = test_configuration(&url, &database);
+        Self {
+            _container: container,
+            client: config.build_client("graph"),
+            config,
+            schema_sqls: Arc::new(schema_sqls.iter().map(|sql| sql.to_string()).collect()),
+        }
+    }
+
+    async fn clone_database(url: &str, source: &str, target: &str, schema_sqls: &[&str]) {
+        Self::create_database(url, target).await;
+        Self::clone_tables(url, source, target, schema_sqls).await;
+    }
+
+    async fn clone_tables(url: &str, source: &str, target: &str, schema_sqls: &[&str]) {
+        let client = test_client(url, target);
+        let query = format!(
+            "SELECT name FROM system.tables WHERE database = '{source}' \
+             AND engine NOT IN ('View', 'MaterializedView', 'Dictionary')"
+        );
+        let batches = client
+            .query_arrow(&query)
+            .await
+            .unwrap_or_else(|e| panic!("failed to list tables in {source}: {e}"));
+        for batch in &batches {
+            let names =
+                ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
+            for row in 0..batch.num_rows() {
+                let table = names.value(row);
+                client
+                    .execute(&format!(
+                        "CREATE TABLE `{target}`.`{table}` CLONE AS `{source}`.`{table}`"
+                    ))
+                    .await
+                    .unwrap_or_else(|e| panic!("failed to clone {source}.{table}: {e}"));
+            }
+        }
+        let objects = schema_statements(target, schema_sqls)
+            .into_iter()
+            .filter(|statement| {
+                let kind = statement_kind(statement);
+                kind.starts_with("CREATE MATERIALIZED VIEW")
+                    || kind.starts_with("CREATE DICTIONARY")
+            })
+            .collect();
+        Self::execute_statements(&client, objects).await;
+    }
+
+    async fn create_database(url: &str, database: &str) {
+        test_client(url, "default")
+            .execute(&format!("CREATE DATABASE `{database}`"))
+            .await
+            .unwrap_or_else(|e| panic!("failed to create database {database}: {e}"));
+    }
+
+    async fn execute_statements(client: &ArrowClickHouseClient, statements: Vec<String>) {
+        for statement in statements {
+            client
+                .execute(&statement)
+                .await
+                .unwrap_or_else(|e| panic!("schema execution failed: {e}\n{statement}"));
+        }
+    }
+}
+
+fn test_settings() -> HashMap<String, String> {
+    HashMap::from([
+        ("async_insert".to_string(), "0".to_string()),
+        ("fsync_metadata".to_string(), "0".to_string()),
+    ])
+}
+
+fn test_client(url: &str, database: &str) -> ArrowClickHouseClient {
+    ArrowClickHouseClient::new(
+        url,
+        database,
+        TEST_USERNAME,
+        Some(TEST_PASSWORD),
+        &test_settings(),
+        &HashMap::new(),
+        "graph",
+    )
+}
+
+fn test_configuration(url: &str, database: &str) -> ClickHouseConfiguration {
+    ClickHouseConfiguration {
+        database: database.to_string(),
+        url: url.to_string(),
+        username: TEST_USERNAME.to_string(),
+        password: Some(TEST_PASSWORD.to_string()),
+        session_settings: test_settings(),
+        replicated: false,
+        insert_settings: HashMap::new(),
+        profiling: AppConfig::embedded_defaults().graph.profiling,
+    }
+}
+
+fn schema_statements(database: &str, schema_sqls: &[&str]) -> Vec<String> {
+    schema_sqls
+        .iter()
+        .flat_map(|schema_sql| {
+            schema_sql
                 .replace("$DICTIONARY_USER", TEST_USERNAME)
                 .replace("$DICTIONARY_PASSWORD", TEST_PASSWORD)
                 .replace("$DICTIONARY_SECURE", "0")
-                .replace("$DICTIONARY_DATABASE", database);
-            for statement in schema_sql.split(';') {
-                let statement = statement.trim();
-                if statement.is_empty() {
-                    continue;
-                }
-                client
-                    .execute(statement)
-                    .await
-                    .unwrap_or_else(|e| panic!("schema execution failed: {e}\n{statement}"));
-            }
-        }
-        eprintln!("[context] run_schema: {:.2?}", t.elapsed());
-    }
+                .replace("$DICTIONARY_DATABASE", database)
+                .split(';')
+                .map(str::trim)
+                .filter(|statement| !statement.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn unique_database(label: &str) -> String {
+    format!(
+        "{}gkg_{}_{}",
+        std::env::var(DATABASE_PREFIX).unwrap_or_default(),
+        database_label(label),
+        uuid::Uuid::new_v4().simple()
+    )
+}
+
+fn database_label(label: &str) -> String {
+    label
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || *character == '_')
+        .take(48)
+        .collect()
+}
+
+fn statement_kind(statement: &str) -> String {
+    statement
+        .lines()
+        .find(|line| !line.trim().is_empty() && !line.trim_start().starts_with("--"))
+        .unwrap_or_default()
+        .trim_start()
+        .to_ascii_uppercase()
 }
