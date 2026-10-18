@@ -25,17 +25,27 @@ const MAX_CONNECTION_ATTEMPTS: u32 = 30;
 const CONNECTION_RETRY_DELAY_MS: u64 = 500;
 
 struct TestContext {
-    _container: testcontainers::ContainerAsync<GenericImage>,
+    _container: Option<testcontainers::ContainerAsync<GenericImage>>,
     writer: ClickHouseWriter,
-    host: String,
-    port: u16,
+    config: ClickHouseConfiguration,
 }
 
 impl TestContext {
     async fn new() -> Self {
-        let (container, host, port) = start_clickhouse_container().await;
-        setup_database(&host, port).await;
-        let config = create_config(&host, port);
+        let (container, config) = match std::env::var("GKG_TEST_CLICKHOUSE_URL") {
+            Ok(_) => (
+                None,
+                integration_testkit::TestContext::shared_database("writer")
+                    .await
+                    .config,
+            ),
+            Err(_) => {
+                let (container, host, port) = start_clickhouse_container().await;
+                let config = create_config(&host, port, TEST_DATABASE);
+                (Some(container), config)
+            }
+        };
+        setup_database(&config).await;
         let writer = ClickHouseWriter::new(
             config.build_client("graph"),
             Arc::new(EngineMetrics::default()),
@@ -44,15 +54,14 @@ impl TestContext {
         Self {
             _container: container,
             writer,
-            host,
-            port,
+            config,
         }
     }
 
     fn create_client(&self) -> ArrowClickHouseClient {
         ArrowClickHouseClient::new(
-            &format!("http://{}:{}", self.host, self.port),
-            TEST_DATABASE,
+            &self.config.url,
+            &self.config.database,
             TEST_USERNAME,
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
@@ -106,12 +115,12 @@ async fn start_clickhouse_container() -> (testcontainers::ContainerAsync<Generic
     (container, host, port)
 }
 
-async fn setup_database(host: &str, port: u16) {
+async fn setup_database(config: &ClickHouseConfiguration) {
     let mut attempts = 0;
     let client = loop {
         let client = ArrowClickHouseClient::new(
-            &format!("http://{host}:{port}"),
-            "default",
+            &config.url,
+            &config.database,
             TEST_USERNAME,
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
@@ -132,10 +141,11 @@ async fn setup_database(host: &str, port: u16) {
 
     client
         .execute(&format!(
-            "CREATE TABLE IF NOT EXISTS {TEST_DATABASE}.{TEST_TABLE} (
+            "CREATE TABLE IF NOT EXISTS {}.{TEST_TABLE} (
                 id Int32,
                 name String
-            ) ENGINE = MergeTree() ORDER BY id"
+            ) ENGINE = MergeTree() ORDER BY id",
+            config.database
         ))
         .await
         .expect("failed to create table");
@@ -164,9 +174,9 @@ fn create_test_batch_with_data(ids: Vec<i32>, names: Vec<&str>) -> RecordBatch {
         .expect("failed to create record batch")
 }
 
-fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
+fn create_config(host: &str, port: u16, database: &str) -> ClickHouseConfiguration {
     ClickHouseConfiguration {
-        database: TEST_DATABASE.to_string(),
+        database: database.to_string(),
         url: format!("http://{host}:{port}"),
         username: TEST_USERNAME.to_string(),
         password: Some(TEST_PASSWORD.to_string()),

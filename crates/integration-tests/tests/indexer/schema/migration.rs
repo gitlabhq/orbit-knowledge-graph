@@ -118,11 +118,12 @@ async fn fresh_install_creates_tables_and_records_version() {
     let expected_schema = test_schema(&ontology);
 
     let result = ctx
-        .query(
+        .query(&format!(
             "SELECT toInt64(count()) AS cnt FROM system.tables \
-             WHERE database = 'test' AND name != 'gkg_schema_version' \
-             AND engine != 'Dictionary'",
-        )
+                 WHERE database = '{}' AND name != 'gkg_schema_version' \
+                 AND engine != 'Dictionary'",
+            ctx.config.database
+        ))
         .await;
     let count = i64::extract_column(&result, 0).unwrap();
     assert_eq!(
@@ -132,7 +133,10 @@ async fn fresh_install_creates_tables_and_records_version() {
     );
 
     let result = ctx
-        .query("SELECT toInt64(count()) AS cnt FROM system.dictionaries WHERE database = 'test'")
+        .query(&format!(
+            "SELECT toInt64(count()) AS cnt FROM system.dictionaries WHERE database = '{}'",
+            ctx.config.database
+        ))
         .await;
     let dict_count = i64::extract_column(&result, 0).unwrap();
     assert_eq!(
@@ -187,12 +191,13 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
     let expected_schema = test_schema(&ontology);
 
     let result = ctx
-        .query(
+        .query(&format!(
             "SELECT name FROM system.tables \
-             WHERE database = 'test' AND name != 'gkg_schema_version' \
-             AND engine != 'Dictionary' \
-             ORDER BY name",
-        )
+                 WHERE database = '{}' AND name != 'gkg_schema_version' \
+                 AND engine != 'Dictionary' \
+                 ORDER BY name",
+            ctx.config.database
+        ))
         .await;
     let created_names = String::extract_column(&result, 0).unwrap();
 
@@ -248,7 +253,8 @@ async fn created_tables_have_correct_columns() {
     ] {
         let result = ctx
             .query(&format!(
-                "SELECT name FROM system.columns WHERE database = 'test' AND table = '{table}'"
+                "SELECT name FROM system.columns WHERE database = '{}' AND table = '{table}'",
+                ctx.config.database
             ))
             .await;
         let columns = String::extract_column(&result, 0).unwrap();
@@ -501,12 +507,13 @@ async fn rollback_rebuilds_when_embedded_tables_are_gone() {
 
     let expected_schema = test_schema(&ontology);
     let result = ctx
-        .query(
+        .query(&format!(
             "SELECT name FROM system.tables \
-             WHERE database = 'test' AND name != 'gkg_schema_version' \
-             AND engine != 'Dictionary' \
-             ORDER BY name",
-        )
+                 WHERE database = '{}' AND name != 'gkg_schema_version' \
+                 AND engine != 'Dictionary' \
+                 ORDER BY name",
+            ctx.config.database
+        ))
         .await;
     let created_names = String::extract_column(&result, 0).unwrap();
     for name in &expected_schema.prefixed_table_names(&table_prefix(*SCHEMA_VERSION)) {
@@ -576,9 +583,10 @@ async fn rollback_rebuild_clears_stale_objects_before_recreating() {
     let result = ctx
         .query(&format!(
             "SELECT name FROM system.tables \
-             WHERE database = 'test' AND startsWith(name, '{prefix}') \
+             WHERE database = '{}' AND startsWith(name, '{prefix}') \
              AND engine != 'Dictionary' \
-             ORDER BY name"
+             ORDER BY name",
+            ctx.config.database
         ))
         .await;
     let created_names = String::extract_column(&result, 0).unwrap();
