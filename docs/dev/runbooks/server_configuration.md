@@ -154,9 +154,9 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `async_insert_busy_timeout_min_ms` | `1000` | Lower bound of the flush timeout. |
 | `async_insert_busy_timeout_max_ms` | `1000` | Upper bound of the flush timeout. Without it, a server upper bound below the lower bound makes ClickHouse ignore the lower bound. |
 
-Graph data writes and code checkpoints also set `async_insert=1` and `wait_for_async_insert=1` on each insert, so an overlay cannot turn them off. At light traffic each such insert waits about 1 s for the flush. At backfill rates the flush fires on volume.
+Arrow data writes and code checkpoints also set `async_insert=1` and `wait_for_async_insert=1` on each insert, so an overlay cannot turn them off. At light traffic each such insert waits about 1 s for the flush. At backfill rates the flush fires on volume.
 
-On a quorum cluster, Orbit drops `async_insert` and `wait_for_async_insert` from every insert, and the session sets `async_insert=0`. The flush timeout keys are still sent, but ClickHouse ignores them when `async_insert` is off.
+On a quorum cluster, Orbit drops `async_insert` and `wait_for_async_insert` from every insert. With `replicated: true`, the session also sets `async_insert=0`. The flush timeout keys are still sent, but ClickHouse ignores them when `async_insert` is off.
 
 The graph writer user must be allowed to set all five settings. If a user profile makes one of them read-only or constrains it, ClickHouse fails the insert with `SETTING_CONSTRAINT_VIOLATION` and names the setting. To change a value, set the key in `graph.insert_settings`.
 
