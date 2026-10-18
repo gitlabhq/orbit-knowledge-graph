@@ -63,6 +63,7 @@ pub fn codegen(ast: &Node, result_context: ResultContext) -> Result<Parameterize
     Ok(ParameterizedQuery {
         sql,
         params: ctx.params,
+        index_queries: Vec::new(),
         result_context,
         query_config: QueryConfig::default(),
         dialect: SqlDialect::DuckDb,

@@ -1466,7 +1466,7 @@ mod tests {
     #[test]
     fn final_prewhere_setting_follows_final_scans() {
         let sql = compile_sql(
-            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":10}"#,
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":"active"}}],"limit":10}"#,
         );
         assert!(sql.contains(" FINAL"), "{sql}");
         assert!(

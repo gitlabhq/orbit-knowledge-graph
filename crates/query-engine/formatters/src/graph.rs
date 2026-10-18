@@ -668,6 +668,7 @@ mod tests {
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
+                    index_queries: Vec::new(),
                     result_context: result_ctx.clone(),
                     query_config: Default::default(),
                     dialect: Default::default(),
@@ -716,6 +717,7 @@ mod tests {
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
+                    index_queries: Vec::new(),
                     result_context: result_ctx.clone(),
                     query_config: Default::default(),
                     dialect: Default::default(),
@@ -912,6 +914,7 @@ mod tests {
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
+                    index_queries: Vec::new(),
                     result_context: result_ctx.clone(),
                     query_config: Default::default(),
                     dialect: Default::default(),
@@ -1040,6 +1043,7 @@ mod tests {
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
+                    index_queries: Vec::new(),
                     result_context: result_ctx.clone(),
                     query_config: Default::default(),
                     dialect: Default::default(),
@@ -1138,6 +1142,7 @@ mod tests {
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
+                    index_queries: Vec::new(),
                     result_context: result_ctx.clone(),
                     query_config: Default::default(),
                     dialect: Default::default(),

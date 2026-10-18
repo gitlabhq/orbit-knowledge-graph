@@ -46,6 +46,7 @@ fn output(
             base: ParameterizedQuery {
                 sql: String::new(),
                 params: HashMap::new(),
+                index_queries: Vec::new(),
                 result_context: result_context.clone(),
                 query_config: Default::default(),
                 dialect: Default::default(),

@@ -17,8 +17,8 @@ use format::ExpectedIndex;
 use futures::FutureExt;
 use pagination::{PageCollection, next_page, with_after, without_cursor};
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
-    SecurityContext,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ParameterizedQuery,
+    ResultContext, SecurityContext,
 };
 use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
@@ -345,8 +345,7 @@ async fn run_frontend(
     }
 
     if !expect.indexes_used.is_empty() {
-        let plan = ctx.explain_plan(&compiled.base).await;
-        assert_indexes_used(&plan, &expect.indexes_used, label);
+        assert_indexes_used(ctx, &compiled.base, &expect.indexes_used, label).await;
     }
 
     if !expect.pages.is_empty() {
@@ -380,8 +379,7 @@ async fn run_frontend(
         let compiled = assert_compilation(compiled, expect, frontend_key, label)
             .expect("repeated query should compile");
         if !expect.indexes_used.is_empty() {
-            let plan = ctx.explain_plan(&compiled.base).await;
-            assert_indexes_used(&plan, &expect.indexes_used, label);
+            assert_indexes_used(ctx, &compiled.base, &expect.indexes_used, label).await;
         }
         let output = execute_output(
             ctx,
@@ -397,21 +395,58 @@ async fn run_frontend(
     }
 }
 
-fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], label: &str) {
+async fn assert_indexes_used(
+    ctx: &TestContext,
+    query: &ParameterizedQuery,
+    expected: &[ExpectedIndex],
+    label: &str,
+) {
+    let plan = ctx.explain_plan(query).await;
     for ExpectedIndex { table, index } in expected {
-        let scan = read_from_merge_tree(plan, table).unwrap_or_else(|| {
-            panic!("{label}: no ReadFromMergeTree step for table {table}\nplan: {plan:#}")
-        });
-        let entry = skip_index(scan, index).unwrap_or_else(|| {
-            panic!("{label}: skip index {index} not applied on {table}\nplan: {plan:#}")
-        });
-        let initial = entry["Initial Granules"].as_u64().unwrap_or(0);
-        let selected = entry["Selected Granules"].as_u64().unwrap_or(initial);
+        let mut scans = Vec::new();
+        read_from_merge_tree(&plan, table, &mut scans);
+        let mut applied = scans.iter().any(|scan| skip_index(scan, index).is_some());
+        let mut pruned = scans.iter().any(|scan| index_pruned(scan, index));
+        if !applied {
+            for sql in &query.index_queries {
+                let candidate = ParameterizedQuery {
+                    sql: sql.sql.clone(),
+                    params: sql.params.clone(),
+                    index_queries: Vec::new(),
+                    result_context: query.result_context.clone(),
+                    query_config: query.query_config.clone(),
+                    dialect: query.dialect,
+                };
+                let plan = ctx.explain_plan(&candidate).await;
+                let mut candidate_scans = Vec::new();
+                read_from_merge_tree(&plan, table, &mut candidate_scans);
+                applied |= candidate_scans
+                    .iter()
+                    .any(|scan| skip_index(scan, index).is_some());
+                pruned |= candidate_scans.iter().any(|scan| index_pruned(scan, index));
+            }
+        }
         assert!(
-            selected < initial,
-            "{label}: skip index {index} on {table} selected {selected} of {initial} granules\nplan: {plan:#}"
+            !scans.is_empty(),
+            "{label}: no ReadFromMergeTree step for table {table}"
+        );
+        assert!(
+            applied,
+            "{label}: skip index {index} not applied on any {table} scan"
+        );
+        assert!(
+            pruned,
+            "{label}: skip index {index} did not prune granules on any {table} scan"
         );
     }
+}
+
+fn index_pruned(value: &serde_json::Value, index: &str) -> bool {
+    skip_index(value, index).is_some_and(|entry| {
+        let initial = entry["Initial Granules"].as_u64().unwrap_or(0);
+        let selected = entry["Selected Granules"].as_u64().unwrap_or(initial);
+        selected < initial
+    })
 }
 
 fn unversioned_table(description: &str) -> &str {
@@ -428,7 +463,8 @@ fn unversioned_table(description: &str) -> &str {
 fn read_from_merge_tree<'a>(
     value: &'a serde_json::Value,
     table: &str,
-) -> Option<&'a serde_json::Value> {
+    scans: &mut Vec<&'a serde_json::Value>,
+) {
     match value {
         serde_json::Value::Object(map) => {
             let is_scan = map.get("Node Type").and_then(serde_json::Value::as_str)
@@ -438,14 +474,15 @@ fn read_from_merge_tree<'a>(
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|description| unversioned_table(description) == table);
             if is_scan && scans_table {
-                return Some(value);
+                scans.push(value);
             }
-            map.values().find_map(|v| read_from_merge_tree(v, table))
+            map.values()
+                .for_each(|child| read_from_merge_tree(child, table, scans));
         }
-        serde_json::Value::Array(items) => {
-            items.iter().find_map(|v| read_from_merge_tree(v, table))
-        }
-        _ => None,
+        serde_json::Value::Array(items) => items
+            .iter()
+            .for_each(|child| read_from_merge_tree(child, table, scans)),
+        _ => {}
     }
 }
 
