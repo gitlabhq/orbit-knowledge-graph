@@ -275,7 +275,6 @@ impl<'t> Fold<'t> {
             let in_chain = c.parent().is_some_and(|parent| {
                 parent.is(C::Callee)
                     || parent.is(C::Object)
-                        && !c.lifted()
                         && parent.parent().is_some_and(|owner| owner.is(C::Member))
             });
             if !in_chain {
