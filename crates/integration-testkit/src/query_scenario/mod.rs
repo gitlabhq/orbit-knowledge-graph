@@ -188,8 +188,7 @@ async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, pr
     .catch_unwind()
     .await;
     let cleanup = if let Some(database) = database {
-        let database = ctx.fork_database_name(&database);
-        AssertUnwindSafe(ctx.execute(&format!("DROP DATABASE IF EXISTS `{database}` SYNC")))
+        AssertUnwindSafe(ctx.drop_fork(&database))
             .catch_unwind()
             .await
     } else {

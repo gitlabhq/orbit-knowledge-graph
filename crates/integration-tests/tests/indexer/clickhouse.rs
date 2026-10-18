@@ -1,7 +1,6 @@
 //! Require a Docker-compatible runtime (Docker, Colima, etc).
 
 use clickhouse_client::ClickHouseConfigurationExt;
-use integration_testkit::{CLICKHOUSE_IMAGE, CLICKHOUSE_TAG};
 use std::sync::Arc;
 
 use arrow::array::{Int32Array, StringArray, UInt64Array};
@@ -12,62 +11,32 @@ use indexer::durability::WriteDurability;
 use indexer::metrics::EngineMetrics;
 use orbit_arrow::ArrowUtils;
 use orbit_server_config::ClickHouseConfiguration;
-use testcontainers::GenericImage;
-use testcontainers::core::{ContainerPort, ImageExt};
-use testcontainers::runners::AsyncRunner;
-
-const TEST_USERNAME: &str = "default";
-const TEST_PASSWORD: &str = "testpass";
-const TEST_DATABASE: &str = "test";
 const TEST_TABLE: &str = "test_table";
 
-const MAX_CONNECTION_ATTEMPTS: u32 = 30;
-const CONNECTION_RETRY_DELAY_MS: u64 = 500;
-
 struct TestContext {
-    _container: Option<testcontainers::ContainerAsync<GenericImage>>,
+    clickhouse: integration_testkit::TestContext,
     writer: ClickHouseWriter,
-    config: ClickHouseConfiguration,
 }
 
 impl TestContext {
     async fn new() -> Self {
-        let (container, config) = match std::env::var("GKG_TEST_CLICKHOUSE_URL") {
-            Ok(_) => (
-                None,
-                integration_testkit::TestContext::shared_database("writer")
-                    .await
-                    .config,
-            ),
-            Err(_) => {
-                let (container, host, port) = start_clickhouse_container().await;
-                let config = create_config(&host, port, TEST_DATABASE);
-                (Some(container), config)
-            }
-        };
-        setup_database(&config).await;
+        let clickhouse = integration_testkit::TestContext::isolated(&[]).await;
+        clickhouse
+            .execute(&format!(
+                "CREATE TABLE {TEST_TABLE} (id Int32, name String) \
+                 ENGINE = MergeTree() ORDER BY id"
+            ))
+            .await;
         let writer = ClickHouseWriter::new(
-            config.build_client("graph"),
+            clickhouse.config.build_client("graph"),
             Arc::new(EngineMetrics::default()),
         );
 
-        Self {
-            _container: container,
-            writer,
-            config,
-        }
+        Self { clickhouse, writer }
     }
 
     fn create_client(&self) -> ArrowClickHouseClient {
-        ArrowClickHouseClient::new(
-            &self.config.url,
-            &self.config.database,
-            TEST_USERNAME,
-            Some(TEST_PASSWORD),
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-            "graph",
-        )
+        self.clickhouse.create_client()
     }
 
     async fn execute(&self, sql: &str) {
@@ -81,74 +50,6 @@ impl TestContext {
         let client = self.create_client();
         client.query_arrow(sql).await.expect("query failed")
     }
-}
-
-async fn start_clickhouse_container() -> (testcontainers::ContainerAsync<GenericImage>, String, u16)
-{
-    let http_port = ContainerPort::Tcp(8123);
-
-    let container = GenericImage::new(CLICKHOUSE_IMAGE, CLICKHOUSE_TAG)
-        .with_exposed_port(http_port)
-        .with_env_var("CLICKHOUSE_USER", TEST_USERNAME)
-        .with_env_var("CLICKHOUSE_PASSWORD", TEST_PASSWORD)
-        .with_env_var("CLICKHOUSE_DB", TEST_DATABASE)
-        .start()
-        .await
-        .expect("failed to start ClickHouse container");
-
-    let host = container
-        .get_host()
-        .await
-        .expect("failed to get container host");
-
-    let port = container
-        .get_host_port_ipv4(http_port)
-        .await
-        .expect("failed to get ClickHouse HTTP port");
-
-    let host = if host.to_string() == "localhost" {
-        "127.0.0.1".to_string()
-    } else {
-        host.to_string()
-    };
-
-    (container, host, port)
-}
-
-async fn setup_database(config: &ClickHouseConfiguration) {
-    let mut attempts = 0;
-    let client = loop {
-        let client = ArrowClickHouseClient::new(
-            &config.url,
-            &config.database,
-            TEST_USERNAME,
-            Some(TEST_PASSWORD),
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-            "graph",
-        );
-
-        match client.execute("SELECT 1").await {
-            Ok(_) => break client,
-            Err(_) if attempts < MAX_CONNECTION_ATTEMPTS => {
-                attempts += 1;
-                tokio::time::sleep(std::time::Duration::from_millis(CONNECTION_RETRY_DELAY_MS))
-                    .await;
-            }
-            Err(e) => panic!("failed to connect to ClickHouse after {attempts} attempts: {e}"),
-        }
-    };
-
-    client
-        .execute(&format!(
-            "CREATE TABLE IF NOT EXISTS {}.{TEST_TABLE} (
-                id Int32,
-                name String
-            ) ENGINE = MergeTree() ORDER BY id",
-            config.database
-        ))
-        .await
-        .expect("failed to create table");
 }
 
 fn test_schema() -> Arc<Schema> {
@@ -172,21 +73,6 @@ fn create_test_batch_with_data(ids: Vec<i32>, names: Vec<&str>) -> RecordBatch {
 
     RecordBatch::try_new(test_schema(), vec![Arc::new(ids), Arc::new(names)])
         .expect("failed to create record batch")
-}
-
-fn create_config(host: &str, port: u16, database: &str) -> ClickHouseConfiguration {
-    ClickHouseConfiguration {
-        database: database.to_string(),
-        url: format!("http://{host}:{port}"),
-        username: TEST_USERNAME.to_string(),
-        password: Some(TEST_PASSWORD.to_string()),
-        session_settings: std::collections::HashMap::new(),
-        replicated: false,
-        insert_settings: std::collections::HashMap::new(),
-        profiling: orbit_server_config::AppConfig::embedded_defaults()
-            .graph
-            .profiling,
-    }
 }
 
 async fn write_batch_to_clickhouse(context: &TestContext) {

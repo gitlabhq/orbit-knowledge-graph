@@ -6,7 +6,6 @@ use std::time::Duration;
 use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
-use futures::StreamExt;
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use query_engine::compiler::ParameterizedQuery;
 use testcontainers::bollard::Docker;
@@ -29,7 +28,6 @@ const TEST_USERNAME: &str = "default";
 const TEST_PASSWORD: &str = "testpass";
 const SHARED_CLICKHOUSE_URL: &str = "GKG_TEST_CLICKHOUSE_URL";
 const TEMPLATE_READY_TABLE: &str = "_gkg_template_ready";
-const DDL_CONCURRENCY: usize = 8;
 const TEMPLATE_ATTEMPTS: u32 = 1200;
 
 const CONTAINER_LABEL_KEY: &str = "gkg-integration-test";
@@ -148,7 +146,8 @@ impl TestContext {
         let t = std::time::Instant::now();
         let batches = self
             .query(&format!(
-                "SELECT table FROM system.parts WHERE database = '{}' AND active GROUP BY table",
+                "SELECT table FROM system.parts WHERE database = '{}' AND active \
+                 GROUP BY table HAVING count() > 1",
                 self.config.database
             ))
             .await;
@@ -193,17 +192,16 @@ impl TestContext {
         self.config.build_client("graph")
     }
 
-    pub async fn shared_database(name: &str) -> Self {
-        let url = std::env::var(SHARED_CLICKHOUSE_URL)
-            .unwrap_or_else(|_| panic!("{SHARED_CLICKHOUSE_URL} is not set"));
-        Self::wait_for_ready(&url).await;
-        let database = unique_database(name);
-        Self::create_database(&url, &database).await;
+    pub async fn isolated(schema_sqls: &[&str]) -> Self {
+        let context = Self::new(&[]).await;
+        let database = unique_database("isolated");
+        Self::create_database(&context.url, &database).await;
+        Self::run_schema_in(&context.url, &database, schema_sqls).await;
         Self {
-            _container: None,
-            config: test_configuration(&url, &database),
-            url,
-            schema_sqls: Arc::new(Vec::new()),
+            _container: context._container,
+            config: test_configuration(&context.url, &database),
+            url: context.url,
+            schema_sqls: Arc::new(schema_sqls.iter().map(|sql| sql.to_string()).collect()),
         }
     }
 
@@ -286,6 +284,12 @@ impl TestContext {
             database_label(name).chars().take(24).collect::<String>(),
             &hash[..8]
         )
+    }
+
+    pub async fn drop_fork(&self, name: &str) {
+        let database = self.fork_database_name(name);
+        self.execute(&format!("DROP DATABASE IF EXISTS `{database}` SYNC"))
+            .await;
     }
 
     async fn start_container() -> ContainerAsync<GenericImage> {
@@ -408,7 +412,7 @@ impl TestContext {
         let t = std::time::Instant::now();
         let client = test_client(url, database);
         let (tables, objects) = schema_statements(database, schema_sqls);
-        Self::execute_tables(&client, tables).await;
+        Self::execute_statements(&client, tables).await;
         Self::execute_schema_objects(&client, objects).await;
         eprintln!("[context] run_schema: {:.2?}", t.elapsed());
     }
@@ -449,20 +453,19 @@ impl TestContext {
             .query_arrow(&query)
             .await
             .unwrap_or_else(|e| panic!("failed to list tables in {source}: {e}"));
-        let statements = batches
-            .iter()
-            .flat_map(|batch| {
-                let names = ArrowUtils::get_column_by_name::<StringArray>(batch, "name")
-                    .expect("name column");
-                (0..batch.num_rows())
-                    .map(|row| {
-                        let table = names.value(row);
-                        format!("CREATE TABLE `{target}`.`{table}` CLONE AS `{source}`.`{table}`")
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        Self::execute_clones(&client, statements).await;
+        for batch in &batches {
+            let names =
+                ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
+            for row in 0..batch.num_rows() {
+                let table = names.value(row);
+                client
+                    .execute(&format!(
+                        "CREATE TABLE `{target}`.`{table}` CLONE AS `{source}`.`{table}`"
+                    ))
+                    .await
+                    .unwrap_or_else(|e| panic!("failed to clone {source}.{table}: {e}"));
+            }
+        }
         let (_, objects) = schema_statements(target, schema_sqls);
         Self::execute_schema_objects(&client, objects).await;
     }
@@ -474,63 +477,17 @@ impl TestContext {
             .unwrap_or_else(|e| panic!("failed to create database {database}: {e}"));
     }
 
-    async fn execute_tables(client: &ArrowClickHouseClient, statements: Vec<String>) {
-        let tables: Vec<String> = statements
-            .iter()
-            .map(|statement| table_name(statement))
-            .collect();
-        if let Err(error) = Self::execute_concurrently(client, statements).await {
-            for table in tables {
-                client
-                    .execute(&format!("DROP TABLE IF EXISTS `{table}` SYNC"))
-                    .await
-                    .unwrap_or_else(|drop_error| {
-                        panic!("schema execution failed: {error}; cleanup failed: {drop_error}")
-                    });
-            }
-            panic!("schema execution failed: {error}");
-        }
-    }
-
-    async fn execute_clones(client: &ArrowClickHouseClient, statements: Vec<String>) {
-        if let Err(error) = Self::execute_concurrently(client, statements).await {
-            client
-                .execute(&format!("DROP DATABASE `{}` SYNC", client.database()))
-                .await
-                .unwrap_or_else(|drop_error| {
-                    panic!("schema clone failed: {error}; cleanup failed: {drop_error}")
-                });
-            panic!("schema clone failed: {error}");
-        }
-    }
-
-    async fn execute_concurrently(
-        client: &ArrowClickHouseClient,
-        statements: Vec<String>,
-    ) -> Result<(), String> {
-        let results = futures::stream::iter(statements)
-            .map(|statement| async move {
-                let result = client.execute(&statement).await;
-                (statement, result)
-            })
-            .buffer_unordered(DDL_CONCURRENCY)
-            .collect::<Vec<_>>()
-            .await;
-        for (statement, result) in results {
-            if let Err(error) = result {
-                return Err(format!("{error}\n{statement}"));
-            }
-        }
-        Ok(())
-    }
-
-    async fn execute_schema_objects(client: &ArrowClickHouseClient, statements: Vec<String>) {
+    async fn execute_statements(client: &ArrowClickHouseClient, statements: Vec<String>) {
         for statement in statements {
             client
                 .execute(&statement)
                 .await
                 .unwrap_or_else(|e| panic!("schema execution failed: {e}\n{statement}"));
         }
+    }
+
+    async fn execute_schema_objects(client: &ArrowClickHouseClient, statements: Vec<String>) {
+        Self::execute_statements(client, statements).await;
     }
 }
 
@@ -605,23 +562,4 @@ fn statement_kind(statement: &str) -> String {
         .unwrap_or_default()
         .trim_start()
         .to_ascii_uppercase()
-}
-
-fn table_name(statement: &str) -> String {
-    let statement = statement_kind(statement);
-    let mut tokens = statement.split_whitespace();
-    let table = tokens
-        .find(|token| token.eq_ignore_ascii_case("TABLE"))
-        .and_then(|_| tokens.next())
-        .unwrap_or_else(|| panic!("cannot read table name from {statement}"))
-        .to_string();
-    let table = if table.eq_ignore_ascii_case("IF") {
-        tokens.nth(2)
-    } else {
-        Some(table.as_str())
-    };
-    table
-        .unwrap_or_else(|| panic!("cannot read table name from {statement}"))
-        .trim_matches('`')
-        .to_string()
 }
