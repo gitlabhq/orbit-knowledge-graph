@@ -50,7 +50,7 @@ drop_run_databases() {
 
 for _ in {1..200}; do
   if curl --silent --fail --user "default:$password" "$GKG_TEST_CLICKHOUSE_URL/ping" >/dev/null 2>&1; then
-    trap 'drop_run_databases; cleanup' EXIT
+    trap 'drop_run_databases || true; cleanup' EXIT
     cargo nextest run "$@"
     exit
   fi

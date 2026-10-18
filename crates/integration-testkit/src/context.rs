@@ -155,23 +155,6 @@ impl TestContext {
         );
     }
 
-    pub async fn truncate_all_tables(&self) {
-        let batches = self
-            .query(&format!(
-                "SELECT name FROM system.tables WHERE database = '{}' AND engine NOT IN ('View', 'Dictionary')",
-                self.config.database
-            ))
-            .await;
-        for batch in &batches {
-            let names =
-                ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
-            for i in 0..batch.num_rows() {
-                self.execute(&format!("TRUNCATE TABLE `{}`", names.value(i)))
-                    .await;
-            }
-        }
-    }
-
     pub fn create_client(&self) -> ArrowClickHouseClient {
         self.client.clone()
     }
