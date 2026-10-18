@@ -1,9 +1,46 @@
 #![allow(dead_code, unused_imports)]
 
+use std::time::Duration;
+
+use testcontainers::ImageExt;
+use testcontainers::core::ContainerPort;
+use testcontainers::runners::AsyncRunner;
+use testcontainers_modules::nats::{Nats, NatsServerCmd};
+
 pub mod dispatch;
 pub mod handlers;
 pub mod scenarios;
 pub mod siphon;
+
+pub async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
+    let container = Nats::default()
+        .with_cmd(&NatsServerCmd::default().with_jetstream())
+        .with_tag("2.15.0-alpine")
+        .with_mapped_port(0, ContainerPort::Tcp(4222))
+        .start()
+        .await
+        .expect("failed to start NATS container");
+
+    let host = container.get_host().await.expect("failed to get NATS host");
+    let port = container
+        .get_host_port_ipv4(4222)
+        .await
+        .expect("failed to get NATS port");
+    let url = format!("{host}:{port}");
+    wait_for_nats_port(&url).await;
+
+    (container, url)
+}
+
+pub(super) async fn wait_for_nats_port(url: &str) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while tokio::net::TcpStream::connect(url).await.is_err() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("NATS port did not become ready");
+}
 
 pub use handlers::{
     default_test_watermark, entity_handler_with_batch_size, entity_handler_with_partitions,
