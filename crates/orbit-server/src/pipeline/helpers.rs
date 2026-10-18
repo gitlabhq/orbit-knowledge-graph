@@ -257,7 +257,7 @@ mod tests {
         max_bytes: 1024 * 1024,
     };
 
-    fn chunked(text: &str) -> (Vec<String>, ExecuteQueryResult) {
+    fn chunked(text: &str) -> Result<(Vec<String>, ExecuteQueryResult), PipelineError> {
         let result = ExecuteQueryResult {
             content: Some(FormattedText(text.to_owned())),
             metadata: Some(QueryMetadata {
@@ -265,7 +265,7 @@ mod tests {
                 ..Default::default()
             }),
         };
-        let mut messages = result_messages(result, Some(CHUNKING)).unwrap();
+        let mut messages = result_messages(result, Some(CHUNKING))?;
         let Some(Content::Result(last)) = messages.pop() else {
             panic!("expected a final result message");
         };
@@ -276,20 +276,22 @@ mod tests {
                 other => panic!("expected a result chunk, got {other:?}"),
             })
             .collect();
-        (chunks, last)
+        Ok((chunks, last))
     }
 
     #[test]
-    fn result_messages_split_text_on_char_boundaries_and_keep_metadata() {
+    fn result_messages_split_text_on_char_boundaries_and_keep_metadata() -> Result<(), PipelineError>
+    {
         let text = "aé€😀".repeat(CHUNK_BYTES / 4);
-        let (chunks, last) = chunked(&text);
+        let (chunks, last) = chunked(&text)?;
 
         assert_eq!(chunks.len(), 3);
         assert_eq!(chunks.concat(), text);
         assert!(chunks.iter().all(|c| c.len() <= CHUNK_BYTES + 3));
         assert_eq!(last.content, None);
         assert_eq!(last.metadata.map(|m| m.row_count), Some(7));
-        assert!(chunked("").0.is_empty());
+        assert!(chunked("")?.0.is_empty());
+        Ok(())
     }
 
     #[test]
@@ -298,7 +300,9 @@ mod tests {
             content: Some(ResultJson("x".repeat(CHUNKING.max_bytes + 1))),
             metadata: None,
         };
-        let error = result_messages(result, Some(CHUNKING)).unwrap_err();
+        let Err(error) = result_messages(result, Some(CHUNKING)) else {
+            panic!("expected the size error");
+        };
         let at_limit = ExecuteQueryResult {
             content: Some(ResultJson("x".repeat(CHUNKING.max_bytes))),
             metadata: None,
@@ -311,15 +315,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_query_result_fails_only_when_the_client_left_before_the_first_message() {
-        let messages = || result_messages(ExecuteQueryResult::default(), None).unwrap();
+    async fn send_query_result_fails_only_when_the_client_left_before_the_first_message()
+    -> Result<(), PipelineError> {
+        let messages = || result_messages(ExecuteQueryResult::default(), None);
         let (tx, rx) = mpsc::channel(1);
         drop(rx);
-        assert!(send_query_result(&tx, messages()).await.is_err());
+        assert!(send_query_result(&tx, messages()?).await.is_err());
 
         let (tx, mut rx) = mpsc::channel(1);
-        let mut two = messages();
-        two.extend(messages());
+        let mut two = messages()?;
+        two.extend(messages()?);
         let (sent, first) = tokio::join!(send_query_result(&tx, two), async {
             let first = rx.recv().await;
             rx.close();
@@ -328,6 +333,7 @@ mod tests {
         assert!(sent.is_ok());
         assert!(first.is_some());
         assert!(rx.recv().await.is_none());
+        Ok(())
     }
 
     #[test]
