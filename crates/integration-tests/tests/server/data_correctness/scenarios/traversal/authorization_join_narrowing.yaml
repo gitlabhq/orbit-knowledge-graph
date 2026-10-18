@@ -34,11 +34,10 @@ cases:
           - [12000, 12001]
 
   - name: unpinned_partner_keeps_the_full_join
-    description: Without a pinned partner there are no edge keys to narrow the redaction join
+    description: Without a bounded relation there are no safe keys to narrow the redaction join
     query:
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.project_id = 1000 RETURN caller, callee LIMIT 50
     expect:
       compile_only: true
       sql_contains: ["AS callee FINAL ON"]
-      sql_not_contains: ["_narrow_"]

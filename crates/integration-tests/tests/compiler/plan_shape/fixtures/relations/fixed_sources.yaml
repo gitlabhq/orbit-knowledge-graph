@@ -73,3 +73,20 @@ cases:
           expect:
             - (Filter _orbit_edge_0.target_id = 1, ... (Deduplicate LimitBy ... (_)))
             - (Scan Table(gl_job) AS j)
+
+  - name: FK endpoints narrow current holder rows
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"pl","entity":"Pipeline","node_ids":[1000]},{"id":"j","entity":"Job"}],"relationships":[{"type":"HAS_JOB","from":"pl","to":"j"}],"group_by":["j.status"],"aggregations":[{"count":"j","as":"n"}]}
+      gql: |
+        MATCH (pl:Pipeline {id: 1000})-[:HAS_JOB]->(j:Job)
+        RETURN j.status, count(j) AS n
+    logical:
+      expect: ["(Aggregate group j.status AS j_status, COUNT(j) AS n (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.pipeline_id = 1000, ... (Scan Table(gl_job) AS j)))
+            - (Deduplicate LimitBy j.traversal_path, j.id (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
+          reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]

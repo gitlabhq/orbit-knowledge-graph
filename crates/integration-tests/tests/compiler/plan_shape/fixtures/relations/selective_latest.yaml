@@ -30,6 +30,36 @@ cases:
             expect: ["(Filter j.status = 'failed', j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
             reject: ["(Deduplicate LimitBy ... (_))"]
 
+  - name: High-selectivity ranges use find then check
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"created_at":{"gte":"2026-10-10"}},"columns":["id","created_at"]}],"limit":10}
+      gql: |
+        MATCH (j:Job) WHERE j.created_at >= '2026-10-10' RETURN j.id, j.created_at LIMIT 10
+    logical:
+      expect: ["(Filter j.created_at >= '2026-10-10' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.created_at >= '2026-10-10', ... (Scan Table(gl_job) AS j)))
+            - (Deduplicate LimitBy j.traversal_path, j.id (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
+          reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
+
+  - name: Namespace anchors keep FINAL by themselves
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"j","entity":"Job","filters":{"project_id":1000}}],"aggregations":[{"count":"j","as":"n"}]}
+      gql: |
+        MATCH (j:Job {project_id: 1000}) RETURN count(j) AS n
+    logical:
+      expect: ["(Filter j.project_id = 1000 (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect: ["(Filter j.project_id = 1000, j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
+          reject: ["(Deduplicate LimitBy ... (_))"]
+
   - name: Negated high-selectivity node filters keep FINAL
     query:
       json: |

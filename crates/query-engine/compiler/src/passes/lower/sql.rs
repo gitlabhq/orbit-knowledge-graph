@@ -19,6 +19,63 @@ pub(crate) fn latest_row_dedup(
     (order, Some((1, keys)))
 }
 
+pub(in crate::passes) fn latest_rows_for_join(
+    source: &TableRef,
+    identity: &Expr,
+    table: &str,
+    alias: &str,
+    sort_key: Option<&[String]>,
+) -> TableRef {
+    let Expr::Column {
+        table: source_alias,
+        column,
+    } = identity
+    else {
+        return TableRef::scan_final(table, alias);
+    };
+    let Some(sort_key) =
+        sort_key.filter(|key| key.iter().any(|column| column == DEFAULT_PRIMARY_KEY))
+    else {
+        return TableRef::scan_final(table, alias);
+    };
+    let mut relation = None;
+    crate::ast::visit::visit_relations(source, &mut |candidate| {
+        if let TableRef::Subquery {
+            alias: candidate_alias,
+            query,
+            ..
+        } = candidate
+            && candidate_alias == source_alias
+            && query.limit_by.is_some()
+        {
+            relation = Some(candidate.clone());
+        }
+    });
+    let Some(relation) = relation else {
+        return TableRef::scan_final(table, alias);
+    };
+    let keys = Query {
+        select: vec![SelectExpr::col(source_alias, column)],
+        from: relation,
+        ..Default::default()
+    };
+    let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
+    TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan(table, alias),
+            where_clause: Some(Expr::InSelect {
+                expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
+                query: Box::new(keys),
+            }),
+            order_by,
+            limit_by,
+            ..Default::default()
+        },
+        alias,
+    )
+}
+
 pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
     filter_expression(
         alias,

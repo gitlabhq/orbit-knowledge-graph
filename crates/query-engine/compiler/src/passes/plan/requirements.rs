@@ -31,7 +31,7 @@ pub enum Predicate {
         column: Column,
         filter: InputFilter,
         data_type: Option<ontology::DataType>,
-        selectivity: ontology::FieldSelectivity,
+        selective: bool,
         in_sort_key: bool,
         text_indexed: bool,
     },
@@ -82,18 +82,7 @@ impl Predicate {
                 &|predicates| predicates.into_iter().any(|selective| selective),
                 &|_| false,
             ),
-            Self::Property {
-                filter,
-                selectivity,
-                ..
-            } => {
-                *selectivity == ontology::FieldSelectivity::High
-                    && filter.rhs_column.is_none()
-                    && matches!(
-                        filter.op,
-                        None | Some(crate::input::FilterOp::Eq | crate::input::FilterOp::In)
-                    )
-            }
+            Self::Property { selective, .. } => *selective,
             Self::Ids { .. } | Self::Membership { .. } => true,
             Self::IdRange { start, end, .. } => {
                 end.saturating_sub(*start) <= crate::passes::validate::MAX_ID_RANGE_SPAN

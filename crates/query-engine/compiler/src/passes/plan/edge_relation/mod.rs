@@ -595,9 +595,30 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         {
             return Ok(false);
         }
-        let node = &self.facts.nodes[&node_source.node];
-        let outputs = node_outputs(node);
-        let mut scan = self.node_read(node)?;
+        let mut node = self.facts.nodes[&node_source.node].clone();
+        let outputs = node_outputs(&node);
+        if self.facts.aggregate() {
+            let endpoint = [&relation.from_node, &relation.to_node]
+                .into_iter()
+                .find(|endpoint| **endpoint != node_source.node)
+                .expect("node relation endpoint");
+            let endpoint_plan = &self.facts.nodes[endpoint];
+            if !endpoint_plan.node_ids.is_empty() {
+                node.predicates.push(id_list(
+                    &node.alias,
+                    &node_source.column,
+                    &endpoint_plan.node_ids,
+                ));
+            }
+            if let Some(range) = &endpoint_plan.id_range {
+                node.predicates.push(Predicate::IdRange {
+                    column: Column::new(&node.alias, &node_source.column),
+                    start: range.start,
+                    end: range.end,
+                });
+            }
+        }
+        let mut scan = self.node_read(&node)?;
         if let Some((ids, key)) = self.ids(&node_source.node).cloned() {
             scan = self
                 .graph

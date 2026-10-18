@@ -25,6 +25,7 @@ pub struct BoundFilter {
     pub property: Option<query_data_model::PropertyId>,
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
+    pub namespace_anchor: bool,
     pub in_sort_key: bool,
     pub text_indexed: bool,
 }
@@ -32,8 +33,21 @@ pub struct BoundFilter {
 impl BoundFilter {
     pub fn is_selective(&self) -> bool {
         self.selectivity == ontology::FieldSelectivity::High
+            && !self.namespace_anchor
             && self.filter.rhs_column.is_none()
-            && matches!(self.filter.op, None | Some(FilterOp::Eq | FilterOp::In))
+            && !matches!(
+                self.filter.op,
+                Some(
+                    FilterOp::Contains
+                        | FilterOp::StartsWith
+                        | FilterOp::EndsWith
+                        | FilterOp::TokenMatch
+                        | FilterOp::AllTokens
+                        | FilterOp::AnyTokens
+                        | FilterOp::Ne
+                        | FilterOp::IsNotNull
+                )
+            )
     }
 
     pub fn at(&self, column: requirements::Column) -> requirements::Predicate {
@@ -41,7 +55,7 @@ impl BoundFilter {
             column,
             filter: self.filter.clone(),
             data_type: self.data_type,
-            selectivity: self.selectivity,
+            selective: self.is_selective(),
             in_sort_key: self.in_sort_key,
             text_indexed: self.text_indexed,
         }

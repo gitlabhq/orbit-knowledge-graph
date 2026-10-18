@@ -75,6 +75,9 @@ pub fn bind_filter(
         }
     };
     let (property_id, data_type) = metadata.unwrap_or_default();
+    let column = property_id
+        .and_then(|property| model.property_column(property))
+        .unwrap_or(property);
     BoundFilter {
         filter,
         property: property_id,
@@ -83,6 +86,7 @@ pub fn bind_filter(
             .map(|property| model.property_selectivity(property))
             .or_else(|| data_type.map(ontology::FieldSelectivity::from_data_type))
             .unwrap_or_default(),
+        namespace_anchor: model.anchor_foreign_keys().contains_key(column),
         in_sort_key,
         text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),
     }

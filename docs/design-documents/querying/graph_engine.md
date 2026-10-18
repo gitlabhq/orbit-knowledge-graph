@@ -220,7 +220,7 @@ Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between backg
 
 The second filter application preserves latest-state semantics. An old version can find a candidate key, but it cannot make the current version match. Tuple membership keeps composite replacement keys intact. Routed edge reads apply this process to each physical table before `UNION ALL`.
 
-The planner uses this form for exact IDs, bounded ID ranges, relation frontiers, and positive equality or membership filters marked as high selectivity in the ontology. Wide ranges, negated filters, and low-selectivity fields keep `FINAL`. Backends must opt in; DuckDB does not use this ClickHouse strategy.
+The planner uses this form for exact IDs, bounded ID ranges, relation frontiers, and positive filters marked as high selectivity in the ontology. Text searches, negated filters, `!=`, `IS NOT NULL`, namespace-anchor-only filters, wide ID ranges, and low-selectivity fields keep `FINAL`. Backends must opt in; DuckDB does not use this ClickHouse strategy.
 
 | Scan type | Strategy | Rationale |
 |---|---|---|

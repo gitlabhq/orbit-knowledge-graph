@@ -344,7 +344,7 @@ fn complex_search_query() {
     // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
-    assert!(rendered.contains(" FINAL"));
+    assert!(rendered.contains("LIMIT 1 BY"));
     assert!(rendered.contains("_deleted"));
     assert!(rendered.contains("username"));
     assert!(rendered.contains("state"));
@@ -1468,7 +1468,7 @@ fn filterable_allows_traversal_path_in_columns() {
 }
 
 #[test]
-fn aggregation_count_pushes_project_id_into_dedup_subquery() {
+fn aggregation_count_keeps_final_for_project_anchor() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [{"id": "d", "entity": "Definition",
@@ -1483,8 +1483,8 @@ fn aggregation_count_pushes_project_id_into_dedup_subquery() {
         "should contain COUNT() or countIf: {rendered}"
     );
     assert!(
-        rendered.contains("project_id") && rendered.contains("LIMIT 1 BY"),
-        "project_id must narrow latest-row resolution: {rendered}"
+        rendered.contains("project_id") && rendered.contains(" FINAL"),
+        "project_id alone must keep FINAL: {rendered}"
     );
 }
 
@@ -1546,7 +1546,7 @@ fn calls_traversal_compiles_against_embedded_ontology() {
 }
 
 #[test]
-fn aggregation_count_in_clause_pushes_project_id() {
+fn aggregation_count_in_clause_keeps_final_for_project_anchor() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [{"id": "d", "entity": "Definition",
@@ -1557,8 +1557,8 @@ fn aggregation_count_in_clause_pushes_project_id() {
     let rendered = result.base.render();
 
     assert!(
-        rendered.contains("project_id") && rendered.contains("LIMIT 1 BY"),
-        "project_id IN must narrow latest-row resolution: {rendered}"
+        rendered.contains("project_id") && rendered.contains(" FINAL"),
+        "project_id IN alone must keep FINAL: {rendered}"
     );
 }
 
