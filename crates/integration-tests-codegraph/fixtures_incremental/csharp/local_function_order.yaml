@@ -1,0 +1,26 @@
+name: "C#: a call reaches the local function of its own method, declared after the call"
+
+fixtures:
+  - path: A.cs
+    content: |
+      class Binder {
+          int First() {
+              return isUnique(1);
+              int isUnique(int x) { return x; }
+          }
+          int Second() {
+              return isUnique(2);
+              int isUnique(int x) { return x + 1; }
+          }
+      }
+
+tests:
+  - name: each method calls its own local function
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE t.name = 'isUnique'
+      RETURN c.name AS caller, t.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "First", callee: "Binder.First.isUnique" } }
+      - { row: { caller: "Second", callee: "Binder.Second.isUnique" } }

@@ -215,7 +215,7 @@ stages:
       - match: '(constructor_declaration $$$PRE name: $N:identifier parameters: $P body: $B)'
         replace: '(__def (__defname @$N) (__method) $$$PRE $P $B)'
       - match: '(local_function_statement $$$PRE name: $N:identifier parameters: $P body: $B)'
-        replace: '(__def (__defname @$N) (__declaration "block") (__function) $$$PRE $P $B)'
+        replace: '(__def (__defname @$N) (__function) $$$PRE $P $B)'
 
       # Types (after members)
       - match: '(class_declaration $$$PRE name: $N:identifier (base_list $S:__supertype $$$REST) body: (declaration_list $$$B))'
@@ -241,7 +241,8 @@ stages:
   - name: tag-defs
     rules:
       - match: '(block $$$B)'
-        replace: '(__scope "block" $$$B)'
+        replace: '(__scope $$$B)'
+        tag: { hoisted: "true" }
       - match: '(__def (__function))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__method))'

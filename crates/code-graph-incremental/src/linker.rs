@@ -534,7 +534,10 @@ impl<'t> Fold<'t> {
     }
 
     fn predeclare(&mut self, scope: Cursor<'t>) {
-        for d in scope.children().filter(|d| d.is(C::Def)) {
+        for d in scope
+            .children()
+            .filter(|d| d.is(C::Def) && d.child(C::Declaration).is_none())
+        {
             if let Some(name) = d.child_sym(C::DefName) {
                 self.register_def(d);
                 self.declare(d, name);

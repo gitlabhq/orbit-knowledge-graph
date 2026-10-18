@@ -335,6 +335,9 @@ stages:
       - match: '(method_definition **/(static) name: $N body: $B)'
         replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $B)'
         tag: { flavor: static }
+      - match: '(method_definition **/(get) name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
+        replace: '(__def (__defname @$N) (__method) $$$P $B)'
+        tag: { value: "true" }
       - match: '(method_definition name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
         replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P $B)'
       - match: '(method_definition name: $N body: $B)'
@@ -360,6 +363,7 @@ stages:
     rules:
       - match: '(statement_block $$$V)'
         replace: '(__scope "block" $$$V)'
+        tag: { hoisted: "true" }
 
   - name: cjs-entries
     rules:

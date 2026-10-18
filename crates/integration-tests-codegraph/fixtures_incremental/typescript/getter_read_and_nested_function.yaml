@@ -1,0 +1,25 @@
+name: "TypeScript: a getter read is a value and a nested function declaration is hoisted"
+
+fixtures:
+  - path: main.ts
+    content: |
+      class Diagnostic {
+        get severity(): number { return 1; }
+        level(): number { return 2; }
+      }
+      function report(d: Diagnostic): number {
+        const a = d.severity;
+        const b = helper();
+        return a + b;
+        function helper(): number { return 3; }
+      }
+
+tests:
+  - name: the getter read and the hoisted call resolve
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'report'
+      RETURN t.name AS callee
+    assert:
+      - { row: { callee: "severity" } }
+      - { row: { callee: "helper" } }
