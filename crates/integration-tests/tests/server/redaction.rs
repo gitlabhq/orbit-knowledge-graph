@@ -8,8 +8,8 @@ use std::collections::HashSet;
 
 use crate::common::compile;
 use crate::common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, compile_and_execute,
-    load_ontology, run_redaction, test_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, TestContext, compile_and_execute, load_ontology,
+    run_redaction, test_security_context,
 };
 use integration_testkit::{run_subtests, run_subtests_shared, t};
 use orbit_server::redaction::QueryResult;
@@ -4431,7 +4431,7 @@ async fn cross_entity_id_collision_redaction(ctx: &TestContext) {
 
 #[tokio::test]
 async fn redaction_integration() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     setup_test_data(&ctx).await;
 
     // Read-only subtests share one database (seed once, query many).

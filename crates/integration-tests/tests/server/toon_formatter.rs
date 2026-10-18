@@ -1,6 +1,4 @@
-use crate::common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, test_security_context,
-};
+use crate::common::{GRAPH_SCHEMA_SQL, MockRedactionService, TestContext, test_security_context};
 use integration_testkit::{run_subtests_shared, t};
 use query_engine::formatters::{
     FormatName, GraphFormatter, ResultFormatter, TOON_OUTPUT_FORMAT_VERSION, ToonFormatter,
@@ -277,7 +275,7 @@ async fn aggregation_without_node_groups_emits_scalar_rows(ctx: &TestContext) {
 
 #[tokio::test]
 async fn toon_formatter_e2e() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     seed(&ctx).await;
 
     run_subtests_shared!(

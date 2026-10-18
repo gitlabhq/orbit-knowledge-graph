@@ -7,10 +7,12 @@ mod format;
 pub(crate) mod seed;
 
 use std::collections::HashMap;
+use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::FutureExt;
 
 use crate::collect_subtest_results;
 use crate::context::TestContext;
@@ -100,10 +102,19 @@ pub async fn run_dir(ctx: &TestContext, root: &str, handlers: Arc<dyn ScenarioHa
         let task_name = name.clone();
         let handle = tokio::task::spawn(async move {
             let _permit = semaphore.acquire_owned().await.unwrap();
-            let db = ctx.fork(&database_name(&task_name)).await;
+            let database = database_name(&task_name);
+            let db = ctx.fork(&database).await;
             let started = std::time::Instant::now();
             eprintln!("--- {task_name}");
-            run_scenario(&db, &file, &task_name, handlers.as_ref()).await;
+            let outcome = AssertUnwindSafe(run_scenario(&db, &file, &task_name, handlers.as_ref()))
+                .catch_unwind()
+                .await;
+            let cleanup = AssertUnwindSafe(ctx.drop_fork(&database))
+                .catch_unwind()
+                .await;
+            if let Err(failure) = outcome.and(cleanup) {
+                resume_unwind(failure);
+            }
             eprintln!("    {task_name} {:.2?}", started.elapsed());
         });
         handles.push((name, handle));

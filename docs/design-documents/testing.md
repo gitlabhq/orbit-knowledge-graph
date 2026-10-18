@@ -138,16 +138,21 @@ Run them with `mise test:cli`. The release jobs also install the Linux release a
 
 ## Container tests
 
-Container tests run real Orbit code against real infrastructure. The shared harness, [`integration-testkit`](../../crates/integration-testkit/README.md), does this setup:
+Container tests run real Orbit code against real infrastructure. Server and indexer tests use
+separate Rust binaries. The shared harness, [`integration-testkit`](../../crates/integration-testkit/README.md), does this setup:
 
-1. It starts a ClickHouse testcontainer.
-2. It creates the graph schema from the ontology. Tests always use the same tables that the indexer writes.
+1. The test command starts one ClickHouse container for the nextest run.
+2. The harness creates each schema once and clones it into isolated databases.
 3. It loads seed data from `config/seeds/`.
 4. It runs `OPTIMIZE TABLE ... FINAL` on every table, so reads are deterministic.
 
-Tests that only read data share one database. Tests that write data get their own copy of it. Mocks replace two systems that Orbit does not own: Rails authorization and Gitaly.
+Tests that only read data share one database. Tests that write data get a cloned database.
+Query-only suites create only the graph schema. Indexer suites also create the Siphon source
+schema. Mocks replace Rails authorization and Gitaly because Orbit does not own those systems.
 
-The mise tasks use the Docker socket of the Colima `gkg` profile. On macOS, start that profile, then pick a task. On Linux with native Docker, run `cargo nextest run --all-features --test containers`.
+The mise tasks use the Docker socket of the Colima `gkg` profile. On macOS, start that profile.
+Then pick a task. On Linux with native Docker, use the same mise task. Local mise tasks reuse
+`gkg-clickhouse-local`. Container tests require the mise runner because it configures the service.
 
 ```shell
 colima start gkg --memory 12

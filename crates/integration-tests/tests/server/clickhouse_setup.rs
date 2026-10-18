@@ -56,7 +56,7 @@ async fn assert_fails_with(client: &ArrowClickHouseClient, sql: &str, code: &str
 }
 
 async fn new_context() -> TestContext {
-    let ctx = TestContext::new(&[]).await;
+    let ctx = TestContext::dedicated(&[]).await;
     ctx.execute(&format!("CREATE DATABASE `{DATALAKE_DB}`"))
         .await;
     ctx.execute(&format!(

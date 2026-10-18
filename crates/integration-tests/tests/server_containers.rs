@@ -1,5 +1,8 @@
 mod common;
-mod indexer;
+
+mod indexer {
+    pub(crate) mod common;
+}
 
 mod canary {
     pub mod setup_test;
