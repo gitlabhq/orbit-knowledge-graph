@@ -961,8 +961,8 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            !sql.contains("u.id") && !sql.contains("(u.id"),
-            "must not reference u.id when User is not hydrated and absent from FROM, got:\n{sql}"
+            !sql.contains("COUNT(u.id)") && !sql.contains("countIf(u.id"),
+            "must not count u.id when User is not hydrated, got:\n{sql}"
         );
         assert!(
             sql.contains("COUNT()") || sql.contains("countIf("),

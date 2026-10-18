@@ -26,9 +26,9 @@ cases:
       expect: ["(Filter j.status = 'failed' (_))"]
     physical:
       clickhouse:
-          planned:
-            expect: ["(Filter j.status = 'failed', j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
-            reject: ["(Deduplicate LimitBy ... (_))"]
+        planned:
+          expect: ["(Filter j.status = 'failed', j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
+          reject: ["(Deduplicate LimitBy ... (_))"]
 
   - name: High-selectivity ranges use find then check
     query:
