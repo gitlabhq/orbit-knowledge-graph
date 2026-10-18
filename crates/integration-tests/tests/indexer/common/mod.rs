@@ -15,7 +15,7 @@ pub mod siphon;
 pub async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
     let container = Nats::default()
         .with_cmd(&NatsServerCmd::default().with_jetstream())
-        .with_tag("2.11-alpine")
+        .with_tag("2.15.0-alpine")
         .with_mapped_port(0, ContainerPort::Tcp(4222))
         .start()
         .await

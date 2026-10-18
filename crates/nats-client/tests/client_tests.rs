@@ -10,7 +10,7 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 
 const BUCKET: &str = "test_locks";
-const NATS_TAG: &str = "2.11-alpine";
+const NATS_TAG: &str = "2.15.0-alpine";
 
 async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
     let cmd = NatsServerCmd::default().with_jetstream();
