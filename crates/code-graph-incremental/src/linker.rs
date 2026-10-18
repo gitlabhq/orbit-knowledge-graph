@@ -648,7 +648,7 @@ impl<'t> Fold<'t> {
             }
         } else if let Some(iv) = callee.child(C::Ivar) {
             if let Some(cls) = self.enclosing_class(from) {
-                self.push_calls(from, self.find_method_in(cls, iv.sym(), c.role()));
+                self.push_calls(from, self.members(cls, iv.sym(), c.role()));
             }
         } else if let Some(sym) = callee.sym_opt() {
             if c.has_tag(self.tags.implicit_self) {
@@ -1159,9 +1159,9 @@ impl<'t> Fold<'t> {
     fn resolve_obj_inner(&mut self, obj: Cursor, method: u32, from: u32, role: Role) {
         for r in self.lookup_chain(obj) {
             match r {
-                Value::Type(node) => self.push_calls(from, self.find_method_in(node, method, role)),
+                Value::Type(node) => self.push_calls(from, self.members(node, method, role)),
                 Value::LocalDef(node) => {
-                    let members = self.find_method_in(node, method, role);
+                    let members = self.members(node, method, role);
                     if members.is_empty() && obj.is(C::Object) {
                         self.emit(&Value::LocalDef(node), from);
                     }
@@ -1192,7 +1192,7 @@ impl<'t> Fold<'t> {
         }
         let members = self
             .enclosing_class(from)
-            .map(|cls| self.find_method_in(cls, sym, site.role()))
+            .map(|cls| self.members(cls, sym, site.role()))
             .unwrap_or_default();
         if !members.is_empty() {
             self.push_calls(from, members);
@@ -1227,7 +1227,7 @@ impl<'t> Fold<'t> {
                 Value::Type(target) => {
                     let callable = self.tree.cursor(*target).child_sym(C::Callable);
                     let targets = callable.map_or(vec![*target], |name| {
-                        self.find_method_in(*target, name, Role::Callable)
+                        self.members(*target, name, Role::Callable)
                     });
                     self.push_calls(from, targets);
                 }
@@ -1305,6 +1305,7 @@ impl<'t> Fold<'t> {
         let filled = match role {
             Role::Value => target.has_tag(self.tags.value),
             Role::Callable => target.has_tag(self.tags.callable) && !both(target),
+            Role::Type => target.has_tag(self.tags.type_),
         };
         if filled {
             return value;
@@ -1429,7 +1430,7 @@ impl<'t> Fold<'t> {
             .into_iter()
             .flat_map(|r| match r {
                 Value::LocalDef(d) => self
-                    .find_method_in(d, m.sym(), c.role())
+                    .members(d, m.sym(), c.role())
                     .into_iter()
                     .map(Value::LocalDef)
                     .collect(),
@@ -1468,10 +1469,6 @@ impl<'t> Fold<'t> {
             let defs = defs.map(|&def| self.tree.cursor(def));
             find_member_in(self.tree.cursor(dn), defs, role, &self.tags)
         })
-    }
-
-    fn find_method_in(&self, container: u32, name: u32, role: Role) -> Vec<u32> {
-        self.members(container, name, role)
     }
 }
 

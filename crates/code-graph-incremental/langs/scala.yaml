@@ -58,10 +58,8 @@ stages:
         replace: '(__ivar @$F)'
       - match: '(extends_clause type: $T:type_identifier $$$W:type_identifier)'
         replace: '(extends_clause (__supertype @$T) $$$W=>__supertype)'
-      - match: '(class_parameter name: $N:identifier type: $T:function_type)'
-        replace: '(sc_prop (__def (__defname @$N) (__property) $T) (__binding @$N))'
       - match: '(class_parameter name: $N:identifier type: $T:type_identifier)'
-        replace: '(sc_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
+        replace: '(sc_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
       - match: '(class_parameter name: $N:identifier)'
         replace: '(__def (__defname @$N) (__property))'
       - match: '(parameter name: $N:identifier type: $T:type_identifier)'
@@ -157,23 +155,21 @@ stages:
       - match: '(__def (__method))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__class))'
-        tag: { callable: "true", value: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", type: "true", scoped: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
         tag: { callable: "true", value: "true" }
       - match: '(__def (__struct))'
-        tag: { value: "true", scoped: "true" }
+        tag: { value: "true", type: "true", scoped: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
       - match: '(__def (__trait))'
-        tag: { value: "true", scoped: "true" }
+        tag: { value: "true", type: "true", scoped: "true" }
       - match: '(__def (__enum))'
-        tag: { value: "true", scoped: "true" }
+        tag: { value: "true", type: "true", scoped: "true" }
       - match: '(__def (__property))'
         tag: { value: "true" }
-      - match: '(__def (__property) (function_type))'
-        tag: { callable: "true" }
 
   - name: tag-file-dir
     rules:

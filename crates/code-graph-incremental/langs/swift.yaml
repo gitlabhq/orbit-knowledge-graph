@@ -72,9 +72,9 @@ stages:
   - name: classify
     rules:
       - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) (type_annotation $T:type_identifier) value: $V:__call)'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T)))))'
       - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) (type_annotation $T:type_identifier))'
-        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs (__member (__object @$T)))) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))))'
+        replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs (__member (__object @$T)))) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T)))))'
       - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) value: $V:__call)'
         replace: '(sw_prop (__def (__defname @$N) (__property)) (__binding @$N (__declaration) (__rhs $V)) (__binding (__ivar @$N) (__rhs $V)))'
       - match: '(property_declaration (pattern bound_identifier: $N:simple_identifier) value: $V)'
@@ -140,21 +140,21 @@ stages:
       - match: '(__def (__method))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__class))'
-        tag: { callable: "true", value: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", type: "true", scoped: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
         tag: { callable: "true", value: "true" }
       - match: '(__def (__struct))'
-        tag: { value: "true", scoped: "true" }
+        tag: { value: "true", type: "true", scoped: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
       - match: '(__def (__trait))'
-        tag: { value: "true", scoped: "true" }
+        tag: { value: "true", type: "true", scoped: "true" }
       - match: '(__def (__enum))'
-        tag: { value: "true", scoped: "true" }
+        tag: { value: "true", type: "true", scoped: "true" }
       - match: '(__def (__interface))'
-        tag: { value: "true" }
+        tag: { value: "true", type: "true" }
       - match: '(__def (__property))'
         tag: { value: "true" }
 

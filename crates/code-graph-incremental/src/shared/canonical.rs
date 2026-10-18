@@ -54,6 +54,8 @@ pub enum Canonical {
     Member,
     #[strum(serialize = "__object")]
     Object,
+    #[strum(serialize = "__type")]
+    Type,
     #[strum(serialize = "__ivar")]
     Ivar,
     #[strum(serialize = "__binding")]

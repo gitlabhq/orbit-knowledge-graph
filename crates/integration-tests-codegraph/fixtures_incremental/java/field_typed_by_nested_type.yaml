@@ -1,0 +1,30 @@
+name: "Java: a field typed by a nested type of another file keeps its type reference"
+
+fixtures:
+  - path: a/G.java
+    content: |
+      package a;
+      public interface G {
+          enum ClientType { REST, WEB }
+          void act();
+      }
+
+  - path: b/F.java
+    content: |
+      package b;
+      import a.G;
+      class F {
+          G.ClientType t = G.ClientType.REST;
+          G.ClientType mode() {
+              return t;
+          }
+      }
+
+tests:
+  - name: the field references the nested enum
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 't' AND t.name = 'ClientType'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row: { callee: "a.G.ClientType", kind: "Enum" } }

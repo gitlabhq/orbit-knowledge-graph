@@ -75,6 +75,7 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
             false => Some(self).filter(|node| node.is(C::Call)),
         };
         match call {
+            Some(call) if call.has(C::Type) => Role::Type,
             Some(call) if !call.has(C::Property) => Role::Callable,
             _ => Role::Value,
         }
@@ -210,6 +211,7 @@ pub fn infer_return_type<S: Storage<Node = Node>>(def: Cursor<'_, S>) -> Option<
 pub enum Role {
     Value,
     Callable,
+    Type,
 }
 
 pub fn members_named<'a, S: Storage<Node = Node>>(
@@ -231,6 +233,7 @@ pub fn find_member_in<'a, S: Storage<Node = Node>>(
     let tag = match role {
         Role::Value => tags.value,
         Role::Callable => tags.callable,
+        Role::Type => tags.type_,
     };
     let both = |def: Cursor<'a, S>| def.has_tag(tags.value) && def.has_tag(tags.callable);
     let mut defs = defs.filter(|def| def.has_tag(tag) && def.is_member_of(owner));
