@@ -16,7 +16,8 @@ cases:
             - (Project mr.id AS e0_src, mr.project_id AS e0_dst, ... (_))
             - (Deduplicate LimitBy ... (_))
             - (Scan Table(gl_merge_request) AS mr)
-          reject: ["(Scan Table(gl_edge) ...)", "(Scan Table(gl_project) ...)"]
+            - (Project p.id AS id (Filter p._deleted = false (Deduplicate Final (Scan Table(gl_project) AS p))))
+          reject: ["(Scan Table(gl_edge) ...)"]
 
   - name: A fixed chain composes routed edge relations
     query:

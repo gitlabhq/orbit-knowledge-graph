@@ -551,22 +551,16 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                 end: range.end,
             });
         }
-        if !endpoint_plan.joined
-            && node_has_uncovered_filter(
-                endpoint_plan,
-                &self.facts.relations,
-                &self.facts.denormalized,
-                self.facts.model,
-            )
-        {
-            let ids = self.node_ids(endpoint)?;
+        if self.binding(endpoint).is_none() {
+            let mut endpoint = self.facts.nodes[endpoint].clone();
+            endpoint.columns = Some(ColumnSelection::List(vec![]));
+            let ids = self.node_ids_from(&endpoint)?;
             predicates.push(Predicate::Membership {
                 columns: vec![endpoint_column.clone()],
                 relation: ids.0,
                 keys: vec![ids.1],
             });
-        }
-        if let Some((ids, key)) = self.ids(endpoint) {
+        } else if let Some((ids, key)) = self.ids(endpoint) {
             predicates.push(Predicate::Membership {
                 columns: vec![endpoint_column.clone()],
                 relation: *ids,
@@ -711,7 +705,14 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         if let Some(ids) = self.ids(alias) {
             return Ok(ids.clone());
         }
-        let node = &self.facts.nodes[alias];
+        let node = self.facts.nodes[alias].clone();
+        self.node_ids_from(&node)
+    }
+
+    fn node_ids_from(&mut self, node: &NodePlan) -> Result<(RelationId, String)> {
+        if let Some(ids) = self.ids(&node.alias) {
+            return Ok(ids.clone());
+        }
         let source = self.node_read(node)?;
         let id = self.graph.project(
             source,
@@ -721,7 +722,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             )],
         );
         let key = DEFAULT_PRIMARY_KEY.to_string();
-        self.set_ids(alias, (id, key.clone()));
+        self.set_ids(&node.alias, (id, key.clone()));
         Ok((id, key))
     }
 
