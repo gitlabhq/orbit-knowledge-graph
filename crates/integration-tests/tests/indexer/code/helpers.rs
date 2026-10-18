@@ -18,7 +18,7 @@ use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexer,
     CodeIndexingTaskHandler, LocalRepositoryCache, RailsRepositoryService, RepositoryService,
-    config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
+    code_graph_client, config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
     repository::RepositoryResolver,
 };
 use indexer::nats::ProgressNotifier;
@@ -41,6 +41,7 @@ pub struct CodeIndexingDeps {
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
     pub clickhouse_config: orbit_server_config::ClickHouseConfiguration,
+    graph_client: Arc<indexer::clickhouse::ArrowClickHouseClient>,
     pipeline_config: CodeIndexingPipelineConfig,
     cache_dir: tempfile::TempDir,
 }
@@ -70,7 +71,10 @@ impl CodeIndexingDeps {
         ontology: ontology::Ontology,
     ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
-        let graph_client = Arc::new(clickhouse.config.build_client("graph"));
+        let graph_client = Arc::new(code_graph_client(
+            clickhouse.config.build_client("graph"),
+            &pipeline_config,
+        ));
         let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
             &graph_client,
         )));
@@ -81,8 +85,14 @@ impl CodeIndexingDeps {
             .expect("code tables must resolve"),
         );
 
-        let stale_data_cleaner =
-            Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
+        let writer = Arc::new(indexer::clickhouse::ClickHouseWriter::new(
+            (*graph_client).clone(),
+            Arc::new(indexer::metrics::EngineMetrics::new()),
+        ));
+        let stale_data_cleaner = Arc::new(ClickHouseStaleDataCleaner::new(
+            Arc::clone(&graph_client),
+            &table_names,
+        ));
         let metrics = CodeMetrics::new();
 
         let cache_dir = tempfile::TempDir::new().expect("failed to create temp dir for cache");
@@ -101,7 +111,7 @@ impl CodeIndexingDeps {
 
         let pipeline = Arc::new(CodeIndexer::new(
             resolver,
-            writer_for(clickhouse.config.clone()),
+            writer,
             Arc::clone(&checkpoint_store) as _,
             stale_data_cleaner,
             metrics.clone(),
@@ -116,6 +126,7 @@ impl CodeIndexingDeps {
             checkpoint_store,
             metrics,
             clickhouse_config: clickhouse.config.clone(),
+            graph_client,
             pipeline_config,
             cache_dir,
         }
@@ -148,9 +159,10 @@ impl CodeIndexingDeps {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let table_names =
             Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
-        let graph_client = Arc::new(self.clickhouse_config.build_client("graph"));
-        let stale_data_cleaner =
-            Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
+        let stale_data_cleaner = Arc::new(ClickHouseStaleDataCleaner::new(
+            Arc::clone(&self.graph_client),
+            &table_names,
+        ));
 
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
             self.cache_dir.path().to_path_buf(),

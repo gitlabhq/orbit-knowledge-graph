@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT, insert_overrides};
+use crate::durability::WriteDurability;
 use crate::observer::IndexingMode;
 use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
@@ -211,13 +212,16 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
             .map(|indexed_at| indexed_at.format(TIMESTAMP_FORMAT).to_string());
 
         self.client
-            .insert_query(&format!(
-                r#"
+            .insert_query_with_overrides(
+                &format!(
+                    r#"
                 INSERT INTO {table}
                 (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at, attempts, is_default_branch)
                 VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}}, {{last_commit:String}}, {{indexed_at:Nullable(String)}}, {{attempts:Int64}}, true)
             "#
-            ))
+                ),
+                insert_overrides(WriteDurability::Durable),
+            )
             .param("traversal_path", checkpoint.traversal_path.as_str())
             .param("project_id", checkpoint.project_id)
             .param("branch", &checkpoint.branch)

@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use crate::IndexerConfig;
 use crate::analytics::IndexingAnalytics;
-use crate::clickhouse::ClickHouseClients;
+use crate::clickhouse::{ArrowClickHouseClient, ClickHouseClients};
 
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
@@ -23,7 +23,7 @@ use crate::types::Event;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
-use orbit_server_config::{IndexerModule, SubscriptionConfig};
+use orbit_server_config::{CodeIndexingPipelineConfig, IndexerModule, SubscriptionConfig};
 use repository::RepositoryResolver;
 
 pub use checkpoint::{ClickHouseCodeCheckpointStore, CodeCheckpoint, CodeCheckpointStore};
@@ -47,6 +47,13 @@ pub fn code_indexing_task_topic_policy() -> SubscriptionConfig {
     }
 }
 
+pub fn code_graph_client(
+    graph: ArrowClickHouseClient,
+    pipeline: &CodeIndexingPipelineConfig,
+) -> ArrowClickHouseClient {
+    graph.with_async_insert_settings(&pipeline.async_insert_settings())
+}
+
 pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
@@ -68,7 +75,9 @@ pub async fn register_handlers(
 
     let gitlab_client =
         Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(HandlerInitError::new)?);
-    let client = Arc::new(clients.graph.clone());
+    let client = code_graph_client(clients.graph.clone(), &code_indexing_task_config.pipeline);
+    let writer = Arc::new(writer.with_client(client.clone()));
+    let client = Arc::new(client);
 
     let repository_service: Arc<dyn RepositoryService> =
         CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));
@@ -127,8 +136,78 @@ pub async fn register_handlers(
 
 #[cfg(test)]
 mod tests {
-    use super::code_indexing_task_topic_policy;
-    use orbit_server_config::SubscriptionConfig;
+    use super::{ArrowClickHouseClient, code_graph_client, code_indexing_task_topic_policy};
+    use crate::clickhouse::insert_overrides;
+    use crate::durability::WriteDurability;
+    use clickhouse_client::ClickHouseConfigurationExt;
+    use orbit_server_config::{AppConfig, SubscriptionConfig};
+
+    const ARGO_CODE_POOL_INSERT_SETTINGS: [(&str, &str); 3] = [
+        ("async_insert", "1"),
+        ("wait_for_async_insert", "0"),
+        ("async_insert_busy_timeout_min_ms", "1000"),
+    ];
+
+    fn graph_client(overlay: &[(&str, &str)], replicated: bool) -> ArrowClickHouseClient {
+        let mut graph = AppConfig::embedded_defaults().graph;
+        graph
+            .insert_settings
+            .extend(overlay.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        graph.replicated = replicated;
+        graph.build_client("graph")
+    }
+
+    fn durable_insert_sql(client: &ArrowClickHouseClient) -> String {
+        client.build_insert_sql_with_overrides("t", insert_overrides(WriteDurability::Durable))
+    }
+
+    fn code_client(graph: ArrowClickHouseClient) -> ArrowClickHouseClient {
+        code_graph_client(
+            graph,
+            &AppConfig::embedded_defaults()
+                .engine
+                .handlers
+                .code_indexing_task
+                .pipeline,
+        )
+    }
+
+    #[test]
+    fn code_inserts_send_the_flush_timeout_bounds_with_or_without_the_argo_overlay() {
+        for overlay in [&[][..], &ARGO_CODE_POOL_INSERT_SETTINGS[..]] {
+            assert_eq!(
+                durable_insert_sql(&code_client(graph_client(overlay, false))),
+                "INSERT INTO t SETTINGS async_insert=1, async_insert_busy_timeout_max_ms=1000, \
+                 async_insert_busy_timeout_min_ms=1000, optimize_on_insert=0, \
+                 wait_for_async_insert=1 FORMAT ArrowStream",
+                "{overlay:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn quorum_code_inserts_send_only_the_shared_settings() {
+        let graph = graph_client(&[], true);
+        assert_eq!(
+            durable_insert_sql(&code_client(graph.clone())),
+            durable_insert_sql(&graph)
+        );
+        assert_eq!(
+            durable_insert_sql(&graph),
+            "INSERT INTO t SETTINGS optimize_on_insert=0 FORMAT ArrowStream"
+        );
+    }
+
+    #[test]
+    fn sdlc_inserts_keep_the_shared_client_settings() {
+        let graph = graph_client(&[], false);
+        let _code = code_client(graph.clone());
+        assert_eq!(
+            durable_insert_sql(&graph),
+            "INSERT INTO t SETTINGS async_insert=1, optimize_on_insert=0, \
+             wait_for_async_insert=1 FORMAT ArrowStream"
+        );
+    }
 
     #[test]
     fn declared_policy_retries_and_dead_letters() {

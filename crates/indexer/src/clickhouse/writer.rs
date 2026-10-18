@@ -52,6 +52,14 @@ impl ClickHouseWriter {
         }
     }
 
+    pub fn with_client(&self, client: ArrowClickHouseClient) -> Self {
+        Self {
+            client,
+            metrics: Arc::clone(&self.metrics),
+            noop: self.noop,
+        }
+    }
+
     /// A writer that accepts all writes without connecting. For unit tests only.
     #[cfg(any(test, feature = "testkit"))]
     pub fn noop() -> Self {
