@@ -1308,7 +1308,7 @@ impl<'t> Fold<'t> {
         let filled = match role {
             Role::Value => target.has_tag(self.tags.value),
             Role::Callable => target.has_tag(self.tags.callable) && !both(target),
-            Role::Type => target.has_tag(self.tags.type_),
+            Role::Type => target.has_tag(self.tags.declares_type),
         };
         if filled {
             return value;

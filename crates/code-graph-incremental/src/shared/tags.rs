@@ -7,7 +7,7 @@ use crate::intern::Lang;
 pub struct ReservedTags {
     pub callable: u32,
     pub value: u32,
-    pub type_: u32,
+    pub declares_type: u32,
     pub non_callable: u32,
     pub type_only: u32,
     pub scoped: u32,
@@ -26,7 +26,7 @@ impl ReservedTags {
         Self {
             callable: k("callable"),
             value: k("value"),
-            type_: k("type"),
+            declares_type: k("declares_type"),
             non_callable: k("non_callable"),
             type_only: k("type_only"),
             scoped: k("scoped"),

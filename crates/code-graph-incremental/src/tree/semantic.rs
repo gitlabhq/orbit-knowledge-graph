@@ -233,7 +233,7 @@ pub fn find_member_in<'a, S: Storage<Node = Node>>(
     let tag = match role {
         Role::Value => tags.value,
         Role::Callable => tags.callable,
-        Role::Type => tags.type_,
+        Role::Type => tags.declares_type,
     };
     let both = |def: Cursor<'a, S>| def.has_tag(tags.value) && def.has_tag(tags.callable);
     let mut defs = defs.filter(|def| def.has_tag(tag) && def.is_member_of(owner));
