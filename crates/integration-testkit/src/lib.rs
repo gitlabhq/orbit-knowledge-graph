@@ -14,12 +14,12 @@ pub use assertions::{
     assert_edge_tags_by_source, assert_edge_tags_by_target, assert_edges_have_traversal_path,
     assert_node_count,
 };
-pub use context::TestContext;
+pub use context::{CLICKHOUSE_IMAGE, CLICKHOUSE_TAG, TestContext};
 pub use seed::load_seed;
 pub use seeded_resolver::SeededColumnResolver;
 
 /// `GKG_TEST_ONTOLOGY_OVERLAY=<name>` merges `config/seeds/overlays/<name>/` over the ontology.
-fn load_unprefixed_ontology() -> ontology::Ontology {
+pub(crate) fn load_unprefixed_ontology() -> ontology::Ontology {
     let Some(name) = std::env::var("GKG_TEST_ONTOLOGY_OVERLAY")
         .ok()
         .filter(|v| !v.is_empty())

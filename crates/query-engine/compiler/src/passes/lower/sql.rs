@@ -26,6 +26,7 @@ pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
         &bound.filter,
         bound.data_type.as_ref(),
         bound.in_sort_key,
+        bound.text_indexed,
     )
 }
 
@@ -35,6 +36,7 @@ pub(crate) fn filter_expression(
     filter: &InputFilter,
     data_type: Option<&ontology::DataType>,
     in_sort_key: bool,
+    text_indexed: bool,
 ) -> Expr {
     let col = Expr::col(alias, prop);
 
@@ -47,21 +49,26 @@ pub(crate) fn filter_expression(
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
     let typed = |v: serde_json::Value| -> Expr { Expr::param(parameter_type(data_type), v) };
 
-    match filter.op.unwrap_or(FilterOp::Eq) {
+    let op = filter.op.unwrap_or(FilterOp::Eq);
+    let expression = match op {
         op @ (FilterOp::Eq
         | FilterOp::Ne
         | FilterOp::Gt
         | FilterOp::Gte
         | FilterOp::Lt
         | FilterOp::Lte) => comparison(col, op, typed(val())).expect("comparison operator"),
-        FilterOp::In => {
-            if let Some(arr) = filter.value.as_ref().and_then(|v| v.as_array()) {
-                Expr::col_in(alias, prop, parameter_type(data_type), arr.clone())
-                    .unwrap_or_else(|| Expr::param(SqlType::Bool, false))
-            } else {
-                Expr::param(SqlType::Bool, false)
-            }
-        }
+        FilterOp::In => Expr::col_in(
+            alias,
+            prop,
+            parameter_type(data_type),
+            filter
+                .value
+                .as_ref()
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default(),
+        )
+        .expect("validated non-empty IN list"),
         FilterOp::IsNull => Expr::unary(Op::IsNull, col),
         FilterOp::IsNotNull => Expr::unary(Op::IsNotNull, col),
         op => {
@@ -92,6 +99,35 @@ pub(crate) fn filter_expression(
                 query: Box::new(needle),
             }
         }
+    };
+    if text_indexed && matches!(op, FilterOp::Eq | FilterOp::In) {
+        let values = match val() {
+            serde_json::Value::Array(values) => values,
+            value => vec![value],
+        };
+        Expr::and(
+            expression,
+            lowered_match(Expr::col(alias, prop), values, parameter_type(data_type)),
+        )
+    } else {
+        expression
+    }
+}
+
+fn lowered_match(column: Expr, values: Vec<serde_json::Value>, data_type: SqlType) -> Expr {
+    let lower = |expr| Expr::func(Function::Lower, vec![expr]);
+    let mut candidates: Vec<_> = values
+        .into_iter()
+        .map(|value| lower(Expr::param(data_type, value)))
+        .collect();
+    if candidates.len() == 1 {
+        Expr::eq(lower(column), candidates.remove(0))
+    } else {
+        Expr::binary(
+            Op::In,
+            lower(column),
+            Expr::func(Function::Tuple, candidates),
+        )
     }
 }
 
@@ -215,9 +251,9 @@ pub(crate) fn tag_membership(alias: &str, column: &str, values: &[String]) -> Ex
 /// columns common to all edge tables (the 6 reserved edge columns) so
 /// that tables with extra columns (e.g. gl_code_edge's project_id/branch)
 /// don't cause a ClickHouse "UNION different number of columns" error.
-pub fn edge_table_scan(tables: &[String], alias: &str) -> TableRef {
+pub fn final_edge_table_scan(tables: &[String], alias: &str) -> TableRef {
     if tables.len() == 1 {
-        return TableRef::scan(&tables[0], alias);
+        return TableRef::scan_final(&tables[0], alias);
     }
     let inner_alias = format!("_{alias}");
     let columns: Vec<_> = EDGE_RESERVED_COLUMNS
@@ -229,7 +265,7 @@ pub fn edge_table_scan(tables: &[String], alias: &str) -> TableRef {
         .iter()
         .map(|table| Query {
             select: columns.clone(),
-            from: TableRef::scan(table, &inner_alias),
+            from: TableRef::scan_final(table, &inner_alias),
             ..Default::default()
         })
         .collect();

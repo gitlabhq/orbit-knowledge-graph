@@ -1,0 +1,299 @@
+name: "C#: a namespace used by many files links each call once"
+
+fixtures:
+  - path: Ns0/C0_0.cs
+    content: |
+      using Ns0;
+      using Ns1;
+      using Ns2;
+
+      namespace Ns0
+      {
+          public class C0_0
+          {
+              public static void Run() {}
+
+              public void M()
+              {
+                  C0_0.Run();
+                  C1_0.Run();
+                  C2_0.Run();
+              }
+          }
+      }
+
+  - path: Ns0/C0_1.cs
+    content: |
+      using Ns0;
+      using Ns1;
+      using Ns2;
+
+      namespace Ns0
+      {
+          public class C0_1
+          {
+              public static void Run() {}
+
+              public void M()
+              {
+                  C0_0.Run();
+                  C1_0.Run();
+                  C2_0.Run();
+              }
+          }
+      }
+
+  - path: Ns0/C0_2.cs
+    content: |
+      using Ns0;
+      using Ns1;
+      using Ns2;
+
+      namespace Ns0
+      {
+          public class C0_2
+          {
+              public static void Run() {}
+
+              public void M()
+              {
+                  C0_0.Run();
+                  C1_0.Run();
+                  C2_0.Run();
+              }
+          }
+      }
+
+  - path: Ns0/C0_3.cs
+    content: |
+      using Ns0;
+      using Ns1;
+      using Ns2;
+
+      namespace Ns0
+      {
+          public class C0_3
+          {
+              public static void Run() {}
+
+              public void M()
+              {
+                  C0_0.Run();
+                  C1_0.Run();
+                  C2_0.Run();
+              }
+          }
+      }
+
+  - path: Ns1/C1_0.cs
+    content: |
+      using Ns0;
+      using Ns1;
+      using Ns2;
+
+      namespace Ns1
+      {
+          public class C1_0
+          {
+              public static void Run() {}
+
+              public void M()
+              {
+                  C0_0.Run();
+                  C1_0.Run();
+                  C2_0.Run();
+              }
+          }
+      }
+
+  - path: Ns1/C1_1.cs
+    content: |
+      using Ns0;
+      using Ns1;
+      using Ns2;
+
+      namespace Ns1
+      {
+          public class C1_1
+          {
+              public static void Run() {}
+
+              public void M()
+              {
+                  C0_0.Run();
+                  C1_0.Run();
+                  C2_0.Run();
+              }
+          }
+      }
+
+  - path: Ns1/C1_2.cs
+    content: |
+      using Ns0;
+      using Ns1;
+      using Ns2;
+
+      namespace Ns1
+      {
+          public class C1_2
+          {
+              public static void Run() {}
+
+              public void M()
+              {
+                  C0_0.Run();
+                  C1_0.Run();
+                  C2_0.Run();
+              }
+          }
+      }
+
+  - path: Ns1/C1_3.cs
+    content: |
+      using Ns0;
+      using Ns1;
+      using Ns2;
+
+      namespace Ns1
+      {
+          public class C1_3
+          {
+              public static void Run() {}
+
+              public void M()
+              {
+                  C0_0.Run();
+                  C1_0.Run();
+                  C2_0.Run();
+              }
+          }
+      }
+
+  - path: Ns2/C2_0.cs
+    content: |
+      using Ns0;
+      using Ns1;
+      using Ns2;
+
+      namespace Ns2
+      {
+          public class C2_0
+          {
+              public static void Run() {}
+
+              public void M()
+              {
+                  C0_0.Run();
+                  C1_0.Run();
+                  C2_0.Run();
+              }
+          }
+      }
+
+  - path: Ns2/C2_1.cs
+    content: |
+      using Ns0;
+      using Ns1;
+      using Ns2;
+
+      namespace Ns2
+      {
+          public class C2_1
+          {
+              public static void Run() {}
+
+              public void M()
+              {
+                  C0_0.Run();
+                  C1_0.Run();
+                  C2_0.Run();
+              }
+          }
+      }
+
+  - path: Ns2/C2_2.cs
+    content: |
+      using Ns0;
+      using Ns1;
+      using Ns2;
+
+      namespace Ns2
+      {
+          public class C2_2
+          {
+              public static void Run() {}
+
+              public void M()
+              {
+                  C0_0.Run();
+                  C1_0.Run();
+                  C2_0.Run();
+              }
+          }
+      }
+
+  - path: Ns2/C2_3.cs
+    content: |
+      using Ns0;
+      using Ns1;
+      using Ns2;
+
+      namespace Ns2
+      {
+          public class C2_3
+          {
+              public static void Run() {}
+
+              public void M()
+              {
+                  C0_0.Run();
+                  C1_0.Run();
+                  C2_0.Run();
+              }
+          }
+      }
+
+tests:
+  - name: "each call through a using directive links once to its target"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'M' AND caller.file_path = 'Ns0/C0_1.cs'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: Ns0.C0_0.Run } }
+      - { row: { callee: Ns1.C1_0.Run } }
+      - { row: { callee: Ns2.C2_0.Run } }
+
+  - name: "a caller in another namespace also links to each target once"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'M' AND caller.file_path = 'Ns2/C2_3.cs'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: Ns0.C0_0.Run } }
+      - { row: { callee: Ns1.C1_0.Run } }
+      - { row: { callee: Ns2.C2_0.Run } }
+
+  - name: "each using directive is one import"
+    query: |
+      MATCH (f:File)-[:IMPORTS]->(s:ImportedSymbol)
+      WHERE f.path = 'Ns2/C2_3.cs'
+      RETURN s.import_path AS path
+    assert:
+      - { row_count: 3 }
+      - { row: { path: Ns0 } }
+      - { row: { path: Ns1 } }
+      - { row: { path: Ns2 } }
+
+  - name: "every M links to all three targets"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'M'
+      RETURN callee.fqn AS callee, count(caller) AS callers
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: Ns0.C0_0.Run, callers: 12 } }
+      - { row: { callee: Ns1.C1_0.Run, callers: 12 } }
+      - { row: { callee: Ns2.C2_0.Run, callers: 12 } }

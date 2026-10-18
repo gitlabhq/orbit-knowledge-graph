@@ -86,7 +86,7 @@ mod tests {
             phases: Default::default(),
         };
         ctx.phases.insert(AuthorizationOutput {
-            query_result: QueryResult::from_batches(&[batch], &result_ctx),
+            query_result: QueryResult::from_batches(&[batch], &result_ctx).unwrap(),
             authorizations,
         });
         ctx

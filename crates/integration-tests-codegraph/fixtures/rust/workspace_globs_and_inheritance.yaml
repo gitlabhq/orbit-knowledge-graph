@@ -1,4 +1,5 @@
 name: "Rust: workspace globs and inherited dependencies"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -67,8 +68,8 @@ tests:
       RETURN callee.file_path AS file, callee.fqn AS fqn
     assert:
       - { row_count: 2 }
-      - { row: { file: 'crates/ignored/src/lib.rs', fqn: 'ignored_lib::secret' } }
-      - { row: { file: 'crates/shared/src/lib.rs', fqn: 'shared_lib::helper' } }
+      - { row: { file: "crates/ignored/src/lib.rs", fqn: "ignored_lib::secret" } }
+      - { row: { file: "crates/shared/src/lib.rs", fqn: "shared_lib::helper" } }
 
   - name: "excluded crate is still indexed when it is a local path dependency"
     query: |
@@ -77,7 +78,7 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'ignored_lib::secret' } }
+      - { row: { fqn: "ignored_lib::secret" } }
 
   - name: "workspace inherited edition and version still yield crate-qualified FQNs"
     query: |
@@ -86,4 +87,4 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'app_cli::call_workspace_deps' } }
+      - { row: { fqn: "app_cli::call_workspace_deps" } }

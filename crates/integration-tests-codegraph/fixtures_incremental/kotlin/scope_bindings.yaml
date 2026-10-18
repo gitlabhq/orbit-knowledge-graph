@@ -1,4 +1,5 @@
 name: "Kotlin: lexical binding ownership"
+
 fixtures:
   - path: local/main.kt
     content: |
@@ -12,6 +13,7 @@ fixtures:
           }
           f()
       }
+
   - path: callable/main.kt
     content: |
       fun first() {}
@@ -20,6 +22,7 @@ fixtures:
           val f = ::first
           f()
       }
+
   - path: shadow/main.kt
     content: |
       class First {
@@ -37,6 +40,7 @@ fixtures:
           }
           f.ping()
       }
+
   - path: control/main.kt
     content: |
       class First {
@@ -47,6 +51,7 @@ fixtures:
           val f = First()
           f.ping()
       }
+
 tests:
   - name: "Callable aliases and receiver types survive inner declarations"
     query: |

@@ -1,0 +1,71 @@
+cases:
+  - name: after_partial_redaction
+    description: Neighbors that survive redaction are still hydrated
+    config:
+      redaction: { allow: { user: [2], group: [100] }, deny: { user: [3] } }
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "u", "entity": "User", "node_ids": [2, 3]}],
+          "neighbors": {"direction": "outgoing"}
+        }
+      gql: |
+        MATCH (u:User)-->(n) WHERE u.id IN [2, 3] RETURN u, n
+    expect:
+      hydration: dynamic
+      node_count: 2
+      nodes:
+        User: { ids: [2], absent: [3] }
+        Group:
+          ids: [100]
+          rows:
+            - { id: 100, name: Public Group }
+      edges:
+        MEMBER_OF: [[2, 100]]
+
+  - name: code_entities_by_own_id
+    description: Code entity neighbors are hydrated by their own id, not by their project id
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "d", "entity": "Definition", "node_ids": [12000]}],
+          "neighbors": {"direction": "outgoing", "rel_types": ["CALLS"]}
+        }
+      gql: |
+        MATCH (d:Definition {id: 12000})-[:CALLS]->(n) RETURN d, n
+    expect:
+      node_count: 2
+      nodes:
+        Definition:
+          ids: [12000, 12001]
+          rows:
+            - { id: 12000, name: compile }
+            - { id: 12001, name: helper }
+      edges:
+        CALLS: [[12000, 12001]]
+
+  - name: null_properties_dropped
+    description: Hydration leaves out properties whose value is null
+    query:
+      json: |
+        {
+          "query_type": "neighbors",
+          "nodes": [{"id": "u", "entity": "User", "node_ids": [3]}],
+          "neighbors": {"direction": "outgoing", "rel_types": ["APPROVED"]},
+          "options": {"dynamic_columns": "*"}
+        }
+      gql: |
+        MATCH (u:User {id: 3})-[:APPROVED]->(n) RETURN u, properties(n)
+    expect:
+      node_count: 2
+      nodes:
+        User: { ids: [3] }
+        MergeRequest:
+          ids: [2000]
+          prop_absent: [merged_at]
+          rows:
+            - { id: 2000, state: opened }
+      edges:
+        APPROVED: [[3, 2000]]

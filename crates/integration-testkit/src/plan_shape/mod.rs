@@ -310,10 +310,13 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
     crate::scenario::discover(directory, &mut paths);
     paths.sort();
     assert!(!paths.is_empty());
-    for path in &paths {
-        let scenario: Scenario =
-            orbit_utils::yaml::from_str(&std::fs::read_to_string(path).unwrap())
-                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let mut cases = 0;
+    for (path, scenario) in paths.iter().flat_map(|path| {
+        crate::scenario::read_cases::<Scenario>(path)
+            .into_iter()
+            .map(move |(_, scenario)| (path, scenario))
+    }) {
+        cases += 1;
         assert!(
             !scenario.physical.is_empty() && !scenario.query.is_empty(),
             "{}: missing query arms or backend assertions",
@@ -345,7 +348,7 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
         }
         println!("PASS {}", scenario.name);
     }
-    println!("{} plan fixtures passed", paths.len());
+    println!("{cases} plan fixtures passed");
 }
 
 #[test]

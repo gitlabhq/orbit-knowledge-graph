@@ -33,48 +33,152 @@ mod tests {
     };
     use ontology::FieldSource;
 
-    #[test]
-    fn constructs_a_document_model_without_relational_or_gitlab_contracts() {
-        use crate::{DataModel, DataModelError, GraphCatalog, Mapping};
-        use std::collections::HashMap;
+    fn overlay_ontology(name: &str) -> Arc<ontology::Ontology> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../config/seeds/overlays")
+            .join(name);
+        Arc::new(ontology::Ontology::load_embedded_with_overlay(&path).unwrap())
+    }
 
-        struct Documents {
-            collections: Vec<String>,
+    #[test]
+    fn reordered_tables_retain_source_columns_and_dependencies() {
+        let model = ClickHouseDataModel::derive(overlay_ontology("reordered_edges")).unwrap();
+        let layouts = model.backend().equivalent_layouts("gl_code_edge");
+        assert!(layouts.is_empty());
+        let storage = model.layout().schema();
+        let source = storage.table("gl_code_edge").unwrap();
+        let copy = storage.table("gl_code_edge_by_target").unwrap();
+        assert_eq!(copy.columns.len(), source.columns.len());
+        assert_eq!(copy.sort_key[1], "target_id");
+        assert_eq!(
+            storage.dependencies()["gl_code_edge_by_target"],
+            std::collections::BTreeSet::from(["gl_code_edge".to_string()])
+        );
+    }
+
+    #[test]
+    fn catalog_routes_preserve_variant_endpoints_on_each_backend() {
+        let ontology = overlay_ontology("variant_routes");
+        let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();
+        let local = DuckDbDataModel::derive(ontology).unwrap();
+        for (source, target, table) in [
+            ("Definition", "Definition", "gl_code_edge"),
+            ("File", "Definition", "gl_edge"),
+            ("Definition", "ImportedSymbol", "gl_code_edge"),
+            ("File", "ImportedSymbol", "gl_edge"),
+        ] {
+            let variant = remote
+                .graph()
+                .variant_named("CALLS", source, target)
+                .unwrap();
+            assert_eq!(
+                remote.backend().variant_route(variant.id).unwrap().table,
+                table
+            );
+            let local_variant = local
+                .graph()
+                .variant_named("CALLS", source, target)
+                .unwrap();
+            assert_eq!(
+                local
+                    .backend()
+                    .variant_route(local_variant.id)
+                    .unwrap()
+                    .table,
+                local.backend().default_edge_table()
+            );
         }
-        struct DocumentMapping(HashMap<crate::PropertyId, Vec<String>>);
-        impl Mapping<Documents> for DocumentMapping {
-            fn derive(graph: &GraphCatalog, schema: &Documents) -> Result<Self, DataModelError> {
-                assert_eq!(schema.collections, ["records"]);
-                let property = graph.property_named("Record", "key").unwrap().id;
-                Ok(Self(HashMap::from([(
-                    property,
-                    vec!["metadata".into(), "key".into()],
-                )])))
+    }
+
+    #[test]
+    fn writer_catalog_tracks_exact_node_mapping_routes() {
+        let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
+        let model = ClickHouseDataModel::derive(ontology).unwrap();
+
+        let code_writers = model.layout().schema().writers("gl_code_edge").unwrap();
+        assert!(code_writers.contains("Branch"));
+        assert!(code_writers.contains("Directory"));
+        assert!(!code_writers.contains("Group"));
+        assert!(!code_writers.contains("Project"));
+
+        let default_writers = model.layout().schema().writers("gl_edge").unwrap();
+        assert!(default_writers.contains("Group"));
+        assert!(default_writers.contains("Project"));
+
+        let ci_writers = model.layout().schema().writers("gl_ci_edge").unwrap();
+        assert!(ci_writers.contains("Pipeline"));
+        assert!(!ci_writers.contains("Vulnerability"));
+
+        let security_writers = model.layout().schema().writers("gl_sec_edge").unwrap();
+        assert!(security_writers.contains("Vulnerability"));
+        assert!(!security_writers.contains("Pipeline"));
+    }
+
+    #[test]
+    fn materialized_bindings_resolve_graph_identities_and_source_columns() {
+        let model = ClickHouseDataModel::derive(overlay_ontology("denorm_approved")).unwrap();
+        let storage = model.layout().schema();
+        let approved = model
+            .backend()
+            .materialized_joins()
+            .iter()
+            .find(|binding| binding.table == "gl_denorm_approved")
+            .unwrap();
+        assert_eq!(approved.nodes.len(), 2);
+        assert_eq!(approved.relationships.len(), 1);
+        assert_eq!(approved.sources, ["gl_user", "gl_edge", "gl_merge_request"]);
+
+        let approved_project_model =
+            ClickHouseDataModel::derive(overlay_ontology("denorm_approved_project")).unwrap();
+        let approved_project = approved_project_model
+            .backend()
+            .materialized_joins()
+            .iter()
+            .find(|binding| binding.table == "gl_denorm_approved_project")
+            .unwrap();
+        assert_eq!(approved_project.nodes.len(), 3);
+        assert_eq!(approved_project.relationships.len(), 2);
+        assert_eq!(
+            approved_project.sources,
+            [
+                "gl_user",
+                "gl_edge",
+                "gl_merge_request",
+                "gl_edge",
+                "gl_project"
+            ]
+        );
+
+        for binding in model.backend().materialized_joins() {
+            let table = storage.table(&binding.table).unwrap();
+            let has_column = |name: &str| table.columns.iter().any(|column| column.name == name);
+            for node in &binding.nodes {
+                assert!(has_column(&node.identity_column));
+                for (property, column) in &node.properties {
+                    assert!(
+                        model
+                            .graph()
+                            .entity(node.entity)
+                            .properties
+                            .contains(property)
+                    );
+                    assert!(has_column(column));
+                }
+            }
+            for relationship in &binding.relationships {
+                let variant = model.graph().variant(relationship.variant);
+                assert_eq!(
+                    variant.source,
+                    binding.nodes[relationship.source_slot].entity
+                );
+                assert_eq!(
+                    variant.target,
+                    binding.nodes[relationship.target_slot].entity
+                );
+                assert!(has_column(&relationship.source_id_column));
+                assert!(has_column(&relationship.target_id_column));
             }
         }
-
-        let mut graph = GraphCatalog::new();
-        let entity = graph.add_entity("Record".into()).unwrap();
-        let key = graph
-            .add_property(entity, "key".into(), ontology::DataType::Uuid)
-            .unwrap();
-        let related = graph
-            .add_relationship("RELATED".into(), &[(entity, entity)])
-            .unwrap();
-        let model = DataModel::<_, DocumentMapping, _>::build(
-            graph,
-            Documents {
-                collections: vec!["records".into()],
-            },
-            (),
-        )
-        .unwrap();
-
-        assert_eq!(model.layout().schema().collections, ["records"]);
-        assert_eq!(model.backend().0[&key], ["metadata", "key"]);
-        assert!(model.graph().property_id(entity, "id").is_none());
-        assert!(model.graph().variant_id(related, entity, entity).is_some());
-        assert!(model.graph().property_id(entity, "key").is_some());
     }
 
     #[test]
@@ -156,10 +260,7 @@ mod tests {
             local.backend().entity(definition).unwrap().table,
             "gl_definition"
         );
-        assert_eq!(
-            remote.backend().relationship_table(contains),
-            Some("gl_edge")
-        );
+        assert_eq!(remote.backend().relationship_table(contains), None);
         assert_eq!(
             local.backend().relationship_table(contains),
             Some("gl_edge")
@@ -200,7 +301,10 @@ mod tests {
         let model = ClickHouseDataModel::derive(ontology.clone()).unwrap();
         let entity = model.graph().entity_id("MergeRequest").unwrap();
         let property = model.graph().property_id(entity, "project_id").unwrap();
-        let table = model.backend().table_for_entity(entity).unwrap();
+        let table = model
+            .backend()
+            .table(&model.backend().entity(entity).unwrap().table)
+            .unwrap();
 
         let source = &ontology
             .get_node("MergeRequest")
@@ -232,7 +336,10 @@ mod tests {
                 .unwrap();
         let entity = model.graph().entity_id("Job").unwrap();
         let property = model.graph().property_id(entity, "when").unwrap();
-        let table = model.backend().table_for_entity(entity).unwrap();
+        let table = model
+            .backend()
+            .table(&model.backend().entity(entity).unwrap().table)
+            .unwrap();
 
         assert_eq!(model.backend().property_column(property), Some("when"));
         assert!(table.columns.contains("when"));

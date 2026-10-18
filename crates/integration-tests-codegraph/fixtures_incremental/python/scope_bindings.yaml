@@ -1,4 +1,5 @@
 name: "Python: lexical binding ownership"
+
 fixtures:
   - path: global_read/main.py
     content: |
@@ -14,6 +15,7 @@ fixtures:
           global f
           f()
           f = second
+
   - path: nonlocal/main.py
     content: |
       def first():
@@ -29,6 +31,7 @@ fixtures:
               nonlocal f
               f()
               f = second
+
   - path: class_local/main.py
     content: |
       def first():
@@ -42,6 +45,7 @@ fixtures:
               first = second
 
           first()
+
   - path: before_assignment/main.py
     content: |
       def first():
@@ -53,6 +57,7 @@ fixtures:
       def run():
           first()
           first = second
+
   - path: branch/main.py
     content: |
       def first():
@@ -66,6 +71,7 @@ fixtures:
           if flag:
               f = second
           f()
+
   - path: global_write/main.py
     content: |
       def first():
@@ -80,6 +86,7 @@ fixtures:
           global f
           f = second
           f()
+
   - path: global_nested/main.py
     content: |
       def first():
@@ -96,6 +103,7 @@ fixtures:
           def run():
               global f
               f()
+
 tests:
   - name: "Function locals block global fallback before assignment"
     query: |
@@ -104,6 +112,7 @@ tests:
       RETURN callee.name AS target
     assert:
       - { empty: true }
+
   - name: "Explicit ownership and branch assignments select exact targets"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)

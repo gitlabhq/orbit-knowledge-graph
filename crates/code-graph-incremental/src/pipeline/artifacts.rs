@@ -8,6 +8,7 @@ use orbit_utils::vfs::Vfs;
 use rustc_hash::FxHashSet;
 
 use super::{SourceFile, State};
+use crate::sentinel::Killed;
 use crate::tree::{Compact, Edge, Tree};
 
 pub type Sources = Arc<Vfs<()>>;
@@ -48,17 +49,18 @@ pub struct SourcePaths {
 }
 
 /// The tree-sitter tree, source attached.
-pub struct Parsed(pub Tree);
+pub struct Parsed(pub Tree, pub Option<Killed>);
 
 /// Rewrite rules applied; language nodes still present.
-pub struct Rewritten(pub Tree);
+pub struct Rewritten(pub Tree, pub Option<Killed>);
 
 /// Only canonical nodes remain; the source text is gone.
-pub struct Canonical(pub Tree<Compact>);
+pub struct Canonical(pub Tree<Compact>, pub Option<Killed>);
 
 pub struct LinkedFile {
     pub tree: Tree<Compact>,
     pub edges: Vec<Edge>,
+    pub limited: Option<Killed>,
 }
 
 pub struct DirtyGraph {

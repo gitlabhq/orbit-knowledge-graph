@@ -1,4 +1,5 @@
 name: "Rust: loop calls retain lexical import fallback"
+
 fixtures:
   - path: src/lib.rs
     content: |
@@ -39,6 +40,7 @@ fixtures:
               callback();
           }
       }
+
 tests:
   - name: "Undefined calls use the wildcard visible at their call site"
     query: |
@@ -50,6 +52,7 @@ tests:
       - { row: { caller: straight, path: external } }
       - { row: { caller: in_loop, path: external } }
       - { row: { caller: inner_import, path: inner } }
+
   - name: "Opaque locals and builtins block wildcard fallback in loops"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
@@ -57,6 +60,7 @@ tests:
       RETURN caller.name
     assert:
       - { empty: true }
+
   - name: "Known loop targets still resolve through their reaching values"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)

@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/edge_cases/like.rs::like_contains_returns_matching_rows
 description: LIKE contains filter returns usernames matching substring
 
 query:

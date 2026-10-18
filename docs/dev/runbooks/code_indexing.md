@@ -339,6 +339,96 @@ OPTIMIZE TABLE `<gkg-database>`.gl_imported_symbol FINAL CLEANUP;
 OPTIMIZE TABLE `<gkg-database>`.gl_definition FINAL CLEANUP;
 ```
 
+## Emergency code-indexing pause
+
+Use this to stop code indexing quickly, for example during an incident. It
+scales only the code indexer pool to zero. The SDLC indexer, webserver,
+dispatcher, and queries keep running. Queued tasks stay in NATS.
+
+### Find the ScaledObject name
+
+The name depends on the Helm release and `nameOverride`. Dedicated renders
+`gkg-indexer-code`, but the chart default with release `gkg` renders
+`gkg-orbit-indexer-code`. Find the name first and use it in every command below:
+
+```shell
+kubectl -n <ns> get scaledobject -l orbit.gitlab.com/indexer-pool=code
+```
+
+### Pause
+
+```shell
+kubectl -n <ns> annotate scaledobject <name> autoscaling.keda.sh/paused-replicas="0" --overwrite
+```
+
+The deployment drops to zero replicas immediately and the pods are gone within
+a few seconds.
+
+### Verify
+
+```shell
+kubectl -n <ns> get scaledobject <name>
+kubectl -n <ns> get deploy <name>
+```
+
+- The ScaledObject must show `PAUSED=True`.
+- The deployment must show `0/0`.
+- Do not trust the `ACTIVE` column while paused. KEDA stops its scalers, so it
+  shows `False` or `Unknown`.
+
+A typo in the annotation value does not pause. `PAUSED` can still show `True`
+while the pool keeps running, so always check the deployment.
+
+If pods remain (a typo or a manual scale-up), remove the annotation and add it
+again. Re-running `annotate --overwrite` with the same value does not fix it:
+
+```shell
+kubectl -n <ns> annotate scaledobject <name> autoscaling.keda.sh/paused-replicas-
+kubectl -n <ns> annotate scaledobject <name> autoscaling.keda.sh/paused-replicas="0" --overwrite
+```
+
+### Maximum pause length
+
+The defaults are a 1 h consumer inactivity threshold and a 4 h stream max age
+(`stream_max_age_secs`). Stream max age counts from each message's publish time,
+not from the start of the pause. Tasks that were already queued when you paused
+can expire in under 4 h.
+
+| Pause length | Effect |
+|--------------|--------|
+| Under 1 h | Nothing changes. |
+| 1 h to 4 h | NATS may delete the idle consumer. Queued messages stay, and the indexer recreates the consumer on resume. |
+| Over 4 h | Queued tasks expire. Tasks queued before the pause expire 4 h after they were published, which can be sooner than 4 h after the pause started. |
+
+Set a reminder or alert for the 1 h mark. The consumer deletion and recreation
+path was verified only with a shortened 60 s threshold, not a real 1 h wait.
+
+### Resume
+
+```shell
+kubectl -n <ns> annotate scaledobject <name> autoscaling.keda.sh/paused-replicas-
+```
+
+Watch for `PAUSED=False` and the deployment returning to its minimum replicas.
+This takes 6 to 60 seconds.
+
+If the consumer was deleted during the pause, resume can take about 1 minute.
+The queue-depth endpoint returns 503 until the indexer recreates the consumer.
+KEDA then activates its fallback and may briefly run 2 pods before it recovers
+on its own.
+
+### Never do this while paused
+
+- Do not use `kubectl scale`. While paused, nothing reverts a manual scale-up.
+  While not paused, KEDA reverts a scale to zero in about 15 seconds.
+- Do not set `autoscaling.keda.sh/paused: "true"`. It freezes the pool at its
+  current replica count and the queue keeps being pulled.
+- Do not scale the dispatcher to 0.
+- Do not set `keda.enabled: false` on the code pool. Helm would then render a
+  fixed `replicas` value and bring the pool back, and the annotation does not
+  stop that. The pause survives `helm upgrade` only because the chart omits
+  `replicas` while KEDA is enabled.
+
 ## Monitoring
 
 ### Key metrics
@@ -350,6 +440,7 @@ OPTIMIZE TABLE `<gkg-database>`.gl_definition FINAL CLEANUP;
 | Handler outcome: `skipped_lock` | Messages skipped (another worker holds the lock) |
 | Handler outcome: `error` | Failed processing attempts |
 | Error stage: `repository_fetch` | Repository download failures |
+| Error stage: `repository_fetch_overload` | Archive endpoint answered 429, 502, 503 or 504; task is retried, never checkpointed as empty |
 | Error stage: `checkpoint` | Checkpoint read/write failures |
 | Error stage: `indexing` | Parse or graph build failures |
 | Error stage: `arrow_conversion` | Schema conversion failures |

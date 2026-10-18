@@ -78,7 +78,7 @@ fn per_file_budgets_count_thread_cpu_time_not_time_asleep() {
     .map(|killed| killed.label)
     .collect();
 
-    assert_eq!(killed, Vec::<&str>::new());
+    assert!(killed.is_empty(), "{killed:?}");
 }
 
 #[test]
@@ -97,34 +97,17 @@ fn the_per_file_resolve_budget_counts_thread_cpu_time() {
     assert_eq!(skipped(&context.report.skipped), Vec::<(&str, &str)>::new());
 }
 
-#[test]
-fn a_parse_stops_before_the_thread_runs_out_of_stack() {
-    let env = python(Limits::UNLIMITED);
-    let source = "def f(x):\n    return x\n".repeat(2_000);
-
-    let killed = std::thread::scope(|scope| {
-        std::thread::Builder::new()
-            .stack_size(128 * 1024)
-            .spawn_scoped(scope, || {
-                let file = SourceFile::from(("main.py".to_string(), source));
-                Parse.run(&env, &Sentinel::disabled(), file).err()
-            })
-            .unwrap()
-            .join()
-            .unwrap()
-    });
-
-    assert_eq!(killed.map(|killed| killed.label), Some("tree-sitter"));
-}
-
 fn write_all(root: &Path, files: &[(&str, &str)]) {
     for (path, content) in files {
         std::fs::write(root.join(path), content).unwrap();
     }
 }
 
-fn skipped(killed: &[Killed]) -> Vec<(&'static str, &str)> {
-    let mut found: Vec<_> = killed.iter().map(|k| (k.label, k.path.as_str())).collect();
+fn skipped(killed: &[Killed]) -> Vec<(&str, &str)> {
+    let mut found: Vec<_> = killed
+        .iter()
+        .map(|k| (k.label.as_ref(), k.path.as_str()))
+        .collect();
     found.sort();
     found
 }

@@ -1,4 +1,5 @@
 name: "Java: inter-file resolution"
+
 fixtures:
   - path: com/example/model/User.java
     content: |

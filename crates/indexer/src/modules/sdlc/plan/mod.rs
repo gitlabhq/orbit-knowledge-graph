@@ -4,15 +4,21 @@ mod transform;
 
 pub(in crate::modules::sdlc) use build::{Sizing, build_plans};
 pub(in crate::modules::sdlc) use extract::ExtractTemplate;
-pub(in crate::modules::sdlc) use transform::{TransformDeclaration, TransformSpec, Transformation};
+pub use transform::Transformation;
+pub(in crate::modules::sdlc) use transform::{TransformDeclaration, TransformSpec};
 
-pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
+pub const SOURCE_DATA_TABLE: &str = "source_data";
 
+use arrow::array::{Array, as_primitive_array};
+use arrow::datatypes::{
+    DataType, TimeUnit, TimestampMicrosecondType, TimestampMillisecondType,
+    TimestampNanosecondType, TimestampSecondType,
+};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use ontology::EtlScope;
 use ontology::sql_template;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use serde_json::Value;
 
 use super::partitioning::PartitionAssignment;
@@ -21,7 +27,7 @@ use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::handler::HandlerError;
 use orbit_utils::traversal_path::TraversalPath;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(in crate::modules::sdlc) struct Cursor {
     values: Vec<String>,
 }
@@ -52,7 +58,7 @@ impl Cursor {
                     ))
                 })?;
                 let column = batch.column(column_index);
-                ArrowUtils::array_value_to_string(column.as_ref(), last_row).ok_or_else(|| {
+                cursor_value(column.as_ref(), last_row).ok_or_else(|| {
                     HandlerError::Processing(format!(
                         "unsupported sort key column type for cursor: {}",
                         column.data_type()
@@ -62,6 +68,34 @@ impl Cursor {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self { values })
     }
+}
+
+fn cursor_value(column: &dyn Array, row: usize) -> Option<String> {
+    let DataType::Timestamp(unit, _) = column.data_type() else {
+        return ArrowUtils::array_value_to_string(column, row);
+    };
+    if column.is_null(row) {
+        return None;
+    }
+    let (timestamp, format) = match unit {
+        TimeUnit::Second => (
+            as_primitive_array::<TimestampSecondType>(column).value_as_datetime(row)?,
+            "%Y-%m-%d %H:%M:%S",
+        ),
+        TimeUnit::Millisecond => (
+            as_primitive_array::<TimestampMillisecondType>(column).value_as_datetime(row)?,
+            "%Y-%m-%d %H:%M:%S%.3f",
+        ),
+        TimeUnit::Microsecond => (
+            as_primitive_array::<TimestampMicrosecondType>(column).value_as_datetime(row)?,
+            "%Y-%m-%d %H:%M:%S%.6f",
+        ),
+        TimeUnit::Nanosecond => (
+            as_primitive_array::<TimestampNanosecondType>(column).value_as_datetime(row)?,
+            "%Y-%m-%d %H:%M:%S%.9f",
+        ),
+    };
+    Some(timestamp.format(format).to_string())
 }
 
 pub(in crate::modules::sdlc) trait Filter {
@@ -409,6 +443,71 @@ mod tests {
             batch_size,
             transform: TransformSpec::DataFusion(vec![]),
         }
+    }
+
+    fn timestamp_batch(unit: TimeUnit, value: i64) -> RecordBatch {
+        use arrow::array::{
+            TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
+            TimestampSecondArray,
+        };
+        let column: Arc<dyn Array> = match unit {
+            TimeUnit::Second => Arc::new(TimestampSecondArray::from(vec![value])),
+            TimeUnit::Millisecond => Arc::new(TimestampMillisecondArray::from(vec![value])),
+            TimeUnit::Microsecond => Arc::new(TimestampMicrosecondArray::from(vec![value])),
+            TimeUnit::Nanosecond => Arc::new(TimestampNanosecondArray::from(vec![value])),
+        };
+        let schema = Schema::new(vec![Field::new(
+            "started_at",
+            DataType::Timestamp(unit, None),
+            false,
+        )]);
+        RecordBatch::try_new(Arc::new(schema), vec![column]).expect("valid batch")
+    }
+
+    #[test]
+    fn cursor_formats_timestamps_at_the_column_precision() {
+        let sort_key = vec!["started_at".to_string()];
+        let cases = [
+            (TimeUnit::Second, 1_705_312_800, "2024-01-15 10:00:00"),
+            (
+                TimeUnit::Millisecond,
+                1_705_312_800_123,
+                "2024-01-15 10:00:00.123",
+            ),
+            (
+                TimeUnit::Microsecond,
+                1_705_312_800_123_456,
+                "2024-01-15 10:00:00.123456",
+            ),
+            (
+                TimeUnit::Nanosecond,
+                1_705_312_800_123_456_789,
+                "2024-01-15 10:00:00.123456789",
+            ),
+        ];
+        for (unit, value, expected) in cases {
+            let cursor = Cursor::default()
+                .advance(&timestamp_batch(unit, value), &sort_key)
+                .expect("timestamp is a supported sort key type");
+            assert_eq!(cursor.values(), [expected], "{unit:?}");
+        }
+    }
+
+    #[test]
+    fn cursor_filter_compares_timestamp_values_as_quoted_literals() {
+        let sort_key = vec!["session_started_at".to_string(), "id".to_string()];
+        let values = vec!["2024-01-15 10:00:00.123456".to_string(), "7".to_string()];
+        let sql = CursorFilter {
+            sort_key: &sort_key,
+            values: &values,
+        }
+        .condition();
+
+        assert_eq!(
+            sql,
+            "((session_started_at > '2024-01-15 10:00:00.123456')) OR \
+             ((session_started_at = '2024-01-15 10:00:00.123456') AND (id > '7'))"
+        );
     }
 
     #[test]

@@ -22,12 +22,16 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
         direction,
         edge,
         has_non_denorm,
-        center_tp_lookup,
         fused_table,
+        outgoing_kinds,
+        incoming_kinds,
+        incoming_scope_preserving,
+        incoming_cross_scope,
+        outgoing_neighbor_paths,
+        incoming_neighbor_paths,
     } = &plan.operation;
     let direction = *direction;
     let has_non_denorm = *has_non_denorm;
-    let center_tp_lookup = center_tp_lookup.as_ref();
     let cnp = &plan.nodes[center_alias];
     let center_id = center_alias.to_string();
     let center_entity = cnp.entity.clone().unwrap_or_default();
@@ -39,6 +43,32 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
     let center_filters = cnp.filters.clone();
     let center_id_range = cnp.id_range.clone();
     let edge_alias = "e";
+
+    let center_lookup = |edge: &str, center: &str| Expr::InSelect {
+        expr: Box::new(Expr::col(edge, TARGET_ID_COLUMN)),
+        query: Box::new(Query {
+            select: vec![SelectExpr::col(center, DEFAULT_PRIMARY_KEY)],
+            from: TableRef::scan_final(&center_table, center),
+            where_clause: Expr::conjoin(vec![
+                id_list_predicate(center, DEFAULT_PRIMARY_KEY, &center_node_ids),
+                deleted_false(center),
+            ]),
+            ..Default::default()
+        }),
+    };
+
+    let path_lookup = |edge: &str| Expr::InSelect {
+        expr: Box::new(Expr::col(edge, TRAVERSAL_PATH_COLUMN)),
+        query: Box::new(Query {
+            select: vec![SelectExpr::col("_tpd", TRAVERSAL_PATH_COLUMN)],
+            from: TableRef::scan_final(&center_table, "_tpd"),
+            where_clause: Expr::conjoin(vec![
+                id_list_predicate("_tpd", DEFAULT_PRIMARY_KEY, &center_node_ids),
+                deleted_false("_tpd"),
+            ]),
+            ..Default::default()
+        }),
+    };
 
     fn build_center_dedup(
         alias: &str,
@@ -78,24 +108,26 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
     };
 
     let build_arm = |dir: Direction| -> Query {
-        let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing) = match dir
-        {
-            Direction::Outgoing => (
-                SOURCE_ID_COLUMN,
-                SOURCE_KIND_COLUMN,
-                TARGET_ID_COLUMN,
-                TARGET_KIND_COLUMN,
-                1i64,
-            ),
-            Direction::Incoming => (
-                TARGET_ID_COLUMN,
-                TARGET_KIND_COLUMN,
-                SOURCE_ID_COLUMN,
-                SOURCE_KIND_COLUMN,
-                0i64,
-            ),
-            Direction::Both => unreachable!(),
-        };
+        let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing, arm_kinds) =
+            match dir {
+                Direction::Outgoing => (
+                    SOURCE_ID_COLUMN,
+                    SOURCE_KIND_COLUMN,
+                    TARGET_ID_COLUMN,
+                    TARGET_KIND_COLUMN,
+                    1i64,
+                    outgoing_kinds,
+                ),
+                Direction::Incoming => (
+                    TARGET_ID_COLUMN,
+                    TARGET_KIND_COLUMN,
+                    SOURCE_ID_COLUMN,
+                    SOURCE_KIND_COLUMN,
+                    0i64,
+                    incoming_kinds,
+                ),
+                Direction::Both => unreachable!(),
+            };
 
         let denorm_direction = if dir == Direction::Outgoing {
             query_data_model::DenormalizedDirection::Source
@@ -111,28 +143,27 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
             if !center_node_ids.is_empty() {
                 wp.push(id_list_predicate(a, center_edge_col, &center_node_ids));
             }
-            if let Some(ref types) = edge.rel_type_filter
-                && let Some(f) = rel_kind_filter(a, types)
-            {
+            if let Some(f) = rel_kind_filter(a, arm_kinds) {
                 wp.push(f);
             }
-            // Incoming edges to a namespace center sit at the center's own tp; pin to the resolved paths for a leading-PK point lookup.
-            if dir == Direction::Incoming
-                && !center_node_ids.is_empty()
-                && let Some((src, key_col)) = center_tp_lookup
-            {
-                wp.push(Expr::InSelect {
-                    expr: Box::new(Expr::col(a, TRAVERSAL_PATH_COLUMN)),
-                    query: Box::new(Query {
-                        select: vec![SelectExpr::col("_tpd", TRAVERSAL_PATH_COLUMN)],
-                        from: TableRef::scan(src.as_str(), "_tpd"),
-                        where_clause: Expr::conjoin(vec![
-                            id_list_predicate("_tpd", key_col, &center_node_ids),
-                            deleted_false("_tpd"),
-                        ]),
-                        ..Default::default()
-                    }),
-                });
+            if dir == Direction::Incoming && !center_node_ids.is_empty() && center_has_tp {
+                if incoming_cross_scope.is_empty() {
+                    wp.push(path_lookup(a));
+                } else if incoming_scope_preserving.is_empty() {
+                    wp.push(center_lookup(a, "_ctr"));
+                } else {
+                    let narrowed_filter = rel_kind_filter(a, incoming_scope_preserving)
+                        .expect("nonempty scoped kinds");
+                    let broad_filter = rel_kind_filter(a, incoming_cross_scope)
+                        .expect("nonempty cross-scope kinds");
+                    wp.push(
+                        Expr::or_all([
+                            Some(Expr::and(narrowed_filter, path_lookup(a))),
+                            Some(Expr::and(broad_filter, center_lookup(a, "_ctr"))),
+                        ])
+                        .expect("incoming route groups are nonempty"),
+                    );
+                }
             }
             wp.push(deleted_false(a));
             wp
@@ -170,11 +201,15 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
             SelectExpr::new(Expr::int(is_outgoing), neighbor_is_outgoing_column()),
         ];
 
-        let arm_tables = if dir == Direction::Outgoing {
-            &edge.outgoing_tables
+        let (arm_tables, arm_neighbor_paths) = if dir == Direction::Outgoing {
+            (&edge.outgoing_tables, outgoing_neighbor_paths)
         } else {
-            &edge.incoming_tables
+            (&edge.incoming_tables, incoming_neighbor_paths)
         };
+        select.push(SelectExpr::new(
+            neighbor_path(edge_alias, neighbor_type, arm_neighbor_paths),
+            neighbor_traversal_path_column(),
+        ));
         let (mut from, outer_pushed) = edge_table_scan_filtered(arm_tables, edge_alias, arm_where);
         where_parts.extend(outer_pushed);
         let needs_center_table = !center_uses_default_pk;
@@ -295,6 +330,29 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
         Node::Query(Box::new(query)),
         NodeBinding::Projected { role_identity },
     ))
+}
+
+fn neighbor_path(edge_alias: &str, neighbor_type: &str, owned: &[(String, String)]) -> Expr {
+    let owned_pair = |(relationship, entity): &(String, String)| {
+        Some(Expr::and(
+            Expr::eq(
+                Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
+                Expr::string(relationship),
+            ),
+            Expr::eq(Expr::col(edge_alias, neighbor_type), Expr::string(entity)),
+        ))
+    };
+    match Expr::or_all(owned.iter().map(owned_pair)) {
+        Some(owned) => Expr::func(
+            Function::If,
+            vec![
+                owned,
+                Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
+                Expr::string(""),
+            ],
+        ),
+        None => Expr::string(""),
+    }
 }
 
 /// Direction::Both collapsed into a single edge scan (see `fused_both_eligible`).

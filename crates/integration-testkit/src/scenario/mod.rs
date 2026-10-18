@@ -82,7 +82,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, handlers: Arc<dyn ScenarioHa
         }
     }
 
-    assert_distinct_database_names(root, &files);
+    assert_distinct_database_names(files.iter().map(|file| scenario_name(root, file)));
 
     let concurrency: usize = std::env::var("SUBTEST_CONCURRENCY")
         .ok()
@@ -172,16 +172,62 @@ pub(crate) fn scenario_name(root: &Path, file: &Path) -> String {
 // database_name collapses every non-alphanumeric character to '_', so two scenario
 // paths differing only in such characters would fork the same database and silently
 // interfere. Catch the collision loudly before any task spawns.
-pub(crate) fn assert_distinct_database_names(root: &Path, files: &[PathBuf]) {
+pub(crate) fn assert_distinct_database_names(names: impl IntoIterator<Item = String>) {
     let mut seen: HashMap<String, String> = HashMap::new();
-    for file in files {
-        let name = scenario_name(root, file);
+    for name in names {
         let db = database_name(&name);
         if let Some(previous) = seen.insert(db.clone(), name.clone()) {
             panic!(
                 "scenarios '{previous}' and '{name}' map to the same database '{db}'; \
                  rename one so their sanitised names differ"
             );
+        }
+    }
+}
+
+pub(crate) fn read_cases<T: serde::de::DeserializeOwned>(file: &Path) -> Vec<(Option<String>, T)> {
+    let fail = |error: &dyn std::fmt::Display| -> ! { panic!("{}: {error}", file.display()) };
+    let raw = std::fs::read_to_string(file).unwrap_or_else(|e| fail(&e));
+    let mut defaults: serde_json::Value =
+        orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| fail(&e));
+    let Some(cases) = defaults
+        .as_object_mut()
+        .and_then(|file| file.remove("cases"))
+    else {
+        return vec![(
+            None,
+            orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| fail(&e)),
+        )];
+    };
+    let serde_json::Value::Array(cases) = cases else {
+        fail(&"cases must be a list");
+    };
+    cases
+        .into_iter()
+        .enumerate()
+        .map(|(index, mut case)| {
+            merge_defaults(&mut case, &defaults);
+            let label = case
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map_or_else(|| index.to_string(), str::to_string);
+            let case = serde_json::from_value(case)
+                .unwrap_or_else(|e| fail(&format!("case {label}: {e}")));
+            (Some(label), case)
+        })
+        .collect()
+}
+
+fn merge_defaults(case: &mut serde_json::Value, defaults: &serde_json::Value) {
+    let (Some(case), Some(defaults)) = (case.as_object_mut(), defaults.as_object()) else {
+        return;
+    };
+    for (key, value) in defaults {
+        match case.get_mut(key) {
+            Some(existing) => merge_defaults(existing, value),
+            None => {
+                case.insert(key.clone(), value.clone());
+            }
         }
     }
 }

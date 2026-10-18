@@ -1,4 +1,5 @@
 name: Containment hierarchy
+
 fixtures:
   - path: app.py
     content: |

@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_both_fused_scan_returns_complete_bidirectional_set
 description: Bidirectional MEMBER_OF+CONTAINS neighbors of Group 100 with limit
 
 query:

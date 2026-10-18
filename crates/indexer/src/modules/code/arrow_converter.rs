@@ -5,9 +5,10 @@ use code_graph::v2::SinkError;
 use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
-use orbit_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
+use ontology::constants::{RELATIONSHIP_KIND_COLUMN, SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN};
+use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use orbit_utils::traversal_path::TraversalPath;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -131,6 +132,10 @@ fn low_cardinality_columns(storage_columns: &[ontology::StorageColumn]) -> HashS
         .collect()
 }
 
+#[expect(
+    clippy::panic,
+    reason = "callers pass either a built-in code-graph entity name or a name taken from this same ontology, so the lookup cannot miss"
+)]
 pub(super) fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
     let node = ontology
         .get_node(entity_name)
@@ -579,6 +584,10 @@ fn repository_on_branch_rows<'a>(
     rows
 }
 
+#[expect(
+    clippy::unwrap_used,
+    reason = "edge indices come from iterating this same graph, so endpoints exist"
+)]
 fn graph_edge_row<'a>(
     graph: &'a code_graph::v2::linker::CodeGraph,
     ids: &'a [i64],
@@ -683,6 +692,8 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
     }
 }
 
+type RouteKey = (usize, usize, usize);
+
 pub(super) fn route_graph(
     data: ConvertedGraphData,
     table_names: &super::config::CodeTableNames,
@@ -696,16 +707,7 @@ pub(super) fn route_graph(
     ];
 
     if data.edges.num_rows() > 0 {
-        use std::collections::HashMap;
-
-        // Cloned so the routing borrow detaches from `data.edges` and the
-        // single-table path can move the batch out instead of copying it.
-        let rel_col = data
-            .edges
-            .column_by_name("relationship_kind")
-            .ok_or_else(|| SinkError("edges batch missing relationship_kind column".into()))?
-            .clone();
-        let routing = EdgeRouting::resolve(&rel_col, table_names)?;
+        let routing = EdgeRouting::resolve(&data.edges, table_names)?;
 
         // Columns that only exist on gl_code_edge. Sub-batches going
         // to other edge tables (gl_edge) must have them stripped.
@@ -713,123 +715,140 @@ pub(super) fn route_graph(
 
         // Every semantic edge kind usually routes to one table, and `take`
         // would copy the whole batch while the original is still live.
-        if let Some(table) = routing.single_table() {
-            let batch = if table.contains("code_edge") {
-                data.edges
-            } else {
-                drop_columns(&data.edges, code_only_cols)
-            };
-            result.push((table.to_string(), batch));
-            return Ok(result);
-        }
-
-        let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
-        for (i, table) in routing.tables_by_row().enumerate() {
-            table_rows.entry(table).or_default().push(i as u32);
-        }
-
-        for (table, indices) in table_rows {
-            let idx_array = arrow::array::UInt32Array::from(indices);
-            let mut batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
-                .map_err(|e| SinkError(format!("edge routing: {e}")))?;
-            if !table.contains("code_edge") {
-                batch = drop_columns(&batch, code_only_cols);
+        match routing {
+            EdgeRouting::Single(table) => {
+                let batch = if table.contains("code_edge") {
+                    data.edges
+                } else {
+                    drop_columns(&data.edges, code_only_cols)
+                };
+                result.push((table.to_string(), batch));
             }
-            result.push((table.to_string(), batch));
+            EdgeRouting::Split(table_rows) => {
+                for (table, indices) in table_rows {
+                    let idx_array = arrow::array::UInt32Array::from(indices);
+                    let mut batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
+                        .map_err(|e| SinkError(format!("edge routing: {e}")))?;
+                    if !table.contains("code_edge") {
+                        batch = drop_columns(&batch, code_only_cols);
+                    }
+                    result.push((table.to_string(), batch));
+                }
+            }
         }
     }
 
     Ok(result)
 }
 
-/// Destination table per edge row. `relationship_kind` is `LowCardinality`, so
-/// mapping the dictionary once beats a Utf8 cast plus a hash lookup per row.
 enum EdgeRouting<'a> {
-    Dictionary {
-        keys: &'a [i32],
-        by_key: Vec<&'a str>,
-    },
-    /// The column was not dictionary-encoded after all.
-    PerRow(Vec<&'a str>),
+    Single(&'a str),
+    Split(HashMap<&'a str, Vec<u32>>),
 }
+
+type DictionaryStrings<'a> = (&'a [i32], &'a arrow::array::StringArray);
 
 impl<'a> EdgeRouting<'a> {
     fn resolve(
-        rel_col: &'a arrow::array::ArrayRef,
+        edges: &RecordBatch,
         table_names: &'a super::config::CodeTableNames,
     ) -> Result<Self, SinkError> {
         use arrow::array::{Array, AsArray};
         use arrow::datatypes::Int32Type;
 
-        // Nulls cannot occur today, but the dictionary path reads the raw key
-        // buffer, where a null position would index `by_key` out of bounds.
-        if rel_col.null_count() > 0 {
-            return Err(SinkError(
-                "relationship_kind contains nulls, which edge routing cannot resolve".into(),
-            ));
-        }
-
-        if let Some(dict) = rel_col.as_dictionary_opt::<Int32Type>() {
-            let values = dict.values().as_string_opt::<i32>().ok_or_else(|| {
-                SinkError("relationship_kind dictionary values are not strings".into())
-            })?;
-            let by_key = (0..values.len())
-                .map(|i| table_names.edge_table_for(values.value(i)))
-                .collect();
-            return Ok(Self::Dictionary {
-                keys: dict.keys().values(),
-                by_key,
-            });
-        }
-
-        let plain = rel_col.as_string_opt::<i32>().ok_or_else(|| {
-            SinkError("relationship_kind is neither a dictionary nor a string column".into())
-        })?;
-        Ok(Self::PerRow(
-            (0..plain.len())
-                .map(|i| table_names.edge_table_for(plain.value(i)))
-                .collect(),
-        ))
-    }
-
-    /// `Some` when every row routes to the same table.
-    fn single_table(&self) -> Option<&'a str> {
-        let mut tables = match self {
-            Self::Dictionary { keys, by_key } => {
-                // A dictionary can carry values no row references, so the
-                // distinct set has to come from the keys actually present.
-                let mut seen: Vec<&str> = Vec::new();
-                for &k in *keys {
-                    let table = by_key[k as usize];
-                    if !seen.contains(&table) {
-                        seen.push(table);
-                    }
-                }
-                seen
+        let strings = [
+            RELATIONSHIP_KIND_COLUMN,
+            SOURCE_KIND_COLUMN,
+            TARGET_KIND_COLUMN,
+        ]
+        .map(|name| {
+            let column = edges
+                .column_by_name(name)
+                .ok_or_else(|| SinkError(format!("edges batch missing {name} column")))?;
+            if column.null_count() > 0 {
+                return Err(SinkError(format!(
+                    "{name} contains nulls, which edge routing cannot resolve"
+                )));
             }
-            Self::PerRow(tables) => {
-                let mut seen: Vec<&str> = Vec::new();
-                for &table in tables {
-                    if !seen.contains(&table) {
-                        seen.push(table);
-                    }
-                }
-                seen
-            }
+            let dictionary = column
+                .as_dictionary_opt::<Int32Type>()
+                .ok_or_else(|| SinkError(format!("{name} is not dictionary encoded")))?;
+            let values = dictionary
+                .values()
+                .as_string_opt::<i32>()
+                .ok_or_else(|| SinkError(format!("{name} dictionary values are not strings")))?;
+            Ok((dictionary.keys().values().as_ref(), values))
+        })
+        .into_iter()
+        .collect::<Result<Vec<_>, SinkError>>()?;
+
+        let [relationship, source, target] = strings.as_slice() else {
+            return Err(SinkError("edge route columns did not resolve".into()));
         };
-        (tables.len() == 1).then(|| tables.pop().expect("length checked"))
-    }
-
-    fn tables_by_row(&self) -> Box<dyn Iterator<Item = &'a str> + '_> {
-        match self {
-            Self::Dictionary { keys, by_key } => {
-                Box::new(keys.iter().map(move |&k| by_key[k as usize]))
+        let mut routes: rustc_hash::FxHashMap<RouteKey, &'a str> = rustc_hash::FxHashMap::default();
+        routes.reserve(relationship.1.len().min(edges.num_rows()));
+        let mut routing = None;
+        for row in 0..edges.num_rows() {
+            let relationship_key = dictionary_key(relationship, row, "relationship_kind")?;
+            let source_key = dictionary_key(source, row, "source_kind")?;
+            let target_key = dictionary_key(target, row, "target_kind")?;
+            let route_key = (relationship_key, source_key, target_key);
+            let table = match routes.get(&route_key) {
+                Some(table) => *table,
+                None => {
+                    let table = table_names
+                        .edge_table_for(
+                            relationship.1.value(relationship_key),
+                            source.1.value(source_key),
+                            target.1.value(target_key),
+                        )
+                        .map_err(|error| SinkError(error.to_string()))?;
+                    routes.insert(route_key, table);
+                    table
+                }
+            };
+            match &mut routing {
+                None => routing = Some(Self::Single(table)),
+                Some(Self::Single(first)) if *first != table => {
+                    let first = *first;
+                    let row = u32::try_from(row)
+                        .map_err(|_| SinkError("edge batch exceeds u32 row indexing".into()))?;
+                    let mut rows = HashMap::new();
+                    rows.insert(first, (0..row).collect());
+                    rows.insert(table, vec![row]);
+                    routing = Some(Self::Split(rows));
+                }
+                Some(Self::Split(rows)) => {
+                    let row = u32::try_from(row)
+                        .map_err(|_| SinkError("edge batch exceeds u32 row indexing".into()))?;
+                    rows.entry(table).or_default().push(row);
+                }
+                Some(Self::Single(_)) => {}
             }
-            Self::PerRow(tables) => Box::new(tables.iter().copied()),
         }
+        routing.ok_or_else(|| SinkError("cannot route an empty edge batch".into()))
     }
 }
 
+fn dictionary_key(
+    dictionary: &DictionaryStrings<'_>,
+    row: usize,
+    column: &str,
+) -> Result<usize, SinkError> {
+    let key = usize::try_from(dictionary.0[row])
+        .map_err(|_| SinkError(format!("{column} contains a negative dictionary key")))?;
+    if key >= dictionary.1.offsets().len() - 1 {
+        return Err(SinkError(format!(
+            "{column} dictionary key {key} is out of bounds"
+        )));
+    }
+    Ok(key)
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "indices are derived from the batch's own schema, so projection is in bounds"
+)]
 fn drop_columns(batch: &RecordBatch, drop: &[&str]) -> RecordBatch {
     let schema = batch.schema();
     let mut indices: Vec<usize> = Vec::new();

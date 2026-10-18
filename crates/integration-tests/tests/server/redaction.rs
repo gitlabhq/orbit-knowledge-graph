@@ -36,6 +36,7 @@ fn edge_table_for(relationship: &str) -> String {
     // load_ontology() already applies the schema version prefix.
     ontology
         .edge_table_for_relationship(relationship)
+        .unwrap()
         .to_string()
 }
 
@@ -125,7 +126,7 @@ async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
@@ -160,7 +161,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext)
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 5);
@@ -205,7 +206,7 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     let mut mock_service = MockRedactionService::new();
@@ -224,6 +225,46 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
 
     assert_eq!(authorized_ids, HashSet::from([1, 2, 3, 4]));
     assert!(!authorized_ids.contains(&5));
+}
+
+async fn agent_session_hidden_when_project_read_code_is_denied(ctx: &TestContext) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, flow_type, project_id, traversal_path) VALUES
+         (1, 'developer', 1000, '1/100/1000/'),
+         (2, 'chat', 1001, '1/101/1001/')",
+        t("gl_agent_session")
+    ))
+    .await;
+    ctx.optimize_all().await;
+
+    let ontology = load_ontology();
+    let query = compile(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [{"id": "w", "entity": "AgentSession", "id_range": {"start": 1, "end": 10000}}],
+            "limit": 10
+        }"#,
+        query_engine::compiler::Frontend::JsonDsl,
+        &ontology,
+        &test_security_context(),
+    )
+    .unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
+    let w = result.ctx().get("w").unwrap().clone();
+
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("project", &[1000]);
+    mock_service.deny("project", &[1001]);
+    run_redaction(&mut result, &mock_service);
+
+    // The redaction id of an AgentSession row is its project, not the session.
+    let visible_projects: HashSet<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&w))
+        .collect();
+    assert_eq!(result.authorized_count(), 1);
+    assert_eq!(visible_projects, HashSet::from([1000]));
 }
 
 async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
@@ -248,7 +289,7 @@ async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
 
@@ -320,7 +361,7 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &T
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
 
@@ -374,7 +415,7 @@ async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
@@ -448,7 +489,7 @@ async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContex
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
@@ -514,7 +555,7 @@ async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
 
@@ -574,7 +615,7 @@ async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let p = result.ctx().get("p").unwrap().clone();
 
     let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
@@ -640,7 +681,7 @@ async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
     }
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
@@ -673,7 +714,7 @@ async fn empty_query_result_stays_empty(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(result.len(), 0);
 
@@ -708,7 +749,7 @@ async fn all_authorized_preserves_all_data(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let raw_count = result.len();
 
@@ -747,7 +788,7 @@ async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
 
@@ -863,7 +904,7 @@ async fn all_columns_preserved_on_three_hop_traversal(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
@@ -906,7 +947,7 @@ async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     let all_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
@@ -987,7 +1028,7 @@ fn fail_closed_null_id_denies_row() {
         ctx.add_entity_auth(entity, config);
     }
 
-    let mut result = QueryResult::from_batches(&[batch], &ctx);
+    let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1, 3]);
@@ -1032,7 +1073,7 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert!(!result.is_empty(), "should find at least one path");
 
@@ -1085,7 +1126,7 @@ async fn path_finding_no_authorization_returns_nothing(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let raw_count = result.len();
     assert!(raw_count > 0, "should find paths before redaction");
@@ -1118,7 +1159,7 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let raw_count = result.len();
     assert!(raw_count > 0, "should find paths");
@@ -1193,7 +1234,7 @@ async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let raw_count = result.len();
 
@@ -1245,7 +1286,7 @@ async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert!(!result.is_empty());
 
@@ -1281,7 +1322,7 @@ async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let raw_count = result.len();
     assert!(raw_count > 0);
@@ -1324,7 +1365,7 @@ async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let raw_count = result.len();
     assert!(raw_count >= 2, "should find paths to both projects");
@@ -1373,7 +1414,7 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let raw_count = result.len();
     assert!(raw_count >= 2, "should find paths from both users");
@@ -1419,7 +1460,7 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let raw_count = result.len();
     assert!(raw_count > 0, "should find some paths");
@@ -1479,7 +1520,7 @@ async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert!(!result.is_empty(), "should have paths before redaction");
 
@@ -1518,7 +1559,7 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let raw_count = result.len();
     assert!(raw_count >= 3, "should find paths to all 3 projects");
@@ -1633,7 +1674,7 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     let raw_usernames: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
@@ -1685,7 +1726,7 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let p = result.ctx().get("p").unwrap().clone();
 
     let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
@@ -1731,7 +1772,7 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
 
     let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&g)).collect();
@@ -1777,7 +1818,7 @@ async fn search_with_id_range_filter(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
@@ -1817,7 +1858,7 @@ async fn search_with_specific_node_ids(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let p = result.ctx().get("p").unwrap().clone();
 
     let raw_ids: HashSet<i64> = result.iter().filter_map(|r| r.get_id(&p)).collect();
@@ -1865,7 +1906,7 @@ async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(result.len(), 0, "should find no users");
 
@@ -1899,7 +1940,7 @@ async fn search_fail_closed_no_authorization(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let raw_count = result.len();
     assert_eq!(raw_count, 3, "should find all 3 groups");
@@ -1949,7 +1990,7 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     for row in result.iter() {
@@ -2005,7 +2046,7 @@ fn fail_closed_null_type_denies_row() {
         ctx.add_entity_auth(entity, config);
     }
 
-    let mut result = QueryResult::from_batches(&[batch], &ctx);
+    let mut result = QueryResult::from_batches(&[batch], &ctx).unwrap();
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1, 2]);
@@ -2064,7 +2105,7 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 5, "should have all 5 users before redaction");
@@ -2139,7 +2180,7 @@ async fn column_selection_wildcard_returns_listed_columns_plus_mandatory(ctx: &T
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
 
     assert_eq!(result.len(), 3, "should have all 3 groups before redaction");
@@ -2187,7 +2228,7 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 5, "should have all 5 users");
@@ -2265,7 +2306,7 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
@@ -2322,7 +2363,7 @@ async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContex
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
 
@@ -2381,7 +2422,7 @@ async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", ALL_USER_IDS);
@@ -2427,7 +2468,7 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 2, "should find alice and bob");
@@ -2483,7 +2524,7 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let p = result.ctx().get("p").unwrap().clone();
 
     assert_eq!(result.len(), 5, "should have all 5 projects");
@@ -2588,7 +2629,7 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 2, "should have 2 aggregation rows");
@@ -2678,7 +2719,7 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 2, "should have 2 aggregation rows");
@@ -2719,7 +2760,7 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
 
@@ -2793,7 +2834,7 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(result.len(), 4, "should find 4 active users");
@@ -2833,7 +2874,7 @@ async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let raw_count = result.len();
     assert_eq!(raw_count, 5, "should have all 5 users");
@@ -2887,7 +2928,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     assert_eq!(
@@ -2916,7 +2957,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     assert_eq!(redacted, 2, "all rows should be redacted");
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
@@ -2931,7 +2972,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     assert_eq!(redacted, 2);
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
@@ -2949,7 +2990,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     assert_eq!(neighbor_ids, HashSet::from([100, 102]));
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("user", &[1]);
@@ -2991,7 +3032,7 @@ async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(result.len(), 2, "should have 2 neighbors before redaction");
 
@@ -3023,7 +3064,7 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestCon
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
 
     let raw_count = result.len();
@@ -3068,7 +3109,7 @@ async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(result.len(), 2, "group 100 should have 2 incoming members");
 
@@ -3172,7 +3213,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(
         result.len(),
@@ -3223,7 +3264,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     }
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let pre_deny_ids: HashSet<i64> = result
         .iter()
@@ -3258,7 +3299,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     }
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let pre_redaction_neighbor_ids: HashSet<i64> = result
         .iter()
@@ -3323,7 +3364,7 @@ async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestConte
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     let raw_count = result.len();
     assert!(
@@ -3369,7 +3410,7 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(
         result.len(),
@@ -3444,7 +3485,7 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
 
@@ -3603,7 +3644,7 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
     assert!(query.base.sql.contains("e1_src"), "SQL must contain e1_src");
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
     let p = result.ctx().get("p").unwrap().clone();
     let u = result.ctx().get("u").unwrap().clone();
@@ -3726,7 +3767,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(
         result.len(),
@@ -3794,7 +3835,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(
         result.len(),
@@ -3830,7 +3871,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(
         result.len(),
@@ -3852,7 +3893,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(
         result.len(),
@@ -3884,7 +3925,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(
         result.len(),
@@ -3905,7 +3946,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(
         result.len(),
@@ -3926,7 +3967,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(
         result.len(),
@@ -3958,7 +3999,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(
         result.len(),
@@ -3979,7 +4020,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
     assert_eq!(
         result.len(),
@@ -4008,7 +4049,7 @@ async fn fetch_page(
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let meta = query_engine::shared::paginate(&mut result, &query.input, &query.pagination);
     (result, meta)
 }
@@ -4092,7 +4133,7 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     run_redaction(&mut result, &mock_service);
     let meta = query_engine::shared::paginate(&mut result, &query.input, &query.pagination);
 
@@ -4114,7 +4155,7 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
     )
     .unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     run_redaction(&mut result, &mock_service);
     let meta = query_engine::shared::paginate(&mut result, &query.input, &query.pagination);
 
@@ -4405,6 +4446,7 @@ async fn redaction_integration() {
         three_hop_denying_one_project_removes_only_those_paths,
         group_project_two_hop_verifies_exact_pairs,
         single_node_project_query_verifies_all_projects,
+        agent_session_hidden_when_project_read_code_is_denied,
         all_nodes_have_required_type_columns,
         empty_query_result_stays_empty,
         all_authorized_preserves_all_data,

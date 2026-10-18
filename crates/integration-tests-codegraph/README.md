@@ -37,6 +37,21 @@ tests:
       - { row: { caller: "main.run", callee: "utils.helper" } }
 ```
 
+A fixture `content` can also be a list of parts. Each part is a string or
+`{ repeat: N, text: "..." }`, which writes the text N times. In a repeated text,
+`{i}` becomes the repetition number from 0, and `{i+1}` becomes the next number.
+Use parts for large inputs, such as deep nesting or long chains:
+
+```yaml
+  - path: main.js
+    content:
+      - "function main(c) {\n"
+      - { repeat: 10000, text: "if (c) {\n" }
+      - "target();\n"
+      - { repeat: 10000, text: "}\n" }
+      - "}\n"
+```
+
 A test can also use `queries` for multiple query blocks:
 
 ```yaml
@@ -123,12 +138,20 @@ Four test targets run the suites and the pipeline checks:
 | Target | What it runs |
 |---|---|
 | `suites` | one test for each YAML file in `fixtures/`, through `code-graph` |
-| `incremental_suites` | one test for each YAML file in `fixtures_incremental/`, through `code-graph-incremental` |
+| `incremental_suites` | one test for each YAML file in `fixtures_incremental/`, through `code-graph-incremental` on the indexer worker stack size |
 | `cancellation` | a job that runs past its budget cancels the run, and its work stops |
 | `vanished_tree` | a repository tree that disappears does not fail the other files |
 
 A suite that mixes languages declares `pipeline:`. A known gap is a `skip: true`
-with a comment that gives the reason.
+with a comment that gives the reason. The incremental runner still executes the
+queries of a skipped test without its assertions, so a query that no longer runs,
+or needs a LIMIT, fails the suite while it stays skipped.
+
+`limits: default` indexes a suite with the production budgets of
+`config/default.yaml` (incremental runner only; unset or `unlimited` applies no
+budget). `skipped:` lists the files those budgets must skip, each as
+`{ path: deep.js, label: depth }`; the label names the guard that must fire and
+is optional. Without `skipped:` the runner fails when any file is skipped.
 
 ## Adding a test
 

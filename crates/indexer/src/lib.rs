@@ -29,7 +29,6 @@ pub mod checkpoint;
 pub mod clickhouse;
 pub mod config;
 pub mod engine;
-pub mod health;
 pub mod locking;
 pub mod modules;
 pub mod nats;
@@ -54,11 +53,9 @@ pub mod metrics {
 use std::sync::Arc;
 use std::time::Duration;
 
-use clickhouse::ClickHouseConfigurationExt;
-use clickhouse::ClickHouseWriter;
+use clickhouse::{ClickHouseClients, ClickHouseWriter};
 use engine::EngineBuilder;
 use engine::handler::HandlerRegistry;
-use health::run_health_server;
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
@@ -82,6 +79,7 @@ pub async fn run(
     ontology: Arc<ontology::Ontology>,
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
+    sql_transform: modules::sdlc::SqlTransformFactory,
 ) -> Result<(), IndexerError> {
     let resources = orbit_server_config::ContainerResources::detect();
     let mut config = config.clone();
@@ -90,12 +88,13 @@ pub async fn run(
 
     config.schema.validate()?;
     config.engine.validate()?;
+    config.graph.validate()?;
 
     info!(modules = ?config.engine.modules, "indexer module selection");
 
-    let graph_client = config.graph.build_client();
+    let clients = ClickHouseClients::new(&config.graph, &config.datalake);
     info!(url = %config.graph.url, "initializing schema version table");
-    schema::version::init(&graph_client).await?;
+    schema::version::init(&clients.graph).await?;
 
     info!(url = %config.nats.url, "connecting to NATS");
     let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
@@ -108,26 +107,13 @@ pub async fn run(
         .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
 
-    // Start the health server before waiting for schema readiness so that the
-    // Kubernetes liveness probe is answered during the (potentially long) schema
-    // wait phase. Readiness stays `503` until the gate clears (`serving`).
-    let health_serving = serving.clone();
-    let health_shutdown = shutdown.clone();
-    let health_bind_address = config.health_bind_address;
-    let health_task = tokio::spawn(async move {
-        tokio::select! {
-            result = run_health_server(health_bind_address, health_serving) => result,
-            _ = health_shutdown.cancelled() => Ok(()),
-        }
-    });
-
     let schema_version = *schema::version::SCHEMA_VERSION;
     info!(
         schema_version,
         "waiting for dispatcher to prepare schema version before processing"
     );
     schema::version::wait_until_ready(
-        &graph_client,
+        &clients.graph,
         schema_version,
         Duration::from_secs(config.schema.indexer_schema_wait_timeout_secs),
         Duration::from_secs(config.schema.version_poll_interval_secs),
@@ -138,9 +124,9 @@ pub async fn run(
 
     info!(url = %config.graph.url, "connecting to graph ClickHouse");
     let writer = Arc::new(ClickHouseWriter::new(
-        config.graph.clone(),
+        clients.graph.clone(),
         metrics.clone(),
-    )?);
+    ));
 
     let registry = Arc::new(HandlerRegistry::default());
 
@@ -157,10 +143,12 @@ pub async fn run(
         modules::sdlc::register_handlers(
             &registry,
             config,
+            &clients,
             &ontology,
             writer.clone(),
             analytics.clone(),
             modules::sdlc::PARTITION_MIN_ROWS,
+            sql_transform,
         )
         .await?;
     } else {
@@ -172,6 +160,7 @@ pub async fn run(
         modules::code::register_handlers(
             &registry,
             config,
+            &clients,
             &ontology,
             writer.clone(),
             analytics.clone(),
@@ -187,7 +176,7 @@ pub async fn run(
         .is_module_enabled(IndexerModule::NamespaceDeletion)
     {
         info!("initializing Namespace Deletion handler");
-        modules::namespace_deletion::register_handlers(&registry, config, &ontology)?;
+        modules::namespace_deletion::register_handlers(&registry, config, &clients, &ontology)?;
     } else {
         info!("Namespace Deletion handler disabled by engine.modules");
     }
@@ -212,22 +201,7 @@ pub async fn run(
 
     serving.store(true, std::sync::atomic::Ordering::Relaxed);
     info!("indexer started");
-    let health_abort = health_task.abort_handle();
-    let result = tokio::select! {
-        result = engine.run(&config.engine) => {
-            health_abort.abort();
-            result.map_err(IndexerError::from)
-        }
-        result = health_task => {
-            let error = result
-                .unwrap_or_else(|e| Err(std::io::Error::other(e)))
-                .err()
-                .unwrap_or_else(|| std::io::Error::other(
-                    "health server exited unexpectedly",
-                ));
-            Err(IndexerError::Health(error))
-        }
-    };
+    let result = engine.run(&config.engine).await.map_err(IndexerError::from);
 
     shutdown_task.abort();
     analytics.shutdown().await;
@@ -242,12 +216,18 @@ pub async fn run_dispatcher(
     serving: Arc<std::sync::atomic::AtomicBool>,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
+    let candidate = archive
+        .load_ontology()
+        .map_err(orbit_migrations::catalog::CatalogError::from)?;
+    let code_tables = modules::code::config::CodeTableNames::from_ontology(&candidate)?;
+    let clients = ClickHouseClients::new(&config.graph, &config.datalake);
+
     let services = orchestrator::scheduled::connect(&config.nats).await?;
 
     let catalog = OntologyCatalog::open(services.nats_client.clone()).await?;
     let ontology = catalog.publish(archive).await?;
 
-    let graph = config.graph.build_client();
+    let graph = clients.graph.clone();
     if let Some(active_version) = orbit_migrations::version::read_active_version(&graph).await?
         && active_version != archive.schema_version()
     {
@@ -263,22 +243,9 @@ pub async fn run_dispatcher(
         warn!(%error, "release GC failed, will retry next startup");
     }
 
-    let datalake = config.datalake.build_client();
+    let datalake = clients.datalake.clone();
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
-
-    // Start the health server before migration so that the Kubernetes liveness
-    // probe is answered during the (potentially long) DDL phase. Readiness stays
-    // `503` until migration completes (`serving`).
-    let health_serving = serving.clone();
-    let health_shutdown = shutdown.clone();
-    let health_bind_address = config.health_bind_address;
-    let health_task = tokio::spawn(async move {
-        tokio::select! {
-            result = run_health_server(health_bind_address, health_serving) => result,
-            _ = health_shutdown.cancelled() => Ok(()),
-        }
-    });
 
     let campaign = Arc::new(campaign::CampaignState::new());
 
@@ -333,8 +300,8 @@ pub async fn run_dispatcher(
         }
     }
 
-    let deletion_graph = Arc::new(config.graph.build_client());
-    let deletion_datalake = Arc::new(config.datalake.build_client());
+    let deletion_graph = Arc::new(clients.graph.clone());
+    let deletion_datalake = Arc::new(clients.datalake.clone());
     let deletion_store: Arc<dyn NamespaceDeletionStore> =
         Arc::new(ClickHouseNamespaceDeletionStore::new(
             deletion_datalake,
@@ -345,8 +312,8 @@ pub async fn run_dispatcher(
 
     let backfill = Arc::new(CodeBackfill::new(
         services.nats.clone(),
-        config.graph.build_client(),
-        config.datalake.build_client(),
+        clients.graph.clone(),
+        clients.datalake.clone(),
         metrics.clone(),
         campaign.clone(),
         config.schedule.tasks.code_backfill.publish_window,
@@ -363,7 +330,7 @@ pub async fn run_dispatcher(
             services.nats.clone(),
             datalake,
             Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                config.graph.build_client(),
+                clients.graph.clone(),
             ))),
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
@@ -373,9 +340,8 @@ pub async fn run_dispatcher(
         Box::new(CodeBackfillSweep::new(
             backfill.clone(),
             CodeStaleSweep::new(
-                config.graph.build_client(),
-                &modules::code::config::CodeTableNames::from_ontology(&ontology)
-                    .expect("code tables must resolve from the archived ontology"),
+                clients.graph.clone(),
+                &code_tables,
                 checkpoint_store.clone(),
                 config.schedule.tasks.code_backfill.stale_sweeps_per_tick,
             ),
@@ -395,17 +361,17 @@ pub async fn run_dispatcher(
             config.schedule.tasks.namespace_deletion.clone(),
         )),
         Box::new(StaleEdgeReconciliation::new(
-            config.graph.build_client(),
+            clients.graph.clone(),
             &ontology,
             Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
-                config.graph.build_client(),
+                clients.graph.clone(),
             ))),
             metrics.clone(),
             config.schedule.tasks.stale_edge_reconciliation.clone(),
         )),
         Box::new(MigrationCompletionChecker::new(
-            config.graph.build_client(),
-            config.datalake.build_client(),
+            clients.graph.clone(),
+            clients.datalake.clone(),
             lock_service.clone(),
             Arc::new(ontology),
             config.schema.clone(),
@@ -425,7 +391,7 @@ pub async fn run_dispatcher(
         Arc::new(EnabledNamespacesRoute::new(
             NamespaceIndexingDispatch::new(services.nats.clone()),
             backfill.clone(),
-            config.datalake.build_client(),
+            clients.datalake.clone(),
         )),
     ];
 
@@ -444,21 +410,7 @@ pub async fn run_dispatcher(
         Box::new(max_deliveries_reconciler),
     ];
 
-    let health_abort = health_task.abort_handle();
-    tokio::select! {
-        result = orchestrator::launch(triggers, shutdown.clone()) => {
-            health_abort.abort();
-            result.map_err(DispatcherError::from)
-        }
-        result = health_task => {
-            shutdown.cancel();
-            let error = result
-                .unwrap_or_else(|e| Err(std::io::Error::other(e)))
-                .err()
-                .unwrap_or_else(|| std::io::Error::other(
-                    "dispatcher health server exited unexpectedly",
-                ));
-            Err(DispatcherError::Health(error))
-        }
-    }
+    orchestrator::launch(triggers, shutdown)
+        .await
+        .map_err(DispatcherError::from)
 }

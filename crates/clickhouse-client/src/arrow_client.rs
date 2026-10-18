@@ -8,10 +8,11 @@ use arrow::record_batch::RecordBatch;
 use arrow_ipc::reader::{StreamDecoder, StreamReader};
 use arrow_ipc::writer::StreamWriter;
 use bytes::Bytes;
-use circuit_breaker::CircuitBreakableError;
+use circuit_breaker::{CircuitBreaker, CircuitConfig};
 use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use orbit_observability::resilience::MetricsObserver;
 use orbit_utils::query_types::{ScalarType, SqlType};
 use serde::Serialize;
 use serde_json::Value;
@@ -44,7 +45,7 @@ const REPLICATION_TRANSIENTS: [&str; 11] = [
 const QUORUM_RETRY_ATTEMPTS: u32 = 20;
 
 fn is_replication_transient(error: &ClickHouseError) -> bool {
-    if error.is_transient() {
+    if error.is_retryable() {
         return true;
     }
     let message = error.to_string();
@@ -87,6 +88,7 @@ pub struct ArrowClickHouseClient {
     insert_settings: std::collections::HashMap<String, String>,
     quorum_writes: bool,
     replicated: bool,
+    circuit_breaker: CircuitBreaker,
 }
 
 impl ArrowClickHouseClient {
@@ -97,6 +99,7 @@ impl ArrowClickHouseClient {
         password: Option<&str>,
         session_settings: &std::collections::HashMap<String, String>,
         insert_settings: &std::collections::HashMap<String, String>,
+        service: &'static str,
     ) -> Self {
         let mut client = Client::default()
             .with_url(url)
@@ -107,7 +110,9 @@ impl ArrowClickHouseClient {
             .with_setting("use_query_condition_cache", "true")
             .with_setting("join_use_nulls", "0")
             .with_setting("query_plan_join_swap_table", "auto")
-            .with_setting("optimize_aggregation_in_order", "1");
+            .with_setting("optimize_aggregation_in_order", "1")
+            .with_setting("use_statistics", "0")
+            .with_setting("use_text_index_like_evaluation_by_dictionary_scan", "0");
 
         if let Some(password) = password {
             client = client.with_password(password);
@@ -124,11 +129,27 @@ impl ArrowClickHouseClient {
             insert_settings: insert_settings.clone(),
             quorum_writes: has_quorum_insert_setting(session_settings, insert_settings),
             replicated: false,
+            circuit_breaker: CircuitBreaker::new(
+                service,
+                CircuitConfig::default(),
+                Arc::new(MetricsObserver::new()),
+            ),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_circuit_breaker(mut self, circuit_breaker: CircuitBreaker) -> Self {
+        self.circuit_breaker = circuit_breaker;
+        self
     }
 
     pub fn with_replicated(mut self, replicated: bool) -> Self {
         self.replicated = replicated;
+        self
+    }
+
+    pub fn without_query_cache(mut self) -> Self {
+        self.client = self.client.with_setting("use_query_cache", "0");
         self
     }
 
@@ -149,20 +170,18 @@ impl ArrowClickHouseClient {
         ArrowQuery {
             inner: self.client.query(sql),
             retry_quorum_conflicts: self.quorum_writes,
+            circuit_breaker: self.circuit_breaker.clone(),
         }
     }
 
     /// Use this for `INSERT` queries so they inherit async-insert and
     /// other write-specific settings. Use `query()` for read operations.
     pub fn insert_query(&self, sql: &str) -> ArrowQuery {
-        let mut q = self.query(sql);
-        for (k, v) in &self.insert_settings {
-            if self.should_drop_async_insert_setting(k) {
-                continue;
-            }
-            q = q.with_setting(k, v);
-        }
-        q
+        self.query(sql).with_settings(
+            self.insert_settings
+                .iter()
+                .filter(|(k, _)| !self.should_drop_async_insert_setting(k)),
+        )
     }
 
     /// Sorted so the emitted `SETTINGS` clause is deterministic.
@@ -240,14 +259,16 @@ impl ArrowClickHouseClient {
 
         let settings_clause = self.insert_settings_clause(&[]);
         let sql = format!("INSERT INTO {table}{settings_clause} FORMAT ArrowStream");
-        let mut insert = self.client.insert_formatted_with(&sql);
-        insert
-            .send(Bytes::from(buffer))
+        self.circuit_breaker
+            .call_transient(|| async {
+                let mut insert = self.client.insert_formatted_with(&sql);
+                insert
+                    .send(Bytes::from(buffer))
+                    .await
+                    .map_err(ClickHouseError::Insert)?;
+                insert.end().await.map_err(ClickHouseError::Insert)
+            })
             .await
-            .map_err(ClickHouseError::Insert)?;
-        insert.end().await.map_err(ClickHouseError::Insert)?;
-
-        Ok(())
     }
 
     pub async fn insert_arrow_streaming(
@@ -269,10 +290,15 @@ impl ArrowClickHouseClient {
         if batches.is_empty() {
             return Ok(());
         }
-        if !self.quorum_writes {
-            return self.stream_insert(table, sql, batches).await;
-        }
-        retry_quorum_conflicts(true, || self.stream_insert(table, sql, batches.clone())).await
+        self.circuit_breaker
+            .call_transient(|| async move {
+                if !self.quorum_writes {
+                    return self.stream_insert(table, sql, batches).await;
+                }
+                retry_quorum_conflicts(true, || self.stream_insert(table, sql, batches.clone()))
+                    .await
+            })
+            .await
     }
 
     async fn stream_insert(
@@ -412,6 +438,7 @@ impl std::fmt::Debug for ArrowClickHouseClient {
 pub struct ArrowQuery {
     pub(crate) inner: Query,
     retry_quorum_conflicts: bool,
+    circuit_breaker: CircuitBreaker,
 }
 
 type FirstChunk = (clickhouse::query::BytesCursor, Option<Bytes>);
@@ -445,6 +472,15 @@ impl ArrowQuery {
         self
     }
 
+    pub fn with_settings<K: Into<String>, V: Into<String>>(
+        self,
+        settings: impl IntoIterator<Item = (K, V)>,
+    ) -> Self {
+        settings
+            .into_iter()
+            .fold(self, |query, (name, value)| query.with_setting(name, value))
+    }
+
     /// For statements that are not idempotent, such as `ATTACH PARTITION ... FROM`.
     pub fn without_quorum_retry(mut self) -> Self {
         self.retry_quorum_conflicts = false;
@@ -452,17 +488,22 @@ impl ArrowQuery {
     }
 
     pub async fn execute(self) -> Result<(), ClickHouseError> {
-        if !self.retry_quorum_conflicts {
-            return self.inner.execute().await.map_err(ClickHouseError::Query);
-        }
-        retry_quorum_conflicts(true, || async {
-            self.inner
-                .clone()
-                .execute()
+        let breaker = self.circuit_breaker.clone();
+        breaker
+            .call_transient(|| async {
+                if !self.retry_quorum_conflicts {
+                    return self.inner.execute().await.map_err(ClickHouseError::Query);
+                }
+                retry_quorum_conflicts(true, || async {
+                    self.inner
+                        .clone()
+                        .execute()
+                        .await
+                        .map_err(ClickHouseError::Query)
+                })
                 .await
-                .map_err(ClickHouseError::Query)
-        })
-        .await
+            })
+            .await
     }
 
     pub async fn fetch_arrow(self) -> Result<Vec<RecordBatch>, ClickHouseError> {
@@ -473,10 +514,14 @@ impl ArrowQuery {
     pub async fn fetch_arrow_with_summary(
         self,
     ) -> Result<(Vec<RecordBatch>, Option<QuerySummary>), ClickHouseError> {
-        let (buffer, summary) = retry_quorum_conflicts(self.retry_quorum_conflicts, || {
-            collect_bytes(self.inner.clone())
-        })
-        .await?;
+        let breaker = self.circuit_breaker.clone();
+        let (buffer, summary) = breaker
+            .call_transient(|| {
+                retry_quorum_conflicts(self.retry_quorum_conflicts, || {
+                    collect_bytes(self.inner.clone())
+                })
+            })
+            .await?;
 
         if buffer.is_empty() {
             return Ok((Vec::new(), summary));
@@ -499,10 +544,14 @@ impl ArrowQuery {
                 .inner
                 .with_setting("max_block_size", max_block_size.to_string());
         }
-        retry_quorum_conflicts(self.retry_quorum_conflicts, || {
-            open_cursor(self.inner.clone())
-        })
-        .await
+        let breaker = self.circuit_breaker.clone();
+        breaker
+            .call_transient(|| {
+                retry_quorum_conflicts(self.retry_quorum_conflicts, || {
+                    open_cursor(self.inner.clone())
+                })
+            })
+            .await
     }
 
     pub async fn fetch_arrow_streamed(
@@ -653,6 +702,11 @@ async fn flush_drain(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{UNREACHABLE_URL, circuit_breaker};
+    use arrow::array::Int64Array;
+    use arrow::datatypes::{DataType, Field, Schema};
+    use circuit_breaker::CircuitBreakableError;
+    use futures::future::BoxFuture;
     use std::collections::HashMap;
 
     fn client_with_insert_settings(
@@ -672,6 +726,7 @@ mod tests {
             None,
             &session_settings,
             &insert_settings,
+            "test",
         )
     }
 
@@ -818,5 +873,136 @@ mod tests {
             HashMap::new(),
         );
         assert!(!client.has_quorum_writes());
+    }
+
+    fn unreachable_client(breaker: &CircuitBreaker) -> ArrowClickHouseClient {
+        ArrowClickHouseClient::new(
+            UNREACHABLE_URL,
+            "default",
+            "default",
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            "test",
+        )
+        .with_circuit_breaker(breaker.clone())
+    }
+
+    fn one_row_batch() -> RecordBatch {
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1]))]).unwrap()
+    }
+
+    type NetworkCall =
+        for<'a> fn(&'a ArrowClickHouseClient) -> BoxFuture<'a, Result<(), ClickHouseError>>;
+
+    const NETWORK_CALLS: [(&str, NetworkCall); 8] = [
+        ("execute", |client| Box::pin(client.execute("SELECT 1"))),
+        ("query_arrow", |client| {
+            Box::pin(async { client.query_arrow("SELECT 1").await.map(drop) })
+        }),
+        ("fetch_arrow_with_summary", |client| {
+            Box::pin(async {
+                client
+                    .query("SELECT 1")
+                    .fetch_arrow_with_summary()
+                    .await
+                    .map(drop)
+            })
+        }),
+        ("fetch_arrow_streamed", |client| {
+            Box::pin(async {
+                client
+                    .query("SELECT 1")
+                    .fetch_arrow_streamed(None)
+                    .await
+                    .map(drop)
+            })
+        }),
+        ("fetch_arrow_streamed_with_summary", |client| {
+            Box::pin(async {
+                client
+                    .query("SELECT 1")
+                    .fetch_arrow_streamed_with_summary(None)
+                    .await
+                    .map(drop)
+            })
+        }),
+        ("insert_query", |client| {
+            Box::pin(client.insert_query("INSERT INTO t VALUES (1)").execute())
+        }),
+        ("insert_arrow", |client| {
+            Box::pin(async { client.insert_arrow("t", &[one_row_batch()]).await })
+        }),
+        ("insert_arrow_streaming", |client| {
+            Box::pin(client.insert_arrow_streaming("t", vec![one_row_batch()]))
+        }),
+    ];
+
+    #[tokio::test]
+    async fn every_network_call_counts_toward_the_circuit() {
+        for (name, call) in NETWORK_CALLS {
+            let breaker = circuit_breaker(1);
+            let client = unreachable_client(&breaker);
+
+            let _ = call(&client).await;
+
+            assert!(
+                !breaker.is_available(),
+                "{name} bypassed the circuit breaker"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_open_circuit_rejects_every_network_call() {
+        let client = unreachable_client(&circuit_breaker(1));
+        let _ = client.execute("SELECT 1").await;
+
+        for (name, call) in NETWORK_CALLS {
+            let err = call(&client).await.unwrap_err();
+            assert!(
+                matches!(err, ClickHouseError::CircuitOpen { .. }),
+                "{name} returned {err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn clones_share_one_circuit() {
+        let client = unreachable_client(&circuit_breaker(1));
+        let clone = client.clone();
+
+        let _ = client.execute("SELECT 1").await;
+
+        let err = clone.execute("SELECT 1").await.unwrap_err();
+        assert!(
+            matches!(err, ClickHouseError::CircuitOpen { .. }),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn server_overload_counts_toward_the_circuit() {
+        for message in [
+            "Code: 252. DB::Exception: Too many parts (3000 with average size of 1.00 MiB) in table 'gl_edge'. Merges are processing significantly slower than inserts. (TOO_MANY_PARTS) (version 26.6.8.7 (official build))",
+            "Code: 202. DB::Exception: Too many simultaneous queries. Maximum: 100. (TOO_MANY_SIMULTANEOUS_QUERIES) (version 26.6.8.7 (official build))",
+            "Code: 241. DB::Exception: Memory limit exceeded: would use 28.01 GiB (attempt to allocate chunk of 4.00 MiB), current RSS: 27.90 GiB, maximum: 28.00 GiB. (MEMORY_LIMIT_EXCEEDED) (version 26.6.8.7 (official build))",
+        ] {
+            assert!(bad_response(message).is_transient(), "{message}");
+        }
+    }
+
+    #[test]
+    fn single_query_failures_never_count_toward_the_circuit() {
+        for message in [
+            "Code: 241. DB::Exception: Query memory limit exceeded: would use 9.31 GiB (attempt to allocate chunk of 4.00 MiB), maximum: 9.31 GiB. (MEMORY_LIMIT_EXCEEDED) (version 26.6.8.7 (official build))",
+            "Code: 241. DB::Exception: User memory limit exceeded: would use 9.31 GiB (attempt to allocate chunk of 4.00 MiB), maximum: 9.31 GiB. (MEMORY_LIMIT_EXCEEDED) (version 26.6.8.7 (official build))",
+            "Code: 159. DB::Exception: Timeout exceeded: elapsed 30.0 seconds, maximum: 30. (TIMEOUT_EXCEEDED) (version 26.6.8.7 (official build))",
+            "Code: 62. DB::Exception: Syntax error: failed at position 1. (SYNTAX_ERROR) (version 26.6.8.7 (official build))",
+        ] {
+            assert!(!bad_response(message).is_transient(), "{message}");
+        }
+        assert!(!ClickHouseError::Query(clickhouse::error::Error::TimedOut).is_transient());
     }
 }

@@ -302,7 +302,6 @@ impl TestContext {
             datalake: defaults.datalake,
             schedule: defaults.schedule,
             schema: defaults.schema,
-            health_bind_address: "127.0.0.1:0".parse().unwrap(),
         };
         Self { server, config }
     }

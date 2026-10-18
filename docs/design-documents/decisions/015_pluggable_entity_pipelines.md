@@ -119,7 +119,7 @@ batching can buffer internally.
   `SessionContext` internally (register/deregister take `&self` via DataFusion's
   interior mutability, so no `&mut` and no leak). It registers the block as
   `source_data`, runs the ontology-generated SQL list, and returns `TableBatch`es.
-  Built from a plan's `TransformSpec::DataFusion(Vec<Transformation>)`.
+  Built from a plan's `TransformSpec::DataFusion(Vec<Transformation>)`. It lives in `indexer-datafusion`.
 - **`SystemNotesTransform`** (ADR 013, follow-up MR): hand-written Rust. It parses
   note bodies, collects distinct refs, calls `datalake.query_batches` for the
   `siphon_routes` and entity-table resolution hops, and emits edge rows. No DataFusion.
@@ -199,8 +199,8 @@ It hands each stage exactly its inputs so data flows top-down:
   `build → {extract, transform}`; neither stage imports the other or exchanges planning metadata.
 
 `ExtractTemplate::new` is the only way a `Plan` gets its `extract_template`, so an
-unvalidated template cannot reach the runtime. A unit-test gate in `ontology`
-(`ontology::etl_sql::validate_authored_etl_sql`) enforces two things.
+unvalidated template cannot reach the runtime. The ontology unit test
+`authored_sql_uses_lifecycle_markers_and_aliases` enforces two things.
 Every authored `.sql.j2` file projects `AS _version`/`AS _deleted`. It uses
 `{{watermark_column}}`/`{{deleted_column}}` markers instead of hardcoding the column
 names. Projection completeness (order-by and lookup columns) is exercised end-to-end
@@ -209,10 +209,10 @@ by the indexer's Docker integration scenarios.
 One shared `Pipeline` is built once in `register_handlers` and Arc-cloned to every
 handler. It is an Arc-bundle of stateless collaborators (`datalake`,
 `checkpoint_store`, `metrics`, `retry_config`), so sharing one instance duplicates
-no logic. The pipeline carries a `TransformRegistry`, supplied via `with_registry`.
+no logic. The pipeline carries a `TransformRegistry`, passed to `Pipeline::new`.
 At the start of each run, `Pipeline::run` calls `registry.build(plan)`:
 
-- `TransformSpec::DataFusion(transforms)` builds a `DataFusionTransform` inline.
+- `TransformSpec::DataFusion(transforms)` calls the injected `SqlTransformFactory`.
 - `TransformSpec::Rust(name)` resolves a registered factory by name.
 
 `datafusion` is therefore *not* a registry entry; it is the default arm. The
@@ -221,13 +221,13 @@ registry holds only Rust transforms, which self-register from their own module
 
 ```rust
 // register_handlers
-let mut transform_registry = TransformRegistry::default();
+let mut transform_registry = TransformRegistry::new(sql_transform);
 transform::system_notes::register(&mut transform_registry);  // additive; one line per Rust transform
 let transform_registry = Arc::new(transform_registry);
 
 let pipeline = Arc::new(
-    Pipeline::new(datalake.clone(), checkpoint_store.clone(), metrics.clone(), retry.clone())
-        .with_registry(Arc::clone(&transform_registry)),
+    Pipeline::new(datalake.clone(), checkpoint_store.clone(), metrics.clone(), retry.clone(),
+        Arc::clone(&transform_registry)),
 );
 
 for plan in plans.namespaced {
@@ -310,9 +310,9 @@ unaffected.
   `DataFusionTransform`, `TransformRegistry`)
 - Ontology pipeline model: `crates/ontology/src/etl.rs` (`Pipeline`, `Extract`,
   `ExtractQuery`, `Transform`, `EdgeMapping`). YAML loading in
-  `crates/ontology/src/loading/node.rs`. Authored `.sql.j2` marker/alias check in
-  `crates/ontology/src/etl_sql.rs` (`validate_authored_etl_sql`, run from an
-  `ontology` unit test)
+  `crates/ontology/src/loading/node.rs`. The authored `.sql.j2` marker and alias
+  check is `authored_sql_uses_lifecycle_markers_and_aliases` in
+  `crates/ontology/src/lib.rs`.
 - Transform spec: `crates/indexer/src/modules/sdlc/plan/mod.rs` (`TransformSpec`,
   `Transformation`, `Cursor`, filters). Plan building in `plan/build.rs`. Point
   lookups in `plan/extract/lookup.rs`. Extract stage in `plan/extract/` (`ExtractSpec`,

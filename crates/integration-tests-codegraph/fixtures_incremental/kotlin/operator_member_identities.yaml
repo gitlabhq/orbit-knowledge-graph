@@ -1,4 +1,5 @@
 name: "Kotlin operator receiver and result identities"
+
 fixtures:
   - path: Operators.kt
     content: |
@@ -33,6 +34,7 @@ tests:
       - { row_count: 2 }
       - { row: { target: operators.Operand.plus } }
       - { row: { target: operators.First.display } }
+
   - name: "fromConstructor selects the exact operator and result owners"
     query: |
       MATCH (caller:Definition)-[edge:CALLS]->(callee:Definition)
@@ -44,6 +46,7 @@ tests:
       - { row_count: 2 }
       - { row: { target: operators.Operand.plus } }
       - { row: { target: operators.First.display } }
+
   - name: "fromFactory selects the exact operator and result owners"
     query: |
       MATCH (caller:Definition)-[edge:CALLS]->(callee:Definition)
@@ -55,6 +58,7 @@ tests:
       - { row_count: 2 }
       - { row: { target: operators.Operand.plus } }
       - { row: { target: operators.First.display } }
+
   - name: "leftAssociative selects the exact operator and result owners"
     query: |
       MATCH (caller:Definition)-[edge:CALLS]->(callee:Definition)

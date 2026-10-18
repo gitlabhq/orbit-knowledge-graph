@@ -106,7 +106,7 @@ graph LR
 | `code-graph` crate | Single crate containing the v2 pipeline stack in `src/v2/` and shared code-indexing utilities |
 | `treesitter-visit` crate | Tree-sitter wrapper crate kept separate for compile-time isolation and used by the generic v2 language pipelines |
 | `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, namespace backfill dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
-| `orbit-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
+| `orbit-server` | Server binary, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Distributed lock store to prevent concurrent indexing of the same project |
 | ClickHouse | Columnar OLAP database storing the data lake and the property graph |
@@ -178,13 +178,13 @@ Pending projects are published in bounded batches, not after every namespace has
 
 These backfill requests omit `branch` and `commit_sha`. The handler resolves the default branch from the Rails internal API at processing time.
 
-The backfill dispatches a project that has no `indexed_at`, fewer than `MAX_CODE_ATTEMPTS` (5) attempts, and no attempt in the last `CODE_RETRY_AFTER` (1 hour). A project at 5 attempts is a gap, and only a new push indexes it. A run that gets no indexing lane gives its attempt back.
+The backfill dispatches a project that has no `indexed_at`, fewer than `MAX_CODE_ATTEMPTS` (5) attempts, and no attempt in the last `CODE_RETRY_AFTER` (1 hour). A project at 5 attempts is a gap, and only a new push indexes it. A run whose failure NATS redelivers gives its attempt back, if it still holds the project lock. So `attempts` counts the runs that ended the message or never returned.
 
 A namespace whose every project is checkpointed is drained. Once per schema version, the backfill tick then tombstones the namespace's code rows that are older than their project's checkpoint. These are rows left by a previous version or by a run that died before checkpointing. The sweep runs inside the tick. So it is capped at `schedule.tasks.code-backfill.stale_sweeps_per_tick` namespaces per tick, and the rest wait for later ticks. Without the cap a fleet-wide re-index held dispatch for the length of that burst while indexers sat idle. Such a re-index drains thousands of small namespaces within minutes.
 
 ##### Handler
 
-The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexingTaskRequest` messages from the `GKG_INDEXER` stream. It deserializes the JSON request and, if no branch was provided (e.g. from a namespace backfill), resolves the default branch from the Rails internal API. It then acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently.
+The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexingTaskRequest` messages from the `GKG_INDEXER` stream. It deserializes the JSON request and, if no branch was provided (e.g. from a namespace backfill), resolves the default branch from the Rails internal API. It then acquires a lock on the project + branch combination to prevent other workers from indexing the same branch concurrently. If the lock is held, the handler returns the task to NATS for the time left on the lease plus one renew interval. That delivery spends no checkpoint attempt and skips the engine retry check. NATS still counts it against `nats.max_deliver` (5 by default). So at the defaults a task waits behind about 23 minutes of lock contention. Then NATS stops redelivery, and the max-deliveries reconciler deletes the message. The next push indexes the newest commit. A deferred task also arrives with a higher NATS delivery count. So under the job-timeout policy (2 attempts), its first budget timeout dead-letters it with no retry. The checkpoint check skips the task later if the other run already indexed past it.
 
 Example NATS KV:
 
@@ -216,12 +216,12 @@ Spill compression defaults to off.
 The existing file-size and total-byte limits also apply, with total bytes charged before filtering.
 
 Each archive starts a fresh incremental-engine run; the server does not persist engine snapshots between jobs.
-An engine error that cannot succeed on retry dead-letters the job at once, as a fatal legacy pipeline error does. Examples are a rules load error and an export schema mismatch. A cancelled run and a failed hand-off to the buffered writer stay retryable.
+An engine error that cannot succeed on retry dead-letters the job at once, as a fatal legacy pipeline error does. Examples are a rules load error and an export schema mismatch. A cancelled run and a failed insert stay retryable.
 File and directory rows are emitted once across language families, including files rejected by the content policy.
 The server reuses the embedded export mapping with ontology-derived output schemas.
 The envelope supplies typed values for extra schema columns and overrides header constants such as traversal path.
 The engine validates mapped columns against the ontology and output schema. Required envelope values must be present.
-The server adds branch relationships and endpoint tags before routing batches through the existing buffered writer.
+The server adds branch relationships and endpoint tags before it inserts the batches.
 Both engines share locking, heartbeats, stale-data cleanup, and checkpoint handling.
 Write failures and cancelled runs do not advance the checkpoint.
 Tree-sitter polls cancellation and the per-file parse deadline while parsing.
@@ -403,27 +403,33 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 1. Checks the checkpoint to skip already-indexed commits
 2. Acquires a distributed lock via NATS KV to prevent concurrent indexing of the same project and branch
 3. Downloads the full repository archive via the Rails internal API
-4. Runs the streaming indexing pipeline (parse, convert to Arrow, write to ClickHouse, clean up stale data)
+4. Runs the indexing pipeline (parse, convert to Arrow, insert into ClickHouse)
 5. Deletes the downloaded repository from disk
-6. Updates the checkpoint and releases the lock
+6. Waits for the inserts, cleans up stale data, updates the checkpoint, and releases the lock
 
 ##### Storage in ClickHouse
 
-The graph is converted to Apache Arrow record batches and written to six ClickHouse tables. There is one each for branches, directories, files, definitions, imported symbols, and the ontology-configured edge table (defaulting to `gl_edge`). Every row carries base columns for the namespace hierarchy path (used for authorization), project ID, branch, and a version timestamp used for stale data cleanup.
+The graph is converted to Apache Arrow record batches and written to ClickHouse. Node batches use the branch, directory, file, definition, and imported symbol tables. Edge batches route by relationship kind and both endpoint kinds. The resolved ontology variant selects `gl_code_edge` for source-code relationships, including the Project and Branch bridge. Every row carries base columns for the namespace hierarchy path, project ID, branch, and a version timestamp used for stale data cleanup.
 
 Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
-##### Cross-project write coalescing
+##### Writes
 
-The edge tables (`gl_code_edge`, `gl_edge`) are `ReplacingMergeTree`s partitioned by a hash bucket of the top-level namespace (see [Namespace partitioning](../data_model.md#namespace-partitioning)). So each bucket has its own part budget. Within a bucket, every project's inserts still share that budget. During a full reindex the long tail of tiny repositories would otherwise produce one small part per table per project. Most projects emit fewer than 500 edges. Those small parts outrun ClickHouse merges until part-count backpressure throttles inserts.
+Each job inserts its own rows. The parse emits one Arrow batch per table. The job cuts a batch into slices of at most `write_slice_rows` (default 1M). It starts one insert per slice while the parse continues. At most `write_max_concurrent` (default 8) inserts of one job are in flight. The parse pauses until a slot frees, so a job holds at most that many slices in memory. The default is above the number of code tables. So a small job sends every table's insert at once and waits one server flush, not two. Every insert sets `async_insert=1` and `wait_for_async_insert=1`. ClickHouse pools small inserts from all jobs and all pods per table into one part per flush. It answers each insert only after its rows are in a part. The flush fires at the latest on the server's `async_insert_busy_timeout_max_ms`, so a small job waits about that long for its rows. The operator can raise it in the code pool's `graph.insert_settings` to pool more inserts per part at the cost of a longer wait. A cluster with `insert_quorum` cannot use async inserts; there every job writes one part per table.
 
-To avoid this, all code jobs stream their edges into one process-wide `BufferedWriter` (a coalescing layer over `ClickHouseWriter`). A table flushes on any of three conditions. It flushes when it reaches `write_slice_rows` (default 1M). It flushes on the soft `write_buffer_age_secs` tick (default 60), but only once the table holds at least `write_min_flush_rows` (default 10k). It flushes when its oldest unflushed row exceeds the hard `write_max_flush_age_secs` cap (default 120). The size-blind age tick was the original leak. In a quiet window it flushed every table at a few hundred rows, so the long tail still produced tiny parts. The floor holds a sub-threshold table across soft ticks, so small repositories pool into one well-sized part. The hard cap bounds how long any row waits, regardless of size. This also bounds the uncheckpointed-rows window on a pod crash. Big repositories cross the row cap on their own and flush promptly. Each submitted batch carries a `FlushToken` the writer invokes once that batch's part lands (or fails). So a producer learns durability per part without the writer knowing what the rows mean. Up to `write_max_concurrent` (default 4) parts are written to ClickHouse at once. They may land out of order. This is safe because the edge tables are `ReplacingMergeTree`s keyed by row identity + `_version`, and stale cleanup keys on `indexed_at`. So nothing depends on insert order. The bound trades memory (that many `write_slice_rows`-sized parts in flight) for write throughput.
+Each insert is retried with bounded backoff (2 s then 4 s) before it fails. So a transient ClickHouse blip does not cost the project a full re-index. The retry runs through the shared engine retry harness (`engine/retry.rs`), the same vocabulary the SDLC datalake read, the schema-readiness wait, and the job-timeout policy use.
 
-Each part insert is retried with bounded backoff (2s then 4s) before the part is declared failed. So a transient ClickHouse blip does not cost the project a full re-index on the next sweep tick. Only after the retries are exhausted is the part's token marked failed. The retry runs through the shared engine retry harness (`engine/retry.rs`). It is a local `RetryPolicy` driven by `drive`. This is the same vocabulary the SDLC datalake read, the schema-readiness wait, and the job-timeout policy use.
+Archive downloads also share a budget per Gitaly storage across all indexer pods. `fetch_concurrency` is per pod, and KEDA adds pods as the backlog grows. Each download takes one of `archive_storage_budget` (default 4) slot keys for its storage in the `indexing_locks` KV bucket, named `archive.<base64url storage>.<slot>`. A slot is the same renewable lock the project lock uses. A pod takes it with create-as-CAS and keeps it with a heartbeat every third of `archive_lease_ttl_secs` (default 30). The heartbeat runs beside the download, so a slow renewal never pauses it. A crashed pod's slot is taken over once its embedded expiry passes. Only the download and its extraction hold a slot, not the retry backoff or the parse.
+
+When a renewal reports the slot lost, or renewals fail until the lease expires, the download future is dropped. The legacy extractor reads the stream on a blocking thread that outlives the future. So it also carries a cancel flag, set on drop, that fails its next read. Together these stop the Gitaly stream, and a second pod cannot overlap it. The attempt then retries through the normal archive retry.
+
+The storage comes from `repository_storage` in the `/info` response. Backfill tasks reuse the lookup they already make to resolve the default branch. Push tasks make one lookup, which the one-hour project-info cache usually serves. Either way a task makes at most one lookup, whatever the cache holds. After a storage move the old key stays in use until the cache expires. GitLab versions whose `/info` omits the field, and failed lookups, use a separate tenant-wide budget, `archive_tenant_budget`, under the keys `archive.tenant.<slot>`. Its default is 8. That is above the per-storage default, so a tenant with a few storages is not starved before the Rails field ships. It is far below today's worst case of `fetch_concurrency × pods` (about 40), so an Orbit upgrade alone already bounds the load. During a mixed rollout the two key spaces are independent. A storage can then see its storage budget plus the tenant budget at once, because some projects resolve a storage and others do not.
+
+A job queues for a slot for at most `archive_lease_max_wait_secs` (default 30), while it holds one of the pod's fetch slots. A longer wait would let one busy storage pin every fetch slot of a pod. Projects on idle storages would starve. After the wait the job goes back to the queue without spending a checkpoint attempt, and it does not count as a fetch error. When the project lock is lost it also goes back, but the attempt stays counted, the same as a lost lock during the lane wait. It does spend a JetStream delivery, though. NATS counts every redelivery toward `max_deliver` (5 by default), and each NAK waits `retry_interval_secs` (60) first. A storage that stays saturated for several minutes therefore drops the task from the stream. The project then waits for the dispatcher cadence, up to the one-hour backfill retry window. Under sustained saturation the lease behaves as dispatcher-paced retry, not as a queue. Each cycle also costs two checkpoint writes, a project-lock acquire, and up to 60 polls of every slot key. A budget of 0 turns the lease off for that key space. The key is the storage name. Under Praefect it covers a set of Gitaly nodes, so the budget is stricter than needed.
 
 Concurrency is split into two lanes by parsable-file count. The count includes only files that the content filter keeps and that have a supported language. So a repository of images or lockfiles is not misclassified as large. Both engines use the same count, so a repository takes the same lane under either engine. A repository with more than `small_repo_max_files` such files takes the big lane. Unless they are set, the lane sizes come from the worker budget, which the CPU count and the container memory limit bound. A part of the indexing share, at least one, is the reserved lane (`big_indexing_slots`). The remainder, at least one, is the wide lane (`small_indexing_slots`) that serves the small-repo tail. The reserved lane means a flood of small repositories cannot starve monorepos. A job that finds its lane busy waits for up to the time left on its project lock lease. The heartbeat renews the lock and refreshes the NATS delivery during the wait. If no lane frees in that time, the job goes back to the queue without spending an attempt.
 
-A project is checkpointed only after its rows are durable. The handler attaches a per-project `ProjectCommit` token to every batch it submits, and holds a `+1` sentinel. The writer decrements the token as each part lands. Whichever decrement reaches zero finalizes the project. That decrement is either a flushed part, or the sentinel the pipeline drops after the parse finishes. Finalizing tombstones the prior version's stale rows, then writes the checkpoint. If any of the project's parts failed to flush, the token is marked failed and the checkpoint is skipped. So NATS redelivery retries it, and the backfill sweep dispatches it again one hour after its last attempt (re-indexing is idempotent). A crash before a part lands has the same effect. So does a job that hits its wall-clock timeout after submitting batches. Its run future is dropped before the sentinel is released, so the project never finalizes and is re-indexed. The `ProjectCommit` frees its in-flight slot on drop regardless, so the shutdown drain never wedges. This keeps the checkpoint the single durable record, with no watermark and no durability handshake. The project lock is not the durability boundary. The handler heartbeat renews it, and a lost lock cancels the job.
+A project is checkpointed only after its rows are durable. When the parse ends, the job deletes its extraction tree, releases its intake permit, and waits for its inserts. If any insert fails after its retries, the job fails without a checkpoint. NATS redelivers it, and the backfill sweep dispatches it again one hour after its last attempt (re-indexing is idempotent). A crash before the rows land has the same effect. So does a job that hits its wall-clock timeout; its run future is dropped, which aborts its inserts, and the project is re-indexed. Once the rows land, the job tombstones the prior version's stale rows, then writes the checkpoint. The handler holds the project lock until the checkpoint is saved, and acks the task only then. This keeps the checkpoint the single durable record, with no watermark and no durability handshake. The handler heartbeat renews the lock, and a lost lock cancels the job.
 
 Parts that span many namespaces are safe to query. The edge sort key is `(traversal_path, relationship_kind, …)`, so ClickHouse still prunes by primary key within a mixed part.
 
@@ -431,7 +437,9 @@ Parts that span many namespaces are safe to query. The edge sort key is `(traver
 
 The `code_indexing_checkpoint` table records the last successfully indexed point per namespace, project, and branch (keyed on `traversal_path, project_id, branch`). The code indexing task handler checks it to skip already-indexed commits. Before a first index, the handler counts an attempt. A completed index resets the count to 0.
 
-Projects whose Gitaly archive endpoint returns 404 (no refs) or 5xx (no repository storage) are checkpointed with no commit and treated as terminal "indexed empty". This prevents retries and DLQ churn for projects with no content. Once the project is populated, subsequent siphon tasks arrive with a larger `task_id` than the stored checkpoint and are re-processed normally. The `gkg.indexer.code.repository.empty` counter (labelled `reason=not_found|server_error`) tracks how often this short-circuit fires.
+Projects whose archive endpoint returns 404 or a plain 500 are checkpointed with no commit and treated as terminal "indexed empty". Workhorse maps Gitaly's not-found, invalid-argument and failed-precondition to 404. Backfill tasks resolve the branch through `project_info` first, so the project exists and a 404 means it has no repository or no refs. That is why 404 stays terminal for tasks without a commit SHA. A plain 500 stays terminal too. Rails currently answers 500 for a missing repository (`NoRepository`). This prevents retries and DLQ churn for projects with no content. Once the project is populated, subsequent siphon tasks arrive with a larger `task_id` than the stored checkpoint and are re-processed normally. The `gkg.indexer.code.repository.empty` counter (labelled `reason=not_found|server_error|empty_archive|repository_too_large`) tracks how often this short-circuit fires.
+
+A 429, 502, 503 or 504 from the archive endpoint is transient overload, not an empty repository. Workhorse answers 500 for Gitaly's `ResourceExhausted` today, which is treated like a missing repository; a 429 is handled as overload. Overload is never checkpointed, for backfill and CDC tasks alike. The indexer skips its local retries, nacks the task, and increments `gkg.indexer.code.errors` with `stage=repository_fetch_overload`. Redeliveries are `retry_interval_secs` (60 s) apart, so counting each one would use up `MAX_CODE_ATTEMPTS` within minutes. The handler refunds the checkpoint attempt on every delivery except the first, so one dispatch costs at most one attempt whatever `max_attempts` is. The backfill dispatcher re-sends the project after `CODE_RETRY_AFTER` (1 h). After `MAX_CODE_ATTEMPTS` counted attempts it stops, leaving an unindexed checkpoint row (`indexed_at` null) that is visible and repairable. The project is never marked indexed-empty, so a later push event still indexes it. The archive lease is released before the nack, so an overloaded task never holds a slot while it waits for redelivery.
 
 Tasks with no `branch` field resolve the default branch via `GET /api/v4/internal/orbit/project/:id/info`. That endpoint sometimes returns 404, when the project is deleted in Rails but still referenced by the dispatcher's datalake view. Then the task is acked with the same `empty_repository{reason=not_found}` counter, and no checkpoint is stored. The branch is unknown, so there is no key to write under. The ack avoids DLQ churn; the dispatcher stopping emission for deleted projects is tracked separately.
 
@@ -474,68 +482,33 @@ A job that exceeds its hard wall-clock budget (`job_timeout_secs`, default 1500s
                            |       |- CPU-bound parsing (bounded parallelism)
                            |       |- Analysis phase -> graph
                            |       |- Convert graph to Arrow record batches
-                           |       |- Write to ClickHouse (6 tables)
-                           |       \- Clean up stale data
+                           |       \- Insert into ClickHouse (6 tables)
                            |- 7. Delete downloaded repository from disk
-                           \- 8. Release lock (checkpoint happens asynchronously,
-                                  once the buffered writes for the project land)
+                           |- 8. Wait for its inserts, tombstone stale rows,
+                           |      then save the checkpoint
+                           \- 9. Release lock and ack
 ```
 
-The handler acks after its batches are *buffered*, not after they are written. The actual ClickHouse writes, the stale cleanup, and the checkpoint happen asynchronously in the writer's drain task once the project's parts are durable. The two diagrams below show that durable-write path.
-
-##### ProjectCommit state machine
-
-```plantuml
-@startuml
-hide empty description
-[*] --> Open : pipeline creates commit\n(remaining = 1 sentinel)
-Open --> Open : batch submitted\n(remaining += 1)
-Open --> Draining : parse done\n(sentinel released, remaining -= 1)
-Open --> Failed : a part failed / parse panicked / timeout\n(failed = true)
-Draining --> Draining : part lands\n(remaining -= 1)
-Draining --> Failed : a part failed after retries\n(failed = true)
-Draining --> Checkpointed : remaining hits 0, not failed\n(stale-clean then checkpoint)
-Failed --> Abandoned : remaining hits 0\n(no checkpoint; sweep re-indexes)
-Checkpointed --> [*]
-Abandoned --> [*]
-@enduml
-```
+The handler acks only after the project's rows are written and its checkpoint is saved. Nothing in the indexer delays the write: the wait ends when ClickHouse answers the job's own inserts. An insert that hangs holds the job, its lock, and its NATS delivery. The heartbeat progress acks keep the delivery under `nats.ack_wait_secs` and renew the lock during the wait. On shutdown the engine stops pulling messages and joins the in-flight jobs. A job that waits for its inserts still lands them and checkpoints before the process exits.
 
 ##### Write data flow
-
-One coalesced part can hold batches from many projects. Each batch carries its own project's token, so a single part write notifies every contributing project precisely. The insert is retried with bounded backoff before a part is declared failed.
 
 ```plantuml
 @startuml
 skinparam shadowing false
 skinparam ParticipantPadding 20
-skinparam BoxPadding 12
 
-box "indexer" #F7F7F7
-  participant "project A parse" as A
-  participant "project B parse" as B
-  participant "BufferedWriter\ndrain task" as W
-end box
+participant "code job" as J
 database ClickHouse as CH
 
-A -> W : submit(gl_edge, batchA, tokenA)
-B -> W : submit(gl_edge, batchB, tokenB)
-note over W : coalesce per table until\nwrite_slice_rows (1M), floor+age, or cap (120s)
-
-W -> CH : write one gl_edge part\n(batchA + batchB together)
-note right of W : up to write_max_concurrent parts in flight;\ninsert retried 2s/4s before giving up
-
-alt part durable (possibly after retry)
-  CH --> W : ok
-  W -> A : tokenA.on_flushed()
-  W -> B : tokenB.on_flushed()
-else part failed after retries / panic
-  CH --> W : err
-  W -> A : tokenA.on_failed()
-  W -> B : tokenB.on_failed()
-end
-
-note over A, B : each token decrements its project's\nremaining count; the project whose\ncount hits 0 (and never failed)\nstale-cleans then checkpoints
+J -> J : parse; cut each table batch\ninto write_slice_rows slices
+J -> CH : insert slice (async_insert,\nwait_for_async_insert)
+note right of CH : pools inserts from all jobs and pods\nper table; one part per flush
+J -> J : delete extraction tree,\nrelease intake permit
+CH --> J : rows in a part (about 1 s)
+J -> CH : tombstone stale rows (re-index only)
+J -> CH : save checkpoint
+J -> J : release lock, ack
 @enduml
 ```
 

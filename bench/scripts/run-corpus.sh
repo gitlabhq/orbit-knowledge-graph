@@ -87,23 +87,15 @@ fi
 
 resolve_samples() {
   python3 -c "
-import json, sys
+import json, re, sys
 samples = json.loads(sys.argv[1])
-query = json.loads(sys.stdin.read())
-nodes = query.get('nodes', [])
-if 'node' in query:
-    nodes.append(query['node'])
-for node in nodes:
-    nids = node.get('node_ids', '')
-    if not isinstance(nids, str) or not nids.startswith('\$sample'):
-        continue
-    count = 1
-    if ':' in nids:
-        count = int(nids.split(':')[1])
-    entity = node.get('entity', '')
-    pool = samples.get(entity, [1])
-    node['node_ids'] = pool[:count] if count <= len(pool) else pool
-json.dump(query, sys.stdout)
+query = sys.stdin.read()
+labels = dict(re.findall(r'\(\s*(\w+)\s*:\s*(\w+)', query))
+def ids(m):
+    count = int(m.group(2) or 1)
+    pool = samples.get(labels.get(m.group(1), ''), [1])
+    return m.group(1) + '.id IN ' + json.dumps(pool[:count])
+sys.stdout.write(re.sub(r'(\w+)\.id\s+IN\s+\\\$sample(?::(\d+))?', ids, query, flags=re.I))
 " "${SAMPLE_JSON}"
 }
 
@@ -124,7 +116,7 @@ for yaml in "${CORPUS_DIR}"/*.yaml; do
     QUERY=$(yq eval ".${qname}.query" "${yaml}" | resolve_samples 2>/dev/null || yq eval ".${qname}.query" "${yaml}")
     OUTPUT="${RESULTS_DIR}/${suite}_${qname}.json"
 
-    PROF_ARGS=(-t "${TPATH}" --explain)
+    PROF_ARGS=(-t "${TPATH}" --gql --explain)
 
     if [[ "${EXPECT}" == "error" ]]; then
       if "${PROFILER}" "${PROF_ARGS[@]}" "${QUERY}" >/dev/null 2>&1; then

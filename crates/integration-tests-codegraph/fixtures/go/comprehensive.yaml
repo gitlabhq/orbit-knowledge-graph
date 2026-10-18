@@ -1,4 +1,5 @@
 name: "Go: comprehensive resolution"
+
 fixtures:
   - path: models.go
     content: |

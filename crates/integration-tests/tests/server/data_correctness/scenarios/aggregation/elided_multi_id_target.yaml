@@ -25,5 +25,5 @@ query:
 
 expect:
   row_count: 1
-  row_values: [{n: 2}]
+  row_values: [{ n: 2 }]
   skip_requirements: [node_ids, "filter:username"]

@@ -1,0 +1,50 @@
+name: "Python: a function re-exported through a second module"
+
+fixtures:
+  - path: app/__init__.py
+    content: ""
+
+  - path: app/a.py
+    content: |
+      def helper():
+          pass
+
+  - path: app/b.py
+    content: |
+      from app.a import helper
+
+  - path: app/c.py
+    content: |
+      from app.b import helper
+
+      def run():
+          helper()
+
+tests:
+  - name: "the function is defined in the first module"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'helper' AND d.definition_type = 'Function'
+      RETURN d.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: app/a.py } }
+
+  - name: "a call through the re-export links to the definition"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: helper, file: app/a.py } }
+
+  - name: "both imports resolve to the definition"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      WHERE i.identifier_name = 'helper'
+      RETURN i.file_path AS file, d.file_path AS target
+    assert:
+      - { row_count: 2 }
+      - { row: { file: app/b.py, target: app/a.py } }
+      - { row: { file: app/c.py, target: app/a.py } }

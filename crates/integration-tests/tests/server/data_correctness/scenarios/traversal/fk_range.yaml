@@ -1,0 +1,14 @@
+description: Pinned FK target retains contradictory range
+
+query:
+  gql: |
+    MATCH (v:User {id: 2})-[:APPROVED]->(mr:MergeRequest)<-[:AUTHORED]-(u:User {id: 1})
+    WHERE u.id >= 2 AND u.id <= 3
+    RETURN v.id, mr.id, u.id
+
+expect:
+  node_count: 0
+  nodes:
+    User: { ids: [] }
+    MergeRequest: { ids: [] }
+  edge_count: { APPROVED: 0, AUTHORED: 0 }

@@ -1,5 +1,3 @@
-//! Each declared denormalized join must hold exactly the rows a live join of its source chain yields.
-
 use clickhouse_client::FromArrowColumn;
 use integration_testkit::{
     GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology, load_seed,
@@ -11,8 +9,10 @@ async fn denormalized_tables_match_their_source_join() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_all().await;
+    let ontology = load_ontology();
+    let model = integration_testkit::derive_clickhouse_data_model(&ontology);
 
-    for join in load_ontology().denormalized_joins() {
+    for join in ontology.denormalized_joins() {
         let materialized = count(
             &ctx,
             &format!("FROM {} FINAL WHERE _deleted = false", join.table),
@@ -29,6 +29,35 @@ async fn denormalized_tables_match_their_source_join() {
             "{}: the seed exercises no rows for this join",
             join.table
         );
+        let binding = model
+            .backend()
+            .materialized_joins()
+            .iter()
+            .find(|binding| binding.table == join.table)
+            .unwrap();
+        let stored_ids = binding
+            .nodes
+            .iter()
+            .map(|node| node.identity_column.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source_ids = binding
+            .nodes
+            .iter()
+            .map(|node| format!("{}.id", alias(node.source_occurrence)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let stored = format!(
+            "SELECT {stored_ids} FROM {} FINAL WHERE _deleted = false",
+            binding.table
+        );
+        let source = format!("SELECT {source_ids} {}", live_source_join(join));
+        for (left, right) in [(&stored, &source), (&source, &stored)] {
+            assert_eq!(
+                count(&ctx, &format!("FROM ({left} EXCEPT ALL {right})")).await,
+                0
+            );
+        }
     }
 }
 
@@ -37,7 +66,6 @@ async fn count(ctx: &TestContext, from: &str) -> i64 {
     i64::extract_column(&batches, 0).unwrap()[0]
 }
 
-/// The chain joined live, every table `FINAL` and not deleted.
 fn live_source_join(join: &DenormalizedJoin) -> String {
     let mut sql = format!("FROM {} AS {} FINAL", join.tables[0].table, alias(0));
     for (i, table) in join.tables.iter().enumerate().skip(1) {

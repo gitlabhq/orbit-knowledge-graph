@@ -1,4 +1,5 @@
 name: Selective joined nodes plan narrowing keys before lowering
+
 query:
   json: |
     {
@@ -13,23 +14,26 @@ query:
   gql: |
     MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)
     RETURN a.id, b.id ORDER BY a.id
+
 logical:
   expect:
     - (Filter a.id IN [1] (NodeScan Definition AS a))
     - (Sort a.id (_))
+
 physical:
   clickhouse:
     planned:
       ctes:
-        exact_order: [_filter_a]
+        exact_order: [_filter_a, _narrow_b]
       expect:
         - (CTE _filter_a (Project a.id AS id (Deduplicate LimitBy a.traversal_path, a.project_id, a.branch, a.id (Filter ... (Scan Table(gl_definition) AS a)))))
-        - (Filter e0.source_id IN _filter_a.id, ... (_))
+        - (Filter _orbit_edge_0.source_id IN _filter_a.id, ... (_))
     emitted:
       expect:
         - (CTE _filter_a (Deduplicate LimitBy 1 BY a.traversal_path, a.project_id, a.branch, a.id (_)))
   duckdb:
     planned:
+      ctes: { absent: true }
       expect:
-        - (CTE _filter_a (Project a.id AS id (Deduplicate LimitBy ... (Filter ... (Scan Table(gl_definition) AS a)))))
-        - (Filter e0.source_id IN _filter_a.id, ... (_))
+        - (Join ON a.id = e0.source_id (_) (Filter ... (Scan Table(gl_definition) AS a)))
+      reject: ["(Deduplicate ... (_))", "(SemiJoin ... (_) (_))"]

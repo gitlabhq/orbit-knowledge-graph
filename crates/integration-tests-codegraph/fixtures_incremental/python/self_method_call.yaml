@@ -1,4 +1,5 @@
 name: "Python: self.method() intra-class call"
+
 fixtures:
   - path: main.py
     content: |

@@ -3,7 +3,7 @@
 //! `mod.rs` only follows the result.
 
 use ontology::{DataType, Ontology};
-use orbit_utils::arrow::{ColumnSpec, ColumnType};
+use orbit_arrow::{ColumnSpec, ColumnType};
 
 use crate::dsl::parser::parse_pipeline;
 use crate::dsl::types::{Ctx, Tf};
@@ -305,7 +305,7 @@ impl ExportPlan {
             edge_columns,
             containment,
             graph,
-            batch_bytes: orbit_utils::arrow::BATCH_BYTES,
+            batch_bytes: orbit_arrow::BATCH_BYTES,
         })
     }
 }

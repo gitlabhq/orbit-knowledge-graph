@@ -1,0 +1,27 @@
+name: Property comparisons do not lower into literal edge tags
+
+missing_frontends:
+  json: The JSON frontend does not expose property-to-property comparisons.
+
+query:
+  gql: |
+    MATCH (a:Definition {id: 99000})-[:CALLS]->(b:Definition)
+    WHERE a.definition_type = a.name
+    RETURN count(b) AS n
+
+logical:
+  expect:
+    - (Aggregate COUNT(b) AS n (_))
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Scan Table(gl_definition) AS a)
+      reject:
+        - (Filter _orbit_edge_0.source_tags HAS ANY ['definition_type:'], ... (_))
+    emitted:
+      expect:
+        - (Filter a.definition_type = a.name, ... (Deduplicate Final (Scan Table(gl_definition) AS a)))
+      reject:
+        - (Filter ArrayContains(_orbit_edge_0.source_tags, 'definition_type:'), ... (_))

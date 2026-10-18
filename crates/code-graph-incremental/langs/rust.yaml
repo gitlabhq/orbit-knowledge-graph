@@ -482,12 +482,12 @@ display:
           module_path: '@$M|tag("source_root_rel")|regex_replace("\.rs$","")|regex_replace("(^|/)(mod|lib|main)$","")|replace("/","::")'
       - match: '$M:__source_file'
         tag:
-          fqn: '@$M|concat("::", "tag:crate", "tag:module_path")'
+          fqn: '@$M|concat("::", "tag:crate", "tag:module_path")|keep_last("::", "64", "4096")'
 
       - match: '(__def)'
         tag:
           entity: Definition
-          fqn: '@$ROOT|concat("::", "ancestor_tag:fqn", "child_sym:__defname")'
+          fqn: '@$ROOT|concat("::", "ancestor_tag:fqn", "child_sym:__defname")|keep_last("::", "64", "4096")'
           file_path: '@$ROOT|ancestor_tag("file_path")'
   - name: def_type
     rules:

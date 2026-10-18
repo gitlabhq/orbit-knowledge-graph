@@ -1,9 +1,11 @@
 name: "Kotlin: a return arm is bottom and does not take part in the join"
+
 fixtures:
   - path: com/example/bottom/A.kt
     content: |
       package com.example.bottom
       class A { fun n() {} }
+
   - path: com/example/bottom/Use.kt
     content: |
       package com.example.bottom

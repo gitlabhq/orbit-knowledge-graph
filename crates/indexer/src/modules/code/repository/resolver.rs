@@ -5,6 +5,7 @@ use tracing::{info, warn};
 
 use super::cache::{CachedRepository, RepositoryCache, RepositoryCacheError};
 use super::service::{RepositoryService, RepositoryServiceError};
+use super::storage_lease::{ArchiveLeases, LeaseError};
 use crate::handler::HandlerError;
 use crate::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive};
 use gitlab_client::GitlabClientError;
@@ -25,6 +26,12 @@ pub enum ResolveError {
         detail: String,
     },
 
+    #[error("archive endpoint overloaded: {0}")]
+    Overloaded(GitlabClientError),
+
+    #[error("no archive download slot within {waited:?}")]
+    NoArchiveSlot { waited: Duration },
+
     #[error(transparent)]
     Other(#[from] HandlerError),
 }
@@ -39,6 +46,7 @@ impl From<RetryExhausted> for ResolveError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmptyRepositoryReason {
     NotFound,
+    /// Rails raises 500 for a repository that does not exist.
     ServerError,
     /// HTTP 200 OK with an empty or truncated archive body. Distinct from
     /// `NotFound` so dashboards can separate real 404s from quietly-empty 200s.
@@ -75,24 +83,40 @@ impl std::fmt::Display for EmptyRepositoryReason {
     }
 }
 
+/// Backfill resolves the branch through `project_info` first, so the project exists
+/// and a 404 means it has no repository or no refs.
 fn classify_download_error(
-    err: &RepositoryServiceError,
-) -> Option<(EmptyRepositoryReason, String)> {
-    match err {
-        RepositoryServiceError::GitlabApi(GitlabClientError::NotFound(id)) => Some((
-            EmptyRepositoryReason::NotFound,
-            format!("project {id} not found (404)"),
-        )),
-        RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
-            project_id,
-            status,
-        }) => Some((
-            EmptyRepositoryReason::ServerError,
-            format!(
-                "archive endpoint returned {status} for project {project_id} (repository likely missing)"
-            ),
-        )),
-        _ => None,
+    err: RepositoryServiceError,
+) -> Result<ResolveError, RepositoryServiceError> {
+    let api_error = match err {
+        RepositoryServiceError::GitlabApi(api_error) => api_error,
+        RepositoryServiceError::Archive(_) => return Err(err),
+    };
+    match &api_error {
+        GitlabClientError::NotFound(id) => Ok(ResolveError::EmptyRepository {
+            reason: EmptyRepositoryReason::NotFound,
+            detail: format!("project {id} not found (404)"),
+        }),
+        GitlabClientError::ServerError {
+            status: 502..=504, ..
+        }
+        | GitlabClientError::RateLimited { .. } => Ok(ResolveError::Overloaded(api_error)),
+        GitlabClientError::ServerError { project_id, status } => {
+            Ok(ResolveError::EmptyRepository {
+                reason: EmptyRepositoryReason::ServerError,
+                detail: format!(
+                    "archive endpoint returned {status} for project {project_id} (repository likely missing)"
+                ),
+            })
+        }
+        GitlabClientError::Request(_)
+        | GitlabClientError::Unauthorized
+        | GitlabClientError::ForcePush(_)
+        | GitlabClientError::JwtSigning(_)
+        | GitlabClientError::JwtDecoding(_)
+        | GitlabClientError::InvalidSecret(_)
+        | GitlabClientError::Unexpected(_)
+        | GitlabClientError::CircuitOpen { .. } => Err(api_error.into()),
     }
 }
 
@@ -134,6 +158,10 @@ impl RepositoryResolver {
         }
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one download's inputs, all supplied by the pipeline; a params struct would only move the arity"
+    )]
     pub async fn resolve(
         &self,
         project_id: i64,
@@ -141,6 +169,8 @@ impl RepositoryResolver {
         commit_sha: Option<&str>,
         namespace_id: Option<i64>,
         config: &orbit_server_config::CodeIndexingPipelineConfig,
+        leases: &ArchiveLeases,
+        storage: Option<&str>,
     ) -> Result<Repository, ResolveError> {
         let ref_name = commit_sha.unwrap_or(branch);
         let virtual_config = orbit_server_config::features::enabled_for(
@@ -148,16 +178,31 @@ impl RepositoryResolver {
             namespace_id,
         )
         .then_some(config);
-        self.full_download(project_id, branch, ref_name, virtual_config)
-            .await
+        self.full_download(
+            project_id,
+            branch,
+            ref_name,
+            virtual_config,
+            commit_sha.is_some(),
+            leases,
+            storage,
+        )
+        .await
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "private helper threading one download's inputs; a params struct would only move the arity"
+    )]
     async fn full_download(
         &self,
         project_id: i64,
         branch: &str,
         ref_name: &str,
         virtual_config: Option<&orbit_server_config::CodeIndexingPipelineConfig>,
+        retry_empty: bool,
+        leases: &ArchiveLeases,
+        storage: Option<&str>,
     ) -> Result<Repository, ResolveError> {
         info!(
             project_id,
@@ -168,43 +213,70 @@ impl RepositoryResolver {
         );
 
         drive(&ARCHIVE_DOWNLOAD_RETRY, |attempt| async move {
-            let archive_stream = match self
-                .repository_service
-                .download_archive(project_id, ref_name)
-                .await
-            {
-                Ok(stream) => stream,
-                Err(err) => {
-                    if let Some((reason, detail)) = classify_download_error(&err) {
-                        return Step::GiveUp(ResolveError::EmptyRepository { reason, detail });
+            let download = async {
+                let archive_stream = match self
+                    .repository_service
+                    .download_archive(project_id, ref_name)
+                    .await
+                {
+                    Ok(stream) => stream,
+                    Err(err) => {
+                        let err = match classify_download_error(err) {
+                            Ok(resolved) => return Step::GiveUp(resolved),
+                            Err(err) => err,
+                        };
+                        warn!(project_id, ref_name, attempt = attempt + 1, error = %err, "archive download failed");
+                        let e = HandlerError::Processing(format!("failed to download archive: {err}"));
+                        return ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into());
                     }
-                    warn!(project_id, ref_name, attempt = attempt + 1, error = %err, "archive download failed");
-                    let e = HandlerError::Processing(format!("failed to download archive: {err}"));
-                    return ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into());
+                };
+
+                let repository = match virtual_config {
+                    Some(config) => super::super::incremental::load(archive_stream, config).await.map(Repository::IncrementalEngine),
+                    None => self.cache.extract_archive(archive_stream).await.map(Repository::Extracted),
+                };
+                match repository {
+                    Ok(path) => Step::Done(path),
+                    Err(RepositoryCacheError::EmptyArchive) => {
+                        let empty = ResolveError::EmptyRepository {
+                            reason: EmptyRepositoryReason::EmptyArchive,
+                            detail: format!(
+                                "archive contained no entries for project {project_id} ref {ref_name} (200 OK with empty body)"
+                            ),
+                        };
+                        if !retry_empty {
+                            return Step::GiveUp(empty);
+                        }
+                        warn!(project_id, ref_name, attempt = attempt + 1, "archive empty for a commit that exists; retrying the download");
+                        ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), empty)
+                    }
+                    Err(RepositoryCacheError::RepositoryTooLarge) => Step::GiveUp(ResolveError::EmptyRepository {
+                        reason: EmptyRepositoryReason::RepositoryTooLarge,
+                        detail: format!(
+                            "repository for project {project_id} ref {ref_name} exceeded the total-bytes cap"
+                        ),
+                    }),
+                    Err(e) => {
+                        warn!(project_id, ref_name, attempt = attempt + 1, error = %e, "archive extraction failed");
+                        let e = HandlerError::Processing(format!("failed to extract archive: {e}"));
+                        ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into())
+                    }
                 }
             };
-
-            let repository = match virtual_config {
-                Some(config) => super::super::incremental::load(archive_stream, config).await.map(Repository::IncrementalEngine),
-                None => self.cache.extract_archive(archive_stream).await.map(Repository::Extracted),
-            };
-            match repository {
-                Ok(path) => Step::Done(path),
-                Err(RepositoryCacheError::EmptyArchive) => Step::GiveUp(ResolveError::EmptyRepository {
-                    reason: EmptyRepositoryReason::EmptyArchive,
-                    detail: format!(
-                        "archive contained no entries for project {project_id} ref {ref_name} (200 OK with empty body)"
-                    ),
-                }),
-                Err(RepositoryCacheError::RepositoryTooLarge) => Step::GiveUp(ResolveError::EmptyRepository {
-                    reason: EmptyRepositoryReason::RepositoryTooLarge,
-                    detail: format!(
-                        "repository for project {project_id} ref {ref_name} exceeded the total-bytes cap"
-                    ),
-                }),
-                Err(e) => {
-                    warn!(project_id, ref_name, attempt = attempt + 1, error = %e, "archive extraction failed");
-                    let e = HandlerError::Processing(format!("failed to extract archive: {e}"));
+            match leases.run(storage, download).await {
+                Ok(step) => step,
+                Err(LeaseError::Timeout { waited, .. }) => {
+                    Step::GiveUp(ResolveError::NoArchiveSlot { waited })
+                }
+                Err(LeaseError::Cancelled(_)) => {
+                    warn!(project_id, ref_name, "archive lease wait stopped: project lock lost");
+                    Step::GiveUp(ResolveError::NoArchiveSlot {
+                        waited: Duration::ZERO,
+                    })
+                }
+                Err(error @ (LeaseError::Lost(_) | LeaseError::Backend(_))) => {
+                    warn!(project_id, ref_name, attempt = attempt + 1, %error, "archive lease failed");
+                    let e = HandlerError::Processing(error.to_string());
                     ARCHIVE_DOWNLOAD_RETRY.retry_or_give_up(attempt, (), e.into())
                 }
             }
@@ -217,11 +289,14 @@ impl RepositoryResolver {
 mod tests {
     use std::io::Write as _;
 
+    use super::super::storage_lease::{LeaseSettings, slot_key};
     use super::*;
     use crate::modules::code::metrics::CodeMetrics;
     use crate::modules::code::repository::cache::{LocalRepositoryCache, RepositoryCache};
     use crate::modules::code::repository::service::RepositoryServiceError;
+    use crate::testkit::mocks::MockLockService;
     use async_trait::async_trait;
+    use code_graph::v2::CancellationToken;
     use parking_lot::Mutex;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -301,6 +376,7 @@ mod tests {
             Ok(gitlab_client::ProjectInfo {
                 project_id,
                 default_branch: "main".to_string(),
+                repository_storage: None,
             })
         }
 
@@ -409,7 +485,15 @@ mod tests {
                 .pipeline;
             match self
                 .0
-                .resolve(project, branch, commit, None, &config)
+                .resolve(
+                    project,
+                    branch,
+                    commit,
+                    None,
+                    &config,
+                    &no_lease_limit(),
+                    None,
+                )
                 .await?
             {
                 Repository::Extracted(repository) => Ok(repository),
@@ -418,6 +502,122 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn no_lease_limit() -> ArchiveLeases {
+        leases_with_budget(Arc::new(MockLockService::new()), 0)
+    }
+
+    fn leases_with_budget(locks: Arc<MockLockService>, budget: usize) -> ArchiveLeases {
+        ArchiveLeases::new(
+            locks,
+            LeaseSettings {
+                storage_budget: budget,
+                tenant_budget: budget,
+                ttl: Duration::from_secs(30),
+                max_wait: Duration::from_secs(2),
+            },
+            CancellationToken::new(),
+            CodeMetrics::default(),
+        )
+    }
+
+    async fn resolve_leased(
+        resolver: &RepositoryResolver,
+        leases: &ArchiveLeases,
+        storage: Option<&str>,
+    ) -> Result<Repository, ResolveError> {
+        let config = orbit_server_config::AppConfig::embedded_defaults()
+            .engine
+            .handlers
+            .code_indexing_task
+            .pipeline;
+        resolver
+            .resolve(1, "main", Some("abc123"), None, &config, leases, storage)
+            .await
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_saturated_storage_returns_the_task_to_the_queue() {
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
+        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let locks = Arc::new(MockLockService::new());
+        locks.set_lock(&slot_key(Some("gitaly-1"), 0));
+
+        let result =
+            resolve_leased(&resolver.0, &leases_with_budget(locks, 1), Some("gitaly-1")).await;
+
+        assert!(matches!(result, Err(ResolveError::NoArchiveSlot { .. })));
+        assert_eq!(
+            service.download_count(),
+            0,
+            "no Gitaly request without a lease"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn another_storages_slots_do_not_block_this_download() {
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
+        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let locks = Arc::new(MockLockService::new());
+        locks.set_lock(&slot_key(Some("gitaly-2"), 0));
+        locks.set_lock(&slot_key(None, 0));
+
+        let result = resolve_leased(
+            &resolver.0,
+            &leases_with_budget(locks.clone(), 1),
+            Some("gitaly-1"),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        assert_eq!(service.download_count(), 1);
+        assert!(
+            !locks.is_held(&slot_key(Some("gitaly-1"), 0)),
+            "slot freed after download"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_overloaded_archive_frees_its_lease_without_a_slot_timeout() {
+        let service = ScriptedRepositoryService::with_download_error(|| {
+            RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::RateLimited {
+                project_id: 42,
+            })
+        });
+        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let locks = Arc::new(MockLockService::new());
+
+        let result = resolve_leased(
+            &resolver.0,
+            &leases_with_budget(locks.clone(), 1),
+            Some("gitaly-1"),
+        )
+        .await;
+
+        assert!(matches!(result, Err(ResolveError::Overloaded(_))));
+        assert_eq!(
+            service.download_count(),
+            1,
+            "no local retry under the lease"
+        );
+        assert!(!locks.is_held(&slot_key(Some("gitaly-1"), 0)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_missing_storage_shares_one_tenant_wide_budget() {
+        let service =
+            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
+        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let locks = Arc::new(MockLockService::new());
+        locks.set_lock(&slot_key(None, 0));
+
+        let result = resolve_leased(&resolver.0, &leases_with_budget(locks, 1), None).await;
+
+        assert!(matches!(result, Err(ResolveError::NoArchiveSlot { .. })));
+        assert_eq!(service.download_count(), 0);
     }
 
     fn create_resolver(
@@ -553,7 +753,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_maps_archive_5xx_to_empty_repository() {
+    async fn resolve_maps_archive_500_to_empty_repository() {
         let service = ScriptedRepositoryService::with_download_error(|| {
             RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::ServerError {
                 project_id: 42,
@@ -570,6 +770,39 @@ mod tests {
                 assert!(detail.contains("500"), "detail was {detail}");
             }
             other => panic!("expected EmptyRepository, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_maps_archive_overload_statuses_to_overloaded_without_retrying() {
+        use gitlab_client::GitlabClientError;
+
+        let overloads: [fn() -> GitlabClientError; 4] = [
+            || GitlabClientError::ServerError {
+                project_id: 42,
+                status: 502,
+            },
+            || GitlabClientError::ServerError {
+                project_id: 42,
+                status: 503,
+            },
+            || GitlabClientError::ServerError {
+                project_id: 42,
+                status: 504,
+            },
+            || GitlabClientError::RateLimited { project_id: 42 },
+        ];
+        for overload in overloads {
+            let service = ScriptedRepositoryService::with_download_error(move || {
+                RepositoryServiceError::GitlabApi(overload())
+            });
+            let (_dir, resolver) = create_resolver(Arc::clone(&service));
+
+            for commit_sha in [None, Some("abc123")] {
+                let err = resolver.resolve(42, "main", commit_sha).await.unwrap_err();
+                assert!(matches!(err, ResolveError::Overloaded(_)), "got {err:?}");
+            }
+            assert_eq!(service.download_count(), 2, "no local retries");
         }
     }
 

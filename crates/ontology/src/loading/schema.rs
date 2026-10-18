@@ -23,6 +23,8 @@ pub(super) struct EdgeColumnYaml {
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct EdgeTableYaml {
+    #[serde(default)]
+    pub domains: Vec<String>,
     pub sort_key: Vec<String>,
     pub columns: Vec<EdgeColumnYaml>,
     #[serde(default)]
@@ -55,6 +57,8 @@ pub(super) struct SettingsYaml {
     pub denormalization: Vec<DenormalizationEntryYaml>,
     #[serde(default)]
     pub denormalized_joins: Vec<DenormalizedJoinYaml>,
+    #[serde(default)]
+    pub reordered_tables: Vec<crate::denormalized::ReorderedTable>,
     #[serde(default)]
     pub statistics: Option<StatisticsYaml>,
     #[serde(default)]

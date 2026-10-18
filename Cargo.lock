@@ -124,15 +124,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arbitrary"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
-dependencies = [
- "derive_arbitrary",
-]
-
-[[package]]
 name = "arc-swap"
 version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -693,6 +684,12 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "bigdecimal"
@@ -1289,6 +1286,7 @@ dependencies = [
  "circuit-breaker",
  "clickhouse",
  "futures",
+ "orbit-observability",
  "orbit-server-config",
  "orbit-utils",
  "rand 0.10.2",
@@ -1372,6 +1370,7 @@ dependencies = [
  "ignore",
  "jsonschema",
  "memchr",
+ "orbit-arrow",
  "orbit-utils",
  "oxc",
  "oxc_linter",
@@ -1417,6 +1416,7 @@ dependencies = [
  "itertools 0.14.0",
  "lasso",
  "ontology",
+ "orbit-arrow",
  "orbit-utils",
  "pest",
  "pest_consume",
@@ -1722,6 +1722,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc-fast"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e75b2483e97a5a7da73ac68a05b629f9c53cff58d8ed1c77866079e18b00dba5"
+dependencies = [
+ "digest 0.10.7",
+ "spin",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1990,7 +2000,7 @@ dependencies = [
  "indexmap 2.14.2",
  "itertools 0.14.0",
  "log",
- "object_store",
+ "object_store 0.13.2",
  "parking_lot",
  "sqlparser",
  "tempfile",
@@ -2019,7 +2029,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "log",
- "object_store",
+ "object_store 0.13.2",
  "parking_lot",
  "tokio",
 ]
@@ -2044,7 +2054,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "log",
- "object_store",
+ "object_store 0.13.2",
 ]
 
 [[package]]
@@ -2064,7 +2074,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "log",
- "object_store",
+ "object_store 0.13.2",
  "sqlparser",
  "tokio",
  "uuid",
@@ -2105,7 +2115,7 @@ dependencies = [
  "glob",
  "itertools 0.14.0",
  "log",
- "object_store",
+ "object_store 0.13.2",
  "parking_lot",
  "rand 0.9.4",
  "tokio",
@@ -2132,7 +2142,7 @@ dependencies = [
  "datafusion-session",
  "futures",
  "itertools 0.14.0",
- "object_store",
+ "object_store 0.13.2",
  "tokio",
 ]
 
@@ -2154,7 +2164,7 @@ dependencies = [
  "datafusion-physical-plan",
  "datafusion-session",
  "futures",
- "object_store",
+ "object_store 0.13.2",
  "regex",
  "tokio",
 ]
@@ -2177,7 +2187,7 @@ dependencies = [
  "datafusion-physical-plan",
  "datafusion-session",
  "futures",
- "object_store",
+ "object_store 0.13.2",
  "tokio",
  "tokio-stream",
 ]
@@ -2203,7 +2213,7 @@ dependencies = [
  "datafusion-physical-expr-common",
  "futures",
  "log",
- "object_store",
+ "object_store 0.13.2",
  "parking_lot",
  "rand 0.9.4",
  "tempfile",
@@ -2591,17 +2601,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive_arbitrary"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
-
-[[package]]
 name = "derive_builder"
 version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2743,9 +2742,9 @@ checksum = "9bda8e21c04aca2ae33ffc2fd8c23134f3cac46db123ba97bd9d3f3b8a4a85e1"
 
 [[package]]
 name = "duckdb"
-version = "1.10505.0"
+version = "1.10506.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "970e05eedd3f55c435194d9104f90a9b4a79a80d6e73251bc9ff43e178130c4e"
+checksum = "1a46cc5f64f534993bae616668a94b1b8e58295c2bd39f85afef7c44297817da"
 dependencies = [
  "arrow",
  "cast",
@@ -2768,6 +2767,7 @@ dependencies = [
  "code-graph",
  "duckdb",
  "ontology",
+ "orbit-arrow",
  "orbit-search",
  "orbit-utils",
  "serde_json",
@@ -3108,6 +3108,7 @@ dependencies = [
  "arrow",
  "compiler",
  "indexmap 2.14.2",
+ "orbit-arrow",
  "orbit-utils",
  "orbit-versions",
  "semver",
@@ -3340,6 +3341,7 @@ dependencies = [
  "circuit-breaker",
  "futures",
  "jsonwebtoken",
+ "orbit-observability",
  "orbit-server-config",
  "rand 0.10.2",
  "reqwest 0.13.4",
@@ -3931,7 +3933,6 @@ dependencies = [
  "arrow",
  "async-nats",
  "async-trait",
- "axum",
  "base64 0.22.1",
  "bytes",
  "chrono",
@@ -3939,7 +3940,6 @@ dependencies = [
  "clickhouse-client",
  "code-graph",
  "code-graph-incremental",
- "datafusion",
  "flate2",
  "futures",
  "gitaly-protos",
@@ -3952,6 +3952,7 @@ dependencies = [
  "ontology",
  "opentelemetry",
  "orbit-analytics",
+ "orbit-arrow",
  "orbit-migrations",
  "orbit-observability",
  "orbit-server-config",
@@ -3972,10 +3973,21 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "tower",
  "tracing",
+ "tracing-subscriber",
  "uuid",
  "zstd",
+]
+
+[[package]]
+name = "indexer-datafusion"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "datafusion",
+ "indexer",
+ "orbit-arrow",
 ]
 
 [[package]]
@@ -4072,9 +4084,12 @@ dependencies = [
  "arrow",
  "async-trait",
  "clickhouse-client",
+ "duckdb-client",
  "futures",
  "gitalisk-core",
+ "jsonschema",
  "ontology",
+ "orbit-arrow",
  "orbit-migrations",
  "orbit-server",
  "orbit-server-config",
@@ -4087,6 +4102,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlparser",
+ "tempfile",
  "testcontainers",
  "tokio",
  "uuid",
@@ -4115,6 +4131,7 @@ dependencies = [
  "gitlab-client",
  "health-check",
  "indexer",
+ "indexer-datafusion",
  "integration-testkit",
  "jsonschema",
  "jsonwebtoken",
@@ -4126,6 +4143,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "orbit-analytics",
+ "orbit-arrow",
  "orbit-migrations",
  "orbit-server",
  "orbit-server-config",
@@ -4152,7 +4170,6 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "toon-format",
- "tower",
  "uuid",
 ]
 
@@ -4169,6 +4186,8 @@ dependencies = [
  "duckdb-client",
  "globset",
  "ontology",
+ "orbit-arrow",
+ "orbit-server-config",
  "orbit-utils",
  "rayon",
  "regex",
@@ -4615,8 +4634,6 @@ dependencies = [
  "axum-server",
  "futures-util",
  "http",
- "http-body",
- "http-body-util",
  "labkit-fields",
  "opentelemetry",
  "opentelemetry-appender-tracing",
@@ -4631,7 +4648,6 @@ dependencies = [
  "tokio",
  "tonic",
  "tower",
- "tower-http",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -4782,9 +4798,9 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libduckdb-sys"
-version = "1.10505.0"
+version = "1.10506.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb514dab5e271e849235c1cb98bd65a2ae107fbd619a6740219319c54a71d95"
+checksum = "113d1c26c9f518405a17b5729bb6ab6abf029fdc46626406922cf9a8dc9b4609"
 dependencies = [
  "cc",
  "flate2",
@@ -4918,12 +4934,12 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "md-5"
-version = "0.10.6"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
 dependencies = [
  "cfg-if",
- "digest 0.10.7",
+ "digest 0.11.2",
 ]
 
 [[package]]
@@ -5093,6 +5109,18 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags 2.13.0",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]
@@ -5317,9 +5345,37 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "622acbc9100d3c10e2ee15804b0caa40e55c933d5aa53814cd520805b7958a49"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
  "bytes",
  "chrono",
+ "futures-channel",
+ "futures-core",
+ "futures-util",
+ "http",
+ "humantime",
+ "itertools 0.14.0",
+ "parking_lot",
+ "percent-encoding",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "walkdir",
+ "wasm-bindgen-futures",
+ "web-time",
+]
+
+[[package]]
+name = "object_store"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1796bc93603f78c5760a69f2d58badc9618d22adade0a95385bb2adbae4eb94"
+dependencies = [
+ "async-trait",
+ "aws-lc-rs",
+ "base64 0.23.1",
+ "bytes",
+ "chrono",
+ "crc-fast",
  "form_urlencoded",
  "futures-channel",
  "futures-core",
@@ -5328,14 +5384,14 @@ dependencies = [
  "http-body-util",
  "humantime",
  "hyper",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "md-5",
+ "nix",
  "parking_lot",
  "percent-encoding",
  "quick-xml",
  "rand 0.10.2",
- "reqwest 0.12.28",
- "ring",
+ "reqwest 0.13.4",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -5347,6 +5403,7 @@ dependencies = [
  "walkdir",
  "wasm-bindgen-futures",
  "web-time",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5526,6 +5583,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-arrow"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "chrono",
+ "enum-as-inner",
+ "rustc-hash 2.1.3",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "orbit-billing"
 version = "0.1.0"
 dependencies = [
@@ -5621,6 +5690,7 @@ dependencies = [
  "futures",
  "nats-client",
  "ontology",
+ "orbit-arrow",
  "orbit-utils",
  "orbit-versions",
  "query-data-model",
@@ -5636,7 +5706,7 @@ name = "orbit-object-storage"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "object_store",
+ "object_store 0.14.2",
  "orbit-server-config",
  "thiserror 2.0.18",
  "tokio",
@@ -5689,6 +5759,7 @@ dependencies = [
  "gitlab-client",
  "health-check",
  "indexer",
+ "indexer-datafusion",
  "jsonschema",
  "jsonwebtoken",
  "labkit",
@@ -5700,6 +5771,7 @@ dependencies = [
  "ontology",
  "opentelemetry",
  "orbit-analytics",
+ "orbit-arrow",
  "orbit-billing",
  "orbit-migrations",
  "orbit-observability",
@@ -5756,10 +5828,7 @@ dependencies = [
 name = "orbit-utils"
 version = "0.1.0"
 dependencies = [
- "arrow",
- "chrono",
  "dunce",
- "enum-as-inner",
  "flate2",
  "ignore",
  "libc",
@@ -7061,9 +7130,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.39.4"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
  "serde",
@@ -8185,7 +8254,6 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "futures-core",
- "futures-util",
  "h2",
  "http",
  "http-body",
@@ -8197,7 +8265,6 @@ dependencies = [
  "log",
  "percent-encoding",
  "pin-project-lite",
- "quinn",
  "rustls",
  "rustls-native-certs",
  "rustls-pki-types",
@@ -8207,14 +8274,12 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
- "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams 0.4.2",
  "web-sys",
 ]
 
@@ -8257,7 +8322,7 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams 0.5.0",
+ "wasm-streams",
  "web-sys",
 ]
 
@@ -8478,9 +8543,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -8796,7 +8861,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1ec1f5cac0eb96063c64b28705255a7ed6e7d77f95c1d25e9f8b8c928006ce1"
 dependencies = [
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.23.1",
  "encoding_rs_io",
  "granit-parser 1.1.0",
  "nohash-hasher",
@@ -9019,6 +9084,7 @@ dependencies = [
  "compiler",
  "futures",
  "ontology",
+ "orbit-arrow",
  "orbit-utils",
  "pipeline",
  "query-data-model",
@@ -9175,6 +9241,12 @@ dependencies = [
  "libc",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "spin"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3"
 
 [[package]]
 name = "sqlformat"
@@ -10441,7 +10513,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "compiler",
- "orbit-utils",
+ "orbit-arrow",
 ]
 
 [[package]]
@@ -10829,19 +10901,6 @@ dependencies = [
  "indexmap 2.14.2",
  "wasm-encoder",
  "wasmparser",
-]
-
-[[package]]
-name = "wasm-streams"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
-dependencies = [
- "futures-util",
- "js-sys",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]
@@ -11391,6 +11450,7 @@ dependencies = [
  "parquet",
  "query-engine",
  "rand 0.10.2",
+ "regex",
  "schemars 1.2.1",
  "serde",
  "serde_json",
@@ -11544,15 +11604,16 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "6.0.0"
+version = "9.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb2a05c7c36fde6c09b08576c9f7fb4cda705990f73b58fe011abf7dfb24168b"
+checksum = "a954114b47a54df49f83d2722814e86b23d4bb1b54a1b90fb7d92b41619ddc22"
 dependencies = [
- "arbitrary",
  "crc32fast",
  "flate2",
  "indexmap 2.14.2",
  "memchr",
+ "nix",
+ "typed-path",
  "zopfli",
 ]
 

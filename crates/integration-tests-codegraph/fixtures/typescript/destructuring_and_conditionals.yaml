@@ -1,5 +1,6 @@
 name: "TypeScript: destructuring bindings and conditional flow"
 pipeline: js
+
 fixtures:
   - path: main.ts
     content: |

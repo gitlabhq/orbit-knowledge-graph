@@ -1,0 +1,16 @@
+description: An unset WorkItem weight has no property value
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4002],"columns":["work_item_type","weight"]}],"limit":10}
+  gql: |
+    MATCH (w:WorkItem {id: 4002}) RETURN w.work_item_type, w.weight LIMIT 10
+
+expect:
+  node_count: 1
+  nodes:
+    WorkItem:
+      ids: [4002]
+      prop_absent: [weight]
+      rows:
+        - { id: 4002, work_item_type: task }

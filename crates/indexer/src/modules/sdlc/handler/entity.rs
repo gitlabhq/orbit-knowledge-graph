@@ -181,16 +181,13 @@ impl EntityHandler {
                 column: &self.plan.deleted_column,
             }));
 
-        let should_partition =
-            self.partition_strategy.is_some() && checkpoint.is_first_pass_before_paging();
-        let ranges = if should_partition {
-            self.partition_strategy
-                .as_ref()
-                .unwrap()
-                .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_ref())
-                .await?
-        } else {
-            Vec::new()
+        let ranges = match &self.partition_strategy {
+            Some(strategy) if checkpoint.is_first_pass_before_paging() => {
+                strategy
+                    .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_ref())
+                    .await?
+            }
+            _ => Vec::new(),
         };
 
         let result = if ranges.is_empty() {
@@ -267,9 +264,18 @@ impl EntityHandler {
                     duration_ms = stats.duration_ms,
                     "indexing resource stats"
                 );
-                observer.lock().unwrap().finish()
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                )]
+                let mut obs = observer.lock().unwrap();
+                obs.finish();
             }
             Err(e) => {
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                )]
                 let mut obs = observer.lock().unwrap();
                 obs.record_error(&e.to_string());
                 obs.finish();
@@ -395,7 +401,7 @@ impl Handler for EntityHandler {
         if !request.indexing_requested(&self.plan.target) {
             debug!(
                 entity = %self.plan.name,
-                target = %self.plan.target,
+                plan_target = %self.plan.target,
                 targets = ?request.targets,
                 "skipping request: target not selected"
             );
@@ -488,6 +494,7 @@ mod tests {
             Arc::clone(&checkpoint_store),
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
+            crate::modules::sdlc::test_helpers::passthrough_registry(),
         ));
         let subscription = match scope {
             EtlScope::Global => GlobalIndexingRequest::subscription(),

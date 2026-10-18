@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/neighbors.rs::neighbors_dynamic_columns_all_returns_properties
 description: Dynamic columns "*" returns properties on neighbors
 
 query:

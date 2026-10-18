@@ -1,4 +1,4 @@
-mod fixtures;
+pub(crate) mod fixtures;
 mod graph_status;
 mod indexing_status;
 mod indexing_status_response;

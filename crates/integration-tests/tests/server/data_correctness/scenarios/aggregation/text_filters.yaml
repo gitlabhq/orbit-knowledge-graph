@@ -1,0 +1,113 @@
+config:
+  security:
+    org_id: 1
+    paths: [1/100/]
+  redaction:
+    allow:
+      project: [1000]
+      group: [100]
+      work_item: [4000]
+    deny:
+      work_item: [4001]
+
+cases:
+  - name: text_prefix_on_ungrouped_node_rejected
+    description: A text prefix filter requires grouping by its node
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4001],"filters":{"title":{"starts_with":"Fix a"}}}],"aggregations":[{"count":"w","as":"n"}]}
+      gql: |
+        MATCH (w:WorkItem {id: 4001}) WHERE w.title STARTS WITH 'Fix a' RETURN count(w) AS n
+    expect:
+      compile_error: text matching and ordering require grouping by "w"
+
+  - name: text_contains_on_ungrouped_node_rejected
+    description: A CONTAINS filter requires grouping by its node
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.title CONTAINS 'auth' RETURN g, count(w) AS n
+    expect:
+      compile_error: text matching and ordering require grouping by "w"
+
+  - name: negated_text_match_on_ungrouped_node_rejected
+    description: A negated CONTAINS filter requires grouping by its node
+    query:
+      gql: |
+        MATCH (w:WorkItem {id: 4001}) WHERE NOT w.description CONTAINS 'login' RETURN count(w) AS n
+    expect:
+      compile_error: text matching and ordering require grouping by "w"
+
+  - name: text_ordering_on_ungrouped_node_rejected
+    description: An ordering comparison on text requires grouping by its node
+    query:
+      gql: |
+        MATCH (w:WorkItem {id: 4001}) WHERE w.title < 'G' RETURN count(w) AS n
+    expect:
+      compile_error: text matching and ordering require grouping by "w"
+
+  - name: cross_node_text_ordering_rejected
+    description: A text ordering comparison between nodes requires grouping by the left node
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:HAS_LABEL]->(l:Label) WHERE w.title > l.title RETURN count(w) AS n
+    expect:
+      compile_error: text matching and ordering require grouping by "w"
+
+  - name: cross_node_text_ordering_rhs_rejected
+    description: A text ordering comparison between nodes requires grouping by the right node
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:HAS_LABEL]->(l:Label) WHERE w.title > l.title RETURN w, count(l) AS n
+    expect:
+      compile_error: text matching and ordering require grouping by "l"
+
+  - name: text_equality_on_ungrouped_node_compiles
+    description: Equality on a text property works on any node
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.title = 'Implement login page' RETURN g, count(w) AS n
+    expect:
+      compile_only: true
+
+  - name: text_filter_on_grouped_node
+    description: A text filter works on a grouped node and returns its readable rows
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.title STARTS WITH 'Fix' RETURN w, count(g) AS n
+    expect:
+      skip_requirements: [node_ids, filter:title, aggregation]
+      empty_aggregation: true
+
+  - name: text_group_key_rows
+    description: A text group key returns one row per readable work item
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) RETURN w.title AS title, count(w) AS n
+    expect:
+      skip_requirements: [node_ids, aggregation]
+      row_values:
+        - { title: Implement login page, n: 1 }
+
+  - name: code_text_filter_compiles
+    description: Code entities keep text filters on ungrouped nodes
+    query:
+      gql: |
+        MATCH (d:Definition) WHERE d.project_id = 1000 AND d.fqn STARTS WITH 'src' RETURN count(d) AS n
+    expect:
+      compile_only: true
+
+  - name: namespace_text_filter_compiles
+    description: Group and project text filters work on ungrouped nodes
+    query:
+      gql: |
+        MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest) WHERE g.full_path STARTS WITH 'public' AND p.name CONTAINS 'Project' RETURN count(mr) AS n
+    expect:
+      compile_only: true
+
+  - name: traversal_path_prefix_compiles
+    description: A traversal_path prefix works on an ungrouped node
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.traversal_path STARTS WITH '1/100/' RETURN g, count(w) AS n
+    expect:
+      compile_only: true

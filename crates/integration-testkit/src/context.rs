@@ -16,10 +16,10 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
 
 use arrow::array::StringArray;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 
-const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
-const CLICKHOUSE_TAG: &str = "26.2";
+pub const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
+pub const CLICKHOUSE_TAG: &str = "26.6";
 const CLICKHOUSE_HTTP_PORT: u16 = 8123;
 
 const TEST_DATABASE: &str = "test";
@@ -179,7 +179,7 @@ impl TestContext {
     }
 
     pub fn create_client(&self) -> ArrowClickHouseClient {
-        self.config.build_client()
+        self.config.build_client("graph")
     }
 
     pub async fn fork(&self, name: &str) -> Self {
@@ -190,6 +190,7 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            "graph",
         );
         admin
             .execute(&format!("CREATE DATABASE IF NOT EXISTS `{name}`"))
@@ -332,16 +333,16 @@ impl TestContext {
 
     async fn wait_for_ready(url: &str) {
         let t = std::time::Instant::now();
-        let client = ArrowClickHouseClient::new(
-            url,
-            "default",
-            TEST_USERNAME,
-            Some(TEST_PASSWORD),
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
-        );
-
         for attempt in 1..=MAX_CONNECTION_ATTEMPTS {
+            let client = ArrowClickHouseClient::new(
+                url,
+                "default",
+                TEST_USERNAME,
+                Some(TEST_PASSWORD),
+                &std::collections::HashMap::new(),
+                &std::collections::HashMap::new(),
+                "graph",
+            );
             if client.execute("SELECT 1").await.is_ok() {
                 eprintln!("[context] wait_for_ready: {:.2?}", t.elapsed());
                 return;
@@ -362,6 +363,7 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            "graph",
         );
 
         for schema_sql in schema_sqls {

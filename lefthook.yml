@@ -34,6 +34,12 @@ pre-commit:
     - name: narration
       run: ./scripts/linting/check-narration.sh {staged_files} || true
       glob: "**/*.rs"
+    # Blocking. Skip with COMMENTS_CHECK=0 or LEFTHOOK_EXCLUDE=comments. The
+    # wrapper blocks only when comments are flagged; a uv, mise, or checker
+    # failure skips the check.
+    - name: comments
+      run: scripts/linting/comment_check_hook.sh
+      glob: "**/*.{rs,yaml,yml,toml,sh,py,js,mjs,ts,rb,css}"
     - name: prose
       run: mise exec -- uv run --quiet scripts/linting/prose_lint.py {staged_files}
       glob:
@@ -47,6 +53,9 @@ pre-commit:
         - "skills/**/*.md"
         - "config/prompts/**/*.yml"
         - "config/setup/setup.yaml"
+    - name: yaml-suites
+      run: mise exec -- uv run --quiet scripts/linting/yaml_lint.py {staged_files}
+      glob: "**/*.{yaml,yml}"
     - name: agent-file-sync
       run: diff AGENTS.md CLAUDE.md
       glob:

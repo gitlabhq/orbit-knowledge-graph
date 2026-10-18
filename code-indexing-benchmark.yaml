@@ -17,7 +17,7 @@ repos:
     version: v14.47.0
     groups: [ruby, go]
 
-  # Go services (GDK components)
+  # Go services (GitLab components)
   - name: gitaly
     source: gitlab
     project: gitlab-org/gitaly

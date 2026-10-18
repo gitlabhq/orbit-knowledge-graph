@@ -36,7 +36,7 @@ impl EmbeddedSysroot {
         let root = utf8_abs_path(tempdir.path())?;
         let project_json = load_project_json(&root)?;
         tracing::debug!(
-            version = EMBEDDED_RUST_SYSROOT_VERSION,
+            sysroot_version = EMBEDDED_RUST_SYSROOT_VERSION,
             "materialized embedded Rust sysroot"
         );
 

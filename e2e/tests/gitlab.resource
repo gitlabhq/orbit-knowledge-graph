@@ -158,11 +158,19 @@ Create Project
     RETURN    ${project}
 
 Create Issue
-    [Arguments]    ${project_id}    ${title}
+    [Arguments]    ${project_id}    ${title}    ${confidential}=${False}
     ${headers}=    GitLab Auth Headers
-    ${body}=    Create Dictionary    title=${title}
+    ${body}=    Create Dictionary    title=${title}    confidential=${confidential}
     ${resp}=    POST    ${GITLAB_URL}/api/v4/projects/${project_id}/issues
     ...    headers=${headers}    json=${body}    expected_status=201
+    RETURN    ${resp.json()}
+
+Close Issue
+    [Arguments]    ${project_id}    ${issue_iid}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    state_event=close
+    ${resp}=    PUT    ${GITLAB_URL}/api/v4/projects/${project_id}/issues/${issue_iid}
+    ...    headers=${headers}    json=${body}    expected_status=200
     RETURN    ${resp.json()}
 
 Link Issues
@@ -281,6 +289,16 @@ Add Group Member
     RETURN    ${resp.json()}
 
 Create Vulnerability
+    [Documentation]    Run `Try Create Vulnerability` until it succeeds. New GitLab builds the
+    ...                project tracked context in the background, and until then
+    ...                `vulnerabilityCreate` returns "Tracked context is being updated".
+    [Arguments]    ${project_id}    ${title}    ${severity}=CRITICAL    ${state}=DETECTED
+    ...    ${description}=role scoped authz fixture
+    ${result}=    Wait Until Keyword Succeeds    90s    3s
+    ...    Try Create Vulnerability    ${project_id}    ${title}    ${severity}    ${state}    ${description}
+    RETURN    ${result}
+
+Try Create Vulnerability
     [Documentation]    Create a manually-reported Vulnerability via the GraphQL `vulnerabilityCreate`
     ...                mutation. Requires Ultimate license (e2e/scripts/activate-license.sh) and
     ...                Maintainer+ on the project; the e2e-bot is admin so this works on any project.

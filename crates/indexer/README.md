@@ -147,7 +147,6 @@ pub struct IndexerConfig {
     pub engine: EngineConfiguration,
     pub gitlab: Option<GitlabClientConfiguration>,
     pub schedule: ScheduleConfig,
-    pub health_bind_address: SocketAddr,
     pub schema: SchemaConfig,
     pub analytics: AnalyticsConfig,
 }

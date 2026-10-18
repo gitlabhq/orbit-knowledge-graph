@@ -1,4 +1,5 @@
 name: "Lua: function definitions"
+
 fixtures:
   - path: defs.lua
     content: |

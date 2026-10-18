@@ -1,5 +1,6 @@
 name: "Next.js pages router graph patterns"
 pipeline: js
+
 fixtures:
   - path: pages/_app.tsx
     content: |

@@ -104,6 +104,10 @@ stages:
     rules:
       - match: '(await_expression $V:__call)'
         replace: '$V'
+      - match: '(postfix_unary_expression $V:__call)'
+        replace: '$V'
+      - match: '(parenthesized_expression $V:__call)'
+        replace: '$V'
       - match: '(member_access_expression expression: $O:__ivar name: $M:identifier)'
         replace: '(__member @$M (__object $O))'
       - match: '(member_access_expression expression: $O:__member name: $M:identifier)'
@@ -291,7 +295,7 @@ display:
       - match: '(__def)'
         tag:
           entity: Definition
-          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")'
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")|keep_last(".", "64", "4096")'
           file_path: '@$ROOT|ancestor_tag("file_path")'
   - name: def_type
     rules:

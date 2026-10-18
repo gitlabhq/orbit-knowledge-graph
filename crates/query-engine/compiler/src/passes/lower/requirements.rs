@@ -10,17 +10,24 @@ pub(super) fn column(value: &Column) -> Expr {
 
 pub(super) fn predicate(value: &Predicate) -> Expr {
     match value {
+        Predicate::Boolean(expression) => expression.fold(
+            &|leaf| predicate(leaf),
+            &|children| Expr::conjoin(children).expect("validated non-empty condition group"),
+            &|child| Expr::unary(Op::Not, child),
+        ),
         Predicate::Property {
             column: value,
             filter,
             data_type,
             in_sort_key,
+            text_indexed,
         } => sql::filter_expression(
             &value.source,
             &value.name,
             filter,
             data_type.as_ref(),
             *in_sort_key,
+            *text_indexed,
         ),
         Predicate::Ids {
             column: value,
@@ -34,11 +41,16 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             Expr::binary(Op::Ge, column(value), Expr::int(*start)),
             Expr::binary(Op::Le, column(value), Expr::int(*end)),
         ),
+        Predicate::ColumnsEqual { left, right } => Expr::eq(
+            Expr::col(&left.source, &left.name),
+            Expr::col(&right.source, &right.name),
+        ),
         Predicate::Live { alias } => sql::deleted_false(alias),
         Predicate::EntityKind {
             column: value,
             entity,
         } => Expr::eq(column(value), Expr::string(entity)),
+        Predicate::ColumnEq { left, right } => Expr::eq(column(left), column(right)),
         Predicate::RelationshipKinds { alias, kinds } => {
             sql::rel_kind_filter(alias, kinds).unwrap_or_else(|| Expr::lit(true))
         }

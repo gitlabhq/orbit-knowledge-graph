@@ -1,4 +1,5 @@
 name: "Lua: lexical binding ownership"
+
 fixtures:
   - path: local/main.lua
     content: |
@@ -15,6 +16,7 @@ fixtures:
           end
           f()
       end
+
   - path: assignment/main.lua
     content: |
       function first()
@@ -30,6 +32,7 @@ fixtures:
           end
           f()
       end
+
 tests:
   - name: "Local declarations stay inside blocks while assignments survive"
     query: |

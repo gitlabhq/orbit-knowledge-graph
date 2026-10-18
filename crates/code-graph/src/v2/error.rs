@@ -109,6 +109,14 @@ pub enum FileSkip {
     ParserOversize,
     ArrowOffsetOverflow,
     UnsafePath,
+    DeeplyNested,
+    StackLimit,
+    TooManyEdges,
+    TooManyNames,
+    TooManyManifestBytes,
+    FqnTruncated,
+    CrossFileTimeout,
+    ResolveTimeout,
     Timeout(AbortPhase),
 }
 
@@ -120,6 +128,14 @@ impl FileSkip {
             Self::ParserOversize => "parser_oversize",
             Self::ArrowOffsetOverflow => "arrow_offset_overflow",
             Self::UnsafePath => "unsafe_path",
+            Self::DeeplyNested => "deeply_nested",
+            Self::StackLimit => "stack_limit",
+            Self::TooManyEdges => "too_many_edges",
+            Self::TooManyNames => "too_many_names",
+            Self::TooManyManifestBytes => "too_many_manifest_bytes",
+            Self::FqnTruncated => "fqn_truncated",
+            Self::CrossFileTimeout => "timeout_cross_file",
+            Self::ResolveTimeout => "timeout_resolve",
             Self::Timeout(AbortPhase::Parse) => "timeout_parse",
             Self::Timeout(AbortPhase::Walk) => "timeout_walk",
             Self::Timeout(AbortPhase::Ssa) => "timeout_ssa",
@@ -232,6 +248,7 @@ pub struct SkippedFile {
     pub path: String,
     pub kind: FileSkip,
     pub detail: String,
+    pub family: Option<String>,
 }
 
 #[derive(Debug, Clone)]

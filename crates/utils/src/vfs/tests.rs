@@ -288,6 +288,36 @@ fn storage_modes_share_content_and_enforce_exact_budgets() {
 }
 
 #[test]
+fn the_file_limit_counts_kept_files_and_drops_listed_entries_past_it() {
+    let listed = |i| {
+        (
+            format!("assets/{i}.png"),
+            Put::Listed {
+                size: 0,
+                reason: "excluded_extension",
+            },
+        )
+    };
+    let kept = |name: &str| (name.to_string(), Put::Bytes(vec![1]));
+    let limits = Limits {
+        files: Some(2),
+        ..Limits::default()
+    };
+    let entries: Vec<_> = [kept("a"), kept("b")]
+        .into_iter()
+        .chain((0..5).map(listed))
+        .collect();
+    let vfs = Vfs::load(entries, (), limits, Options::default()).unwrap();
+    assert_eq!((vfs.usage().files, vfs.usage().dropped_listed), (4, 3));
+    let entries = vec![kept("a"), kept("a"), kept("b")];
+    let vfs = Vfs::load(entries, (), limits, Options::default()).unwrap();
+    assert_eq!((vfs.usage().files, vfs.usage().duplicate_paths), (2, 1));
+    let entries = vec![kept("a"), kept("b"), kept("c")];
+    let result = Vfs::load(entries, (), limits, Options::default());
+    assert!(matches!(result, Err(SourceError::Cap(cap)) if cap.metric == LimitKind::Files));
+}
+
+#[test]
 fn directory_classification_retains_accepted_bytes_in_memory_or_scratch() {
     for resident in [0, 1024] {
         let root = tempfile::tempdir().unwrap();
@@ -538,4 +568,46 @@ fn concurrent_loading_and_first_reads_preserve_content_and_classify_once() {
         vfs.stat("lazy").unwrap().decision,
         Some(Decision::List("binary"))
     );
+}
+
+#[test]
+fn the_file_limit_counts_a_kept_entry_after_a_listed_one_of_the_same_path() {
+    let listed = (
+        "a".to_string(),
+        Put::Listed {
+            size: 0,
+            reason: "excluded_extension",
+        },
+    );
+    let kept = |name: &str| (name.to_string(), Put::Bytes(vec![1]));
+    let limits = Limits {
+        files: Some(1),
+        ..Limits::default()
+    };
+    let entries = vec![listed, kept("b"), kept("a")];
+    let result = Vfs::load(entries, (), limits, Options::default());
+    assert!(matches!(result, Err(SourceError::Cap(cap)) if cap.metric == LimitKind::Files));
+}
+
+#[test]
+fn the_file_limit_counts_paths_that_share_a_hash() {
+    use std::hash::{Hash, Hasher};
+    let (a, b) = ("p/e6e786bcf6d1b1ad.cs", "p/741aba3948e9c9ca.cs");
+    let fx = |path: &str| {
+        let mut hasher = rustc_hash::FxHasher::default();
+        path.hash(&mut hasher);
+        hasher.finish()
+    };
+    assert_eq!(
+        fx(a),
+        fx(b),
+        "the pair no longer collides under FxHasher; find a new one"
+    );
+    let limits = Limits {
+        files: Some(1),
+        ..Limits::default()
+    };
+    let entries = vec![(a, Put::Bytes(vec![1])), (b, Put::Bytes(vec![1]))];
+    let result = Vfs::load(entries, (), limits, Options::default());
+    assert!(matches!(result, Err(SourceError::Cap(cap)) if cap.metric == LimitKind::Files));
 }

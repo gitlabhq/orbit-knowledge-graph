@@ -126,9 +126,12 @@ fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
 /// FINAL subqueries: PK range pruning reduces the scan from the entire LCP
 /// namespace to only the user's authorized paths.
 fn path_or_filter(alias: &str, paths: &[TraversalPath]) -> Expr {
-    let mut iter = paths.iter().map(|p| starts_with_expr(alias, p.as_str()));
-    let first = iter.next().expect("paths is non-empty (caller checks)");
-    iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
+    Expr::or_all(
+        paths
+            .iter()
+            .map(|path| Some(starts_with_expr(alias, path.as_str()))),
+    )
+    .expect("paths is non-empty (caller checks)")
 }
 
 /// Collect `(alias, table)` pairs for every scan that should receive a
@@ -255,7 +258,7 @@ mod tests {
 
     #[test]
     fn many_paths_uses_or_chain() {
-        let paths: Vec<TraversalPath> = (0..200u64)
+        let paths: Vec<TraversalPath> = (0..1000u64)
             .map(|i| TraversalPath::from(format!("1/{i}/")))
             .collect();
         let refs: Vec<&TraversalPath> = paths.iter().collect();
@@ -269,6 +272,18 @@ mod tests {
             dbg.contains("StartsWith"),
             "should produce startsWith predicates: {dbg}"
         );
+        assert!(or_depth(&expr) <= 11, "OR tree is too deep: {dbg}");
+    }
+
+    fn or_depth(expr: &Expr) -> usize {
+        match expr {
+            Expr::BinaryOp {
+                op: Op::Or,
+                left,
+                right,
+            } => 1 + or_depth(left).max(or_depth(right)),
+            _ => 1,
+        }
     }
 
     #[test]
@@ -669,9 +684,8 @@ mod tests {
     fn scope_proof_narrows_scoped_alias_beside_broad_filter() {
         let mut proofs = std::collections::HashMap::new();
         proofs.insert("p".to_string(), ScopeProof::literal("1/24/23/"));
-        let ctx = SecurityContext::new(1, vec!["1/".into()])
-            .unwrap()
-            .with_scope_proofs(proofs);
+        let mut ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        ctx.scope_proofs = proofs;
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -712,9 +726,9 @@ mod tests {
         let ontology = Ontology::load_embedded().unwrap();
         let mut proofs = std::collections::HashMap::new();
         proofs.insert("v".to_string(), ScopeProof::literal("1/100/200/"));
-        let ctx = SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)])
-            .unwrap()
-            .with_scope_proofs(proofs);
+        let mut ctx =
+            SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)]).unwrap();
+        ctx.scope_proofs = proofs;
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -741,9 +755,8 @@ mod tests {
     fn scope_proof_dropped_on_non_path_scopable_alias() {
         let mut proofs = std::collections::HashMap::new();
         proofs.insert("g".to_string(), ScopeProof::literal("1/24/23/"));
-        let ctx = SecurityContext::new(1, vec!["1/".into()])
-            .unwrap()
-            .with_scope_proofs(proofs);
+        let mut ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        ctx.scope_proofs = proofs;
 
         let ontology = Ontology::new().with_nodes(["Global"]);
 

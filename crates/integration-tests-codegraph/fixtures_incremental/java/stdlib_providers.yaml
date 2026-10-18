@@ -1,4 +1,5 @@
 name: Java static providers preserve project overrides
+
 fixtures:
   - path: Main.java
     content: |
@@ -6,6 +7,7 @@ fixtures:
       class Main {
         double standard(double x) { return sqrt(x); }
       }
+
   - path: Local.java
     content: |
       import static java.lang.Math.*;
@@ -13,6 +15,7 @@ fixtures:
         double sqrt(double x) { return x; }
         double custom(double x) { return sqrt(x); }
       }
+
 tests:
   - name: Static standard call does not fall back to wildcard
     query: |
@@ -21,6 +24,7 @@ tests:
       RETURN target.import_path
     assert:
       - { empty: true }
+
   - name: Local method wins over standard provider
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)

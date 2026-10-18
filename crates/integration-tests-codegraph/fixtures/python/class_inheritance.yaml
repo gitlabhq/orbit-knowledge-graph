@@ -1,4 +1,5 @@
 name: "Python: class inheritance metadata"
+
 fixtures:
   - path: main.py
     content: |

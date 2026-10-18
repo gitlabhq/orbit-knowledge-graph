@@ -1,4 +1,5 @@
 name: "Rust: precise callable value flow"
+
 fixtures:
   - path: Cargo.toml
     content: |

@@ -268,7 +268,9 @@ mod tests {
     fn plain_edge_sweep_scopes_by_source_kind_and_min_watermark() {
         let sql = edge_sweep("v9_gl_edge", "v9_cp");
         assert!(
-            sql.contains("s.source_kind IN ('Directory', 'File', 'Definition', 'ImportedSymbol')"),
+            sql.contains(
+                "s.source_kind IN ('Branch', 'Directory', 'File', 'Definition', 'ImportedSymbol')"
+            ),
             "{sql}"
         );
         assert!(
@@ -302,6 +304,7 @@ mod tests {
             None,
             &Default::default(),
             &Default::default(),
+            "graph",
         );
         let store = Arc::new(crate::checkpoint::ClickHouseCheckpointStore::new(Arc::new(
             graph.clone(),

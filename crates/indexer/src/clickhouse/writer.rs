@@ -1,15 +1,10 @@
-use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::sync::Arc;
 use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
-use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
-use orbit_server_config::ClickHouseConfiguration;
+use clickhouse_client::ArrowClickHouseClient;
 use thiserror::Error;
-use tokio::sync::mpsc;
-use tokio::task::JoinSet;
-use tokio::time::Instant;
 use tracing::{error, warn};
 
 use crate::durability::WriteDurability;
@@ -23,14 +18,10 @@ pub enum WriteError {
 
     #[error("connection error: {0}")]
     Connection(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
-
-    #[error("invalid configuration: {0}")]
-    InvalidConfiguration(String),
 }
 
 impl From<RetryExhausted> for WriteError {
     fn from(e: RetryExhausted) -> Self {
-        // Satisfies the drive bound; write_part GiveUps the real error so the cap is never reached.
         WriteError::Write(e.to_string(), None)
     }
 }
@@ -53,28 +44,23 @@ pub struct ClickHouseWriter {
 }
 
 impl ClickHouseWriter {
-    pub fn new(
-        configuration: ClickHouseConfiguration,
-        metrics: Arc<EngineMetrics>,
-    ) -> Result<Self, WriteError> {
-        configuration
-            .validate()
-            .map_err(|e| WriteError::InvalidConfiguration(e.to_string()))?;
-        let client = configuration.build_client();
-        Ok(Self {
+    pub fn new(client: ArrowClickHouseClient, metrics: Arc<EngineMetrics>) -> Self {
+        Self {
             client,
             metrics,
             noop: false,
-        })
+        }
     }
 
     /// A writer that accepts all writes without connecting. For unit tests only.
     #[cfg(any(test, feature = "testkit"))]
     pub fn noop() -> Self {
+        use clickhouse_client::ClickHouseConfigurationExt;
+
         Self {
             client: orbit_server_config::AppConfig::embedded_defaults()
                 .graph
-                .build_client(),
+                .build_client("graph"),
             metrics: Arc::new(EngineMetrics::new()),
             noop: true,
         }
@@ -91,6 +77,12 @@ pub(crate) fn insert_overrides(
     }
 }
 
+/// Blanket-retries a transient ClickHouse insert (its error codes are not stable enough to classify).
+const WRITE_RETRY: LocalRetry = LocalRetry {
+    backoff: Backoff::Fixed(&[Duration::from_secs(2), Duration::from_secs(4)]),
+    max_attempts: 3,
+};
+
 impl ClickHouseWriter {
     pub async fn write(
         &self,
@@ -101,7 +93,7 @@ impl ClickHouseWriter {
         let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
         let bytes: u64 = batches
             .iter()
-            .map(|batch| match orbit_utils::arrow::logical_byte_size(batch) {
+            .map(|batch| match orbit_arrow::logical_byte_size(batch) {
                 Ok(n) => n,
                 Err(e) => {
                     self.metrics.record_unmeterable_batch(table);
@@ -151,6 +143,26 @@ impl ClickHouseWriter {
         })
     }
 
+    pub async fn write_durable(
+        &self,
+        table: &str,
+        batch: RecordBatch,
+    ) -> Result<WriteReport, WriteError> {
+        drive(&WRITE_RETRY, |attempt| {
+            let fut = self.write(table, vec![batch.clone()], Some(WriteDurability::Durable));
+            async move {
+                match fut.await {
+                    Ok(report) => Step::Done(report),
+                    Err(e) => {
+                        warn!(table, attempt = attempt + 1, error = %e, "durable write failed");
+                        WRITE_RETRY.retry_or_give_up(attempt, (), e)
+                    }
+                }
+            }
+        })
+        .await
+    }
+
     /// Issues a `DELETE FROM` statement for rows that should be lightweight-deleted.
     pub async fn lightweight_delete(&self, sql: &str) -> Result<(), WriteError> {
         if self.noop {
@@ -161,241 +173,6 @@ impl ClickHouseWriter {
             .execute()
             .await
             .map_err(|e| WriteError::Write(e.to_string(), None))
-    }
-}
-
-/// A per-submission completion hook. The buffered writer calls exactly one of these for every
-/// batch once that batch's part lands (or fails). The producer uses it to learn durability
-/// without the writer knowing anything about what the batch represents.
-pub trait FlushToken: Send + Sync {
-    /// This batch's part was written durably.
-    fn on_flushed(self: Arc<Self>);
-    /// This batch's part failed to write.
-    fn on_failed(self: Arc<Self>);
-}
-
-type Token = Arc<dyn FlushToken>;
-
-enum Msg {
-    Submit(String, RecordBatch, Token),
-    Flush(tokio::sync::oneshot::Sender<()>),
-}
-
-/// Coalesces tagged writes into well-sized parts across all producers, so a trickle of small
-/// writes pools into one part instead of one tiny part per flush tick. Each batch carries a
-/// [`FlushToken`] the writer notifies once the batch's part is durable or has failed.
-#[derive(Clone)]
-pub struct BufferedWriter {
-    tx: mpsc::Sender<Msg>,
-}
-
-/// Tunables for [`BufferedWriter::spawn`]. Named fields so callers can't transpose the several
-/// `usize`/`Duration` knobs.
-pub struct BufferedWriterConfig {
-    pub channel_capacity: usize,
-    pub max_rows: usize,
-    pub flush_interval: Duration,
-    pub min_flush_rows: usize,
-    pub max_age: Duration,
-    pub max_concurrent: usize,
-}
-
-impl BufferedWriter {
-    pub fn spawn(writer: Arc<ClickHouseWriter>, config: BufferedWriterConfig) -> Self {
-        let (tx, rx) = mpsc::channel(config.channel_capacity.max(1));
-        tokio::spawn(drain(
-            writer,
-            rx,
-            DrainLimits {
-                max_rows: config.max_rows.max(1),
-                flush_interval: config.flush_interval,
-                min_flush_rows: config.min_flush_rows,
-                max_age: config.max_age,
-            },
-            config.max_concurrent.max(1),
-        ));
-        Self { tx }
-    }
-
-    /// Buffer one batch with its completion `token`. Uses `blocking_send`, for the blocking
-    /// parse thread.
-    pub fn submit(
-        &self,
-        table: String,
-        batch: RecordBatch,
-        token: Token,
-    ) -> Result<(), WriteError> {
-        self.tx
-            .blocking_send(Msg::Submit(table, batch, token))
-            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
-    }
-
-    /// Flush all buffered rows now and wait until they are written. Used to make writes
-    /// synchronously visible (tests, shutdown); the steady-state path relies on the size/age
-    /// flush instead.
-    pub async fn flush(&self) -> Result<(), WriteError> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.tx
-            .send(Msg::Flush(tx))
-            .await
-            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))?;
-        rx.await
-            .map_err(|_| WriteError::Write("buffered writer drain closed".into(), None))
-    }
-}
-
-#[derive(Default)]
-struct TableBuffer {
-    batches: Vec<RecordBatch>,
-    tokens: Vec<Token>,
-    rows: usize,
-    first_buffered_at: Option<Instant>,
-}
-
-struct DrainLimits {
-    max_rows: usize,
-    flush_interval: Duration,
-    min_flush_rows: usize,
-    max_age: Duration,
-}
-
-async fn drain(
-    writer: Arc<ClickHouseWriter>,
-    mut rx: mpsc::Receiver<Msg>,
-    limits: DrainLimits,
-    max_concurrent: usize,
-) {
-    let mut pending: HashMap<String, TableBuffer> = HashMap::new();
-    let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
-    // Parts write concurrently and may land out of order. That is safe: the edge tables are
-    // ReplacingMergeTree keyed by row identity + `_version`, and stale cleanup keys on
-    // `indexed_at`, so neither correctness nor dedup depends on insert order.
-    let mut writes = JoinSet::new();
-
-    let mut ticker = tokio::time::interval(limits.flush_interval);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    ticker.tick().await;
-
-    loop {
-        tokio::select! {
-            msg = rx.recv() => match msg {
-                None => break,
-                Some(Msg::Flush(ack)) => {
-                    for (table, buf) in std::mem::take(&mut pending) {
-                        spawn_write(&mut writes, &sem, &writer, table, buf);
-                    }
-                    while writes.join_next().await.is_some() {}
-                    let _ = ack.send(());
-                }
-                Some(Msg::Submit(table, batch, token)) => {
-                    let buf = pending.entry(table.clone()).or_default();
-                    buf.first_buffered_at.get_or_insert_with(Instant::now);
-                    buf.rows += batch.num_rows();
-                    buf.batches.push(batch);
-                    buf.tokens.push(token);
-                    if buf.rows >= limits.max_rows {
-                        let buf = pending.remove(&table).unwrap();
-                        spawn_write(&mut writes, &sem, &writer, table, buf);
-                    }
-                }
-            },
-            _ = ticker.tick() => {
-                let now = Instant::now();
-                let ripe: Vec<String> = pending
-                    .iter()
-                    .filter(|(_, buf)| {
-                        buf.rows >= limits.min_flush_rows
-                            || buf
-                                .first_buffered_at
-                                .is_some_and(|t| now.duration_since(t) >= limits.max_age)
-                    })
-                    .map(|(table, _)| table.clone())
-                    .collect();
-                for table in ripe {
-                    let buf = pending.remove(&table).unwrap();
-                    spawn_write(&mut writes, &sem, &writer, table, buf);
-                }
-            }
-            // Reap finished writes so the JoinSet does not grow unbounded between flushes.
-            Some(_) = writes.join_next(), if !writes.is_empty() => {}
-        }
-    }
-
-    for (table, buf) in std::mem::take(&mut pending) {
-        spawn_write(&mut writes, &sem, &writer, table, buf);
-    }
-    while writes.join_next().await.is_some() {}
-}
-
-/// Spawn one coalesced part write, bounded by `sem` to `max_concurrent` in flight.
-fn spawn_write(
-    writes: &mut JoinSet<()>,
-    sem: &Arc<tokio::sync::Semaphore>,
-    writer: &Arc<ClickHouseWriter>,
-    table: String,
-    buf: TableBuffer,
-) {
-    let (writer, sem) = (writer.clone(), sem.clone());
-    writes.spawn(async move {
-        let _permit = sem
-            .acquire_owned()
-            .await
-            .expect("write semaphore never closes");
-        write_part(&writer, &table, buf).await;
-    });
-}
-
-/// Notifies every held token of failure when dropped, unless `disarm`ed first. Guarantees a part
-/// that unwinds (a panic in `write`) still releases its tokens, so a project can never be stranded
-/// with an un-decremented commit (which would hang `flush()` on the inflight count forever).
-struct NotifyOnDrop(Vec<Token>);
-
-impl NotifyOnDrop {
-    fn disarm(mut self) -> Vec<Token> {
-        std::mem::take(&mut self.0)
-    }
-}
-
-impl Drop for NotifyOnDrop {
-    fn drop(&mut self) {
-        std::mem::take(&mut self.0)
-            .into_iter()
-            .for_each(|t| t.on_failed());
-    }
-}
-
-/// Blanket-retries a transient ClickHouse insert (its error codes are not stable enough to classify).
-const WRITE_RETRY: LocalRetry = LocalRetry {
-    backoff: Backoff::Fixed(&[Duration::from_secs(2), Duration::from_secs(4)]),
-    max_attempts: 3,
-};
-
-/// Write one coalesced part, then notify every batch's token whether its rows landed.
-async fn write_part(writer: &ClickHouseWriter, table: &str, buf: TableBuffer) {
-    let guard = NotifyOnDrop(buf.tokens);
-
-    // Arrow batches are Arc-backed, so the per-attempt clone is a refcount bump, not a data copy.
-    let durable = drive(&WRITE_RETRY, |attempt| {
-        let fut = writer.write(table, buf.batches.clone(), Some(WriteDurability::Durable));
-        async move {
-            match fut.await {
-                Ok(report) => Step::Done(report),
-                Err(e) => {
-                    warn!(table, attempt = attempt + 1, error = %e, "buffered write failed");
-                    WRITE_RETRY.retry_or_give_up(attempt, (), e)
-                }
-            }
-        }
-    })
-    .await;
-
-    let tokens = guard.disarm();
-    match durable {
-        Ok(_) => tokens.into_iter().for_each(|t| t.on_flushed()),
-        Err(e) => {
-            warn!(table, error = %e, "buffered write flush failed after retries");
-            tokens.into_iter().for_each(|t| t.on_failed());
-        }
     }
 }
 
@@ -417,185 +194,5 @@ mod tests {
             insert_overrides(WriteDurability::FireAndForget),
             &[("async_insert", "1"), ("wait_for_async_insert", "0")]
         );
-    }
-
-    use arrow::array::Int64Array;
-    use arrow::datatypes::{DataType, Field, Schema};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    fn batch(rows: usize) -> RecordBatch {
-        let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int64, false)]));
-        RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![0i64; rows]))]).unwrap()
-    }
-
-    #[derive(Default)]
-    struct CountToken {
-        flushed: AtomicUsize,
-        failed: AtomicUsize,
-    }
-
-    impl FlushToken for CountToken {
-        fn on_flushed(self: Arc<Self>) {
-            self.flushed.fetch_add(1, Ordering::SeqCst);
-        }
-        fn on_failed(self: Arc<Self>) {
-            self.failed.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
-    async fn submit(w: &BufferedWriter, table: &str, batch: RecordBatch, token: Token) {
-        let w = w.clone();
-        let table = table.to_string();
-        tokio::task::spawn_blocking(move || w.submit(table, batch, token))
-            .await
-            .unwrap()
-            .unwrap();
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn size_flush_notifies_each_batch_token_once_its_part_lands() {
-        let w = BufferedWriter::spawn(
-            Arc::new(ClickHouseWriter::noop()),
-            BufferedWriterConfig {
-                channel_capacity: 16,
-                max_rows: 100,
-                flush_interval: Duration::from_secs(3600),
-                min_flush_rows: 1,
-                max_age: Duration::from_secs(3600),
-                max_concurrent: 1,
-            },
-        );
-        let token: Arc<CountToken> = Arc::new(CountToken::default());
-
-        // gl_edge crosses max_rows and flushes immediately; gl_code_edge stays buffered.
-        submit(&w, "gl_edge", batch(100), token.clone()).await;
-        submit(&w, "gl_code_edge", batch(10), token.clone()).await;
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(token.flushed.load(Ordering::SeqCst), 1);
-
-        w.flush().await.unwrap();
-        assert_eq!(token.flushed.load(Ordering::SeqCst), 2);
-        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn flush_waits_for_concurrent_in_flight_writes() {
-        let w = BufferedWriter::spawn(
-            Arc::new(ClickHouseWriter::noop()),
-            BufferedWriterConfig {
-                channel_capacity: 64,
-                max_rows: 100,
-                flush_interval: Duration::from_secs(3600),
-                min_flush_rows: 1,
-                max_age: Duration::from_secs(3600),
-                max_concurrent: 4,
-            },
-        );
-        let token: Arc<CountToken> = Arc::new(CountToken::default());
-
-        // Each batch crosses max_rows on its own table, so all four spawn concurrent writes.
-        for table in ["a", "b", "c", "d"] {
-            submit(&w, table, batch(100), token.clone()).await;
-        }
-
-        w.flush().await.unwrap();
-        assert_eq!(token.flushed.load(Ordering::SeqCst), 4);
-        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn soft_tick_holds_a_table_below_the_floor() {
-        let w = BufferedWriter::spawn(
-            Arc::new(ClickHouseWriter::noop()),
-            BufferedWriterConfig {
-                channel_capacity: 16,
-                max_rows: 1_000_000,
-                flush_interval: Duration::from_millis(20),
-                min_flush_rows: 500,
-                max_age: Duration::from_secs(3600),
-                max_concurrent: 1,
-            },
-        );
-        let token: Arc<CountToken> = Arc::new(CountToken::default());
-
-        submit(&w, "gl_definition", batch(10), token.clone()).await;
-        tokio::time::sleep(Duration::from_millis(120)).await;
-        assert_eq!(
-            token.flushed.load(Ordering::SeqCst),
-            0,
-            "a sub-floor buffer must survive repeated soft ticks"
-        );
-
-        w.flush().await.unwrap();
-        assert_eq!(token.flushed.load(Ordering::SeqCst), 1);
-        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn hard_cap_force_flushes_a_table_below_the_floor() {
-        let w = BufferedWriter::spawn(
-            Arc::new(ClickHouseWriter::noop()),
-            BufferedWriterConfig {
-                channel_capacity: 16,
-                max_rows: 1_000_000,
-                flush_interval: Duration::from_millis(20),
-                min_flush_rows: 500,
-                max_age: Duration::from_millis(60),
-                max_concurrent: 1,
-            },
-        );
-        let token: Arc<CountToken> = Arc::new(CountToken::default());
-
-        submit(&w, "gl_definition", batch(10), token.clone()).await;
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        assert_eq!(
-            token.flushed.load(Ordering::SeqCst),
-            1,
-            "the oldest row aging past the cap force-flushes despite being below the floor"
-        );
-        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn size_flush_still_fires_below_the_floor_age() {
-        let w = BufferedWriter::spawn(
-            Arc::new(ClickHouseWriter::noop()),
-            BufferedWriterConfig {
-                channel_capacity: 16,
-                max_rows: 100,
-                flush_interval: Duration::from_secs(3600),
-                min_flush_rows: 1_000_000,
-                max_age: Duration::from_secs(3600),
-                max_concurrent: 1,
-            },
-        );
-        let token: Arc<CountToken> = Arc::new(CountToken::default());
-
-        submit(&w, "gl_definition", batch(100), token.clone()).await;
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(
-            token.flushed.load(Ordering::SeqCst),
-            1,
-            "reaching max_rows flushes immediately, independent of floor or cap"
-        );
-    }
-
-    #[test]
-    fn notify_on_drop_fails_tokens_when_not_disarmed() {
-        let token: Arc<CountToken> = Arc::new(CountToken::default());
-        let guard = NotifyOnDrop(vec![token.clone()]);
-        drop(guard);
-        assert_eq!(token.failed.load(Ordering::SeqCst), 1);
-        assert_eq!(token.flushed.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn notify_on_drop_is_silent_once_disarmed() {
-        let token: Arc<CountToken> = Arc::new(CountToken::default());
-        let guard = NotifyOnDrop(vec![token.clone()]);
-        let tokens = guard.disarm();
-        tokens.into_iter().for_each(|t| t.on_flushed());
-        assert_eq!(token.flushed.load(Ordering::SeqCst), 1);
-        assert_eq!(token.failed.load(Ordering::SeqCst), 0);
     }
 }

@@ -1,11 +1,16 @@
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
-use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
+use ontology::constants::{
+    DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TRAVERSAL_PATH_COLUMN,
+};
 use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use strum::VariantNames;
+
+mod predicates;
+pub use predicates::{BooleanExpression, Condition, PredicateTarget};
 
 /// Controls which columns are fetched for dynamically-discovered entities
 /// during hydration (PathFinding, Neighbors).
@@ -31,6 +36,44 @@ pub struct QueryOptions {
     pub include_debug_sql: bool,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RelationshipReturn {
+    pub columns: Vec<RelationshipColumn>,
+    pub column_order: Vec<String>,
+    pub sort: Option<RelationshipOrder>,
+}
+
+impl RelationshipReturn {
+    pub fn uses(&self, relationship: usize) -> bool {
+        self.columns
+            .iter()
+            .any(|column| column.relationship == relationship)
+            || self
+                .sort
+                .as_ref()
+                .is_some_and(|sort| sort.relationship == relationship)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationshipColumn {
+    pub name: String,
+    pub relationship: usize,
+    pub kind: RelationshipColumnKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelationshipColumnKind {
+    Type,
+    Relationship,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationshipOrder {
+    pub relationship: usize,
+    pub direction: OrderDirection,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Input {
     pub query_type: QueryType,
@@ -49,19 +92,26 @@ pub struct Input {
     #[serde(default)]
     pub options: QueryOptions,
     #[serde(skip)]
-    pub join_predicates: Vec<JoinPredicate>,
-}
-
-#[derive(Debug, Clone)]
-pub struct JoinPredicate {
-    pub lhs_node: String,
-    pub lhs_prop: String,
-    pub op: FilterOp,
-    pub rhs_node: String,
-    pub rhs_prop: String,
+    pub predicates: Vec<BooleanExpression<Condition>>,
+    #[serde(skip)]
+    pub relationship_return: RelationshipReturn,
 }
 
 impl Input {
+    pub(crate) fn aggregation_row_nodes(
+        &self,
+        model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    ) -> std::collections::HashSet<&str> {
+        let groups = &self.aggregation.group_by;
+        let text_groups = property_groups(groups)
+            .filter(|(node, property)| {
+                self.entity_of(node)
+                    .is_some_and(|entity| model.property_is_free_text(entity, property))
+            })
+            .map(|(node, _)| node);
+        node_group_ids(groups).chain(text_groups).collect()
+    }
+
     /// Whether this query has the "search shape": a single-node table scan
     /// with no relationships (traversal with 1 node + 0 relationships).
     pub fn is_search(&self) -> bool {
@@ -90,7 +140,8 @@ impl Default for Input {
             cursor: None,
             order_by: None,
             options: QueryOptions::default(),
-            join_predicates: Vec::new(),
+            predicates: Vec::new(),
+            relationship_return: RelationshipReturn::default(),
         }
     }
 }
@@ -148,6 +199,8 @@ pub struct InputNode {
     pub columns: Option<ColumnSelection>,
     #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, Vec<InputFilter>>,
+    #[serde(default, rename = "not", deserialize_with = "deserialize_filters")]
+    pub negated_filters: BTreeMap<String, Vec<InputFilter>>,
     #[serde(default, deserialize_with = "deserialize_id_vec")]
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
@@ -166,6 +219,7 @@ impl Default for InputNode {
             entity: None,
             columns: None,
             filters: HashMap::new(),
+            negated_filters: BTreeMap::new(),
             node_ids: Vec::new(),
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
@@ -284,11 +338,10 @@ pub enum FilterOp {
     AnyTokens,
 }
 
-fn deserialize_filters<'de, D>(
-    deserializer: D,
-) -> Result<HashMap<String, Vec<InputFilter>>, D::Error>
+fn deserialize_filters<'de, D, C>(deserializer: D) -> Result<C, D::Error>
 where
     D: Deserializer<'de>,
+    C: FromIterator<(String, Vec<InputFilter>)>,
 {
     let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
     raw.into_iter()

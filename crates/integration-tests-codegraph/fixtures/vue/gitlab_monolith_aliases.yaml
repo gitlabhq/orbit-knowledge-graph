@@ -1,5 +1,6 @@
 name: "Vue GitLab monolith alias patterns"
 pipeline: js
+
 fixtures:
   - path: config/webpack.config.js
     content: |

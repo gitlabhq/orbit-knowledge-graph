@@ -1,4 +1,5 @@
 name: "Rust: local flow bug fixes"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -51,8 +52,8 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 2 }
-      - { row: { fqn: 'foo' } }
-      - { row: { fqn: 'bar' } }
+      - { row: { fqn: "foo" } }
+      - { row: { fqn: "bar" } }
 
   - name: "tuple destructure binds elements positionally"
     query: |
@@ -61,8 +62,8 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 2 }
-      - { row: { fqn: 'foo' } }
-      - { row: { fqn: 'bar' } }
+      - { row: { fqn: "foo" } }
+      - { row: { fqn: "bar" } }
 
   - name: "field reassignment tracks both assigned targets"
     query: |
@@ -71,5 +72,5 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 2 }
-      - { row: { fqn: 'foo' } }
-      - { row: { fqn: 'bar' } }
+      - { row: { fqn: "foo" } }
+      - { row: { fqn: "bar" } }

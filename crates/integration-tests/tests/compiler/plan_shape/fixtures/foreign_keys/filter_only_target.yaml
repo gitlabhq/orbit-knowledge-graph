@@ -1,4 +1,5 @@
 name: Filter-only FK target exports keys from an authoritative filtered scan
+
 query:
   json: |
     {
@@ -13,10 +14,12 @@ query:
   gql: |
     MATCH (mr:MergeRequest {id: 2000})<-[:AUTHORED]-(u:User {username: 'alice'})
     RETURN count(mr) AS n
+
 logical:
   expect:
     - (Filter u.username = 'alice' (NodeScan User AS u))
     - (Aggregate COUNT(mr) AS n (_))
+
 physical:
   clickhouse:
     planned:

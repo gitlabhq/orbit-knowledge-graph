@@ -1,4 +1,5 @@
 name: "Rust: generics, lifetimes, and macro calls"
+
 fixtures:
   - path: main.rs
     content: |

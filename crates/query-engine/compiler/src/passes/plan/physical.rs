@@ -3,7 +3,10 @@ use super::requirements::{
     property_filter,
 };
 use crate::error::{QueryError, Result};
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use ontology::constants::{
+    DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, SOURCE_TAGS_COLUMN,
+    TARGET_TAGS_COLUMN,
+};
 
 use super::{Hop, NodePlan};
 
@@ -22,6 +25,14 @@ pub struct BindingSource {
 }
 
 impl BindingSource {
+    pub(super) fn column(&self, property: &str) -> Option<Column> {
+        if property == DEFAULT_PRIMARY_KEY {
+            Some(Column::new(&self.alias, &self.column))
+        } else {
+            self.joined.then(|| Column::new(&self.node, property))
+        }
+    }
+
     pub(super) fn table(alias: &str) -> Self {
         Self {
             node: alias.into(),
@@ -87,6 +98,39 @@ pub enum PhysicalSource {
 }
 
 impl PhysicalSource {
+    pub(super) fn edge(hop: &Hop, alias: &str, final_: bool) -> Self {
+        if let Some(table) = hop.single_edge_table() {
+            return Self::Scan {
+                relationship: Some(hop.input_index),
+                table: table.into(),
+                alias: alias.into(),
+                final_,
+            };
+        }
+        Self::Union {
+            alias: alias.into(),
+            arms: hop
+                .edge_tables
+                .iter()
+                .map(|table| PhysicalPlan {
+                    source: Self::Scan {
+                        relationship: Some(hop.input_index),
+                        table: table.clone(),
+                        alias: format!("_{alias}"),
+                        final_,
+                    },
+                    outputs: EDGE_RESERVED_COLUMNS
+                        .iter()
+                        .chain([&SOURCE_TAGS_COLUMN, &TARGET_TAGS_COLUMN])
+                        .chain([&DELETED_COLUMN])
+                        .map(|column| Projection::col(&format!("_{alias}"), column))
+                        .collect(),
+                })
+                .collect(),
+            relationship: hop.input_index,
+        }
+    }
+
     pub(super) fn inner_join(self, right: Self, endpoints: (Column, Column)) -> Self {
         Self::Join {
             endpoints,
@@ -138,15 +182,7 @@ impl PhysicalSource {
         predicates: Vec<Predicate>,
         upstream: Option<&PhysicalPlan>,
     ) -> Self {
-        let source = Self::Filter {
-            predicates,
-            input: Box::new(Self::Scan {
-                table: hop.edge_table.clone(),
-                alias: alias.into(),
-                final_: false,
-                relationship: Some(hop.input_index),
-            }),
-        };
+        let source = Self::edge(hop, alias, false).filter(predicates);
         source.cascade(hop, alias, upstream)
     }
 }

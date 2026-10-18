@@ -265,6 +265,13 @@ mod tests {
             .render()
     }
 
+    fn compile_gql_sql(query: &str) -> String {
+        compile(query, Frontend::Gql, &ONTOLOGY, &security_ctx())
+            .expect("should compile")
+            .base
+            .render()
+    }
+
     #[test]
     fn relationship_filter_keeps_edge_column_type() {
         let query = r#"{
@@ -514,7 +521,7 @@ mod tests {
                 "joined Project alias must remain scoped, got:\n{sql}"
             );
             assert!(
-                sql.contains("startsWith(e0.traversal_path"),
+                sql.contains("startsWith(_orbit_edge_0.traversal_path"),
                 "edge alias e0 must remain scoped, got:\n{sql}"
             );
         }
@@ -551,14 +558,14 @@ mod tests {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "node_ids": [1]},
-                {"id": "f", "entity": "File"}
+                {"id": "parent", "entity": "Pipeline", "node_ids": [1]},
+                {"id": "child", "entity": "Pipeline"}
             ],
-            "relationships": [{"type": "IN_PROJECT", "from": "f", "to": "p"}],
-            "group_by": ["p"],
+            "relationships": [{"type": "CHILD_OF", "from": "parent", "to": "child"}],
+            "group_by": ["parent"],
             "aggregations": [{
-                "count": "f",
-                "as": "files"
+                "count": "child",
+                "as": "children"
             }],
             "limit": 10
         }"#;
@@ -575,7 +582,8 @@ mod tests {
             "single-hop edge aggregation should use LIMIT BY dedup, got:\n{sql}"
         );
         assert!(
-            !sql.contains("COUNT(e0.source_id)") && !sql.contains("count(e0.source_id)"),
+            !sql.contains("COUNT(_orbit_edge_0.source_id)")
+                && !sql.contains("count(_orbit_edge_0.source_id)"),
             "must not emit COUNT(source_id) -- forces unnecessary column read, \
              got:\n{sql}"
         );
@@ -631,10 +639,10 @@ mod tests {
 
         let sql = compile_sql(query);
         let (e0_inner, rest) = sql
-            .split_once(") AS e0 INNER JOIN")
+            .split_once(") AS _orbit_edge_0 INNER JOIN")
             .expect("e0 dedup subquery is closed before the join");
         let (e1_inner, post_join) = rest
-            .split_once(") AS e1 ON")
+            .split_once(") AS _orbit_edge_1 ON")
             .expect("e1 dedup subquery is closed before ON");
         let outer = post_join
             .split_once(" WHERE ")
@@ -642,8 +650,8 @@ mod tests {
             .unwrap_or("");
 
         for clause in [
-            "e0.source_id = 490855697",
-            "e0.target_id IN (SELECT id FROM _filter_label)",
+            "_orbit_edge_0.source_id = 490855697",
+            "_orbit_edge_0.target_id IN (SELECT id FROM _filter_label)",
         ] {
             assert!(
                 e0_inner.contains(clause),
@@ -651,8 +659,8 @@ mod tests {
             );
         }
         for clause in [
-            "e1.source_id = 490855697",
-            "e1.target_id IN (SELECT id FROM _filter_project)",
+            "_orbit_edge_1.source_id = 490855697",
+            "_orbit_edge_1.target_id IN (SELECT id FROM _filter_project)",
         ] {
             assert!(
                 e1_inner.contains(clause),
@@ -660,11 +668,11 @@ mod tests {
             );
         }
         for kind in [
-            "e0.relationship_kind = 'HAS_LABEL'",
-            "e0.source_kind = 'MergeRequest'",
-            "e0.target_kind = 'Label'",
-            "e1.relationship_kind = 'IN_PROJECT'",
-            "e1.target_kind = 'Project'",
+            "_orbit_edge_0.relationship_kind = 'HAS_LABEL'",
+            "_orbit_edge_0.source_kind = 'MergeRequest'",
+            "_orbit_edge_0.target_kind = 'Label'",
+            "_orbit_edge_1.relationship_kind = 'IN_PROJECT'",
+            "_orbit_edge_1.target_kind = 'Project'",
         ] {
             assert!(
                 outer.contains(kind),
@@ -700,7 +708,8 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("FROM gl_edge AS e0 FINAL") && sql.contains("FROM gl_edge AS e1 FINAL"),
+            sql.contains("FROM gl_edge AS _orbit_edge_0 FINAL")
+                && sql.contains("FROM gl_edge AS _orbit_edge_1 FINAL"),
             "multi-edge self-join must dedup each edge scan via FINAL, got:\n{sql}"
         );
     }
@@ -1124,7 +1133,7 @@ mod tests {
             "variable-length traversal must use UNION ALL arms, got:\n{sql}"
         );
         assert!(
-            sql.contains("e0.source_id = 1"),
+            sql.contains("_orbit_edge_0.source_id = 1"),
             "pinned User node_ids must reach the outer WHERE, got:\n{sql}"
         );
         assert!(
@@ -1157,7 +1166,7 @@ mod tests {
             "variable-length traversal should use UNION ALL arms, got:\n{sql}"
         );
         assert!(
-            sql.contains("e0.target_id = 1"),
+            sql.contains("_orbit_edge_0.target_id = 1"),
             "pinned to-side node_ids must reach the outer WHERE, got:\n{sql}"
         );
     }
@@ -1223,8 +1232,8 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("e1.source_kind") && sql.contains("'Group'"),
-            "depth-1 arm must inject e1.source_kind = 'Group', got:\n{sql}"
+            sql.contains("_orbit_edge_1.source_kind") && sql.contains("'Group'"),
+            "depth-1 arm must inject _orbit_edge_1.source_kind = 'Group', got:\n{sql}"
         );
         assert!(
             sql.contains("e3.target_kind") && sql.contains("'Project'"),
@@ -1256,11 +1265,11 @@ mod tests {
         }"#;
         let sql = compile_sql(query);
         assert!(
-            sql.contains("has(e1.source_tags, 'state:opened')"),
+            sql.contains("has(_orbit_edge_1.source_tags, 'state:opened')"),
             "state must be pushed onto IN_PROJECT (e1), which carries it, got:\n{sql}"
         );
         assert!(
-            !sql.contains("has(e0.source_tags, 'state:opened')"),
+            !sql.contains("has(_orbit_edge_0.source_tags, 'state:opened')"),
             "state must NOT be pushed onto HAS_LABEL (e0), whose tags are empty, got:\n{sql}"
         );
     }
@@ -1360,11 +1369,11 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("e0.target_id IN [1, 2, 3]"),
+            sql.contains("_orbit_edge_0.target_id IN [1, 2, 3]"),
             "node_ids must be pushed to edge target_id filter, got:\n{sql}"
         );
         assert!(
-            sql.contains("has(e0.target_tags, 'state:merged')"),
+            sql.contains("has(_orbit_edge_0.target_tags, 'state:merged')"),
             "denorm tag filter is applied alongside node_ids, got:\n{sql}"
         );
     }
@@ -1391,7 +1400,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("has(e0.target_tags, 'state:merged')"),
+            sql.contains("has(_orbit_edge_0.target_tags, 'state:merged')"),
             "denorm filter must be pushed to edge target_tags, got:\n{sql}"
         );
         assert!(
@@ -1752,12 +1761,9 @@ mod tests {
 
     #[test]
     fn scope_proofs_preserve_deeper_authorization_filters() {
-        let context = SecurityContext::new(1, vec!["1/2/3/".into(), "1/2/4/".into()])
-            .unwrap()
-            .with_scope_proofs(std::collections::HashMap::from([(
-                "p".into(),
-                ScopeProof::literal("1/2/"),
-            )]));
+        let mut context = SecurityContext::new(1, vec!["1/2/3/".into(), "1/2/4/".into()]).unwrap();
+        context.scope_proofs =
+            std::collections::HashMap::from([("p".into(), ScopeProof::literal("1/2/"))]);
         for (query, lookup) in [
             (
                 "MATCH (p:Project {name: 'example'}) RETURN p LIMIT 20",
@@ -1824,7 +1830,12 @@ mod tests {
                 r#""from":"a","to":"x","direction":"incoming""#,
                 "gl_edge",
             ),
-            ("Directory", "File", r#""from":"a","to":"x""#, "gl_edge"),
+            (
+                "Directory",
+                "File",
+                r#""from":"a","to":"x""#,
+                "gl_code_edge",
+            ),
             ("Project", "Group", r#""from":"x","to":"a""#, "gl_edge"),
             ("Group", "Group", r#""from":"x","to":"a""#, "gl_edge"),
         ];
@@ -1875,7 +1886,7 @@ mod tests {
             "single FilterOnly node should not emit _narrow_p cascade CTE; the IN-CTE push on the same hop already narrows the join, got:\n{sql}"
         );
         assert!(
-            sql.contains("e1.source_id IN (SELECT id FROM _filter_g)"),
+            sql.contains("_orbit_edge_1.source_id IN (SELECT id FROM _filter_g)"),
             "FilterOnly IN-CTE should land inside the dedup CTE inner WHERE, got:\n{sql}"
         );
     }
@@ -2340,5 +2351,86 @@ mod tests {
             (1000..3000).contains(&wide_page),
             "wide page got {wide_page} chars"
         );
+    }
+
+    #[test]
+    fn gql_where_id_equality_compiles_like_pattern_id() {
+        assert_eq!(
+            compile_gql_sql(
+                "MATCH (w:WorkItem)-[:HAS_NOTE]->(n:Note) WHERE w.id = 7 RETURN n.note"
+            ),
+            compile_gql_sql("MATCH (w:WorkItem {id: 7})-[:HAS_NOTE]->(n:Note) RETURN n.note"),
+        );
+    }
+
+    #[test]
+    fn json_id_filter_compiles_like_node_ids() {
+        let neighbors = |center: &str| {
+            compile_sql(&format!(
+                r#"{{"query_type": "neighbors", "nodes": [{{"id": "w", "entity": "WorkItem", {center}}}],
+                    "neighbors": {{"direction": "both"}}, "limit": 30}}"#
+            ))
+        };
+        assert_eq!(
+            neighbors(r#""filters": {"id": 7}"#),
+            neighbors(r#""node_ids": [7]"#)
+        );
+    }
+
+    #[test]
+    fn multi_id_neighbors_center_keeps_one_fused_scan() {
+        let sql = compile_gql_sql(
+            "MATCH (g:Group)-[r:MEMBER_OF|CONTAINS]-(m) WHERE g.id IN [1, 2] RETURN g, r, m LIMIT 30",
+        );
+
+        assert!(sql.contains("_orbit_fused"), "{sql}");
+    }
+
+    #[test]
+    fn pinned_neighbors_center_scans_each_arm_by_its_own_id() {
+        let sql = compile_gql_sql(
+            "MATCH (w:WorkItem)-[r:RELATED_TO|HAS_LABEL]-(m) WHERE w.id = 7 RETURN w, r, m LIMIT 30",
+        );
+
+        assert!(!sql.contains("_orbit_fused"), "{sql}");
+        assert!(sql.contains("(e.source_id = 7)"), "{sql}");
+        assert!(sql.contains("(e.target_id = 7)"), "{sql}");
+    }
+
+    #[test]
+    fn aggregated_edge_dedup_filters_kinds_before_picking_latest_row() {
+        let sql = compile_gql_sql(
+            "MATCH (u:User)-[:APPROVED]->(mr:MergeRequest {state: 'merged'}) RETURN u.username, count(mr) AS n",
+        );
+
+        let dedup = sql
+            .split("LIMIT 1 BY")
+            .next()
+            .and_then(|head| head.rsplit("(SELECT * FROM gl_edge").next())
+            .expect("edge dedup subquery");
+        assert!(
+            dedup.contains("relationship_kind = 'APPROVED'"),
+            "kind filter should sit inside the dedup subquery:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn text_indexed_equality_also_matches_the_lowercase_index_expression() {
+        let sql = compile_gql_sql("MATCH (d:Definition) WHERE d.name = 'compile' RETURN d.name");
+
+        assert!(sql.contains("(d.name = 'compile')"), "{sql}");
+        assert!(sql.contains("(lower(d.name) = lower('compile'))"), "{sql}");
+    }
+
+    #[test]
+    fn equality_without_text_index_or_with_a_sort_key_filter_stays_plain() {
+        for query in [
+            "MATCH (d:Definition) WHERE d.definition_type = 'Function' RETURN d.name",
+            "MATCH (d:Definition) WHERE d.name <> 'compile' RETURN d.name",
+            "MATCH (d:Definition) WHERE d.project_id = 9 AND d.name = 'compile' RETURN d.name",
+        ] {
+            let sql = compile_gql_sql(query);
+            assert!(!sql.contains("lower(d."), "{query}:\n{sql}");
+        }
     }
 }

@@ -1,4 +1,5 @@
 name: Node type properties do not suppress planned edge outputs
+
 query:
   json: |
     {
@@ -14,14 +15,16 @@ query:
   gql: |
     MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 9970})
     RETURN u.username, u.user_type, g.name ORDER BY u.username LIMIT 5
+
 logical:
   expect:
     - (EdgeScan MEMBER_OF u->g AS e0)
+
 physical:
   clickhouse:
     planned:
       expect:
-        - (Project e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, u.user_type AS u_user_type, ... (_))
+        - (Project _orbit_edge_0.relationship_kind AS e0_type, _orbit_edge_0.source_id AS e0_src, _orbit_edge_0.source_kind AS e0_src_type, _orbit_edge_0.target_id AS e0_dst, _orbit_edge_0.target_kind AS e0_dst_type, u.user_type AS u_user_type, ... (_))
     emitted:
       expect:
-        - (Project e0.relationship_kind AS e0_type, e0.source_id AS e0_src, e0.source_kind AS e0_src_type, e0.target_id AS e0_dst, e0.target_kind AS e0_dst_type, u.user_type AS u_user_type, ... (_))
+        - (Project _orbit_edge_0.relationship_kind AS e0_type, _orbit_edge_0.source_id AS e0_src, _orbit_edge_0.source_kind AS e0_src_type, _orbit_edge_0.target_id AS e0_dst, _orbit_edge_0.target_kind AS e0_dst_type, u.user_type AS u_user_type, ... (_))

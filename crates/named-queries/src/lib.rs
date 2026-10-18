@@ -8,7 +8,7 @@ use std::path::Path;
 use rust_embed::Embed;
 use serde_json::{Map, Value};
 
-pub use query::{BindingValues, NamedQuery};
+pub use query::{BindingValues, NamedQuery, RenderedQuery};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -143,20 +143,12 @@ impl NamedQueries {
         self.queries.get(name)
     }
 
-    pub fn render_request(
-        &self,
-        request: &str,
-        values: &BindingValues,
-    ) -> Result<String, NamedQueryError> {
-        self.render_request_language(request, Language::Json, values)
-    }
-
     pub fn render_request_language(
         &self,
         request: &str,
         language: Language,
         values: &BindingValues,
-    ) -> Result<String, NamedQueryError> {
+    ) -> Result<RenderedQuery, NamedQueryError> {
         let envelope = parse_request(request)?;
         let Some(query) = self.queries.get(&envelope.name) else {
             return Err(NamedQueryError::Unknown {
@@ -164,7 +156,7 @@ impl NamedQueries {
                 available: self.names().map(String::from).collect(),
             });
         };
-        query.render_language(language, values, &envelope.parameters)
+        query.render_query(language, values, &envelope.parameters)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &NamedQuery> {
@@ -197,11 +189,22 @@ fn parse_request(request: &str) -> Result<Envelope, NamedQueryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
-    fn values() -> BindingValues {
-        BindingValues {
-            current_user_id: 42,
-        }
+    fn render_request(
+        queries: &NamedQueries,
+        language: Language,
+        request: &str,
+    ) -> Result<String, NamedQueryError> {
+        queries
+            .render_request_language(
+                request,
+                language,
+                &BindingValues {
+                    current_user_id: 42,
+                },
+            )
+            .map(|rendered| rendered.text)
     }
 
     const VALID: &str = r#"
@@ -220,70 +223,71 @@ query:
 "#;
 
     #[test]
-    fn load_embedded_contains_committed_queries() {
-        assert_eq!(NamedQueries::load_embedded().unwrap().iter().count(), 12);
-    }
-
-    #[test]
-    fn render_request_substitutes_current_user_id() {
+    fn json_requests_render_bindings_and_parameters() {
         let queries = NamedQueries::load_embedded().expect("embedded named queries load");
-        let rendered = queries
-            .render_request(r#"{"name": "my_neighbors"}"#, &values())
+        let rendered = render_request(&queries, Language::Json, r#"{"name": "my_neighbors"}"#)
             .expect("known named query renders");
-        assert!(rendered.contains("\"node_ids\":[42]"), "{rendered}");
-        assert!(!rendered.contains("$binding"), "{rendered}");
+        assert_eq!(
+            serde_json::from_str::<Value>(&rendered).unwrap(),
+            json!({
+                "query_type": "neighbors",
+                "nodes": [{"id": "me", "entity": "User", "node_ids": [42]}],
+                "neighbors": {"direction": "both"},
+                "limit": 100
+            })
+        );
+
+        let request = r#"{"name": "expand_neighbors", "parameters": {"entity": "Project", "node_ids": [7, 9], "limit": 50}}"#;
+        let rendered = render_request(&queries, Language::Json, request)
+            .expect("parameterized named query renders");
+        assert_eq!(
+            serde_json::from_str::<Value>(&rendered).unwrap(),
+            json!({
+                "query_type": "neighbors",
+                "nodes": [{"id": "center", "entity": "Project", "node_ids": [7, 9]}],
+                "neighbors": {"direction": "both"},
+                "limit": 50
+            })
+        );
     }
 
     #[test]
-    fn render_request_rejects_unknown_name_and_lists_available() {
+    fn gql_requests_render_bindings_and_parameters() {
         let queries = NamedQueries::load_embedded().expect("embedded named queries load");
-        let err = queries
-            .render_request(r#"{"name": "nonexistent"}"#, &values())
-            .unwrap_err();
+        let rendered = render_request(&queries, Language::Gql, r#"{"name": "my_neighbors"}"#)
+            .expect("known named query renders");
+        assert_eq!(
+            rendered,
+            "MATCH (me:User {id: 42})--(neighbor)\nRETURN me, neighbor\nLIMIT 100"
+        );
+
+        let request = r#"{"name": "expand_neighbors", "parameters": {"entity": "Project", "node_ids": [7, 9], "limit": 50}}"#;
+        let rendered = render_request(&queries, Language::Gql, request)
+            .expect("parameterized named query renders");
+        assert_eq!(
+            rendered,
+            "MATCH (center:`Project`)--(neighbor)\nWHERE center.id IN [7,9]\nRETURN center, neighbor\nLIMIT 50"
+        );
+    }
+
+    #[test]
+    fn requests_reject_invalid_envelopes() {
+        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
+        let err =
+            render_request(&queries, Language::Json, r#"{"name": "nonexistent"}"#).unwrap_err();
         assert!(err.to_string().contains("nonexistent"), "{err}");
         assert!(err.to_string().contains("my_neighbors"), "{err}");
-    }
 
-    #[test]
-    fn render_request_rejects_bare_name() {
-        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
-        let err = queries
-            .render_request("my_neighbors", &values())
-            .unwrap_err();
-        assert!(
-            matches!(err, NamedQueryError::InvalidRequest { .. }),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn render_request_envelope_substitutes_parameters() {
-        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
-        let rendered = queries
-            .render_request(
-                r#"{"name": "expand_neighbors", "parameters": {"entity": "Project", "node_ids": [7, 9], "limit": 50}}"#,
-                &values(),
-            )
-            .expect("parameterized named query renders");
-        assert!(rendered.contains("\"entity\":\"Project\""), "{rendered}");
-        assert!(rendered.contains("\"node_ids\":[7,9]"), "{rendered}");
-        assert!(rendered.contains("\"limit\":50"), "{rendered}");
-        assert!(!rendered.contains("$param"), "{rendered}");
-    }
-
-    #[test]
-    fn render_request_rejects_malformed_envelope() {
-        let queries = NamedQueries::load_embedded().expect("embedded named queries load");
-        let err = queries
-            .render_request(
-                r#"{"name": "expand_neighbors", "unexpected": 1}"#,
-                &values(),
-            )
-            .unwrap_err();
-        assert!(
-            matches!(err, NamedQueryError::InvalidRequest { .. }),
-            "{err}"
-        );
+        for request in [
+            "my_neighbors",
+            r#"{"name": "expand_neighbors", "unexpected": 1}"#,
+        ] {
+            let err = render_request(&queries, Language::Json, request).unwrap_err();
+            assert!(
+                matches!(err, NamedQueryError::InvalidRequest { .. }),
+                "{request}: {err}"
+            );
+        }
     }
 
     #[test]
@@ -313,6 +317,37 @@ query:
         .unwrap_err();
         assert!(err.to_string().contains("at most one"), "{err}");
         assert!(err.to_string().contains("first, second"), "{err}");
+    }
+
+    #[test]
+    fn settings_load_as_string_pairs() {
+        let yaml = VALID.replace(
+            "name: q",
+            "name: q\nsettings:\n  max_threads: 4\n  join_algorithm: hash\n  log_queries: true",
+        );
+        let queries = NamedQueries::from_files("test", [("q.yaml".to_string(), yaml)]).unwrap();
+        let rendered = queries
+            .render_request_language(
+                r#"{"name":"q"}"#,
+                Language::Json,
+                &BindingValues { current_user_id: 1 },
+            )
+            .unwrap();
+        assert_eq!(
+            rendered.settings,
+            [
+                ("join_algorithm".to_string(), "hash".to_string()),
+                ("log_queries".to_string(), "true".to_string()),
+                ("max_threads".to_string(), "4".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn non_scalar_settings_are_rejected() {
+        let yaml = VALID.replace("name: q", "name: q\nsettings:\n  max_threads: [4]");
+        let err = NamedQueries::from_files("test", [("q.yaml".to_string(), yaml)]).unwrap_err();
+        assert!(err.to_string().contains("setting `max_threads`"), "{err}");
     }
 
     #[test]

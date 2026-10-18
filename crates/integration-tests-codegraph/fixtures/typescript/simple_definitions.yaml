@@ -1,5 +1,6 @@
 name: "TypeScript: simple definitions"
 pipeline: js
+
 fixtures:
   - path: main.ts
     content: |

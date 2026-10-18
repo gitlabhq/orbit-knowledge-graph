@@ -23,7 +23,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<()> {
         password: Some(admin_password.to_string()),
         ..config.graph.clone()
     }
-    .build_client();
+    .build_client("graph");
 
     if config.graph.replicated {
         check_replicated_prerequisites(&admin, &config.graph.database).await?;

@@ -45,430 +45,6 @@
       },
       "id": 1,
       "panels": [],
-      "title": "HTTP transport (webserver)",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "HTTP server request latency (autoinstrumentation).",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 1
-      },
-      "id": 2,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le, http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p50 {{http_route}} / {{http_response_status_code}} / {{http_request_method}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p95 {{http_route}} / {{http_response_status_code}} / {{http_request_method}}",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p99 {{http_route}} / {{http_response_status_code}} / {{http_request_method}}",
-          "refId": "C"
-        }
-      ],
-      "title": "http_server_request_duration_seconds — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "HTTP server request latency (autoinstrumentation).",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 1
-      },
-      "id": 3,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (http_route, http_response_status_code, http_request_method) (rate(http_server_request_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
-          "legendFormat": "{{http_route}} / {{http_response_status_code}} / {{http_request_method}}",
-          "refId": "A"
-        }
-      ],
-      "title": "http_server_request_duration_seconds — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "In-flight HTTP server requests.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 1
-      },
-      "id": 4,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (http_route, http_request_method) (http_server_active_requests{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"})",
-          "legendFormat": "{{http_route}} / {{http_request_method}}",
-          "refId": "A"
-        }
-      ],
-      "title": "http_server_active_requests",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "HTTP request body size.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "bytes"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 9
-      },
-      "id": 5,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le, http_route) (rate(http_server_request_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p50 {{http_route}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_request_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p95 {{http_route}}",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, http_route) (rate(http_server_request_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p99 {{http_route}}",
-          "refId": "C"
-        }
-      ],
-      "title": "http_server_request_body_size_bytes — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "HTTP request body size.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 9
-      },
-      "id": 6,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (http_route) (rate(http_server_request_body_size_bytes_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
-          "legendFormat": "{{http_route}}",
-          "refId": "A"
-        }
-      ],
-      "title": "http_server_request_body_size_bytes — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "HTTP response body size.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "bytes"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 9
-      },
-      "id": 7,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le, http_route) (rate(http_server_response_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p50 {{http_route}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_server_response_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p95 {{http_route}}",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, http_route) (rate(http_server_response_body_size_bytes_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p99 {{http_route}}",
-          "refId": "C"
-        }
-      ],
-      "title": "http_server_response_body_size_bytes — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "HTTP response body size.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 17
-      },
-      "id": 8,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (http_route) (rate(http_server_response_body_size_bytes_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[5m]))",
-          "legendFormat": "{{http_route}}",
-          "refId": "A"
-        }
-      ],
-      "title": "http_server_response_body_size_bytes — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 25
-      },
-      "id": 9,
-      "panels": [],
       "title": "gRPC transport (webserver)",
       "type": "row"
     },
@@ -493,9 +69,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 26
+        "y": 1
       },
-      "id": 10,
+      "id": 2,
       "options": {
         "legend": {
           "calcs": [
@@ -562,9 +138,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 26
+        "y": 1
       },
-      "id": 11,
+      "id": 3,
       "options": {
         "legend": {
           "calcs": [
@@ -613,9 +189,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 26
+        "y": 1
       },
-      "id": 12,
+      "id": 4,
       "options": {
         "legend": {
           "calcs": [
@@ -664,9 +240,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 34
+        "y": 9
       },
-      "id": 13,
+      "id": 5,
       "options": {
         "legend": {
           "calcs": [
@@ -733,9 +309,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 34
+        "y": 9
       },
-      "id": 14,
+      "id": 6,
       "options": {
         "legend": {
           "calcs": [
@@ -784,9 +360,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 34
+        "y": 9
       },
-      "id": 15,
+      "id": 7,
       "options": {
         "legend": {
           "calcs": [
@@ -853,9 +429,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 42
+        "y": 17
       },
-      "id": 16,
+      "id": 8,
       "options": {
         "legend": {
           "calcs": [
@@ -889,9 +465,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 25
       },
-      "id": 17,
+      "id": 9,
       "panels": [],
       "title": "ETL engine (indexer)",
       "type": "row"
@@ -917,9 +493,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 51
+        "y": 26
       },
-      "id": 18,
+      "id": 10,
       "options": {
         "legend": {
           "calcs": [
@@ -968,9 +544,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 51
+        "y": 26
       },
-      "id": 19,
+      "id": 11,
       "options": {
         "legend": {
           "calcs": [
@@ -1019,9 +595,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 51
+        "y": 26
       },
-      "id": 20,
+      "id": 12,
       "options": {
         "legend": {
           "calcs": [
@@ -1088,9 +664,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 59
+        "y": 34
       },
-      "id": 21,
+      "id": 13,
       "options": {
         "legend": {
           "calcs": [
@@ -1139,9 +715,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 59
+        "y": 34
       },
-      "id": 22,
+      "id": 14,
       "options": {
         "legend": {
           "calcs": [
@@ -1174,7 +750,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Total logical bytes written to ClickHouse per table (orbit_utils::arrow::logical_byte_size, a deterministic count of row values, not allocator memory).",
+      "description": "Total logical bytes written to ClickHouse per table (orbit_arrow::logical_byte_size, a deterministic count of row values, not allocator memory).",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1190,9 +766,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 59
+        "y": 34
       },
-      "id": 23,
+      "id": 15,
       "options": {
         "legend": {
           "calcs": [
@@ -1241,9 +817,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 67
+        "y": 42
       },
-      "id": 24,
+      "id": 16,
       "options": {
         "legend": {
           "calcs": [
@@ -1310,9 +886,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 67
+        "y": 42
       },
-      "id": 25,
+      "id": 17,
       "options": {
         "legend": {
           "calcs": [
@@ -1361,9 +937,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 67
+        "y": 42
       },
-      "id": 26,
+      "id": 18,
       "options": {
         "legend": {
           "calcs": [
@@ -1412,9 +988,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 75
+        "y": 50
       },
-      "id": 27,
+      "id": 19,
       "options": {
         "legend": {
           "calcs": [
@@ -1481,9 +1057,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 75
+        "y": 50
       },
-      "id": 28,
+      "id": 20,
       "options": {
         "legend": {
           "calcs": [
@@ -1532,9 +1108,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 75
+        "y": 50
       },
-      "id": 29,
+      "id": 21,
       "options": {
         "legend": {
           "calcs": [
@@ -1583,9 +1159,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 83
+        "y": 58
       },
-      "id": 30,
+      "id": 22,
       "options": {
         "legend": {
           "calcs": [
@@ -1652,9 +1228,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 83
+        "y": 58
       },
-      "id": 31,
+      "id": 23,
       "options": {
         "legend": {
           "calcs": [
@@ -1703,9 +1279,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 83
+        "y": 58
       },
-      "id": 32,
+      "id": 24,
       "options": {
         "legend": {
           "calcs": [
@@ -1772,9 +1348,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 91
+        "y": 66
       },
-      "id": 33,
+      "id": 25,
       "options": {
         "legend": {
           "calcs": [
@@ -1823,9 +1399,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 91
+        "y": 66
       },
-      "id": 34,
+      "id": 26,
       "options": {
         "legend": {
           "calcs": [
@@ -1859,9 +1435,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 99
+        "y": 74
       },
-      "id": 35,
+      "id": 27,
       "panels": [],
       "title": "Code pipeline (indexer)",
       "type": "row"
@@ -1887,9 +1463,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 100
+        "y": 75
       },
-      "id": 36,
+      "id": 28,
       "options": {
         "legend": {
           "calcs": [
@@ -1922,6 +1498,126 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
+      "description": "Archive download and extraction time while holding a lease, per storage.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 75
+      },
+      "id": 29,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, storage) (rate(gkg_indexer_code_archive_duration_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p50 {{storage}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, storage) (rate(gkg_indexer_code_archive_duration_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p95 {{storage}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, storage) (rate(gkg_indexer_code_archive_duration_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p99 {{storage}}",
+          "refId": "C"
+        }
+      ],
+      "title": "gkg_indexer_code_archive_duration_seconds — p50/p95/p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Archive download and extraction time while holding a lease, per storage.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 75
+      },
+      "id": 30,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (storage) (rate(gkg_indexer_code_archive_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
+          "legendFormat": "{{storage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gkg_indexer_code_archive_duration_seconds — observation rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
       "description": "Files the stream recorded as a graph node but did not load or parse (and, for the tar source, did not write to disk). Reasons: `excluded_extension` (basename matches the `code-graph::v2::config::filter::EXCLUDED_INDEXING_GLOBS` denylist — binary assets, media, archives, minified bundles), `oversize` (declared size exceeds the configured per-file ceiling), `binary` (a NUL byte in the first 8000 bytes, git-style, with a UTF BOM rescue), `not_utf8` (content is not valid UTF-8), `minified` / `line_too_long` (high average line length or a >64 KiB line), `non_regular_file` (a symlink — a node, never parsed), `lfs_pointer` (a Git LFS pointer: the archive is fetched with `include_lfs_blobs=false`, so the pointer text stands in for content Orbit never indexes).",
       "fieldConfig": {
         "defaults": {
@@ -1937,10 +1633,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
-        "y": 100
+        "x": 0,
+        "y": 83
       },
-      "id": 37,
+      "id": 31,
       "options": {
         "legend": {
           "calcs": [
@@ -1973,6 +1669,228 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
+      "description": "Archive downloads cancelled because the lease could not be renewed.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 83
+      },
+      "id": 32,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (storage) (rate(gkg_indexer_code_archive_lease_lost_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
+          "legendFormat": "{{storage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gkg_indexer_code_archive_lease_lost_total — rate/s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Archive lease slots held by this pod. Sum across pods for the storage's load against its budget.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 83
+      },
+      "id": 33,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (storage) (gkg_indexer_code_archive_lease_slots_in_use{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"})",
+          "legendFormat": "{{storage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gkg_indexer_code_archive_lease_slots_in_use",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Time spent waiting for a per-storage archive download lease. Label: storage (`_tenant` when GitLab does not report one).",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 91
+      },
+      "id": 34,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, storage) (rate(gkg_indexer_code_archive_lease_wait_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p50 {{storage}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, storage) (rate(gkg_indexer_code_archive_lease_wait_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p95 {{storage}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, storage) (rate(gkg_indexer_code_archive_lease_wait_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p99 {{storage}}",
+          "refId": "C"
+        }
+      ],
+      "title": "gkg_indexer_code_archive_lease_wait_seconds — p50/p95/p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Time spent waiting for a per-storage archive download lease. Label: storage (`_tenant` when GitLab does not report one).",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 91
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (storage) (rate(gkg_indexer_code_archive_lease_wait_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
+          "legendFormat": "{{storage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gkg_indexer_code_archive_lease_wait_seconds — observation rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
       "description": "Task-level code indexing failures by pipeline stage. Increments only when a code indexing task ends with a fatal pipeline error (sink write, thread pool, sentinel spawn, internal panic). Per-file failures land in `gkg.indexer.code.file_faults` instead, so this rate is suitable for alerting.",
       "fieldConfig": {
         "defaults": {
@@ -1989,9 +1907,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 100
+        "y": 91
       },
-      "id": 38,
+      "id": 36,
       "options": {
         "legend": {
           "calcs": [
@@ -2040,9 +1958,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 108
+        "y": 99
       },
-      "id": 39,
+      "id": 37,
       "options": {
         "legend": {
           "calcs": [
@@ -2091,9 +2009,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 108
+        "y": 99
       },
-      "id": 40,
+      "id": 38,
       "options": {
         "legend": {
           "calcs": [
@@ -2160,9 +2078,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 108
+        "y": 99
       },
-      "id": 41,
+      "id": 39,
       "options": {
         "legend": {
           "calcs": [
@@ -2211,9 +2129,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 116
+        "y": 107
       },
-      "id": 42,
+      "id": 40,
       "options": {
         "legend": {
           "calcs": [
@@ -2262,9 +2180,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 116
+        "y": 107
       },
-      "id": 43,
+      "id": 41,
       "options": {
         "legend": {
           "calcs": [
@@ -2297,7 +2215,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize`, `oversize_combined`, `parser_oversize`, `arrow_offset_overflow`, `unsafe_path`, and per-phase CPU-budget timeouts `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`. `language` comes from the file extension, `unknown` when none matches.",
+      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize`, `oversize_combined`, `parser_oversize`, `arrow_offset_overflow`, `unsafe_path`, `deeply_nested`, `stack_limit`, `too_many_edges`, per-phase CPU-budget timeouts `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`, and the per-file resolve timeout `timeout_resolve`. Cross-file stops `too_many_names` and `timeout_cross_file` count once per language family per run, with an empty path. `too_many_manifest_bytes` counts a manifest that stays in the graph but is not read for resolution, and `fqn_truncated` a file whose deepest definitions keep only the last 64 segments (or 4 KiB) of their qualified name. `language` comes from the file extension, `unknown` when none matches.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -2313,9 +2231,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 116
+        "y": 107
       },
-      "id": 44,
+      "id": 42,
       "options": {
         "legend": {
           "calcs": [
@@ -2364,9 +2282,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 124
+        "y": 115
       },
-      "id": 45,
+      "id": 43,
       "options": {
         "legend": {
           "calcs": [
@@ -2433,9 +2351,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 124
+        "y": 115
       },
-      "id": 46,
+      "id": 44,
       "options": {
         "legend": {
           "calcs": [
@@ -2484,9 +2402,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 124
+        "y": 115
       },
-      "id": 47,
+      "id": 45,
       "options": {
         "legend": {
           "calcs": [
@@ -2553,9 +2471,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 132
+        "y": 123
       },
-      "id": 48,
+      "id": 46,
       "options": {
         "legend": {
           "calcs": [
@@ -2604,9 +2522,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 132
+        "y": 123
       },
-      "id": 49,
+      "id": 47,
       "options": {
         "legend": {
           "calcs": [
@@ -2655,9 +2573,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 132
+        "y": 123
       },
-      "id": 50,
+      "id": 48,
       "options": {
         "legend": {
           "calcs": [
@@ -2706,9 +2624,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 140
+        "y": 131
       },
-      "id": 51,
+      "id": 49,
       "options": {
         "legend": {
           "calcs": [
@@ -2775,9 +2693,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 140
+        "y": 131
       },
-      "id": 52,
+      "id": 50,
       "options": {
         "legend": {
           "calcs": [
@@ -2826,9 +2744,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 140
+        "y": 131
       },
-      "id": 53,
+      "id": 51,
       "options": {
         "legend": {
           "calcs": [
@@ -2877,9 +2795,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 148
+        "y": 139
       },
-      "id": 54,
+      "id": 52,
       "options": {
         "legend": {
           "calcs": [
@@ -2946,9 +2864,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 148
+        "y": 139
       },
-      "id": 55,
+      "id": 53,
       "options": {
         "legend": {
           "calcs": [
@@ -2997,9 +2915,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 148
+        "y": 139
       },
-      "id": 56,
+      "id": 54,
       "options": {
         "legend": {
           "calcs": [
@@ -3048,9 +2966,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 156
+        "y": 147
       },
-      "id": 57,
+      "id": 55,
       "options": {
         "legend": {
           "calcs": [
@@ -3099,9 +3017,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 156
+        "y": 147
       },
-      "id": 58,
+      "id": 56,
       "options": {
         "legend": {
           "calcs": [
@@ -3168,9 +3086,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 156
+        "y": 147
       },
-      "id": 59,
+      "id": 57,
       "options": {
         "legend": {
           "calcs": [
@@ -3219,9 +3137,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 164
+        "y": 155
       },
-      "id": 60,
+      "id": 58,
       "options": {
         "legend": {
           "calcs": [
@@ -3270,9 +3188,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 164
+        "y": 155
       },
-      "id": 61,
+      "id": 59,
       "options": {
         "legend": {
           "calcs": [
@@ -3321,9 +3239,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 164
+        "y": 155
       },
-      "id": 62,
+      "id": 60,
       "options": {
         "legend": {
           "calcs": [
@@ -3390,9 +3308,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 172
+        "y": 163
       },
-      "id": 63,
+      "id": 61,
       "options": {
         "legend": {
           "calcs": [
@@ -3426,9 +3344,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 180
+        "y": 171
       },
-      "id": 64,
+      "id": 62,
       "panels": [],
       "title": "SDLC pipeline (indexer)",
       "type": "row"
@@ -3454,9 +3372,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 181
+        "y": 172
       },
-      "id": 65,
+      "id": 63,
       "options": {
         "legend": {
           "calcs": [
@@ -3505,9 +3423,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 181
+        "y": 172
       },
-      "id": 66,
+      "id": 64,
       "options": {
         "legend": {
           "calcs": [
@@ -3574,9 +3492,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 181
+        "y": 172
       },
-      "id": 67,
+      "id": 65,
       "options": {
         "legend": {
           "calcs": [
@@ -3625,9 +3543,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 189
+        "y": 180
       },
-      "id": 68,
+      "id": 66,
       "options": {
         "legend": {
           "calcs": [
@@ -3694,9 +3612,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 189
+        "y": 180
       },
-      "id": 69,
+      "id": 67,
       "options": {
         "legend": {
           "calcs": [
@@ -3745,9 +3663,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 189
+        "y": 180
       },
-      "id": 70,
+      "id": 68,
       "options": {
         "legend": {
           "calcs": [
@@ -3814,9 +3732,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 197
+        "y": 188
       },
-      "id": 71,
+      "id": 69,
       "options": {
         "legend": {
           "calcs": [
@@ -3865,9 +3783,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 197
+        "y": 188
       },
-      "id": 72,
+      "id": 70,
       "options": {
         "legend": {
           "calcs": [
@@ -3916,9 +3834,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 197
+        "y": 188
       },
-      "id": 73,
+      "id": 71,
       "options": {
         "legend": {
           "calcs": [
@@ -3967,9 +3885,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 205
+        "y": 196
       },
-      "id": 74,
+      "id": 72,
       "options": {
         "legend": {
           "calcs": [
@@ -4036,9 +3954,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 205
+        "y": 196
       },
-      "id": 75,
+      "id": 73,
       "options": {
         "legend": {
           "calcs": [
@@ -4087,9 +4005,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 205
+        "y": 196
       },
-      "id": 76,
+      "id": 74,
       "options": {
         "legend": {
           "calcs": [
@@ -4123,9 +4041,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 213
+        "y": 204
       },
-      "id": 77,
+      "id": 75,
       "panels": [],
       "title": "Namespace deletion (indexer)",
       "type": "row"
@@ -4151,9 +4069,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 214
+        "y": 205
       },
-      "id": 78,
+      "id": 76,
       "options": {
         "legend": {
           "calcs": [
@@ -4220,9 +4138,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 214
+        "y": 205
       },
-      "id": 79,
+      "id": 77,
       "options": {
         "legend": {
           "calcs": [
@@ -4271,9 +4189,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 214
+        "y": 205
       },
-      "id": 80,
+      "id": 78,
       "options": {
         "legend": {
           "calcs": [
@@ -4307,9 +4225,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 222
+        "y": 213
       },
-      "id": 81,
+      "id": 79,
       "panels": [],
       "title": "Scheduler (dispatcher)",
       "type": "row"
@@ -4335,9 +4253,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 223
+        "y": 214
       },
-      "id": 82,
+      "id": 80,
       "options": {
         "legend": {
           "calcs": [
@@ -4404,9 +4322,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 223
+        "y": 214
       },
-      "id": 83,
+      "id": 81,
       "options": {
         "legend": {
           "calcs": [
@@ -4455,9 +4373,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 223
+        "y": 214
       },
-      "id": 84,
+      "id": 82,
       "options": {
         "legend": {
           "calcs": [
@@ -4506,9 +4424,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 231
+        "y": 222
       },
-      "id": 85,
+      "id": 83,
       "options": {
         "legend": {
           "calcs": [
@@ -4575,9 +4493,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 231
+        "y": 222
       },
-      "id": 86,
+      "id": 84,
       "options": {
         "legend": {
           "calcs": [
@@ -4626,9 +4544,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 231
+        "y": 222
       },
-      "id": 87,
+      "id": 85,
       "options": {
         "legend": {
           "calcs": [
@@ -4677,9 +4595,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 239
+        "y": 230
       },
-      "id": 88,
+      "id": 86,
       "options": {
         "legend": {
           "calcs": [
@@ -4728,9 +4646,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 239
+        "y": 230
       },
-      "id": 89,
+      "id": 87,
       "options": {
         "legend": {
           "calcs": [
@@ -4764,9 +4682,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 247
+        "y": 238
       },
-      "id": 90,
+      "id": 88,
       "panels": [],
       "title": "Schema migration (dispatcher)",
       "type": "row"
@@ -4792,9 +4710,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 248
+        "y": 239
       },
-      "id": 91,
+      "id": 89,
       "options": {
         "legend": {
           "calcs": [
@@ -4843,9 +4761,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 248
+        "y": 239
       },
-      "id": 92,
+      "id": 90,
       "options": {
         "legend": {
           "calcs": [
@@ -4894,9 +4812,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 248
+        "y": 239
       },
-      "id": 93,
+      "id": 91,
       "options": {
         "legend": {
           "calcs": [
@@ -4945,9 +4863,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 256
+        "y": 247
       },
-      "id": 94,
+      "id": 92,
       "options": {
         "legend": {
           "calcs": [
@@ -4996,9 +4914,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 256
+        "y": 247
       },
-      "id": 95,
+      "id": 93,
       "options": {
         "legend": {
           "calcs": [
@@ -5047,9 +4965,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 256
+        "y": 247
       },
-      "id": 96,
+      "id": 94,
       "options": {
         "legend": {
           "calcs": [
@@ -5083,9 +5001,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 264
+        "y": 255
       },
-      "id": 97,
+      "id": 95,
       "panels": [],
       "title": "Query pipeline (webserver)",
       "type": "row"
@@ -5111,9 +5029,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 265
+        "y": 256
       },
-      "id": 98,
+      "id": 96,
       "options": {
         "legend": {
           "calcs": [
@@ -5180,9 +5098,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 265
+        "y": 256
       },
-      "id": 99,
+      "id": 97,
       "options": {
         "legend": {
           "calcs": [
@@ -5231,9 +5149,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 265
+        "y": 256
       },
-      "id": 100,
+      "id": 98,
       "options": {
         "legend": {
           "calcs": [
@@ -5300,9 +5218,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 273
+        "y": 264
       },
-      "id": 101,
+      "id": 99,
       "options": {
         "legend": {
           "calcs": [
@@ -5351,9 +5269,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 273
+        "y": 264
       },
-      "id": 102,
+      "id": 100,
       "options": {
         "legend": {
           "calcs": [
@@ -5420,9 +5338,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 273
+        "y": 264
       },
-      "id": 103,
+      "id": 101,
       "options": {
         "legend": {
           "calcs": [
@@ -5471,9 +5389,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 281
+        "y": 272
       },
-      "id": 104,
+      "id": 102,
       "options": {
         "legend": {
           "calcs": [
@@ -5522,9 +5440,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 281
+        "y": 272
       },
-      "id": 105,
+      "id": 103,
       "options": {
         "legend": {
           "calcs": [
@@ -5573,9 +5491,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 281
+        "y": 272
       },
-      "id": 106,
+      "id": 104,
       "options": {
         "legend": {
           "calcs": [
@@ -5642,9 +5560,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 289
+        "y": 280
       },
-      "id": 107,
+      "id": 105,
       "options": {
         "legend": {
           "calcs": [
@@ -5693,9 +5611,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 289
+        "y": 280
       },
-      "id": 108,
+      "id": 106,
       "options": {
         "legend": {
           "calcs": [
@@ -5762,9 +5680,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 289
+        "y": 280
       },
-      "id": 109,
+      "id": 107,
       "options": {
         "legend": {
           "calcs": [
@@ -5813,9 +5731,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 297
+        "y": 288
       },
-      "id": 110,
+      "id": 108,
       "options": {
         "legend": {
           "calcs": [
@@ -5882,9 +5800,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 297
+        "y": 288
       },
-      "id": 111,
+      "id": 109,
       "options": {
         "legend": {
           "calcs": [
@@ -5933,9 +5851,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 297
+        "y": 288
       },
-      "id": 112,
+      "id": 110,
       "options": {
         "legend": {
           "calcs": [
@@ -5984,9 +5902,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 305
+        "y": 296
       },
-      "id": 113,
+      "id": 111,
       "options": {
         "legend": {
           "calcs": [
@@ -6053,9 +5971,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 305
+        "y": 296
       },
-      "id": 114,
+      "id": 112,
       "options": {
         "legend": {
           "calcs": [
@@ -6104,9 +6022,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 305
+        "y": 296
       },
-      "id": 115,
+      "id": 113,
       "options": {
         "legend": {
           "calcs": [
@@ -6155,9 +6073,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 313
+        "y": 304
       },
-      "id": 116,
+      "id": 114,
       "options": {
         "legend": {
           "calcs": [
@@ -6224,9 +6142,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 313
+        "y": 304
       },
-      "id": 117,
+      "id": 115,
       "options": {
         "legend": {
           "calcs": [
@@ -6275,9 +6193,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 313
+        "y": 304
       },
-      "id": 118,
+      "id": 116,
       "options": {
         "legend": {
           "calcs": [
@@ -6344,9 +6262,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 321
+        "y": 312
       },
-      "id": 119,
+      "id": 117,
       "options": {
         "legend": {
           "calcs": [
@@ -6380,9 +6298,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 329
+        "y": 320
       },
-      "id": 120,
+      "id": 118,
       "panels": [],
       "title": "Query engine — threat counters (webserver)",
       "type": "row"
@@ -6408,9 +6326,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 330
+        "y": 321
       },
-      "id": 121,
+      "id": 119,
       "options": {
         "legend": {
           "calcs": [
@@ -6444,9 +6362,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 338
+        "y": 329
       },
-      "id": 122,
+      "id": 120,
       "panels": [],
       "title": "Content resolution (webserver)",
       "type": "row"
@@ -6472,9 +6390,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 339
+        "y": 330
       },
-      "id": 123,
+      "id": 121,
       "options": {
         "legend": {
           "calcs": [
@@ -6541,9 +6459,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 339
+        "y": 330
       },
-      "id": 124,
+      "id": 122,
       "options": {
         "legend": {
           "calcs": [
@@ -6592,9 +6510,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 339
+        "y": 330
       },
-      "id": 125,
+      "id": 123,
       "options": {
         "legend": {
           "calcs": [
@@ -6643,9 +6561,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 347
+        "y": 338
       },
-      "id": 126,
+      "id": 124,
       "options": {
         "legend": {
           "calcs": [
@@ -6694,9 +6612,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 347
+        "y": 338
       },
-      "id": 127,
+      "id": 125,
       "options": {
         "legend": {
           "calcs": [
@@ -6745,9 +6663,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 347
+        "y": 338
       },
-      "id": 128,
+      "id": 126,
       "options": {
         "legend": {
           "calcs": [
@@ -6814,9 +6732,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 355
+        "y": 346
       },
-      "id": 129,
+      "id": 127,
       "options": {
         "legend": {
           "calcs": [
@@ -6865,9 +6783,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 355
+        "y": 346
       },
-      "id": 130,
+      "id": 128,
       "options": {
         "legend": {
           "calcs": [
@@ -6934,9 +6852,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 355
+        "y": 346
       },
-      "id": 131,
+      "id": 129,
       "options": {
         "legend": {
           "calcs": [
@@ -6970,9 +6888,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 363
+        "y": 354
       },
-      "id": 132,
+      "id": 130,
       "panels": [],
       "title": "Schema watcher (webserver)",
       "type": "row"
@@ -6998,9 +6916,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 364
+        "y": 355
       },
-      "id": 133,
+      "id": 131,
       "options": {
         "legend": {
           "calcs": [
@@ -7034,9 +6952,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 372
+        "y": 363
       },
-      "id": 134,
+      "id": 132,
       "panels": [],
       "title": "Billing events (webserver)",
       "type": "row"
@@ -7062,9 +6980,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 373
+        "y": 364
       },
-      "id": 135,
+      "id": 133,
       "options": {
         "legend": {
           "calcs": [
@@ -7113,9 +7031,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 373
+        "y": 364
       },
-      "id": 136,
+      "id": 134,
       "options": {
         "legend": {
           "calcs": [
@@ -7164,9 +7082,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 373
+        "y": 364
       },
-      "id": 137,
+      "id": 135,
       "options": {
         "legend": {
           "calcs": [
@@ -7215,9 +7133,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 381
+        "y": 372
       },
-      "id": 138,
+      "id": 136,
       "options": {
         "legend": {
           "calcs": [
@@ -7266,9 +7184,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 381
+        "y": 372
       },
-      "id": 139,
+      "id": 137,
       "options": {
         "legend": {
           "calcs": [
@@ -7302,9 +7220,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 389
+        "y": 380
       },
-      "id": 140,
+      "id": 138,
       "panels": [],
       "title": "Billing quota (webserver)",
       "type": "row"
@@ -7330,9 +7248,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 390
+        "y": 381
       },
-      "id": 141,
+      "id": 139,
       "options": {
         "legend": {
           "calcs": [
@@ -7381,9 +7299,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 390
+        "y": 381
       },
-      "id": 142,
+      "id": 140,
       "options": {
         "legend": {
           "calcs": [
@@ -7432,9 +7350,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 390
+        "y": 381
       },
-      "id": 143,
+      "id": 141,
       "options": {
         "legend": {
           "calcs": [
@@ -7501,9 +7419,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 398
+        "y": 389
       },
-      "id": 144,
+      "id": 142,
       "options": {
         "legend": {
           "calcs": [
@@ -7552,9 +7470,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 398
+        "y": 389
       },
-      "id": 145,
+      "id": 143,
       "options": {
         "legend": {
           "calcs": [
@@ -7588,9 +7506,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 406
+        "y": 397
       },
-      "id": 146,
+      "id": 144,
       "panels": [],
       "title": "Circuit breaker (CH / NATS / GitLab clients)",
       "type": "row"
@@ -7616,9 +7534,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 407
+        "y": 398
       },
-      "id": 147,
+      "id": 145,
       "options": {
         "legend": {
           "calcs": [
@@ -7667,9 +7585,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 407
+        "y": 398
       },
-      "id": 148,
+      "id": 146,
       "options": {
         "legend": {
           "calcs": [
@@ -7718,9 +7636,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 407
+        "y": 398
       },
-      "id": 149,
+      "id": 147,
       "options": {
         "legend": {
           "calcs": [
@@ -7754,9 +7672,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 415
+        "y": 406
       },
-      "id": 150,
+      "id": 148,
       "panels": [],
       "title": "Siphon producers",
       "type": "row"
@@ -7767,6 +7685,70 @@
         "uid": "$ORBIT_DS"
       },
       "description": "Siphon producer ops (CDC events emitted).",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 407
+      },
+      "id": 149,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (app_id, container) (rate(siphon_operations_total{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
+          "legendFormat": "{{app_id}} / {{container}}",
+          "refId": "A"
+        }
+      ],
+      "title": "siphon_operations_total — rate/s",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 415
+      },
+      "id": 150,
+      "panels": [],
+      "title": "Siphon ClickHouse consumers",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Events consumed off NATS and written to ClickHouse.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -7804,70 +7786,6 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (app_id, container) (rate(siphon_operations_total{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
-          "legendFormat": "{{app_id}} / {{container}}",
-          "refId": "A"
-        }
-      ],
-      "title": "siphon_operations_total — rate/s",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 424
-      },
-      "id": 152,
-      "panels": [],
-      "title": "Siphon ClickHouse consumers",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Events consumed off NATS and written to ClickHouse.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 425
-      },
-      "id": 153,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
           "expr": "sum by (product_app_id) (rate(siphon_clickhouse_consumer_number_of_events{namespace=\"siphon\", cluster=~\".*\"}[5m]))",
           "legendFormat": "{{product_app_id}}",
           "refId": "A"
@@ -7882,9 +7800,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 433
+        "y": 424
       },
-      "id": 154,
+      "id": 152,
       "panels": [],
       "title": "NATS JetStream + varz",
       "type": "row"
@@ -7910,9 +7828,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 434
+        "y": 425
       },
-      "id": 155,
+      "id": 153,
       "options": {
         "legend": {
           "calcs": [
@@ -7961,9 +7879,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 434
+        "y": 425
       },
-      "id": 156,
+      "id": 154,
       "options": {
         "legend": {
           "calcs": [
@@ -8012,9 +7930,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 434
+        "y": 425
       },
-      "id": 157,
+      "id": 155,
       "options": {
         "legend": {
           "calcs": [
@@ -8063,9 +7981,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 442
+        "y": 433
       },
-      "id": 158,
+      "id": 156,
       "options": {
         "legend": {
           "calcs": [
@@ -8114,9 +8032,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 442
+        "y": 433
       },
-      "id": 159,
+      "id": 157,
       "options": {
         "legend": {
           "calcs": [
@@ -8165,9 +8083,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 442
+        "y": 433
       },
-      "id": 160,
+      "id": 158,
       "options": {
         "legend": {
           "calcs": [
@@ -8216,9 +8134,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 450
+        "y": 441
       },
-      "id": 161,
+      "id": 159,
       "options": {
         "legend": {
           "calcs": [
@@ -8267,9 +8185,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 450
+        "y": 441
       },
-      "id": 162,
+      "id": 160,
       "options": {
         "legend": {
           "calcs": [
@@ -8318,9 +8236,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 450
+        "y": 441
       },
-      "id": 163,
+      "id": 161,
       "options": {
         "legend": {
           "calcs": [
@@ -8369,9 +8287,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 458
+        "y": 449
       },
-      "id": 164,
+      "id": 162,
       "options": {
         "legend": {
           "calcs": [
@@ -8405,9 +8323,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 466
+        "y": 457
       },
-      "id": 165,
+      "id": 163,
       "panels": [],
       "title": "Rails Orbit request path",
       "type": "row"
@@ -8433,9 +8351,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 467
+        "y": 458
       },
-      "id": 166,
+      "id": 164,
       "options": {
         "legend": {
           "calcs": [
@@ -8502,9 +8420,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 467
+        "y": 458
       },
-      "id": 167,
+      "id": 165,
       "options": {
         "legend": {
           "calcs": [
@@ -8553,9 +8471,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 467
+        "y": 458
       },
-      "id": 168,
+      "id": 166,
       "options": {
         "legend": {
           "calcs": [
@@ -8604,9 +8522,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 475
+        "y": 466
       },
-      "id": 169,
+      "id": 167,
       "options": {
         "legend": {
           "calcs": [
@@ -8673,9 +8591,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 475
+        "y": 466
       },
-      "id": 170,
+      "id": 168,
       "options": {
         "legend": {
           "calcs": [
@@ -8724,9 +8642,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 475
+        "y": 466
       },
-      "id": 171,
+      "id": 169,
       "options": {
         "legend": {
           "calcs": [
@@ -8793,9 +8711,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 483
+        "y": 474
       },
-      "id": 172,
+      "id": 170,
       "options": {
         "legend": {
           "calcs": [
@@ -8844,9 +8762,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 483
+        "y": 474
       },
-      "id": 173,
+      "id": 171,
       "options": {
         "legend": {
           "calcs": [
@@ -8913,9 +8831,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 483
+        "y": 474
       },
-      "id": 174,
+      "id": 172,
       "options": {
         "legend": {
           "calcs": [
@@ -8964,9 +8882,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 491
+        "y": 482
       },
-      "id": 175,
+      "id": 173,
       "options": {
         "legend": {
           "calcs": [
@@ -9033,9 +8951,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 491
+        "y": 482
       },
-      "id": 176,
+      "id": 174,
       "options": {
         "legend": {
           "calcs": [
@@ -9084,9 +9002,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 491
+        "y": 482
       },
-      "id": 177,
+      "id": 175,
       "options": {
         "legend": {
           "calcs": [
@@ -9153,9 +9071,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 499
+        "y": 490
       },
-      "id": 178,
+      "id": 176,
       "options": {
         "legend": {
           "calcs": [
@@ -9189,9 +9107,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 507
+        "y": 498
       },
-      "id": 179,
+      "id": 177,
       "panels": [],
       "title": "Rails Orbit traversal compaction",
       "type": "row"
@@ -9217,9 +9135,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 508
+        "y": 499
       },
-      "id": 180,
+      "id": 178,
       "options": {
         "legend": {
           "calcs": [
@@ -9286,9 +9204,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 508
+        "y": 499
       },
-      "id": 181,
+      "id": 179,
       "options": {
         "legend": {
           "calcs": [
@@ -9337,9 +9255,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 508
+        "y": 499
       },
-      "id": 182,
+      "id": 180,
       "options": {
         "legend": {
           "calcs": [
@@ -9406,9 +9324,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 516
+        "y": 507
       },
-      "id": 183,
+      "id": 181,
       "options": {
         "legend": {
           "calcs": [
@@ -9457,9 +9375,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 516
+        "y": 507
       },
-      "id": 184,
+      "id": 182,
       "options": {
         "legend": {
           "calcs": [
@@ -9508,9 +9426,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 516
+        "y": 507
       },
-      "id": 185,
+      "id": 183,
       "options": {
         "legend": {
           "calcs": [

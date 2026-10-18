@@ -162,6 +162,29 @@ pub struct JoinSource {
 pub struct MaterializedJoin {
     pub table: String,
     pub sources: Vec<JoinSource>,
+    pub nodes: Vec<JoinNode>,
+    pub relationships: Vec<JoinRelationship>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JoinNode {
+    pub entity: String,
+    pub source_occurrence: usize,
+    pub identity_column: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct JoinRelationship {
+    pub kind: String,
+    pub source_slot: usize,
+    pub target_slot: usize,
+    pub edge_occurrence: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReorderedCopy {
+    pub table: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone)]
@@ -175,6 +198,8 @@ pub struct EdgeRoute {
 
 #[derive(Debug)]
 pub struct Metadata {
+    copies: Vec<ReorderedCopy>,
+    dependencies: BTreeMap<String, BTreeSet<String>>,
     pub(crate) entities: Vec<crate::implementations::EntityFacts>,
     pub(crate) default_edge_table: String,
     pub(crate) denormalized: Vec<ontology::DenormalizedProperty>,
@@ -191,6 +216,17 @@ pub struct Metadata {
 }
 
 impl crate::Relational<ClickHouse> {
+    pub fn copies(&self) -> &[ReorderedCopy] {
+        &self.metadata.copies
+    }
+    pub fn dependencies(&self) -> &BTreeMap<String, BTreeSet<String>> {
+        &self.metadata.dependencies
+    }
+    pub fn deployed_tables(&self) -> impl Iterator<Item = &Table> {
+        self.tables()
+            .iter()
+            .filter(|table| !self.copies().iter().any(|copy| copy.table == table.name))
+    }
     pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {
         &self.metadata.auxiliary_tables
     }
@@ -217,7 +253,7 @@ impl crate::Relational<ClickHouse> {
             .iter()
             .filter(|table| table.versioned)
             .map(|table| &table.table)
-            .chain(self.tables())
+            .chain(self.deployed_tables())
     }
 
     pub fn table_names(&self) -> impl Iterator<Item = &str> {
@@ -225,7 +261,7 @@ impl crate::Relational<ClickHouse> {
             .auxiliary_tables
             .iter()
             .map(|table| table.table.name.as_str())
-            .chain(self.tables().iter().map(|table| table.name.as_str()))
+            .chain(self.deployed_tables().map(|table| table.name.as_str()))
     }
     pub fn joins(&self) -> &[MaterializedJoin] {
         &self.metadata.joins

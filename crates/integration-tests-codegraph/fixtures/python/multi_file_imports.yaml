@@ -1,4 +1,5 @@
 name: "Python: multi-file import patterns"
+
 fixtures:
   - path: models.py
     content: |
@@ -9,6 +10,7 @@ fixtures:
       class Project:
           def __init__(self, title):
               self.title = title
+
   - path: services.py
     content: |
       from models import User, Project
@@ -19,6 +21,7 @@ fixtures:
 
           def get_project(self):
               return Project("test")
+
   - path: main.py
     content: |
       from services import UserService

@@ -8,7 +8,7 @@ use crate::v2::types::{
     CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, NodeKind,
     Range, Relationship, containment_relationship,
 };
-use orbit_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
+use orbit_arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
 
 fn common_prefix_len(a: &str, b: &str) -> usize {
     a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
@@ -863,18 +863,6 @@ impl CodeGraph {
             .is_some_and(|id| self.indexes.by_name.contains(id))
     }
 
-    pub fn lookup_nested(&self, scope: &str, member: &str) -> &[NodeIndex] {
-        let scope_id = match self.strings.find(scope) {
-            Some(id) => id,
-            None => return &[],
-        };
-        let member_id = match self.strings.find(member) {
-            Some(id) => id,
-            None => return &[],
-        };
-        self.indexes.nested.lookup(scope_id, member_id)
-    }
-
     #[inline]
     pub fn ancestors(&self, idx: NodeIndex) -> Option<&[NodeIndex]> {
         self.indexes.ancestors.get(&idx).map(|v| v.as_slice())
@@ -1231,7 +1219,7 @@ impl<'a> RowContext<'a> {
     }
 }
 
-impl orbit_utils::arrow::RowEnvelope for RowContext<'_> {
+impl orbit_arrow::RowEnvelope for RowContext<'_> {
     fn write_header(&self, b: &mut BatchBuilder, id: i64) -> Result<(), arrow::error::ArrowError> {
         b.col("id")?.push_int(id)?;
         b.col("project_id")?.push_int(self.project_id)?;
@@ -1287,7 +1275,7 @@ pub struct DirectoryRow<'a> {
     pub dir: &'a CanonicalDirectory,
     pub id: i64,
 }
-impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for DirectoryRow<'_> {
+impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DirectoryRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("path")?.push_str(&self.dir.path)?;
@@ -1300,7 +1288,7 @@ pub struct FileRow<'a> {
     pub file: &'a CanonicalFile,
     pub id: i64,
 }
-impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
+impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("path")?.push_str(&self.file.path)?;
@@ -1319,7 +1307,7 @@ pub struct DefinitionRow<'a> {
     pub pool: &'a StringPool,
     pub id: i64,
 }
-impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
+impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
@@ -1338,7 +1326,7 @@ pub struct ImportRow<'a> {
     pub pool: &'a StringPool,
     pub id: i64,
 }
-impl<C: orbit_utils::arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
+impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
@@ -1523,7 +1511,6 @@ mod tests {
         assert_eq!(cg.lookup_fqn("Foo.bar").len(), 1);
         assert_eq!(cg.lookup_name("Foo").len(), 1);
         assert_eq!(cg.lookup_name("bar").len(), 1);
-        assert_eq!(cg.lookup_nested("Foo", "bar").len(), 1);
     }
 
     fn make_def_at(

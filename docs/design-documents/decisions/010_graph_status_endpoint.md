@@ -13,6 +13,13 @@ Accepted
 
 2026-04-21 (state semantics updated 2026-08-10 and 2026-09-26, see the updates below)
 
+## Update: cached item counts (2026-10-16)
+
+Item counts use the ClickHouse query cache with the default 10 second TTL. A count can be
+up to 10 seconds old, also after a backfill ends. `GetGraphStatus` counts the same way. The
+checkpoint and coverage reads still skip the cache, so a phase change is visible on the
+next call. The count queries were the largest share of ClickHouse time and bytes read.
+
 ## Update: last completed time (2026-10-11)
 
 `GetIndexingStatus` returns `last_completed_at` per path, and `GetGraphStatus` sets it
@@ -31,9 +38,8 @@ Two RPCs expose the services directly, for the Rails status pages.
 - `GetIndexingStatus` returns one phase per path and per domain: unknown, not started,
   syncing, ready or error. A project path reports the SDLC phases of its root, and the source
   code domain carries the project coverage under the path.
-- `GetItemCounts` returns entity counts per domain that the caller can see. The counts
-  skip the ClickHouse query cache, because a cached count from a backfill stays stale
-  after the backfill ends. `GetGraphStatus` counts the same way. Rails rate-limits both
+- `GetItemCounts` returns entity counts per domain that the caller can see.
+  `GetGraphStatus` counts the same way. Rails rate-limits both
   callers: the GraphQL `itemCounts` field per user, and the REST graph status endpoint per
   user and group or project.
 - Rails owns the display text of each domain. The responses send the domain name only.
@@ -55,8 +61,8 @@ Both take many scopes in one call.
   plans) and, for code entities, the project coverage. The scope folds its domains.
 - `item_counts` counts each entity only under the requested scopes where the caller holds
   the entity's required role.
-- The checkpoint, coverage and item count reads skip the ClickHouse query cache. A phase
-  change or a new row is visible on the next call.
+- The checkpoint and coverage reads skip the ClickHouse query cache. A phase change is
+  visible on the next call.
 - `indexing.state` comes from the scope phase, `sdlc_indexing` from the plans, and
   `code_indexing` from project coverage: ready → `indexed`, syncing → `backfilling`, not
   started → `not_indexed`. `IndexingStatus` fields 2 and 4 to 7 are no longer set.

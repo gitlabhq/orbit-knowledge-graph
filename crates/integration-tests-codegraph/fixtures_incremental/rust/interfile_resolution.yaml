@@ -1,4 +1,5 @@
 name: "Rust: interfile resolution"
+
 fixtures:
   - path: Cargo.toml
     content: |

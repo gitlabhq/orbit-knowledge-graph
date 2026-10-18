@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
+use clickhouse_client::ArrowClickHouseClient;
+use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::net::TcpListener;
 use tonic::transport::Server as TonicServer;
@@ -28,7 +29,7 @@ impl GrpcServer {
     pub fn new(
         validator: Arc<JwtValidator>,
         active_schema: Arc<ActiveSchema>,
-        clickhouse_config: &ClickHouseConfiguration,
+        client: ArrowClickHouseClient,
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
         grpc_config: GrpcConfig,
@@ -37,9 +38,9 @@ impl GrpcServer {
         let service = OrbitServiceImpl::new(
             validator,
             active_schema,
-            clickhouse_config,
+            client,
             cluster_health,
-            grpc_config.stream_timeout_secs,
+            &grpc_config,
             analytics_config,
         );
         Self {
@@ -51,11 +52,6 @@ impl GrpcServer {
 
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
         self.service = self.service.with_resolver_registry(registry);
-        self
-    }
-
-    pub fn with_cache_broker(mut self, broker: Arc<nats_client::NatsClient>) -> Self {
-        self.service = self.service.with_cache_broker(broker);
         self
     }
 
@@ -107,6 +103,12 @@ impl GrpcServer {
             ))
             .layer(labkit::grpc::GrpcTraceLayer::new())
             .layer(labkit::grpc::GrpcCorrelationLayer::new())
+            .layer(labkit::grpc::GrpcVerboseLogsLayer::new(
+                crate::expanded_logs::VERBOSE_LOGS.clone(),
+            ))
+            .layer(tower::util::MapFutureLayer::new(|future| {
+                tracing::Instrument::instrument(future, crate::auth::request_span())
+            }))
             .add_service(OrbitServiceServer::from_arc(Arc::clone(&service)))
             .add_service(super::legacy::LegacyGkgService::new(
                 OrbitServiceServer::from_arc(service),

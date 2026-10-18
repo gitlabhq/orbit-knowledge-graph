@@ -3,9 +3,6 @@
   "title": "AppConfig",
   "type": "object",
   "properties": {
-    "bind_address": {
-      "type": "string"
-    },
     "grpc_bind_address": {
       "type": "string"
     },
@@ -44,12 +41,6 @@
     "health_check": {
       "$ref": "#/$defs/HealthCheckConfig"
     },
-    "indexer_health_bind_address": {
-      "type": "string"
-    },
-    "dispatcher_health_bind_address": {
-      "type": "string"
-    },
     "metrics": {
       "$ref": "#/$defs/MetricsConfig"
     },
@@ -83,7 +74,6 @@
   },
   "additionalProperties": false,
   "required": [
-    "bind_address",
     "grpc_bind_address",
     "jwt_clock_skew_secs",
     "nats",
@@ -94,8 +84,6 @@
     "gitlab",
     "schedule",
     "health_check",
-    "indexer_health_bind_address",
-    "dispatcher_health_bind_address",
     "metrics",
     "probe_server",
     "tls",
@@ -564,6 +552,12 @@
           "format": "uint64",
           "minimum": 0
         },
+        "max_repository_files": {
+          "description": "Files that pass the content filter above which a repository is skipped\nentirely, as for `max_total_bytes`. Listed-only entries (excluded, binary,\noversize, symlinks) do not count; past the same number they get no File\nrow and are counted as skipped. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
         "source_memory_budget_bytes": {
           "type": "integer",
           "format": "uint64",
@@ -607,9 +601,33 @@
           "minimum": 0
         },
         "cross_file_resolve_timeout_ms": {
-          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). Incremental engine:\n`cross_file_resolve_ms`. 0 = no timeout.",
+          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). Incremental engine:\n`cross_file_resolve_ms`. On a timeout the language family keeps its\nper-file graph, the cross-file edges of the waves that finished, and\nthe part of the last wave that finished, which depends on thread\nscheduling. 0 = no timeout.",
           "type": "integer",
           "format": "uint64",
+          "minimum": 0
+        },
+        "max_tree_depth": {
+          "description": "Syntax tree depth at which the incremental engine cuts a file: it drops\nthe deeper nodes, indexes the rest, and reports the file as limited\n(deeply_nested). A left-nested chain of one operator adds no depth.\n0 = no limit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_cross_file_names": {
+          "description": "Names that cross-file resolution may make visible across all files of\none language family before it stops as an overrun. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_manifest_bytes": {
+          "description": "Manifest bytes (package.json, Cargo.toml, and the like) that one language\nfamily reads for resolution. A manifest past the limit is not read, keeps\nits File row, and is counted as too_many_manifest_bytes. 0 = no limit.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_file_edges": {
+          "description": "Edges that the incremental engine's linker may emit for one file. A file\npast the limit is skipped as too_many_edges. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
           "minimum": 0
         },
         "job_timeout_secs": {
@@ -624,10 +642,28 @@
           "format": "uint",
           "minimum": 0
         },
-        "write_channel_capacity": {
-          "description": "In-flight batches the streaming sink holds before back-pressuring the parser.",
+        "archive_storage_budget": {
+          "description": "Maximum archive downloads in flight per Gitaly storage across all indexer pods, enforced with a NATS KV lease. 0 = no limit.",
           "type": "integer",
           "format": "uint",
+          "minimum": 0
+        },
+        "archive_tenant_budget": {
+          "description": "Maximum archive downloads in flight across the whole tenant for projects whose Gitaly storage is unknown (GitLab versions whose `/info` omits `repository_storage`, or a failed lookup). Independent of `archive_storage_budget`, so during a mixed rollout a storage can see both budgets. 0 = no limit.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "archive_lease_ttl_secs": {
+          "description": "Seconds an archive lease stays valid without a heartbeat (minimum 1). A pod that crashes mid-download frees its slot after this long; a pod that loses the lease cancels its download.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "archive_lease_max_wait_secs": {
+          "description": "Seconds a download queues for an archive lease while holding a fetch slot. After that the task is NAKed without spending a checkpoint attempt, so a busy storage cannot hold every fetch slot of a pod. Each NAK still counts toward the stream's `max_deliver`.",
+          "type": "integer",
+          "format": "uint64",
           "minimum": 0
         },
         "write_slice_rows": {
@@ -636,26 +672,8 @@
           "format": "uint",
           "minimum": 0
         },
-        "write_buffer_age_secs": {
-          "description": "Soft-flush interval in seconds: the coalescer flushes a table on this tick only once it holds at least `write_min_flush_rows`, so a trickle of small repos pools into one part instead of one tiny part per tick.",
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        },
-        "write_min_flush_rows": {
-          "description": "Minimum buffered rows a table needs before the soft tick flushes it. Below this, rows keep pooling across repos until the row count or the hard `write_max_flush_age_secs` cap is reached.",
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0
-        },
-        "write_max_flush_age_secs": {
-          "description": "Hard cap in seconds on how long a table's oldest unflushed row may wait before it is force-flushed regardless of size, bounding the uncheckpointed-rows window. Keep below `nats.ack_wait_secs`.",
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0
-        },
         "write_max_concurrent": {
-          "description": "Coalesced parts written to ClickHouse concurrently. Trades memory (up to this many `write_slice_rows`-sized parts in flight) for write throughput.",
+          "description": "Inserts one code job keeps in flight at ClickHouse. The parse pauses at the bound, so a job holds at most this many `write_slice_rows`-sized slices in memory. Keep it at or above the number of code tables, so a small job sends every table's insert at once.",
           "type": "integer",
           "format": "uint",
           "minimum": 0
@@ -690,6 +708,7 @@
         "max_file_size_bytes",
         "max_files",
         "max_total_bytes",
+        "max_repository_files",
         "source_memory_budget_bytes",
         "source_compress_spill",
         "worker_threads",
@@ -699,13 +718,17 @@
         "per_file_walk_timeout_ms",
         "per_file_ssa_timeout_ms",
         "cross_file_resolve_timeout_ms",
+        "max_tree_depth",
+        "max_cross_file_names",
+        "max_manifest_bytes",
+        "max_file_edges",
         "job_timeout_secs",
         "fetch_concurrency",
-        "write_channel_capacity",
+        "archive_storage_budget",
+        "archive_tenant_budget",
+        "archive_lease_ttl_secs",
+        "archive_lease_max_wait_secs",
         "write_slice_rows",
-        "write_buffer_age_secs",
-        "write_min_flush_rows",
-        "write_max_flush_age_secs",
         "write_max_concurrent",
         "small_repo_max_files"
       ]
@@ -1035,6 +1058,9 @@
             "null"
           ]
         },
+        "expanded_logs": {
+          "$ref": "#/$defs/ExpandedLogsConfig"
+        },
         "otel": {
           "$ref": "#/$defs/OtelConfig"
         },
@@ -1044,8 +1070,33 @@
       },
       "additionalProperties": false,
       "required": [
+        "expanded_logs",
         "otel",
         "prometheus"
+      ]
+    },
+    "ExpandedLogsConfig": {
+      "description": "Which log lines carry expanded fields; other lines carry only safe fields.",
+      "type": "object",
+      "properties": {
+        "global_override": {
+          "description": "Expand every log line.",
+          "type": "boolean"
+        },
+        "root_namespace_ids": {
+          "description": "Root namespace IDs whose logs are always expanded.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "global_override",
+        "root_namespace_ids"
       ]
     },
     "OtelConfig": {
@@ -1150,7 +1201,7 @@
       "additionalProperties": false
     },
     "QuerySettings": {
-      "description": "Top-level query settings loaded from YAML. Contains a `default` config\nand optional per-query-type overrides keyed by snake_case query type\nname (e.g. `traversal`, `aggregation`, `search`).\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n    use_query_cache: false\n    query_cache_ttl: 60\n  aggregation:\n    max_execution_time: 60\n```",
+      "description": "Top-level query settings loaded from YAML. Contains a `default` config\nand optional per-query-type overrides keyed by snake_case query type\nname (e.g. `traversal`, `aggregation`, `search`).\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n    use_query_cache: true\n    query_cache_ttl: 10\n  aggregation:\n    max_execution_time: 60\n```",
       "type": "object",
       "properties": {
         "default": {
@@ -1241,7 +1292,7 @@
           "minimum": 0
         },
         "use_query_cache": {
-          "description": "ClickHouse `use_query_cache`. Enabled for cursor pagination.",
+          "description": "ClickHouse `use_query_cache`. Queries with non-deterministic functions\nor system tables still run, but uncached.",
           "type": [
             "boolean",
             "null"
@@ -1255,24 +1306,6 @@
           ],
           "format": "uint32",
           "minimum": 0
-        },
-        "graph_query_cache_enabled": {
-          "description": "NATS KV cache for graph query results (webserver).\nExcluded from ClickHouse SETTINGS (app-level only).",
-          "type": [
-            "boolean",
-            "null"
-          ],
-          "writeOnly": true
-        },
-        "graph_query_cache_ttl": {
-          "description": "Graph query cache TTL in seconds.\nExcluded from ClickHouse SETTINGS (app-level only).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "minimum": 0,
-          "writeOnly": true
         }
       },
       "additionalProperties": false
@@ -1329,6 +1362,17 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0
+        },
+        "result_chunk_bytes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 65536,
+          "maximum": 4194304
+        },
+        "max_result_bytes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 1048576
         }
       },
       "additionalProperties": false,
@@ -1342,7 +1386,9 @@
         "max_connection_age_secs",
         "max_connection_age_grace_secs",
         "stream_timeout_secs",
-        "max_header_list_size_bytes"
+        "max_header_list_size_bytes",
+        "result_chunk_bytes",
+        "max_result_bytes"
       ]
     },
     "SchemaConfig": {

@@ -1,0 +1,21 @@
+name: APPROVED neighbor filters use writer-provided target tags
+
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[99000],"filters":{"state":"opened"}}],"neighbors":{"direction":"incoming","rel_types":["APPROVED"]}}
+  gql: |
+    MATCH (mr:MergeRequest {id: 99000, state: 'opened'})<-[:APPROVED]-(neighbor)
+    RETURN neighbor
+
+logical:
+  expect:
+    - (Filter mr.id IN [99000], mr.state = 'opened' (NodeScan MergeRequest AS mr))
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Neighbors center=mr direction=incoming directional outgoing=[gl_edge] incoming=[gl_edge] center_filter=false relationships=[APPROVED] incoming_scoped=[] incoming_cross_scope=[APPROVED] (_))
+    emitted:
+      expect:
+        - (SemiJoin e.target_id IN subquery (Filter ArrayContains(e.target_tags, 'state:opened'), e.target_kind = 'MergeRequest', e.target_id = 99000, e.relationship_kind = 'APPROVED' (Scan Table(gl_edge) AS e)) (Project _ctr.id AS id (Filter _ctr.id = 99000, _ctr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS _ctr)))))

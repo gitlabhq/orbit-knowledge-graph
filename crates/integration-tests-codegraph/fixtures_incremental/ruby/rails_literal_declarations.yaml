@@ -1,4 +1,5 @@
 name: Rails literal declarations preserve Ruby receiver boundaries
+
 fixtures:
   - path: app/models/post.rb
     content: |
@@ -27,6 +28,7 @@ fixtures:
           label
         end
       end
+
   - path: lib/ordinary.rb
     content: |
       class Ordinary
@@ -40,6 +42,7 @@ fixtures:
         end
         define_method(dynamic_name) { "dynamic" }
       end
+
 tests:
   - name: Literal declarations create precisely the intended names
     query: |
@@ -49,6 +52,7 @@ tests:
     assert:
       - { row_count: 10 }
       - { column_values: { field: name, values: [limit, mode, enabled, category, tags, author, title, description, author_name, label] } }
+
   - name: Options and delegated source names are not generated methods
     query: |
       MATCH (d:Definition)
@@ -56,6 +60,7 @@ tests:
       RETURN d.fqn
     assert:
       - { empty: true }
+
   - name: Ordinary same-named methods keep their calls
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:Definition)
@@ -63,7 +68,8 @@ tests:
       RETURN target.fqn AS name
     assert:
       - { row_count: 1 }
-      - { row: { name: 'Ordinary::after_create' } }
+      - { row: { name: "Ordinary::after_create" } }
+
   - name: Literal method alias keeps its original target
     query: |
       MATCH (caller:Definition)-[:CALLS]->(alias:Definition)-[:CALLS]->(target:Definition)
@@ -71,7 +77,8 @@ tests:
       RETURN alias.fqn AS alias, target.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { alias: 'Post::renamed', target: 'Post::original' } }
+      - { row: { alias: "Post::renamed", target: "Post::original" } }
+
 steps:
   - name: Rename a generated declaration after snapshot loading
     snapshot: true
@@ -90,7 +97,7 @@ steps:
           RETURN target.fqn AS name
         assert:
           - { row_count: 1 }
-          - { row: { name: 'Post::updated_limit' } }
+          - { row: { name: "Post::updated_limit" } }
       - name: Removed declarations do not survive the snapshot edit
         query: |
           MATCH (d:Definition)

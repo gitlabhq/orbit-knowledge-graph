@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/search.rs::search_returns_correct_project_properties
 description: Project search returns correct name and visibility_level
 
 query:

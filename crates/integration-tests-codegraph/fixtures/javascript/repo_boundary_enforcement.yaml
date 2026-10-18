@@ -1,5 +1,6 @@
 name: "JavaScript repo boundary enforcement"
 pipeline: js
+
 fixtures:
   - path: ../outside/index.js
     content: |

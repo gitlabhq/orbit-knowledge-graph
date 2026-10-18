@@ -158,41 +158,6 @@ async fn run_task_loop(
     info!(task = task_name, "task loop stopped");
 }
 
-/// Runs all tasks once (for integration tests and backward compatibility).
-pub async fn run_once(
-    tasks: &[Box<dyn ScheduledTask>],
-    lock_service: &dyn LockService,
-) -> Result<(), SchedulerError> {
-    for task in tasks {
-        let task_name = task.name();
-
-        let cadence_key = format!("cadence.{}", task_name);
-        let ttl = task.schedule().interval_hint();
-        match lock_service.try_acquire(&cadence_key, ttl).await {
-            Ok(true) => {}
-            Ok(false) => {
-                info!(task = task_name, "skipping, within interval");
-                continue;
-            }
-            Err(error) => {
-                warn!(task = task_name, %error, "cadence lock check failed");
-                continue;
-            }
-        }
-
-        match task.run().await {
-            Ok(()) => {
-                debug!(task = task_name, "task completed");
-            }
-            Err(error) => {
-                warn!(task = task_name, %error, "task failed");
-            }
-        }
-    }
-
-    Ok(())
-}
-
 /// Trigger A: the cron-driven scheduler. Wraps [`run_loop`] over a fixed set of
 /// [`ScheduledTask`]s so it can be launched alongside the other triggers.
 pub struct Scheduled {
@@ -231,7 +196,6 @@ mod tests {
 
     use super::*;
     use crate::locking::LockError;
-    use crate::testkit::mocks::MockLockService;
 
     /// Every-second cron: deterministic short delay (≤1s) regardless of wall clock.
     const EVERY_SECOND: &str = "*/1 * * * * *";
@@ -290,8 +254,9 @@ mod tests {
             &self,
             _key: &str,
             _ttl: Duration,
-        ) -> Result<Option<crate::locking::LockRevision>, LockError> {
-            Ok(Some(0))
+        ) -> Result<Result<crate::locking::LockRevision, crate::locking::LockHeld>, LockError>
+        {
+            Ok(Ok(0))
         }
         async fn renew(
             &self,
@@ -311,45 +276,6 @@ mod tests {
         for _ in 0..10 {
             tokio::task::yield_now().await;
         }
-    }
-
-    #[tokio::test]
-    async fn run_once_runs_when_lock_available() {
-        let lock_service = AlwaysGrantLockService;
-        let task = Arc::new(StubTask::new("t", EVERY_SECOND));
-        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(Arc::clone(&task))];
-
-        run_once(&tasks, &lock_service).await.unwrap();
-        run_once(&tasks, &lock_service).await.unwrap();
-
-        assert_eq!(task.run_count(), 2);
-    }
-
-    #[tokio::test]
-    async fn run_once_skips_when_cadence_held() {
-        let lock_service = MockLockService::new();
-        let task = Arc::new(StubTask::new("hourly", "0 0 * * * *"));
-        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(Arc::clone(&task))];
-
-        run_once(&tasks, &lock_service).await.unwrap();
-        assert_eq!(task.run_count(), 1);
-
-        run_once(&tasks, &lock_service).await.unwrap();
-        assert_eq!(task.run_count(), 1, "should skip when cadence lock is held");
-    }
-
-    #[tokio::test]
-    async fn run_once_cadence_is_per_task() {
-        let lock_service = MockLockService::new();
-        let a = Arc::new(StubTask::new("a", "0 0 * * * *"));
-        let b = Arc::new(StubTask::new("b", "0 0 * * * *"));
-        let tasks: Vec<Box<dyn ScheduledTask>> =
-            vec![Box::new(Arc::clone(&a)), Box::new(Arc::clone(&b))];
-
-        run_once(&tasks, &lock_service).await.unwrap();
-
-        assert_eq!(a.run_count(), 1);
-        assert_eq!(b.run_count(), 1, "each task has its own cadence lock");
     }
 
     #[tokio::test]

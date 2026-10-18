@@ -56,6 +56,44 @@ fn campaign() -> indexer::campaign::CampaignState {
     indexer::campaign::CampaignState::new()
 }
 
+#[test]
+fn reordered_table_declarations_do_not_change_deployed_schema() {
+    let base = ontology::Ontology::load_embedded().unwrap();
+    let overlay = integration_testkit::load_ontology_overlay("reordered_edges");
+    let base_schema = test_schema(&base);
+    let overlay_schema = test_schema(&overlay);
+    assert_eq!(
+        base_schema
+            .tables
+            .iter()
+            .map(|table| table.name.as_str())
+            .collect::<Vec<_>>(),
+        overlay_schema
+            .tables
+            .iter()
+            .map(|table| table.name.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        base_schema
+            .views
+            .iter()
+            .map(|view| view.name.as_str())
+            .collect::<Vec<_>>(),
+        overlay_schema
+            .views
+            .iter()
+            .map(|view| view.name.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !overlay_schema
+            .tables
+            .iter()
+            .any(|table| table.name == "gl_code_edge_by_target")
+    );
+}
+
 #[tokio::test]
 async fn fresh_install_creates_tables_and_records_version() {
     let (ctx, ontology, metrics) = setup().await;
@@ -1138,12 +1176,17 @@ impl MigrationScenario {
         let table_names =
             CodeTableNames::from_ontology(&self.ontology).expect("code tables must resolve");
         let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
-            self.ctx.config.build_client(),
+            self.ctx.config.build_client("graph"),
         )));
-        CodeStaleSweep::new(self.ctx.config.build_client(), &table_names, store, 10)
-            .run_for_drained(&[TraversalPath::new_unchecked("1/100/")])
-            .await
-            .expect("sweep failed");
+        CodeStaleSweep::new(
+            self.ctx.config.build_client("graph"),
+            &table_names,
+            store,
+            10,
+        )
+        .run_for_drained(&[TraversalPath::new_unchecked("1/100/")])
+        .await
+        .expect("sweep failed");
     }
 
     async fn live_edge_exists(&self, kind: &str, source_id: u64) -> bool {
@@ -1371,8 +1414,8 @@ async fn code_migration_clone_converges_after_reindex_and_sweep() {
         "SDLC edges must never be touched by the code stale sweep"
     );
     assert!(
-        scenario.live_edge_exists("CONTAINS", 1).await,
-        "known gap: Branch-source code edges are not swept until the sweep covers Branch/Project"
+        !scenario.live_edge_exists("CONTAINS", 1).await,
+        "the cloned Branch-source code edge must be tombstoned once its project re-indexes"
     );
 }
 

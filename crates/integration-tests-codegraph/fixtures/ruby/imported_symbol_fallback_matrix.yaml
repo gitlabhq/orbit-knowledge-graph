@@ -1,4 +1,5 @@
 name: "Ruby: imported-symbol fallback matrix"
+
 fixtures:
   - path: app/api_runner.rb
     content: |

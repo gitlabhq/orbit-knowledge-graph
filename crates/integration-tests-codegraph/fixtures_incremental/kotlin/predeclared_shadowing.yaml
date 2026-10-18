@@ -1,4 +1,5 @@
 name: "Kotlin: a local definition shadows a predeclared default-import name"
+
 fixtures:
   - path: src/main/kotlin/com/ex/Main.kt
     content: |

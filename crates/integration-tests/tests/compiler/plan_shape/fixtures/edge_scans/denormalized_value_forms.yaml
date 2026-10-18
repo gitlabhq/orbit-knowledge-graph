@@ -1,4 +1,5 @@
 name: Denormalized singleton sets and boolean filters retain value tokens
+
 query:
   json: |
     {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"mr","entity":"MergeRequest","filters":{"state":{"in":["merged"]},"draft":true}}],"relationships":[{"type":"REVIEWER","from":"u","to":"mr"}]}
@@ -6,13 +7,15 @@ query:
     MATCH (u:User {id: 1})-[:REVIEWER]->(mr:MergeRequest)
     WHERE mr.state IN ['merged'] AND mr.draft = true
     RETURN u, mr
+
 logical:
   expect: ["(Filter mr.state IN ['merged'], mr.draft = true (_))"]
+
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter e0.target_tags HAS ANY ['draft:true'], e0.target_tags HAS ANY ['state:merged'], ... (_))"]
+      expect: ["(Filter _orbit_edge_0.target_tags HAS ANY ['draft:true'], _orbit_edge_0.target_tags HAS ANY ['state:merged'], ... (_))"]
       reject: ["(Scan Table(gl_merge_request) ...)"]
     emitted:
-      expect: ["(Filter ArrayContains(e0.target_tags, 'draft:true'), ArrayContains(e0.target_tags, 'state:merged'), ... (_))"]
-      reject: ["(CTE _nf_mr (_))", "(Filter ArrayContains(e0.target_tags, 'draft:'), ... (_))"]
+      expect: ["(Filter ArrayContains(_orbit_edge_0.target_tags, 'draft:true'), ArrayContains(_orbit_edge_0.target_tags, 'state:merged'), ... (_))"]
+      reject: ["(CTE _nf_mr (_))", "(Filter ArrayContains(_orbit_edge_0.target_tags, 'draft:'), ... (_))"]

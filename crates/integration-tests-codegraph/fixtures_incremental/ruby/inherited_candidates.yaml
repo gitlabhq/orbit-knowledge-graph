@@ -1,4 +1,5 @@
 name: "Ruby: two included modules emit every candidate"
+
 fixtures:
   - path: app/models/thing.rb
     content: |

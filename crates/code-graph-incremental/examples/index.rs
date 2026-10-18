@@ -30,9 +30,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         worker_threads: 0,
         concurrent_families: 2,
         small_family_files: 0,
-        batch_bytes: orbit_utils::arrow::BATCH_BYTES,
+        batch_bytes: orbit_arrow::BATCH_BYTES,
         cancelled: Arc::new(|| false),
         family_finished: Arc::new(|| eprintln!("family finished")),
+        phase_started: Arc::new(|_, _, _| {}),
     };
     let selected_files =
         code_graph_incremental::pipeline::candidates(&repository, options.limits.max_files).count();

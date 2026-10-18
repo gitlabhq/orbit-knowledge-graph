@@ -161,6 +161,7 @@ impl<'e> Context<'e> {
 #[derive(Default)]
 pub struct Report {
     pub skipped: Vec<Killed>,
+    pub limited: Vec<Killed>,
     pub unread_files: Vec<String>,
     pub phases: Vec<PhaseReport>,
     pub files: HashMap<String, FileStats>,

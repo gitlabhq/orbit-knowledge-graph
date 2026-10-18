@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/traversal.rs::traversal_code_graph_calls_without_node_ids
 description: Code graph CALLS traversal without node_ids relies on auth-scope cascade
 
 query:

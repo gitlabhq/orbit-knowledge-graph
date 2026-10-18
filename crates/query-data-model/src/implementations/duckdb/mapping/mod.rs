@@ -38,6 +38,13 @@ impl Mapping<Relational<DuckDb>> for DuckDbBindings {
         let edge = storage.require_table(&storage.metadata.edge_table)?;
         let relationships = graph.relationships().map(|_| edge.name.clone()).collect();
         Ok(DuckDbBindings {
+            variants: graph
+                .variants()
+                .map(|_| crate::VariantRoute {
+                    table: edge.name.clone(),
+                    foreign_key: None,
+                })
+                .collect(),
             edge_columns: edge
                 .columns
                 .iter()

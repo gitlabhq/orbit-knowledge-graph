@@ -35,7 +35,6 @@ pub const EMBEDDED_DEFAULTS: &str = include_str!(concat!(env!("CONFIG_DIR"), "/d
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct AppConfig {
-    pub bind_address: SocketAddr,
     pub grpc_bind_address: SocketAddr,
     pub jwt_clock_skew_secs: u64,
     pub health_check_url: Option<String>,
@@ -47,8 +46,6 @@ pub struct AppConfig {
     pub gitlab: GitlabConfig,
     pub schedule: ScheduleConfig,
     pub health_check: HealthCheckConfig,
-    pub indexer_health_bind_address: SocketAddr,
-    pub dispatcher_health_bind_address: SocketAddr,
     pub metrics: MetricsConfig,
     pub probe_server: ProbeServerConfig,
     pub tls: TlsConfig,
@@ -361,6 +358,40 @@ schedule:
         let config = AppConfig::load_from(Some(&overlay), &secrets).unwrap();
 
         assert_eq!(config.graph.password.as_deref(), Some("secret-password"));
+    }
+
+    #[test]
+    fn a_retired_pipeline_key_in_an_overlay_is_ignored() {
+        let yaml = r#"
+engine:
+  handlers:
+    code-indexing-task:
+      pipeline:
+        write_buffer_age_secs: 5
+        write_max_flush_age_secs: 5
+"#;
+
+        let config: AppConfig = builder_with_defaults()
+            .add_source(config::File::from_str(yaml, config::FileFormat::Yaml))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .expect("a deployed overlay may still carry keys a release removed");
+
+        assert_eq!(
+            config
+                .engine
+                .handlers
+                .code_indexing_task
+                .pipeline
+                .write_max_concurrent,
+            AppConfig::embedded_defaults()
+                .engine
+                .handlers
+                .code_indexing_task
+                .pipeline
+                .write_max_concurrent
+        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 name: "Rust: macro expansion resolution"
+
 fixtures:
   - path: Cargo.toml
     content: |

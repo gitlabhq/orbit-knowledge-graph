@@ -1,4 +1,5 @@
 name: "Python: unresolved refs, shadowing, walrus, f-strings"
+
 fixtures:
   - path: main.py
     content: |

@@ -20,7 +20,10 @@ pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<(Input, u64)> {
         other => other,
     })?;
     let query_hash = cursor::canonical_hash(&value);
-    Ok((serde_json::from_value(value)?, query_hash))
+    let mut input: Input = serde_json::from_value(value)?;
+    input.lift_negated_filters()?;
+    input.promote_id_filters()?;
+    Ok((input, query_hash))
 }
 
 fn derive_json_schema(model: &impl OrbitQueryModel) -> Result<serde_json::Value> {
@@ -70,7 +73,8 @@ fn derive_json_schema(model: &impl OrbitQueryModel) -> Result<serde_json::Value>
                             { "type": "array", "items": allowlist(false), "minItems": 1 }
                         ]
                     },
-                    "filters": { "propertyNames": allowlist(true) }
+                    "filters": { "propertyNames": allowlist(true) },
+                    "not": { "propertyNames": allowlist(true) }
                 }
             }
         })

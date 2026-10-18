@@ -64,6 +64,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_env: [data_model]
             reads_state: [input]
         }
+        validate_conditions {
+            reads_env: [data_model]
+            reads_state: [input]
+        }
         validate {
             reads_env: [data_model]
             mutates: [input, pagination]
@@ -162,7 +166,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, settings, codegen]
+            phases: [validate_conditions, restrict, plan_clickhouse, lower, scope_requirements, response_policy, enforce, settings, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
@@ -207,6 +211,11 @@ fn gql_parse(ctx: &mut impl CompilerCtx) -> Result<()> {
         frontend::gql::parse_with_hash(&raw)?.load(ctx);
     }
     Ok(())
+}
+
+fn validate_conditions(ctx: &mut impl CompilerCtx) -> Result<()> {
+    let input = require(ctx.input().as_ref(), "input")?;
+    validate::Validator::new(ctx.data_model()).check_filter_types(input)
 }
 
 fn validate_relationships(ctx: &mut impl CompilerCtx) -> Result<()> {
@@ -424,6 +433,7 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = require(ctx.node().clone(), "node")?;
     if let Node::Query(q) = &node {
         let derived = &mut config.compiler_derived;
+        derived.null_in_is_unknown = input.has_negation();
         visit_queries(q, &mut |query| {
             derived.enable_materialized_cte |= query.ctes.iter().any(|cte| cte.materialized);
             visit_relations(&query.from, &mut |relation| {
@@ -441,6 +451,9 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     if query_plan.hops().len() >= 3 {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
+    }
+    if query_plan.is_point_lookup() && config.use_query_cache == Some(true) {
+        config.use_query_cache = Some(false);
     }
     // Pathfinding safety net: enforce hard limits on fan-out-prone queries
     // regardless of config. These are compiler-side floors; the config can

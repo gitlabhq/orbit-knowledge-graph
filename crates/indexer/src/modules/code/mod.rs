@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use crate::IndexerConfig;
 use crate::analytics::IndexingAnalytics;
-use crate::clickhouse::ClickHouseConfigurationExt;
+use crate::clickhouse::ClickHouseClients;
 
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
@@ -26,8 +26,8 @@ use metrics::CodeMetrics;
 use orbit_server_config::{IndexerModule, SubscriptionConfig};
 use repository::RepositoryResolver;
 
-pub use checkpoint::{ClickHouseCodeCheckpointStore, CodeCheckpoint};
-pub use handler::CodeIndexingTaskHandler;
+pub use checkpoint::{ClickHouseCodeCheckpointStore, CodeCheckpoint, CodeCheckpointStore};
+pub use handler::{CodeIndexingTaskHandler, project_lock_key};
 pub use pipeline::{CodeIndexer, IndexError, IndexingRequest};
 pub use repository::{
     CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
@@ -50,6 +50,7 @@ pub fn code_indexing_task_topic_policy() -> SubscriptionConfig {
 pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
+    clients: &ClickHouseClients,
     ontology: &ontology::Ontology,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
@@ -67,7 +68,7 @@ pub async fn register_handlers(
 
     let gitlab_client =
         Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(HandlerInitError::new)?);
-    let client = Arc::new(config.graph.build_client());
+    let client = Arc::new(clients.graph.clone());
 
     let repository_service: Arc<dyn RepositoryService> =
         CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));

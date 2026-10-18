@@ -2,21 +2,34 @@
 //! tests but exercises the full query path: compile, execute, redact,
 //! hydrate, paginate, format, assert.
 
+mod duckdb;
 mod format;
+mod pagination;
+#[cfg(test)]
+mod regression;
+mod response;
 
+use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
 use std::sync::Arc;
 
 use format::ExpectedIndex;
+use futures::FutureExt;
+use pagination::{PageCollection, next_page, with_after, without_cursor};
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
+    SecurityContext,
 };
-use query_engine::formatters::{GraphFormatter, ResultFormatter};
+use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext, TypeMap,
 };
 use query_engine::shared::content::ColumnResolverRegistry;
 use query_engine::shared::{CompilationStage, PipelineOutput, RedactionOutput};
+use response::{
+    assert_compilation, assert_cursor, assert_output, assert_repeated_response, repeat_count,
+    validate_response,
+};
 
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
@@ -26,9 +39,10 @@ use crate::{
     SeededColumnResolver, collect_subtest_results, derive_clickhouse_data_model, load_ontology,
 };
 
+pub use duckdb::run_duckdb_dir;
 pub use format::{
-    PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, RedactionConfig, ScenarioConfig,
-    SecurityOverride,
+    PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, QueryStep, RedactionConfig,
+    ScenarioConfig, SecurityOverride,
 };
 
 use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
@@ -43,25 +57,62 @@ pub fn validate_parse(root: &str) {
     scenario::discover(root, &mut files);
     assert!(!files.is_empty(), "no files found under {}", root.display());
     for file in &files {
-        let raw =
-            std::fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
-        let _: QueryScenario =
-            orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+        scenario::read_cases::<QueryScenario>(file);
     }
+}
+
+fn read_scenarios(root: &Path, file: &Path) -> Vec<(String, QueryScenario)> {
+    let name = scenario::scenario_name(root, file);
+    scenario::read_cases(file)
+        .into_iter()
+        .map(|(case, scenario)| {
+            let name = case.map_or_else(|| name.clone(), |case| format!("{name}/{case}"));
+            (name, scenario)
+        })
+        .collect()
 }
 
 /// Load a named seed preset from `presets/seed.yaml` and apply it.
 pub async fn load_yaml_seed(ctx: &TestContext, presets_dir: &str, name: &str) {
-    let path = Path::new(presets_dir).join("seed.yaml");
+    let seed = seed_preset(Path::new(presets_dir), name);
+    let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
+    crate::scenario::seed::apply_seed(ctx, &seed, &Default::default(), &columns, name).await;
+}
+
+fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
+    let path = presets_dir.join("seed.yaml");
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("seed presets at {}: {e}", path.display()));
-    let map: std::collections::BTreeMap<String, Seed> =
+    let mut map: std::collections::BTreeMap<String, Seed> =
         orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| panic!("invalid seed presets: {e}"));
-    let seed = map
-        .get(name)
-        .unwrap_or_else(|| panic!("unknown seed preset '{name}'"));
-    let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
-    crate::scenario::seed::apply_seed(ctx, seed, &Default::default(), &columns, name).await;
+    map.remove(name)
+        .unwrap_or_else(|| panic!("unknown seed preset '{name}'"))
+}
+
+pub async fn run_query(
+    ctx: &TestContext,
+    frontend: Frontend,
+    query: &str,
+    security: &SecurityContext,
+    redaction: &MockRedactionService,
+) -> ResponseView {
+    let ontology = load_ontology();
+    let data_model = derive_clickhouse_data_model(&ontology);
+    let compiled = compile_like_server(query, frontend, (&data_model, &ontology), security)
+        .await
+        .expect("query should compile");
+    let output = execute_output(
+        ctx,
+        frontend,
+        &compiled,
+        (&data_model, &ontology),
+        security,
+        redaction,
+    )
+    .await;
+    assert_cursor(&output, "run_query");
+    let response = validate_response(&compiled.input, GraphFormatter.format(&output), "run_query");
+    ResponseView::for_query(&compiled.input, response)
 }
 
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
@@ -70,8 +121,12 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let mut files = Vec::new();
     scenario::discover(root, &mut files);
     files.sort();
+    let mut scenarios: Vec<_> = files
+        .iter()
+        .flat_map(|file| read_scenarios(root, file))
+        .collect();
     assert!(
-        !files.is_empty(),
+        !scenarios.is_empty(),
         "no query scenario files found under {}",
         root.display()
     );
@@ -79,16 +134,16 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     if let Ok(filter) = std::env::var("SCENARIO_FILTER") {
         let filter = filter.trim();
         if !filter.is_empty() {
-            files.retain(|f| scenario::scenario_name(root, f).contains(filter));
+            scenarios.retain(|(name, _)| name.contains(filter));
             assert!(
-                !files.is_empty(),
+                !scenarios.is_empty(),
                 "SCENARIO_FILTER='{filter}' matched no query scenarios under {}",
                 root.display()
             );
         }
     }
 
-    scenario::assert_distinct_database_names(root, &files);
+    scenario::assert_distinct_database_names(scenarios.iter().map(|(name, _)| name.clone()));
 
     let concurrency: usize = std::env::var("SUBTEST_CONCURRENCY")
         .ok()
@@ -98,8 +153,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let ctx = Arc::new(ctx.clone());
 
     let mut handles = Vec::new();
-    for file in files {
-        let name = scenario::scenario_name(root, &file);
+    for (name, scenario) in scenarios {
         let semaphore = Arc::clone(&semaphore);
         let ctx = Arc::clone(&ctx);
         let presets = Arc::clone(&presets);
@@ -108,7 +162,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
             let _permit = semaphore.acquire_owned().await.unwrap();
             let started = std::time::Instant::now();
             eprintln!("--- {task_name}");
-            run_scenario(&ctx, &file, &task_name, &presets).await;
+            run_scenario(&ctx, scenario, &task_name, &presets).await;
             eprintln!("    {task_name} {:.2?}", started.elapsed());
         });
         handles.push((name, handle));
@@ -117,18 +171,61 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     collect_subtest_results(handles).await;
 }
 
-async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path) {
-    let raw = std::fs::read_to_string(file)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", file.display()));
-    let scenario: QueryScenario = orbit_utils::yaml::from_str(&raw)
-        .unwrap_or_else(|e| panic!("{name}: invalid scenario: {e}"));
+async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, presets: &Path) {
+    let (config, steps) = scenario.into_steps();
+    let database = (!config.extra_seed.is_empty()
+        || config.ontology_overlay.is_some()
+        || steps.iter().any(|step| !step.seed.is_empty()))
+    .then(|| scenario::database_name(name));
+    let outcome = AssertUnwindSafe(run_case(
+        ctx,
+        &config,
+        &steps,
+        name,
+        presets,
+        database.as_deref(),
+    ))
+    .catch_unwind()
+    .await;
+    let cleanup = if let Some(database) = database {
+        AssertUnwindSafe(ctx.execute(&format!("DROP DATABASE IF EXISTS `{database}` SYNC")))
+            .catch_unwind()
+            .await
+    } else {
+        Ok(())
+    };
+    if let Err(failure) = outcome.and(cleanup) {
+        resume_unwind(failure);
+    }
+}
 
-    let cfg = &scenario.config;
-
-    let needs_fork = !cfg.extra_seed.is_empty();
-    let ctx = if needs_fork {
-        let db_name = scenario::database_name(name);
-        let forked = ctx.fork(&db_name).await;
+async fn run_case(
+    ctx: &TestContext,
+    cfg: &ScenarioConfig,
+    steps: &[QueryStep],
+    name: &str,
+    presets: &Path,
+    database: Option<&str>,
+) {
+    let ctx = if let Some(database) = database {
+        let forked = ctx.fork(database).await;
+        if let Some(overlay) = &cfg.ontology_overlay {
+            let ontology = crate::load_ontology_overlay(overlay);
+            let schema = orbit_migrations::schema::GraphSchema::from_ontology(&ontology).unwrap();
+            let credentials = orbit_migrations::schema::DictionaryCredentials {
+                database: forked.config.database.clone(),
+                user: forked.config.username.clone(),
+                password: forked.config.password.clone(),
+            };
+            orbit_migrations::execute::create_all_versioned_tables(
+                &forked.create_client(),
+                &schema,
+                &credentials,
+                &crate::TABLE_PREFIX,
+            )
+            .await
+            .unwrap();
+        }
         let columns = crate::scenario::seed::fetch_table_columns(&forked).await;
         let mut settings = Default::default();
         if cfg.unmerged_seed {
@@ -182,21 +279,43 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
         });
     let data_model = derive_clickhouse_data_model(&ontology);
 
-    for (frontend_key, query_str) in &scenario.query {
-        let Ok(frontend) = frontend_key.parse::<Frontend>() else {
-            eprintln!("    {name}: skipping unknown query language '{frontend_key}'");
-            continue;
-        };
-        run_frontend(
-            (&ctx, &data_model, &ontology),
-            (frontend, frontend_key),
-            query_str,
-            &security,
-            &redaction,
-            &scenario.expect,
-            name,
-        )
-        .await;
+    for (index, step) in steps.iter().enumerate() {
+        if !step.seed.is_empty() {
+            let columns = crate::scenario::seed::fetch_table_columns(&ctx).await;
+            crate::scenario::seed::apply_seed(
+                &ctx,
+                &step.seed,
+                &Default::default(),
+                &columns,
+                name,
+            )
+            .await;
+            ctx.optimize_all().await;
+        }
+        let name = &step_label(name, index, steps.len());
+        for (frontend_key, query_str) in &step.query {
+            let frontend = frontend_key
+                .parse::<Frontend>()
+                .unwrap_or_else(|_| panic!("{name}: unknown query language '{frontend_key}'"));
+            run_frontend(
+                (&ctx, &data_model, &ontology),
+                (frontend, frontend_key),
+                query_str,
+                &security,
+                &redaction,
+                &step.expect,
+                name,
+            )
+            .await;
+        }
+    }
+}
+
+pub(super) fn step_label(name: &str, index: usize, steps: usize) -> String {
+    if steps > 1 {
+        format!("{name} step {}", index + 1)
+    } else {
+        name.to_string()
     }
 }
 
@@ -214,65 +333,12 @@ async fn run_frontend(
     name: &str,
 ) {
     let label = &format!("{name} [{frontend_key}]");
+    expect.validate_pages_exclusive(label);
 
     let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
-    let compiled = match compiled {
-        Ok(c) => {
-            let expects_error = !matches!(
-                expect.compile_error,
-                None | Some(format::CompileErrorExpect::Flag(false))
-            );
-            assert!(
-                !expects_error,
-                "{label}: expected compile error but got success"
-            );
-            c
-        }
-        Err(e) => match &expect.compile_error {
-            None | Some(format::CompileErrorExpect::Flag(false)) => {
-                panic!("{label}: unexpected compile error: {e}")
-            }
-            Some(expected) => {
-                let msg = e.to_string();
-                if let Some(sub) = expected.substring_for(frontend_key) {
-                    assert!(
-                        msg.contains(sub),
-                        "{label}: compile error '{msg}' does not contain '{sub}'"
-                    );
-                }
-                for banned in expect.compile_error_not_contains.banned_for(frontend_key) {
-                    assert!(
-                        !msg.contains(banned.as_str()),
-                        "{label}: compile error must not contain '{banned}'\nerror: {msg}"
-                    );
-                }
-                return;
-            }
-        },
+    let Some(compiled) = assert_compilation(compiled, expect, frontend_key, label) else {
+        return;
     };
-
-    if let Some(expected) = expect.hydration {
-        assert_eq!(
-            compiled.hydration.kind(),
-            expected,
-            "{label}: unexpected hydration plan\n{:?}",
-            compiled.hydration
-        );
-    }
-
-    let sql = compiled.base.render();
-    for fragment in &expect.sql_contains {
-        assert!(
-            sql.contains(fragment.as_str()),
-            "{label}: SQL does not contain '{fragment}'\nSQL: {sql}"
-        );
-    }
-    for fragment in &expect.sql_not_contains {
-        assert!(
-            !sql.contains(fragment.as_str()),
-            "{label}: SQL should not contain '{fragment}'\nSQL: {sql}"
-        );
-    }
 
     if expect.compile_only {
         return;
@@ -284,7 +350,6 @@ async fn run_frontend(
     }
 
     if !expect.pages.is_empty() {
-        expect.validate_pages_exclusive(label);
         run_pages(
             ctx,
             frontend,
@@ -299,7 +364,7 @@ async fn run_frontend(
         return;
     }
 
-    let resp = execute_pipeline(
+    let output = execute_output(
         ctx,
         frontend,
         &compiled,
@@ -308,39 +373,28 @@ async fn run_frontend(
         redaction,
     )
     .await;
-
-    if let Some(n) = expect.repeat_count {
-        assert!(n >= 2, "{label}: repeat_count must be >= 2");
-        let baseline_node_ids = canonical_ids(&resp);
-        let baseline_edges = canonical_edges(&resp);
-        for run in 2..=n {
-            let rerun = execute_pipeline(
-                ctx,
-                frontend,
-                &compiled,
-                (data_model, ontology),
-                security,
-                redaction,
-            )
-            .await;
-            assert_eq!(
-                baseline_node_ids,
-                canonical_ids(&rerun),
-                "{label}: run {run}/{n} returned different node IDs"
-            );
-            assert_eq!(
-                baseline_edges,
-                canonical_edges(&rerun),
-                "{label}: run {run}/{n} returned different edges"
-            );
+    let baseline = assert_output(&output, frontend, expect, label);
+    let count = repeat_count(expect, label);
+    for run in 2..=count {
+        let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
+        let compiled = assert_compilation(compiled, expect, frontend_key, label)
+            .expect("repeated query should compile");
+        if !expect.indexes_used.is_empty() {
+            let plan = ctx.explain_plan(&compiled.base).await;
+            assert_indexes_used(&plan, &expect.indexes_used, label);
         }
+        let output = execute_output(
+            ctx,
+            frontend,
+            &compiled,
+            (data_model, ontology),
+            security,
+            redaction,
+        )
+        .await;
+        let rerun = assert_output(&output, frontend, expect, label);
+        assert_repeated_response(&baseline, &rerun, run, label);
     }
-
-    let response: query_engine::formatters::GraphResponse =
-        serde_json::from_value(resp).expect("response should deserialize");
-    let view = ResponseView::for_query(&compiled.input, response);
-
-    apply_expect(&view, expect, label);
 }
 
 fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], label: &str) {
@@ -410,18 +464,6 @@ fn skip_index<'a>(value: &'a serde_json::Value, name: &str) -> Option<&'a serde_
     }
 }
 
-fn with_after(frontend: Frontend, base_query: &str, token: &str) -> String {
-    match frontend {
-        Frontend::JsonDsl => {
-            let mut query: serde_json::Value =
-                serde_json::from_str(base_query).expect("query must be valid JSON");
-            query["cursor"]["after"] = serde_json::Value::String(token.to_owned());
-            query.to_string()
-        }
-        Frontend::Gql => format!("{base_query} AFTER '{token}'"),
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn run_pages(
     ctx: &TestContext,
@@ -438,12 +480,7 @@ async fn run_pages(
 ) {
     let mut query_str = base_query.trim_end().to_owned();
 
-    let mut collected_ids: std::collections::BTreeMap<String, Vec<i64>> =
-        std::collections::BTreeMap::new();
-    let mut collected_group_ids: std::collections::BTreeMap<String, Vec<i64>> =
-        std::collections::BTreeMap::new();
-    let mut collected_edges: Vec<(String, i64, i64)> = Vec::new();
-    let mut page_count = 0;
+    let mut collected = PageCollection::default();
 
     for (i, page_expect) in expect.pages.iter().enumerate() {
         let page_label = format!("{label} page {}", i + 1);
@@ -452,7 +489,7 @@ async fn run_pages(
             .await
             .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}"));
 
-        let resp = execute_pipeline(
+        let output = execute_output(
             ctx,
             frontend,
             &compiled,
@@ -461,97 +498,34 @@ async fn run_pages(
             redaction,
         )
         .await;
-        let response: query_engine::formatters::GraphResponse =
-            serde_json::from_value(resp).expect("response should deserialize");
-
-        let next_cursor = response
-            .pagination
-            .as_ref()
-            .and_then(|p| p.next_cursor.clone());
-
-        // Collect IDs and edges for all_pages assertions.
-        if expect.all_pages.is_some() {
-            for node in &response.nodes {
-                collected_ids
-                    .entry(node.entity_type.clone())
-                    .or_default()
-                    .push(node.id);
-            }
-            for edge in &response.edges {
-                collected_edges.push((edge.edge_type.clone(), edge.from_id, edge.to_id));
-            }
-        }
-        page_count += 1;
-
-        let view = ResponseView::for_query(&compiled.input, response);
-
-        if let Some(ap) = &expect.all_pages {
-            for key in ap.group_node_ids.keys() {
-                if let Some((group_key, entity)) = key.split_once(':') {
-                    let ids = view.group_node_ids_ordered(group_key, entity);
-                    collected_group_ids
-                        .entry(key.clone())
-                        .or_default()
-                        .extend(ids);
-                }
-            }
-        }
-
-        apply_expect(&view, page_expect, &page_label);
-
-        match next_cursor {
-            Some(cursor) => query_str = with_after(frontend, base_query.trim_end(), &cursor),
-            None => {
-                assert_eq!(
-                    i + 1,
-                    expect.pages.len(),
-                    "{page_label}: no next_cursor but more pages expected"
-                );
-            }
+        let response = assert_output(&output, frontend, page_expect, &page_label);
+        let response = serde_json::from_value(response).expect("response should deserialize");
+        collected.push(&response);
+        if let Some(cursor) = next_page(&response, i, expect.pages.len(), &page_label) {
+            query_str = with_after(frontend, base_query, &cursor);
         }
     }
 
-    if let Some(ap) = &expect.all_pages {
-        if let Some(expected_pages) = ap.page_count {
-            assert_eq!(page_count, expected_pages, "{label}: page count mismatch");
-        }
-        if ap.no_duplicate_ids {
-            for (entity, ids) in &collected_ids {
-                let mut seen = std::collections::HashSet::new();
-                for id in ids {
-                    assert!(
-                        seen.insert(*id),
-                        "{label}: {entity}/{id} appeared on multiple pages"
-                    );
-                }
-            }
-        }
-        for (entity, expected_ids) in &ap.node_ids {
-            let mut actual: Vec<i64> = collected_ids.get(entity).cloned().unwrap_or_default();
-            actual.sort();
-            actual.dedup();
-            assert_eq!(
-                actual, *expected_ids,
-                "{label}: collected {entity} IDs mismatch"
-            );
-        }
-        for (key, expected_ids) in &ap.group_node_ids {
-            let mut actual = collected_group_ids.get(key).cloned().unwrap_or_default();
-            actual.sort();
-            actual.dedup();
-            assert_eq!(
-                actual, *expected_ids,
-                "{label}: collected group {key} IDs mismatch"
-            );
-        }
-        if let Some(expected) = ap.edge_count {
-            collected_edges.sort();
-            collected_edges.dedup();
-            assert_eq!(
-                collected_edges.len(),
-                expected,
-                "{label}: collected edge count mismatch"
-            );
+    if let Some(all_pages) = &expect.all_pages {
+        collected.assert_expect(all_pages, label);
+        if all_pages.matches_unpaginated {
+            let query = without_cursor(frontend, base_query);
+            let compiled = compile_like_server(&query, frontend, (data_model, ontology), security)
+                .await
+                .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}"));
+            let output = execute_output(
+                ctx,
+                frontend,
+                &compiled,
+                (data_model, ontology),
+                security,
+                redaction,
+            )
+            .await;
+            assert_cursor(&output, label);
+            let response =
+                validate_response(&compiled.input, GraphFormatter.format(&output), label);
+            collected.assert_matches(&response, label);
         }
     }
 }
@@ -588,7 +562,7 @@ async fn compile_like_server(
         .ok_or_else(|| PipelineError::custom("CompilationStage produced no query"))
 }
 
-async fn execute_pipeline(
+async fn execute_output(
     ctx: &TestContext,
     frontend: Frontend,
     compiled: &Arc<CompiledQueryContext>,
@@ -598,9 +572,9 @@ async fn execute_pipeline(
     ),
     security: &SecurityContext,
     redaction: &MockRedactionService,
-) -> serde_json::Value {
+) -> PipelineOutput {
     let batches = ctx.query_parameterized(&compiled.base).await;
-    let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
+    let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
 
     let checks = result.resource_checks();
     let authorizations = redaction.check(&checks);
@@ -636,26 +610,65 @@ async fn execute_pipeline(
         .await
         .expect("hydration should succeed");
 
-    let mut query_result = hydration_output.query_result;
+    pipeline_output(
+        compiled,
+        hydration_output.query_result,
+        hydration_output.redacted_count,
+        hydration_output.result_context,
+        compiled.base.sql.clone(),
+    )
+}
+
+fn pipeline_output(
+    compiled: &Arc<CompiledQueryContext>,
+    mut query_result: QueryResult,
+    redacted_count: usize,
+    result_context: ResultContext,
+    sql: String,
+) -> PipelineOutput {
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
         &compiled.input,
         &compiled.pagination,
     ));
-
-    let output = PipelineOutput {
+    PipelineOutput {
         row_count: query_result.authorized_count(),
-        redacted_count: hydration_output.redacted_count,
+        redacted_count,
         query_type: compiled.query_type.to_string(),
-        raw_query_strings: vec![compiled.base.sql.clone()],
+        raw_query_strings: vec![sql],
         compiled: Arc::clone(compiled),
         query_result,
-        result_context: hydration_output.result_context,
+        result_context,
         execution_log: vec![],
         pagination,
-    };
+    }
+}
 
-    GraphFormatter.format(&output)
+fn assert_response(input: &Input, response: serde_json::Value, expect: &QueryExpect, label: &str) {
+    expect.validate_response_type(input.query_type, label);
+    let response = validate_response(input, response, label);
+    apply_expect(&ResponseView::for_query(input, response), expect, label);
+}
+
+fn assert_gql_table(output: &PipelineOutput, expect: &QueryExpect, label: &str) {
+    if expect.gql_columns.is_empty() && expect.gql_column_names.is_empty() {
+        return;
+    }
+    let (header, rows) = GqlFormatter.table(output);
+    if !expect.gql_column_names.is_empty() {
+        assert_eq!(
+            header, expect.gql_column_names,
+            "{label}: gql column names mismatch"
+        );
+    }
+    for (name, values) in &expect.gql_columns {
+        let index = header
+            .iter()
+            .position(|column| column == name)
+            .unwrap_or_else(|| panic!("{label}: gql table has no column {name}: {header:?}"));
+        let actual: Vec<&str> = rows.iter().map(|row| row[index].as_str()).collect();
+        assert_eq!(actual, *values, "{label}: gql column {name} mismatch");
+    }
 }
 
 fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
@@ -738,6 +751,10 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             }
         }
         for (field, expected) in &ne.filters {
+            if ne.ids.as_ref().is_some_and(Vec::is_empty) {
+                view.assert_filter_has_no_matches(entity, field);
+                continue;
+            }
             let expected = expected.clone();
             let field_name = field.clone();
             view.assert_filter(entity, field, move |n| {
@@ -749,29 +766,25 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
         let pairs: Vec<(i64, i64)> = tuples.iter().map(|[a, b]| (*a, *b)).collect();
         view.assert_edge_set(kind, &pairs);
     }
-    for (kind, tuples) in &expect.edge_exists {
-        for [from_id, to_id] in tuples {
+    for (kind, edges) in &expect.edge_exists {
+        for expected in edges {
             let edge = view
                 .response
                 .edges
                 .iter()
-                .find(|e| e.from_id == *from_id && e.to_id == *to_id && e.edge_type == *kind);
-            let edge = edge
-                .unwrap_or_else(|| panic!("{label}: expected edge {from_id} --{kind}--> {to_id}"));
-            view.assert_edge_exists(&edge.from, *from_id, &edge.to, *to_id, kind);
+                .find(|edge| edge.edge_type == *kind && expected.matches(edge));
+            let edge = edge.unwrap_or_else(|| panic!("{label}: expected {kind} edge {expected:?}"));
+            view.assert_edge_exists(&edge.from, edge.from_id, &edge.to, edge.to_id, kind);
         }
     }
-    for (kind, tuples) in &expect.edge_absent {
-        for [from_id, to_id] in tuples {
+    for (kind, edges) in &expect.edge_absent {
+        for expected in edges {
             let found = view
                 .response
                 .edges
                 .iter()
-                .any(|e| e.from_id == *from_id && e.to_id == *to_id && e.edge_type == *kind);
-            assert!(
-                !found,
-                "{label}: unexpected edge {from_id} --{kind}--> {to_id}"
-            );
+                .any(|edge| edge.edge_type == *kind && expected.matches(edge));
+            assert!(!found, "{label}: unexpected {kind} edge {expected:?}");
         }
     }
     for (kind, count) in &expect.edge_count {
@@ -1000,77 +1013,54 @@ fn eval_filter_predicate(
     field: &str,
     expected: &serde_json::Value,
 ) -> bool {
-    match expected {
-        serde_json::Value::Object(m) if m.contains_key("starts_with") => n
-            .prop_str(field)
-            .is_some_and(|v| v.starts_with(m["starts_with"].as_str().unwrap())),
-        serde_json::Value::Object(m) if m.contains_key("contains") => n
-            .prop_str(field)
-            .is_some_and(|v| v.contains(m["contains"].as_str().unwrap())),
-        serde_json::Value::Object(m) if m.contains_key("ends_with") => n
-            .prop_str(field)
-            .is_some_and(|v| v.ends_with(m["ends_with"].as_str().unwrap())),
-        serde_json::Value::Object(m) if m.contains_key("in") => {
-            let vals = m["in"].as_array().unwrap();
-            n.prop(field).is_some_and(|p| vals.contains(p))
-        }
-        serde_json::Value::Object(m)
-            if m.get("is_null") == Some(&serde_json::Value::Bool(true)) =>
-        {
-            // is_null as a filter predicate is inherently trivial (passes for
-            // blank nodes). Use prop_absent on the entity level instead for
-            // non-trivial absence checks. This arm exists for queries where
-            // other filter assertions on the same entity make the overall
-            // predicate non-trivial.
-            !n.has_prop(field)
-        }
-        serde_json::Value::Object(m)
-            if m.get("is_not_null") == Some(&serde_json::Value::Bool(true)) =>
-        {
-            n.has_prop(field)
-        }
-        serde_json::Value::Object(m) if m.contains_key("gte") => {
-            let threshold = &m["gte"];
-            if let Some(t) = threshold.as_i64() {
-                n.prop_i64(field)
-                    .or_else(|| n.prop_str(field).and_then(|s| s.parse().ok()))
-                    .is_some_and(|v| v >= t)
-            } else {
-                let t = threshold.as_str().unwrap();
-                n.prop_str(field).is_some_and(|v| v >= t)
+    let serde_json::Value::Object(operators) = expected else {
+        return n.properties.get(field) == Some(expected);
+    };
+    assert!(!operators.is_empty(), "empty filter assertion on '{field}'");
+    operators
+        .iter()
+        .all(|(operator, value)| match operator.as_str() {
+            "starts_with" => n
+                .prop_str(field)
+                .is_some_and(|text| text.starts_with(value.as_str().unwrap())),
+            "contains" => n
+                .prop_str(field)
+                .is_some_and(|text| text.contains(value.as_str().unwrap())),
+            "ends_with" => n
+                .prop_str(field)
+                .is_some_and(|text| text.ends_with(value.as_str().unwrap())),
+            "in" => n
+                .prop(field)
+                .is_some_and(|actual| value.as_array().unwrap().contains(actual)),
+            "is_null" if value == &serde_json::Value::Bool(true) => {
+                n.properties.get(field) == Some(&serde_json::Value::Null)
             }
-        }
-        serde_json::Value::Object(m) if m.contains_key("lte") => {
-            let t = m["lte"].as_str().unwrap();
-            n.prop_str(field).is_some_and(|v| v <= t)
-        }
-        serde_json::Value::Object(m) if m.contains_key("lt") => {
-            let t = m["lt"].as_str().unwrap();
-            n.prop_str(field).is_some_and(|v| v < t)
-        }
-        serde_json::Value::Object(m) if m.contains_key("eq") => {
-            let val = &m["eq"];
-            n.prop(field) == Some(val)
-                || match val {
-                    serde_json::Value::Number(num) => {
-                        n.prop_str(field).is_some_and(|s| s == num.to_string())
-                    }
-                    serde_json::Value::String(s) => n.prop_str(field) == Some(s.as_str()),
-                    _ => false,
-                }
-        }
-        // Compound filter: all sub-predicates must pass
-        serde_json::Value::Object(m) if m.len() > 1 => m.iter().all(|(op, val)| {
-            let sub =
-                serde_json::Value::Object(std::iter::once((op.clone(), val.clone())).collect());
-            eval_filter_predicate(n, field, &sub)
-        }),
-        serde_json::Value::Object(m) if m.len() == 1 => {
-            let op = m.keys().next().unwrap();
-            panic!("unsupported filter operator '{op}' on field '{field}'")
-        }
-        _ => n.prop(field) == Some(expected),
-    }
+            "is_not_null" if value == &serde_json::Value::Bool(true) => n.has_prop(field),
+            "gte" | "lte" | "lt" | "gt" => {
+                let ordering = if let Some(threshold) = value.as_i64() {
+                    n.prop_i64(field)
+                        .or_else(|| n.prop_str(field).and_then(|text| text.parse().ok()))
+                        .map(|actual| actual.cmp(&threshold))
+                } else {
+                    n.prop_str(field)
+                        .map(|actual| actual.cmp(value.as_str().unwrap()))
+                };
+                ordering.is_some_and(|ordering| match operator.as_str() {
+                    "gte" => !ordering.is_lt(),
+                    "lte" => !ordering.is_gt(),
+                    "lt" => ordering.is_lt(),
+                    _ => ordering.is_gt(),
+                })
+            }
+            "eq" => {
+                n.properties.get(field) == Some(value)
+                    || value.as_number().is_some_and(|number| {
+                        n.prop_str(field)
+                            .is_some_and(|text| text == number.to_string())
+                    })
+            }
+            _ => panic!("unsupported filter operator '{operator}' on field '{field}'"),
+        })
 }
 
 fn try_expand_repeat(obj: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
@@ -1107,10 +1097,7 @@ fn assert_property(
             );
         }
         serde_json::Value::Null => {
-            assert!(
-                !node.has_prop(prop),
-                "{label}: {entity}/{id}.{prop} expected null but has value",
-            );
+            node.assert_prop(prop, &serde_json::Value::Null);
         }
         _ => panic!("{label}: unsupported property value type for {prop}"),
     }
@@ -1204,61 +1191,6 @@ fn parse_requirement(name: &str) -> Option<Requirement> {
         "path_finding" => Some(Requirement::PathFinding),
         _ => None,
     }
-}
-
-fn canonical_ids(resp: &serde_json::Value) -> Vec<(String, i64)> {
-    let mut ids: Vec<(String, i64)> = resp["nodes"]
-        .as_array()
-        .map(|nodes| {
-            nodes
-                .iter()
-                .map(|n| {
-                    let entity = n["entity_type"].as_str().unwrap_or("").to_owned();
-                    let id = n["id"]
-                        .as_str()
-                        .and_then(|s| s.parse().ok())
-                        .or_else(|| n["id"].as_i64())
-                        .unwrap_or_else(|| {
-                            panic!("determinism check: node missing numeric 'id': {n}")
-                        });
-                    (entity, id)
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    ids.sort();
-    ids
-}
-
-fn canonical_edges(resp: &serde_json::Value) -> Vec<(String, i64, i64)> {
-    let mut edges: Vec<(String, i64, i64)> = resp["edges"]
-        .as_array()
-        .map(|edges| {
-            edges
-                .iter()
-                .map(|e| {
-                    let kind = e["type"].as_str().unwrap_or("").to_owned();
-                    let from = e["from_id"]
-                        .as_str()
-                        .and_then(|s| s.parse().ok())
-                        .or_else(|| e["from_id"].as_i64())
-                        .unwrap_or_else(|| {
-                            panic!("determinism check: edge missing numeric 'from_id': {e}")
-                        });
-                    let to = e["to_id"]
-                        .as_str()
-                        .and_then(|s| s.parse().ok())
-                        .or_else(|| e["to_id"].as_i64())
-                        .unwrap_or_else(|| {
-                            panic!("determinism check: edge missing numeric 'to_id': {e}")
-                        });
-                    (kind, from, to)
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    edges.sort();
-    edges
 }
 
 #[cfg(test)]

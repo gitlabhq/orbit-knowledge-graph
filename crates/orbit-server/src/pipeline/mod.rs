@@ -4,7 +4,10 @@ pub(crate) mod metrics;
 mod service;
 mod stages;
 
-pub use helpers::{receive_query_request, send_invalid_request_error, send_query_error};
+pub use helpers::{
+    ResultChunking, receive_query_request, result_messages, send_invalid_request_error,
+    send_query_error,
+};
 pub use metrics::OTelPipelineObserver;
 pub use service::{QueryPipelineService, QueryServiceOutput, RawQuery};
 pub use stages::{

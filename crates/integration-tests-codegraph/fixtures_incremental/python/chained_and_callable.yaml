@@ -1,4 +1,5 @@
 name: "Python: chained calls, callable objects, multiple inheritance"
+
 fixtures:
   - path: main.py
     content: |

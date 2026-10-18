@@ -1,5 +1,7 @@
 //! Require a Docker-compatible runtime (Docker, Colima, etc).
 
+use clickhouse_client::ClickHouseConfigurationExt;
+use integration_testkit::{CLICKHOUSE_IMAGE, CLICKHOUSE_TAG};
 use std::sync::Arc;
 
 use arrow::array::{Int32Array, StringArray, UInt64Array};
@@ -8,14 +10,12 @@ use arrow::record_batch::RecordBatch;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseWriter};
 use indexer::durability::WriteDurability;
 use indexer::metrics::EngineMetrics;
+use orbit_arrow::ArrowUtils;
 use orbit_server_config::ClickHouseConfiguration;
-use orbit_utils::arrow::ArrowUtils;
 use testcontainers::GenericImage;
 use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
 
-const CLICKHOUSE_IMAGE: &str = "clickhouse/clickhouse-server";
-const CLICKHOUSE_TAG: &str = "26.2";
 const TEST_USERNAME: &str = "default";
 const TEST_PASSWORD: &str = "testpass";
 const TEST_DATABASE: &str = "test";
@@ -36,8 +36,10 @@ impl TestContext {
         let (container, host, port) = start_clickhouse_container().await;
         setup_database(&host, port).await;
         let config = create_config(&host, port);
-        let writer = ClickHouseWriter::new(config, Arc::new(EngineMetrics::default()))
-            .expect("failed to create writer");
+        let writer = ClickHouseWriter::new(
+            config.build_client("graph"),
+            Arc::new(EngineMetrics::default()),
+        );
 
         Self {
             _container: container,
@@ -55,6 +57,7 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            "graph",
         )
     }
 
@@ -113,6 +116,7 @@ async fn setup_database(host: &str, port: u16) {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            "graph",
         );
 
         match client.execute("SELECT 1").await {
@@ -293,8 +297,9 @@ async fn arrow_string_overflow_recovers_with_byte_cap() {
             first_error.expect("a reduced row cap alone must still overflow on a >2GB block")
         }
     };
+    let overflow = overflow.to_string();
     assert!(
-        overflow.to_string().contains("cannot contain more than"),
+        overflow.contains("cannot contain more than") || overflow.contains("exceeds 32 bits"),
         "expected the Arrow 2GB overflow, got: {overflow}"
     );
 
@@ -329,8 +334,10 @@ async fn connection_failure_returns_error() {
             .profiling,
     };
 
-    let writer = ClickHouseWriter::new(config, Arc::new(EngineMetrics::default()))
-        .expect("failed to create writer");
+    let writer = ClickHouseWriter::new(
+        config.build_client("graph"),
+        Arc::new(EngineMetrics::default()),
+    );
 
     let result = writer
         .write(

@@ -1,0 +1,6 @@
+settings:
+  denormalized_joins:
+    - name: approved_project
+      hops:
+        - {relationship: APPROVED, from: User, to: MergeRequest}
+        - {relationship: IN_PROJECT, from: MergeRequest, to: Project}

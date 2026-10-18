@@ -1,4 +1,5 @@
 name: "Rust: trait ambiguity resolution"
+
 fixtures:
   - path: Cargo.toml
     content: |
@@ -94,7 +95,7 @@ tests:
       RETURN callee.fqn AS fqn
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'Service::run' } }
+      - { row: { fqn: "Service::run" } }
 
   - name: "supertrait default methods resolve to the defining trait item"
     query: |
@@ -103,7 +104,7 @@ tests:
       RETURN callee.fqn AS fqn, callee.definition_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { fqn: 'Base::ping', type: 'Method' } }
+      - { row: { fqn: "Base::ping", type: "Method" } }
 
   - name: "cross-file method fallback keeps the concrete impl target"
     query: |

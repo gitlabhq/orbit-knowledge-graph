@@ -94,6 +94,7 @@ impl Tree {
                     child.detach(&mut self.storage.0);
                     id.insert_before(child, &mut self.storage.0);
                 }
+                self.tags.remove(&Self::to_raw(id));
                 id.remove(&mut self.storage.0);
             } else {
                 self.node_mut(id).field = 0;
@@ -138,5 +139,20 @@ mod tests {
         assert_eq!(tree.get_tag(1, 7), Some(70));
         assert_eq!(tree.get_tag(2, 8), Some(80));
         assert_eq!(tree.tags.len(), 2, "the removed node's tag is gone");
+    }
+
+    #[test]
+    fn a_node_in_a_reused_slot_has_no_tags_of_the_removed_node() {
+        let mut tree = Tree::new(node(1, 10));
+        let replaced = tree.append(tree.root, node(2, 20));
+        tree.set_tag(Tree::to_raw(replaced), 7, 70);
+        let replacement = tree.storage.0.new_node(node(3, 30));
+        tree.replace(replaced, vec![replacement]);
+        let reused = tree.append(tree.root, node(4, 40));
+        assert_eq!(Tree::to_raw(reused), Tree::to_raw(replaced));
+        assert_eq!(tree.get_tag(Tree::to_raw(reused), 7), None);
+        tree.set_tag(Tree::to_raw(reused), 8, 80);
+        tree.prune();
+        assert_eq!(tree.tags.keys().collect::<Vec<_>>(), Vec::<&u32>::new());
     }
 }

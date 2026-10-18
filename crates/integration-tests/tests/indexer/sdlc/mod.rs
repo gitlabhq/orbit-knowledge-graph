@@ -9,6 +9,7 @@
 //! cross-test contamination while eliminating per-test container startup overhead.
 
 mod first_pass;
+mod keyset_paging;
 mod partitioning;
 
 use std::sync::Arc;
@@ -39,10 +40,21 @@ async fn global_indexing() {
         partitioning::present_parent_takes_single_pull_path_and_honors_floor,
         partitioning::span_smaller_than_partition_count_falls_back_to_single_run,
         first_pass::completed_first_pass_resets_attempts_and_sets_indexed_at,
-        first_pass::unfinished_first_pass_counts_each_attempt,
+        first_pass::unfinished_first_pass_counts_each_attempt_with_a_session_query_cache,
         first_pass::incremental_run_keeps_indexed_at_and_ends_with_zero_attempts,
         first_pass::stale_page_write_after_completion_keeps_indexed_at,
         first_pass::tombstoned_key_does_not_resurrect_an_old_completion,
+    );
+}
+
+#[tokio::test]
+async fn keyset_paging() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    run_subtests!(
+        &ctx,
+        keyset_paging::agent_sessions_page_by_sort_key_without_skips_or_duplicates,
+        keyset_paging::agent_sessions_resume_from_a_saved_cursor,
+        keyset_paging::agent_sessions_restart_when_the_saved_cursor_has_the_old_sort_key_arity,
     );
 }
 

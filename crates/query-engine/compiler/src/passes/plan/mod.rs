@@ -1,5 +1,8 @@
 pub mod aggregation;
+mod clickhouse;
+mod conditions;
 mod context;
+mod duckdb;
 pub mod edge_chain;
 pub(crate) mod edge_predicates;
 pub mod fk;
@@ -12,11 +15,13 @@ pub mod pathfinding;
 pub mod physical;
 pub mod requirements;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
+pub use clickhouse::plan as plan_clickhouse;
+pub use duckdb::plan as plan_duckdb;
 pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity};
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
 use query_data_model::OrbitQueryModel;
@@ -29,6 +34,19 @@ pub struct BoundFilter {
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
     pub in_sort_key: bool,
+    pub text_indexed: bool,
+}
+
+impl BoundFilter {
+    pub fn at(&self, column: requirements::Column) -> requirements::Predicate {
+        requirements::Predicate::Property {
+            column,
+            filter: self.filter.clone(),
+            data_type: self.data_type,
+            in_sort_key: self.in_sort_key,
+            text_indexed: self.text_indexed,
+        }
+    }
 }
 
 pub struct Plan<T> {
@@ -55,6 +73,18 @@ impl QueryPlan {
             _ => &[],
         }
     }
+
+    pub fn is_point_lookup(&self) -> bool {
+        let nodes = match self {
+            Self::Traversal(Plan { nodes, .. }) | Self::Aggregation(Plan { nodes, .. }) => nodes,
+            _ => return false,
+        };
+        !nodes.is_empty()
+            && nodes
+                .values()
+                .all(|node| node.selectivity == Selectivity::Pinned)
+            && self.hops().iter().all(|hop| hop.max_hops == 1)
+    }
 }
 
 pub fn denormalized_facts(
@@ -69,18 +99,29 @@ pub fn denormalized_facts(
             [DenormalizedDirection::Source, DenormalizedDirection::Target]
                 .into_iter()
                 .flat_map(move |direction| {
-                    node.filters.keys().filter_map(move |property| {
-                        let property = model.graph().property_id(entity, property)?;
-                        let key = DenormalizedKey {
-                            property,
-                            direction,
-                        };
-                        model
-                            .denormalized()
-                            .property(key)
-                            .cloned()
-                            .map(|facts| (key, facts))
-                    })
+                    node.filters
+                        .keys()
+                        .map(String::as_str)
+                        .chain(
+                            input
+                                .conditions()
+                                .filter(|condition| {
+                                    condition.target == PredicateTarget::Node(node.id.clone())
+                                })
+                                .map(|condition| condition.property.as_str()),
+                        )
+                        .filter_map(move |property| {
+                            let property = model.graph().property_id(entity, property)?;
+                            let key = DenormalizedKey {
+                                property,
+                                direction,
+                            };
+                            model
+                                .denormalized()
+                                .property(key)
+                                .cloned()
+                                .map(|facts| (key, facts))
+                        })
                 })
         })
         .collect()
@@ -101,7 +142,12 @@ pub struct Neighbors {
     pub edge: EdgeTableConfig,
     pub has_non_denorm: bool,
     pub fused_table: Option<String>,
-    pub center_tp_lookup: Option<(String, String)>,
+    pub outgoing_kinds: Vec<String>,
+    pub incoming_kinds: Vec<String>,
+    pub incoming_scope_preserving: Vec<String>,
+    pub incoming_cross_scope: Vec<String>,
+    pub outgoing_neighbor_paths: Vec<(String, String)>,
+    pub incoming_neighbor_paths: Vec<(String, String)>,
 }
 
 pub struct Hydration {
@@ -141,7 +187,7 @@ impl EdgeTableConfig {
         let mut source_kinds = BTreeSet::new();
         let mut target_kinds = BTreeSet::new();
         for rt in rel_types {
-            if let Some(route) = model.relationship_route(rt) {
+            for route in model.relationship_routes(rt) {
                 source_kinds.extend(
                     route
                         .source_entities()
@@ -176,54 +222,4 @@ pub fn find_node<'a>(input: &'a Input, alias: &str) -> Result<&'a InputNode> {
         .iter()
         .find(|n| n.id == alias)
         .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
-}
-
-pub fn plan_clickhouse(
-    input: &Input,
-    model: &query_data_model::ClickHouseDataModel,
-    hydration_options: HydrationCompileOptions,
-    table_scans: &HashSet<String>,
-) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, true, table_scans)
-}
-
-pub fn plan_duckdb(
-    input: &Input,
-    model: &query_data_model::DuckDbDataModel,
-    hydration_options: HydrationCompileOptions,
-    table_scans: &HashSet<String>,
-) -> Result<QueryPlan> {
-    plan(input, model, hydration_options, false, table_scans)
-}
-
-fn plan<M>(
-    input: &Input,
-    model: &M,
-    hydration_options: HydrationCompileOptions,
-    use_fk_elision: bool,
-    table_scans: &HashSet<String>,
-) -> Result<QueryPlan>
-where
-    M: OrbitQueryModel + ?Sized,
-{
-    let context = context::PlanningContext {
-        input,
-        model,
-        nodes: HashMap::new(),
-        hops: Vec::new(),
-        denormalized: HashMap::new(),
-        node_edge_mappings: HashMap::new(),
-    };
-    match input.query_type {
-        QueryType::Traversal | QueryType::Aggregation => {
-            edge_chain::plan(context, use_fk_elision, table_scans)
-        }
-        QueryType::Neighbors => neighbors::plan_neighbors(context).map(QueryPlan::Neighbors),
-        QueryType::PathFinding => {
-            pathfinding::plan_pathfinding(context).map(QueryPlan::PathFinding)
-        }
-        QueryType::Hydration => {
-            hydration::plan_hydration(context, hydration_options).map(QueryPlan::Hydration)
-        }
-    }
 }

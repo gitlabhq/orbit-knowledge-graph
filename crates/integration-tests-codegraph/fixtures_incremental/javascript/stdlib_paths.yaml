@@ -1,14 +1,17 @@
 name: Node builtins and relative modules have separate identities
+
 fixtures:
   - path: util.js
     content: |
       export function format() {}
+
   - path: main.js
     content: |
       import { format as local } from './util';
       import { format as builtin } from 'util';
       import { format as explicit } from 'node:util';
       function run() { local(); builtin(); explicit(); }
+
 tests:
   - name: Only the relative import binds to the project
     query: |
@@ -18,6 +21,7 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { file: util.js } }
+
   - name: Both builtin spellings remain external
     query: |
       MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
@@ -26,7 +30,8 @@ tests:
     assert:
       - { row_count: 2 }
       - { row: { path: util } }
-      - { row: { path: 'node:util' } }
+      - { row: { path: "node:util" } }
+
 steps:
   - name: Edit local module after snapshot loading
     snapshot: true

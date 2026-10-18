@@ -93,6 +93,24 @@ pub fn logical(input: &Input) -> Tree {
         )
     }));
     let mut tree = Tree::node(Operator::Input, input.query_type.to_string(), children);
+    tree = filter(
+        input
+            .predicates
+            .iter()
+            .map(|expression| {
+                boolean_text(expression, &|leaf: &compiler::input::Condition| {
+                    let alias = match &leaf.target {
+                        compiler::input::PredicateTarget::Node(alias) => alias.clone(),
+                        compiler::input::PredicateTarget::Relationship(index) => {
+                            format!("e{index}")
+                        }
+                    };
+                    property_filter(&alias, &leaf.property, &leaf.filter)
+                })
+            })
+            .collect(),
+        tree,
+    );
     if !input.aggregation.metrics.is_empty() || !input.aggregation.group_by.is_empty() {
         let groups = input.aggregation.group_by.iter().map(|group| {
             let value = group.property().map_or_else(
@@ -275,7 +293,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             Tree::node(
                 Operator::Neighbors,
                 format!(
-                    "center={} direction={} {access} center_filter={} relationships=[{}] path_lookup={}",
+                    "center={} direction={} {access} center_filter={} relationships=[{}] incoming_scoped=[{}] incoming_cross_scope=[{}]",
                     operation.center,
                     match operation.direction {
                         compiler::input::Direction::Both => "both",
@@ -289,10 +307,8 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                         .as_deref()
                         .unwrap_or_default()
                         .join(", "),
-                    operation.center_tp_lookup.as_ref().map_or_else(
-                        || "none".into(),
-                        |(table, column)| format!("{table}.{column}")
-                    )
+                    operation.incoming_scope_preserving.join(", "),
+                    operation.incoming_cross_scope.join(", ")
                 ),
                 vec![planned_node(&plan.nodes[&operation.center])],
             )
@@ -543,6 +559,9 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
         }
     };
     match value {
+        Predicate::Boolean(expression) => vec![boolean_text(expression, &|leaf| {
+            planned_predicate(leaf).join(" AND ")
+        })],
         Predicate::Property { column, filter, .. } => {
             vec![property_filter(&column.source, &column.name, filter)]
         }
@@ -554,11 +573,20 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             format!("{} >= {start}", planned_column(column)),
             format!("{} <= {end}", planned_column(column)),
         ],
+        Predicate::ColumnsEqual { left, right } => vec![format!(
+            "{}.{} = {}.{}",
+            left.source, left.name, right.source, right.name
+        )],
         Predicate::Live { alias } => vec![format!("{alias}._deleted = false")],
         Predicate::EntityKind { column, entity } => vec![format!(
             "{} = {}",
             planned_column(column),
             text_literal(entity)
+        )],
+        Predicate::ColumnEq { left, right } => vec![format!(
+            "{} = {}",
+            planned_column(left),
+            planned_column(right)
         )],
         Predicate::RelationshipKinds { alias, kinds } => vec![membership(
             format!("{alias}.relationship_kind"),
@@ -579,6 +607,23 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             key,
         } => vec![format!("{} IN {definition}.{key}", planned_column(column))],
     }
+}
+
+fn boolean_text<T>(
+    expression: &compiler::input::BooleanExpression<T>,
+    leaf: &impl Fn(&T) -> String,
+) -> String {
+    expression.fold(
+        leaf,
+        &|children| {
+            children
+                .iter()
+                .map(|child| format!("({child})"))
+                .collect::<Vec<_>>()
+                .join(" AND ")
+        },
+        &|child| format!("NOT ({child})"),
+    )
 }
 
 fn planned_projections(values: &[Projection]) -> String {

@@ -1,4 +1,5 @@
 name: "Kotlin: intra-file resolution"
+
 fixtures:
   - path: com/example/App.kt
     content: |

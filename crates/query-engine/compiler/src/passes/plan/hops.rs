@@ -47,28 +47,34 @@ fn depth_arm(hop: &Hop, depth: u32) -> PhysicalPlan {
         Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
         Direction::Incoming => SOURCE_KIND_COLUMN,
     };
-    let scan = |alias: &str| PhysicalSource::Scan {
-        relationship: None,
-        table: hop.edge_table.clone(),
-        alias: alias.into(),
-        final_: false,
-    };
+    let scan = |alias: &str| PhysicalSource::edge(hop, alias, true);
     let mut predicate = vec![];
     if let Some(kind) = relationship_kinds("e1", &hop.rel_types) {
         predicate.push(kind);
     }
-    predicate.push(live("e1"));
     let mut source = scan("e1");
     for index in 2..=depth {
         let previous = format!("e{}", index - 1);
         let current = format!("e{index}");
-        let mut predicates = vec![live(&current)];
+        let mut predicates = vec![];
         if let Some(kind) = relationship_kinds(&current, &hop.rel_types) {
             predicates.push(kind);
         }
         source = PhysicalSource::Join {
             endpoints: (Column::new(&previous, end), Column::new(&current, start)),
-            predicates,
+            predicates: {
+                predicates.push(Predicate::ColumnEq {
+                    left: Column::new(&previous, end_kind),
+                    right: Column::new(
+                        &current,
+                        match hop.direction {
+                            Direction::Outgoing | Direction::Both => SOURCE_KIND_COLUMN,
+                            Direction::Incoming => TARGET_KIND_COLUMN,
+                        },
+                    ),
+                });
+                predicates
+            },
             left: Box::new(source),
             right: Box::new(scan(&current)),
         };

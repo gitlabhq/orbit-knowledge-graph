@@ -1,4 +1,5 @@
 name: "Lua: require imports"
+
 fixtures:
   - path: app.lua
     content: |

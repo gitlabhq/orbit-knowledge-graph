@@ -1,4 +1,3 @@
-# source: crates/integration-tests/tests/server/data_correctness/path_finding.rs::path_finding_target_entity_constrains_results
 description: Target entity MergeRequest excludes Note and WorkItem endpoints
 
 query:

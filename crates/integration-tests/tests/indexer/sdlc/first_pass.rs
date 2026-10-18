@@ -47,7 +47,7 @@ async fn insert_checkpoint_row(
 }
 
 fn checkpoint_store(ctx: &TestContext) -> ClickHouseCheckpointStore {
-    ClickHouseCheckpointStore::new(Arc::new(ctx.config.build_client()))
+    ClickHouseCheckpointStore::new(Arc::new(ctx.config.build_client("graph")))
 }
 
 pub async fn stale_page_write_after_completion_keeps_indexed_at(ctx: &TestContext) {
@@ -99,12 +99,19 @@ pub async fn completed_first_pass_resets_attempts_and_sets_indexed_at(ctx: &Test
     ));
 }
 
-pub async fn unfinished_first_pass_counts_each_attempt(ctx: &TestContext) {
+pub async fn unfinished_first_pass_counts_each_attempt_with_a_session_query_cache(
+    ctx: &TestContext,
+) {
     for id in 1..=12 {
         create_user(ctx, id).await;
     }
     insert_checkpoint(ctx, "global.User.p5of6", r#"{"c":["6"]}"#, "NULL").await;
-    let handler = entity_handler_with_partitions(ctx, "User", 4).await;
+    let mut cached = ctx.clone();
+    cached
+        .config
+        .session_settings
+        .insert("use_query_cache".to_string(), "1".to_string());
+    let handler = entity_handler_with_partitions(&cached, "User", 4).await;
 
     for _ in 0..2 {
         handler

@@ -1,0 +1,8 @@
+description: Aggregation cannot read a virtual property from a stored table
+
+query:
+  gql: |
+    MATCH (f:File {id: 13004}) RETURN min(f.content) AS text
+
+expect:
+  compile_error: "virtual"

@@ -4,9 +4,9 @@ use std::time::Duration;
 use crate::active_schema::SchemaSnapshot;
 use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
 use crate::auth::RequestContext;
-use crate::proto::{ExecuteQueryMessage, ExecuteQueryResult};
+use crate::proto::ExecuteQueryMessage;
+use crate::proto::execute_query_message::Content;
 use clickhouse_client::ArrowClickHouseClient;
-use nats_client::NatsClient;
 use orbit_billing::{BillingObserver, BillingTracker};
 use orbit_server_config::AnalyticsConfig;
 use query_engine::shared::content::ColumnResolverRegistry;
@@ -30,7 +30,10 @@ use super::stages::{
 pub struct RawQuery {
     pub text: String,
     pub frontend: Frontend,
+    pub settings: Vec<(String, String)>,
 }
+
+pub(crate) struct QuerySettings(pub Vec<(String, String)>);
 
 pub enum QueryServiceOutput {
     Graph(Box<PipelineOutput>),
@@ -41,7 +44,6 @@ pub enum QueryServiceOutput {
 pub struct QueryPipelineService {
     client: Arc<ArrowClickHouseClient>,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
-    cache_broker: Option<Arc<NatsClient>>,
     billing_tracker: Option<Arc<dyn BillingTracker>>,
     analytics_tracker: Option<Arc<dyn AnalyticsTracker>>,
     analytics_config: Arc<AnalyticsConfig>,
@@ -57,7 +59,6 @@ impl QueryPipelineService {
         Self {
             client,
             resolver_registry: None,
-            cache_broker: None,
             billing_tracker: None,
             analytics_tracker: None,
             analytics_config,
@@ -67,11 +68,6 @@ impl QueryPipelineService {
 
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
         self.resolver_registry = Some(registry);
-        self
-    }
-
-    pub fn with_cache_broker(mut self, broker: Arc<NatsClient>) -> Self {
-        self.cache_broker = Some(broker);
         self
     }
 
@@ -92,7 +88,7 @@ impl QueryPipelineService {
         query: RawQuery,
         tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
-        render: impl FnOnce(QueryServiceOutput) -> Result<ExecuteQueryResult, PipelineError>,
+        render: impl FnOnce(QueryServiceOutput) -> Result<Vec<Content>, PipelineError>,
     ) -> Result<(), PipelineError> {
         let coding_agent = request_context.coding_agent().map(String::from);
         let claims = request_context.claims;
@@ -122,9 +118,6 @@ impl QueryPipelineService {
         if let Some(registry) = &self.resolver_registry {
             server_extensions.insert(ColumnResolverRegistry::clone(registry));
         }
-        if let Some(broker) = &self.cache_broker {
-            server_extensions.insert(Arc::clone(broker));
-        }
 
         let mut ctx = QueryPipelineContext {
             frontend: query.frontend,
@@ -135,6 +128,7 @@ impl QueryPipelineService {
             server_extensions,
             phases: TypeMap::default(),
         };
+        ctx.phases.insert(QuerySettings(query.settings));
 
         // The timeout lives inside run_query so the observer is still alive
         // when it fires. Dropping the future from outside (the prior shape)
@@ -200,7 +194,7 @@ impl QueryPipelineService {
 async fn deliver(
     responses: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
     output: QueryServiceOutput,
-    render: impl FnOnce(QueryServiceOutput) -> Result<ExecuteQueryResult, PipelineError>,
+    render: impl FnOnce(QueryServiceOutput) -> Result<Vec<Content>, PipelineError>,
 ) -> Result<Option<(usize, usize)>, PipelineError> {
     let counts = match &output {
         QueryServiceOutput::Graph(output) => Some((output.row_count, output.redacted_count)),

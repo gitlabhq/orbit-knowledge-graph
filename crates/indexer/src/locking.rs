@@ -20,6 +20,12 @@ pub enum LockError {
     Lost,
 }
 
+/// `time_left` is `None` when the holder's lease could not be read.
+#[derive(Debug)]
+pub struct LockHeld {
+    pub time_left: Option<Duration>,
+}
+
 #[async_trait]
 pub trait LockService: Send + Sync {
     async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError>;
@@ -28,7 +34,7 @@ pub trait LockService: Send + Sync {
         &self,
         key: &str,
         ttl: Duration,
-    ) -> Result<Option<LockRevision>, LockError>;
+    ) -> Result<Result<LockRevision, LockHeld>, LockError>;
 
     /// `Ok(None)`: the lease was lost to another holder.
     async fn renew(
@@ -58,9 +64,9 @@ impl LockGuard {
         service: Arc<dyn LockService>,
         key: &str,
         ttl: Duration,
-    ) -> Result<Option<Self>, LockError> {
+    ) -> Result<Result<Self, LockHeld>, LockError> {
         match service.try_acquire_renewable(key, ttl).await? {
-            Some(revision) => Ok(Some(Self {
+            Ok(revision) => Ok(Ok(Self {
                 service: Some(service),
                 key: key.to_string(),
                 lease: std::sync::Mutex::new(Lease {
@@ -68,10 +74,14 @@ impl LockGuard {
                     revision,
                 }),
             })),
-            None => Ok(None),
+            Err(held) => Ok(Err(held)),
         }
     }
 
+    #[expect(
+        clippy::unwrap_used,
+        reason = "mutex poisoning means another thread already panicked; propagating is intended"
+    )]
     pub fn time_left(&self) -> Duration {
         self.lease
             .lock()
@@ -84,9 +94,17 @@ impl LockGuard {
         let Some(service) = &self.service else {
             return Ok(());
         };
+        #[expect(
+            clippy::unwrap_used,
+            reason = "mutex poisoning means another thread already panicked; propagating is intended"
+        )]
         let revision = self.lease.lock().unwrap().revision;
         match service.renew(&self.key, ttl, revision).await? {
             Some(new_revision) => {
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "mutex poisoning means another thread already panicked; propagating is intended"
+                )]
                 let mut lease = self.lease.lock().unwrap();
                 lease.revision = new_revision;
                 lease.expires_at = tokio::time::Instant::now() + ttl;
@@ -94,6 +112,11 @@ impl LockGuard {
             }
             None => Err(LockError::Lost),
         }
+    }
+
+    /// Drop without releasing: after `LockError::Lost` the key belongs to another holder.
+    pub fn abandon(mut self) {
+        self.service = None;
     }
 
     pub async fn release(mut self) -> Result<(), LockError> {
@@ -145,14 +168,15 @@ fn decode_expiration(value: &[u8]) -> Option<DateTime<Utc>> {
 #[async_trait]
 impl LockService for NatsLockService {
     async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError> {
-        Ok(self.try_acquire_renewable(key, ttl).await?.is_some())
+        Ok(self.try_acquire_renewable(key, ttl).await?.is_ok())
     }
 
     async fn try_acquire_renewable(
         &self,
         key: &str,
         ttl: Duration,
-    ) -> Result<Option<LockRevision>, LockError> {
+    ) -> Result<Result<LockRevision, LockHeld>, LockError> {
+        let unknown = LockHeld { time_left: None };
         let chrono_ttl =
             chrono::Duration::from_std(ttl).map_err(|e| LockError::Backend(e.to_string()))?;
         let expiration = Utc::now() + chrono_ttl;
@@ -171,9 +195,9 @@ impl LockService for NatsLockService {
         {
             KvPutResult::Success(revision) => {
                 debug!(key, "lock acquired");
-                return Ok(Some(revision));
+                return Ok(Ok(revision));
             }
-            KvPutResult::RevisionMismatch => return Ok(None),
+            KvPutResult::RevisionMismatch => return Ok(Err(unknown)),
             KvPutResult::AlreadyExists => {}
         }
 
@@ -182,12 +206,16 @@ impl LockService for NatsLockService {
             .kv_get(INDEXING_LOCKS_BUCKET, key)
             .await
             .map_err(|e| LockError::Backend(e.to_string()))?;
-        let Some(entry) = entry else { return Ok(None) };
+        let Some(entry) = entry else {
+            return Ok(Err(unknown));
+        };
 
         match decode_expiration(&entry.value) {
             Some(at) if Utc::now() < at => {
                 debug!(key, expires_at = %at, "lock contention, still valid");
-                Ok(None)
+                Ok(Err(LockHeld {
+                    time_left: (at - Utc::now()).to_std().ok(),
+                }))
             }
             Some(_) | None => {
                 match self
@@ -203,9 +231,9 @@ impl LockService for NatsLockService {
                 {
                     KvPutResult::Success(revision) => {
                         debug!(key, "lock acquired after expiry");
-                        Ok(Some(revision))
+                        Ok(Ok(revision))
                     }
-                    KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch => Ok(None),
+                    KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch => Ok(Err(unknown)),
                 }
             }
         }
@@ -316,13 +344,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lock_guard_acquire_returns_none_when_held() {
+    async fn lock_guard_acquire_reports_the_holder_when_held() {
         let svc = Arc::new(MockLockService::new());
         svc.set_lock("k5");
         let result = LockGuard::acquire(svc.clone(), "k5", Duration::from_secs(1))
             .await
             .expect("acquire ok");
-        assert!(result.is_none(), "contended acquire must return None");
+        assert!(result.is_err(), "contended acquire must report the holder");
     }
 
     #[tokio::test]
@@ -416,6 +444,23 @@ mod tests {
                     .unwrap(),
                 "expired lock must be reclaimable",
             );
+        }
+
+        #[tokio::test]
+        async fn contention_reports_the_holders_time_left() {
+            let (_, svc) = new_service();
+            assert!(
+                svc.try_acquire("p8", Duration::from_secs(30))
+                    .await
+                    .unwrap()
+            );
+            let held = svc
+                .try_acquire_renewable("p8", Duration::from_secs(30))
+                .await
+                .unwrap()
+                .expect_err("held");
+            let left = held.time_left.expect("lease read");
+            assert!(left > Duration::from_secs(28) && left <= Duration::from_secs(30));
         }
 
         #[tokio::test]

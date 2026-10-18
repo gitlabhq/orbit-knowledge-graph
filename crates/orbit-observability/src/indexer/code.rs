@@ -9,6 +9,7 @@ pub mod labels {
     pub const STAGE: &str = "stage";
     pub const LANGUAGE: &str = "language";
     pub const PHASE: &str = "phase";
+    pub const STORAGE: &str = "storage";
 }
 
 const DOMAIN: &str = "indexer.code";
@@ -120,8 +121,14 @@ pub const FILES_SKIPPED: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.files.skipped",
     "Source files skipped by the code-graph indexer for policy or watchdog reasons. \
      Not an error. Reasons: `oversize`, `oversize_combined`, `parser_oversize`, \
-     `arrow_offset_overflow`, `unsafe_path`, and per-phase CPU-budget timeouts \
-     `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`. \
+     `arrow_offset_overflow`, `unsafe_path`, `deeply_nested`, `stack_limit`, \
+     `too_many_edges`, per-phase CPU-budget timeouts `timeout_parse`, \
+     `timeout_walk`, `timeout_ssa`, `timeout_sentinel`, and the per-file resolve \
+     timeout `timeout_resolve`. Cross-file stops `too_many_names` and \
+     `timeout_cross_file` count once per language family per run, with an empty path. \
+     `too_many_manifest_bytes` counts a manifest \
+     that stays in the graph but is not read for resolution, and `fqn_truncated` a file whose deepest definitions keep only the last \
+     64 segments (or 4 KiB) of their qualified name. \
      `language` comes from the file extension, `unknown` when none matches.",
     None,
     &[labels::REASON, labels::LANGUAGE],
@@ -218,7 +225,46 @@ pub const PIPELINE_PHASE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     DOMAIN,
 );
 
+pub const ARCHIVE_LEASE_WAIT: MetricSpec = MetricSpec::histogram_f64(
+    "gkg.indexer.code.archive.lease.wait",
+    "Time spent waiting for a per-storage archive download lease. Label: storage (`_tenant` when \
+     GitLab does not report one).",
+    Some("s"),
+    &[labels::STORAGE],
+    LATENCY_SLOW,
+    DOMAIN,
+);
+
+pub const ARCHIVE_LEASE_SLOTS_IN_USE: MetricSpec = MetricSpec::up_down_counter(
+    "gkg.indexer.code.archive.lease.slots_in_use",
+    "Archive lease slots held by this pod. Sum across pods for the storage's load against its budget.",
+    None,
+    &[labels::STORAGE],
+    DOMAIN,
+);
+
+pub const ARCHIVE_DURATION: MetricSpec = MetricSpec::histogram_f64(
+    "gkg.indexer.code.archive.duration",
+    "Archive download and extraction time while holding a lease, per storage.",
+    Some("s"),
+    &[labels::STORAGE],
+    LATENCY_SLOW,
+    DOMAIN,
+);
+
+pub const ARCHIVE_LEASE_LOST: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.archive.lease.lost",
+    "Archive downloads cancelled because the lease could not be renewed.",
+    None,
+    &[labels::STORAGE],
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
+    &ARCHIVE_LEASE_WAIT,
+    &ARCHIVE_LEASE_SLOTS_IN_USE,
+    &ARCHIVE_DURATION,
+    &ARCHIVE_LEASE_LOST,
     &EVENTS_PROCESSED,
     &HANDLER_DURATION,
     &REPOSITORY_FETCH_DURATION,

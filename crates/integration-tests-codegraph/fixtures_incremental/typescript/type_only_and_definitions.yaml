@@ -1,5 +1,6 @@
 name: "TypeScript type-only imports and definition extraction"
 pipeline: js
+
 fixtures:
   - path: types/contracts.ts
     content: |

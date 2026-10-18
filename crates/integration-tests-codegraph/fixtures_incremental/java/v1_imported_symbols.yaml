@@ -1,4 +1,5 @@
 name: "Java v1 parity — imported symbol resolution"
+
 fixtures:
   - path: com/example/app/Main.java
     content: |
@@ -11,10 +12,12 @@ fixtures:
               var list2 = List.of("a", "b", "c");
           }
       }
+
   - path: com/example/app/Application.java
     content: |
       package com.example.app;
       public class Application { public void run() {} }
+
   - path: com/example/app/Traceable.java
     content: |
       package com.example.app;
@@ -22,6 +25,7 @@ fixtures:
       @Retention(RetentionPolicy.RUNTIME)
       @Target({ElementType.METHOD, ElementType.TYPE})
       public @interface Traceable {}
+
   - path: com/example/app/ExplicitTarget.java
     content: |
       package com.example.app;
@@ -37,10 +41,10 @@ tests:
       RETURN sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { row_count: 1 }
-      - { row: { path: 'java.lang.annotation', name: Target } }
+      - { row: { path: "java.lang.annotation", name: Target } }
 
   - name: "Main.main -> ArrayList (imported symbol)"
-    
+
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -51,7 +55,7 @@ tests:
       - { row_count: 1 }
 
   - name: "Main.main -> List (imported symbol)"
-    
+
     query: |
       MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -77,4 +81,4 @@ tests:
       RETURN sym.import_path AS path, sym.identifier_name AS name
     assert:
       - { row_count: 1 }
-      - { row: { path: 'java.lang.annotation', name: '*' } }
+      - { row: { path: "java.lang.annotation", name: "*" } }

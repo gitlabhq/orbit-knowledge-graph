@@ -266,6 +266,10 @@ declares a query, optional config overrides, and expected results. The harness s
 runs the full pipeline (compile, execute, redact, hydrate, paginate, format), and checks
 the response against the expectations.
 
+Every response must match the response JSON schema. Numeric metric assertions
+require JSON numbers. Explicit `null` values require a present null property;
+use `prop_absent` when a property may be missing.
+
 ### File structure
 
 Scenarios are in `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/`.
@@ -286,7 +290,26 @@ data_correctness/
         └── admin_aggregation_compiles.yaml
 ```
 
-Each YAML file contains one `QueryScenario` document.
+Each YAML file contains one `QueryScenario` document, or a `cases` list of them.
+In a `cases` file, every other top-level key is a default for each case. A case
+key replaces the default, and nested maps such as `config` merge key by key.
+A case reports failures as `<file>/<name>`, or `<file>/<index>` when it has no
+`name`.
+
+```yaml
+config:
+  security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
+cases:
+  - name: not_in
+    query:
+      gql: MATCH (u:User {id: 1}) WHERE NOT u.username IN ['bob'] RETURN u
+    expect: { node_count: 1 }
+  - name: admin_not_in
+    config: { security: admin_user }
+    query:
+      gql: MATCH (u:User {id: 2}) WHERE NOT u.username IN ['bob'] RETURN u
+    expect: { node_count: 0 }
+```
 
 A scenario can set `config.ontology_overlay` to a name under
 `config/seeds/overlays/`. The overlay changes the query catalog for that scenario.
@@ -300,8 +323,9 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 |---|---|---|---|
 | `description` | string | no | Human-readable summary |
 | `config` | `ScenarioConfig` | no | Security, redaction, and seed overrides |
-| `query` | map | **yes** | Query strings keyed by frontend (`json`, `gql`) |
-| `expect` | `QueryExpect` | **yes** | Assertions on the result |
+| `query` | map | one of `query`/`steps` | Query strings keyed by frontend (`json`, `gql`) |
+| `expect` | `QueryExpect` | with `query` | Assertions on the result |
+| `steps` | [`QueryStep`] | one of `query`/`steps` | Ordered steps, each with an optional `seed` (rows inserted before the step runs), a `query` map, and an `expect`. Use it when a later query must observe a write made after an earlier one |
 
 #### `config` — `ScenarioConfig`
 
@@ -311,6 +335,7 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, insert each row as its own part, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
 | `security` | preset name or inline `SecurityOverride` | Authorization context |
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
+| `duckdb` | bool | Default `false`. Also run the scenario in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with CALLS rows in `gl_edge`. |
 
 #### `config.security` — `SecurityOverride`
 
@@ -339,11 +364,17 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 | `total_edge_count` | N | Total edges across all types |
 | `nodes` | {Entity: `NodeExpect`} | Per-entity assertions |
 | `edges` | {TYPE: [[from, to]]} | Exact edge set |
-| `edge_exists` | {TYPE: [[from, to]]} | Subset check |
-| `edge_absent` | {TYPE: [[from, to]]} | Negative check |
+| `edge_exists` | {TYPE: [edge]} | Subset check; each edge is an ID pair or a typed object |
+| `edge_absent` | {TYPE: [edge]} | Negative check; each edge is an ID pair or a typed object |
 | `edge_count` | {TYPE: N} | Per-type edge count |
 | `referential_integrity` | bool | All edge endpoints have nodes |
 | `has_more` | bool | Pagination flag |
+| `gql_columns` | {column: [cell]} | Exact cells of a `gql` format table column, in row order |
+| `gql_column_names` | [column] | Exact `gql` format table header, in order |
+
+Typed edge objects use `{from: User, from_id: 1, to: Group, to_id: 100}`.
+They check endpoint types as well as IDs. Pair arrays such as `[1, 100]` check
+only IDs and the relationship type.
 
 **Aggregation:**
 
@@ -370,24 +401,26 @@ Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL
 |---|---|---|
 | `compile_only` | bool | Only compile, skip execution |
 | `compile_error` | bool / string / {frontend: string} | Expect compile failure |
+| `compile_error_contains` | [string] / {frontend: [string]} | Error must contain every listed fragment |
 | `compile_error_not_contains` | [string] / {frontend: [string]} | Error must NOT contain |
 | `sql_contains` | [string] | Rendered SQL must contain these |
 | `sql_not_contains` | [string] | Rendered SQL must NOT contain these |
 | `indexes_used` | [{table, index}] | ClickHouse skip indexes that `EXPLAIN indexes = 1` must apply on the named table (`gl_user`, matched against the `ReadFromMergeTree` step) and that must each prune granules. Seed non-matching rows with `unmerged_seed` so there are parts to prune |
 | `hydration` | `none` / `static` / `dynamic` | Kind of hydration plan the compiler produced |
+| `settings` | {name: value} | ClickHouse SETTINGS pairs the compiled query carries, for example `{ use_query_cache: 0 }`. A `null` value asserts the setting is absent. The pairs come from the process-wide query settings; the `query_settings_scenarios` test loads the production defaults |
 
 **Pagination:**
 
 | Field | Type | Description |
 |---|---|---|
-| `pages` | [`QueryExpect`] | Multi-page assertions with auto cursor chaining |
+| `pages` | [`QueryExpect`] | Multi-page assertions with auto cursor chaining; the last page must exhaust the cursor |
 | `all_pages` | `AllPagesExpect` | Cross-page assertions |
 
 **Other:**
 
 | Field | Type | Description |
 |---|---|---|
-| `repeat_count` | N | Run N times, assert identical results |
+| `repeat_count` | N | Recompile and run N times; compare node order within each entity type, properties, edges, aggregation rows, and pagination |
 | `skip_requirements` | [string] | Skip enforcement checks |
 
 #### `NodeExpect`
@@ -423,11 +456,22 @@ Row values support `{repeat: str, count: N, suffix: str}` for expansion.
 
 | Field | Type | Description |
 |---|---|---|
-| `node_ids` | {Entity: [ids]} | All node IDs across pages |
+| `node_ids` | {Entity: [ids]} | Sorted unique node IDs across pages |
+| `node_order` | {Entity: [ids]} | Exact node ID sequence across pages |
 | `group_node_ids` | {"key:Entity": [ids]} | All group node IDs across pages |
 | `edge_count` | N | Total edges across pages |
 | `page_count` | N | Expected number of pages |
-| `no_duplicate_ids` | bool | Assert no ID appears twice |
+| `no_duplicate_ids` | bool | Reject repeated node or group-node IDs across pages |
+| `no_duplicate_edges` | bool | Reject repeated typed edges across pages |
+| `matches_unpaginated` | bool | Compare combined typed node IDs, typed edges, group rows, and paths with the same query without a cursor |
+
+Cursor responses must keep `has_more` and `next_cursor` consistent. The runner
+decodes each token and checks its keys against the last authorized row when one
+exists. Unpaginated comparisons use a limit of 1000 and fail if results exceed it.
+GQL comparison queries must end with `PAGE N`.
+Node properties are checked per page because excerpt lengths depend on page size.
+
+Per-frontend error expectations must include every frontend in the scenario.
 
 ### Preset system
 
@@ -436,7 +480,7 @@ value. Presets are defined in `tests/scenarios/presets/`.
 
 | Preset file | Default | Description |
 |---|---|---|
-| `presets/security.yaml` | `paths: ["1/"]`, Reporter access | Named authorization contexts |
+| `presets/security.yaml` | `paths: ["1/"]`, the Reporter role | Named authorization contexts |
 | `presets/redaction.yaml` | `allow_all` (permits all seeded entity IDs) | Named redaction configs |
 | `presets/seed.yaml` | — | Named extra seed data |
 
@@ -445,19 +489,18 @@ To reference a preset by name: `security: admin_user`. To inline: provide the st
 
 ### Running scenarios
 
-```sh
+```shell
 mise test:integration:data
 SCENARIO_FILTER=search mise test:integration:data
 ```
 
-The harness finds each scenario file. `SCENARIO_FILTER` keeps the files whose path
-contains the filter. The `query_scenario_fixtures_parse` test in the `local` binary
+The harness finds each scenario file and case. `SCENARIO_FILTER` keeps the cases whose
+name contains the filter. The `query_scenario_fixtures_parse` test in the `local` binary
 parses every file with no Docker.
 
 ### Example
 
 ```yaml
-# source: path/to/rust_file.rs::original_function_name
 description: User search returns correct properties
 
 query:

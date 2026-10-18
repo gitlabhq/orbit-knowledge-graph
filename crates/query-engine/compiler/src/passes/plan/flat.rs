@@ -18,7 +18,7 @@ struct FlatBuilder<'a, M: OrbitQueryModel + ?Sized> {
     facts: &'a PlanningContext<'a, M>,
     definitions: Vec<(String, PhysicalPlan)>,
     filtered: HashSet<String>,
-    tagged: HashSet<(String, String)>,
+    tagged: HashSet<(String, String, usize)>,
 }
 
 pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
@@ -54,8 +54,8 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                     previous.inner_join(
                         edge,
                         (
-                            Column::new(format!("e{}", join.prev_index), &join.prev_col),
-                            Column::new(format!("e{index}"), &join.curr_col),
+                            Column::new(&self.facts.hops[join.prev_index].alias, &join.prev_col),
+                            Column::new(&hop.alias, &join.curr_col),
                         ),
                     )
                 }
@@ -71,12 +71,8 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
         };
         if !self.facts.aggregate() {
             for (index, hop) in self.facts.hops.iter().enumerate() {
-                let edge = format!("e{index}");
-                let prefix = if hop.max_hops > 1 {
-                    format!("hop_{edge}")
-                } else {
-                    edge.clone()
-                };
+                let edge = hop.alias.clone();
+                let prefix = hop.column_prefix(index);
                 plan.outputs.extend(
                     [
                         (RELATIONSHIP_KIND_COLUMN, EDGE_TYPE_SUFFIX),
@@ -89,14 +85,14 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                     .map(|(column, suffix)| {
                         Projection::new(
                             OutputValue::Column(Column::new(&edge, column)),
-                            format!("{prefix}_{suffix}"),
+                            format!("{prefix}{suffix}"),
                         )
                     }),
                 );
                 if hop.max_hops > 1 {
                     plan.outputs.push(Projection::new(
                         OutputValue::Column(Column::new(&edge, PATH_NODES_COLUMN)),
-                        format!("{prefix}_{PATH_NODES_COLUMN}"),
+                        format!("{prefix}{PATH_NODES_COLUMN}"),
                     ));
                 }
             }
@@ -113,7 +109,7 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                 else {
                     continue;
                 };
-                let edge = &format!("e{index}");
+                let edge = &hop.alias;
                 let joined = node.hydration != HydrationStrategy::Skip
                     && !(node.hydration == HydrationStrategy::FilterOnly
                         && self.filtered.contains(alias));
@@ -126,7 +122,9 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                 if !joined {
                     continue;
                 }
-                let membership = if node.hydration == HydrationStrategy::Join && node.use_narrowing
+                let membership = if node.hydration == HydrationStrategy::Join
+                    && node.use_narrowing
+                    && hop.max_hops == 1
                 {
                     let scan_alias = format!("{edge}n");
                     let mut predicates = self.facts.edge_predicates(&scan_alias, hop, false);
@@ -206,7 +204,7 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                     self.definitions.push((name.clone(), keys));
                 }
                 if first || !filter_only {
-                    predicates.push(key_membership(&format!("e{index}"), column, name));
+                    predicates.push(key_membership(&hop.alias, column, name));
                 }
             }
         }
@@ -258,26 +256,30 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
         cascade: Option<&PhysicalPlan>,
     ) -> Result<PhysicalSource> {
         let hop = &self.facts.hops[index];
-        let alias = format!("e{index}");
-        let scan = |final_| PhysicalSource::Scan {
-            table: hop.edge_table.clone(),
-            alias: alias.clone(),
-            final_,
-            relationship: Some(hop.input_index),
-        };
+        let alias = hop.alias.clone();
+        let scan = |final_| PhysicalSource::edge(hop, &alias, final_);
         let multi_hop = hop.max_hops > 1;
         let dedup = self.facts.hops.len() >= 2;
-        if !multi_hop && !dedup && self.facts.aggregate() {
-            let sort_key = self.facts.latest_row_key(&hop.edge_table)?;
+        if !multi_hop
+            && !dedup
+            && self.facts.aggregate()
+            && let Some(table) = hop.single_edge_table()
+        {
+            let sort_key = self.facts.latest_row_key(table)?;
             let mut predicates = self
                 .facts
                 .filtered_edge_predicates(&alias, hop, &mut self.tagged);
             predicates.extend(membership);
+            let identity = predicates
+                .iter()
+                .filter(|predicate| filters_sort_key(predicate, sort_key))
+                .cloned()
+                .collect();
             return Ok(PhysicalSource::Latest {
                 sort_key: sort_key.to_vec(),
                 alias: alias.clone(),
                 aggregate_condition: predicates,
-                input: Box::new(scan(false)),
+                input: Box::new(scan(false).filter(identity)),
             });
         }
         let edge = if multi_hop {
@@ -286,10 +288,9 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                 .cascade(hop, &alias, cascade)
         } else if dedup {
             let (start, end) = hop.direction.edge_columns();
-            let narrow_inside = self
-                .facts
-                .model
-                .table_sort_key(&hop.edge_table)
+            let narrow_inside = hop
+                .single_edge_table()
+                .and_then(|table| self.facts.model.table_sort_key(table))
                 .is_some_and(|keys| keys.iter().take(4).any(|key| key == start || key == end));
             let mut input = scan(true).filter(self.facts.node_id_predicates(&alias, hop));
             let outside = if narrow_inside {
@@ -308,7 +309,7 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
                 scoped.filter(outside).cascade(hop, &alias, cascade)
             }
         } else {
-            scan(false).filter(membership).cascade(hop, &alias, cascade)
+            scan(true).filter(membership).cascade(hop, &alias, cascade)
         };
         let mut predicates = if multi_hop {
             Vec::new()
@@ -327,4 +328,13 @@ impl<M: OrbitQueryModel + ?Sized> FlatBuilder<'_, M> {
         }
         Ok(edge.filter(predicates))
     }
+}
+
+fn filters_sort_key(predicate: &Predicate, sort_key: &[String]) -> bool {
+    let column = match predicate {
+        Predicate::RelationshipKinds { .. } => RELATIONSHIP_KIND_COLUMN,
+        Predicate::EntityKind { column, .. } => column.name.as_str(),
+        _ => return false,
+    };
+    sort_key.iter().any(|key| key == column)
 }

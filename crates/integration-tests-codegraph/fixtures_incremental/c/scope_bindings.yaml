@@ -1,4 +1,5 @@
 name: "C: lexical binding ownership"
+
 fixtures:
   - path: local/main.c
     content: |
@@ -14,6 +15,7 @@ fixtures:
           }
           f();
       }
+
   - path: assignment/main.c
     content: |
       void first() {}
@@ -28,6 +30,7 @@ fixtures:
           }
           f();
       }
+
 tests:
   - name: "Declarations stay local while assignments update outer bindings"
     query: |

@@ -1,4 +1,5 @@
 name: "Go: init and main special functions"
+
 fixtures:
   - path: app.go
     content: |
@@ -45,4 +46,3 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { column_values: { field: fqn, values: ["main.init"] } }
-

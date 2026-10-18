@@ -64,19 +64,21 @@ async fn build_fan_out(
     subscription: Subscription,
 ) -> Arc<dyn Handler> {
     let config = create_test_indexer_config(&ctx.config);
-    let writer = Arc::new(
-        ClickHouseWriter::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
-            .expect("writer"),
-    );
+    let writer = Arc::new(ClickHouseWriter::new(
+        ctx.config.clone().build_client("graph"),
+        Arc::new(EngineMetrics::default()),
+    ));
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
     indexer::modules::sdlc::register_handlers(
         &registry,
         &config,
+        &indexer::clickhouse::ClickHouseClients::new(&config.graph, &config.datalake),
         &ontology,
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
         indexer::modules::sdlc::PARTITION_MIN_ROWS,
+        indexer_datafusion::sql_transform(),
     )
     .await
     .expect("failed to register SDLC handlers");
@@ -108,10 +110,35 @@ pub async fn entity_handler_with_partitions(
     partitions: u32,
 ) -> Arc<dyn Handler> {
     let config: IndexerConfig = create_test_indexer_config(&ctx.config);
-    let writer = Arc::new(
-        ClickHouseWriter::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
-            .expect("writer"),
-    );
+    entity_handler_for_config(ctx, config, entity_name, partitions).await
+}
+
+/// Pages the entity extract at `batch_size` rows so small fixtures exercise keyset paging.
+pub async fn entity_handler_with_batch_size(
+    ctx: &TestContext,
+    entity_name: &str,
+    batch_size: u64,
+) -> Arc<dyn Handler> {
+    let mut config: IndexerConfig = create_test_indexer_config(&ctx.config);
+    config
+        .engine
+        .handlers
+        .entity_handler
+        .batch_size_overrides
+        .insert(entity_name.to_string(), batch_size);
+    entity_handler_for_config(ctx, config, entity_name, 1).await
+}
+
+async fn entity_handler_for_config(
+    ctx: &TestContext,
+    config: IndexerConfig,
+    entity_name: &str,
+    partitions: u32,
+) -> Arc<dyn Handler> {
+    let writer = Arc::new(ClickHouseWriter::new(
+        ctx.config.clone().build_client("graph"),
+        Arc::new(EngineMetrics::default()),
+    ));
     let ontology = ontology::Ontology::load_embedded()
         .expect("ontology must load")
         .with_partition_count(entity_name, partitions);
@@ -119,10 +146,12 @@ pub async fn entity_handler_with_partitions(
     indexer::modules::sdlc::register_handlers(
         &registry,
         &config,
+        &indexer::clickhouse::ClickHouseClients::new(&config.graph, &config.datalake),
         &ontology,
         writer,
         indexer::analytics::IndexingAnalytics::disabled(),
         0,
+        indexer_datafusion::sql_transform(),
     )
     .await
     .expect("failed to register SDLC handlers");
@@ -165,10 +194,10 @@ pub fn stale_edge_task(
 ) -> indexer::orchestrator::scheduled::StaleEdgeReconciliation {
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let checkpoint_store = Arc::new(indexer::checkpoint::ClickHouseCheckpointStore::new(
-        Arc::new(ctx.config.build_client()),
+        Arc::new(ctx.config.build_client("graph")),
     ));
     indexer::orchestrator::scheduled::StaleEdgeReconciliation::new(
-        ctx.config.build_client(),
+        ctx.config.build_client("graph"),
         &ontology,
         checkpoint_store,
         indexer::orchestrator::scheduled::ScheduledTaskMetrics::new(),

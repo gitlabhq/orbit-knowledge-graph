@@ -2,7 +2,7 @@
 //! connection.
 
 use labkit::tls::ServerTls;
-use orbit_server::webserver::InfrastructureHealthClient;
+use orbit_server::health_client::InfrastructureHealthClient;
 
 use super::tls_fixtures::{generate_test_certs, init_crypto_provider};
 

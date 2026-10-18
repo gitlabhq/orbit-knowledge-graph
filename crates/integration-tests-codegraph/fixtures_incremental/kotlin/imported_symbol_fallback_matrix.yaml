@@ -1,4 +1,5 @@
 name: "Kotlin: imported-symbol fallback matrix"
+
 fixtures:
   - path: com/example/App.kt
     content: |

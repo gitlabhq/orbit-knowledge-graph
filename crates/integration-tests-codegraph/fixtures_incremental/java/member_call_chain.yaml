@@ -1,0 +1,17 @@
+name: "Java: a long member call chain links in linear work"
+
+fixtures:
+  - path: B.java
+    content:
+      - "class B {\n    B b() {\n        return this;\n    }\n}\n\nclass U {\n    void f(B x) {\n        x"
+      - { repeat: 4000, text: ".b()" }
+      - ";\n    }\n}\n"
+
+tests:
+  - name: "every call of the chain calls B.b"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'f' AND callee.name = 'b'
+      RETURN count(callee) AS n
+    assert:
+      - { count_equals: { field: n, value: 4000 } }

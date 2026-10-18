@@ -1,0 +1,25 @@
+description: Wildcard expansion keeps relationship kinds needed by intermediate nodes
+
+config:
+  redaction:
+    allow:
+      user: [99002]
+      merge_request: [99000]
+      project: [1000]
+  extra_seed:
+    gl_user:
+      - { id: 99002, username: audit_user }
+    gl_merge_request:
+      - { id: 99000, traversal_path: "1/100/1000/", project_id: 1000, author_id: 99002, title: audit_mr }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 99002, source_kind: User, relationship_kind: AUTHORED, target_id: 99000, target_kind: MergeRequest }
+      - { traversal_path: "1/100/1000/", source_id: 99000, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 1000, target_kind: Project }
+
+query:
+  gql: |
+    MATCH (u:User {id: 99002})-[*2]->(p:Project {id: 1000})
+    RETURN u.id, p.id
+
+expect:
+  skip_requirements: ["node_ids", "relationship:*"]
+  node_count: 2

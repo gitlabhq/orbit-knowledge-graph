@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
-use crate::input::{FilterOp, InputFilter, InputIdRange};
-use crate::{QueryError, Result};
-use serde_json::Value;
+use crate::Result;
+use crate::input::{BooleanExpression, Condition, FilterOp, InputFilter, PredicateTarget};
 
-use super::super::ast::{Comparison, MapEntry};
+use super::super::ast::{Comparison, MapEntry, Predicate};
 use super::super::errors::invalid;
 use super::Lowering;
 
@@ -25,154 +24,99 @@ impl Lowering {
         }
     }
 
-    pub(super) fn predicate(&mut self, comparison: Comparison<'_>) -> Result<()> {
+    pub(super) fn predicates(
+        &mut self,
+        predicates: Vec<BooleanExpression<Predicate<'_>>>,
+    ) -> Result<()> {
+        let expression = BooleanExpression::And(predicates)
+            .try_map(&mut |predicate| self.condition(predicate))?;
+        self.input.absorb(expression)
+    }
+
+    fn condition(&self, predicate: Predicate<'_>) -> Result<Condition> {
+        let comparison = match predicate {
+            Predicate::Comparison(comparison) => comparison,
+            Predicate::RelationshipType {
+                span,
+                variable,
+                op,
+                value,
+            } => {
+                let index = self.relationship_index(span, &variable)?;
+                self.one_hop(span, &variable)?;
+                return Ok(Condition {
+                    target: PredicateTarget::Relationship(index),
+                    property: Condition::RELATIONSHIP_TYPE.into(),
+                    filter: InputFilter {
+                        op: Some(op),
+                        value,
+                        rhs_column: None,
+                    },
+                });
+            }
+        };
         let Comparison {
             span,
             property,
             op,
             value,
             rhs_property,
-        } = comparison;
-
-        if let Some(rhs) = rhs_property {
-            let lhs_node = property.node.value;
-            let lhs_prop = property.property.value;
-            let rhs_node = rhs.node.value;
-            let rhs_prop = rhs.property.value;
-            let lhs_known = self.input.nodes.iter().any(|n| n.id == lhs_node)
-                || self.edges.contains_key(&lhs_node);
-            let rhs_known = self.input.nodes.iter().any(|n| n.id == rhs_node)
-                || self.edges.contains_key(&rhs_node);
-            if !lhs_known {
-                return Err(invalid(span, &format!("undefined variable {lhs_node}")));
+        } = *comparison;
+        let target = self.predicate_target(&property.node.value, span)?;
+        let rhs_column = match rhs_property {
+            Some(rhs) => {
+                let rhs_target = self.predicate_target(&rhs.node.value, span)?;
+                if !matches!(
+                    (&target, &rhs_target),
+                    (PredicateTarget::Node(_), PredicateTarget::Node(_))
+                ) {
+                    return Err(invalid(
+                        span,
+                        "property comparisons involving relationships are unsupported",
+                    ));
+                }
+                if !matches!(
+                    op,
+                    FilterOp::Eq
+                        | FilterOp::Ne
+                        | FilterOp::Gt
+                        | FilterOp::Lt
+                        | FilterOp::Gte
+                        | FilterOp::Lte
+                ) {
+                    return Err(invalid(
+                        span,
+                        "property-to-property comparisons only support =, <>, !=, <, >, <=, >=",
+                    ));
+                }
+                Some((rhs.node.value, rhs.property.value))
             }
-            if !rhs_known {
-                return Err(invalid(span, &format!("undefined variable {rhs_node}")));
-            }
-            if !matches!(
-                op,
-                FilterOp::Eq
-                    | FilterOp::Ne
-                    | FilterOp::Gt
-                    | FilterOp::Lt
-                    | FilterOp::Gte
-                    | FilterOp::Lte
-            ) {
-                return Err(invalid(
-                    span,
-                    "property-to-property comparisons only support =, <>, !=, <, >, <=, >=",
-                ));
-            }
-            if lhs_node == rhs_node {
-                self.input
-                    .nodes
-                    .iter_mut()
-                    .find(|n| n.id == lhs_node)
-                    .ok_or_else(|| invalid(span, &format!("undefined variable {lhs_node}")))?
-                    .filters
-                    .entry(lhs_prop)
-                    .or_default()
-                    .push(InputFilter {
-                        op: Some(op),
-                        rhs_column: Some((rhs_node, rhs_prop)),
-                        ..Default::default()
-                    });
-            } else {
-                self.input
-                    .join_predicates
-                    .push(crate::input::JoinPredicate {
-                        lhs_node,
-                        lhs_prop,
-                        op,
-                        rhs_node,
-                        rhs_prop,
-                    });
-            }
-            return Ok(());
-        }
-
-        let filter = InputFilter {
-            op: Some(op),
-            value,
-            ..Default::default()
+            None => None,
         };
-        let node = property.node.value;
-        let key = property.property.value;
-        if let Some(node) = self.input.nodes.iter_mut().find(|n| n.id == node) {
-            node.filters.entry(key).or_default().push(filter);
-        } else if let Some(index) = self.edges.get(&node) {
-            let edge = &mut self.input.relationships[*index];
-            if edge.hops.max != 1 {
+        Ok(Condition {
+            target,
+            property: property.property.value,
+            filter: InputFilter {
+                op: Some(op),
+                value,
+                rhs_column,
+            },
+        })
+    }
+
+    fn predicate_target(&self, alias: &str, span: pest::Span<'_>) -> Result<PredicateTarget> {
+        if self.input.nodes.iter().any(|node| node.id == alias) {
+            Ok(PredicateTarget::Node(alias.into()))
+        } else if let Some(index) = self.edges.get(alias) {
+            if self.input.relationships[*index].hops.max != 1 {
                 return Err(invalid(
                     span,
                     "a variable-length relationship binds a list; relationship-list predicates are unsupported",
                 ));
             }
-            edge.filters.entry(key).or_default().push(filter);
+            Ok(PredicateTarget::Relationship(*index))
         } else {
-            return Err(invalid(span, &format!("undefined variable {node}")));
+            Err(invalid(span, &format!("undefined variable {alias}")))
         }
-        Ok(())
-    }
-
-    pub(super) fn promote_ids(&mut self) -> Result<()> {
-        for node in &mut self.input.nodes {
-            let Some(filters) = node.filters.get_mut("id") else {
-                continue;
-            };
-            if node.node_ids.is_empty()
-                && let Some((index, values)) =
-                    filters
-                        .iter()
-                        .enumerate()
-                        .find_map(|(index, f)| match (&f.op, &f.value) {
-                            (Some(FilterOp::In), Some(Value::Array(values)))
-                                if !values.is_empty() =>
-                            {
-                                Some((index, values))
-                            }
-                            _ => None,
-                        })
-            {
-                node.node_ids = values
-                    .iter()
-                    .map(|v| {
-                        v.as_i64()
-                            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-                            .ok_or_else(|| {
-                                QueryError::Validation(
-                                    "node IDs must be signed 64-bit integers".into(),
-                                )
-                            })
-                    })
-                    .collect::<Result<_>>()?;
-                filters.remove(index);
-            }
-            if let [left, right] = filters.as_slice() {
-                let lower = [left, right]
-                    .into_iter()
-                    .find(|f| matches!(f.op, Some(FilterOp::Gte | FilterOp::Gt)));
-                let upper = [left, right]
-                    .into_iter()
-                    .find(|f| matches!(f.op, Some(FilterOp::Lte | FilterOp::Lt)));
-                if let (Some(lower), Some(upper)) = (lower, upper)
-                    && let (Some(start), Some(end)) = (
-                        lower.value.as_ref().and_then(Value::as_i64),
-                        upper.value.as_ref().and_then(Value::as_i64),
-                    )
-                {
-                    let start = start.checked_add(i64::from(lower.op == Some(FilterOp::Gt)));
-                    let end = end.checked_sub(i64::from(upper.op == Some(FilterOp::Lt)));
-                    if let (Some(start), Some(end)) = (start, end) {
-                        node.id_range = Some(InputIdRange { start, end });
-                        filters.clear();
-                    }
-                }
-            }
-            if filters.is_empty() {
-                node.filters.remove("id");
-            }
-        }
-        Ok(())
     }
 }

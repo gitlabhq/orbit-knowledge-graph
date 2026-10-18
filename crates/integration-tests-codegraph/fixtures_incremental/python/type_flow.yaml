@@ -1,4 +1,5 @@
 name: "Python: expression chain resolution"
+
 fixtures:
   - path: service.py
     content: |

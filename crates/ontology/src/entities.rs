@@ -294,12 +294,9 @@ pub struct RedactionConfig {
     /// Rails resource type (e.g., "projects", "merge_requests", "groups", "users").
     /// This maps to the key used in `Authz::RedactionService::RESOURCE_CLASSES`.
     pub resource_type: String,
-    /// Column containing the ID for redaction (defaults to "id").
-    #[serde(default = "RedactionConfig::default_id_column")]
+    /// Column containing the ID for redaction.
     pub id_column: String,
     /// The ability to check for this resource (e.g., "read_project", "read_group").
-    /// Defaults to "read".
-    #[serde(default = "RedactionConfig::default_ability")]
     pub ability: String,
     /// Minimum GitLab role required on a traversal path for rows of this
     /// entity to survive the compiler security pass. Defaults to `Reporter`
@@ -311,14 +308,6 @@ pub struct RedactionConfig {
 }
 
 impl RedactionConfig {
-    fn default_id_column() -> String {
-        "id".to_string()
-    }
-
-    fn default_ability() -> String {
-        "read".to_string()
-    }
-
     fn default_required_role() -> RequiredRole {
         RequiredRole::Reporter
     }
@@ -413,6 +402,18 @@ impl EdgeVariantScope {
     pub fn propagates_to_source(self, relationship: &str, source: &str) -> bool {
         self.is_scope_preserving() && !(relationship == "CONTAINS" && source == "Group")
     }
+
+    /// A `same_namespace` source can live in another namespace on prod
+    /// (parent Group of CONTAINS, Package of HAS_VULNERABILITY).
+    #[must_use]
+    pub fn edge_path_is_target_path(self) -> bool {
+        matches!(self, Self::SameNamespace | Self::PruneToTarget)
+    }
+
+    #[must_use]
+    pub fn edge_path_is_source_path(self) -> bool {
+        matches!(self, Self::PruneToSource)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -471,6 +472,7 @@ pub struct DenormalizedProperty {
     /// Values are stored as `"key:value"` tokens in the array.
     pub tag_key: String,
     pub enum_values: Option<BTreeMap<i64, String>>,
+    pub nullable: bool,
 }
 
 impl fmt::Display for EdgeEntity {

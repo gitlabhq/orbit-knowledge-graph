@@ -1,0 +1,20 @@
+name: Bounded hops keep source ordering when endpoint filters are outside union arms
+ontology_overlay: reordered_edges
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"callee","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"callee","hops":[1,3]}]}
+  gql: |
+    MATCH (caller:Definition)-[:CALLS*1..3]->(callee:Definition {id: 12001}) RETURN caller, callee
+
+logical:
+  expect: ["(EdgeScan CALLS caller->callee AS e0 HOPS 1..3)"]
+
+physical:
+  clickhouse:
+    planned:
+      expect: ["(Scan Table(gl_code_edge) ...)"]
+      reject: ["(Scan Table(gl_code_edge_by_target) ...)"]
+  duckdb:
+    planned:
+      expect: ["(Scan Table(gl_edge) ...)"]

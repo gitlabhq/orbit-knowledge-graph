@@ -1,0 +1,1084 @@
+# Production performance corpus.
+#
+# 131 GQL queries over real gitlab-org shapes: point lookups, filtered scans,
+# 1-hop and multi-hop traversals, aggregations, neighbors, path finding,
+# pagination, and code graph.
+# Canonical corpus entry: desc / category / suite / query (inline GQL).
+#
+# Date windows are literal: 7, 30, and 90 days before the 2026-10-17 run.
+# {{TOKENS}} values used on prod:
+#   {{GITLAB_PROJECT_ID}} = 278964  (gitlab-org/gitlab)
+#   {{KG_PROJECT_ID}} = 77960826  (gitlab-org/orbit/knowledge-graph)
+#   {{ORG_GROUP_ID}} = 9970  (gitlab-org)
+#   {{ORBIT_GROUP_ID}} = 120946322  (gitlab-org/orbit)
+#   {{MEMBER_USER_ID}} = 7980077  (User)
+#   {{ASSIGNEE_USER_ID}} = 5054237  (User)
+#   {{APPROVER_USER_ID}} = 20271294  (User)
+#   {{AUTHOR_USER_ID}} = 64248  (User)
+#   {{PROLIFIC_AUTHOR_USER_ID}} = 128633  (User)
+#   {{BOT_USER_ID}} = 1786152  (User)
+#   {{MR_ID}} = 549661405  (MergeRequest)
+#   {{KG_MR_ID}} = 549658919  (MergeRequest)
+#   {{WORK_ITEM_ID}} = 206806508  (WorkItem)
+#   {{EPIC_ID}} = 206800025  (WorkItem)
+#   {{PIPELINE_ID}} = 2952150594  (Pipeline)
+#   {{JOB_ID}} = 17217733329  (Job)
+#   {{VULNERABILITY_ID}} = 408651131  (Vulnerability)
+#   {{LABEL_ID}} = 2278648  (Label)
+#   {{MILESTONE_ID}} = 5948917  (Milestone)
+#   {{FILE_ID}} = 2224282993346279700  (File)
+#   {{DEFINITION_ID}} = 3155405440850214569  (Definition)
+
+a01_project_by_path:
+  desc: "Project by path"
+  category: search
+  query: |
+    MATCH (p:Project {full_path: 'gitlab-org/gitlab'})
+    RETURN p.id, p.full_path
+    LIMIT 1
+
+a02_mr_by_id:
+  desc: "MR by ID"
+  category: search
+  query: |
+    MATCH (mr:MergeRequest {id: {{MR_ID}}})
+    RETURN mr
+
+a03_mr_by_iid_project:
+  desc: "MR by IID project"
+  category: search
+  query: |
+    MATCH (mr:MergeRequest {iid: 235291})-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+    RETURN mr.id, mr.title, mr.state
+
+a04_mr_by_iid_project_id:
+  desc: "MR by IID project ID"
+  category: search
+  query: |
+    MATCH (mr:MergeRequest {iid: 235291, project_id: {{GITLAB_PROJECT_ID}}})
+    RETURN mr.id, mr.title, mr.state
+
+a05_user_by_username:
+  desc: "User by username"
+  category: search
+  query: |
+    MATCH (u:User {username: 'stanhu'})
+    RETURN u.id, u.name
+
+a06_workitem_by_id:
+  desc: "Work item by ID"
+  category: search
+  query: |
+    MATCH (w:WorkItem {id: {{WORK_ITEM_ID}}})
+    RETURN properties(w)
+
+a07_pipeline_by_id:
+  desc: "Pipeline by ID"
+  category: search
+  query: |
+    MATCH (pl:Pipeline {id: {{PIPELINE_ID}}})
+    RETURN pl
+
+a08_job_by_id:
+  desc: "Job by ID"
+  category: search
+  query: |
+    MATCH (j:Job {id: {{JOB_ID}}})
+    RETURN j.name, j.status, j.failure_reason
+
+a09_vuln_by_id:
+  desc: "Vulnerability by ID"
+  category: search
+  query: |
+    MATCH (v:Vulnerability {id: {{VULNERABILITY_ID}}})
+    RETURN v
+
+a10_group_by_path:
+  desc: "Group by path"
+  category: search
+  query: |
+    MATCH (g:Group {full_path: 'gitlab-org/orbit'})
+    RETURN g.id
+
+a11_workitem_by_iid:
+  desc: "Work item by IID"
+  category: search
+  query: |
+    MATCH (w:WorkItem {iid: 1, project_id: {{KG_PROJECT_ID}}})
+    RETURN w.title
+
+b01_mrs_open_in_project:
+  desc: "MRs open in project"
+  category: search
+  query: |
+    MATCH (mr:MergeRequest {project_id: {{GITLAB_PROJECT_ID}}, state: 'opened'})
+    RETURN mr.iid, mr.title
+    ORDER BY mr.created_at DESC
+    LIMIT 20
+
+b02_mrs_title_contains_project:
+  desc: "MRs title contains project"
+  category: search
+  query: |
+    MATCH (mr:MergeRequest {project_id: {{GITLAB_PROJECT_ID}}})
+    WHERE mr.title CONTAINS 'migration'
+    RETURN mr.iid, mr.title
+    ORDER BY mr.created_at DESC
+    LIMIT 20
+
+b03_mrs_all_tokens_project:
+  desc: "MRs all tokens project"
+  category: search
+  query: |
+    MATCH (mr:MergeRequest {project_id: {{GITLAB_PROJECT_ID}}})
+    WHERE all_tokens(mr.title, 'database migration')
+    RETURN mr.iid, mr.title, mr.state
+    ORDER BY mr.created_at DESC
+    LIMIT 10
+
+b04_mrs_title_contains_org:
+  desc: "MRs title contains org"
+  category: search
+  query: |
+    MATCH (mr:MergeRequest)
+    WHERE mr.title CONTAINS 'knowledge graph'
+    RETURN mr.iid, mr.title
+    LIMIT 20
+
+b05_mrs_merged_last30_org:
+  desc: "MRs merged last 30 days org"
+  category: search
+  query: |
+    MATCH (mr:MergeRequest {state: 'merged'})
+    WHERE mr.merged_at >= '2026-09-17'
+    RETURN mr.iid, mr.title
+    ORDER BY mr.merged_at DESC
+    LIMIT 50
+
+b06_failed_jobs_project_7d:
+  desc: "Failed jobs project 7 days"
+  category: search
+  query: |
+    MATCH (j:Job {project_id: {{GITLAB_PROJECT_ID}}, status: 'failed'})
+    WHERE j.created_at >= '2026-10-10'
+    RETURN j.name, j.failure_reason
+    ORDER BY j.created_at DESC
+    LIMIT 50
+
+b07_failed_pipelines_master_7d:
+  desc: "Failed pipelines master 7 days"
+  category: search
+  query: |
+    MATCH (pl:Pipeline {project_id: {{GITLAB_PROJECT_ID}}, ref: 'master', status: 'failed'})
+    WHERE pl.created_at >= '2026-10-10'
+    RETURN pl.id, pl.created_at
+    ORDER BY pl.created_at DESC
+    LIMIT 50
+
+b08_critical_vulns_project:
+  desc: "Critical vulnerabilities project"
+  category: search
+  query: |
+    MATCH (v:Vulnerability {project_id: {{GITLAB_PROJECT_ID}}, severity: 'critical', state: 'detected'})
+    RETURN v.title, v.report_type
+    LIMIT 50
+
+b09_open_epics_org:
+  desc: "Open epics org"
+  category: search
+  query: |
+    MATCH (w:WorkItem {work_item_type: 'epic', state: 'opened'})
+    WHERE w.title CONTAINS 'orbit'
+    RETURN w.iid, w.title
+    LIMIT 50
+
+b10_notes_contains_project:
+  desc: "Notes contains project"
+  category: search
+  query: |
+    MATCH (n:Note {project_id: {{GITLAB_PROJECT_ID}}})
+    WHERE n.note CONTAINS 'flaky'
+    RETURN n.id, n.noteable_type
+    ORDER BY n.created_at DESC
+    LIMIT 20
+
+b11_jobs_by_name_org_7d:
+  desc: "Jobs by name org 7 days"
+  category: search
+  query: |
+    MATCH (j:Job {name: 'rspec-ee unit pg16 1/28'})
+    WHERE j.created_at >= '2026-10-10'
+    RETURN j.status, j.ref
+    LIMIT 50
+
+b12_draft_mrs_project:
+  desc: "Draft MRs project"
+  category: search
+  query: |
+    MATCH (mr:MergeRequest {project_id: {{KG_PROJECT_ID}}, draft: true, state: 'opened'})
+    RETURN mr.iid, mr.title
+    LIMIT 50
+
+b13_issues_open_project_recent:
+  desc: "Issues open project recent"
+  category: search
+  query: |
+    MATCH (w:WorkItem {project_id: {{GITLAB_PROJECT_ID}}, work_item_type: 'issue', state: 'opened'})
+    WHERE w.created_at >= '2026-10-10'
+    RETURN w.iid, w.title
+    ORDER BY w.created_at DESC
+    LIMIT 50
+
+b14_definitions_by_name:
+  desc: "Definitions by name"
+  category: search
+  query: |
+    MATCH (d:Definition {project_id: {{KG_PROJECT_ID}}, name: 'compile'})
+    RETURN d.fqn, d.file_path
+    LIMIT 20
+
+b15_files_by_ext:
+  desc: "Files by extension"
+  category: search
+  query: |
+    MATCH (f:File {project_id: {{KG_PROJECT_ID}}, extension: 'rs'})
+    WHERE f.path STARTS WITH 'crates/query-engine'
+    RETURN f.path
+    LIMIT 100
+
+b16_mr_source_branch:
+  desc: "MR source branch"
+  category: search
+  query: |
+    MATCH (mr:MergeRequest {project_id: {{GITLAB_PROJECT_ID}}, source_branch: 'master'})
+    RETURN mr.iid
+    LIMIT 10
+
+b17_mrs_merged_window_project:
+  desc: "MRs merged window project"
+  category: search
+  query: |
+    MATCH (mr:MergeRequest {project_id: {{GITLAB_PROJECT_ID}}, state: 'merged'})
+    WHERE mr.merged_at >= '2026-10-10'
+    RETURN mr.iid, mr.title
+    ORDER BY mr.merged_at DESC
+    LIMIT 100
+
+b18_jobs_failure_reason_project:
+  desc: "Jobs failure reason project"
+  category: search
+  query: |
+    MATCH (j:Job {project_id: {{GITLAB_PROJECT_ID}}, failure_reason: 'script_failure'})
+    WHERE j.finished_at >= '2026-10-10'
+    RETURN j.name, j.id
+    ORDER BY j.finished_at DESC
+    LIMIT 20
+
+b19_not_state_mrs:
+  desc: "Not state MRs"
+  category: search
+  query: |
+    MATCH (mr:MergeRequest {project_id: {{KG_PROJECT_ID}}})
+    WHERE NOT mr.state IN ['merged', 'closed']
+    RETURN mr.iid, mr.title
+    LIMIT 50
+
+c01_user_authored_mrs:
+  desc: "User authored MRs"
+  category: traversal
+  query: |
+    MATCH (u:User {id: {{AUTHOR_USER_ID}}})-[:AUTHORED]->(mr:MergeRequest)
+    RETURN mr.iid, mr.title, mr.state
+    ORDER BY mr.created_at DESC
+    LIMIT 20
+
+c02_user_authored_mrs_by_username:
+  desc: "User authored MRs by username"
+  category: traversal
+  query: |
+    MATCH (u:User {username: 'dgruzd'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
+    RETURN mr.title, mr.merged_at
+    ORDER BY mr.merged_at DESC
+    LIMIT 20
+
+c03_mr_reviewers:
+  desc: "MR reviewers"
+  category: traversal
+  query: |
+    MATCH (u:User)-[:REVIEWER]->(mr:MergeRequest {id: {{MR_ID}}})
+    RETURN u.username
+
+c04_mr_notes:
+  desc: "MR notes"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {id: {{MR_ID}}})-[:HAS_NOTE]->(n:Note)
+    RETURN n.note, n.created_at
+    ORDER BY n.created_at
+    LIMIT 100
+
+c05_mr_labels:
+  desc: "MR labels"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {id: {{MR_ID}}})-[:HAS_LABEL]->(l:Label)
+    RETURN l.title
+
+c06_workitem_labels:
+  desc: "Work item labels"
+  category: traversal
+  query: |
+    MATCH (w:WorkItem {id: {{WORK_ITEM_ID}}})-[:HAS_LABEL]->(l:Label)
+    RETURN l.title
+
+c07_project_mrs_via_edge:
+  desc: "Project MRs via edge"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {state: 'opened'})-[:IN_PROJECT]->(p:Project {id: {{KG_PROJECT_ID}}})
+    RETURN mr.iid, mr.title
+    ORDER BY mr.created_at DESC
+    LIMIT 20
+
+c08_project_mrs_via_edge_gitlab:
+  desc: "Project MRs via edge gitlab"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {state: 'opened'})-[:IN_PROJECT]->(p:Project {id: {{GITLAB_PROJECT_ID}}})
+    RETURN mr.iid, mr.title
+    ORDER BY mr.created_at DESC
+    LIMIT 20
+
+c09_pipeline_failed_jobs:
+  desc: "Pipeline failed jobs"
+  category: traversal
+  query: |
+    MATCH (pl:Pipeline {id: {{PIPELINE_ID}}})-[:HAS_JOB]->(j:Job {status: 'failed'})
+    RETURN j.name, j.failure_reason
+
+c10_mr_head_pipeline:
+  desc: "MR head pipeline"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {id: {{MR_ID}}})-[:HAS_HEAD_PIPELINE]->(pl:Pipeline)
+    RETURN pl.id, pl.status
+
+c11_mr_closes_workitems:
+  desc: "MR closes work items"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {id: {{MR_ID}}})-[:CLOSES]->(w:WorkItem)
+    RETURN w.iid, w.title
+
+c12_epic_children:
+  desc: "Epic children"
+  category: traversal
+  query: |
+    MATCH (e:WorkItem {id: {{EPIC_ID}}})-[:CONTAINS]->(c:WorkItem)
+    RETURN c.iid, c.title, c.state
+
+c13_group_projects:
+  desc: "Group projects"
+  category: traversal
+  query: |
+    MATCH (g:Group {id: {{ORBIT_GROUP_ID}}})-[:CONTAINS]->(p:Project)
+    RETURN p.full_path
+
+c14_user_member_groups:
+  desc: "User member groups"
+  category: traversal
+  query: |
+    MATCH (u:User {id: {{MEMBER_USER_ID}}})-[:MEMBER_OF]->(g:Group)
+    RETURN g.full_path
+
+c15_mrs_in_milestone:
+  desc: "MRs in milestone"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_MILESTONE]->(m:Milestone {id: {{MILESTONE_ID}}})
+    RETURN mr.iid, mr.title
+    LIMIT 50
+
+c16_vuln_notes:
+  desc: "Vulnerability notes"
+  category: traversal
+  query: |
+    MATCH (v:Vulnerability {id: {{VULNERABILITY_ID}}})-[:HAS_NOTE]->(n:Note)
+    RETURN n.note
+
+c17_mr_fixes_vulns:
+  desc: "MR fixes vulnerabilities"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest)-[:FIXES]->(v:Vulnerability {id: {{VULNERABILITY_ID}}})
+    RETURN mr.iid
+
+c18_user_assigned_open_issues:
+  desc: "User assigned open issues"
+  category: traversal
+  query: |
+    MATCH (u:User {id: {{ASSIGNEE_USER_ID}}})-[:ASSIGNED]->(w:WorkItem {state: 'opened'})
+    RETURN w.iid, w.title
+    LIMIT 50
+
+c19_user_approved_mrs:
+  desc: "User approved MRs"
+  category: traversal
+  query: |
+    MATCH (u:User {id: {{APPROVER_USER_ID}}})-[:APPROVED]->(mr:MergeRequest)
+    RETURN mr.iid, mr.title
+    ORDER BY mr.created_at DESC
+    LIMIT 20
+
+c20_mr_pipelines_mre:
+  desc: "MR pipelines merge-request-event"
+  category: traversal
+  query: |
+    MATCH (pl:Pipeline {merge_request_id: {{MR_ID}}, source: 'merge_request_event'})
+    RETURN pl.id, pl.status
+    ORDER BY pl.created_at DESC
+    LIMIT 20
+
+c21_mr_merged_by:
+  desc: "MR merged by"
+  category: traversal
+  query: |
+    MATCH (u:User)-[:MERGED]->(mr:MergeRequest {id: {{MR_ID}}})
+    RETURN u.username
+
+c22_workitem_notes:
+  desc: "Work item notes"
+  category: traversal
+  query: |
+    MATCH (w:WorkItem {id: {{WORK_ITEM_ID}}})-[:HAS_NOTE]->(n:Note)
+    RETURN n.note
+    ORDER BY n.created_at
+    LIMIT 50
+
+c23_label_workitems_open:
+  desc: "Label work items open"
+  category: traversal
+  query: |
+    MATCH (w:WorkItem {state: 'opened'})-[:HAS_LABEL]->(l:Label {id: {{LABEL_ID}}})
+    RETURN w.iid, w.title
+    LIMIT 50
+
+c24_label_by_title_mrs:
+  desc: "Label by title MRs"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {state: 'opened'})-[:HAS_LABEL]->(l:Label {title: 'type::bug'})
+    RETURN mr.iid, mr.title
+    LIMIT 50
+
+c25_bot_authored_notes:
+  desc: "Bot authored notes"
+  category: traversal
+  query: |
+    MATCH (u:User {id: {{BOT_USER_ID}}})-[:AUTHORED]->(n:Note)
+    RETURN n.id, n.created_at
+    ORDER BY n.created_at DESC
+    LIMIT 20
+
+c26_mr_mentions:
+  desc: "MR mentions"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {id: {{MR_ID}}})-[:MENTIONS]->(w:WorkItem)
+    RETURN w.iid
+
+c27_job_runner:
+  desc: "Job runner"
+  category: traversal
+  query: |
+    MATCH (j:Job {id: {{JOB_ID}}})-[:RUNS_ON]->(r:Runner)
+    RETURN r.description
+
+c28_mr_diff_files_latest:
+  desc: "MR diff files latest"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {id: {{MR_ID}}})-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
+    RETURN f.new_path
+
+c29_user_triggered_pipelines:
+  desc: "User triggered pipelines"
+  category: traversal
+  query: |
+    MATCH (u:User {id: {{MEMBER_USER_ID}}})-[:TRIGGERED]->(pl:Pipeline)
+    RETURN pl.id, pl.status
+    ORDER BY pl.created_at DESC
+    LIMIT 20
+
+c30_user_authored_workitems:
+  desc: "User authored work items"
+  category: traversal
+  query: |
+    MATCH (u:User {id: {{MEMBER_USER_ID}}})-[:AUTHORED]->(w:WorkItem)
+    RETURN w.iid, w.title
+    ORDER BY w.created_at DESC
+    LIMIT 20
+
+d01_user_mrs_in_project:
+  desc: "User MRs in project"
+  category: traversal
+  query: |
+    MATCH (u:User {id: {{AUTHOR_USER_ID}}})-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: {{GITLAB_PROJECT_ID}}})
+    RETURN mr.iid, mr.title
+    LIMIT 20
+
+d02_mr_pipeline_failed_jobs:
+  desc: "MR pipeline failed jobs"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {id: {{MR_ID}}})-[:HAS_HEAD_PIPELINE]->(pl:Pipeline)-[:HAS_JOB]->(j:Job {status: 'failed'})
+    RETURN j.name, j.failure_reason
+
+d03_closing_mr_authors:
+  desc: "Closing MR authors"
+  category: traversal
+  query: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:CLOSES]->(w:WorkItem {id: {{WORK_ITEM_ID}}})
+    RETURN u.username, mr.iid
+
+d04_group_project_mrs:
+  desc: "Group project MRs"
+  category: traversal
+  query: |
+    MATCH (g:Group {id: {{ORBIT_GROUP_ID}}})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'opened'})
+    RETURN p.full_path, mr.title
+    LIMIT 50
+
+d05_mrs_touched_file:
+  desc: "MRs touched file"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile {project_id: {{GITLAB_PROJECT_ID}}, old_path: 'app/services/base_service.rb'})
+    RETURN mr.iid, mr.title
+    LIMIT 50
+
+d06_vuln_occurrence_identifiers:
+  desc: "Vulnerability occurrence identifiers"
+  category: traversal
+  query: |
+    MATCH (v:Vulnerability {id: {{VULNERABILITY_ID}}})-[:HAS_FINDING]->(o:VulnerabilityOccurrence)-[:HAS_IDENTIFIER]->(i:VulnerabilityIdentifier)
+    RETURN i.external_type, i.name
+
+d07_label_mrs_project:
+  desc: "Label MRs project"
+  category: traversal
+  query: |
+    MATCH (l:Label {title: 'type::bug'})<-[:HAS_LABEL]-(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project {id: {{GITLAB_PROJECT_ID}}})
+    RETURN mr.iid, mr.title
+    ORDER BY mr.merged_at DESC
+    LIMIT 20
+
+d08_epic_children_mrs:
+  desc: "Epic children MRs"
+  category: traversal
+  query: |
+    MATCH (e:WorkItem {id: {{EPIC_ID}}})-[:CONTAINS]->(w:WorkItem)<-[:CLOSES]-(mr:MergeRequest)
+    RETURN w.iid, mr.iid, mr.state
+
+d09_reviewer_mrs_in_project:
+  desc: "Reviewer MRs in project"
+  category: traversal
+  query: |
+    MATCH (u:User {username: 'michaelangeloio'})-[:REVIEWER]->(mr:MergeRequest {state: 'opened'})-[:IN_PROJECT]->(p:Project {id: {{KG_PROJECT_ID}}})
+    RETURN mr.iid, mr.title
+
+d10_milestone_issues_assignees:
+  desc: "Milestone issues assignees"
+  category: traversal
+  query: |
+    MATCH (u:User)-[:ASSIGNED]->(w:WorkItem {state: 'opened'})-[:IN_MILESTONE]->(m:Milestone {id: {{MILESTONE_ID}}})
+    RETURN u.username, w.title
+    LIMIT 100
+
+d11_mr_author_and_reviewers:
+  desc: "MR author and reviewers"
+  category: traversal
+  query: |
+    MATCH (a:User)-[:AUTHORED]->(mr:MergeRequest {id: {{MR_ID}}})<-[:REVIEWER]-(r:User)
+    RETURN a.username, r.username
+
+d12_pipeline_stages_jobs:
+  desc: "Pipeline stages jobs"
+  category: traversal
+  query: |
+    MATCH (pl:Pipeline {id: {{PIPELINE_ID}}})-[:HAS_STAGE]->(s:Stage)-[:HAS_JOB]->(j:Job {status: 'failed'})
+    RETURN s.name, j.name
+
+d13_failed_jobs_mrs_project:
+  desc: "Failed jobs MRs project"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {project_id: {{KG_PROJECT_ID}}, state: 'opened'})-[:HAS_HEAD_PIPELINE]->(pl:Pipeline {status: 'failed'})
+    RETURN mr.iid, pl.id
+    LIMIT 50
+
+d14_user_group_projects:
+  desc: "User group projects"
+  category: traversal
+  query: |
+    MATCH (u:User {id: {{MEMBER_USER_ID}}})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+    RETURN g.full_path, p.full_path
+    LIMIT 100
+
+d15_mr_notes_authors:
+  desc: "MR notes authors"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {id: {{MR_ID}}})-[:HAS_NOTE]->(n:Note)<-[:AUTHORED]-(u:User)
+    RETURN u.username, n.created_at
+    LIMIT 100
+
+d16_wi_related_mrs_label:
+  desc: "Work item related MRs label"
+  category: traversal
+  query: |
+    MATCH (l:Label {id: {{LABEL_ID}}})<-[:HAS_LABEL]-(w:WorkItem {state: 'opened', project_id: {{GITLAB_PROJECT_ID}}})<-[:CLOSES]-(mr:MergeRequest)
+    RETURN w.iid, mr.iid
+    LIMIT 50
+
+d17_package_vulns:
+  desc: "Package vulnerabilities"
+  category: traversal
+  query: |
+    MATCH (pk:Package {project_id: {{GITLAB_PROJECT_ID}}})-[:HAS_VULNERABILITY]->(v:Vulnerability {severity: 'high'})
+    RETURN pk.name, v.title
+    LIMIT 50
+
+d18_job_triggered_pipeline:
+  desc: "Job triggered pipeline"
+  category: traversal
+  query: |
+    MATCH (j:Job {project_id: {{GITLAB_PROJECT_ID}}, name: 'e2e:test-on-omnibus-ee'})-[:TRIGGERS_PIPELINE]->(pl:Pipeline)
+    WHERE j.created_at >= '2026-10-10'
+    RETURN j.id, pl.status
+    LIMIT 20
+
+d19_varlen_epic_tree:
+  desc: "Variable-length epic tree"
+  category: traversal
+  query: |
+    MATCH (e:WorkItem {id: {{EPIC_ID}}})-[:CONTAINS*1..3]->(c:WorkItem)
+    RETURN c.iid, c.title
+    LIMIT 200
+
+d20_varlen_group_projects:
+  desc: "Variable-length group projects"
+  category: traversal
+  query: |
+    MATCH (g:Group {id: {{ORG_GROUP_ID}}})-[:CONTAINS*1..2]->(p:Project {archived: false})
+    RETURN p.full_path
+    LIMIT 200
+
+e01_mr_count_by_state_project:
+  desc: "MR count by state project"
+  category: aggregation
+  query: |
+    MATCH (mr:MergeRequest {project_id: {{GITLAB_PROJECT_ID}}})
+    RETURN mr.state, count(mr) AS n
+
+e02_top_authors_project_90d:
+  desc: "Top authors project 90 days"
+  category: aggregation
+  query: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {project_id: {{GITLAB_PROJECT_ID}}, state: 'merged'})
+    WHERE mr.merged_at >= '2026-07-19'
+    RETURN u.username, count(mr) AS n
+    ORDER BY n DESC
+    LIMIT 10
+
+e03_failed_jobs_by_name_7d:
+  desc: "Failed jobs by name 7 days"
+  category: aggregation
+  query: |
+    MATCH (j:Job {project_id: {{GITLAB_PROJECT_ID}}, status: 'failed'})
+    WHERE j.created_at >= '2026-10-10'
+    RETURN j.name, count(j) AS n
+    ORDER BY n DESC
+    LIMIT 20
+
+e04_pipelines_by_status_master:
+  desc: "Pipelines by status master"
+  category: aggregation
+  query: |
+    MATCH (pl:Pipeline {project_id: {{GITLAB_PROJECT_ID}}, ref: 'master'})
+    WHERE pl.created_at >= '2026-09-17'
+    RETURN pl.status, count(pl) AS n
+
+e05_workitems_by_type_org:
+  desc: "Work items by type org"
+  category: aggregation
+  query: |
+    MATCH (w:WorkItem {state: 'opened'})
+    RETURN w.work_item_type, count(w) AS n
+    ORDER BY n DESC
+
+e06_vulns_by_severity_project:
+  desc: "Vulnerabilities by severity project"
+  category: aggregation
+  query: |
+    MATCH (v:Vulnerability {project_id: {{GITLAB_PROJECT_ID}}})
+    RETURN v.severity, count(v) AS n
+
+e07_vulns_per_project_group:
+  desc: "Vulnerabilities per project group"
+  category: aggregation
+  query: |
+    MATCH (v:Vulnerability {state: 'detected'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.full_path STARTS WITH 'gitlab-org/security-products'
+    RETURN p.full_path, count(v) AS n
+    ORDER BY n DESC
+    LIMIT 20
+
+e08_avg_pipeline_duration_week:
+  desc: "Avg pipeline duration week"
+  category: time_series
+  query: |
+    MATCH (pl:Pipeline {project_id: {{GITLAB_PROJECT_ID}}, ref: 'master', status: 'success'})
+    WHERE pl.created_at >= '2026-07-19'
+    RETURN date_trunc('week', pl.created_at) AS wk, avg(pl.duration) AS d
+    ORDER BY wk
+
+e09_mr_notes_per_author:
+  desc: "MR notes per author"
+  category: aggregation
+  query: |
+    MATCH (u:User)-[:AUTHORED]->(n:Note)<-[:HAS_NOTE]-(mr:MergeRequest {id: {{MR_ID}}})
+    RETURN u.username, count(n) AS c
+    ORDER BY c DESC
+
+e10_mrs_per_label_project:
+  desc: "MRs per label project"
+  category: aggregation
+  query: |
+    MATCH (mr:MergeRequest {project_id: {{KG_PROJECT_ID}}, state: 'merged'})-[:HAS_LABEL]->(l:Label)
+    RETURN l.title, count(mr) AS n
+    ORDER BY n DESC
+    LIMIT 20
+
+e11_weight_per_milestone:
+  desc: "Weight per milestone"
+  category: aggregation
+  query: |
+    MATCH (w:WorkItem {project_id: {{GITLAB_PROJECT_ID}}})-[:IN_MILESTONE]->(m:Milestone)
+    WHERE m.title STARTS WITH '18.'
+    RETURN m.title, sum(w.weight) AS wt, count(w) AS n
+    ORDER BY n DESC
+    LIMIT 20
+
+e12_failure_reasons_30d:
+  desc: "Failure reasons 30 days"
+  category: aggregation
+  query: |
+    MATCH (j:Job {project_id: {{GITLAB_PROJECT_ID}}, status: 'failed'})
+    WHERE j.finished_at >= '2026-09-17'
+    RETURN j.failure_reason, count(j) AS n
+    ORDER BY n DESC
+
+e13_mrs_merged_per_week:
+  desc: "MRs merged per week"
+  category: time_series
+  query: |
+    MATCH (mr:MergeRequest {project_id: {{GITLAB_PROJECT_ID}}, state: 'merged'})
+    WHERE mr.merged_at >= '2026-07-19'
+    RETURN date_trunc('week', mr.merged_at) AS wk, count(mr) AS n
+    ORDER BY wk
+
+e14_reviews_per_reviewer_project:
+  desc: "Reviews per reviewer project"
+  category: aggregation
+  query: |
+    MATCH (u:User)-[:REVIEWER]->(mr:MergeRequest {project_id: {{KG_PROJECT_ID}}})
+    RETURN u.username, count(mr) AS n
+    ORDER BY n DESC
+    LIMIT 20
+
+e15_mr_count_user:
+  desc: "MR count user"
+  category: aggregation
+  query: |
+    MATCH (u:User {id: {{PROLIFIC_AUTHOR_USER_ID}}})-[:AUTHORED]->(mr:MergeRequest)
+    RETURN mr.state, count(mr) AS n
+
+e16_jobs_count_by_status_project:
+  desc: "Jobs count by status project"
+  category: aggregation
+  query: |
+    MATCH (j:Job {project_id: {{GITLAB_PROJECT_ID}}})
+    RETURN j.status, count(j) AS n
+
+e17_count_mrs_per_project_group:
+  desc: "Count MRs per project group"
+  category: aggregation
+  query: |
+    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+    WHERE p.full_path STARTS WITH 'gitlab-org/orbit'
+    RETURN p.full_path, count(mr) AS n
+    ORDER BY n DESC
+
+e18_issues_closed_per_week_group:
+  desc: "Issues closed per week group"
+  category: time_series
+  query: |
+    MATCH (w:WorkItem {work_item_type: 'issue', state: 'closed'})
+    WHERE w.closed_at >= '2026-07-19'
+    RETURN date_trunc('week', w.closed_at) AS wk, count(w) AS n
+    ORDER BY wk
+
+e19_max_job_duration_by_name:
+  desc: "Job count by status in a pipeline"
+  category: aggregation
+  query: |
+    MATCH (pl:Pipeline {id: {{PIPELINE_ID}}})-[:HAS_JOB]->(j:Job)
+    RETURN j.status, count(j) AS n
+
+e20_definitions_by_type:
+  desc: "Definitions by type"
+  category: aggregation
+  query: |
+    MATCH (d:Definition {project_id: {{KG_PROJECT_ID}}})
+    RETURN d.definition_type, count(d) AS n
+    ORDER BY n DESC
+
+e21_approvals_per_user_project:
+  desc: "Approvals per user project"
+  category: aggregation
+  query: |
+    MATCH (u:User)-[:APPROVED]->(mr:MergeRequest {project_id: {{GITLAB_PROJECT_ID}}, state: 'merged'})
+    WHERE mr.merged_at >= '2026-09-17'
+    RETURN u.username, count(mr) AS n
+    ORDER BY n DESC
+    LIMIT 20
+
+e22_runner_failed_jobs:
+  desc: "Runner failed jobs"
+  category: aggregation
+  query: |
+    MATCH (j:Job {project_id: {{GITLAB_PROJECT_ID}}, status: 'failed'})-[:RUNS_ON]->(r:Runner)
+    WHERE j.created_at >= '2026-10-10'
+    RETURN r.description, count(j) AS n
+    ORDER BY n DESC
+    LIMIT 20
+
+f01_mr_neighbors:
+  desc: "MR neighbors"
+  category: neighbors
+  query: |
+    MATCH (mr:MergeRequest {id: {{MR_ID}}})--(n)
+    RETURN n
+
+f02_workitem_neighbors:
+  desc: "Work item neighbors"
+  category: neighbors
+  query: |
+    MATCH (w:WorkItem {id: {{WORK_ITEM_ID}}})--(n)
+    RETURN n
+
+f03_user_neighbors_out:
+  desc: "User neighbors out"
+  category: neighbors
+  query: |
+    MATCH (u:User {id: {{MEMBER_USER_ID}}})-->(n)
+    RETURN n
+
+f04_project_neighbors_in:
+  desc: "Project neighbors in"
+  category: neighbors
+  query: |
+    MATCH (p:Project {id: {{KG_PROJECT_ID}}})<--(n)
+    RETURN n
+
+f05_pipeline_neighbors:
+  desc: "Pipeline neighbors"
+  category: neighbors
+  query: |
+    MATCH (pl:Pipeline {id: {{PIPELINE_ID}}})--(n)
+    RETURN n
+
+f06_vuln_neighbors:
+  desc: "Vulnerability neighbors"
+  category: neighbors
+  query: |
+    MATCH (v:Vulnerability {id: {{VULNERABILITY_ID}}})--(n)
+    RETURN n
+
+f07_group_neighbors:
+  desc: "Group neighbors"
+  category: neighbors
+  query: |
+    MATCH (g:Group {id: {{ORBIT_GROUP_ID}}})--(n)
+    RETURN n
+
+f08_epic_neighbors:
+  desc: "Epic neighbors"
+  category: neighbors
+  query: |
+    MATCH (e:WorkItem {id: {{EPIC_ID}}})--(n)
+    RETURN n
+
+f09_mr_neighbors_typed:
+  desc: "MR neighbors typed"
+  category: neighbors
+  query: |
+    MATCH (mr:MergeRequest {id: {{MR_ID}}})-[r]-(n)
+    WHERE type(r) IN ['AUTHORED', 'REVIEWER', 'APPROVED']
+    RETURN n
+
+f10_bot_neighbors_out:
+  desc: "Bot neighbors out"
+  category: neighbors
+  query: |
+    MATCH (u:User {id: {{BOT_USER_ID}}})-->(n)
+    RETURN n
+
+f11_project_gitlab_neighbors_in:
+  desc: "Project gitlab neighbors in"
+  category: neighbors
+  query: |
+    MATCH (p:Project {id: {{GITLAB_PROJECT_ID}}})<--(n)
+    RETURN n
+
+f12_file_neighbors:
+  desc: "File neighbors"
+  category: neighbors
+  query: |
+    MATCH (f:File {id: {{FILE_ID}}})--(n)
+    RETURN n
+
+g01_group_to_project_path:
+  desc: "Group to project path"
+  category: path_finding
+  query: |
+    MATCH path = ANY SHORTEST (g:Group {id: {{ORG_GROUP_ID}}})-[:CONTAINS*1..2]->(p:Project {full_path: 'gitlab-org/gitlab'})
+    RETURN path
+
+g02_user_to_project_path:
+  desc: "User to project path"
+  category: path_finding
+  query: |
+    MATCH path = ANY SHORTEST (u:User {id: {{MEMBER_USER_ID}}})-[*1..3]->(p:Project {id: {{KG_PROJECT_ID}}})
+    RETURN path
+
+g03_user_to_mr_path:
+  desc: "User to MR path"
+  category: path_finding
+  query: |
+    MATCH path = ANY SHORTEST (u:User {id: {{APPROVER_USER_ID}}})-[*1..2]->(mr:MergeRequest {id: {{KG_MR_ID}}})
+    RETURN path
+
+g04_mr_to_wi_path:
+  desc: "MR to work item path"
+  category: path_finding
+  query: |
+    MATCH path = ANY SHORTEST (mr:MergeRequest {id: {{MR_ID}}})-[*1..3]->(w:WorkItem {id: {{WORK_ITEM_ID}}})
+    RETURN path
+
+h01_page_mrs_project:
+  desc: "Page MRs project"
+  category: cursor
+  query: |
+    MATCH (mr:MergeRequest {project_id: {{GITLAB_PROJECT_ID}}, state: 'merged'})
+    RETURN mr.iid, mr.title
+    ORDER BY mr.created_at DESC
+    PAGE 50
+
+h02_page_jobs_pipeline:
+  desc: "Page jobs pipeline"
+  category: cursor
+  query: |
+    MATCH (pl:Pipeline {id: {{PIPELINE_ID}}})-[:HAS_JOB]->(j:Job)
+    RETURN j.name, j.status
+    PAGE 100
+
+h03_page_user_mrs:
+  desc: "Page user MRs"
+  category: cursor
+  query: |
+    MATCH (u:User {id: {{AUTHOR_USER_ID}}})-[:AUTHORED]->(mr:MergeRequest)
+    RETURN mr.iid, mr.title
+    PAGE 50
+
+h04_page_project_issues:
+  desc: "Page project issues"
+  category: cursor
+  query: |
+    MATCH (w:WorkItem {state: 'opened'})-[:IN_PROJECT]->(p:Project {id: {{GITLAB_PROJECT_ID}}})
+    RETURN w.iid, w.title
+    PAGE 100
+
+i01_file_definitions:
+  desc: "File definitions"
+  category: code_graph
+  query: |
+    MATCH (f:File {id: {{FILE_ID}}})-[:DEFINES]->(d:Definition)
+    RETURN d.name, d.definition_type
+
+i02_def_callers:
+  desc: "Definition callers"
+  category: code_graph
+  query: |
+    MATCH (c:Definition)-[:CALLS]->(d:Definition {id: {{DEFINITION_ID}}})
+    RETURN c.fqn, c.file_path
+    LIMIT 100
+
+i03_def_callees:
+  desc: "Definition callees"
+  category: code_graph
+  query: |
+    MATCH (d:Definition {id: {{DEFINITION_ID}}})-[:CALLS]->(c:Definition)
+    RETURN c.fqn
+    LIMIT 100
+
+i04_extends_tree:
+  desc: "Extends tree"
+  category: code_graph
+  query: |
+    MATCH (child:Definition)-[:EXTENDS*1..3]->(parent:Definition {fqn: 'ApplicationRecord', project_id: {{GITLAB_PROJECT_ID}}, branch: 'master'})
+    RETURN child.fqn
+    LIMIT 200
+
+i05_callers_by_name:
+  desc: "Callers by name"
+  category: code_graph
+  query: |
+    MATCH (c:Definition)-[:CALLS]->(d:Definition {project_id: {{KG_PROJECT_ID}}, name: 'compile'})
+    RETURN c.fqn, d.fqn
+    LIMIT 100
+
+i06_file_imports:
+  desc: "File imports"
+  category: code_graph
+  query: |
+    MATCH (f:File {id: {{FILE_ID}}})-[:IMPORTS]->(s:ImportedSymbol)
+    RETURN s.import_path, s.identifier_name
+
+i07_defs_fqn_contains:
+  desc: "Definitions FQN contains"
+  category: code_graph
+  query: |
+    MATCH (d:Definition {project_id: {{GITLAB_PROJECT_ID}}})
+    WHERE d.fqn CONTAINS 'MergeRequest'
+    RETURN d.fqn
+    LIMIT 50
+
+i08_callers_count_by_file:
+  desc: "Callers count by file"
+  category: code_graph
+  query: |
+    MATCH (c:Definition)-[:CALLS]->(d:Definition {id: {{DEFINITION_ID}}})
+    RETURN c.file_path, count(c) AS n
+    ORDER BY n DESC
+    LIMIT 20
+
+i09_defs_in_file_path:
+  desc: "Definitions in file path"
+  category: code_graph
+  query: |
+    MATCH (d:Definition {project_id: {{KG_PROJECT_ID}}, file_path: 'crates/query-engine/compiler/src/lib.rs'})
+    RETURN d.name, d.start_line
+    ORDER BY d.start_line
+    LIMIT 100

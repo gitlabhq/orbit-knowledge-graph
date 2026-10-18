@@ -28,8 +28,13 @@ use service::ProfilerPipelineService;
     about = "Profile GKG queries against ClickHouse"
 )]
 struct Cli {
-    /// JSON query string or @filepath (single query or named query collection)
+    /// JSON query string or @filepath (single query or named query collection);
+    /// with --gql, one GQL statement or @filepath to one statement
     query: String,
+
+    /// Read the query as one GQL statement instead of Orbit query JSON
+    #[arg(long)]
+    gql: bool,
 
     /// ClickHouse HTTP URL
     #[arg(long, default_value = "http://127.0.0.1:8123", env = "CLICKHOUSE_URL")]
@@ -126,6 +131,7 @@ struct RunContext<'a> {
     org_id: i64,
     traversal_paths: &'a [String],
     emit_response: Option<ResponseFormat>,
+    frontend: compiler::Frontend,
 }
 
 async fn run_single(
@@ -137,7 +143,7 @@ async fn run_single(
     let span = labkit::context::span_with_id("profile", &correlation_id);
     let mut output = ctx
         .service
-        .run_query(ctx.security_ctx.clone(), query_json)
+        .run_query(ctx.security_ctx.clone(), query_json, ctx.frontend)
         .instrument(span)
         .await
         .map_err(|e| anyhow::anyhow!("pipeline failed: {e}"))?;
@@ -241,18 +247,22 @@ fn embedded_schema_version() -> u32 {
     orbit_versions::VERSIONS.schema
 }
 
+fn frontend(cli: &Cli) -> compiler::Frontend {
+    if cli.gql {
+        compiler::Frontend::Gql
+    } else {
+        compiler::Frontend::JsonDsl
+    }
+}
+
 fn compile_one(
     query_json: &str,
+    frontend: compiler::Frontend,
     ontology: &Arc<Ontology>,
     security_ctx: &SecurityContext,
 ) -> Result<compiler::CompiledQueryContext> {
-    compiler::compile(
-        query_json,
-        compiler::Frontend::JsonDsl,
-        ontology,
-        security_ctx,
-    )
-    .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
+    compiler::compile(query_json, frontend, ontology, security_ctx)
+        .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
 }
 
 fn format_hydration(plan: &compiler::HydrationPlan) -> String {
@@ -284,10 +294,14 @@ fn run_compile_only(
     show: &CompileShow,
     cli: &Cli,
 ) -> Result<()> {
-    let parsed: serde_json::Value =
-        serde_json::from_str(query_json).context("failed to parse query JSON")?;
+    let parsed: serde_json::Value = if cli.gql {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str(query_json).context("failed to parse query JSON")?
+    };
 
-    let is_single = matches!(parsed.get("query_type"), Some(serde_json::Value::String(_)));
+    let is_single =
+        cli.gql || matches!(parsed.get("query_type"), Some(serde_json::Value::String(_)));
 
     let entries: Vec<(String, String)> = if is_single {
         vec![("query".to_string(), query_json.to_string())]
@@ -307,7 +321,7 @@ fn run_compile_only(
     };
 
     for (name, json) in &entries {
-        let compiled = compile_one(json, ontology, security_ctx)?;
+        let compiled = compile_one(json, frontend(cli), ontology, security_ctx)?;
         if entries.len() > 1 {
             eprintln!("--- {} ---", name);
         }
@@ -395,6 +409,7 @@ async fn main() -> Result<()> {
         cli.ch_password.as_deref(),
         &custom_settings,
         &std::collections::HashMap::new(),
+        "graph",
     ));
 
     let profiling_config = ProfilingConfig {
@@ -409,10 +424,14 @@ async fn main() -> Result<()> {
         return run_raw_sql(&client, &query_json, &cli, &profiling_config).await;
     }
 
-    let parsed: serde_json::Value =
-        serde_json::from_str(&query_json).context("failed to parse query JSON")?;
+    let parsed: serde_json::Value = if cli.gql {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str(&query_json).context("failed to parse query JSON")?
+    };
 
-    let is_single_query = matches!(parsed.get("query_type"), Some(serde_json::Value::String(_)));
+    let is_single_query =
+        cli.gql || matches!(parsed.get("query_type"), Some(serde_json::Value::String(_)));
 
     let instance_health = if profiling_config.instance_health {
         match client.fetch_instance_health().await {
@@ -435,6 +454,7 @@ async fn main() -> Result<()> {
         org_id,
         traversal_paths: &cli.traversal_paths,
         emit_response: cli.emit_response.clone(),
+        frontend: frontend(&cli),
     };
 
     if is_single_query {

@@ -1,0 +1,25 @@
+name: expand_merge_request
+description: "Merge request neighbors for context expansion: people, labels, milestone, project, head pipeline, closed work items. Cut at limit in no set order; check pagination.truncated."
+parameters:
+  node_ids:
+    schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }
+    example: [1]
+  limit:
+    schema: { type: integer, minimum: 1, maximum: 500 }
+    example: 100
+query:
+  json:
+    query_type: neighbors
+    nodes:
+      - id: center
+        entity: MergeRequest
+        node_ids: { $param: node_ids }
+    neighbors:
+      direction: both
+      rel_types: [AUTHORED, ASSIGNED, REVIEWER, APPROVED, MERGED, HAS_LABEL, IN_MILESTONE, IN_PROJECT, HAS_HEAD_PIPELINE, CLOSES]
+    limit: { $param: limit }
+  gql: |
+    MATCH (center:MergeRequest)-[:AUTHORED|ASSIGNED|REVIEWER|APPROVED|MERGED|HAS_LABEL|IN_MILESTONE|IN_PROJECT|HAS_HEAD_PIPELINE|CLOSES]-(neighbor)
+    WHERE center.id IN {{ param("node_ids") }}
+    RETURN center, neighbor
+    LIMIT {{ param("limit") }}

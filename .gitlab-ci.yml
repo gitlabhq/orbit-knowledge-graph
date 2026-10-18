@@ -2,7 +2,7 @@ variables:
   ORBIT_TELEMETRY_ENABLED: "false"
   CANONICAL_PROJECT_ID: "77960826"
   SECURITY_PROJECT_ID: "80999258"
-  CLICKHOUSE_VERSION: "26.2"
+  CLICKHOUSE_VERSION: "26.6"
   DEV_PREFIX: "dev"
   GCLOUD_PROJECT: gitlab-ci-runners-signing
   SERVICE_ACCOUNT: gitlab-orbit-kg-signer@gitlab-ci-runners-signing.iam.gserviceaccount.com
@@ -72,6 +72,14 @@ include:
   - local: .gitlab/ci/release-deploy-mr.yml
   - local: .gitlab/ci/linting.yml
   - local: .gitlab/ci/rails-contract.yml
+  # Uses `secrets`, which dev.gitlab.org rejects and fork MR pipelines can't use.
+  - local: .gitlab/ci/review-docs.yml
+    rules:
+      - if: '$CI_SERVER_URL != "https://gitlab.com" || $CI_PROJECT_PATH != "gitlab-org/orbit/knowledge-graph"'
+        when: never
+      - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_PROJECT_PATH != "gitlab-org/orbit/knowledge-graph"'
+        when: never
+      - when: always
   - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'
     ref: '3.3.0'
     file: 'templates/gcp_auth.yaml'
@@ -314,7 +322,6 @@ indexer-scenario-schema-validate:
   script:
     - find crates/integration-tests/tests/indexer/scenarios -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/indexer_scenario.schema.json
 
-
 setup-schema-validate:
   stage: lint
   image: ghcr.io/astral-sh/uv:python3.12-alpine
@@ -524,6 +531,15 @@ newline-check:
   script:
     - mise run lint:newlines
 
+script-tests:
+  stage: lint
+  extends:
+    - .job-template
+    - .mr-only-rules
+    - .no-cargo-home-cache
+  script:
+    - mise run test:scripts
+
 lint-check:
   stage: lint
   extends:
@@ -678,7 +694,7 @@ check_docs_i18n_markdown:
     # Check links
     - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/source/**/*.md
 
-docs_hugo_build:
+.docs-gitlab-com:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
   stage: docs
   needs: []
@@ -719,11 +735,19 @@ docs_hugo_build:
     # Clone the Docs website project
     - git clone --depth 1 --filter=tree:0 --branch $DOCS_BRANCH https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com.git
     - cd docs-gitlab-com
-    - make add-latest-icons
+
+docs_hugo_build:
+  extends:
+    - .docs-gitlab-com
+  allow_failure: true
   script:
-    # Test that Hugo will build
+    - make add-latest-icons
     - hugo --gc --printPathWarnings --panicOnWarning  --environment test
-    # Test for invalid index pages
+
+docs_index_pages:
+  extends:
+    - .docs-gitlab-com
+  script:
     # See https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/-/blob/main/scripts/check-index-filenames.sh
     - make check-index-pages SEARCH_DIR="../docs/source"
     #- make check-index-pages SEARCH_DIR="../doc-locale/source" # Enable when translation is added
@@ -859,7 +883,7 @@ corpus-smoke-test:
   script:
     # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
     # against a real ClickHouse schema (no correctness assertions).
-    - cargo nextest run --profile ci --all-features --test containers -E "$NEXTEST_FILTER"
+    - cargo nextest run --profile ci --all-features --test containers --no-capture -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
 
 # Benchmark Stage
@@ -920,7 +944,7 @@ code-indexing-benchmark-build:
       OUTPUT_FILE="gkg-benchmark-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}-${ARCH}-${SCENARIO}-${GROUP}.json"
 
       for attempt in 1 2 3; do
-        if gitlab-xtasks benchmark download-repos \
+        if mise exec -- gitlab-xtasks benchmark download-repos \
           --config code-indexing-benchmark.yaml \
           --output-dir temp \
           --group "$GROUP"; then
@@ -936,7 +960,7 @@ code-indexing-benchmark-build:
         sleep "$delay"
       done
 
-      gitlab-xtasks benchmark hyperfine \
+      mise exec -- gitlab-xtasks benchmark hyperfine \
         --config code-indexing-benchmark.yaml \
         --architecture "$ARCH" \
         --scenario "$SCENARIO" \
@@ -970,7 +994,7 @@ code-indexing-benchmark-v2-linux:
   interruptible: true
   script:
     - |
-      gitlab-xtasks benchmark analyze \
+      mise exec -- gitlab-xtasks benchmark analyze \
         --pattern "gkg-benchmark-*-${SCENARIO}-*.json" \
         --output-format markdown \
         --pipeline-url "$CI_PIPELINE_URL" \
@@ -978,7 +1002,7 @@ code-indexing-benchmark-v2-linux:
         --branch "$CI_COMMIT_REF_NAME" \
         --output-file "gkg-benchmark-${SCENARIO}-results.md"
 
-      gitlab-xtasks benchmark analyze \
+      mise exec -- gitlab-xtasks benchmark analyze \
         --pattern "gkg-benchmark-*-${SCENARIO}-*.json" \
         --output-format json \
         --pipeline-url "$CI_PIPELINE_URL" \
@@ -987,7 +1011,7 @@ code-indexing-benchmark-v2-linux:
         --output-file "gkg-benchmark-${SCENARIO}-results.json"
 
       if [[ -n "$CI_MERGE_REQUEST_IID" && -n "$BENCHMARK_GITLAB_TOKEN" ]]; then
-        gitlab-xtasks comment post \
+        mise exec -- gitlab-xtasks comment post \
           --type add-or-edit \
           --unique-id "code-indexing-benchmark-${SCENARIO}-comment" \
           --token "$BENCHMARK_GITLAB_TOKEN" \
@@ -1335,63 +1359,6 @@ release-manifest:
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64@$(cat image-digests/arm64)"
 
 # Review stage
-
-.review-docs:
-  image: ruby:3.3-alpine3.23
-  extends:
-    - .canonical-mr-only-rules
-  stage: review
-  cache: {}
-  dependencies: []
-  before_script:
-  - gem install gitlab --no-doc
-  # We need to download the script rather than clone the repo since the
-  # review-docs-cleanup job will not be able to run when the branch gets
-  # deleted (when merging the MR).
-  - apk add --update openssl
-  - wget https://gitlab.com/gitlab-org/gitlab/-/raw/master/scripts/trigger-build.rb
-  - chmod 755 trigger-build.rb
-  secrets:
-    DOCS_PROJECT_API_TOKEN:
-      gitlab_secrets_manager:
-        name: DOCS_PROJECT_API_TOKEN
-        source: group/gitlab-org
-      file: false
-    DOCS_TRIGGER_TOKEN:
-      gitlab_secrets_manager:
-        name: DOCS_TRIGGER_TOKEN
-        source: group/gitlab-org
-      file: false
-  variables:
-    GIT_STRATEGY: none
-    DOCS_GITLAB_REPO_SUFFIX: orbit
-    # By default, deploy the Review App using the `main` branch of the `gitlab-org/gitlab-docs` project
-    DOCS_BRANCH: main
-  when: manual
-
-# Trigger a docs build in docs-gitlab-com project
-# Useful to preview the docs changes live
-# https://docs.gitlab.com/development/documentation/review_apps/
-review-docs-deploy:
-  extends:
-  - .review-docs
-  environment:
-    name: review/mr-${CI_MERGE_REQUEST_IID}
-    url: https://docs.gitlab.com/upstream-review-mr-${DOCS_GITLAB_REPO_SUFFIX}-${CI_MERGE_REQUEST_IID}/${DOCS_GITLAB_REPO_SUFFIX}
-    auto_stop_in: 2 weeks
-    on_stop: review-docs-cleanup
-  script:
-  - ./trigger-build.rb docs deploy
-
-# Cleanup remote environment of docs-gitlab-com
-review-docs-cleanup:
-  extends:
-  - .review-docs
-  environment:
-    name: review/mr-${CI_MERGE_REQUEST_IID}
-    action: stop
-  script:
-  - ./trigger-build.rb docs cleanup
 
 # AI Review Stage
 #

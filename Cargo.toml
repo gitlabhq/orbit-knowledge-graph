@@ -10,6 +10,7 @@ members = [
   "crates/code-graph-incremental",
   "crates/clickhouse-client",
   "crates/indexer",
+  "crates/indexer/datafusion",
   "crates/query-engine",
   "crates/query-engine/compiler",
   "crates/query-engine/types",
@@ -41,6 +42,7 @@ members = [
   "crates/named-queries",
   "crates/nats-client",
   "crates/utils",
+  "crates/utils/arrow",
   "crates/orbit-versions",
   "crates/integration-tests",
   "crates/duckdb-client",
@@ -96,7 +98,8 @@ typed-path = "0.12.3"
 
 # Indexer dependencies
 anyhow = "1.0.100"
-object_store = { version = "0.13.2", features = ["aws", "gcp"] }
+# Keep this a different major than DataFusion's object_store so the cloud features stay off its build path.
+object_store = { version = "0.14.2", features = ["aws", "gcp"] }
 config = { version = "0.15", default-features = false, features = ["yaml"] }
 parquet = { version = "58", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
 tokio = { version = "1.49.0", features = ["full"] }
@@ -113,7 +116,7 @@ walkdir = "2.5.0"
 circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }
 nats-client = { path = "crates/nats-client" }
-duckdb = { version = "1.10505.0", features = ["vtab-arrow", "appender-arrow"] }
+duckdb = { version = "1.10506.1", features = ["vtab-arrow", "appender-arrow"] }
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.8.1" }
 siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.git", tag = "0.0.103-beta" }
 thiserror = "2.0.18"
@@ -220,48 +223,54 @@ gitlab-client = { path = "crates/gitlab-client" }
 [profile.dev]
 debug = "line-tables-only"
 
-# Optimise the Parquet, Arrow, zstd and RNG deps even in debug builds: synthetic
-# data generation spends most of its time in them. The rest of dev stays unoptimised.
-[profile.dev.package.parquet]
+# With debuginfo, a normal proc-macro2 dependency rehashes every host proc macro and rebuilds all deps for tests.
+[profile.dev.package."*"]
+debug = false
+
+# Synthetic data generation spends most of its time in these deps; dev keeps them unoptimised for cold builds.
+[profile.synth]
+inherits = "dev"
+
+[profile.synth.package.parquet]
 opt-level = 3
 
-[profile.dev.package.arrow-array]
+[profile.synth.package.arrow-array]
 opt-level = 3
 
-[profile.dev.package.arrow-buffer]
+[profile.synth.package.arrow-buffer]
 opt-level = 3
 
-[profile.dev.package.arrow-cast]
+[profile.synth.package.arrow-cast]
 opt-level = 3
 
-[profile.dev.package.arrow-data]
+[profile.synth.package.arrow-data]
 opt-level = 3
 
-[profile.dev.package.arrow-schema]
+[profile.synth.package.arrow-schema]
 opt-level = 3
 
-[profile.dev.package.arrow-select]
+[profile.synth.package.arrow-select]
 opt-level = 3
 
-[profile.dev.package.zstd]
+[profile.synth.package.zstd]
 opt-level = 3
 
-[profile.dev.package.zstd-safe]
+[profile.synth.package.zstd-safe]
 opt-level = 3
 
-[profile.dev.package.zstd-sys]
+[profile.synth.package.zstd-sys]
 opt-level = 3
 
-[profile.dev.package.rand]
+[profile.synth.package.rand]
 opt-level = 3
 
-[profile.dev.package.rand_core]
+[profile.synth.package.rand_core]
 opt-level = 3
 
-[profile.dev.package.rand_chacha]
+[profile.synth.package.rand_chacha]
 opt-level = 3
 
-[profile.dev.package.ppv-lite86]
+[profile.synth.package.ppv-lite86]
 opt-level = 3
 
 [profile.fuzz]

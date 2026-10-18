@@ -383,14 +383,43 @@ fn neighbors_query() {
         "bidirectional should include direction"
     );
     assert!(rendered.contains("gl_edge"));
-    // A pinned default-PK center on a single edge table fuses both directions into
-    // one scan: arrayJoin over the matched-arm tuples, no UNION ALL. The multi-table
-    // and non-denorm-filter neighbors tests still exercise the UNION ALL path.
     assert!(
-        rendered.contains("arrayJoin") && rendered.contains("arrayFilter"),
-        "pinned default-PK both should fuse to a single arrayJoin scan"
+        rendered.contains("UNION ALL") && !rendered.contains("arrayJoin"),
+        "pinned both should scan each direction on its own id column; a fused \
+         source_id OR target_id scan stops the primary key and both bloom indexes"
     );
-    assert!(!rendered.contains("UNION ALL"));
+    assert!(rendered.contains("(e.source_id = 100)") && rendered.contains("(e.target_id = 100)"));
+}
+
+#[test]
+fn neighbors_project_the_edge_path_only_when_it_is_the_neighbors_own() {
+    let ontology = crate::compiler::setup::embedded_ontology();
+    let render = |json: &str, orbit_query: &str| {
+        compile_pair(json, orbit_query, &ontology, &test_ctx())
+            .unwrap()
+            .base
+            .render()
+    };
+
+    let authored = render(
+        r#"{"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["AUTHORED"]}}"#,
+        "MATCH (u:User {id: 1})-[:AUTHORED]-(n) RETURN u, n",
+    );
+    assert!(
+        authored
+            .contains("((e.relationship_kind = 'AUTHORED') AND (e.target_kind = 'MergeRequest'))")
+            && authored.contains("e.traversal_path, '') AS _orbit_neighbor_tp"),
+        "{authored}"
+    );
+
+    let in_project = render(
+        r#"{"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[1]}],"neighbors":{"direction":"both","rel_types":["IN_PROJECT"]}}"#,
+        "MATCH (p:Project {id: 1})-[:IN_PROJECT]-(n) RETURN p, n",
+    );
+    assert!(
+        in_project.contains("'' AS _orbit_neighbor_tp"),
+        "{in_project}"
+    );
 }
 
 #[test]
@@ -614,10 +643,8 @@ fn multi_table_code_edge_routes_to_code_table() {
 }
 
 #[test]
-fn multi_table_wildcard_scans_all_tables() {
+fn multi_table_wildcard_keeps_the_default_table_scan() {
     let orbit_query = "MATCH (u:User {id: 1})-->(p:Project) RETURN u, p LIMIT 25";
-    // v2 planner routes wildcard to the default edge table for a single hop.
-    // It does not generate UNION ALL across edge tables per hop.
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -627,20 +654,14 @@ fn multi_table_wildcard_scans_all_tables() {
         "relationships": [{"type": "*", "from": "u", "to": "p"}],
         "limit": 25
     }"#;
-    let result = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap();
-    let rendered = result.base.render();
-    assert!(
-        rendered.contains("gl_edge"),
-        "wildcard should route to default gl_edge: {rendered}"
-    );
+    let compiled = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap();
+    assert!(compiled.base.render().contains("FROM gl_edge"));
 }
 
 #[test]
-fn multi_table_mixed_types_scans_both_tables() {
+fn multi_table_mixed_types_scan_every_route() {
     let orbit_query =
         "MATCH (u:User {id: 1})-[:AUTHORED|DEFINES]->(p:Project) RETURN u, p LIMIT 25";
-    // v2 planner routes a single hop to one table (the first matched).
-    // Mixed edge types in a single relationship entry go to one table.
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -652,14 +673,9 @@ fn multi_table_mixed_types_scans_both_tables() {
     }"#;
     let result = compile_pair(json, orbit_query, &multi_table_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
-    assert!(
-        rendered.contains("gl_edge"),
-        "mixed types should route to first matched table (gl_edge): {rendered}"
-    );
-    assert!(
-        rendered.contains("AUTHORED") && rendered.contains("DEFINES"),
-        "both relationship types should appear in the SQL: {rendered}"
-    );
+    assert!(rendered.contains("FROM gl_code_edge"), "{rendered}");
+    assert!(rendered.contains("FROM gl_edge"), "{rendered}");
+    assert!(rendered.contains("UNION ALL"), "{rendered}");
 }
 
 #[test]
@@ -732,8 +748,8 @@ fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
         "expected one gl_file scan per direction arm; got {gl_file_refs}\nSQL:\n{rendered}"
     );
     assert!(
-        rendered.contains("f.project_id AS project_id"),
-        "dedup subquery must surface redaction id column: {rendered}"
+        rendered.contains("f.project_id AS _orbit_f_id"),
+        "neighbors must project the redaction id without an alias clash: {rendered}"
     );
 }
 
@@ -1333,7 +1349,6 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User|Project) RETURN u",
         "MATCH (u IS User) RETURN u",
         "MATCH (u:User) WHERE u.id = 1 OR u.id = 2 RETURN u",
-        "MATCH (u:User) WHERE NOT u.id = 1 RETURN u",
         "MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u",
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
@@ -1502,6 +1517,79 @@ fn orbit_query_rejects_traversal_path_column_comparisons() {
     let query = "MATCH (p:Project {id: 5}) WHERE p.traversal_path = p.full_path RETURN p";
     let error = compile(query, Frontend::Gql, &embedded_ontology(), &context).unwrap_err();
     assert!(matches!(error, QueryError::Validation(_)), "{error:?}");
+}
+
+#[test]
+fn native_predicate_trees_are_bounded_before_planning() {
+    use compiler::input::{BooleanExpression, Condition, FilterOp, InputFilter, PredicateTarget};
+    let model =
+        query_data_model::ClickHouseDataModel::derive(crate::compiler::setup::embedded_ontology())
+            .unwrap();
+    let validator = compiler::passes::validate::Validator::new(&model);
+    let mut input =
+        compiler::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+    let leaf = |target| {
+        BooleanExpression::Leaf(Condition {
+            target,
+            property: "id".into(),
+            filter: InputFilter {
+                op: Some(FilterOp::In),
+                value: Some(serde_json::json!([1])),
+                ..Default::default()
+            },
+        })
+    };
+    let mut deep = leaf(PredicateTarget::Node("u".into()));
+    for _ in 0..1024 {
+        deep = BooleanExpression::Not(Box::new(deep));
+    }
+    input.predicates = vec![deep];
+    let error = validator.check_shape(&input).unwrap_err();
+    assert!(
+        error.to_string().contains("must not nest deeper than 32"),
+        "{error}"
+    );
+    input.predicates = vec![BooleanExpression::Not(Box::new(leaf(
+        PredicateTarget::Relationship(7),
+    )))];
+    let error = validator.check_shape(&input).unwrap_err();
+    assert!(
+        error.to_string().contains("undefined relationship"),
+        "{error}"
+    );
+}
+
+#[test]
+fn native_conditions_need_a_column() {
+    use compiler::input::{BooleanExpression, InputFilter};
+    let base = compiler::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+    let mut empty_group = base.clone();
+    empty_group.predicates = vec![BooleanExpression::Not(Box::new(BooleanExpression::And(
+        vec![],
+    )))];
+    let mut empty_property = base;
+    empty_property.nodes[0].filters.insert(
+        String::new(),
+        vec![InputFilter {
+            value: Some(serde_json::json!(1)),
+            ..Default::default()
+        }],
+    );
+    for input in [empty_group, empty_property] {
+        let error = compiler::compile_input(
+            input,
+            Default::default(),
+            &crate::compiler::setup::embedded_ontology(),
+            &test_ctx(),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("every condition must compare a property"),
+            "{error}"
+        );
+    }
 }
 
 #[test]

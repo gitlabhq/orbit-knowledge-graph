@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use arrow::datatypes::UInt32Type;
 use clickhouse_client::ArrowClickHouseClient;
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -229,7 +229,11 @@ pub async fn version_tables_complete(
         .collect();
 
     if !missing.is_empty() {
-        tracing::warn!(version, ?missing, "version table set is incomplete");
+        tracing::warn!(
+            schema_version = version,
+            ?missing,
+            "version table set is incomplete"
+        );
         return Ok(false);
     }
 

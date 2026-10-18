@@ -16,6 +16,9 @@ missing_frontends:
   json: The JSON frontend does not expose property-to-property comparisons.
 ```
 
+A file can hold several fixtures in a `cases` list. Every other top-level key
+is a default for each case, and each case needs its own `name`.
+
 The fixtures cover access-path choices and their important eligibility guards.
 
 CTE assertions refer to top-level named query definitions, not execution order.
@@ -40,7 +43,7 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
 | Old implementation | Behavior | Fixtures |
 |---|---|---|
 | `plan/edge_chain::reorder_by_selectivity` | Start at the more selective endpoint | `edge_scans/selective_end_reversal.yaml` |
-| `determine_hydration` | Skip node reads when edges supply identity and filters | `edge_scans/plain_single_hop.yaml`, `edge_scans/denormalized_filter.yaml` |
+| `determine_hydration` | Skip node reads when edges supply identity and filters | `edge_scans/denormalized_filter.yaml` |
 | `determine_hydration` | Keep uncovered filters and property consumers table-backed | `edge_scans/uncovered_filter_fallback.yaml`, `narrowing/nonselective_join_guard.yaml`, `aggregation/property_inputs.yaml` |
 | `lower/helpers::push_edge_predicates` | Push shared code columns once; retain endpoint ID meaning | `edge_scans/code_column_pushdown.yaml` |
 | `emit_denorm_tags` | Use source/target tags, scalar/set membership, and one filter per shared node | `edge_scans/denormalized_filter.yaml`, `edge_scans/denormalized_incoming_set.yaml`, `edge_scans/denormalized_shared_node.yaml` |
@@ -57,6 +60,7 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
 | `build_cascade_anchor` | Recursive frontier membership from pinned IDs, ranges, or filter keys | `narrowing/recursive_cascade.yaml`, `narrowing/id_range_anchor.yaml`, `narrowing/node_with_cascade.yaml` |
 | `lower/flat_chain` | Place membership inside FINAL only for leading endpoint keys | `narrowing/leading_edge_key.yaml`, `narrowing/recursive_cascade.yaml` |
 | `resolve_node_flags` | Edge-derived node narrowing; skip convergent targets | `narrowing/node_with_cascade.yaml`, `narrowing/convergent_target_guard.yaml` |
+| `resolve_node_flags` | Plan redaction joins of single-hop traversals so a pinned partner narrows them | `edge_scans/plain_single_hop.yaml`, `narrowing/selective_node_keys.yaml` |
 | `emit_node_join_with_narrowing` | Full replacement keys, inner immutable filters, outer mutable/deletion rechecks | `narrowing/mutable_recheck.yaml`, `narrowing/sort_key_pushdown.yaml` |
 | Narrowing eligibility | Avoid rescans without sufficient selectivity | `narrowing/unselective_chain.yaml`, `narrowing/nonselective_join_guard.yaml` |
 | `elide_hops` | Replace pinned targets with holder predicates, including filter-only multi-ID targets | `foreign_keys/elided_pinned_target.yaml`, `foreign_keys/multi_id_filter_elision.yaml` |

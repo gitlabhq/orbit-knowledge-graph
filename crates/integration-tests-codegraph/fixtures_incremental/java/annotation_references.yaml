@@ -1,4 +1,5 @@
 name: "Java: annotation references"
+
 fixtures:
   - path: com/example/MyAnnotation.java
     content: |
@@ -40,7 +41,7 @@ tests:
       RETURN symbol.import_path AS path, symbol.identifier_name AS name
     assert:
       - { row_count: 1 }
-      - { row: { path: 'java.lang.annotation', name: Target } }
+      - { row: { path: "java.lang.annotation", name: Target } }
 
   - name: Annotation ref attributed to the annotated method
     query: |

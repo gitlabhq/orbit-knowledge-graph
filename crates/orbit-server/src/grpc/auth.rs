@@ -18,6 +18,16 @@ pub fn extract_request_context<T>(
         Status::unauthenticated(format!("JWT validation failed: {e}"))
     })?;
 
+    let user_agent = request
+        .metadata()
+        .get("x-client-user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+
+    let ctx = RequestContext { claims, user_agent };
+    ctx.record_in_current_span();
+
+    let claims = &ctx.claims;
     tracing::info!(
         user_id = claims.user_id,
         source_type = <&str>::from(claims.source_type),
@@ -36,13 +46,7 @@ pub fn extract_request_context<T>(
         "JWT claims received"
     );
 
-    let user_agent = request
-        .metadata()
-        .get("x-client-user-agent")
-        .and_then(|v| v.to_str().ok())
-        .map(String::from);
-
-    Ok(RequestContext { claims, user_agent })
+    Ok(ctx)
 }
 
 #[cfg(test)]

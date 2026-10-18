@@ -1,4 +1,5 @@
 name: "C#: lexical binding ownership"
+
 fixtures:
   - path: siblings/main.cs
     content: |
@@ -22,6 +23,7 @@ fixtures:
               }
           }
       }
+
   - path: local_function/main.cs
     content: |
       class Main {
@@ -34,6 +36,7 @@ fixtures:
               target();
           }
       }
+
   - path: control/main.cs
     content: |
       class First {
@@ -47,6 +50,7 @@ fixtures:
               f.ping();
           }
       }
+
   - path: shadow/main.cs
     content: |
       class First {
@@ -63,6 +67,7 @@ fixtures:
               f.ping();
           }
       }
+
 tests:
   - name: "Sibling blocks and field shadows retain their own targets"
     query: |

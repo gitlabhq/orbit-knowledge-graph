@@ -100,17 +100,11 @@ pub struct ResponseView {
 }
 
 fn row_value_i64(row: &Map<String, Value>, key: &str) -> Option<i64> {
-    row.get(key).and_then(|v| {
-        v.as_i64()
-            .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
-    })
+    row.get(key).and_then(Value::as_i64)
 }
 
 fn row_value_f64(row: &Map<String, Value>, key: &str) -> Option<f64> {
-    row.get(key).and_then(|v| {
-        v.as_f64()
-            .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
-    })
+    row.get(key).and_then(Value::as_f64)
 }
 
 fn group_node_object<'a>(
@@ -321,22 +315,6 @@ impl ResponseView {
                 && e.to_id == to_id
                 && e.edge_type == edge_type
         })
-    }
-
-    pub fn edges_from(&self, entity_type: &str, id: i64) -> Vec<&GraphEdge> {
-        self.response
-            .edges
-            .iter()
-            .filter(|e| e.from == entity_type && e.from_id == id)
-            .collect()
-    }
-
-    pub fn edges_to(&self, entity_type: &str, id: i64) -> Vec<&GraphEdge> {
-        self.response
-            .edges
-            .iter()
-            .filter(|e| e.to == entity_type && e.to_id == id)
-            .collect()
     }
 
     /// Satisfies [`Requirement::Relationship`] for the given edge type, and [`Requirement::Neighbors`].
@@ -781,20 +759,6 @@ impl ResponseView {
         );
     }
 
-    /// Assert that all nodes satisfy a predicate (structural check, no enforcement).
-    ///
-    /// For filter enforcement use [`assert_filter`](Self::assert_filter) instead.
-    pub fn assert_all_nodes(&self, predicate: impl Fn(&GraphNode) -> bool, msg: &str) {
-        for (i, node) in self.response.nodes.iter().enumerate() {
-            assert!(
-                predicate(node),
-                "node {i} ({}:{}) failed: {msg}",
-                node.entity_type,
-                node.id,
-            );
-        }
-    }
-
     /// Assert that a filter on `field` produced correct results for nodes of
     /// `entity_type`. Checks that every node of the given type satisfies the predicate.
     ///
@@ -835,6 +799,16 @@ impl ResponseView {
                 node.id,
             );
         }
+    }
+
+    pub fn assert_filter_has_no_matches(&self, entity_type: &str, field: &str) {
+        self.tracker.satisfy(Requirement::Filter {
+            field: field.to_string(),
+        });
+        assert!(
+            self.nodes_of_type(entity_type).is_empty(),
+            "expected no {entity_type} nodes for filter on '{field}'"
+        );
     }
 
     /// Assert that the IDs of nodes with `entity_type` match `expected` exactly (unordered).
@@ -1307,24 +1281,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn edges_from_filters_by_source() {
-        let view = ResponseView::new(sample_response());
-        let from_alice = view.edges_from("User", 1);
-        assert_eq!(from_alice.len(), 2);
-        let from_bob = view.edges_from("User", 2);
-        assert_eq!(from_bob.len(), 1);
-    }
-
-    #[test]
-    fn edges_to_filters_by_target() {
-        let view = ResponseView::new(sample_response());
-        let to_100 = view.edges_to("Group", 100);
-        assert_eq!(to_100.len(), 2);
-        let to_101 = view.edges_to("Group", 101);
-        assert_eq!(to_101.len(), 1);
-    }
-
-    #[test]
     fn edges_of_type_filters_correctly() {
         let view = ResponseView::new(sample_response());
         assert_eq!(view.edges_of_type("MEMBER_OF").len(), 3);
@@ -1473,19 +1429,6 @@ pub(crate) mod tests {
     fn assert_edge_absent_panics_for_present_edge() {
         let view = ResponseView::new(sample_response());
         view.assert_edge_absent("User", 1, "Group", 100, "MEMBER_OF");
-    }
-
-    #[test]
-    fn assert_all_nodes_passes_when_all_match() {
-        let view = ResponseView::new(sample_response());
-        view.assert_all_nodes(|n| n.id > 0, "all ids should be positive");
-    }
-
-    #[test]
-    #[should_panic(expected = "failed: impossible")]
-    fn assert_all_nodes_panics_when_one_fails() {
-        let view = ResponseView::new(sample_response());
-        view.assert_all_nodes(|n| n.entity_type == "User", "impossible");
     }
 
     #[test]

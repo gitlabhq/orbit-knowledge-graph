@@ -2,6 +2,7 @@
 
 use std::io::Write;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::Router;
 use axum::extract::{Path, Query, State};
@@ -40,6 +41,7 @@ pub struct CodeIndexingDeps {
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
     pub clickhouse_config: orbit_server_config::ClickHouseConfiguration,
+    pipeline_config: CodeIndexingPipelineConfig,
     cache_dir: tempfile::TempDir,
 }
 
@@ -68,7 +70,7 @@ impl CodeIndexingDeps {
         ontology: ontology::Ontology,
     ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
-        let graph_client = Arc::new(clickhouse.config.build_client());
+        let graph_client = Arc::new(clickhouse.config.build_client("graph"));
         let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
             &graph_client,
         )));
@@ -97,23 +99,15 @@ impl CodeIndexingDeps {
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
-        let writer = Arc::new(
-            indexer::clickhouse::ClickHouseWriter::new(
-                clickhouse.config.clone(),
-                Arc::new(indexer::metrics::EngineMetrics::new()),
-            )
-            .expect("writer must build"),
-        );
-
         let pipeline = Arc::new(CodeIndexer::new(
             resolver,
-            writer,
+            writer_for(clickhouse.config.clone()),
             Arc::clone(&checkpoint_store) as _,
             stale_data_cleaner,
             metrics.clone(),
             table_names,
             Arc::new(ontology),
-            pipeline_config,
+            pipeline_config.clone(),
         ));
 
         Self {
@@ -122,6 +116,7 @@ impl CodeIndexingDeps {
             checkpoint_store,
             metrics,
             clickhouse_config: clickhouse.config.clone(),
+            pipeline_config,
             cache_dir,
         }
     }
@@ -134,10 +129,26 @@ impl CodeIndexingDeps {
         &self,
         writer: Arc<indexer::clickhouse::ClickHouseWriter>,
     ) -> CodeIndexingTaskHandler {
+        self.handler_with_writer_and_lock_ttl(writer, std::time::Duration::from_secs(60))
+    }
+
+    /// A long lock lease, so a test can hold the job's inserts without the heartbeat losing the lock.
+    pub fn gated_handler(&self, gate: &GatedClickHouse) -> CodeIndexingTaskHandler {
+        self.handler_with_writer_and_lock_ttl(
+            gate.writer(&self.clickhouse_config),
+            std::time::Duration::from_secs(600),
+        )
+    }
+
+    fn handler_with_writer_and_lock_ttl(
+        &self,
+        writer: Arc<indexer::clickhouse::ClickHouseWriter>,
+        lock_ttl: std::time::Duration,
+    ) -> CodeIndexingTaskHandler {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
         let table_names =
             Arc::new(CodeTableNames::from_ontology(&ontology).expect("code tables must resolve"));
-        let graph_client = Arc::new(self.clickhouse_config.build_client());
+        let graph_client = Arc::new(self.clickhouse_config.build_client("graph"));
         let stale_data_cleaner =
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
 
@@ -148,7 +159,6 @@ impl CodeIndexingDeps {
             self.metrics.clone(),
         ));
         let resolver = RepositoryResolver::new(Arc::clone(&self.repository_service), cache);
-        let config = indexer::testkit::test_pipeline_configuration();
         let pipeline = Arc::new(CodeIndexer::new(
             resolver,
             writer,
@@ -157,14 +167,14 @@ impl CodeIndexingDeps {
             self.metrics.clone(),
             table_names,
             Arc::new(ontology),
-            config,
+            self.pipeline_config.clone(),
         ));
         CodeIndexingTaskHandler::new(
             pipeline,
             Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
-            std::time::Duration::from_secs(60),
+            lock_ttl,
             CodeIndexingTaskRequest::subscription(),
             indexer::analytics::IndexingAnalytics::disabled(),
         )
@@ -190,6 +200,145 @@ impl CodeIndexingDeps {
     }
 }
 
+pub fn writer_for(
+    config: orbit_server_config::ClickHouseConfiguration,
+) -> Arc<indexer::clickhouse::ClickHouseWriter> {
+    Arc::new(indexer::clickhouse::ClickHouseWriter::new(
+        config.build_client("graph"),
+        Arc::new(indexer::metrics::EngineMetrics::new()),
+    ))
+}
+
+/// Holds every ClickHouse request until `open`, so a test can observe a job whose rows are in flight.
+pub struct GatedClickHouse {
+    url: String,
+    open: tokio::sync::watch::Sender<bool>,
+    arrivals: Arc<tokio::sync::Semaphore>,
+    arrived: Arc<AtomicUsize>,
+    max_in_flight: Arc<AtomicUsize>,
+}
+
+struct GateState {
+    upstream: String,
+    client: reqwest::Client,
+    open: tokio::sync::watch::Receiver<bool>,
+    arrivals: Arc<tokio::sync::Semaphore>,
+    arrived: Arc<AtomicUsize>,
+    in_flight: AtomicUsize,
+    max_in_flight: Arc<AtomicUsize>,
+}
+
+impl GatedClickHouse {
+    pub async fn start(upstream: &str) -> Self {
+        let (open, opened) = tokio::sync::watch::channel(false);
+        let arrivals = Arc::new(tokio::sync::Semaphore::new(0));
+        let arrived = Arc::new(AtomicUsize::new(0));
+        let max_in_flight = Arc::new(AtomicUsize::new(0));
+        let state = Arc::new(GateState {
+            upstream: upstream.trim_end_matches('/').to_string(),
+            client: reqwest::Client::new(),
+            open: opened,
+            arrivals: Arc::clone(&arrivals),
+            arrived: Arc::clone(&arrived),
+            in_flight: AtomicUsize::new(0),
+            max_in_flight: Arc::clone(&max_in_flight),
+        });
+        Self {
+            url: serve(Router::new().fallback(hold_then_forward).with_state(state)).await,
+            open,
+            arrivals,
+            arrived,
+            max_in_flight,
+        }
+    }
+
+    pub fn writer(
+        &self,
+        config: &orbit_server_config::ClickHouseConfiguration,
+    ) -> Arc<indexer::clickhouse::ClickHouseWriter> {
+        writer_for(orbit_server_config::ClickHouseConfiguration {
+            url: self.url.clone(),
+            ..config.clone()
+        })
+    }
+
+    pub async fn insert_arrived(&self) {
+        self.arrivals
+            .acquire()
+            .await
+            .expect("gate stays open")
+            .forget();
+    }
+
+    pub fn arrived(&self) -> usize {
+        self.arrived.load(Ordering::SeqCst)
+    }
+
+    pub fn max_in_flight(&self) -> usize {
+        self.max_in_flight.load(Ordering::SeqCst)
+    }
+
+    pub fn open(&self) {
+        self.open.send_replace(true);
+    }
+}
+
+async fn hold_then_forward(
+    State(state): State<Arc<GateState>>,
+    request: axum::extract::Request,
+) -> axum::response::Response {
+    let (parts, body) = request.into_parts();
+    let body = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .expect("request body");
+    state.arrived.fetch_add(1, Ordering::SeqCst);
+    let in_flight = state.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+    state.max_in_flight.fetch_max(in_flight, Ordering::SeqCst);
+    state.arrivals.add_permits(1);
+    let mut open = state.open.clone();
+    while !*open.borrow_and_update() {
+        open.changed().await.expect("gate owner alive");
+    }
+
+    let target = format!(
+        "{}{}",
+        state.upstream,
+        parts.uri.path_and_query().map_or("/", |p| p.as_str())
+    );
+    let mut upstream = state.client.request(parts.method, target).body(body);
+    for (name, value) in &parts.headers {
+        if !matches!(
+            name.as_str(),
+            "host" | "content-length" | "transfer-encoding"
+        ) {
+            upstream = upstream.header(name, value);
+        }
+    }
+    let response = upstream.send().await.expect("upstream ClickHouse");
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = response.bytes().await.expect("upstream body");
+    state.in_flight.fetch_sub(1, Ordering::SeqCst);
+    let mut out = (status, body).into_response();
+    for (name, value) in &headers {
+        if !matches!(name.as_str(), "content-length" | "transfer-encoding") {
+            out.headers_mut().insert(name, value.clone());
+        }
+    }
+    out
+}
+
+async fn serve(app: Router) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind failed");
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.ok();
+    });
+    format!("http://{addr}")
+}
+
 struct MockState {
     projects: Mutex<HashMap<i64, ProjectData>>,
 }
@@ -200,11 +349,12 @@ struct ProjectData {
     /// in the handler using the ref from the request query, so the Gitaly
     /// `<slug>-<ref>/` prefix matches whatever commit SHA the indexer asks for.
     archive_files: Vec<(String, Vec<u8>)>,
-    /// When true, the archive endpoint returns 200 OK with a zero-byte body,
+    /// How many more times the archive endpoint returns 200 OK with a zero-byte body,
     /// matching the production case where Gitaly streams an empty archive for
-    /// projects that lack repository content.
-    empty_archive_body: bool,
+    /// projects that lack repository content. `u32::MAX` means always.
+    empty_archive_responses: u32,
     slow_archive: bool,
+    archive_status: Option<StatusCode>,
 }
 
 pub struct MockGitlabServer {
@@ -229,17 +379,9 @@ impl MockGitlabServer {
             )
             .with_state(Arc::clone(&state));
 
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind failed");
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.ok();
-        });
-
         Self {
+            base_url: serve(app).await,
             state,
-            base_url: format!("http://{addr}"),
         }
     }
 
@@ -262,8 +404,9 @@ impl MockGitlabServer {
             ProjectData {
                 default_branch: default_branch.to_string(),
                 archive_files,
-                empty_archive_body: false,
+                empty_archive_responses: 0,
                 slow_archive: false,
+                archive_status: None,
             },
         );
     }
@@ -278,8 +421,9 @@ impl MockGitlabServer {
                     "src/Main.java".to_string(),
                     b"public class Main {}".to_vec(),
                 )],
-                empty_archive_body: false,
+                empty_archive_responses: 0,
                 slow_archive: true,
+                archive_status: None,
             },
         );
     }
@@ -293,10 +437,30 @@ impl MockGitlabServer {
             ProjectData {
                 default_branch: default_branch.to_string(),
                 archive_files: Vec::new(),
-                empty_archive_body: true,
+                empty_archive_responses: u32::MAX,
                 slow_archive: false,
+                archive_status: None,
             },
         );
+    }
+
+    pub fn add_project_with_transient_empty_archive(
+        &self,
+        project_id: i64,
+        default_branch: &str,
+        files: &[(&str, &str)],
+        empty_responses: u32,
+    ) {
+        self.add_project(project_id, default_branch, files);
+        if let Some(project) = self.state.projects.lock().get_mut(&project_id) {
+            project.empty_archive_responses = empty_responses;
+        }
+    }
+
+    pub fn set_archive_status(&self, project_id: i64, status: Option<StatusCode>) {
+        if let Some(project) = self.state.projects.lock().get_mut(&project_id) {
+            project.archive_status = status;
+        }
     }
 
     pub fn replace_archive(&self, project_id: i64, files: &[(&str, &str)]) {
@@ -306,7 +470,7 @@ impl MockGitlabServer {
                 .iter()
                 .map(|(p, c)| (p.to_string(), c.as_bytes().to_vec()))
                 .collect();
-            project.empty_archive_body = false;
+            project.empty_archive_responses = 0;
         }
     }
 }
@@ -347,9 +511,18 @@ async fn handle_download_archive(
     if slow {
         tokio::time::sleep(SLOW_ARCHIVE_DELAY).await;
     }
-    let projects = state.projects.lock();
-    match projects.get(&project_id) {
-        Some(p) if p.empty_archive_body => (StatusCode::OK, Vec::<u8>::new()).into_response(),
+    let mut projects = state.projects.lock();
+    match projects.get_mut(&project_id) {
+        Some(ProjectData {
+            archive_status: Some(status),
+            ..
+        }) => (*status).into_response(),
+        Some(p) if p.empty_archive_responses > 0 => {
+            if p.empty_archive_responses != u32::MAX {
+                p.empty_archive_responses -= 1;
+            }
+            (StatusCode::OK, Vec::<u8>::new()).into_response()
+        }
         Some(p) => {
             let files: Vec<(&str, &str)> = p
                 .archive_files
@@ -433,6 +606,10 @@ pub fn handler_context_with_lock_service(lock_service: Arc<MockLockService>) -> 
     HandlerContext::new(mock_nats.clone(), lock_service, ProgressNotifier::noop())
 }
 
+pub fn handler_context_redelivered(redelivered_on_failure: bool) -> HandlerContext {
+    handler_context().with_redelivery(redelivered_on_failure)
+}
+
 pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
     let branches = clickhouse
         .query(&format!(
@@ -474,7 +651,7 @@ pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
             "SELECT source_id FROM {} \
              WHERE source_kind = 'File' AND target_kind = 'Definition' \
              AND relationship_kind = 'DEFINES'",
-            ontology.edge_table_for_relationship("DEFINES")
+            ontology.edge_table_for_relationship("DEFINES").unwrap()
         ))
         .await;
     assert!(

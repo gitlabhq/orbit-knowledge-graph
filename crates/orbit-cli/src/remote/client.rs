@@ -1,7 +1,6 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use anyhow::bail;
 use serde::Deserialize;
 
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
@@ -45,12 +44,15 @@ impl OrbitClient {
         Self::new(endpoint)
     }
 
-    /// Missing or partial glab tuples must not invoke the credential helper.
+    /// Resolves credentials like `from_env`, but a missing credential is not an
+    /// error: it returns `None` so callers serve the embedded local skill. An
+    /// invalid base URL is still an error so callers can say why they fall back.
     pub(crate) fn from_skill_env() -> Result<Option<Self>, RemoteError> {
-        let Some(endpoint) = resolve_skill_endpoint(|key| std::env::var(key).ok()) else {
-            return Ok(None);
-        };
-        Self::new(endpoint).map(Some)
+        match resolve_endpoint(|key| std::env::var(key).ok(), resolve_via_credential_helper) {
+            Ok(endpoint) => Self::new(endpoint).map(Some),
+            Err(error) if error.is::<MissingCredential>() => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 
     fn new(endpoint: ResolvedEndpoint) -> Result<Self, RemoteError> {
@@ -227,22 +229,6 @@ struct CredentialHelperToken {
     token: String,
 }
 
-fn resolve_skill_endpoint(get_env: impl Fn(&str) -> Option<String>) -> Option<ResolvedEndpoint> {
-    let non_empty = |key: &str| get_env(key).filter(|value| !value.is_empty());
-    match (
-        non_empty("ORBIT_API_BASE_URL"),
-        non_empty("ORBIT_AUTH_HEADER_NAME"),
-        non_empty("ORBIT_AUTH_HEADER_VALUE"),
-    ) {
-        (Some(base_url), Some(header_name), Some(header_value)) => Some(ResolvedEndpoint {
-            base_url,
-            header_name,
-            header_value,
-        }),
-        _ => None,
-    }
-}
-
 fn resolve_endpoint(
     get_env: impl Fn(&str) -> Option<String>,
     credential_helper: impl FnOnce() -> Option<ResolvedEndpoint>,
@@ -254,6 +240,7 @@ fn resolve_endpoint(
         non_empty("ORBIT_AUTH_HEADER_NAME"),
         non_empty("ORBIT_AUTH_HEADER_VALUE"),
     ) {
+        validate_base_url("ORBIT_API_BASE_URL", &base_url)?;
         return Ok(ResolvedEndpoint {
             base_url,
             header_name,
@@ -264,7 +251,8 @@ fn resolve_endpoint(
     if let Some(token) = non_empty("GITLAB_TOKEN") {
         let base_url =
             non_empty("GITLAB_URL").unwrap_or_else(|| DEFAULT_GITLAB_BASE_URL.to_string());
-        if !base_url.starts_with("https://") {
+        let url = validate_base_url("GITLAB_URL", &base_url)?;
+        if url.scheme() == "http" {
             eprintln!(
                 "warning: GITLAB_URL is not https ({base_url}); the token will be sent in plaintext"
             );
@@ -277,16 +265,38 @@ fn resolve_endpoint(
     }
 
     if let Some(endpoint) = credential_helper() {
+        validate_base_url(
+            "glab auth credential-helper instance_url",
+            &endpoint.base_url,
+        )?;
         return Ok(endpoint);
     }
 
-    bail!(
-        "no Orbit credential found\n\n\
+    Err(MissingCredential.into())
+}
+
+fn validate_base_url(source: &str, base_url: &str) -> anyhow::Result<reqwest::Url> {
+    reqwest::Url::parse(base_url)
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+        .ok_or_else(|| anyhow::anyhow!("{source} must be an absolute https URL (got `{base_url}`)"))
+}
+
+#[derive(Debug)]
+struct MissingCredential;
+
+impl std::fmt::Display for MissingCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "no Orbit credential found\n\n\
          Set ORBIT_API_BASE_URL, ORBIT_AUTH_HEADER_NAME, and ORBIT_AUTH_HEADER_VALUE,\n\
          set GITLAB_TOKEN with an optional GITLAB_URL, or run `glab auth login` so the\n\
-         credential-helper can provide a token. Running through `glab orbit` works too."
-    );
+         credential-helper can provide a token. Running through `glab orbit` works too.",
+        )
+    }
 }
+
+impl std::error::Error for MissingCredential {}
 
 fn resolve_via_credential_helper() -> Option<ResolvedEndpoint> {
     static CACHED: OnceLock<Option<ResolvedEndpoint>> = OnceLock::new();
@@ -382,7 +392,7 @@ mod tests {
                 ("ORBIT_AUTH_HEADER_VALUE", "glpat-xyz"),
                 ("GITLAB_TOKEN", "ignored"),
             ]),
-            || None,
+            || panic!("helper must not run"),
         )
         .expect("triplet resolves");
         assert_eq!(endpoint.base_url, "https://example.test");
@@ -390,22 +400,36 @@ mod tests {
         assert_eq!(endpoint.header_value, "glpat-xyz");
     }
 
-    #[test]
-    fn skill_endpoint_uses_only_a_complete_orbit_tuple() {
-        let endpoint = resolve_skill_endpoint(env_from(&[
-            ("ORBIT_API_BASE_URL", "https://example.test"),
-            ("ORBIT_AUTH_HEADER_NAME", "Private-Token"),
-            ("ORBIT_AUTH_HEADER_VALUE", "glpat-xyz"),
-            ("GITLAB_TOKEN", "ignored"),
-        ]))
-        .unwrap();
-        assert_eq!(endpoint.base_url, "https://example.test");
+    fn helper_endpoint() -> ResolvedEndpoint {
+        ResolvedEndpoint {
+            base_url: "https://helper.test".to_string(),
+            header_name: "Authorization".to_string(),
+            header_value: "Bearer helper".to_string(),
+        }
+    }
 
-        assert!(
-            resolve_skill_endpoint(env_from(&[("ORBIT_API_BASE_URL", "https://example.test")]))
-                .is_none()
-        );
-        assert!(resolve_skill_endpoint(env_from(&[("GITLAB_TOKEN", "ignored")])).is_none());
+    #[test]
+    fn gitlab_token_skips_the_credential_helper() {
+        let endpoint = resolve_endpoint(
+            env_from(&[
+                ("GITLAB_TOKEN", "glpat-abc"),
+                ("GITLAB_URL", "https://gl.test"),
+            ]),
+            || panic!("helper must not run"),
+        )
+        .expect("token resolves");
+        assert_eq!(endpoint.base_url, "https://gl.test");
+        assert_eq!(endpoint.header_value, "Bearer glpat-abc");
+    }
+
+    #[test]
+    fn partial_orbit_triplet_falls_through_to_the_helper() {
+        let endpoint = resolve_endpoint(
+            env_from(&[("ORBIT_API_BASE_URL", "https://example.test")]),
+            || Some(helper_endpoint()),
+        )
+        .expect("helper resolves");
+        assert_eq!(endpoint.base_url, "https://helper.test");
     }
 
     #[test]
@@ -443,6 +467,52 @@ mod tests {
     fn no_credential_is_a_clear_error() {
         let result = resolve_endpoint(env_from(&[]), || None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn scheme_less_gitlab_url_is_rejected_with_a_clear_error() {
+        for url in ["gitlab.com", "gitlab.com:8080", "ftp://gitlab.com"] {
+            let error = resolve_endpoint(
+                env_from(&[("GITLAB_TOKEN", "t"), ("GITLAB_URL", url)]),
+                || None,
+            )
+            .err()
+            .unwrap();
+            assert!(!error.is::<MissingCredential>());
+            assert_eq!(
+                error.to_string(),
+                format!("GITLAB_URL must be an absolute https URL (got `{url}`)")
+            );
+        }
+    }
+
+    #[test]
+    fn scheme_less_helper_instance_url_is_rejected() {
+        let error = resolve_endpoint(env_from(&[]), || {
+            Some(ResolvedEndpoint {
+                base_url: "gitlab.com".to_string(),
+                ..helper_endpoint()
+            })
+        })
+        .err()
+        .unwrap();
+        assert_eq!(
+            error.to_string(),
+            "glab auth credential-helper instance_url must be an absolute https URL (got `gitlab.com`)"
+        );
+    }
+
+    #[test]
+    fn http_gitlab_url_is_accepted() {
+        let endpoint = resolve_endpoint(
+            env_from(&[
+                ("GITLAB_TOKEN", "t"),
+                ("GITLAB_URL", "http://localhost:3000"),
+            ]),
+            || None,
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(endpoint.base_url, "http://localhost:3000");
     }
 
     #[test]

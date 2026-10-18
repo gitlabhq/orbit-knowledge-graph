@@ -7,13 +7,14 @@ use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 
 use arrow::record_batch::RecordBatch;
-use orbit_utils::arrow::{BatchBuilder, ColumnType};
+use orbit_arrow::{BatchBuilder, ColumnType};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use crate::dsl::types::Tf;
 use crate::error::{Error, LoadError};
 use crate::file_tree::ProjectTree;
 use crate::intern::Lang;
+use crate::sentinel::Sentinel;
 use crate::tree::{CallResolution, Compact};
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
@@ -247,6 +248,7 @@ fn child(c: Cursor, kind: u16) -> Option<Cursor> {
 }
 
 /// One `(table, batch)` per local entity, then the edge table.
+#[allow(clippy::too_many_arguments)]
 pub fn export(
     trees: &[Tree],
     edges: &[crate::tree::Edge],
@@ -255,8 +257,10 @@ pub fn export(
     envelope: &Envelope,
     include_directories: bool,
     owns_file: &dyn Fn(&str) -> bool,
+    run: &Sentinel,
 ) -> Result<Vec<(String, RecordBatch)>, Error> {
     envelope.check(plan)?;
+    run.check()?;
     let forest = Forest::new(trees, lang);
     let mut ids = FxHashMap::default();
     let mut tables = Vec::new();
@@ -275,8 +279,10 @@ pub fn export(
                 "File" => owns_file(&tree.label),
                 _ => true,
             },
+            run,
         )?;
     }
+    run.check()?;
     for batch in write_edges(plan, edges, &forest, &ids, envelope)? {
         tables.push((plan.edge_table.clone(), batch));
     }
@@ -294,10 +300,12 @@ fn write_entity(
     envelope: &Envelope,
     ids: &mut FxHashMap<(u32, u32), (i64, usize, bool)>,
     emit: &dyn Fn(&Tree) -> bool,
+    run: &Sentinel,
 ) -> Result<(), Error> {
     let mut builder = BatchBuilder::new(&entity.specs, 0)?;
     let b = &mut builder;
     for (ti, tree) in forest.all() {
+        run.check()?;
         let root = tree.root();
         let nodes = std::iter::once(root)
             .chain(root.descendants())
@@ -363,6 +371,8 @@ fn write_entity(
     Ok(())
 }
 
+type Enclosing = FxHashMap<(usize, (u32, u32)), Option<(u32, u32)>>;
+
 struct EdgeRow<'a> {
     source: (i64, &'a str),
     kind: &'a str,
@@ -381,15 +391,40 @@ fn write_edges(
 
     let mut located: Vec<_> = ids.iter().collect();
     located.sort_unstable();
+    let mut enclosing = Enclosing::default();
+    let mut path = Vec::new();
+    let mut current_tree = None;
     for (&(tree, node), &(id, entity, emitted)) in located {
         if !emitted {
             continue;
         }
+        if current_tree != Some(tree) {
+            current_tree = Some(tree);
+            enclosing.clear();
+        }
         for rule in plan.containment.iter().filter(|c| c.to == entity) {
-            let enclosing = forest
-                .ancestors(tree, node)
-                .find_map(|loc| ids.get(&loc).filter(|(_, e, _)| *e == rule.from));
-            if let Some(&(from_id, _, _)) = enclosing {
+            path.clear();
+            path.push((tree, node));
+            let found = loop {
+                let (tree, node) = *path.last().expect("the start location");
+                let Some(above) = forest
+                    .ancestors(tree, node)
+                    .find(|loc| ids.contains_key(loc))
+                else {
+                    break None;
+                };
+                if ids[&above].1 == rule.from {
+                    break Some(above);
+                }
+                if let Some(&known) = enclosing.get(&(rule.from, above)) {
+                    break known;
+                }
+                path.push(above);
+            };
+            for &loc in &path {
+                enclosing.insert((rule.from, loc), found);
+            }
+            if let Some(&(from_id, _, _)) = found.and_then(|loc| ids.get(&loc)) {
                 rows.push(EdgeRow {
                     source: (from_id, entity_name(rule.from)),
                     kind: &rule.kind,

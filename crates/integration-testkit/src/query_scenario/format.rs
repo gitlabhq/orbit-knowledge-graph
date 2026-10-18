@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use query_engine::compiler::HydrationKind;
+use query_engine::compiler::{HydrationKind, QueryType};
 use serde::Deserialize;
 
 use crate::scenario::Seed;
@@ -9,12 +9,44 @@ use crate::scenario::Seed;
 #[serde(deny_unknown_fields)]
 pub struct QueryScenario {
     #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
     pub config: ScenarioConfig,
+    #[serde(default)]
     pub query: BTreeMap<String, String>,
     #[serde(default)]
+    pub expect: Option<QueryExpect>,
+    #[serde(default)]
+    pub steps: Vec<QueryStep>,
+}
+
+/// One query of a multi-step scenario. `seed` rows are inserted before the
+/// query runs, so a later step can observe a write made after an earlier one.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryStep {
+    #[serde(default)]
+    pub seed: Seed,
+    pub query: BTreeMap<String, String>,
     pub expect: QueryExpect,
+}
+
+impl QueryScenario {
+    pub fn into_steps(self) -> (ScenarioConfig, Vec<QueryStep>) {
+        let steps = match (self.query.is_empty(), self.steps.is_empty()) {
+            (false, true) => vec![QueryStep {
+                seed: Seed::default(),
+                query: self.query,
+                expect: self.expect.expect("scenario declares query without expect"),
+            }],
+            (true, false) => self.steps,
+            (false, false) => panic!("scenario declares both query/expect and steps:"),
+            (true, true) => panic!("scenario declares neither query nor steps:"),
+        };
+        (self.config, steps)
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -29,6 +61,8 @@ pub struct ScenarioConfig {
     pub security: Option<PresetOr<SecurityOverride>>,
     #[serde(default)]
     pub redaction: Option<PresetOr<RedactionConfig>>,
+    #[serde(default)]
+    pub duckdb: bool,
 }
 
 /// Either a preset name (string) or an inline value.
@@ -89,9 +123,10 @@ pub struct QueryExpect {
     pub compile_only: bool,
     #[serde(default)]
     pub compile_error: Option<CompileErrorExpect>,
-    /// Assert error message does NOT contain these substrings, for every frontend or per frontend key.
     #[serde(default)]
-    pub compile_error_not_contains: NotContainsExpect,
+    pub compile_error_contains: MessageExpect,
+    #[serde(default)]
+    pub compile_error_not_contains: MessageExpect,
     #[serde(default)]
     pub node_count: Option<usize>,
     #[serde(default)]
@@ -99,12 +134,10 @@ pub struct QueryExpect {
     /// Exact edge set: `{ MEMBER_OF: [[1,100], [2,100]] }`
     #[serde(default)]
     pub edges: BTreeMap<String, Vec<[i64; 2]>>,
-    /// Spot-check edges exist (subset): `{ AUTHORED: [[1,2000], [2,2002]] }`
     #[serde(default)]
-    pub edge_exists: BTreeMap<String, Vec<[i64; 2]>>,
-    /// Assert edges do NOT exist: `{ MEMBER_OF: [[1,102]] }`
+    pub edge_exists: BTreeMap<String, Vec<EdgeExpect>>,
     #[serde(default)]
-    pub edge_absent: BTreeMap<String, Vec<[i64; 2]>>,
+    pub edge_absent: BTreeMap<String, Vec<EdgeExpect>>,
     #[serde(default)]
     pub edge_count: BTreeMap<String, usize>,
     #[serde(default)]
@@ -126,6 +159,10 @@ pub struct QueryExpect {
     pub sql_contains: Vec<String>,
     #[serde(default)]
     pub hydration: Option<HydrationKind>,
+    /// Expected ClickHouse SETTINGS pairs on the compiled query, for example
+    /// `{ use_query_cache: 0 }`. A `null` value asserts the setting is absent.
+    #[serde(default)]
+    pub settings: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub sql_not_contains: Vec<String>,
     #[serde(default)]
@@ -152,6 +189,10 @@ pub struct QueryExpect {
     pub referential_integrity: bool,
     #[serde(default)]
     pub has_more: Option<bool>,
+    #[serde(default)]
+    pub gql_columns: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub gql_column_names: Vec<String>,
     /// Assertions across ALL pages combined. The runner collects node IDs
     /// and edge tuples from every page and asserts at the end.
     #[serde(default)]
@@ -229,6 +270,8 @@ pub struct AllPagesExpect {
     /// Expected node IDs collected across all pages, sorted.
     #[serde(default)]
     pub node_ids: BTreeMap<String, Vec<i64>>,
+    #[serde(default)]
+    pub node_order: BTreeMap<String, Vec<i64>>,
     /// Expected group node IDs collected across all pages, sorted.
     /// Key is "group_key:EntityType", e.g. "u:User".
     #[serde(default)]
@@ -242,39 +285,97 @@ pub struct AllPagesExpect {
     /// Assert no node ID appears on multiple pages.
     #[serde(default)]
     pub no_duplicate_ids: bool,
+    #[serde(default)]
+    pub no_duplicate_edges: bool,
+    #[serde(default)]
+    pub matches_unpaginated: bool,
 }
 
 impl QueryExpect {
-    /// Panics if `pages` is set alongside result-level assertions that would
-    /// be silently ignored.
     pub fn validate_pages_exclusive(&self, scenario: &str) {
+        let has_result_fields = self.has_result_assertions();
+        assert!(
+            !self.compile_only
+                || !(has_result_fields
+                    || self.repeat_count.is_some()
+                    || !self.pages.is_empty()
+                    || self.all_pages.is_some()
+                    || !self.indexes_used.is_empty()),
+            "{scenario}: compile_only cannot be combined with runtime assertions"
+        );
         if self.pages.is_empty() {
+            assert!(
+                self.all_pages.is_none(),
+                "{scenario}: all_pages requires pages"
+            );
             return;
         }
-        let has_result_fields = self.node_count.is_some()
+        assert!(
+            !has_result_fields && self.repeat_count.is_none(),
+            "{scenario}: pages is set alongside top-level result assertions; \
+             move them into the per-page expect or remove them"
+        );
+        for (index, page) in self.pages.iter().enumerate() {
+            assert!(
+                page.repeat_count.is_none()
+                    && !page.compile_only
+                    && page.compile_error.is_none()
+                    && !page.compile_error_contains.is_configured()
+                    && !page.compile_error_not_contains.is_configured()
+                    && page.hydration.is_none()
+                    && page.settings.is_empty()
+                    && page.sql_contains.is_empty()
+                    && page.sql_not_contains.is_empty()
+                    && page.indexes_used.is_empty()
+                    && page.pages.is_empty()
+                    && page.all_pages.is_none(),
+                "{scenario}: page {} supports only result assertions",
+                index + 1
+            );
+        }
+    }
+
+    pub(super) fn validate_response_type(&self, query_type: QueryType, label: &str) {
+        assert!(
+            query_type == QueryType::Aggregation || !self.has_aggregation_assertions(),
+            "{label}: aggregation assertions require an aggregation query"
+        );
+        assert!(
+            query_type == QueryType::PathFinding || !self.has_path_assertions(),
+            "{label}: path assertions require a path_finding query"
+        );
+    }
+
+    fn has_aggregation_assertions(&self) -> bool {
+        !self.groups.is_empty()
+            || !self.group_columns.is_empty()
+            || self.empty_aggregation
+            || self.row_count.is_some()
+            || !self.row_values.is_empty()
+    }
+
+    fn has_path_assertions(&self) -> bool {
+        self.path_count.is_some()
+            || !self.path_destinations.is_empty()
+            || !self.path_edges.is_empty()
+            || !self.path_endpoint_absent.is_empty()
+    }
+
+    fn has_result_assertions(&self) -> bool {
+        self.node_count.is_some()
             || !self.nodes.is_empty()
             || !self.edges.is_empty()
             || !self.edge_exists.is_empty()
             || !self.edge_absent.is_empty()
             || !self.edge_count.is_empty()
-            || !self.groups.is_empty()
-            || !self.group_columns.is_empty()
-            || self.repeat_count.is_some()
-            || self.empty_aggregation
-            || self.row_count.is_some()
-            || !self.row_values.is_empty()
+            || self.has_aggregation_assertions()
             || self.total_edge_count.is_some()
-            || self.path_count.is_some()
-            || !self.path_destinations.is_empty()
-            || !self.path_edges.is_empty()
-            || !self.path_endpoint_absent.is_empty()
+            || self.has_path_assertions()
             || self.referential_integrity
-            || self.has_more.is_some();
-        assert!(
-            !has_result_fields,
-            "{scenario}: pages is set alongside top-level result assertions; \
-             move them into the per-page expect or remove them"
-        );
+            || self.has_more.is_some()
+            || !self.gql_columns.is_empty()
+            || !self.gql_column_names.is_empty()
+            || !self.skip_requirements.is_empty()
     }
 
     /// Derive a total node count from per-entity specs when `node_count` is
@@ -307,30 +408,72 @@ impl CompileErrorExpect {
         match self {
             Self::Flag(_) => None,
             Self::Substring(sub) => Some(sub),
-            Self::PerFrontend(by_frontend) => by_frontend.get(frontend_key).map(String::as_str),
+            Self::PerFrontend(by_frontend) => Some(
+                by_frontend
+                    .get(frontend_key)
+                    .unwrap_or_else(|| panic!("compile_error missing frontend '{frontend_key}'"))
+                    .as_str(),
+            ),
         }
     }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-pub enum NotContainsExpect {
+pub enum MessageExpect {
     All(Vec<String>),
     PerFrontend(BTreeMap<String, Vec<String>>),
 }
 
-impl Default for NotContainsExpect {
+impl Default for MessageExpect {
     fn default() -> Self {
         Self::All(Vec::new())
     }
 }
 
-impl NotContainsExpect {
-    pub fn banned_for(&self, frontend_key: &str) -> &[String] {
+impl MessageExpect {
+    fn is_configured(&self) -> bool {
+        !matches!(self, Self::All(fragments) if fragments.is_empty())
+    }
+
+    pub fn for_frontend(&self, frontend_key: &str) -> &[String] {
         match self {
-            Self::All(banned) => banned,
-            Self::PerFrontend(by_frontend) => {
-                by_frontend.get(frontend_key).map_or(&[], Vec::as_slice)
+            Self::All(fragments) => fragments,
+            Self::PerFrontend(by_frontend) => by_frontend
+                .get(frontend_key)
+                .unwrap_or_else(|| {
+                    panic!("compile error message expectation missing frontend '{frontend_key}'")
+                })
+                .as_slice(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum EdgeExpect {
+    Pair([i64; 2]),
+    Typed(TypedEdgeExpect),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypedEdgeExpect {
+    pub from: String,
+    pub from_id: i64,
+    pub to: String,
+    pub to_id: i64,
+}
+
+impl EdgeExpect {
+    pub fn matches(&self, edge: &query_engine::formatters::GraphEdge) -> bool {
+        match self {
+            Self::Pair([from, to]) => edge.from_id == *from && edge.to_id == *to,
+            Self::Typed(expected) => {
+                edge.from == expected.from
+                    && edge.from_id == expected.from_id
+                    && edge.to == expected.to
+                    && edge.to_id == expected.to_id
             }
         }
     }

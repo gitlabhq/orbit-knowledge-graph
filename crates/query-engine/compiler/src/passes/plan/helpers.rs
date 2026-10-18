@@ -6,7 +6,7 @@ use query_data_model::RelationalMapping;
 
 pub enum FilterOwner<'a> {
     Entity(query_data_model::EntityId),
-    Table(&'a str),
+    Tables(&'a [String]),
 }
 
 pub fn ordered_filters(
@@ -16,39 +16,75 @@ pub fn ordered_filters(
 ) -> Vec<(String, BoundFilter)> {
     let mut properties: Vec<_> = filters.iter().collect();
     properties.sort_unstable_by_key(|(property, _)| *property);
-    properties
+    let mut bound: Vec<_> = properties
         .into_iter()
         .flat_map(|(property, filters)| {
-            let (metadata, table) = match owner {
-                FilterOwner::Entity(entity) => (
-                    model
-                        .property_for_entity_id(entity, property)
-                        .map(|property| (Some(property.id), Some(property.data_type))),
-                    model.query_backend().entity_table(entity),
-                ),
-                FilterOwner::Table(table) => (
-                    Some((None, model.table_column_type(table, property))),
-                    Some(table),
-                ),
-            };
-            let (property_id, data_type) = metadata.unwrap_or_default();
-            let in_sort_key = table.is_some_and(|table| model.in_sort_key(table, property));
-            filters.iter().map(move |filter| {
+            filters.iter().map(|filter| {
                 (
                     property.clone(),
-                    BoundFilter {
-                        filter: filter.clone(),
-                        property: property_id,
-                        data_type,
-                        selectivity: property_id
-                            .map(|property| model.property_selectivity(property))
-                            .unwrap_or_default(),
-                        in_sort_key,
-                    },
+                    bind_filter(property, filter.clone(), &owner, model),
                 )
             })
         })
-        .collect()
+        .collect();
+    let key_narrowed = bound.iter().any(|(_, filter)| {
+        filter.in_sort_key
+            && matches!(
+                filter.filter.op.unwrap_or(FilterOp::Eq),
+                FilterOp::Eq | FilterOp::In
+            )
+    });
+    if key_narrowed {
+        for (_, filter) in &mut bound {
+            filter.text_indexed = false;
+        }
+    }
+    bound
+}
+
+pub fn bind_filter(
+    property: &str,
+    filter: InputFilter,
+    owner: &FilterOwner<'_>,
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+) -> BoundFilter {
+    let (metadata, in_sort_key) = match owner {
+        FilterOwner::Entity(entity) => {
+            let table = model.query_backend().entity_table(*entity);
+            (
+                model
+                    .property_for_entity_id(*entity, property)
+                    .map(|property| (Some(property.id), Some(property.data_type))),
+                table.is_some_and(|table| model.in_sort_key(table, property)),
+            )
+        }
+        FilterOwner::Tables(tables) => {
+            let data_type = tables.first().and_then(|first| {
+                let data_type = model.table_column_type(first, property)?;
+                tables[1..]
+                    .iter()
+                    .all(|table| model.table_column_type(table, property) == Some(data_type))
+                    .then_some(data_type)
+            });
+            (
+                Some((None, data_type)),
+                tables
+                    .iter()
+                    .all(|table| model.in_sort_key(table, property)),
+            )
+        }
+    };
+    let (property_id, data_type) = metadata.unwrap_or_default();
+    BoundFilter {
+        filter,
+        property: property_id,
+        data_type,
+        selectivity: property_id
+            .map(|property| model.property_selectivity(property))
+            .unwrap_or_default(),
+        in_sort_key,
+        text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),
+    }
 }
 
 pub fn requested_columns(columns: &Option<ColumnSelection>) -> Vec<String> {
@@ -72,6 +108,9 @@ fn tag_value(value: &serde_json::Value) -> Option<String> {
 }
 
 pub fn denorm_tag_values(key: &str, filter: &InputFilter) -> Option<Vec<String>> {
+    if filter.rhs_column.is_some() {
+        return None;
+    }
     match filter.op {
         None | Some(FilterOp::Eq) => Some(vec![format!(
             "{key}:{}",
@@ -91,17 +130,6 @@ pub fn denorm_tag_values(key: &str, filter: &InputFilter) -> Option<Vec<String>>
         }
         _ => None,
     }
-}
-
-pub fn has_non_denorm_filters(
-    filters: &[(String, BoundFilter)],
-    denormalized: &HashMap<DenormalizedKey, DenormalizedProperty>,
-) -> bool {
-    filters.iter().any(|(_, filter)| {
-        [DenormalizedDirection::Source, DenormalizedDirection::Target]
-            .into_iter()
-            .all(|direction| lowerable_denorm(filter, direction, denormalized).is_none())
-    })
 }
 
 pub fn lowerable_denorm<'a>(

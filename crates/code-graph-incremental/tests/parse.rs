@@ -23,7 +23,7 @@ fn parse_repo(env: &Env, root: &Path) -> Workset<Vec<Parsed>> {
         .then(Each(Parse))
         .unwrap()
         .into_value();
-    for Parsed(tree) in &workset.items {
+    for Parsed(tree, _) in &workset.items {
         assert!(
             std::sync::Arc::ptr_eq(&tree.source, &sources.read(&tree.label).unwrap()),
             "parsed trees share the resident VFS source buffer"
@@ -124,7 +124,7 @@ fn tsx_inside_the_typescript_pipeline_gets_the_tsx_grammar() {
     let mut labels: Vec<_> = parsed.items.iter().map(|p| p.0.label.clone()).collect();
     labels.sort();
     assert_eq!(labels, ["app.tsx", "util.ts"]);
-    for Parsed(tree) in &parsed.items {
+    for Parsed(tree, _) in &parsed.items {
         assert_eq!(error_nodes(tree, &env), 0, "{}", tree.label);
     }
 }
@@ -203,7 +203,7 @@ fn a_family_parses_each_member_with_its_own_grammar() {
     let mut labels: Vec<_> = parsed.items.iter().map(|p| p.0.label.clone()).collect();
     labels.sort();
     assert_eq!(labels, ["Service.kt", "User.java"]);
-    for Parsed(tree) in &parsed.items {
+    for Parsed(tree, _) in &parsed.items {
         assert_eq!(error_nodes(tree, &env), 0, "{}", tree.label);
     }
 }

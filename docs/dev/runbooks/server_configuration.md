@@ -34,19 +34,22 @@ start and passes it as the single `--config` file. The file is a `yq` deep merge
 
 1. `config/dev.yaml`: the committed description of the dev environment: bind addresses, NATS URL and
    consumer name, database names and users, laptop tuning.
-2. Values read from the GDK checkout. These are ClickHouse URLs from `gdk.yml`, the GitLab base URL,
-   and the Siphon stream name from GDK's Siphon config. They also include JWT keys and the ClickHouse
-   password from the GitLab secret files.
+2. Values read from the Caproni cluster: the GitLab base URL from the cluster hostname, and the JWT
+   keys and ClickHouse password from the `gitlab-dev-stack-gkg-secrets` secret.
 3. The mode's probe server port, so the processes `mise run dev` starts side by side do not collide.
    Every mode binds this port for `/-/liveness` and `/-/readiness`, with or without metrics.
 4. `config/dev.local.yaml`: personal overrides, when the file exists. Git ignores it.
+
+Caproni edit mode (`caproni run`) does not use this merge. There the local binary reads the pod's
+`/app/config/config.yaml` through mirrord, and `scripts/dev/caproni-edit-mode.sh` changes only the
+probe port. See [Local development](../local-development.md).
 
 Passing `--config` disables the default `config/config.yaml` lookup.
 
 Overlay example (`config/dev.local.yaml` or any `--config` file):
 
 ```yaml
-bind_address: "127.0.0.1:8091"
+grpc_bind_address: "127.0.0.1:50055"
 graph:
   database: "gkg-sandbox"
 engine:
@@ -59,7 +62,7 @@ The binary (`gkg-server`) runs in one of five modes via `--mode`:
 
 | Mode | Purpose | Key config sections |
 |------|---------|---------------------|
-| `Webserver` | HTTP/gRPC query server | `bind_address`, `grpc_bind_address`, `grpc`, `tls`, `query`, `graph`, `gitlab` |
+| `Webserver` | gRPC query server | `grpc_bind_address`, `grpc`, `tls`, `query`, `graph`, `gitlab` |
 | `Indexer` | Consumes NATS messages and runs indexing handlers | `nats`, `engine`, `graph`, `datalake`, `gitlab`, `schedule`, `schema` |
 | `DispatchIndexing` | Runs the scheduler loop that publishes indexing requests | `nats`, `graph`, `datalake`, `schedule`, `schema` |
 | `HealthCheck` | Aggregate Kubernetes workload and ClickHouse health, plus NATS queue depth | `health_check`, `graph`, `datalake`, `nats` |
@@ -378,8 +381,14 @@ Required for code indexing (repository archive download) and authorization.
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `metrics.log_level` | None | Rust log filter string |
+| `metrics.expanded_logs.global_override` | `true` | Write expanded fields (file paths, query text, error text) on every log line. Turn it off to write them only for `root_namespace_ids` and for requests that Rails marks for verbose logs |
+| `metrics.expanded_logs.root_namespace_ids` | `[]` | Root namespace IDs whose requests and indexing work are always logged with expanded fields |
 
 Example: `info,orbit_server=debug,gkg_indexer=trace`
+
+Debug and trace lines are written only when they are expanded (see `metrics.expanded_logs`). The server adds `ra_ap=off` to the filter.
+
+A span directive such as `[orbit_request]=debug` in `metrics.log_level` also enables the lines of dependencies inside that span.
 
 ### OpenTelemetry
 
@@ -415,7 +424,6 @@ These settings are used by the Webserver mode.
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `bind_address` | `127.0.0.1:4200` | HTTP server bind address |
 | `grpc_bind_address` | `127.0.0.1:50054` | gRPC server bind address |
 | `jwt_clock_skew_secs` | `60` | Allowed JWT clock skew in seconds |
 | `health_check_url` | None | Optional health check URL |
@@ -448,8 +456,6 @@ Enabling `tls.internal` changes what clients must send:
 - The PodMonitor needs `scheme: https` and a `tlsConfig` that either trusts the issuing CA
   (with `serverName`, because Prometheus connects to the pod IP) or sets `insecureSkipVerify`.
 
-The legacy `/live` and `/ready` listeners stay plaintext until the chart probes the probe server.
-
 ### gRPC tuning
 
 | Config path | Default | Description |
@@ -464,6 +470,8 @@ The legacy `/live` and `/ready` listeners stay plaintext until the chart probes 
 | `grpc.max_connection_age_grace_secs` | `30` | Graceful drain window after `max_connection_age_secs` fires. Must be non-zero to avoid a tonic 0.14.5 panic ([hyperium/tonic#2522](https://github.com/hyperium/tonic/issues/2522)). |
 | `grpc.stream_timeout_secs` | `60` | Stream timeout |
 | `grpc.max_header_list_size_bytes` | `65536` (64 KiB) | HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` advertised to clients. tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs. |
+| `grpc.result_chunk_bytes` | `524288` (512 KiB) | Largest `ResultChunk` the server sends when a client sets `chunked_result`. Must be between 64 KiB and 4 MiB, because GitLab Rails rejects gRPC messages over 8 MiB. Chunks split on UTF-8 boundaries, so a chunk can be up to 3 bytes larger. |
+| `grpc.max_result_bytes` | `67108864` (64 MiB) | Largest result text the server sends in chunks. A larger result fails with a client-safe `compile_error` before the first chunk. Must be at least 1 MiB. |
 
 ### Query settings
 
@@ -474,8 +482,8 @@ query:
   default:
     max_execution_time: 30
     max_memory_usage: 1073741824
-    use_query_cache: false
-    query_cache_ttl: 60
+    use_query_cache: true
+    query_cache_ttl: 10
   aggregation:
     max_execution_time: 60
 ```
@@ -487,8 +495,8 @@ query:
 | `query.default.max_bytes_to_read` | unset | ClickHouse `max_bytes_to_read` in bytes |
 | `query.default.max_rows_to_read` | unset | ClickHouse `max_rows_to_read` |
 | `query.default.max_rows_in_set` | unset | ClickHouse `max_rows_in_set` (IN subquery cap) |
-| `query.default.use_query_cache` | `false` | Enable ClickHouse query cache |
-| `query.default.query_cache_ttl` | `60` | Query cache TTL in seconds |
+| `query.default.use_query_cache` | `true` | ClickHouse query cache for graph queries and item counts. Indexing progress reads, the indexer, and graph queries that pin every pattern node by ID always skip it. Queries with non-deterministic functions or system tables run uncached |
+| `query.default.query_cache_ttl` | `10` | Query cache TTL in seconds. A cached result can be this old |
 
 ## Schema management
 
@@ -638,8 +646,6 @@ When `graph.replicated` is `true`, the mode first runs two checks. ClickHouse mu
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `health_check.bind_address` | `0.0.0.0:4201` | HealthCheck mode bind address |
-| `indexer_health_bind_address` | `0.0.0.0:4202` | `/live` and `/ready` address for Indexer mode. The Helm chart probes it today; it goes away once the chart probes the probe server |
-| `dispatcher_health_bind_address` | `0.0.0.0:4203` | `/live` and `/ready` address for DispatchIndexing mode. The Helm chart probes it today; it goes away once the chart probes the probe server |
 
 ## Tuning guide
 
@@ -813,11 +819,11 @@ engine:
   topics:
     global-handler:
       concurrency_group: sdlc
-      max_attempts: 1
+      max_attempts: 5
       retry_interval_secs: 60
     namespace-handler:
       concurrency_group: sdlc
-      max_attempts: 1
+      max_attempts: 5
       retry_interval_secs: 60
     code-indexing-task:
       concurrency_group: code

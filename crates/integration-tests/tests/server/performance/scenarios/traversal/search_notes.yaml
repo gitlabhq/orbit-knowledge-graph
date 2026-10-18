@@ -1,4 +1,5 @@
 description: Single-node Note lookup (search), page of 100
+
 query:
   json: |
     {
@@ -6,5 +7,6 @@ query:
       "nodes": [{"id": "n", "entity": "Note", "node_ids": [3240810]}],
       "limit": 100
     }
+
 expect:
   compile_only: true

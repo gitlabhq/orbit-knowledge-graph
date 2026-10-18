@@ -3,8 +3,6 @@ use std::time::Duration;
 
 use crate::common::DummyClaims;
 use crate::indexer::common::dispatch::start_nats;
-use axum::body::Body;
-use axum::http::StatusCode;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use integration_testkit::TestContext;
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -21,13 +19,14 @@ use orbit_server::analytics::InMemoryAnalyticsTracker;
 use orbit_server::auth::{Claims, JwtValidator};
 use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::grpc::OrbitServiceImpl;
+use orbit_server::probes;
 use orbit_server::proto::execute_query_message::Content;
 use orbit_server::proto::orbit_service_client::OrbitServiceClient;
 use orbit_server::proto::orbit_service_server::OrbitServiceServer;
 use orbit_server::proto::*;
-use orbit_server::webserver::create_router;
 use orbit_server_config::AppConfig;
 use orbit_utils::yaml;
+use reqwest::StatusCode;
 use serde_json::{Value, json};
 use testcontainers_modules::nats::Nats;
 use tokio::sync::mpsc;
@@ -36,7 +35,6 @@ use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tonic::transport::Channel;
 use tonic::{Request, Status, Streaming};
-use tower::ServiceExt;
 
 const SECRET: &str = "test-secret-that-is-at-least-32-bytes-long";
 const WAIT_LIMIT: Duration = Duration::from_secs(30);
@@ -47,6 +45,22 @@ const PROPERTIES_ADDED_IN_V2: [(&str, &str); 2] = [
     ("nodes/core/project.yaml", "description"),
     ("nodes/code_review/merge_request.yaml", "merged_at"),
 ];
+
+#[tokio::test]
+async fn split_route_archive_is_served_by_variant_aware_queries() {
+    let mut cluster = Cluster::start(1).await;
+    cluster.create_tables(&[1, 2]).await;
+    cluster.promote(1).await;
+    cluster.await_serving(Some(1)).await;
+    let mut sources = ontology::migrations::embedded_sources();
+    let mut calls: Value = yaml::from_str(&sources["edges/calls.yaml"]).unwrap();
+    calls["variants"][0]["table"] = json!("gl_edge");
+    sources.insert("edges/calls.yaml".into(), yaml::to_string(&calls).unwrap());
+    let archive = OntologyArchive::from_sources(2, &sources).unwrap();
+    cluster.catalog.publish(&archive).await.unwrap();
+    cluster.promote(2).await;
+    cluster.await_serving(Some(2)).await;
+}
 
 #[tokio::test]
 async fn promotion_and_rollback_keep_in_flight_queries_on_their_snapshot() {
@@ -72,6 +86,58 @@ async fn promotion_and_rollback_keep_in_flight_queries_on_their_snapshot() {
     assert_eq!(
         cluster.recorded_schema_versions(),
         [json!("1"), json!("2"), json!("1")]
+    );
+}
+
+#[tokio::test]
+async fn chunked_results_join_to_the_same_json_as_one_result() {
+    let mut cluster = Cluster::start(1).await;
+    cluster.create_tables(&[1]).await;
+    cluster.promote(1).await;
+    cluster.await_serving(Some(1)).await;
+
+    let whole = cluster.run_query(project_query(1)).await.unwrap();
+    let chunked = ExecuteQueryRequest {
+        chunked_result: true,
+        ..project_query(1)
+    };
+    let (chunks, result) = cluster
+        .open_query(Some(chunked))
+        .await
+        .collect()
+        .await
+        .unwrap();
+
+    assert!(chunks.len() > 1, "{chunks:?}");
+    assert_eq!(result.content, None);
+    assert_eq!(result.metadata.map(|metadata| metadata.row_count), Some(1));
+    let joined: Value = serde_json::from_str(&chunks.concat()).unwrap();
+    assert_eq!(joined, whole);
+}
+
+#[tokio::test]
+async fn chunked_results_over_the_limit_fail_before_any_chunk() {
+    let mut cluster = Cluster::start(1).await;
+    cluster.create_tables(&[1]).await;
+    cluster.promote(1).await;
+    cluster.await_serving(Some(1)).await;
+
+    let schema = ExecuteQueryRequest {
+        query: "CALL db.schema()".into(),
+        language: QueryLanguage::Gql as i32,
+        chunked_result: true,
+        ..Default::default()
+    };
+    let mut query = cluster.open_query(Some(schema)).await;
+    let Content::Error(error) = query.next().await else {
+        panic!("expected the size error before any chunk");
+    };
+
+    assert_eq!(error.code, "compile_error");
+    assert!(
+        error.message.contains("over the 1024-byte limit"),
+        "{}",
+        error.message
     );
 }
 
@@ -200,7 +266,7 @@ struct Cluster {
     catalog: OntologyCatalog,
     nats_client: Arc<NatsClient>,
     client: OrbitServiceClient<Channel>,
-    router: axum::Router,
+    probe_url: String,
     analytics: Arc<InMemoryAnalyticsTracker>,
     _shutdown: DropGuard,
     _nats: testcontainers::ContainerAsync<Nats>,
@@ -229,9 +295,9 @@ impl Cluster {
         let service = OrbitServiceImpl::new(
             Arc::new(JwtValidator::new(SECRET, 0).unwrap()),
             active_schema.clone(),
-            &config.graph,
+            config.graph.build_client("graph"),
             ClusterHealthChecker::default().into_arc(),
-            WAIT_LIMIT.as_secs(),
+            &config.grpc,
             Arc::new(config.analytics.clone()),
         )
         .with_analytics(analytics.clone());
@@ -243,7 +309,7 @@ impl Cluster {
             catalog,
             nats_client,
             client,
-            router: create_router(active_schema),
+            probe_url: spawn_probe_server(active_schema),
             analytics,
             _shutdown: shutdown.drop_guard(),
             _nats: nats,
@@ -369,7 +435,7 @@ impl Cluster {
             .graph
             .session_settings
             .insert("readonly".into(), "1".into());
-        let client = Arc::new(config.graph.build_client());
+        let client = Arc::new(config.graph.build_client("graph"));
         let shutdown = CancellationToken::new();
         let active_schema = Arc::new(ActiveSchema::default());
         ActiveSchema::spawn(
@@ -381,7 +447,7 @@ impl Cluster {
             shutdown.clone(),
         );
         Reader {
-            router: create_router(active_schema),
+            probe_url: spawn_probe_server(active_schema),
             client,
             _shutdown: shutdown.drop_guard(),
         }
@@ -473,7 +539,7 @@ impl Cluster {
     }
 
     async fn ready_status(&self) -> StatusCode {
-        probe(&self.router, "/ready").await
+        probe(&self.probe_url, "/-/readiness").await
     }
 
     async fn list_tools(&mut self) -> Result<ListToolsResponse, Status> {
@@ -516,18 +582,18 @@ impl Cluster {
 }
 
 struct Reader {
-    router: axum::Router,
+    probe_url: String,
     client: Arc<ArrowClickHouseClient>,
     _shutdown: DropGuard,
 }
 
 impl Reader {
     async fn ready_status(&self) -> StatusCode {
-        probe(&self.router, "/ready").await
+        probe(&self.probe_url, "/-/readiness").await
     }
 
     async fn live_status(&self) -> StatusCode {
-        probe(&self.router, "/live").await
+        probe(&self.probe_url, "/-/liveness").await
     }
 
     async fn await_ready(&self) {
@@ -602,7 +668,18 @@ impl QueryStream {
         self.authorization_request = Some(required);
     }
 
-    async fn finish(mut self) -> Result<Value, ExecuteQueryError> {
+    async fn finish(self) -> Result<Value, ExecuteQueryError> {
+        let (chunks, result) = self.collect().await?;
+        let json = match result.content {
+            Some(execute_query_result::Content::ResultJson(json)) => json,
+            None => chunks.concat(),
+            other => panic!("unexpected result content {other:?}"),
+        };
+        Ok(serde_json::from_str(&json).unwrap())
+    }
+
+    async fn collect(mut self) -> Result<(Vec<String>, ExecuteQueryResult), ExecuteQueryError> {
+        let mut chunks = Vec::new();
         loop {
             if let Some(required) = self.authorization_request.take() {
                 self.authorize_everything(required).await;
@@ -611,10 +688,8 @@ impl QueryStream {
                 Content::Redaction(RedactionExchange {
                     content: Some(redaction_exchange::Content::Required(required)),
                 }) => self.authorization_request = Some(required),
-                Content::Result(ExecuteQueryResult {
-                    content: Some(execute_query_result::Content::ResultJson(json)),
-                    ..
-                }) => return Ok(serde_json::from_str(&json).unwrap()),
+                Content::ResultChunk(chunk) => chunks.push(chunk.data),
+                Content::Result(result) => return Ok((chunks, result)),
                 Content::Error(error) => return Err(error),
                 other => panic!("unexpected query message {other:?}"),
             }
@@ -723,6 +798,9 @@ fn webserver_config(graph: &TestContext, nats_address: &str) -> AppConfig {
     config.graph = graph.config.clone();
     config.schema.version_poll_interval_secs = RETRY_INTERVAL.as_secs();
     config.nats.url = format!("nats://{nats_address}");
+    config.grpc.stream_timeout_secs = WAIT_LIMIT.as_secs();
+    config.grpc.result_chunk_bytes = 16;
+    config.grpc.max_result_bytes = 1024;
     config
 }
 
@@ -762,10 +840,21 @@ fn authenticated<T>(message: T) -> Request<T> {
     request
 }
 
-async fn probe(router: &axum::Router, path: &str) -> StatusCode {
-    router
-        .clone()
-        .oneshot(axum::http::Request::get(path).body(Body::empty()).unwrap())
+fn spawn_probe_server(active_schema: Arc<ActiveSchema>) -> String {
+    let address = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let schema = labkit::health::ReadinessCheck::new("schema", move || {
+        probes::schema_installed(&active_schema)
+    });
+    labkit::health::spawn_server(address, vec![schema], None, None).unwrap();
+    format!("http://{address}")
+}
+
+async fn probe(base_url: &str, path: &str) -> StatusCode {
+    super::tls_fixtures::init_crypto_provider();
+    reqwest::get(format!("{base_url}{path}"))
         .await
         .unwrap()
         .status()

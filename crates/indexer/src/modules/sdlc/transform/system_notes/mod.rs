@@ -30,7 +30,7 @@ use chrono::Utc;
 use serde_json::json;
 use tracing::{debug, warn};
 
-use orbit_utils::arrow::ArrowUtils;
+use orbit_arrow::ArrowUtils;
 
 use crate::handler::HandlerError;
 use crate::modules::sdlc::datalake::DatalakeQuery;

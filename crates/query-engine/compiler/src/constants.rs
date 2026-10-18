@@ -28,6 +28,7 @@ internal_col!(neighbor_id_column, "neighbor_id");
 internal_col!(neighbor_type_column, "neighbor_type");
 internal_col!(relationship_type_column, "relationship_type");
 internal_col!(neighbor_is_outgoing_column, "neighbor_is_outgoing");
+internal_col!(neighbor_traversal_path_column, "neighbor_tp");
 
 // _orbit_{alias}_pk  — always the entity's primary key (for hydration lookups)
 pub fn primary_key_column(alias: &str) -> String {
@@ -87,6 +88,10 @@ pub(crate) const ANCHOR_ID_COLUMN: &str = "anchor_id";
 pub(crate) const END_ID_COLUMN: &str = "end_id";
 
 pub(crate) const END_KIND_COLUMN: &str = "end_kind";
+
+pub(crate) const PATH_START_ID_COLUMN: &str = "path_start_id";
+
+pub(crate) const PATH_END_ID_COLUMN: &str = "path_end_id";
 
 pub(crate) const FORWARD_CTE: &str = "forward";
 
