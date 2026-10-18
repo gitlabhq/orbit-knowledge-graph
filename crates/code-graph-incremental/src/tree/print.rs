@@ -86,7 +86,8 @@ fn label<S: super::Storage<Node = super::Node>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::treesitter::{SupportLang, parse};
+    use crate::sentinel::Sentinel;
+    use crate::treesitter::{SupportLang, parse_with_sentinel};
 
     fn termtree_print<S: super::super::Storage<Node = super::super::Node>>(
         cursor: Cursor<'_, S>,
@@ -104,7 +105,15 @@ mod tests {
     fn a_small_tree_prints_as_the_termtree_printer_did() {
         let lang = Lang::default();
         let source = "class A:\n    def f(self, x):\n        return g(x, [1, 2])\n";
-        let tree = parse(source, SupportLang::Python, &lang, "a.py").unwrap();
+        let (tree, _) = parse_with_sentinel(
+            source.as_bytes().into(),
+            SupportLang::Python,
+            &lang,
+            "a.py",
+            &Sentinel::disabled(),
+            0,
+        )
+        .unwrap();
         for color in [false, true] {
             assert_eq!(
                 pretty_print(&tree, &lang, color),
@@ -117,7 +126,15 @@ mod tests {
     fn a_symbol_with_a_multibyte_character_at_the_cut_prints() {
         let lang = Lang::default();
         let path = format!("{}é{}.py", "a".repeat(49), "b".repeat(10));
-        let tree = parse("x = 1\n", SupportLang::Python, &lang, &path).unwrap();
+        let (tree, _) = parse_with_sentinel(
+            b"x = 1\n".as_slice().into(),
+            SupportLang::Python,
+            &lang,
+            &path,
+            &Sentinel::disabled(),
+            0,
+        )
+        .unwrap();
         let printed = pretty_print(&tree, &lang, false);
         assert!(printed.starts_with(&format!("module {:?}...", "a".repeat(49))));
     }
@@ -127,7 +144,15 @@ mod tests {
         let lang = Lang::default();
         let levels = 5_000;
         let source = format!("x = {}1{}\n", "[".repeat(levels), "]".repeat(levels));
-        let tree = parse(&source, SupportLang::Python, &lang, "deep.py").unwrap();
+        let (tree, _) = parse_with_sentinel(
+            source.into_bytes().into(),
+            SupportLang::Python,
+            &lang,
+            "deep.py",
+            &Sentinel::disabled(),
+            0,
+        )
+        .unwrap();
         let lines = std::thread::scope(|scope| {
             std::thread::Builder::new()
                 .stack_size(256 * 1024)
