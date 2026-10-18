@@ -24,13 +24,12 @@ tests/
 | Binary | Tests | CI job |
 |---|---|---|
 | `local` | compiler and querying pipeline, no Docker | `compiler-integration-test` |
-| `server_containers` | Server tests with ClickHouse | `integration-test`, `integration-test-data-correctness`, `corpus-smoke-test` |
-| `indexer_containers` | Indexer tests with ClickHouse and NATS | `integration-test`, `integration-test-data-correctness` |
+| `server_containers` | Server tests with ClickHouse | `integration-test` |
+| `indexer_containers` | Indexer tests with ClickHouse and NATS | `integration-test` |
 | `cli` | the `orbit` CLI | `cli-integration-test` |
 | `billing_boundary` | only `orbit-server` depends on `orbit-billing` | `billing-boundary-check` |
 
-The three container-test lanes run each container test one time.
-`integration-test-lane-coverage-check` fails if a test is in no lane or in two lanes.
+The container integration job runs each container test one time.
 
 New correctness tests are YAML suites. See
 [Testing principles](../../docs/design-documents/testing.md#testing-principles).

@@ -175,6 +175,7 @@ stages:
     - .job-template
     - .sccache-template
   variables:
+    CARGO_PROFILE_TEST_DEBUG: "0"
     RUST_BACKTRACE: "1"
   artifacts:
     when: always
@@ -399,17 +400,6 @@ ddl-freshness-check:
   needs: []
   script:
     - bash ./scripts/checks/check-ddl-freshness.sh
-
-integration-test-lane-coverage-check:
-  stage: lint
-  extends:
-    - .job-template
-    - .sccache-template
-    - .mr-and-main-rules
-  needs: []
-  script:
-    - mise run lint:integration-test-lanes
-    - sccache --show-stats || true
 
 migration-ledger-check:
   stage: lint
@@ -816,13 +806,13 @@ cli-integration-test:
     - cargo nextest run --profile ci --test cli --test outside_repository --no-fail-fast
     - sccache --show-stats || true
 
-.integration-test-template:
+integration-test:
   stage: test
   extends:
     - .test-template
     - .mr-and-main-rules
   tags:
-    - ${RUNNER_LARGE}
+    - saas-linux-xlarge-amd64
   services:
     - name: docker:dind
       alias: docker
@@ -838,52 +828,7 @@ cli-integration-test:
       docker pull nats:2.15.0-alpine &
       wait
   script:
-    - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --test indexer_containers -E "$NEXTEST_FILTER"
-    - sccache --show-stats || true
-
-integration-test:
-  extends: .integration-test-template
-  variables:
-    NEXTEST_FILTER: >-
-      not test(corpus_smoke) & not (
-        test(=indexer::sdlc::scenario_indexing) |
-        test(=server::data_correctness::data_correctness_scenarios) |
-        test(=server::data_correctness::data_correctness) |
-        test(=server::performance::performance_queries)
-      )
-
-integration-test-data-correctness:
-  extends: .integration-test-template
-  variables:
-    NEXTEST_FILTER: >-
-      test(=indexer::sdlc::scenario_indexing) |
-      test(=server::data_correctness::data_correctness_scenarios) |
-      test(=server::data_correctness::data_correctness) |
-      test(=server::performance::performance_queries)
-
-corpus-smoke-test:
-  stage: test
-  extends:
-    - .test-template
-    - .mr-and-main-rules
-  tags:
-    - ${RUNNER_LARGE}
-  services:
-    - name: docker:dind
-      alias: docker
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    TESTCONTAINERS_HOST_OVERRIDE: docker
-    NEXTEST_FILTER: test(corpus_smoke)
-  needs: []
-  before_script:
-    - !reference [.sccache-template, before_script]
-    - docker pull clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}
-  script:
-    # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
-    # against a real ClickHouse schema (no correctness assertions).
-    - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --no-capture -E "$NEXTEST_FILTER"
+    - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --test indexer_containers
     - sccache --show-stats || true
 
 # Benchmark Stage

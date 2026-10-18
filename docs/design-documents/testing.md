@@ -169,7 +169,7 @@ mise test:integration
 | `mise test:integration:corpus` | The query corpus and the executable docs |
 | `mise test:integration:overlay <name>` | Data correctness with an ontology overlay |
 
-CI splits the container tests into lanes that run in parallel. One lane runs most tests, one runs the data-driven tests, and one runs the query corpus. The `integration-test-lane-coverage-check` job fails if a test is in no lane or in two lanes.
+CI runs the container tests together on an xlarge runner. Nextest runs independent tests in parallel after Cargo builds the two test binaries.
 
 ### Query scenarios
 
@@ -212,7 +212,7 @@ Orbit sends analytics and usage billing events through [labkit-rs](https://gitla
 
 ### Query corpus and executable docs
 
-The `corpus-smoke-test` job runs a large set of queries through the production query stages against seeded ClickHouse. A stub replaces the authorization stage, and a mock serves Gitaly content. The queries come from three places:
+The container integration job runs a large query corpus through the production query stages against seeded ClickHouse. A stub replaces the authorization stage, and a mock serves Gitaly content. The queries come from three places:
 
 - The curated GQL corpus in [`fixtures/queries/corpus`](../../fixtures/queries/corpus).
 - The named queries in `config/named_queries`, each in JSON and GQL.
