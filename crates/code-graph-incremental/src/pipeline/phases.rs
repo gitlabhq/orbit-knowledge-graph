@@ -36,16 +36,6 @@ impl Phase<()> for Prepare {
     }
 }
 
-fn read(
-    repository: &orbit_utils::vfs::Vfs<()>,
-    path: &str,
-) -> std::io::Result<std::sync::Arc<[u8]>> {
-    let bytes = repository.read(path)?;
-    std::str::from_utf8(&bytes)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    Ok(bytes)
-}
-
 fn workset(
     context: &mut Context,
     mut state: State,
@@ -78,7 +68,7 @@ fn workset(
                 context.report.limited.push(limited);
                 continue;
             }
-            match read(repository, path) {
+            match repository.read(path) {
                 Ok(content) => state.configs.push(SourceFile {
                     path: path.into(),
                     content,
@@ -280,7 +270,7 @@ impl IntoParallel for SourcePaths {
     ) -> impl ParallelIterator<Item = Result<SourceFile, String>> {
         self.paths
             .into_par_iter()
-            .map(move |path| match read(repository, &path) {
+            .map(move |path| match repository.read(&path) {
                 Ok(content) => Ok(SourceFile { path, content }),
                 Err(_) => Err(path),
             })
@@ -382,7 +372,7 @@ impl ItemPhase<Rewritten> for Canonicalize {
         for (node, path) in imports {
             tree.set_tag(node, key, path);
         }
-        tree.source = std::sync::Arc::from([]);
+        tree.source = Default::default();
         Ok(Canonical(tree.compact_and_remap(), cut))
     }
 }

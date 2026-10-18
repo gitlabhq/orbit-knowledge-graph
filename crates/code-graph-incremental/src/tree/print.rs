@@ -106,7 +106,7 @@ mod tests {
         let lang = Lang::default();
         let source = "class A:\n    def f(self, x):\n        return g(x, [1, 2])\n";
         let (tree, _) = parse_with_sentinel(
-            source.as_bytes().into(),
+            source.into(),
             SupportLang::Python,
             &lang,
             "a.py",
@@ -127,7 +127,7 @@ mod tests {
         let lang = Lang::default();
         let path = format!("{}é{}.py", "a".repeat(49), "b".repeat(10));
         let (tree, _) = parse_with_sentinel(
-            b"x = 1\n".as_slice().into(),
+            "x = 1\n".into(),
             SupportLang::Python,
             &lang,
             &path,
@@ -145,7 +145,7 @@ mod tests {
         let levels = 5_000;
         let source = format!("x = {}1{}\n", "[".repeat(levels), "]".repeat(levels));
         let (tree, _) = parse_with_sentinel(
-            source.into_bytes().into(),
+            source.into(),
             SupportLang::Python,
             &lang,
             "deep.py",

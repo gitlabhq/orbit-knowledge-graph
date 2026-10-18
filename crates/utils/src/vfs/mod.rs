@@ -23,6 +23,7 @@ mod limits;
 mod loading;
 mod policy;
 mod scratch;
+mod source_text;
 pub mod sources;
 mod store;
 
@@ -36,6 +37,7 @@ use std::sync::Arc;
 pub use limits::{CapExceeded, LimitKind, Limits};
 pub use loading::{ContentReader, Loading, Put};
 pub use policy::{Decision, File, Pass, Tag, Then};
+pub use source_text::SourceText;
 pub use store::{Kind, Stat, Vfs};
 
 pub trait Source {

@@ -47,7 +47,7 @@ fn native_sources_keep_host_paths_for_lazy_reads() {
                 .collect::<Vec<_>>(),
             ["src/file.rs"]
         );
-        assert_eq!(&*vfs.read("src/file.rs").unwrap(), b"after!");
+        assert_eq!(&*vfs.read("src/file.rs").unwrap(), "after!");
     }
 }
 
@@ -85,7 +85,7 @@ fn archives_keep_unix_names_and_link_targets() {
     )
     .unwrap();
     for path in [r"dir\name/file", "alias", "hard"] {
-        assert_eq!(&*vfs.read(path).unwrap(), b"data");
+        assert_eq!(&*vfs.read(path).unwrap(), "data");
     }
 }
 
@@ -103,8 +103,8 @@ fn native_names_are_lossless_and_links_stay_virtual() {
         Options::default(),
     )
     .unwrap();
-    assert_eq!(&*vfs.read("alias").unwrap(), b"data");
-    assert_eq!(&*vfs.read(r"file\name").unwrap(), b"data");
+    assert_eq!(&*vfs.read("alias").unwrap(), "data");
+    assert_eq!(&*vfs.read(r"file\name").unwrap(), "data");
 }
 
 #[cfg(target_os = "linux")]

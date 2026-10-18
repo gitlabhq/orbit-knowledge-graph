@@ -241,8 +241,8 @@ mod tests {
         ]);
         let vfs = load(&data).unwrap();
         assert_eq!(paths(&vfs), ["src/lib.rs", "src/main.rs"]);
-        assert_eq!(&*vfs.read("src/main.rs").unwrap(), b"fn main() {}");
-        assert_eq!(&*vfs.read("src/lib.rs").unwrap(), b"pub mod lib;");
+        assert_eq!(&*vfs.read("src/main.rs").unwrap(), "fn main() {}");
+        assert_eq!(&*vfs.read("src/lib.rs").unwrap(), "pub mod lib;");
         assert_eq!(
             vfs.stat("project-main").unwrap_err().kind(),
             ErrorKind::NotFound
@@ -318,7 +318,7 @@ mod tests {
             }
             let vfs = load(&gzip(&builder.into_inner().unwrap())).unwrap();
             assert_eq!(paths(&vfs), ["caf\u{fffd}.py"]);
-            assert_eq!(&*vfs.read("caf\u{fffd}.py").unwrap(), b"real\n");
+            assert_eq!(&*vfs.read("caf\u{fffd}.py").unwrap(), "real\n");
         }
     }
 
@@ -362,7 +362,7 @@ mod tests {
                 .unwrap();
             let vfs = load(&gzip(&builder.into_inner().unwrap())).unwrap();
             assert_eq!(paths(&vfs), ["src/main.rs"]);
-            assert_eq!(&*vfs.read("src/main.rs").unwrap(), content);
+            assert_eq!(vfs.read("src/main.rs").unwrap().as_bytes(), content);
         }
     }
 
@@ -387,9 +387,9 @@ mod tests {
         let vfs = load(&gzip(&builder.into_inner().unwrap())).unwrap();
         assert_eq!(paths(&vfs), ["alias", "file", "hard", "other"]);
         for path in ["file", "alias", "hard"] {
-            assert_eq!(&*vfs.read(path).unwrap(), b"data");
+            assert_eq!(&*vfs.read(path).unwrap(), "data");
         }
-        assert_eq!(&*vfs.read("other").unwrap(), b"other");
+        assert_eq!(&*vfs.read("other").unwrap(), "other");
     }
 
     // crates/utils/src/archive.rs::tests::skips_entry_outside_archive_root_and_keeps_the_rest
@@ -402,8 +402,8 @@ mod tests {
         ]);
         let vfs = load(&data).unwrap();
         assert_eq!(paths(&vfs), ["file1.rs", "file3.rs"]);
-        assert_eq!(&*vfs.read("file1.rs").unwrap(), b"a");
-        assert_eq!(&*vfs.read("file3.rs").unwrap(), b"c");
+        assert_eq!(&*vfs.read("file1.rs").unwrap(), "a");
+        assert_eq!(&*vfs.read("file3.rs").unwrap(), "c");
     }
 
     // crates/utils/src/archive.rs::tests::skips_entry_whose_name_is_too_long_and_keeps_the_rest — virtual names remain readable.
@@ -416,8 +416,8 @@ mod tests {
         ]);
         let vfs = load(&data).unwrap();
         assert_eq!(paths(&vfs), ["src/main.rs", &name]);
-        assert_eq!(&*vfs.read("src/main.rs").unwrap(), b"fn main() {}");
-        assert_eq!(&*vfs.read(&name).unwrap(), b"unwritable");
+        assert_eq!(&*vfs.read("src/main.rs").unwrap(), "fn main() {}");
+        assert_eq!(&*vfs.read(&name).unwrap(), "unwritable");
     }
 
     // crates/utils/src/archive.rs::tests::skips_entry_whose_directory_name_is_too_long_and_keeps_the_rest — virtual directories have no host limit.
@@ -431,8 +431,8 @@ mod tests {
         ]);
         let vfs = load(&data).unwrap();
         assert_eq!(paths(&vfs), ["src/main.rs", &path]);
-        assert_eq!(&*vfs.read("src/main.rs").unwrap(), b"fn main() {}");
-        assert_eq!(&*vfs.read(&path).unwrap(), b"unwritable");
+        assert_eq!(&*vfs.read("src/main.rs").unwrap(), "fn main() {}");
+        assert_eq!(&*vfs.read(&path).unwrap(), "unwritable");
         assert_eq!(vfs.read_dir(&directory).unwrap(), ["f.rs"]);
     }
 
@@ -472,7 +472,7 @@ mod tests {
             Entry::Symlink("root/parent", "../legit.txt"),
         ]);
         let vfs = load(&data).unwrap();
-        assert_eq!(&*vfs.read("legit.txt").unwrap(), b"hello");
+        assert_eq!(&*vfs.read("legit.txt").unwrap(), "hello");
         for path in ["escape", "parent"] {
             assert_eq!(vfs.read(path).unwrap_err().kind(), ErrorKind::NotFound);
         }
@@ -494,7 +494,7 @@ mod tests {
         );
         assert_eq!(vfs.read("escape").unwrap_err().kind(), ErrorKind::NotFound);
         assert_eq!(vfs.stat("escape").unwrap_err().kind(), ErrorKind::NotFound);
-        assert_eq!(&*vfs.read("legit.txt").unwrap(), b"hello");
+        assert_eq!(&*vfs.read("legit.txt").unwrap(), "hello");
     }
 
     // crates/utils/src/archive.rs::tests::allows_valid_internal_symlink
@@ -505,7 +505,7 @@ mod tests {
             Entry::Symlink("root/bin/run", "../src/lib.rs"),
         ]);
         let vfs = load(&data).unwrap();
-        assert_eq!(&*vfs.read("bin/run").unwrap(), b"real content");
+        assert_eq!(&*vfs.read("bin/run").unwrap(), "real content");
         assert_eq!(
             vfs.stat("bin/run").unwrap().link.as_deref(),
             Some("../src/lib.rs")
@@ -554,7 +554,7 @@ mod tests {
             );
             assert_eq!(vfs.read(path).unwrap_err().kind(), ErrorKind::Unsupported);
         }
-        assert_eq!(&*vfs.read("src/main.rs").unwrap(), b"fn main() {}");
+        assert_eq!(&*vfs.read("src/main.rs").unwrap(), "fn main() {}");
         assert_eq!(vfs.usage().resident, 12);
         assert_eq!(vfs.usage().spilled, 0);
     }
@@ -562,10 +562,10 @@ mod tests {
     // crates/utils/src/archive.rs::tests::text_file_larger_than_sniff_window_is_written_in_full
     #[test]
     fn text_file_larger_than_sniff_window_is_stored_in_full() {
-        let body: Vec<u8> = (0..12_000).map(|i| ((i % 254) + 1) as u8).collect();
+        let body = "café 日本語🦀\n".repeat(1_000).into_bytes();
         let data = build_archive(&[Entry::File("project-main/big.txt", &body)]);
         let vfs = load(&data).unwrap();
-        assert_eq!(&*vfs.read("big.txt").unwrap(), body);
+        assert_eq!(vfs.read("big.txt").unwrap().as_bytes(), body);
         assert_eq!(vfs.stat("big.txt").unwrap().len, body.len() as u64);
     }
 
@@ -617,7 +617,7 @@ mod tests {
             ]);
             let vfs = load(&data).unwrap();
             assert_eq!(paths(&vfs), ["right.rs"]);
-            assert_eq!(&*vfs.read("right.rs").unwrap(), b"right");
+            assert_eq!(&*vfs.read("right.rs").unwrap(), "right");
         }
     }
 

@@ -73,7 +73,7 @@ fn catalog_preserves_empty_rejected_and_replaced_files() {
             .collect::<Vec<_>>(),
         ["binary", "ignored.skip", "src/empty", "src/file"]
     );
-    assert_eq!(&*vfs.read("/src/../src/file").unwrap(), b"new");
+    assert_eq!(&*vfs.read("/src/../src/file").unwrap(), "new");
     assert!(vfs.read("src/empty").unwrap().is_empty());
     assert_eq!(
         vfs.read_dir("/").unwrap(),
@@ -120,7 +120,7 @@ fn virtual_links_resolve_only_inside_the_catalog() {
         .map(|(path, target)| (path, Put::Symlink(target.into()))),
     );
     let vfs = load(inputs, ());
-    assert_eq!(&*vfs.read("chain/link").unwrap(), b"data");
+    assert_eq!(&*vfs.read("chain/link").unwrap(), "data");
     assert_eq!(vfs.read_dir("alias").unwrap(), ["file", "link"]);
     assert_eq!(vfs.subtree("chain").count(), 2);
     let stat = vfs.stat("chain/link").unwrap();
@@ -153,12 +153,12 @@ fn virtual_paths_have_the_same_syntax_on_every_platform() {
         "dir/relative",
         "dir/rooted",
     ] {
-        assert_eq!(&*vfs.read(path).unwrap(), b"backslash");
+        assert_eq!(&*vfs.read(path).unwrap(), "backslash");
         assert_eq!(vfs.stat(path).unwrap().path, r"/dir\name/file");
     }
-    assert_eq!(&*vfs.read("dir/name/file").unwrap(), b"slash");
-    assert_eq!(&*vfs.read(r"C:\repo\file").unwrap(), b"drive");
-    assert_eq!(&*vfs.read(r"\\server\share\file").unwrap(), b"unc");
+    assert_eq!(&*vfs.read("dir/name/file").unwrap(), "slash");
+    assert_eq!(&*vfs.read(r"C:\repo\file").unwrap(), "drive");
+    assert_eq!(&*vfs.read(r"\\server\share\file").unwrap(), "unc");
     assert_eq!(vfs.read_dir(r"dir\name").unwrap(), ["file"]);
     assert_eq!(vfs.subtree(r"dir\name").count(), 1);
     assert_eq!(vfs.read("escape").unwrap_err().kind(), ErrorKind::NotFound);
@@ -187,7 +187,7 @@ fn large_unsorted_catalog_keeps_the_last_version_of_each_path() {
     assert_eq!(vfs.usage().duplicate_paths, 10_000);
     for (index, file) in vfs.files().enumerate() {
         assert_eq!(file.path, format!("dir/{index:05}"));
-        assert_eq!(&*vfs.read(file.path.as_ref()).unwrap(), b"new");
+        assert_eq!(&*vfs.read(file.path.as_ref()).unwrap(), "new");
     }
     assert_eq!(vfs.subtree("dir").count(), 10_000);
     assert_eq!(vfs.read_dir("dir").unwrap().len(), 10_000);
@@ -217,19 +217,19 @@ fn storage_modes_share_content_and_enforce_exact_budgets() {
         .unwrap();
         let a = vfs.read("a").unwrap();
         let b = vfs.read("b").unwrap();
-        assert_eq!(&*a, body);
-        assert_eq!(&*b, body);
+        assert_eq!(a.as_bytes(), body);
+        assert_eq!(b.as_bytes(), body);
         assert_eq!(vfs.usage().deduped_bytes, 4096);
         assert_eq!(vfs.usage().resident, resident);
         if resident > 0 {
-            assert!(Arc::ptr_eq(&a, &b));
+            assert_eq!(a.as_ptr(), b.as_ptr());
         } else if compress {
             assert!(vfs.usage().spilled < 4096);
         } else {
             assert_eq!(vfs.usage().spilled, 4096);
         }
         drop(vfs);
-        assert_eq!(&*a, body);
+        assert_eq!(a.as_bytes(), body);
     }
     for metric in [
         LimitKind::Files,
@@ -288,6 +288,71 @@ fn storage_modes_share_content_and_enforce_exact_budgets() {
 }
 
 #[test]
+fn reads_return_shared_utf8_text_in_every_storage_mode() {
+    let body = "café 日本語🦀";
+    for (resident, compress) in [(1024, false), (0, false), (0, true)] {
+        let vfs = Vfs::load(
+            [
+                ("text", Put::Bytes(body.as_bytes().to_vec())),
+                ("invalid", Put::Bytes(vec![0xff])),
+            ],
+            (),
+            Limits {
+                resident_bytes: Some(resident),
+                ..Limits::default()
+            },
+            Options {
+                compress_spill: compress,
+                ..Options::default()
+            },
+        )
+        .unwrap();
+        let text = vfs.read("text").unwrap();
+        let cloned = text.clone();
+        assert_eq!(text.as_ptr(), cloned.as_ptr());
+        if resident > 0 {
+            assert_eq!(text.as_ptr(), vfs.read("text").unwrap().as_ptr());
+        }
+        assert_eq!(
+            vfs.read("invalid").unwrap_err().kind(),
+            ErrorKind::InvalidData
+        );
+        assert_eq!(vfs.usage().kept, body.len() as u64);
+        assert_eq!(vfs.files().count(), 2);
+        drop(vfs);
+        drop(text);
+        assert_eq!(&*cloned, body);
+        assert_eq!(cloned.get(..5), Some("café"));
+        assert_eq!(cloned.get(..4), None);
+    }
+}
+
+#[test]
+fn on_demand_reads_validate_each_new_buffer_after_classification() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let reads = attempts.clone();
+    let classifications = Arc::new(AtomicUsize::new(0));
+    let vfs = load(
+        [(
+            "live",
+            read_on_demand(2, move |_| {
+                Ok(match reads.fetch_add(1, SeqCst) {
+                    1 => vec![0xff, 0xff],
+                    _ => "é".as_bytes().to_vec(),
+                })
+            }),
+        )],
+        Filter(classifications.clone()),
+    );
+    assert_eq!(&*vfs.read("live").unwrap(), "é");
+    assert_eq!(vfs.read("live").unwrap_err().kind(), ErrorKind::InvalidData);
+    assert_eq!(&*vfs.read("live").unwrap(), "é");
+    assert_eq!(attempts.load(SeqCst), 3);
+    assert_eq!(classifications.load(SeqCst), 1);
+    assert_eq!(vfs.usage().resident, 0);
+}
+
+#[test]
 fn the_file_limit_counts_kept_files_and_drops_listed_entries_past_it() {
     let listed = |i| {
         (
@@ -325,6 +390,7 @@ fn directory_classification_retains_accepted_bytes_in_memory_or_scratch() {
         let content = b"fn main() {}";
         std::fs::write(&path, content).unwrap();
         std::fs::write(root.path().join("binary.rs"), b"\0binary").unwrap();
+        std::fs::write(root.path().join("invalid.rs"), [0xff]).unwrap();
         let vfs = Vfs::load(
             super::sources::Directory(root.path()),
             crate::vfs_policies::CodePolicy,
@@ -337,11 +403,19 @@ fn directory_classification_retains_accepted_bytes_in_memory_or_scratch() {
         .unwrap();
         std::fs::remove_file(path).unwrap();
         for _ in 0..2 {
-            assert_eq!(&*vfs.read("main.rs").unwrap(), content);
+            assert_eq!(vfs.read("main.rs").unwrap().as_bytes(), content);
         }
         assert_eq!(
             vfs.read("binary.rs").unwrap_err().kind(),
             ErrorKind::Unsupported
+        );
+        assert_eq!(
+            vfs.read("invalid.rs").unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+        assert_eq!(
+            vfs.stat("invalid.rs").unwrap().decision,
+            Some(Decision::List("not_utf8"))
         );
         let usage = vfs.usage();
         assert_eq!(
@@ -389,7 +463,7 @@ fn metadata_keep_stores_content_unless_laziness_is_explicit() {
         assert_eq!(reads.load(SeqCst), usize::from(!lazy));
         assert!(vfs.files().next().unwrap().keeps());
         for _ in 0..2 {
-            assert_eq!(&*vfs.read("file").unwrap(), b"x");
+            assert_eq!(&*vfs.read("file").unwrap(), "x");
         }
         assert_eq!(reads.load(SeqCst), if lazy { 2 } else { 1 });
         assert_eq!(vfs.files().next().unwrap().decision(), Decision::Keep(()));
@@ -412,6 +486,7 @@ fn policy_composition_preserves_laziness_and_borrowed_content() {
         }
         fn content(&self, file: &File<'_, u8>) -> Decision<u8> {
             assert_eq!(file.bytes(), Some([].as_slice()));
+            assert_eq!(file.text(), Some(""));
             self.0.fetch_add(1, SeqCst);
             let (Decision::Keep(tag) | Decision::KeepLazy(tag)) = file.decision() else {
                 panic!("metadata must keep the file");
@@ -499,7 +574,7 @@ fn reader_failures_remain_cataloged_and_later_failures_are_retryable() {
     assert_eq!(vfs.read("failed").unwrap_err().to_string(), "denied");
     assert_eq!(calls.load(SeqCst), 0);
     for _ in 0..2 {
-        assert_eq!(&*vfs.read("retry").unwrap(), b"data");
+        assert_eq!(&*vfs.read("retry").unwrap(), "data");
     }
     assert_eq!(calls.load(SeqCst), 1);
     assert_eq!(
@@ -559,7 +634,7 @@ fn concurrent_loading_and_first_reads_preserve_content_and_classify_once() {
             scope.spawn(move || {
                 start.wait();
                 assert_eq!(vfs.read("lazy").unwrap_err().kind(), ErrorKind::Unsupported);
-                assert_eq!(&*vfs.read(format!("{worker}")).unwrap(), vec![b'x'; 128]);
+                assert_eq!(&*vfs.read(format!("{worker}")).unwrap(), "x".repeat(128));
             });
         }
     });

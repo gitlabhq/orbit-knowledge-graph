@@ -43,14 +43,15 @@ impl Pass for CodePolicy {
         let Some(bytes) = file.bytes() else {
             return Decision::Pending;
         };
-        if is_lfs_pointer(bytes) {
+        let text = file.text();
+        if text.is_some_and(is_lfs_pointer) {
             return Decision::List("lfs_pointer");
         }
         let sniff = &bytes[..bytes.len().min(BINARY_SNIFF_BYTES)];
         if looks_binary(sniff) {
             return Decision::List("binary");
         }
-        if std::str::from_utf8(bytes).is_err() {
+        if text.is_none() {
             return Decision::List("not_utf8");
         }
         minified_skip(bytes).map_or(Decision::Keep(()), Decision::List)
@@ -69,13 +70,12 @@ fn is_excluded_from_indexing(path: &str) -> bool {
             .any(|suffix| name.ends_with(suffix))
 }
 
-fn is_lfs_pointer(bytes: &[u8]) -> bool {
-    if bytes.len() > LFS_POINTER_MAX_BYTES || !bytes.starts_with(LFS_POINTER_VERSION_PREFIX) {
+fn is_lfs_pointer(text: &str) -> bool {
+    if text.len() > LFS_POINTER_MAX_BYTES
+        || !text.as_bytes().starts_with(LFS_POINTER_VERSION_PREFIX)
+    {
         return false;
     }
-    let Ok(text) = std::str::from_utf8(bytes) else {
-        return false;
-    };
     let has_object_id = text.lines().any(|line| {
         line.strip_prefix(LFS_OBJECT_ID_PREFIX).is_some_and(|id| {
             id.len() == SHA256_HEX_LENGTH

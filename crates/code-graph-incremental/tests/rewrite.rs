@@ -84,6 +84,26 @@ fn name_of(env: &Env, node: Cursor) -> String {
 }
 
 #[test]
+fn unicode_names_survive_rewriting_after_source_release() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::write(
+        repo.path().join("main.py"),
+        "def café():\n    return '日本語🦀'\n",
+    )
+    .unwrap();
+    let env = python_env(Limits::UNLIMITED);
+    let (trees, skipped) = rewrite_repo(&env, repo.path());
+    assert!(skipped.is_empty());
+    assert_eq!(trees.len(), 1);
+    let tree = &trees[0].0;
+    assert!(tree.source.is_empty());
+    let names: Vec<_> = nodes(tree, C::DefName)
+        .map(|node| env.lang.syms.resolve(node.sym()))
+        .collect();
+    assert_eq!(names, ["café"]);
+}
+
+#[test]
 fn a_python_file_rewrites_into_only_canonical_nodes() {
     let repo = tempfile::tempdir().unwrap();
     std::fs::write(repo.path().join("main.py"), MAIN).unwrap();

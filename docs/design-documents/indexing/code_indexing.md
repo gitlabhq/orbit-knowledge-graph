@@ -259,7 +259,8 @@ Generic cursor navigation works with any payload; code-specific helpers speciali
 `indextree` for structural rewrites. `Compact` stores node payloads and five
 32-bit links in a contiguous vector. Both use the same cursor operations.
 Parsing keeps source-backed text as byte spans until a rule needs a symbol.
-Parse and rewrite share the VFS read buffer rather than copying it into a string and then a tree.
+VFS reads return validated UTF-8 text backed by a shared buffer. Parse and rewrite retain that buffer and use checked string slices.
+Resident reads clone the validated handle. Spilled and on-demand reads validate each materialized buffer; excluded binary files retain only metadata.
 Canonicalization interns surviving text, releases the source, and builds compact
 storage directly from live nodes in preorder, before linking assigns edges.
 The compact vector reserves the live-node count rather than growing during conversion.

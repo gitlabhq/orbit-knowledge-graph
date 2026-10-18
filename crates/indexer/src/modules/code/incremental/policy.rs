@@ -31,7 +31,7 @@ fn assert_matches_legacy(path: &str, bytes: &[u8]) {
         bytes.len()
     );
     if expected == Decision::Keep(()) {
-        assert_eq!(&*repository.read(path).unwrap(), bytes, "{path}");
+        assert_eq!(repository.read(path).unwrap().as_bytes(), bytes, "{path}");
     } else {
         assert_eq!(
             repository.read(path).unwrap_err().kind(),

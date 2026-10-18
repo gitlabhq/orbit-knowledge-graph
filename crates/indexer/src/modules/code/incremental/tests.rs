@@ -787,8 +787,8 @@ async fn loading_retains_filtered_metadata_and_spills_at_the_memory_limit() {
         config.source_memory_budget_bytes = budget;
         let repository = load(stream(archive.clone()), &config).await.unwrap();
         assert_eq!(repository.usage().files, 4);
-        assert_eq!(&*repository.read("src/main.rs").unwrap(), b"fn main() {}");
-        assert_eq!(&*repository.read("Cargo.toml").unwrap(), b"[package]");
+        assert_eq!(&*repository.read("src/main.rs").unwrap(), "fn main() {}");
+        assert_eq!(&*repository.read("Cargo.toml").unwrap(), "[package]");
         for (path, reason) in [("image.png", "excluded_extension"), ("binary.rs", "binary")] {
             assert_eq!(
                 repository.stat(path).unwrap().decision,

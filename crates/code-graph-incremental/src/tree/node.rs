@@ -36,7 +36,6 @@ impl<S: Storage<Node = Node>> Tree<S> {
         }
         self.source
             .get(node.start as usize..node.end as usize)
-            .and_then(|bytes| std::str::from_utf8(bytes).ok())
             .unwrap_or("")
     }
 

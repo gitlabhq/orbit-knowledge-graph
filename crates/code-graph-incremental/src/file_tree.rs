@@ -146,7 +146,7 @@ impl<'a> ProjectTree<'a> {
             .files
             .unwrap_or(&[])
             .iter()
-            .filter_map(|f| Some((f.path.as_str(), std::str::from_utf8(&f.content).ok()?)))
+            .map(|f| (f.path.as_str(), &*f.content))
             .collect();
 
         let mut kids: Vec<FxHashSet<(&str, bool)>> = vec![FxHashSet::default()];

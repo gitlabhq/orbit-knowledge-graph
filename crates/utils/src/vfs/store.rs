@@ -10,7 +10,9 @@ use typed_path::{Utf8UnixComponent, Utf8UnixPath, Utf8UnixPathBuf};
 
 use super::loading::{Content, Loading, VfsEntry};
 use super::scratch::Scratch;
-use super::{Bytes, Decision, File, Limits, Options, Pass, Source, SourceError, Tag, Usage};
+use super::{
+    Bytes, Decision, File, Limits, Options, Pass, Source, SourceError, SourceText, Tag, Usage,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -48,7 +50,7 @@ impl<T: Tag> Vfs<T> {
         Ok(loading.finish())
     }
 
-    pub fn read(&self, path: impl AsRef<str>) -> io::Result<Bytes> {
+    pub fn read(&self, path: impl AsRef<str>) -> io::Result<SourceText> {
         let (key, _) = self.resolve(path.as_ref())?;
         let Some(entry) = self.entry(&key) else {
             return Err(match self.is_dir(&key) {
@@ -61,8 +63,8 @@ impl<T: Tag> Vfs<T> {
         if matches!(entry.file.decision(), Decision::List(_)) {
             return Err(unsupported(&entry.file));
         }
-        let bytes = match &entry.content {
-            Content::Memory(bytes) => bytes.clone(),
+        let bytes: Bytes = match &entry.content {
+            Content::Memory(text) => return Ok(text.clone()),
             Content::Spilled {
                 offset,
                 len,
@@ -88,8 +90,12 @@ impl<T: Tag> Vfs<T> {
             Content::Failed(error) => return Err(io::Error::new(error.kind(), error.clone())),
             Content::Symlink(_) => return Err(not_found()),
         };
-        match entry.file.classify(&*self.passes, &bytes) {
-            Decision::Keep(_) => Ok(bytes),
+        let text = SourceText::try_from(bytes.clone());
+        match entry
+            .file
+            .classify(&*self.passes, &bytes, text.as_deref().ok())
+        {
+            Decision::Keep(_) => text,
             _ => Err(unsupported(&entry.file)),
         }
     }

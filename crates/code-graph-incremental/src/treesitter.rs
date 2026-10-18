@@ -237,7 +237,7 @@ fn grammar_to_ts_language(grammar: &str) -> tree_sitter::Language {
 }
 
 fn from_tree_sitter(
-    source: std::sync::Arc<[u8]>,
+    source: orbit_utils::vfs::SourceText,
     ts_tree: &tree_sitter::Tree,
     lang: &Lang,
     kind_map: &[u16],
@@ -257,9 +257,7 @@ fn from_tree_sitter(
     let root_sym = if !label.is_empty() {
         lang.syms.intern(label)
     } else if cursor.node().is_named() {
-        let text =
-            std::str::from_utf8(&source[cursor.node().start_byte()..cursor.node().end_byte()])
-                .expect("source was validated before parsing");
+        let text = &source[cursor.node().start_byte()..cursor.node().end_byte()];
         lang.syms.intern(text)
     } else {
         0
@@ -385,7 +383,7 @@ thread_local! {
 }
 
 pub fn parse_with_sentinel(
-    source: std::sync::Arc<[u8]>,
+    source: orbit_utils::vfs::SourceText,
     support_lang: SupportLang,
     lang: &Lang,
     label: &str,
@@ -410,7 +408,8 @@ pub fn parse_with_sentinel(
             stopped = Some(stop);
             ControlFlow::Break(())
         };
-        let mut input = |offset: usize, _: tree_sitter::Point| source.get(offset..).unwrap_or(&[]);
+        let mut input =
+            |offset: usize, _: tree_sitter::Point| source.as_bytes().get(offset..).unwrap_or(&[]);
         let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
         let ts_tree = c
             .parser
@@ -507,7 +506,7 @@ mod tests {
             .stack_size(224 * 1024)
             .spawn(move || {
                 parse_with_sentinel(
-                    source.into_bytes().into(),
+                    source.into(),
                     SupportLang::Python,
                     &Lang::default(),
                     "main.py",
@@ -530,7 +529,7 @@ mod tests {
         let source = format!("{}{}", "{\n".repeat(levels), "}\n".repeat(levels));
         let started = cpu_time::ThreadTime::now();
         let killed = parse_with_sentinel(
-            source.into_bytes().into(),
+            source.into(),
             SupportLang::JavaScript,
             &Lang::default(),
             "deep.js",
@@ -550,7 +549,7 @@ mod tests {
     fn a_tree_cut_at_the_depth_limit_reports_its_real_depth() {
         let source = format!("x = {}1{}\n", "[".repeat(50), "]".repeat(50));
         let killed = parse_with_sentinel(
-            source.into_bytes().into(),
+            source.into(),
             SupportLang::Python,
             &Lang::default(),
             "deep.py",
@@ -574,7 +573,7 @@ mod tests {
         let lang = Lang::default();
         let source = "def example():\n    return 42\n".repeat(20000);
         let error = parse_with_sentinel(
-            source.into_bytes().into(),
+            source.into(),
             SupportLang::Python,
             &lang,
             "large.py",
@@ -591,7 +590,7 @@ mod tests {
         assert!(checks.load(Ordering::Relaxed) >= 2);
         assert!(
             parse_with_sentinel(
-                b"def valid(): pass\n".as_slice().into(),
+                "def valid(): pass\n".into(),
                 SupportLang::Python,
                 &lang,
                 "valid.py",

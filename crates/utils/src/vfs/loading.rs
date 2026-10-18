@@ -68,7 +68,7 @@ pub(super) struct VfsEntry<T> {
 pub(super) enum Content {
     Unavailable,
     Failed(Arc<io::Error>),
-    Memory(super::Bytes),
+    Memory(super::SourceText),
     Spilled { offset: u64, len: u64, raw_len: u64 },
     ReadOnDemand(ContentReader),
     Symlink(String),
@@ -170,9 +170,14 @@ impl<T: Tag> Loading<T> {
                 return self.record(file, Content::Failed(Arc::new(error)));
             }
         };
-        file.classify(&*self.passes, &bytes);
+        let bytes: super::Bytes = bytes.into();
+        let text = super::SourceText::try_from(bytes.clone());
+        file.classify(&*self.passes, &bytes, text.as_deref().ok());
         let content = match file.decision() {
-            Decision::Keep(_) => self.store(bytes)?,
+            Decision::Keep(_) => match text {
+                Ok(text) => self.store(text)?,
+                Err(error) => Content::Failed(Arc::new(error)),
+            },
             _ => Content::Unavailable,
         };
         self.record(file, content)
@@ -204,9 +209,9 @@ impl<T: Tag> Loading<T> {
         Ok(())
     }
 
-    fn store(&self, bytes: Vec<u8>) -> Result<Content, SourceError> {
-        let id: [u8; 32] = Sha256::digest(&bytes).into();
-        let len = bytes.len() as u64;
+    fn store(&self, text: super::SourceText) -> Result<Content, SourceError> {
+        let id: [u8; 32] = Sha256::digest(text.as_bytes()).into();
+        let len = text.len() as u64;
         let mut shard = lock(&self.blobs[id[0] as usize]);
         let blob = match shard.entry(id) {
             Entry::Occupied(entry) => {
@@ -220,8 +225,8 @@ impl<T: Tag> Loading<T> {
                     len,
                     self.limits.resident_bytes,
                 ) {
-                    Ok(_) => Content::Memory(bytes.into()),
-                    Err(_) => self.scratch.append(&bytes)?,
+                    Ok(_) => Content::Memory(text),
+                    Err(_) => self.scratch.append(text.as_bytes())?,
                 };
                 vacant.insert(blob)
             }

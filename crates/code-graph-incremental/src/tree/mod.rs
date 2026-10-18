@@ -24,7 +24,7 @@ pub struct Tree<S: Storage = Mutable> {
     pub(crate) root: S::Id,
     pub label: String,
     pub tags: FxHashMap<u32, SmallVec<[Tag; 2]>>,
-    pub source: std::sync::Arc<[u8]>,
+    pub source: orbit_utils::vfs::SourceText,
 }
 
 impl<N> Tree<Mutable<N>> {
@@ -36,7 +36,7 @@ impl<N> Tree<Mutable<N>> {
             root,
             label: String::new(),
             tags: FxHashMap::default(),
-            source: std::sync::Arc::from([]),
+            source: Default::default(),
         }
     }
 

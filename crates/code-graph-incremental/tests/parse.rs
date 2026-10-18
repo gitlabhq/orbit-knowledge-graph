@@ -24,8 +24,9 @@ fn parse_repo(env: &Env, root: &Path) -> Workset<Vec<Parsed>> {
         .unwrap()
         .into_value();
     for Parsed(tree, _) in &workset.items {
-        assert!(
-            std::sync::Arc::ptr_eq(&tree.source, &sources.read(&tree.label).unwrap()),
+        assert_eq!(
+            tree.source.as_ptr(),
+            sources.read(&tree.label).unwrap().as_ptr(),
             "parsed trees share the resident VFS source buffer"
         );
     }
@@ -38,6 +39,38 @@ fn error_nodes(tree: &Tree, env: &Env) -> usize {
         .descendants()
         .filter(|c| c.kind() == error)
         .count()
+}
+
+#[test]
+fn shared_unicode_sources_stay_valid_after_the_owner_is_dropped() {
+    use code_graph_incremental::treesitter::parse_with_sentinel;
+    use orbit_utils::vfs::SourceText;
+    use std::sync::Arc;
+
+    let bytes: Arc<[u8]> = Arc::from("é = '日本語🦀'\n".as_bytes());
+    let source = SourceText::try_from(bytes.clone()).unwrap();
+    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let (tree, _) = parse_with_sentinel(
+        source,
+        SupportLang::Python,
+        &env.lang,
+        "unicode.py",
+        &code_graph_incremental::Sentinel::disabled(),
+        0,
+    )
+    .unwrap();
+    assert_eq!(tree.source.as_ptr(), bytes.as_ptr());
+    let cloned = tree.clone();
+    assert_eq!(cloned.source.as_ptr(), tree.source.as_ptr());
+    drop(tree);
+    drop(bytes);
+
+    assert_eq!(error_nodes(&cloned, &env), 0);
+    assert_eq!(cloned.source.get(..2), Some("é"));
+    assert_eq!(cloned.source.get(..1), None);
+    assert_eq!(cloned.source.get(1..2), None);
+    assert_eq!(cloned.source.get(..usize::MAX), None);
+    assert!(SourceText::try_from(Arc::<[u8]>::from([0xff])).is_err());
 }
 
 #[test]

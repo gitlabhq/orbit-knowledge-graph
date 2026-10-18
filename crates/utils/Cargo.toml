@@ -24,6 +24,7 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 typed-path = { workspace = true }
+yoke = "0.8.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }

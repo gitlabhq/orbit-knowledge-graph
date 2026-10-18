@@ -24,6 +24,7 @@ pub struct File<'a, T> {
     pub(super) metadata_decision: Decision<T>,
     content_decision: OnceLock<Decision<T>>,
     bytes: Option<&'a [u8]>,
+    text: Option<&'a str>,
 }
 
 impl<T: Tag> File<'static, T> {
@@ -34,6 +35,7 @@ impl<T: Tag> File<'static, T> {
             metadata_decision,
             content_decision: OnceLock::new(),
             bytes: None,
+            text: None,
         }
     }
 }
@@ -41,6 +43,10 @@ impl<T: Tag> File<'static, T> {
 impl<'a, T: Tag> File<'a, T> {
     pub fn bytes(&self) -> Option<&'a [u8]> {
         self.bytes
+    }
+
+    pub fn text(&self) -> Option<&'a str> {
+        self.text
     }
 
     pub fn decision(&self) -> Decision<T> {
@@ -54,10 +60,16 @@ impl<'a, T: Tag> File<'a, T> {
         matches!(self.decision(), Decision::Keep(_) | Decision::KeepLazy(_))
     }
 
-    pub(super) fn classify(&self, pass: &dyn Pass<Tag = T>, bytes: &[u8]) -> Decision<T> {
+    pub(super) fn classify(
+        &self,
+        pass: &dyn Pass<Tag = T>,
+        bytes: &[u8],
+        text: Option<&str>,
+    ) -> Decision<T> {
         *self.content_decision.get_or_init(|| {
             match pass.content(&File {
                 bytes: Some(bytes),
+                text,
                 ..self.view()
             }) {
                 Decision::Pending => Decision::Keep(T::default()),
@@ -74,6 +86,7 @@ impl<'a, T: Tag> File<'a, T> {
             metadata_decision: self.metadata_decision,
             content_decision: self.content_decision.clone(),
             bytes: self.bytes,
+            text: self.text,
         }
     }
 }

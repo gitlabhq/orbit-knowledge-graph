@@ -5848,6 +5848,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "typed-path",
+ "yoke",
 ]
 
 [[package]]
