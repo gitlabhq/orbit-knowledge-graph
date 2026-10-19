@@ -11,22 +11,21 @@ mod input;
 mod output;
 mod state;
 
+pub(crate) use output::FamilyOutput;
 use state::Project;
 
 pub(crate) struct Options {
     pub stats: bool,
     pub verbose: bool,
     pub db: Option<PathBuf>,
-    /// The run budget of one language family; per-file budgets come from the
-    /// crate's limits.
-    pub budget_seconds: u64,
+    pub budget_seconds: Option<u64>,
 }
 
-pub(crate) fn index(path: PathBuf, options: Options) -> Result<()> {
+pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<Vec<FamilyOutput>>> {
     run(path, options, Mode::Full)
 }
 
-pub(crate) fn reindex(path: PathBuf, options: Options) -> Result<()> {
+pub(crate) fn reindex(path: PathBuf, options: Options) -> Result<Vec<Vec<FamilyOutput>>> {
     run(path, options, Mode::Changed)
 }
 
@@ -36,7 +35,7 @@ enum Mode {
     Changed,
 }
 
-fn run(path: PathBuf, options: Options, mode: Mode) -> Result<()> {
+fn run(path: PathBuf, options: Options, mode: Mode) -> Result<Vec<Vec<FamilyOutput>>> {
     super::install_tracing(options.verbose, false);
     let workspace = workspace::Workspace::open_default()?;
     let manifest_path = std::path::absolute(workspace.manifest_path())?;
@@ -45,8 +44,15 @@ fn run(path: PathBuf, options: Options, mode: Mode) -> Result<()> {
         bail!("no git repository found in {}", path.display());
     }
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
+    let mut outputs = Vec::new();
     for repo in repos {
-        let git = workspace::git_info(&repo)?;
+        let git = match workspace::git_info(&repo) {
+            Ok(git) => git,
+            Err(error) => {
+                manifest::record_git_info_failure(&manifest_path, &repo, &format!("{error:#}"));
+                return Err(error);
+            }
+        };
         let state_dir = workspace.var_dir(git.project_id);
         let _state_lock = lock_incremental_state(&state_dir)?;
         let db_path = workspace::resolve_db_path(options.db.clone(), &git)?;
@@ -64,14 +70,29 @@ fn run(path: PathBuf, options: Options, mode: Mode) -> Result<()> {
             ontology: &ontology,
             manifest_path: &manifest_path,
             state_dir,
-            budget_ms: options.budget_seconds * 1000,
+            budget_ms: options
+                .budget_seconds
+                .map_or(u64::MAX, |seconds| seconds.saturating_mul(1000)),
             stats: options.stats,
         };
         let output = match mode {
-            Mode::Full => project.index_all()?,
-            Mode::Changed => project.index_changed()?,
+            Mode::Full => project.index_all(),
+            Mode::Changed => project.index_changed(),
+        }
+        .and_then(|output| writer.complete(&git.commit_sha).map(|()| output));
+        let output = match output {
+            Ok(output) => output,
+            Err(error) => {
+                manifest::record_status(
+                    &manifest_path,
+                    &git,
+                    manifest::RepoStatus::Error,
+                    Some(&format!("{error:#}")),
+                    &db_path,
+                )?;
+                return Err(error);
+            }
         };
-        writer.complete(&git.commit_sha)?;
         manifest::record_status(
             &manifest_path,
             &git,
@@ -79,9 +100,9 @@ fn run(path: PathBuf, options: Options, mode: Mode) -> Result<()> {
             None,
             &db_path,
         )?;
-        println!("{}", serde_json::to_string_pretty(&output)?);
+        outputs.push(output);
     }
-    Ok(())
+    Ok(outputs)
 }
 
 pub(crate) enum Freshness {

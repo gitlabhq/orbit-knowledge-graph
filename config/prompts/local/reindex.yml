@@ -1,12 +1,11 @@
 name: reindex
-version: 1.0.0
-short: Re-index only what changed since the last `orbit index --ff=inc`
+version: 1.1.0
+short: Re-index only what changed since the last `orbit index`
 description: >-
-  Re-index only what changed since the last `orbit index --ff=inc`
+  Re-index only what changed since the last `orbit index`
 
 
-  Needs the incremental engine (`--ff=inc`) and a repository that `orbit
-  index --ff=inc` has indexed before. Snapshots live under
+  Needs a repository that `orbit index` has indexed before. Snapshots live under
   `~/.gitlab/orbit/var/<project>/`; their metadata lives in the local
   manifest. Changed files come from git commits since the indexed one,
   plus uncommitted and untracked changes. Returns JSON with the

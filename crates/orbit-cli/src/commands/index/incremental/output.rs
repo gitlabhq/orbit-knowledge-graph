@@ -12,7 +12,7 @@ use crate::database::GraphWriter;
 use crate::workspace::GitInfo;
 
 #[derive(serde::Serialize)]
-pub(super) struct FamilyOutput {
+pub(crate) struct FamilyOutput {
     family: String,
     files: usize,
     skipped_files: usize,

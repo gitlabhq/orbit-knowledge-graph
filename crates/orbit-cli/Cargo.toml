@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 mimalloc = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
-code-graph = { path = "../code-graph" }
 code-graph-incremental = { path = "../code-graph-incremental" }
 duckdb-client = { path = "../duckdb-client" }
 labkit-events = { workspace = true }

@@ -89,7 +89,7 @@ glab orbit index /path/to/your/repo
 
 | Flag | Purpose |
 |------|---------|
-| `--threads` | Worker thread count. `0` (default) auto-detects from CPU cores. |
+| `--budget` | Seconds one language family may take before the run stops. No limit by default. |
 | `--stats` | Include detailed statistics in the JSON output. |
 | `--verbose` | Verbose logging to stderr. |
 

@@ -272,13 +272,13 @@ fn incremental_reindex_follows_the_working_tree() {
     let files = "SELECT path AS n FROM gl_file ORDER BY path";
 
     let out = orbit_cmd()
-        .args(["reindex", repo.to_str().unwrap(), "--ff=inc"])
+        .args(["reindex", repo.to_str().unwrap()])
         .env("ORBIT_DATA_DIR", data_dir.path())
         .output()
         .unwrap();
     assert!(!out.status.success(), "reindex before any index must fail");
 
-    orbit(&["index", repo.to_str().unwrap(), "--ff=inc"]);
+    orbit(&["index", repo.to_str().unwrap()]);
     let sorted = |defs: &[&str]| -> Vec<String> {
         let mut all: Vec<String> = defs.iter().map(|s| s.to_string()).collect();
         all.sort();
@@ -295,7 +295,7 @@ fn incremental_reindex_follows_the_working_tree() {
         "pub fn helper() {}\npub fn uncommitted() {}\n",
     )
     .unwrap();
-    orbit(&["reindex", repo.to_str().unwrap(), "--ff=inc"]);
+    orbit(&["reindex", repo.to_str().unwrap()]);
     assert_eq!(
         names(definitions),
         sorted(&[&["run", "util::helper", "util::uncommitted"][..], &ruby].concat())
@@ -313,7 +313,7 @@ fn incremental_reindex_follows_the_working_tree() {
     .unwrap();
     git(repo, &["commit", "-qam", "edit"]);
     std::fs::write(repo.join("src/new.rs"), "pub fn fresh() {}\n").unwrap();
-    orbit(&["reindex", repo.to_str().unwrap(), "--ff=inc"]);
+    orbit(&["reindex", repo.to_str().unwrap()]);
     let ruby = [
         "Greeter",
         "Greeter::bye",
@@ -340,7 +340,7 @@ fn incremental_reindex_follows_the_working_tree() {
     std::fs::write(repo.join("py/mod.py"), "def py_fn():\n    pass\n").unwrap();
     git(repo, &["add", "-A"]);
     git(repo, &["commit", "-qm", "rename, remove, add python"]);
-    orbit(&["reindex", repo.to_str().unwrap(), "--ff=inc"]);
+    orbit(&["reindex", repo.to_str().unwrap()]);
     assert_eq!(
         names(definitions),
         sorted(
@@ -428,22 +428,12 @@ fn incremental_reindex_follows_the_working_tree() {
     std::fs::remove_file(&rust_snapshot).unwrap();
     let before = names(definitions);
     let failed = orbit_cmd()
-        .args(["reindex", repo.to_str().unwrap(), "--ff=inc"])
+        .args(["reindex", repo.to_str().unwrap()])
         .env("ORBIT_DATA_DIR", data_dir.path())
         .output()
         .unwrap();
     assert!(!failed.status.success());
     assert_eq!(names(definitions), before);
-
-    let out = orbit_cmd()
-        .args(["reindex", repo.to_str().unwrap()])
-        .env("ORBIT_DATA_DIR", data_dir.path())
-        .output()
-        .unwrap();
-    assert!(
-        !out.status.success(),
-        "reindex without --ff=inc must refuse"
-    );
 }
 
 #[test]

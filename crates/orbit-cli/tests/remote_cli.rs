@@ -714,7 +714,7 @@ fn grep_refreshes_an_edited_file_into_the_incremental_graph() {
         String::from_utf8_lossy(&output.stdout).into_owned()
     };
     let (edited, fresh) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    orbit(edited.path(), &["index", ".", "--ff=inc"]);
+    orbit(edited.path(), &["index", "."]);
     std::thread::sleep(std::time::Duration::from_millis(1100));
     std::fs::write(
         repo.path().join("main.py"),
@@ -726,7 +726,7 @@ fn grep_refreshes_an_edited_file_into_the_incremental_graph() {
     assert!(found.contains("Function added"), "{found}");
     assert!(!found.contains("edited since index"), "{found}");
 
-    orbit(fresh.path(), &["index", ".", "--ff=inc"]);
+    orbit(fresh.path(), &["index", "."]);
     let graph = "SELECT (SELECT list(fqn || ':' || start_line ORDER BY fqn) FROM gl_definition) AS defs, \
                  (SELECT list(relationship_kind ORDER BY relationship_kind) FROM gl_edge) AS edges, \
                  (SELECT count(*) FROM gl_edge e JOIN gl_definition d ON d.id = e.target_id) AS linked";

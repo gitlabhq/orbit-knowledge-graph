@@ -2764,7 +2764,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow",
- "code-graph",
  "duckdb",
  "ontology",
  "orbit-arrow",
@@ -5630,7 +5629,6 @@ dependencies = [
  "arrow",
  "clap",
  "cliclack",
- "code-graph",
  "code-graph-incremental",
  "dirs",
  "duckdb-client",
