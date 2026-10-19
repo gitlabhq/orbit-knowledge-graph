@@ -29,6 +29,7 @@ pub struct BoundFilter {
     pub in_sort_key: bool,
     pub text_indexed: bool,
     pub unique: bool,
+    pub immutable: bool,
 }
 
 impl BoundFilter {
@@ -61,6 +62,7 @@ impl BoundFilter {
             in_sort_key: self.in_sort_key,
             text_indexed: self.text_indexed,
             unique: self.unique,
+            immutable: self.immutable,
         }
     }
 }

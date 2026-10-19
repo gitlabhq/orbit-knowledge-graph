@@ -86,6 +86,12 @@ impl RelationalMapping for DuckDbBindings {
             .is_some_and(|facts| facts.unique)
     }
 
+    fn property_mutable(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_none_or(|facts| facts.mutable)
+    }
+
     fn table_path_scopable(&self, _table: &str) -> bool {
         false
     }

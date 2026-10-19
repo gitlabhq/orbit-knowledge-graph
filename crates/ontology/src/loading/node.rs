@@ -200,7 +200,7 @@ struct PropertyYaml {
     description: Option<String>,
     #[serde(default)]
     traversal_path_lookup: Option<TraversalPathLookupYaml>,
-    #[serde(default)]
+    #[serde(default = "PropertyYaml::default_mutable")]
     mutable: bool,
     #[serde(default)]
     terminal_values: Option<Vec<String>>,
@@ -220,6 +220,10 @@ impl PropertyYaml {
         true
     }
     fn default_filterable() -> bool {
+        true
+    }
+
+    fn default_mutable() -> bool {
         true
     }
 }

@@ -35,6 +35,7 @@ pub enum Predicate {
         in_sort_key: bool,
         text_indexed: bool,
         unique: bool,
+        immutable: bool,
     },
     Ids {
         column: Column,
@@ -112,9 +113,12 @@ impl Predicate {
                 &|children| children.into_iter().all(|filters| filters),
                 &|filters| filters,
             ),
-            Self::Property { column, filter, .. } => {
-                filter.rhs_column.is_none() && in_key(&column.name)
-            }
+            Self::Property {
+                column,
+                filter,
+                immutable,
+                ..
+            } => filter.rhs_column.is_none() && (*immutable || in_key(&column.name)),
             Self::Ids { column, .. }
             | Self::IdRange { column, .. }
             | Self::EntityKind { column, .. } => in_key(&column.name),
