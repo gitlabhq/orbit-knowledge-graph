@@ -16,7 +16,7 @@ cases:
             - (Project mr.id AS e0_src, mr.project_id AS e0_dst, ... (_))
             - (Deduplicate LimitBy ... (_))
             - (Scan Table(gl_merge_request) AS mr)
-            - (Filter p.id IN ?.id, p._deleted = false (Deduplicate LimitBy ... (_)))
+            - (Filter p._deleted = false (Deduplicate LimitBy ... (Filter p.id IN ?.id (_))))
           reject: ["(Scan Table(gl_edge) ...)", "(Deduplicate Final (Scan Table(gl_project) AS p))"]
 
   - name: A fixed chain composes routed edge relations
@@ -71,7 +71,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter _orbit_edge_0.target_id = 1, ... (Deduplicate LimitBy ... (_)))
+            - (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.target_id = 1, ... (_))))
             - (Scan Table(gl_job) AS j)
 
   - name: FK endpoints narrow current holder rows

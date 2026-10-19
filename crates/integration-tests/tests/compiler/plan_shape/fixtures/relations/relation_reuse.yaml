@@ -35,7 +35,7 @@ cases:
             - (Filter mr.id IN $mr_ids.id, ... (_))
           occurrences:
             - pattern: (Scan Table(gl_merge_request) AS mr)
-              count: 2
+              count: 1
 
   - name: Shared uncovered endpoint filters materialize matching IDs once
     query:

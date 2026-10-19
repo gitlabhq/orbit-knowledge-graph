@@ -15,7 +15,7 @@ physical:
     planned:
       expect:
         - (Filter f.package_id = 8001, ... (_))
-        - (Project p.id AS id (Filter p.id = 8001, p._deleted = false (Deduplicate LimitBy ... (_))))
+        - (Project p.id AS id (Filter p._deleted = false (Deduplicate LimitBy ... (Filter p.id = 8001 (_)))))
         - (Project f.package_id AS e0_src, ... (_))
         - (Deduplicate LimitBy f.traversal_path, f.id (Filter (f.traversal_path, f.id) IN ?.(traversal_path, id) (Scan Table(gl_package_file) AS f)))
       reject:

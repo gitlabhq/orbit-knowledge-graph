@@ -258,27 +258,33 @@ impl RelationGraph {
             return self.filter(owned, predicates);
         }
 
-        let candidate_read = self.read(table, alias, false);
-        let candidate = self.owned(candidate_read, owner.clone(), alias);
-        let candidate = self.filter(candidate, predicates.clone());
-        let candidate = self.project(
-            candidate,
-            key.iter()
-                .map(|column| Projection::col(alias, column))
-                .collect(),
-        );
-
+        let (identity, rest): (Vec<_>, Vec<_>) = predicates
+            .iter()
+            .cloned()
+            .partition(|predicate| predicate.filters_sort_key(key));
         let read = self.read(table, alias, false);
-        let current = self.owned(read, owner, alias);
-        let current = self.semi_join(
-            current,
-            key.iter()
-                .map(|column| (Column::new(alias, column), column.clone()))
-                .collect(),
-            candidate,
-        );
+        let current = self.owned(read, owner.clone(), alias);
+        let mut current = self.filter(current, identity);
+        if rest.iter().any(Predicate::is_selective) {
+            let candidate_read = self.read(table, alias, false);
+            let candidate = self.owned(candidate_read, owner, alias);
+            let candidate = self.filter(candidate, predicates);
+            let candidate = self.project(
+                candidate,
+                key.iter()
+                    .map(|column| Projection::col(alias, column))
+                    .collect(),
+            );
+            current = self.semi_join(
+                current,
+                key.iter()
+                    .map(|column| (Column::new(alias, column), column.clone()))
+                    .collect(),
+                candidate,
+            );
+        }
         let latest = self.latest(current, alias, key.to_vec(), vec![]);
-        self.filter(latest, predicates)
+        self.filter(latest, rest)
     }
 
     pub(crate) fn filter(
@@ -485,8 +491,8 @@ impl RelationUsage {
     fn reusable(id: RelationId, graph: &RelationGraph) -> bool {
         match graph.get(id) {
             RelationNode::Read { .. } | RelationNode::Owned { .. } => false,
-            RelationNode::Filter { predicates, .. } => {
-                predicates.iter().any(Self::selective_predicate)
+            RelationNode::Filter { input, predicates } => {
+                predicates.iter().any(Self::selective_predicate) || Self::reusable(input.id, graph)
             }
             RelationNode::Project { input, .. } | RelationNode::Bind { input, .. } => {
                 Self::reusable(input.id, graph)

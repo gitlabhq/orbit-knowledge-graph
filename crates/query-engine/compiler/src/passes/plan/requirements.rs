@@ -90,6 +90,27 @@ impl Predicate {
             _ => false,
         }
     }
+
+    pub fn filters_sort_key(&self, sort_key: &[String]) -> bool {
+        let in_key = |column: &str| sort_key.iter().any(|key| key == column);
+        match self {
+            Self::Boolean(expression) => expression.fold(
+                &|predicate| predicate.filters_sort_key(sort_key),
+                &|children| children.into_iter().all(|filters| filters),
+                &|filters| filters,
+            ),
+            Self::Property { column, filter, .. } => {
+                filter.rhs_column.is_none() && in_key(&column.name)
+            }
+            Self::Ids { column, .. }
+            | Self::IdRange { column, .. }
+            | Self::EntityKind { column, .. } => in_key(&column.name),
+            Self::Membership { columns, .. } => columns.iter().all(|column| in_key(&column.name)),
+            Self::RelationshipKinds { .. } => in_key(RELATIONSHIP_KIND_COLUMN),
+            Self::Scope { .. } => in_key(TRAVERSAL_PATH_COLUMN),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone)]

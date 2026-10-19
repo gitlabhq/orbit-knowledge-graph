@@ -454,7 +454,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                     let sort_key = self.facts.latest_row_key(table)?;
                     let identity = predicates
                         .iter()
-                        .filter(|predicate| filters_sort_key(predicate, sort_key))
+                        .filter(|predicate| predicate.filters_sort_key(sort_key))
                         .cloned()
                         .collect();
                     self.graph
@@ -1031,18 +1031,6 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         }
         let read = self.edge_read(relation, alias, final_)?;
         Ok(self.graph.from(read).filter(predicates).finish())
-    }
-}
-
-fn filters_sort_key(predicate: &Predicate, sort_key: &[String]) -> bool {
-    let in_key = |column: &str| sort_key.iter().any(|key| key == column);
-    match predicate {
-        Predicate::RelationshipKinds { .. } => in_key(RELATIONSHIP_KIND_COLUMN),
-        Predicate::EntityKind { column, .. }
-        | Predicate::Ids { column, .. }
-        | Predicate::IdRange { column, .. } => in_key(&column.name),
-        Predicate::Membership { columns, .. } => columns.iter().all(|column| in_key(&column.name)),
-        _ => false,
     }
 }
 

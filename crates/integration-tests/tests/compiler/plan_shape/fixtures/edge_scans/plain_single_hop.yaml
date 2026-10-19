@@ -13,10 +13,10 @@ physical:
   clickhouse:
     planned:
       bind:
-        - (CTE $edge (Filter _orbit_edge_0.source_id = 1, ... (_)))
+        - (CTE $edge (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.source_id = 1, ... (_)))))
         - (CTE $ids (Project _id_source.target_id AS id (_)))
       expect:
-        - (Filter b.id IN $ids.id, ... (Deduplicate LimitBy ... (_)))
+        - (Filter b._deleted = false (Deduplicate LimitBy ... (Filter b.id IN $ids.id (_))))
       reject: ["(Scan Table(gl_definition) AS a)", "(Deduplicate Final (Scan Table(gl_definition) AS b))"]
   duckdb:
     planned:
