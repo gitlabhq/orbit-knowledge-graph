@@ -104,6 +104,7 @@ fn emit_ref(
     };
     if let Some(alias) = &relation.alias
         && !matches!(&output.from, TableRef::Cte { alias: current, .. } if current == alias)
+        && !matches!(&output.from, TableRef::Scan { alias: current, final_: false, .. } if current == alias)
     {
         output.from = TableRef::subquery(
             Query {
