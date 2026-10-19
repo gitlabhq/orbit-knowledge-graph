@@ -760,7 +760,15 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
             }
         }
         for prop in &ne.prop_absent {
-            for node in view.nodes_of_type(entity) {
+            let nodes = view.nodes_of_type(entity);
+            if !nodes.is_empty() && nodes.iter().all(|n| !n.properties.is_empty()) {
+                let absent = prop.clone();
+                view.assert_filter(entity, prop, move |n| {
+                    !n.properties.is_empty() && !n.has_prop(&absent)
+                });
+                continue;
+            }
+            for node in nodes {
                 assert!(
                     !node.has_prop(prop),
                     "{label}: {entity}/{} should not have property '{prop}'",

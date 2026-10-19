@@ -39,13 +39,13 @@ impl BoundFilter {
         match self.filter.op {
             Some(
                 FilterOp::Contains
+                | FilterOp::StartsWith
+                | FilterOp::EndsWith
                 | FilterOp::TokenMatch
                 | FilterOp::AllTokens
                 | FilterOp::AnyTokens,
             ) => self.text_indexed,
-            Some(
-                FilterOp::StartsWith | FilterOp::EndsWith | FilterOp::Ne | FilterOp::IsNotNull,
-            ) => false,
+            Some(FilterOp::Ne | FilterOp::IsNotNull) => false,
             None | Some(FilterOp::Eq | FilterOp::In) => high || self.text_indexed,
             Some(_) => high,
         }

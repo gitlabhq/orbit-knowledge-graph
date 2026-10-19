@@ -13,7 +13,7 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $mrs (Project mr.id AS id (Filter starts_with(mr.title, 'Fix'), ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))))
+            - (CTE $mrs (Project mr.id AS id (Filter starts_with(mr.title, 'Fix'), ... (Deduplicate LimitBy mr.traversal_path, mr.id (_)))))
           expect:
             - (Filter _orbit_edge_0.target_id IN $mrs.id, ... (_))
 
