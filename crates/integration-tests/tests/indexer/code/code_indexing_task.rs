@@ -1318,6 +1318,7 @@ async fn a_stopped_engine_waits_for_a_job_whose_rows_are_still_in_flight() {
         traversal_path: TraversalPath::new_unchecked(traversal_path),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
+        repository_storage: None,
     };
     broker
         .ensure_streams(&[CodeIndexingTaskRequest::subscription()])

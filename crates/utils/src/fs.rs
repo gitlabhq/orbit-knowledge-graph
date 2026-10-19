@@ -116,7 +116,7 @@ pub fn validate_symlinks(root: &Path) -> io::Result<Vec<RemovedSymlink>> {
     while let Some(dir) = stack.pop() {
         let entries = match std::fs::read_dir(&dir) {
             Ok(e) => e,
-            // Directory removed between iteration and read — safe to skip.
+            // Cleanup elsewhere can race us and remove it after listing.
             Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
             Err(e) => return Err(e),
         };
