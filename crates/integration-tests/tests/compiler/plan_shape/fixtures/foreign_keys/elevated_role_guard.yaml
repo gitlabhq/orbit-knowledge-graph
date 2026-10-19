@@ -17,3 +17,7 @@ physical:
       expect: ["(Join ON _orbit_edge_1.source_id = _orbit_edge_0.source_id (_) (_))", "(Filter ?.relationship_kind = 'HAS_FINDING', ... (_))"]
     emitted:
       expect: ["(Filter ?.relationship_kind = 'HAS_FINDING', ... (_))"]
+    final_ast:
+      expect:
+        - "(Filter false, ... (_))"
+        - "(Deduplicate Final (Scan Table(gl_vulnerability_occurrence) AS _role_f))"

@@ -33,3 +33,9 @@ physical:
       reject:
         - (Scan Table(gl_edge) ...)
         - (CTE $users (Project ... (Filter ... (Scan Table(gl_user) AS u))))
+    emitted:
+      expect:
+        - (CTE _filter_u (_))
+        - (Filter mr.author_id IN _filter_u.id, ... (_))
+      reject:
+        - (Scan Table(gl_edge) ...)

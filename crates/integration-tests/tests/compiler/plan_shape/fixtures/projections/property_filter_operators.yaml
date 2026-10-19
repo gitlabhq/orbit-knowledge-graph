@@ -36,3 +36,6 @@ physical:
     emitted:
       expect:
         - (Filter Contains(Lower(p.name), Lower('orbit')), StartsWith(Lower(p.name), Lower('git')), EndsWith(Lower(p.name), Lower('lab')), TokenMatch(Lower(p.name), Lower('graph')), AllTokens(Lower(p.name), Lower('graph query')), AnyTokens(Lower(p.name), Lower('code data')), p.name IS NOT NULL, p.description IS NULL, ... (_))
+    final_ast:
+      expect:
+        - (Filter Contains(Lower(p.name), Lower('orbit')), StartsWith(Lower(p.name), Lower('git')), EndsWith(Lower(p.name), Lower('lab')), TokenMatch(Lower(p.name), Lower('graph')), AllTokens(Lower(p.name), Lower('graph query')), AnyTokens(Lower(p.name), Lower('code data')), p.name IS NOT NULL, p.description IS NULL, ... (_))
