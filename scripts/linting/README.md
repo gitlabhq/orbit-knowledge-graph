@@ -75,10 +75,10 @@ re-indents pass. Renames are followed (`git diff -M`), so a renamed file keeps
 its old comments. Adjacent line comments are one comment.
 
 Skipped on purpose: rustdoc (`///`, `//!`, `/** */`; the rule in `CONTRIBUTING.md`
-still applies, but flagging it blocked about a third of merges for a handful of
-real redundant-comment threads, and clap derive turns `///` into `--help` text),
-tool directives
-(`#!`, PEP 723 headers, `shellcheck`, `clippy`, `yamllint`, and similar), files with an
+still applies, but a replay of 200 merges flagged rustdoc in about a third of them
+for a handful of real redundant-comment threads, and clap derive turns `///` into
+`--help` text), tool directives (`#!`, PEP 723 headers, `shellcheck`, `clippy`,
+`yamllint`, and similar), files with an
 `@generated` marker in the first 2 KiB, fixture and snapshot paths, the
 `code-graph-incremental/langs` suites, and commits that conclude a merge.
 

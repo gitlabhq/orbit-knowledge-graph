@@ -47,8 +47,8 @@ Run `mise lint:docs` before pushing any documentation changes.
 
 ## Engineering conventions
 
-- Comments explain why. Do not narrate what the code shows. The rule covers `///` doc comments:
-  delete one that restates the name or signature, and keep one sentence of why.
+- Comments explain why. Do not narrate what the code shows. The rule covers doc comments (`///`, `//!`):
+  delete one that only restates the name or signature, or cut it to one sentence of why.
 - Reuse existing infrastructure before adding new infrastructure.
 - Before changing an area, read its design document and the crate-local `AGENTS.md`, if present.
 - Treat the ontology as the single source of truth for graph-shape facts.
