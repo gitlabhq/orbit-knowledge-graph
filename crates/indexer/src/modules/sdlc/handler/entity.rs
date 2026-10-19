@@ -399,7 +399,11 @@ impl Handler for EntityHandler {
         message_span.record("gl_root_namespace_id", request.namespace_id);
         message_span.record(
             "traversal_path",
-            request.traversal_path.as_ref().map(TraversalPath::as_str),
+            request
+                .traversal_path
+                .as_ref()
+                .filter(|path| path.is_valid())
+                .map(TraversalPath::as_str),
         );
 
         if !request.indexing_requested(&self.plan.target) {

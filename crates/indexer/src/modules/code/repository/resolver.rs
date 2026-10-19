@@ -180,7 +180,6 @@ impl RepositoryResolver {
         .then_some(config);
         self.full_download(
             project_id,
-            branch,
             ref_name,
             virtual_config,
             commit_sha.is_some(),
@@ -197,7 +196,6 @@ impl RepositoryResolver {
     async fn full_download(
         &self,
         project_id: i64,
-        branch: &str,
         ref_name: &str,
         virtual_config: Option<&orbit_server_config::CodeIndexingPipelineConfig>,
         retry_empty: bool,
@@ -205,7 +203,6 @@ impl RepositoryResolver {
         storage: Option<&str>,
     ) -> Result<Repository, ResolveError> {
         info!(
-            branch,
             ref_name,
             incremental = virtual_config.is_some(),
             "downloading repository archive"

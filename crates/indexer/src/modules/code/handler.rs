@@ -135,12 +135,14 @@ impl Handler for CodeIndexingTaskHandler {
                     "failed to deserialize code indexing task request: {e}"
                 ))
             })?;
-        let message_span = tracing::Span::current();
-        message_span.record(
-            "gl_root_namespace_id",
-            request.traversal_path.top_level_namespace_id(),
-        );
-        message_span.record("traversal_path", request.traversal_path.as_str());
+        if request.traversal_path.is_valid_any_depth() {
+            let message_span = tracing::Span::current();
+            message_span.record(
+                "gl_root_namespace_id",
+                request.traversal_path.top_level_namespace_id(),
+            );
+            message_span.record("traversal_path", request.traversal_path.as_str());
+        }
 
         let span = tracing::info_span!(
             "code_indexing_project",

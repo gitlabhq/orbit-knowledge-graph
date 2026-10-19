@@ -216,14 +216,7 @@ impl Engine {
                     let redelivered_on_failure = subscription
                         .retry_policy()
                         .is_some_and(|policy| policy.should_redeliver(message.envelope.attempt));
-                    let span = tracing::info_span!(
-                        "process_message",
-                        correlation_id = %message.envelope.id.0,
-                        topic = %topic_name,
-                        attempt = message.envelope.attempt,
-                        gl_root_namespace_id = tracing::field::Empty,
-                        traversal_path = tracing::field::Empty,
-                    );
+                    let span = message_span(&message.envelope, &topic_name);
                     inflight.spawn(process_message(
                         message,
                         self.registry.handlers_for(&subscription),
@@ -304,6 +297,17 @@ enum HandlersOutcome {
 struct EngineRuntime {
     worker_pool: WorkerPool,
     metrics: Arc<EngineMetrics>,
+}
+
+fn message_span(envelope: &Envelope, topic_name: &str) -> tracing::Span {
+    tracing::info_span!(
+        "process_message",
+        correlation_id = %envelope.id.0,
+        topic = %topic_name,
+        attempt = envelope.attempt,
+        gl_root_namespace_id = tracing::field::Empty,
+        traversal_path = tracing::field::Empty,
+    )
 }
 
 async fn process_message(
@@ -591,6 +595,61 @@ mod tests {
             worker_pool: WorkerPool::new(configuration, metrics.clone()),
             metrics,
         })
+    }
+
+    #[derive(Clone, Default)]
+    struct LogBuffer(Arc<parking_lot::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn tenant_recorded_by_a_handler_reaches_its_lines_and_the_engine_lines() {
+        let logs = LogBuffer::default();
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        let _default = tracing::subscriber::set_default(subscriber);
+
+        let handler = MockHandler::new("stream", "subject")
+            .with_on_handle(|| {
+                tracing::Span::current().record("gl_root_namespace_id", 9970_u64);
+                tracing::info!("handler line");
+            })
+            .with_error(HandlerError::Processing("boom".into()));
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription = Subscription::new("stream", "subject");
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
+        let runtime = test_runtime(&test_engine_configuration());
+
+        run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .instrument(message_span(&envelope, "stream.subject"))
+        .await;
+
+        let logs = String::from_utf8(logs.0.lock().clone()).unwrap();
+        for message in ["handler line", "handler failed"] {
+            let line = logs
+                .lines()
+                .find(|line| line.contains(message))
+                .unwrap_or_else(|| panic!("no {message:?} line in {logs}"));
+            assert!(line.contains("gl_root_namespace_id=9970"), "{line}");
+        }
     }
 
     #[tokio::test]

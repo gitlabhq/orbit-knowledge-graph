@@ -277,11 +277,7 @@ impl CodeIndexer {
         let mut checkpoint = request.checkpoint.clone();
         checkpoint.complete(request.task_id, request.commit_sha.clone(), run.indexed_at);
         self.save_checkpoint(&checkpoint).await?;
-        info!(
-            project_id = checkpoint.project_id,
-            task_id = checkpoint.last_task_id,
-            "completed code indexing"
-        );
+        info!("completed code indexing");
         Ok(IndexOutcome::Indexed {
             rows_written: run.rows_written,
         })
@@ -602,7 +598,7 @@ impl CodeIndexer {
                 let batch_bytes = match orbit_arrow::logical_byte_size(&batch) {
                     Ok(n) => n,
                     Err(e) => {
-                        span.in_scope(|| tracing::error!(table, error = %e, "batch has no logical-byte-size rule; counting 0 bytes"));
+                        tracing::error!(table, error = %e, "batch has no logical-byte-size rule; counting 0 bytes");
                         0
                     }
                 };
