@@ -14,7 +14,7 @@ use query_data_model::OrbitQueryModel;
 
 use super::filters::BoundFilter;
 use super::graph::{ExecutionPlan, ReadOwner, RelationGraph, RelationId};
-use super::predicates::{Column, Predicate, kind_column, node_predicates};
+use super::predicates::{Column, Predicate, kind_column};
 use super::{DenormalizedKey, DenormalizedProperty, Plan, sort_key};
 use crate::error::{QueryError, Result};
 use crate::input::*;
@@ -61,59 +61,6 @@ pub struct Fk {
     pub column: String,
 }
 
-impl EdgeRelation {
-    fn reversed(&self) -> Self {
-        let mut relation = self.clone();
-        std::mem::swap(&mut relation.from_node, &mut relation.to_node);
-        relation.direction = match relation.direction {
-            Direction::Outgoing => Direction::Incoming,
-            Direction::Incoming => Direction::Outgoing,
-            Direction::Both => Direction::Both,
-        };
-        relation
-    }
-
-    pub fn single_edge_table(&self) -> Option<&str> {
-        let [table] = self.edge_tables.as_slice() else {
-            return None;
-        };
-        Some(table)
-    }
-
-    pub fn column_prefix(&self) -> String {
-        if self.max_hops > 1 {
-            format!("hop_e{}_", self.input_index)
-        } else {
-            format!("e{}_", self.input_index)
-        }
-    }
-
-    fn endpoint_column(&self, node: &str) -> Option<&'static str> {
-        let (start, end) = self.direction.edge_columns();
-        if self.from_node == node {
-            Some(start)
-        } else if self.to_node == node {
-            Some(end)
-        } else {
-            None
-        }
-    }
-
-    /// The endpoints as the edge row stores them: the node in `source_id`, then the node in `target_id`.
-    fn stored_endpoints(&self) -> (&str, &str) {
-        self.direction
-            .stored_order(self.from_node.as_str(), self.to_node.as_str())
-    }
-
-    fn other_end(&self, node: &str) -> &str {
-        if self.from_node == node {
-            &self.to_node
-        } else {
-            &self.from_node
-        }
-    }
-}
-
 pub(super) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
     pub input: &'a Input,
     pub model: &'a M,
@@ -138,7 +85,7 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             &node.alias,
             ReadOwner::Node(node.alias.clone()),
             sort_key(self.model, table)?,
-            node_predicates(node),
+            node.conditions(),
             self.model.supports_selective_latest_rows(),
         ))
     }
@@ -159,7 +106,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
             model,
             relations: relations::build_relations(input, model, &nodes),
             nodes,
-            denormalized: super::denormalized_facts(input, model),
+            denormalized: super::filters::denormalized_facts(input, model),
             scans: Vec::new(),
         };
         let placement = conditions::place_conditions(&pattern)?;

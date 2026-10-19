@@ -7,8 +7,8 @@ use query_data_model::{DenormalizedDirection, OrbitQueryModel, RelationshipId};
 use super::EdgeTableConfig;
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use crate::passes::plan::filters::{BoundFilter, lowerable_denorm};
-use crate::passes::plan::{NodePlan, Plan, denormalized_facts};
+use crate::passes::plan::filters::{BoundFilter, denormalized_facts, lowerable_denorm};
+use crate::passes::plan::{NodePlan, Plan};
 
 pub struct Neighbors {
     pub center: String,

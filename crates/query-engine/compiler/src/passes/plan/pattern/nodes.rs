@@ -10,6 +10,9 @@ use super::{NodePlan, Pattern};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::filters::{FilterOwner, ordered_filters};
+use crate::passes::plan::predicates::{
+    Column, OutputValue, Predicate, Projection, live, property_filter,
+};
 
 impl NodePlan {
     fn from_input<M>(node: &InputNode, model: &M, strip_virtuals: bool) -> Option<Self>
@@ -77,6 +80,52 @@ impl NodePlan {
 
     pub(crate) fn is_pinned(&self) -> bool {
         !self.node_ids.is_empty() || self.id_range.is_some()
+    }
+
+    pub(crate) fn id_predicates(&self, column: Column) -> Vec<Predicate> {
+        let mut predicates = Vec::new();
+        if !self.node_ids.is_empty() {
+            predicates.push(Predicate::Ids {
+                column: column.clone(),
+                values: self.node_ids.clone(),
+            });
+        }
+        if let Some(range) = &self.id_range {
+            predicates.push(Predicate::IdRange {
+                column,
+                start: range.start,
+                end: range.end,
+            });
+        }
+        predicates
+    }
+
+    /// Every predicate the node's table read applies: filters, bound conditions, ids, and liveness.
+    pub fn conditions(&self) -> Vec<Predicate> {
+        let mut predicates: Vec<_> = self
+            .filters
+            .iter()
+            .map(|(property, filter)| property_filter(&self.alias, property, filter))
+            .collect();
+        predicates.extend(self.predicates.iter().cloned());
+        predicates.extend(self.id_predicates(Column::new(&self.alias, DEFAULT_PRIMARY_KEY)));
+        predicates.push(live(&self.alias));
+        predicates
+    }
+
+    pub fn outputs(&self) -> Vec<Projection> {
+        if !self.emit_select {
+            return vec![];
+        }
+        self.requested_columns()
+            .into_iter()
+            .map(|column| {
+                Projection::new(
+                    OutputValue::Column(Column::new(&self.alias, &column)),
+                    format!("{}_{column}", self.alias),
+                )
+            })
+            .collect()
     }
 
     pub(crate) fn requested_columns(&self) -> Vec<String> {

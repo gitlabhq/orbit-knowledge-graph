@@ -66,7 +66,7 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
     if let Some(ids) = source_ids {
         first_predicates.push(membership(Column::new("e1", start_id), ids));
     }
-    first_predicates.extend(id_predicates(from, Column::new("e1", start_id)));
+    first_predicates.extend(from.id_predicates(Column::new("e1", start_id)));
     first_predicates.extend(
         from.filters.iter().filter_map(|(_, filter)| {
             pattern.denorm_tag(relation, &relation.from_node, filter, "e1")
@@ -204,10 +204,7 @@ fn complete_depth<M: OrbitQueryModel + ?Sized>(
     if let Some(ids) = target_ids {
         predicates.push(membership(Column::new(alias, end_id), ids.clone()));
     }
-    predicates.extend(id_predicates(
-        &pattern.nodes[&relation.to_node],
-        Column::new(alias, end_id),
-    ));
+    predicates.extend(pattern.nodes[&relation.to_node].id_predicates(Column::new(alias, end_id)));
     graph.filter(depth.alias(alias), predicates)
 }
 

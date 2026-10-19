@@ -24,7 +24,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             .expect("foreign key holder table");
         let endpoint = relation.other_end(&key.node);
         let key_column = Column::new(alias, &key.column);
-        let mut predicates = id_predicates(&pattern.nodes[endpoint], key_column.clone());
+        let mut predicates = pattern.nodes[endpoint].id_predicates(key_column.clone());
         if self.binding(endpoint).is_none() {
             let reached = if pattern.endpoint_is_selective(endpoint) {
                 None
@@ -75,7 +75,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         let endpoint = relation.other_end(&key.node);
         let key_column = Column::new(&node.alias, &key.column);
         node.predicates
-            .extend(id_predicates(&pattern.nodes[endpoint], key_column.clone()));
+            .extend(pattern.nodes[endpoint].id_predicates(key_column.clone()));
         if let Some(ids) = self.endpoint_ids(endpoint) {
             node.predicates.push(membership(key_column.clone(), ids));
         }

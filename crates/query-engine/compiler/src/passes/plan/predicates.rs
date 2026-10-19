@@ -5,7 +5,6 @@ use ontology::constants::*;
 
 use super::filters::BoundFilter;
 use super::graph::RelationId;
-use super::pattern::NodePlan;
 use crate::input::{BooleanExpression, FilterOp, InputFilter};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -178,24 +177,6 @@ pub fn property_filter(alias: &str, property: &str, bound: &BoundFilter) -> Pred
     bound.at(Column::new(alias, property))
 }
 
-pub fn id_predicates(node: &NodePlan, column: Column) -> Vec<Predicate> {
-    let mut predicates = Vec::new();
-    if !node.node_ids.is_empty() {
-        predicates.push(Predicate::Ids {
-            column: column.clone(),
-            values: node.node_ids.clone(),
-        });
-    }
-    if let Some(range) = &node.id_range {
-        predicates.push(Predicate::IdRange {
-            column,
-            start: range.start,
-            end: range.end,
-        });
-    }
-    predicates
-}
-
 pub fn membership(column: Column, (relation, key): (RelationId, String)) -> Predicate {
     Predicate::Membership {
         columns: vec![column],
@@ -228,34 +209,4 @@ pub fn tag_filter(alias: &str, column: &str, key: &str, filter: &InputFilter) ->
         column: Column::new(alias, column),
         values,
     })
-}
-
-pub fn node_predicates(node: &NodePlan) -> Vec<Predicate> {
-    let mut predicates: Vec<_> = node
-        .filters
-        .iter()
-        .map(|(property, filter)| property_filter(&node.alias, property, filter))
-        .collect();
-    predicates.extend(node.predicates.iter().cloned());
-    predicates.extend(id_predicates(
-        node,
-        Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
-    ));
-    predicates.push(live(&node.alias));
-    predicates
-}
-
-pub fn node_outputs(node: &NodePlan) -> Vec<Projection> {
-    if !node.emit_select {
-        return vec![];
-    }
-    node.requested_columns()
-        .into_iter()
-        .map(|column| {
-            Projection::new(
-                OutputValue::Column(Column::new(&node.alias, &column)),
-                format!("{}_{column}", node.alias),
-            )
-        })
-        .collect()
 }

@@ -106,10 +106,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         }
         for node in endpoints {
             let column = relation.endpoint_column(node).expect("relation endpoint");
-            predicates.extend(id_predicates(
-                &pattern.nodes[node],
-                Column::new(alias, column),
-            ));
+            predicates.extend(pattern.nodes[node].id_predicates(Column::new(alias, column)));
         }
         predicates
     }

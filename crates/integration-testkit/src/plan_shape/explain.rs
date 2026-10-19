@@ -420,7 +420,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
 
 fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
     filter(
-        compiler::passes::plan::predicates::node_predicates(node)
+        node.conditions()
             .iter()
             .flat_map(planned_predicate)
             .collect(),

@@ -82,46 +82,6 @@ impl QueryPlan {
     }
 }
 
-pub fn denormalized_facts(
-    input: &Input,
-    model: &(impl OrbitQueryModel + ?Sized),
-) -> HashMap<DenormalizedKey, DenormalizedProperty> {
-    input
-        .nodes
-        .iter()
-        .filter_map(|node| Some((model.graph().entity_id(node.entity.as_deref()?)?, node)))
-        .flat_map(|(entity, node)| {
-            [DenormalizedDirection::Source, DenormalizedDirection::Target]
-                .into_iter()
-                .flat_map(move |direction| {
-                    node.filters
-                        .keys()
-                        .map(String::as_str)
-                        .chain(
-                            input
-                                .conditions()
-                                .filter(|condition| {
-                                    condition.target == PredicateTarget::Node(node.id.clone())
-                                })
-                                .map(|condition| condition.property.as_str()),
-                        )
-                        .filter_map(move |property| {
-                            let property = model.graph().property_id(entity, property)?;
-                            let key = DenormalizedKey {
-                                property,
-                                direction,
-                            };
-                            model
-                                .denormalized()
-                                .property(key)
-                                .cloned()
-                                .map(|facts| (key, facts))
-                        })
-                })
-        })
-        .collect()
-}
-
 pub(crate) fn sort_key<'m>(
     model: &'m (impl OrbitQueryModel + ?Sized),
     table: &str,

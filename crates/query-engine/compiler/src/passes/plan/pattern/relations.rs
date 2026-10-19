@@ -12,6 +12,59 @@ use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::filters::{FilterOwner, ordered_filters};
 
+impl EdgeRelation {
+    pub(super) fn reversed(&self) -> Self {
+        let mut relation = self.clone();
+        std::mem::swap(&mut relation.from_node, &mut relation.to_node);
+        relation.direction = match relation.direction {
+            Direction::Outgoing => Direction::Incoming,
+            Direction::Incoming => Direction::Outgoing,
+            Direction::Both => Direction::Both,
+        };
+        relation
+    }
+
+    pub fn single_edge_table(&self) -> Option<&str> {
+        let [table] = self.edge_tables.as_slice() else {
+            return None;
+        };
+        Some(table)
+    }
+
+    pub fn column_prefix(&self) -> String {
+        if self.max_hops > 1 {
+            format!("hop_e{}_", self.input_index)
+        } else {
+            format!("e{}_", self.input_index)
+        }
+    }
+
+    pub(super) fn endpoint_column(&self, node: &str) -> Option<&'static str> {
+        let (start, end) = self.direction.edge_columns();
+        if self.from_node == node {
+            Some(start)
+        } else if self.to_node == node {
+            Some(end)
+        } else {
+            None
+        }
+    }
+
+    /// The endpoints as the edge row stores them: the node in `source_id`, then the node in `target_id`.
+    pub(super) fn stored_endpoints(&self) -> (&str, &str) {
+        self.direction
+            .stored_order(self.from_node.as_str(), self.to_node.as_str())
+    }
+
+    pub(super) fn other_end(&self, node: &str) -> &str {
+        if self.from_node == node {
+            &self.to_node
+        } else {
+            &self.from_node
+        }
+    }
+}
+
 pub(super) fn build_relations<M>(
     input: &Input,
     model: &M,

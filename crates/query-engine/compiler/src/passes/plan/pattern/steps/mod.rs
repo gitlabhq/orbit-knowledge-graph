@@ -14,9 +14,7 @@ use super::{EdgeRelation, NodePlan, Pattern};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::passes::plan::graph::{BindingSource, ExecutionPlan, RelationGraph, RelationId};
-use crate::passes::plan::predicates::{
-    Column, OutputValue, Predicate, Projection, membership, node_outputs, node_predicates,
-};
+use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection, membership};
 
 type IdSet = (RelationId, String);
 
@@ -96,7 +94,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         Ok(ExecutionPlan {
             graph: self.graph,
             root,
-            outputs: node_outputs(node),
+            outputs: node.outputs(),
             bindings: vec![BindingSource::table(&node.alias)],
         })
     }
@@ -205,7 +203,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
     ) -> Result<()> {
         let scan = self.node_read(node)?;
         self.join_root(scan, &node.alias, on)?;
-        self.outputs.extend(node_outputs(node));
+        self.outputs.extend(node.outputs());
         self.bind_table(node);
         Ok(())
     }
@@ -232,7 +230,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
 
     fn node_read(&mut self, node: &NodePlan) -> Result<RelationId> {
         let read = self.pattern.node_read(&mut self.graph, node)?;
-        if node_predicates(node).iter().any(Predicate::is_selective) {
+        if node.conditions().iter().any(Predicate::is_selective) {
             self.nodes
                 .entry(node.alias.clone())
                 .or_default()
