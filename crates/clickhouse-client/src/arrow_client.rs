@@ -20,7 +20,7 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::SyncIoBridge;
-use tracing::warn;
+use tracing::{Instrument, warn};
 
 pub use clickhouse::QuerySummary;
 
@@ -563,7 +563,9 @@ impl ArrowQuery {
         let handle = tokio::runtime::Handle::current();
         let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
 
+        let span = tracing::Span::current();
         tokio::task::spawn_blocking(move || {
+            let _entered = span.enter();
             let body = Cursor::new(first.unwrap_or_default()).chain(cursor);
             let bridge = SyncIoBridge::new_with_handle(body, handle);
             let reader = match StreamReader::try_new(bridge, None) {
@@ -601,7 +603,7 @@ impl ArrowQuery {
         let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
         let (summary_tx, summary_rx) = oneshot::channel();
 
-        tokio::spawn(async move {
+        let task = async move {
             let mut decoder = StreamDecoder::new();
             let mut summary_tx = Some(summary_tx);
             let mut next = Ok(first);
@@ -638,7 +640,8 @@ impl ArrowQuery {
             if let Some(summary_tx) = summary_tx.take() {
                 let _ = summary_tx.send(cursor.summary().cloned());
             }
-        });
+        };
+        tokio::spawn(task.in_current_span());
 
         Ok((ReceiverStream::new(rx).boxed(), summary_rx))
     }
