@@ -6,7 +6,7 @@ use grep_matcher::Matcher;
 
 use super::{Options, Output};
 
-use super::defs::{Connections, Def, connection_label};
+use super::defs::Def;
 use super::rank::{is_code, is_test, names, ranked};
 use super::scan::Hit;
 use super::term::{Term, matcher};
@@ -31,14 +31,11 @@ enum Scope<'a> {
     Outside,
 }
 
-fn definition_note(def: &Def, connections: &Connections) -> String {
-    let span = match def.end > def.start {
+fn definition_note(def: &Def) -> String {
+    match def.end > def.start {
         true => format!("{} {}:{}-{}", def.kind, def.name, def.start, def.end),
         false => format!("{} {}", def.kind, def.name),
-    };
-    format!("{span} {}", connection_label(def, connections))
-        .trim_end()
-        .to_string()
+    }
 }
 
 fn defined(hits: &[&Hit]) -> String {
@@ -59,7 +56,6 @@ pub(super) fn render(
     header: &str,
     hits: &[Hit],
     alternatives: &[Term],
-    connections: &Connections,
     edited: &BTreeSet<String>,
     options: &Options,
     lookup: Option<&str>,
@@ -169,11 +165,9 @@ pub(super) fn render(
             };
             if next != scope {
                 match &next {
-                    Scope::Def(def) => out.push_str(&format!(
-                        "{}-{NOTE}{}\n",
-                        def.start,
-                        definition_note(def, connections)
-                    )),
+                    Scope::Def(def) => {
+                        out.push_str(&format!("{}-{NOTE}{}\n", def.start, definition_note(def)))
+                    }
                     Scope::Imports(_) => out.push_str(&format!(
                         "{}-{NOTE}imports {}\n",
                         hit.line,
@@ -240,7 +234,6 @@ pub(super) fn lookup(
     repo: &Path,
     hits: &[Hit],
     alternatives: &[Term],
-    connections: &Connections,
     options: &Options,
 ) -> Option<String> {
     if options.invert || options.output != Output::Lines || options.before > 0 || options.after > 0
@@ -273,16 +266,9 @@ pub(super) fn lookup(
             n => format!(" (1 of {n}; the others are in the rows below)"),
         };
         let mut out = format!(
-            "{} {} — {}:{}-{}{others} {}",
-            def.kind,
-            def.name,
-            hit.file,
-            def.start,
-            def.end,
-            connection_label(def, connections)
-        )
-        .trim_end()
-        .to_string();
+            "{} {} — {}:{}-{}{others}",
+            def.kind, def.name, hit.file, def.start, def.end
+        );
         out.push('\n');
         for number in def.start..=end {
             out.push_str(&format!("  {number}|{}\n", lines.get(number - 1)?));
@@ -325,16 +311,7 @@ mod tests {
 
     fn render_with(hits: &[Hit], terms: &[Term], options: &Options, edited: &[&str]) -> String {
         let edited = edited.iter().map(|f| f.to_string()).collect();
-        render(
-            "grep",
-            hits,
-            terms,
-            &Connections::new(),
-            &edited,
-            options,
-            None,
-        )
-        .unwrap()
+        render("grep", hits, terms, &edited, options, None).unwrap()
     }
 
     fn show(hits: &[Hit], terms: &[Term], output: Output, edited: &[&str]) -> String {
@@ -397,38 +374,6 @@ data.json
             show(&hits, &terms, Output::Count, &[]),
             "src/a.rs:8\nsrc/b.rs:1\ndata.json:1\n"
         );
-    }
-
-    #[test]
-    fn definitions_name_same_name_definitions_outside_the_results() {
-        let hits = [hit(
-            "src/openai.rs",
-            4,
-            "fn check() {",
-            Some(("check", 4, 9)),
-        )];
-        let mut connections = Connections::new();
-        connections.insert(
-            4,
-            super::super::defs::Links {
-                callers: vec!["handle".into()],
-                callees: Vec::new(),
-                siblings: vec!["src/azure.rs:7".into(), "src/base.rs:2".into()],
-            },
-        );
-        let out = render(
-            "grep",
-            &hits,
-            &[Term::parse("check")],
-            &connections,
-            &BTreeSet::new(),
-            &Options::default(),
-            None,
-        )
-        .unwrap();
-        assert!(out.contains(
-            "4-» Function check:4-9 ←handle also check in src/azure.rs:7,src/base.rs:2\n"
-        ));
     }
 
     #[test]

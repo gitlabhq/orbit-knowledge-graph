@@ -511,7 +511,7 @@ fn run_local(
         render_dir(&mut out, &client, &git, dir)?;
     }
     for (path, start, end) in &targets.ranges {
-        render_range(&mut out, &client, &git, &hydrator, path, *start, *end)?;
+        render_range(&mut out, &git, path, *start, *end)?;
     }
     let mut shown: Vec<String> = targets
         .ranges
@@ -810,14 +810,11 @@ fn render_dir(
 
 fn render_range(
     out: &mut String,
-    client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
-    hydrator: &NodeHydrator,
     path: &str,
     start: usize,
     end: usize,
 ) -> Result<()> {
-    let file = resolve_files(client, git, &[path.to_string()], &[])?;
     let content = std::fs::read_to_string(git.repo_path.join(path))
         .with_context(|| format!("failed to read {path}"))?;
     let lines: Vec<&str> = content.lines().collect();
@@ -827,29 +824,11 @@ fn render_range(
         lines.len()
     );
     let end = end.min(lines.len());
-    let mut members = definitions_in_files(client, git, hydrator, &[path.to_string()])?
-        .iter()
-        .map(source_range)
-        .collect::<Result<Vec<_>>>()?;
-    members.retain(|def| def.start <= end && def.end >= start);
     if !out.is_empty() {
         out.push('\n');
     }
-    writeln!(
-        out,
-        "File:{}  {path}  [{}]  L{start}-{end}",
-        file[0].id,
-        file[0].properties["language"].as_str().unwrap_or("")
-    )?;
-    for def in &members {
-        writeln!(
-            out,
-            "  Definition:{}  {}  [{}]  L{}-{}",
-            def.id, def.fqn, def.kind, def.start, def.end
-        )?;
-    }
+    writeln!(out, "{path}:{start}-{end}")?;
     write_lines(out, &lines, start, end)?;
-    out.push_str(&relations::range_links(client, path, start, end, &members)?);
     Ok(())
 }
 

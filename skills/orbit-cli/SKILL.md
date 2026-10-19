@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.26.0
+version: 0.27.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -51,10 +51,8 @@ orbit context duckdb_client::search::DuckDbSearch::grep src/lib.rs:120-180 crate
 
 Quote `a|b|c` for OR alternatives. Plain words ignore case, `_`, and `-`; terms
 with regex characters match as regex. Output follows rg's heading layout: each
-file's path once, then `line:text` per match, in full. A `line-» Kind name:start-end
-←callers →callees` line precedes the matches inside each definition. It ends with
-`also name in path:line` for same-name definitions outside the results, such as
-overrides. `line-» imports`
+file's path once, then `line:text` per match, in full. A `line-» Kind name:start-end`
+line precedes the matches inside each definition. `line-» imports`
 names what an import line brings in, and `line-» outside indexed definitions` marks
 code no definition encloses. A path that does not exist searches tracked paths with the same last segment.
 A scoped search with no matches widens one directory at a time. A `»` line says what was searched.
@@ -91,11 +89,12 @@ as grep prints them: `mr:42`, `issue:7`, `branch:name`, `pipeline:123`,
 `repo:group/project` names another; `mr:group/project!42` names one per target.
 Merge requests and issues return description, comments, and review threads, and
 merge requests add changed files and failed CI jobs. A branch reads its merge
-request, or its latest pipeline. Pipelines and jobs show failed jobs with log
-tails; commits show message, changed files, and merge requests. Bare
+request, or its latest pipeline. Pipelines list failed jobs, and jobs show
+their logs; commits show message, changed files, and merge requests. Bare
 `orbit context` reads the current branch. A `Definition:<id>` from another indexed checkout reads that checkout.
 Definition targets show full source and indexed relationships. File targets show
 a compact map and at most ten connections per section, with omitted counts.
+Line ranges show only the numbered lines.
 `<--` is a caller and `-->` is a callee. Reuse the returned source.
 
 <!-- orbit:section quick-start -->

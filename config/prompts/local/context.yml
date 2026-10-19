@@ -1,5 +1,5 @@
 name: context
-version: 1.10.0
+version: 1.11.0
 short: Expand local code context and GitLab entities
 description: >-
   Expand local code context and GitLab entities.
@@ -14,11 +14,11 @@ description: >-
   indexed checkout that owns the ID. Merge requests and issues return their
   description, comments and review threads, and for merge requests the changed
   files and failed CI jobs. A branch reads its merge request, or its latest
-  pipeline when it has none. Pipelines and jobs show failed jobs with the end
-  of their logs; commits show their message, changed files, and merge requests.
+  pipeline when it has none. Pipelines list failed jobs, and jobs show their
+  logs; commits show their message, changed files, and merge requests.
   With no targets at all it reads the current branch. Files return compact definition maps with every followable
   ID and up to ten connections per section, with omitted counts. Line ranges
-  return those numbered lines with the definitions they touch; directories list
+  return those numbered lines; directories list
   indexed files with definition counts. Choose a Definition ID for complete source and its indexed
   connections. Test connections appear in their own section. Reuse source; never
   truncate output. Raw reads are only for non-code or source Orbit cannot provide.

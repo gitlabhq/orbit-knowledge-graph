@@ -269,10 +269,6 @@ fn local(
         &kinds,
         &edited,
     )?;
-    let connections = match options.output {
-        Output::Lines => defs::connections(backend.client(), &hits)?,
-        _ => defs::Connections::new(),
-    };
     let mut header = format!("grep {query:?}");
     for path in &paths {
         header.push_str(&format!(" {path}"));
@@ -290,17 +286,9 @@ fn local(
         &header,
         &hits,
         &alternatives,
-        &connections,
         &edited,
         &options,
-        render::lookup(
-            &backend.git().repo_path,
-            &hits,
-            &alternatives,
-            &connections,
-            &options,
-        )
-        .as_deref(),
+        render::lookup(&backend.git().repo_path, &hits, &alternatives, &options).as_deref(),
     )?;
     match (options.output, rendered.split_once('\n')) {
         (Output::Lines, Some((first, rest))) if !notes.is_empty() => {
