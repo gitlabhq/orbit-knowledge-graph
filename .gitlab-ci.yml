@@ -781,10 +781,8 @@ windows-cli-check:
   extends:
     - .job-template
     - .sccache-template
-    - .no-cargo-home-cache
   needs: []
   variables:
-    LLVM_MINGW_VERSION: "20260505"
     CC_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang
     CXX_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang++
     AR_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-ar
@@ -796,6 +794,8 @@ windows-cli-check:
         - "**/Cargo.toml"
         - Cargo.lock
         - rust-toolchain.toml
+        - .cargo/config.toml
+        - .gitlab-ci.yml
         - scripts/ci/install-llvm-mingw.sh
   before_script:
     - !reference [.sccache-template, before_script]

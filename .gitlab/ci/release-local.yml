@@ -123,7 +123,6 @@ local-cli-build-windows-amd64:
   variables:
     PLATFORM: windows
     ARCH: x86_64
-    LLVM_MINGW_VERSION: "20260505"
     CC_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang
     CXX_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang++
     AR_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-ar
