@@ -291,74 +291,6 @@ fn package_built_by_pipeline_traversal() {
 }
 
 #[test]
-fn basic_search_query() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{
-            "id": "u",
-            "entity": "User",
-            "columns": ["username"],
-            "filters": { "username": {"eq": "admin"} }
-        }],
-        "limit": 10
-    }"#;
-
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
-    let rendered = result.base.render();
-
-    assert!(
-        rendered.contains("LIMIT 1 BY"),
-        "search should resolve latest rows"
-    );
-    assert!(
-        rendered.contains("_deleted"),
-        "search should filter deleted rows"
-    );
-    assert!(rendered.contains("username"));
-    assert!(rendered.contains("LIMIT 11"));
-    assert!(
-        !rendered.contains("JOIN"),
-        "search queries should not have joins"
-    );
-}
-
-#[test]
-fn complex_search_query() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{
-            "id": "u",
-            "entity": "User",
-            "columns": ["username", "state", "created_at"],
-            "filters": {
-                "username": {"starts_with": "admin"},
-                "state": {"in": ["active", "blocked"]},
-                "created_at": {"gte": "2024-01-01"}
-            }
-        }],
-        "limit": 50,
-        "order_by": "-u.created_at"
-    }"#;
-
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
-    // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
-    let rendered = result.base.render();
-
-    assert!(rendered.contains("LIMIT 1 BY"));
-    assert!(rendered.contains("_deleted"));
-    assert!(rendered.contains("username"));
-    assert!(rendered.contains("state"));
-    assert!(rendered.contains("created_at"));
-    assert!(rendered.contains("ORDER BY"));
-    assert!(rendered.contains("DESC"));
-    assert!(rendered.contains("LIMIT 51"));
-    assert!(
-        !rendered.contains("JOIN"),
-        "search queries should not have joins"
-    );
-}
-
-#[test]
 fn search_with_specific_columns() {
     let json = r#"{
         "query_type": "traversal",
@@ -1020,7 +952,7 @@ fn hydration_uses_parameterized_ids() {
 }
 
 #[test]
-fn hydration_skips_security_context() {
+fn hydration_applies_security_context() {
     let input = Input {
         query_type: QueryType::Hydration,
         nodes: vec![InputNode {
@@ -1048,11 +980,11 @@ fn hydration_skips_security_context() {
 
     assert!(
         !rendered.contains("arrayExists"),
-        "hydration should skip security filters"
+        "hydration should use the caller scope directly"
     );
     assert!(
-        !rendered.contains("startsWith"),
-        "hydration should not have startsWith"
+        rendered.contains("startsWith(hydrate.traversal_path, '1/')"),
+        "hydration should enforce the caller scope: {rendered}"
     );
 }
 

@@ -234,7 +234,7 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
             Ok(query)
         }
         QueryPlan::PathFinding(plan) => pathfinding::emit_pathfinding(plan, input),
-        QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes, input.limit),
+        QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes),
     }?;
 
     let edges = plan

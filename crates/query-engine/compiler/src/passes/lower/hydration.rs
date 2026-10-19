@@ -18,7 +18,7 @@ use crate::passes::plan::{HydrationNodePlan, hydration::HydrationPathFilter};
 
 use orbit_utils::traversal_path::TraversalPath;
 
-pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32) -> Result<Node> {
+pub fn emit_hydration(nodes: &[HydrationNodePlan]) -> Result<Node> {
     let mut arms = nodes.iter().map(emit_arm);
     let mut first = arms
         .next()
@@ -26,7 +26,6 @@ pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32) -> Result<Node> {
     for arm in arms {
         first.union_all.push(arm);
     }
-    first.limit = Some(limit);
     Ok(Node::Query(Box::new(first)))
 }
 
@@ -190,15 +189,15 @@ mod tests {
         }
     }
 
-    fn emit_dynamic(plans: &[InputNode], limit: u32) -> Node {
-        emit(plans, limit, true)
+    fn emit_dynamic(plans: &[InputNode]) -> Node {
+        emit(plans, true)
     }
 
-    fn emit_static(plans: &[InputNode], limit: u32) -> Node {
-        emit(plans, limit, false)
+    fn emit_static(plans: &[InputNode]) -> Node {
+        emit(plans, false)
     }
 
-    fn emit(nodes: &[InputNode], limit: u32, dynamic: bool) -> Node {
+    fn emit(nodes: &[InputNode], dynamic: bool) -> Node {
         let model = query_data_model::ClickHouseDataModel::derive(Arc::new(
             ontology::Ontology::load_embedded().unwrap(),
         ))
@@ -206,7 +205,6 @@ mod tests {
         let input = Input {
             query_type: QueryType::Hydration,
             nodes: nodes.to_vec(),
-            limit,
             ..Default::default()
         };
         let plan = plan_clickhouse(
@@ -231,7 +229,7 @@ mod tests {
             ..plan(vec!["title"], vec![1], vec![])
         };
 
-        let node = emit_dynamic(&[plan], 10);
+        let node = emit_dynamic(&[plan]);
         let (sql, params) = render_with_params(&node);
 
         assert!(
@@ -268,7 +266,7 @@ mod tests {
             ..plan(vec!["title"], vec![1], vec![])
         };
 
-        let node = emit_static(&[plan], 10);
+        let node = emit_static(&[plan]);
         let sql = render(&node);
 
         assert!(
@@ -280,7 +278,7 @@ mod tests {
 
     #[test]
     fn dynamic_tp_filter_precedes_id_filter() {
-        let node = emit_dynamic(&[plan(vec!["title"], vec![1], vec!["1/9970/"])], 10);
+        let node = emit_dynamic(&[plan(vec!["title"], vec![1], vec!["1/9970/"])]);
         let sql = render(&node);
         let tp_pos = sql.find("startsWith").unwrap();
         let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();
@@ -292,7 +290,7 @@ mod tests {
 
     #[test]
     fn static_tp_filter_precedes_id_filter() {
-        let node = emit_static(&[plan(vec!["title"], vec![1], vec!["1/9970/"])], 10);
+        let node = emit_static(&[plan(vec!["title"], vec![1], vec!["1/9970/"])]);
         let sql = render(&node);
         let tp_pos = sql.find("startsWith").unwrap();
         let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();

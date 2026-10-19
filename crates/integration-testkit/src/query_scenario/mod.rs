@@ -759,27 +759,13 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 );
             }
         }
-        if !ne.prop_absent.is_empty() && !view.nodes_of_type(entity).is_empty() {
-            let present = ne.prop_present.clone();
-            let absent = ne.prop_absent.clone();
-            for prop in &absent {
-                let present = present.clone();
-                let absent_field = prop.clone();
-                view.assert_filter(entity, prop, move |n| {
-                    let has_positive =
-                        present.iter().any(|p| n.has_prop(p)) || !n.properties.is_empty();
-                    has_positive && !n.has_prop(&absent_field)
-                });
-            }
-        } else {
-            for prop in &ne.prop_absent {
-                for node in view.nodes_of_type(entity) {
-                    assert!(
-                        !node.has_prop(prop),
-                        "{label}: {entity}/{} should not have property '{prop}'",
-                        node.id
-                    );
-                }
+        for prop in &ne.prop_absent {
+            for node in view.nodes_of_type(entity) {
+                assert!(
+                    !node.has_prop(prop),
+                    "{label}: {entity}/{} should not have property '{prop}'",
+                    node.id
+                );
             }
         }
         if let Some(absent) = &ne.absent {

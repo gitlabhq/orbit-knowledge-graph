@@ -19,7 +19,7 @@ cases:
         WHERE mr.id >= 2200 AND mr.id <= 2202
         RETURN mr, p LIMIT 10
     expect:
-      sql_contains: ["head_pipeline_id IN (SELECT id FROM _orbit_relation_"]
+      sql_contains: ["ANY INNER JOIN _orbit_relation_", "head_pipeline_id = _orbit_keys_"]
       node_count: 2
       nodes:
         MergeRequest: { ids: [2202], absent: [2200, 2201] }
@@ -45,7 +45,7 @@ cases:
         WHERE w.id >= 4100 AND w.id <= 4102
         RETURN w, g LIMIT 10
     expect:
-      sql_contains: ["namespace_id IN (SELECT id FROM _orbit_relation_"]
+      sql_contains: ["ANY INNER JOIN _orbit_relation_", "namespace_id = _orbit_keys_"]
       node_count: 2
       nodes:
         WorkItem: { ids: [4102], absent: [4100, 4101] }

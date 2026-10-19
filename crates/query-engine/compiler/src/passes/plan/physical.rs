@@ -252,7 +252,7 @@ impl RelationGraph {
         predicates: Vec<Predicate>,
         selective_latest: bool,
     ) -> RelationId {
-        if !selective_latest || !predicates.iter().any(Predicate::is_selective) {
+        if !selective_latest || !predicates.iter().any(Predicate::prunes_granules) {
             let read = self.read(table, alias, true);
             let owned = self.owned(read, owner, alias);
             return self.filter(owned, predicates);

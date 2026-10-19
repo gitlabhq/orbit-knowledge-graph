@@ -7,7 +7,7 @@ cases:
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
     expect:
-      sql_contains: ["caller.id IN (SELECT id FROM _orbit_relation_"]
+      sql_contains: ["caller ANY INNER JOIN _orbit_relation_", "caller.id = _orbit_keys_"]
       node_count: 2
       nodes:
         Definition:
@@ -24,7 +24,7 @@ cases:
       gql: |
         MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
     expect:
-      sql_contains: ["callee.id IN (SELECT id FROM _orbit_relation_"]
+      sql_contains: ["callee ANY INNER JOIN _orbit_relation_", "callee.id = _orbit_keys_"]
       node_count: 2
       nodes:
         Definition:

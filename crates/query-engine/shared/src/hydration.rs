@@ -53,33 +53,6 @@ pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<Travers
     paths
 }
 
-/// Fallback for nodes whose own TP column is absent (FK-elided pinned nodes
-/// where the alias was absorbed into a literal). The TPs from sibling nodes in
-/// the same result rows are valid narrowing candidates because all entities
-/// share the same namespace hierarchy.
-fn collect_all_traversal_paths(
-    result: &QueryResult,
-    templates: &[HydrationTemplate],
-) -> Vec<TraversalPath> {
-    let mut all: Vec<TraversalPath> = Vec::new();
-    for t in templates {
-        if !t.has_traversal_path {
-            continue;
-        }
-        let tp_col = traversal_path_column(&t.node_alias);
-        for row in result.authorized_rows() {
-            if let Some(tp) = row.get_column_string(&tp_col)
-                && !tp.is_empty()
-            {
-                all.push(TraversalPath::new_unchecked(tp));
-            }
-        }
-    }
-    all.sort_unstable();
-    all.dedup();
-    all
-}
-
 /// When `static_nodes` is provided (e.g. the center node in a neighbors query),
 /// their IDs are also collected so properties can be hydrated for them.
 pub fn extract_dynamic_refs(
@@ -327,7 +300,6 @@ pub fn hydrate_static(
     templates: &[HydrationTemplate],
     query_result: &QueryResult,
 ) -> Result<(Vec<InputNode>, usize), PipelineError> {
-    let all_tps = collect_all_traversal_paths(query_result, templates);
     let mut nodes = Vec::new();
     let mut total_ids: usize = 0;
 
@@ -342,8 +314,7 @@ pub fn hydrate_static(
         }
 
         let traversal_paths = if template.has_traversal_path {
-            let own = collect_traversal_paths(query_result, &template.node_alias);
-            if own.is_empty() { all_tps.clone() } else { own }
+            collect_traversal_paths(query_result, &template.node_alias)
         } else {
             Vec::new()
         };

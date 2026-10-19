@@ -98,7 +98,25 @@ impl Predicate {
                 &|children| children.into_iter().any(|prunes| prunes),
                 &|_| false,
             ),
-            Self::Property { text_indexed, .. } => *text_indexed || self.is_selective(),
+            Self::Property {
+                filter,
+                text_indexed,
+                ..
+            } => {
+                self.is_selective()
+                    || *text_indexed
+                        && matches!(
+                            filter.op,
+                            None | Some(
+                                crate::input::FilterOp::Eq
+                                    | crate::input::FilterOp::In
+                                    | crate::input::FilterOp::Contains
+                                    | crate::input::FilterOp::TokenMatch
+                                    | crate::input::FilterOp::AllTokens
+                                    | crate::input::FilterOp::AnyTokens
+                            )
+                        )
+            }
             _ => self.is_selective(),
         }
     }

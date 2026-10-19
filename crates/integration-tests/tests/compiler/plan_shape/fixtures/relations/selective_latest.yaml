@@ -60,6 +60,24 @@ cases:
           expect: ["(Filter j.project_id = 1000, j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
           reject: ["(Deduplicate LimitBy ... (_))"]
 
+  - name: Text indexes bound anchor-scoped reads
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"MergeRequestDiffFile","filters":{"project_id":1000,"new_path":{"contains":"app/services"}},"columns":["new_path"]}],"limit":10}
+      gql: |
+        MATCH (f:MergeRequestDiffFile {project_id: 1000})
+        WHERE f.new_path CONTAINS 'app/services'
+        RETURN f.new_path LIMIT 10
+    logical:
+      expect: ["(Filter contains(f.new_path, 'app/services'), f.project_id = 1000 (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Project f.traversal_path AS traversal_path, f.id AS id (Filter contains(f.new_path, 'app/services'), ... (Scan Table(gl_merge_request_diff_file) AS f)))
+            - (Deduplicate LimitBy f.traversal_path, f.id (Filter (f.traversal_path, f.id) IN ?.(traversal_path, id) (Scan Table(gl_merge_request_diff_file) AS f)))
+          reject: ["(Deduplicate Final (Scan Table(gl_merge_request_diff_file) AS f))"]
+
   - name: Negated high-selectivity node filters keep FINAL
     query:
       json: |

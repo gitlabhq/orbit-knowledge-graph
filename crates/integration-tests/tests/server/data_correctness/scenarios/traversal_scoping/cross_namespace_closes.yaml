@@ -1,9 +1,14 @@
-description: Cross-namespace CLOSES edge returns a work item from a different group
+description: Cross-namespace CLOSES edge does not hydrate a work item outside the caller scope
 
 config:
+  security: { org_id: 1, paths: ["1/100/"] }
+  redaction:
+    allow:
+      merge_request: [2000]
+      work_item: [4002]
   extra_seed:
     gl_edge:
-      - { traversal_path: "1/101/", source_id: 2000, source_kind: MergeRequest, relationship_kind: CLOSES, target_id: 4002, target_kind: WorkItem, source_tags: ["state:opened"], target_tags: ["state:opened", "wi_type:task"] }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: CLOSES, target_id: 4002, target_kind: WorkItem, source_tags: ["state:opened"], target_tags: ["state:opened", "wi_type:task"] }
 
 query:
   json: |
@@ -21,6 +26,7 @@ query:
     MATCH (mr:MergeRequest)-[:CLOSES]->(wi:WorkItem) WHERE mr.project_id = 1000 RETURN mr.project_id, wi LIMIT 50
 
 expect:
+  hydration: static
   node_count: 2
   skip_requirements: ["filter:project_id"]
   nodes:
@@ -28,6 +34,7 @@ expect:
       ids: [2000]
     WorkItem:
       ids: [4002]
+      prop_absent: [iid, title, state]
   edges:
     CLOSES:
       - [2000, 4002]
