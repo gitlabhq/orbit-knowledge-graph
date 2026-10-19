@@ -33,7 +33,7 @@ For more information, see [storage and privacy](local/_index.md#storage-and-priv
 
 ## Roles
 
-A role in a top-level group applies to each subgroup and project in it.
+A role for a top-level group applies to each subgroup and project in it.
 Turning on GitLab Orbit does not change existing access.
 
 | Action | Minimum role |
@@ -54,8 +54,8 @@ GitLab authorizes every query. GitLab Orbit adds no permissions of its own, and 
 
 GitLab enforces access in two layers:
 
-- Namespace scope. Results include only the groups where you have the required role, directly or through a shared group, and their subgroups and projects. A role in a project only does not give access to that project.
-  A group next to yours in the same parent group stays out of scope unless you have a role in it.
+- Namespace scope. Results include only the groups where you have the required role, directly or through a shared group, and their subgroups and projects. A role for a project alone does not give access to that project.
+  A group next to yours in the same parent group stays out of scope unless you have a role for it.
 - A check on each result. Before GitLab returns the results, it checks your permission on each item again,
   and removes each item that you cannot access. This check covers confidential items, SAML group links,
   and group [IP address restrictions](https://docs.gitlab.com/user/group/access_and_permissions/#restrict-group-access-by-ip-address).

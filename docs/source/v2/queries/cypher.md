@@ -192,7 +192,7 @@ When `pagination.truncated` is `true`, the result is incomplete.
 - A query has at most five nodes and five relationships.
 - `ORDER BY` takes one sort key.
 - `LIMIT` and `PAGE` accept 1 to 1000 rows.
-- A query returns at most 50 columns and filters on at most 500 node IDs.
+- Each node returns at most 50 properties and filters on at most 500 IDs.
 - The query text is at most 32 KiB.
 
 These forms are not supported and are rejected:

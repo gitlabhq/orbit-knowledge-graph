@@ -33,7 +33,7 @@ title: Troubleshooting GitLab Orbit
 
 ### `glab orbit` is not recognized
 
-`glab` shows an unknown command error for `orbit`, because `glab` is older than 1.117.
+`glab` shows an unknown command error for `orbit`, because your `glab` version is earlier than 1.117.
 [Update `glab`](https://docs.gitlab.com/cli/), then run `glab orbit --install`.
 
 ### Error: `unrecognized subcommand`
@@ -68,9 +68,9 @@ The `@gitlab/orbit` npm package always uses the musl build on Linux.
 
 ### The Orbit settings page is missing
 
-On GitLab.com, the **Orbit** settings page appears only for users with the Owner role for a top-level group.
+The **Orbit** settings page appears only for users with the Owner role for a top-level group.
 If you do not have the Owner role, or you are in a subgroup, ask a user with the Owner role for the top-level group to turn on GitLab Orbit.
-On GitLab Self-Managed and GitLab Dedicated, an administrator turns it on in the **Admin** area.
+On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn it on in the **Admin** area.
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
@@ -186,7 +186,7 @@ Create a token with the `mcp_orbit` or `read_api` scope, or sign in again to gra
 
 ### Error: `403 Forbidden - No Orbit enabled namespaces available`
 
-The service account does not have the Reporter, Security Manager, Developer, Maintainer, or Owner role in a group where GitLab Orbit is on.
+The service account does not have the Reporter, Security Manager, Developer, Maintainer, or Owner role for a group where GitLab Orbit is on.
 Add the account to such a group with one of these roles.
 For more information, see [service accounts](security.md#service-accounts).
 
@@ -199,7 +199,7 @@ If you added the account recently, wait a few minutes, then send the query again
 ### Results have no security data
 
 The service account has the Reporter role, so GitLab removes security entities from results and aggregate counts.
-Give the account the Security Manager role in the group.
+Give the account the Security Manager role for the group.
 
 ## GitLab Duo
 

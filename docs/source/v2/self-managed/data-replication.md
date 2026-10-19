@@ -226,8 +226,9 @@ GRANT SELECT ON system.tables, system.columns TO siphon_app;
 ## Make the passwords available to Siphon
 
 Siphon reads both passwords from environment variables backed by a Kubernetes Secret.
+Create the Siphon namespace first.
 The values file in the next section expects a Secret named `siphon-secrets` in the Siphon namespace,
-with these keys. Create the namespace first.
+with these keys:
 
 | Key | Holds |
 |-----|-------|

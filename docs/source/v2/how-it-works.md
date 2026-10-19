@@ -67,7 +67,7 @@ the indexer builds the graph from two sources:
   parses them, and indexes again when the default branch changes. You cannot select another branch.
 
 Results show your data as of the last index cycle.
-The first index takes from a few minutes to about 30 minutes for thousands of projects. Later updates take seconds to minutes.
+The first index can take up to a few hours. Later updates take seconds to minutes.
 To check the progress, run `glab orbit graph-status --full-path <my-group>`.
 
 ## How a query runs
@@ -83,11 +83,11 @@ Every query follows the same path:
 ## Where the graph runs
 
 On GitLab.com, the graph is stored in ClickHouse, and the GitLab Orbit services run in a separate Kubernetes cluster.
-They do not share compute or memory with your GitLab instance.
+They do not share compute or memory with GitLab.com.
 On GitLab Dedicated, GitLab runs GitLab Orbit for your instance.
 On GitLab Self-Managed, you run GitLab Orbit yourself. See [GitLab Orbit on GitLab Self-Managed](self-managed/_index.md).
 
-### Data retention and deletion
+## Data retention and deletion
 
 When you turn off GitLab Orbit for a group, GitLab keeps the indexed data for 30 days.
 If you turn it on again in that time, indexing continues from where it stopped.
@@ -95,9 +95,8 @@ After 30 days, GitLab deletes all graph data of the group.
 
 ## The local graph
 
-The GitLab Orbit CLI also indexes repositories on your machine into a local graph of code only.
-It works offline, needs no GitLab account, and has no authorization layer.
-Your agent can use both graphs in the same conversation. For more information, see [GitLab Orbit Local](local/_index.md).
+The GitLab Orbit CLI also indexes repositories on your machine into a local graph of code only, with no authorization layer.
+For more information, see [GitLab Orbit Local](local/_index.md).
 
 ## Known issues
 
