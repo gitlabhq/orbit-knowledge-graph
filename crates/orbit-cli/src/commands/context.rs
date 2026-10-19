@@ -503,6 +503,23 @@ fn run_local(
     db: Option<std::path::PathBuf>,
     targets: &[String],
 ) -> Result<String> {
+    use crate::commands::index::incremental::{Freshness, refresh};
+    let (out, git, shown) = render_local(repo.clone(), db.clone(), targets)?;
+    let mut files: Vec<&str> = shown.iter().map(String::as_str).collect();
+    files.sort_unstable();
+    files.dedup();
+    match refresh(&git.repo_path, db.clone(), &files) {
+        Ok(Freshness::Fresh) => Ok(out),
+        Ok(Freshness::Refreshed) => Ok(render_local(repo, db, targets)?.0),
+        _ => Ok(format!("{}{out}", edited_note(&git, &shown))),
+    }
+}
+
+fn render_local(
+    repo: Option<std::path::PathBuf>,
+    db: Option<std::path::PathBuf>,
+    targets: &[String],
+) -> Result<(String, workspace::GitInfo, Vec<String>)> {
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
     let hydrator = NodeHydrator::embedded("Definition")?;
     let targets = resolve_targets(&client, &git, &hydrator, targets)?;
@@ -519,7 +536,7 @@ fn run_local(
         .map(|(path, ..)| path.clone())
         .collect();
     if targets.files.is_empty() && targets.file_ids.is_empty() && targets.ids.is_empty() {
-        return Ok(format!("{}{out}", edited_note(&git, &shown)));
+        return Ok((out, git, shown));
     }
     shown.extend(targets.files.iter().cloned());
     let (paths, file_ids, ids) = (targets.files, targets.file_ids, targets.ids);
@@ -559,7 +576,7 @@ fn run_local(
     out.push_str(&relations::render(
         &client, &git, &hydrator, &nodes, &members,
     )?);
-    Ok(format!("{}{out}", edited_note(&git, &shown)))
+    Ok((out, git, shown))
 }
 
 /// Warns that the graph describes the indexed commit when a shown file has changed since.

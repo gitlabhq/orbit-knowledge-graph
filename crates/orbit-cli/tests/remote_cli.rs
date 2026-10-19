@@ -682,3 +682,56 @@ fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
          job:9 unit (test, script_failure) https://localhost/p/-/jobs/9\n"
     );
 }
+
+#[test]
+fn grep_refreshes_an_edited_file_into_the_incremental_graph() {
+    let repo = tempfile::tempdir().expect("tempdir");
+    std::fs::write(repo.path().join("util.py"), "def helper():\n    return 1\n").unwrap();
+    std::fs::write(
+        repo.path().join("main.py"),
+        "from util import helper\n\ndef run():\n    return helper()\n",
+    )
+    .unwrap();
+    let git = |args: &[&str]| {
+        let status = Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .current_dir(repo.path())
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {args:?} failed");
+    };
+    git(&["init", "--quiet"]);
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "init"]);
+    let orbit = |data: &Path, args: &[&str]| {
+        let output = run_orbit_with_data(repo.path(), data, "http://localhost:1", args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let (edited, fresh) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    orbit(edited.path(), &["index", ".", "--ff=inc"]);
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(
+        repo.path().join("main.py"),
+        "from util import helper\n\n\ndef added():\n    return helper()\n\ndef run():\n    return added()\n",
+    )
+    .unwrap();
+
+    let found = orbit(edited.path(), &["grep", "added"]);
+    assert!(found.contains("Function added"), "{found}");
+    assert!(!found.contains("edited since index"), "{found}");
+
+    orbit(fresh.path(), &["index", ".", "--ff=inc"]);
+    let graph = "SELECT (SELECT list(fqn || ':' || start_line ORDER BY fqn) FROM gl_definition) AS defs, \
+                 (SELECT list(relationship_kind ORDER BY relationship_kind) FROM gl_edge) AS edges, \
+                 (SELECT count(*) FROM gl_edge e JOIN gl_definition d ON d.id = e.target_id) AS linked";
+    assert_eq!(
+        orbit(edited.path(), &["sql", "--format", "json", graph]),
+        orbit(fresh.path(), &["sql", "--format", "json", graph])
+    );
+}

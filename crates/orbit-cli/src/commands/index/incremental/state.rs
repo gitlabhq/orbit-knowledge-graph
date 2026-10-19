@@ -148,8 +148,7 @@ impl Project<'_> {
     }
 
     fn snapshot_path(&self, family: SupportLang) -> PathBuf {
-        self.state_dir
-            .join(format!("graph.{}.bin", family.family()))
+        snapshot_file(&self.state_dir, family)
     }
 
     fn save_state(&self, families: &[String], owner: Option<SupportLang>) -> Result<()> {
@@ -175,5 +174,67 @@ impl Project<'_> {
                 )
             },
         )
+    }
+}
+
+fn snapshot_file(state_dir: &std::path::Path, family: SupportLang) -> PathBuf {
+    state_dir.join(format!("graph.{}.bin", family.family()))
+}
+
+pub(super) fn changed_since_snapshot(
+    repo: &std::path::Path,
+    state_dir: &std::path::Path,
+    files: &[&str],
+) -> Vec<String> {
+    let modified = |path: &std::path::Path| {
+        std::fs::metadata(path)
+            .and_then(|meta| meta.modified())
+            .ok()
+    };
+    files
+        .iter()
+        .filter(|file| {
+            let Some(language) =
+                SupportLang::from_path(file).filter(|language| language.has_rules())
+            else {
+                return false;
+            };
+            let snapshot = modified(&snapshot_file(state_dir, language));
+            let file = modified(&repo.join(file));
+            matches!((file, snapshot), (Some(file), Some(snapshot)) if file > snapshot)
+        })
+        .map(|file| file.to_string())
+        .collect()
+}
+
+impl Project<'_> {
+    pub(super) fn refresh(&self, changed: Vec<String>) -> Result<()> {
+        let saved = self.load_state()?;
+        let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
+        let repository = input::paths(&self.git.repo_path, changed)?;
+        let mut exporter = Exporter::new(self.git, self.writer, self.ontology);
+        for (family, paths) in input::split(&repository, owner).into_values() {
+            let snapshot = self.snapshot_path(family);
+            let (env, state) = State::load(&snapshot, family)
+                .with_context(|| format!("failed to load {}", snapshot.display()))?;
+            let resolved = templates::reindex(
+                Context::new(&env, input::paths(&self.git.repo_path, paths.clone())?),
+                state,
+                Vec::new(),
+            )?;
+            let revisited: Vec<u32> = resolved.value().resolved.clone();
+            let (_, displayed) = resolved.then(Display)?.finish();
+            let state = displayed.state;
+            let mut files: rustc_hash::FxHashSet<String> = paths.into_iter().collect();
+            files.extend(
+                revisited
+                    .into_iter()
+                    .filter_map(|index| state.trees.get(index as usize))
+                    .map(|tree| tree.label.to_string()),
+            );
+            state.save(&env, &snapshot)?;
+            exporter.replace(&env, &state, &files)?;
+        }
+        Ok(())
     }
 }

@@ -282,7 +282,11 @@ fn local(
             let mut files: Vec<&str> = hits.iter().map(|h| h.file.as_str()).collect();
             files.sort();
             files.dedup();
-            let edited = crate::workspace::edited_since_index(&root, &files);
+            use crate::commands::index::incremental::{Freshness, refresh};
+            let edited = match refresh(&root, db.clone(), &files) {
+                Ok(Freshness::Fresh | Freshness::Refreshed) => Default::default(),
+                _ => crate::workspace::edited_since_index(&root, &files),
+            };
             Some((hits, edited))
         }
         false => None,
