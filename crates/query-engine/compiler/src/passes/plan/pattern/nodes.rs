@@ -122,7 +122,7 @@ fn narrowing_nodes<M: OrbitQueryModel + ?Sized>(pattern: &Pattern<'_, M>) -> Has
         [relation]
             if pattern.input.query_type == QueryType::Traversal
                 && relation.max_hops == 1
-                && relation.foreign_key.is_none()
+                && relation.fk.is_none()
                 && relation.direction != Direction::Both =>
         {
             [
@@ -169,8 +169,7 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
         .order_by
         .as_ref()
         .is_some_and(|order| order.node == node.alias);
-    let local_predicate =
-        condition_nodes.contains(&node.alias) && !pattern.holds_foreign_key(&node.alias);
+    let local_predicate = condition_nodes.contains(&node.alias) && !pattern.holds_fk(&node.alias);
     let uncovered_filter = pattern.has_uncovered_filter(node);
     let filter_only = pattern.aggregate()
         && uncovered_filter

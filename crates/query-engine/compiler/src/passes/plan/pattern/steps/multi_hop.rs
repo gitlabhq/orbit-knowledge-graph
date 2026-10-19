@@ -1,7 +1,7 @@
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
 
-use super::super::edges::select_edge_layouts;
+use super::super::relations::select_edge_layouts;
 use super::super::{EdgeRelation, Pattern};
 use super::edge::current_edge_rows;
 use super::{IdSet, RelationBuilder};

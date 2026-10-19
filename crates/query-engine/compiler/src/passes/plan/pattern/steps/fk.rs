@@ -1,18 +1,14 @@
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
 
-use super::super::{EdgeRelation, ForeignKey};
+use super::super::{EdgeRelation, Fk};
 use super::RelationBuilder;
 use crate::error::{QueryError, Result};
 use crate::input::ColumnSelection;
 use crate::passes::plan::predicates::*;
 
 impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
-    pub(super) fn add_foreign_key(
-        &mut self,
-        relation: &EdgeRelation,
-        key: &ForeignKey,
-    ) -> Result<()> {
+    pub(super) fn add_fk(&mut self, relation: &EdgeRelation, key: &Fk) -> Result<()> {
         let pattern = self.pattern;
         let joined_through_endpoint = self.ensure_holder(relation, key)?;
         let holder = self
@@ -62,12 +58,12 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         if let Some(root) = self.root.take() {
             self.root = Some(self.graph.filter(root, predicates));
         }
-        self.push_foreign_key_outputs(relation, key, alias);
+        self.push_fk_outputs(relation, key, alias);
         Ok(())
     }
 
     /// Reads the holder table if it is not in the chain yet; returns whether it joined through the other endpoint.
-    fn ensure_holder(&mut self, relation: &EdgeRelation, key: &ForeignKey) -> Result<bool> {
+    fn ensure_holder(&mut self, relation: &EdgeRelation, key: &Fk) -> Result<bool> {
         if self.has_table(&key.node) {
             return Ok(false);
         }
@@ -103,7 +99,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         Ok(joined_through_endpoint)
     }
 
-    fn push_foreign_key_outputs(&mut self, relation: &EdgeRelation, key: &ForeignKey, alias: &str) {
+    fn push_fk_outputs(&mut self, relation: &EdgeRelation, key: &Fk, alias: &str) {
         let pattern = self.pattern;
         let (source, target) = relation.stored_endpoints();
         let (source_id, target_id) = if key.node == source {

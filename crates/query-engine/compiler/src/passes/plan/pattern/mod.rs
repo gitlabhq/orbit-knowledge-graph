@@ -1,8 +1,8 @@
-mod builder;
 mod conditions;
 mod coverage;
-mod edges;
 mod nodes;
+mod relations;
+mod steps;
 
 use std::collections::{HashMap, HashSet};
 
@@ -47,12 +47,12 @@ pub struct EdgeRelation {
     pub min_hops: u32,
     pub max_hops: u32,
     pub filters: Vec<(String, BoundFilter)>,
-    pub foreign_key: Option<ForeignKey>,
+    pub fk: Option<Fk>,
 }
 
 /// A relationship stored as a column on one of its endpoint nodes instead of an edge row.
 #[derive(Clone)]
-pub struct ForeignKey {
+pub struct Fk {
     pub node: String,
     pub column: String,
 }
@@ -173,21 +173,21 @@ where
     let mut pattern = Pattern {
         input,
         model,
-        relations: edges::build_relations(input, model, &nodes),
+        relations: relations::build_relations(input, model, &nodes),
         nodes,
         denormalized: super::denormalized_facts(input, model),
     };
     let placement = conditions::place_conditions(&pattern)?;
     conditions::bind_scan_conditions(&mut pattern, &placement)?;
     nodes::assign_node_access(&mut pattern, &placement.joined_nodes);
-    edges::linearize_relations(&mut pattern.relations, &pattern.nodes)?;
+    relations::linearize_relations(&mut pattern.relations, &pattern.nodes)?;
     if pattern.aggregate() {
         let groups: HashSet<&str> = node_group_ids(&input.aggregation.group_by).collect();
         for node in pattern.nodes.values_mut() {
             node.emit_select = groups.contains(node.alias.as_str());
         }
     }
-    let mut execution = builder::RelationBuilder::new(&pattern).build()?;
+    let mut execution = steps::RelationBuilder::new(&pattern).build()?;
     let conditions = input
         .predicates
         .iter()

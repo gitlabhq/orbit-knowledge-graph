@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use query_data_model::OrbitQueryModel;
 
-use super::{EdgeRelation, ForeignKey, NodePlan};
+use super::{EdgeRelation, Fk, NodePlan};
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::*;
@@ -59,7 +59,7 @@ where
                 .map(|(_, column)| column)
                 .collect();
             select_edge_layouts(model, &mut edge_tables, &pinned);
-            let foreign_key = (relationship.hops.max == 1
+            let fk = (relationship.hops.max == 1
                 && relationship.filters.is_empty()
                 && !input.references(&PredicateTarget::Relationship(input_index))
                 && relationship.direction != Direction::Both)
@@ -72,7 +72,7 @@ where
                         query_data_model::Endpoint::Target => target_node.clone(),
                     };
                     model.entity_table(input.entity_of(&node)?)?;
-                    Some(ForeignKey { node, column })
+                    Some(Fk { node, column })
                 })
                 .flatten();
             let filters = ordered_filters(
@@ -98,7 +98,7 @@ where
                 max_hops: relationship.hops.max,
                 filters,
                 edge_tables,
-                foreign_key,
+                fk,
             }
         })
         .collect()

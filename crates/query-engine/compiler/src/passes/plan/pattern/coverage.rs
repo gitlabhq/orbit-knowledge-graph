@@ -17,7 +17,7 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         node: &str,
         filter: &BoundFilter,
     ) -> Option<&DenormalizedProperty> {
-        if relation.foreign_key.is_some() || is_wildcard(&relation.rel_types) {
+        if relation.fk.is_some() || is_wildcard(&relation.rel_types) {
             return None;
         }
         let direction = if relation.endpoint_column(node)? == SOURCE_ID_COLUMN {
@@ -65,19 +65,17 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
     }
 
     pub fn covered_by_edge(&self, node: &str, property: &str, filter: &BoundFilter) -> bool {
-        self.relations
-            .iter()
-            .any(|relation| match &relation.foreign_key {
-                Some(key) => key.node == node,
-                None => {
-                    self.denorm_facts(relation, node, filter).is_some()
-                        || relation.max_hops == 1
-                            && relation.endpoint_column(node).is_some()
-                            && self
-                                .edge_columns(relation)
-                                .is_some_and(|columns| columns.contains(property))
-                }
-            })
+        self.relations.iter().any(|relation| match &relation.fk {
+            Some(key) => key.node == node,
+            None => {
+                self.denorm_facts(relation, node, filter).is_some()
+                    || relation.max_hops == 1
+                        && relation.endpoint_column(node).is_some()
+                        && self
+                            .edge_columns(relation)
+                            .is_some_and(|columns| columns.contains(property))
+            }
+        })
     }
 
     pub fn has_uncovered_filter(&self, node: &NodePlan) -> bool {
@@ -103,13 +101,10 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         plan
     }
 
-    pub fn holds_foreign_key(&self, node: &str) -> bool {
-        self.relations.iter().any(|relation| {
-            relation
-                .foreign_key
-                .as_ref()
-                .is_some_and(|key| key.node == node)
-        })
+    pub fn holds_fk(&self, node: &str) -> bool {
+        self.relations
+            .iter()
+            .any(|relation| relation.fk.as_ref().is_some_and(|key| key.node == node))
     }
 
     fn edge_columns(&self, relation: &EdgeRelation) -> Option<&HashSet<String>> {

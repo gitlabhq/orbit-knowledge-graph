@@ -1,5 +1,5 @@
 mod edge;
-mod foreign_key;
+mod fk;
 mod multi_hop;
 
 use std::collections::{HashMap, HashSet};
@@ -51,8 +51,8 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             return self.single_node();
         }
         for (index, relation) in pattern.relations.iter().enumerate() {
-            match &relation.foreign_key {
-                Some(key) => self.add_foreign_key(relation, key)?,
+            match &relation.fk {
+                Some(key) => self.add_fk(relation, key)?,
                 None => self.add_edge(index, relation)?,
             }
         }
