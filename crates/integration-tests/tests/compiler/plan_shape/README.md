@@ -1,8 +1,8 @@
 # Planner optimization coverage
 
 Run `mise test:plan-shape`. The runner discovers YAML files recursively under
-`fixtures/`. Each fixture checks normalized input, selected requirements, and/or
-the emitted SQL AST. Most fixtures run through both JSON and GQL.
+`fixtures/`. Each fixture checks normalized input, the selected plan, the lowered
+SQL AST, and/or the final secured AST. Most fixtures run through both JSON and GQL.
 
 Set `ontology_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved/`
 for one fixture. Other fixtures keep the default ontology.

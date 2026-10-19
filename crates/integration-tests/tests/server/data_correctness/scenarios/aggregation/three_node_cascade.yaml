@@ -25,7 +25,6 @@ query:
     MATCH (u:User {id: 1})-[:AUTHORED]->(mr:MergeRequest)-[:HAS_NOTE]->(n:Note) WHERE n.id >= 1 AND n.id <= 10000 RETURN u{.id, .username}, count(n) AS note_count LIMIT 10
 
 expect:
-  skip_requirements: ["node_ids", "relationship:AUTHORED", "relationship:HAS_NOTE"]
   groups:
     u:
       rows:

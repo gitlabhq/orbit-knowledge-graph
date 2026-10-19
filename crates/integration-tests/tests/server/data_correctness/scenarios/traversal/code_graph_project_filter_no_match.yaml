@@ -15,7 +15,6 @@ query:
     MATCH (caller:Definition {project_id: 99999})-[:CALLS]->(callee:Definition) RETURN caller.name, callee.name LIMIT 20
 
 expect:
-  skip_requirements: ["filter:project_id"]
   node_count: 0
   edges:
     CALLS: []

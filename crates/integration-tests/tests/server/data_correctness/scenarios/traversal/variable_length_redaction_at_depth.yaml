@@ -20,7 +20,6 @@ query:
     MATCH (parent:Group {id: 100})-[:CONTAINS*1..2]->(child:Group) RETURN parent.name, child.name LIMIT 10
 
 expect:
-  skip_requirements: ["node_ids", "node_count", "relationship:CONTAINS"]
   nodes:
     Group:
       absent: [200]

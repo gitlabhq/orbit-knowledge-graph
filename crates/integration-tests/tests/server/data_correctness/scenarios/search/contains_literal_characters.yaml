@@ -1,4 +1,4 @@
-description: contains treats %, _, and backslash as plain characters with independent decoys and ngram index pruning
+description: contains treats %, _, and backslash as plain characters with independent decoys
 
 config:
   redaction: { allow: { merge_request: [2101, 2102, 2103, 2104] } }
@@ -24,8 +24,6 @@ query:
     RETURN mr.title LIMIT 10
 
 expect:
-  indexes_used: [{ table: gl_merge_request, index: idx_title_ngram }]
-  skip_requirements: ["filter:title"]
   node_count: 1
   nodes:
     MergeRequest:

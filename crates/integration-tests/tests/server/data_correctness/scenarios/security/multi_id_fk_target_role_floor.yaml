@@ -31,5 +31,3 @@ query:
 expect:
   row_count: 1
   row_values: [{ n: 0 }]
-  sql_contains: ["HAS_FINDING", "gl_vulnerability_occurrence AS _role_f FINAL", "false"]
-  skip_requirements: [node_ids]

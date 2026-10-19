@@ -104,7 +104,7 @@ The `local` test binary in `crates/integration-tests` checks the query compiler 
 
 ### Plan-shape fixtures
 
-The [plan-shape harness](../../crates/integration-tests/tests/compiler/plan_shape/README.md) checks the plan that the compiler picks, not the rows that the query returns. Each YAML fixture in `plan_shape/fixtures/` gives a query and the expected plan. Examples are which edge table the plan scans, where it narrows, and how it hydrates. Run them with `mise test:plan-shape`.
+The [plan-shape harness](../../crates/integration-tests/tests/compiler/plan_shape/README.md) checks compiler structure, not returned rows. Each YAML fixture gives a query and assertions over normalized input, the physical plan, or the emitted SQL AST. Examples include edge-table selection, narrowing, security predicates, and hydration. Run them with `mise test:plan-shape`.
 
 Plan-shape fixtures do not measure latency, and they do not replace query scenarios.
 
@@ -175,7 +175,7 @@ CI splits the container tests into lanes that run in parallel. One lane runs mos
 
 Query scenarios are the main test surface for query correctness. They live in [`data_correctness/scenarios`](../../crates/integration-tests/tests/server/data_correctness/scenarios), in one directory for each category, such as security, search, and traversal.
 
-Each scenario runs the full query pipeline: compile, execute, redact, hydrate, paginate, and format. Then it checks the response. A scenario can also check the generated SQL and the skip indexes that ClickHouse uses. Scenarios give the same query in JSON and in GQL, so both frontends must return the same result.
+Each scenario runs the full query pipeline: compile, execute, redact, hydrate, paginate, and format. Then it checks only caller-visible errors and response data. SQL, AST, plan, hydration-mode, settings, and index assertions belong in plan-shape fixtures. Scenarios give the same query in JSON and in GQL, so both frontends must return the same result.
 
 The runner validates response schemas and cursor metadata. Repeated queries must
 preserve node order within each entity type, properties, edges, and aggregation rows. Pagination

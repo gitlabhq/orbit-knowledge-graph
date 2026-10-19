@@ -27,7 +27,6 @@ cases:
         WHERE u.id IN [1, 2, 3, 7] AND NOT (u.username IN ['alice'] AND a.target_id = 4000)
         RETURN count(wi) AS items
     expect:
-      skip_requirements: [node_ids]
       row_count: 1
       row_values:
         - { items: 4 }
@@ -41,9 +40,6 @@ cases:
         WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
         RETURN p{.name}, count(mr) AS mrs LIMIT 10
     expect:
-      sql_contains:
-        - "(_orbit_edge_0.relationship_kind = 'IN_PROJECT')"
-        - "NOT ((_orbit_edge_0.source_kind = 'User') AND has(_orbit_edge_0.source_tags, 'state:opened'))"
       groups:
         p:
           entity: Project
@@ -62,8 +58,6 @@ cases:
         WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
         RETURN p{.name}, count(mr) AS mrs LIMIT 10
     expect:
-      sql_contains:
-        - "NOT ((_orbit_edge_0.source_kind = 'User') AND has(_orbit_edge_0.source_tags, 'state:opened'))"
       groups:
         p:
           entity: Project
@@ -105,7 +99,6 @@ cases:
         RETURN caller.name, callee.name LIMIT 20
     expect:
       node_count: 0
-      skip_requirements: ["filter:name"]
       edges:
         CALLS: []
 
@@ -224,7 +217,6 @@ cases:
         WHERE wi.id IN [9410, 9411] AND NOT wi.state IN ['closed']
         RETURN count(wi) AS open_items
     expect:
-      skip_requirements: [node_ids]
       row_count: 1
       row_values:
         - { open_items: 1 }
@@ -291,8 +283,6 @@ cases:
         WHERE NOT r.source_kind = 'MergeRequest'
         RETURN p.name, mr.title LIMIT 20
     expect:
-      skip_requirements: [node_ids]
-      sql_contains: ["source_kind != 'MergeRequest'"]
       node_count: 0
       edges:
         IN_PROJECT: []
@@ -307,7 +297,6 @@ cases:
         WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.id < 4003 AND NOT wi.id IN [4000, 4001]
         RETURN wi.state LIMIT 10
     expect:
-      skip_requirements: ["filter:id"]
       node_count: 1
       nodes:
         WorkItem:
@@ -415,7 +404,6 @@ cases:
         WHERE NOT wi.state = 'closed'
         RETURN n
     expect:
-      skip_requirements: [node_ids, "filter:state"]
       node_count: 0
       edges:
         IN_GROUP: []
@@ -495,6 +483,3 @@ cases:
           - [6, 100]
         CONTAINS:
           - [100, 1000]
-      sql_contains:
-        - "(_orbit_edge_0.relationship_kind = 'MEMBER_OF')"
-        - "(NOT ((_orbit_edge_0.source_id = 2) AND (g.visibility_level = 'public')))"

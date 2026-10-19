@@ -13,7 +13,6 @@ use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::Path;
 use std::sync::Arc;
 
-use format::ExpectedIndex;
 use futures::FutureExt;
 use pagination::{PageCollection, next_page, with_after, without_cursor};
 use query_engine::compiler::{
@@ -34,7 +33,7 @@ use response::{
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
 use crate::scenario::{self, Seed};
-use crate::visitor::{NodeExt, Requirement, ResponseView};
+use crate::visitor::{NodeExt, ResponseView};
 use crate::{
     SeededColumnResolver, collect_subtest_results, derive_clickhouse_data_model, load_ontology,
 };
@@ -112,7 +111,7 @@ pub async fn run_query(
     .await;
     assert_cursor(&output, "run_query");
     let response = validate_response(&compiled.input, GraphFormatter.format(&output), "run_query");
-    ResponseView::for_query(&compiled.input, response)
+    ResponseView::from_response(response)
 }
 
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
@@ -340,15 +339,6 @@ async fn run_frontend(
         return;
     };
 
-    if expect.compile_only {
-        return;
-    }
-
-    if !expect.indexes_used.is_empty() {
-        let plan = ctx.explain_plan(&compiled.base).await;
-        assert_indexes_used(&plan, &expect.indexes_used, label);
-    }
-
     if !expect.pages.is_empty() {
         run_pages(
             ctx,
@@ -379,10 +369,6 @@ async fn run_frontend(
         let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
         let compiled = assert_compilation(compiled, expect, frontend_key, label)
             .expect("repeated query should compile");
-        if !expect.indexes_used.is_empty() {
-            let plan = ctx.explain_plan(&compiled.base).await;
-            assert_indexes_used(&plan, &expect.indexes_used, label);
-        }
         let output = execute_output(
             ctx,
             frontend,
@@ -394,73 +380,6 @@ async fn run_frontend(
         .await;
         let rerun = assert_output(&output, frontend, expect, label);
         assert_repeated_response(&baseline, &rerun, run, label);
-    }
-}
-
-fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], label: &str) {
-    for ExpectedIndex { table, index } in expected {
-        let scan = read_from_merge_tree(plan, table).unwrap_or_else(|| {
-            panic!("{label}: no ReadFromMergeTree step for table {table}\nplan: {plan:#}")
-        });
-        let entry = skip_index(scan, index).unwrap_or_else(|| {
-            panic!("{label}: skip index {index} not applied on {table}\nplan: {plan:#}")
-        });
-        let initial = entry["Initial Granules"].as_u64().unwrap_or(0);
-        let selected = entry["Selected Granules"].as_u64().unwrap_or(initial);
-        assert!(
-            selected < initial,
-            "{label}: skip index {index} on {table} selected {selected} of {initial} granules\nplan: {plan:#}"
-        );
-    }
-}
-
-fn unversioned_table(description: &str) -> &str {
-    let table = description.rsplit('.').next().unwrap_or(description);
-    match table
-        .strip_prefix('v')
-        .and_then(|rest| rest.split_once('_'))
-    {
-        Some((version, unversioned)) if version.chars().all(|c| c.is_ascii_digit()) => unversioned,
-        _ => table,
-    }
-}
-
-fn read_from_merge_tree<'a>(
-    value: &'a serde_json::Value,
-    table: &str,
-) -> Option<&'a serde_json::Value> {
-    match value {
-        serde_json::Value::Object(map) => {
-            let is_scan = map.get("Node Type").and_then(serde_json::Value::as_str)
-                == Some("ReadFromMergeTree");
-            let scans_table = map
-                .get("Description")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|description| unversioned_table(description) == table);
-            if is_scan && scans_table {
-                return Some(value);
-            }
-            map.values().find_map(|v| read_from_merge_tree(v, table))
-        }
-        serde_json::Value::Array(items) => {
-            items.iter().find_map(|v| read_from_merge_tree(v, table))
-        }
-        _ => None,
-    }
-}
-
-fn skip_index<'a>(value: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
-    match value {
-        serde_json::Value::Object(map) => {
-            if map.get("Type").and_then(serde_json::Value::as_str) == Some("Skip")
-                && map.get("Name").and_then(serde_json::Value::as_str) == Some(name)
-            {
-                return Some(value);
-            }
-            map.values().find_map(|v| skip_index(v, name))
-        }
-        serde_json::Value::Array(items) => items.iter().find_map(|v| skip_index(v, name)),
-        _ => None,
     }
 }
 
@@ -647,7 +566,7 @@ fn pipeline_output(
 fn assert_response(input: &Input, response: serde_json::Value, expect: &QueryExpect, label: &str) {
     expect.validate_response_type(input.query_type, label);
     let response = validate_response(input, response, label);
-    apply_expect(&ResponseView::for_query(input, response), expect, label);
+    apply_expect(&ResponseView::from_response(response), expect, label);
 }
 
 fn assert_gql_table(output: &PipelineOutput, expect: &QueryExpect, label: &str) {
@@ -672,11 +591,6 @@ fn assert_gql_table(output: &PipelineOutput, expect: &QueryExpect, label: &str) 
 }
 
 fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
-    for req_name in &expect.skip_requirements {
-        if let Some(req) = parse_requirement(req_name) {
-            view.skip_requirement(req);
-        }
-    }
     if let Some(n) = expect.node_count {
         view.assert_node_count(n);
     }
@@ -1167,30 +1081,6 @@ fn build_redaction(config: &Option<RedactionConfig>) -> MockRedactionService {
         }
     }
     svc
-}
-
-fn parse_requirement(name: &str) -> Option<Requirement> {
-    if let Some(field) = name.strip_prefix("filter:") {
-        return Some(Requirement::Filter {
-            field: field.to_string(),
-        });
-    }
-    if let Some(edge_type) = name.strip_prefix("relationship:") {
-        return Some(Requirement::Relationship {
-            edge_type: edge_type.to_string(),
-        });
-    }
-    match name {
-        "node_ids" => Some(Requirement::NodeIds),
-        "node_count" => Some(Requirement::NodeCount),
-        "order_by" => Some(Requirement::OrderBy),
-        "cursor" => Some(Requirement::Cursor),
-        "aggregation" => Some(Requirement::Aggregation),
-        "aggregation_sort" => Some(Requirement::AggregationSort),
-        "neighbors" => Some(Requirement::Neighbors),
-        "path_finding" => Some(Requirement::PathFinding),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

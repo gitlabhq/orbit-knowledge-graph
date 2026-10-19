@@ -15,7 +15,6 @@ query:
     MATCH (caller:Definition)-[:CALLS]->(callee:Definition {project_id: 1000}) WHERE caller.id >= 12000 AND caller.id <= 12999 RETURN caller.name, callee.name LIMIT 20
 
 expect:
-  skip_requirements: ["filter:project_id"]
   node_count: 3
   referential_integrity: true
   nodes:

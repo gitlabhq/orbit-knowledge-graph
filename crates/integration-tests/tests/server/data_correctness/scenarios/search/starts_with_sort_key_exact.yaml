@@ -14,7 +14,4 @@ query:
     RETURN d.branch LIMIT 10
 
 expect:
-  sql_contains: ["startsWith(d.branch, 'MAI')"]
-  sql_not_contains: ["lower(d.branch)"]
-  skip_requirements: ["filter:branch"]
   node_count: 0

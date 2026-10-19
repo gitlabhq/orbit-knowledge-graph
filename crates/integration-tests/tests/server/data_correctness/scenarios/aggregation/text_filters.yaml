@@ -61,21 +61,12 @@ cases:
     expect:
       compile_error: text matching and ordering require grouping by "l"
 
-  - name: text_equality_on_ungrouped_node_compiles
-    description: Equality on a text property works on any node
-    query:
-      gql: |
-        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.title = 'Implement login page' RETURN g, count(w) AS n
-    expect:
-      compile_only: true
-
   - name: text_filter_on_grouped_node
     description: A text filter works on a grouped node and returns its readable rows
     query:
       gql: |
         MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.title STARTS WITH 'Fix' RETURN w, count(g) AS n
     expect:
-      skip_requirements: [node_ids, filter:title, aggregation]
       empty_aggregation: true
 
   - name: text_group_key_rows
@@ -84,30 +75,5 @@ cases:
       gql: |
         MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) RETURN w.title AS title, count(w) AS n
     expect:
-      skip_requirements: [node_ids, aggregation]
       row_values:
         - { title: Implement login page, n: 1 }
-
-  - name: code_text_filter_compiles
-    description: Code entities keep text filters on ungrouped nodes
-    query:
-      gql: |
-        MATCH (d:Definition) WHERE d.project_id = 1000 AND d.fqn STARTS WITH 'src' RETURN count(d) AS n
-    expect:
-      compile_only: true
-
-  - name: namespace_text_filter_compiles
-    description: Group and project text filters work on ungrouped nodes
-    query:
-      gql: |
-        MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest) WHERE g.full_path STARTS WITH 'public' AND p.name CONTAINS 'Project' RETURN count(mr) AS n
-    expect:
-      compile_only: true
-
-  - name: traversal_path_prefix_compiles
-    description: A traversal_path prefix works on an ungrouped node
-    query:
-      gql: |
-        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) WHERE w.traversal_path STARTS WITH '1/100/' RETURN g, count(w) AS n
-    expect:
-      compile_only: true

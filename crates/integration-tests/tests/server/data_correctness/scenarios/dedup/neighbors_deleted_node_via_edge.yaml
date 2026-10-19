@@ -33,7 +33,6 @@ query:
     MATCH (mr:MergeRequest {id: 9311})--(n) RETURN mr, n
 
 expect:
-  skip_requirements: [node_count]
   nodes:
     MergeRequest:
       ids: [9311]

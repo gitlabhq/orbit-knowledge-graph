@@ -33,7 +33,6 @@ query:
     MATCH (u:User {id: 9600})-[:MEMBER_OF]->(g:Group) RETURN u.username, u.name, g LIMIT 10
 
 expect:
-  skip_requirements: [node_count]
   nodes:
     User:
       ids: [9600]

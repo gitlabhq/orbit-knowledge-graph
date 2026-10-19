@@ -35,7 +35,6 @@ query:
     MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE mr.state = 'merged' RETURN p{.id, .name}, count(mr) AS mr_count LIMIT 10
 
 expect:
-  skip_requirements: ["filter:state"]
   groups:
     p:
       count: 1

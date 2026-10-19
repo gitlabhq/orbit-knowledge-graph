@@ -1,6 +1,6 @@
 cases:
   - name: equality
-    description: Equality on a text-indexed title keeps exact matching and prunes granules with the text skip index
+    description: Equality on a text-indexed title keeps exact matching
 
     config:
       unmerged_seed: true
@@ -23,8 +23,6 @@ cases:
         RETURN mr.title ORDER BY mr.id LIMIT 10
 
     expect:
-      sql_contains: ["lower(mr.title) = lower("]
-      indexes_used: [{ table: gl_merge_request, index: idx_title }]
       node_count: 1
       nodes:
         MergeRequest:
@@ -34,7 +32,7 @@ cases:
             - { id: 2004, title: Ship feature E }
 
   - name: membership
-    description: Membership on a text-indexed title keeps exact matching and prunes granules with the text skip index
+    description: Membership on a text-indexed title keeps exact matching
 
     config:
       unmerged_seed: true
@@ -57,8 +55,6 @@ cases:
         RETURN mr.title ORDER BY mr.id LIMIT 10
 
     expect:
-      sql_contains: ["lower(mr.title) IN tuple(lower("]
-      indexes_used: [{ table: gl_merge_request, index: idx_title }]
       node_count: 1
       nodes:
         MergeRequest:

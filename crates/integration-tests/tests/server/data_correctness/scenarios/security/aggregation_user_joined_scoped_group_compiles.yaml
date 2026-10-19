@@ -17,4 +17,3 @@ query:
     MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, count(u) AS member_count LIMIT 10
 
 expect:
-  compile_only: true

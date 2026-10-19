@@ -12,4 +12,3 @@ query:
     MATCH (u:User {id: 1})-[:MEMBER_OF]->(n) RETURN u, n LIMIT 10
 
 expect:
-  compile_only: true

@@ -16,6 +16,9 @@ cases:
         emitted:
           expect:
             - (Filter mr.title = 'Ship feature E', Lower(mr.title) = Lower('Ship feature E'), ... (_))
+        final_ast:
+          expect:
+            - (Filter mr.title = 'Ship feature E', Lower(mr.title) = Lower('Ship feature E'), ... (_))
 
   - name: Membership on a text-indexed string adds a lower-cased twin for the text index
 
@@ -32,6 +35,9 @@ cases:
     physical:
       clickhouse:
         emitted:
+          expect:
+            - (Filter mr.title IN ['Ship feature E', 'Ship feature F'], Lower(mr.title) IN Tuple(Lower('Ship feature E'), Lower('Ship feature F')), ... (_))
+        final_ast:
           expect:
             - (Filter mr.title IN ['Ship feature E', 'Ship feature F'], Lower(mr.title) IN Tuple(Lower('Ship feature E'), Lower('Ship feature F')), ... (_))
 

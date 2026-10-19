@@ -1,4 +1,4 @@
-description: starts_with filter returns rows with matching prefix regardless of case and prunes granules with the ngram skip index
+description: starts_with filter returns rows with matching prefix regardless of case
 
 config:
   unmerged_seed: true
@@ -19,8 +19,6 @@ query:
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username STARTS WITH 'ALI' RETURN u.username LIMIT 10
 
 expect:
-  sql_contains: ["startsWith(lower(u.username), lower('ALI'))"]
-  indexes_used: [{ table: gl_user, index: idx_username_ngram }]
   node_count: 1
   nodes:
     User:

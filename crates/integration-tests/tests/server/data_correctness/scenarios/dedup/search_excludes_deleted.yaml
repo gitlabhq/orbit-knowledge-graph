@@ -21,5 +21,4 @@ query:
     MATCH (u:User {id: 9002}) RETURN u.username LIMIT 10
 
 expect:
-  skip_requirements: [node_ids]
   node_count: 0

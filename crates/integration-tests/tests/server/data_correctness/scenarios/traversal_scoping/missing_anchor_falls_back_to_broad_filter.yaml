@@ -20,8 +20,6 @@ query:
     MATCH (mr:MergeRequest {project_id: 5555}) RETURN mr.title LIMIT 10
 
 expect:
-  sql_contains: ["AS _scope WHERE", "= '0/')"]
-  skip_requirements: ["filter:project_id"]
   node_count: 1
   nodes:
     MergeRequest:

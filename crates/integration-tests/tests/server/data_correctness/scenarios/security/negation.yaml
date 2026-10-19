@@ -155,22 +155,6 @@ cases:
           - [1, 2000]
           - [1, 2001]
 
-  - name: negation_far_node_scan_keeps_scope
-    description: |
-      A NOT on the far node of a traversal reads that node's table, narrowed to the edge keys. The table scan carries the caller's traversal_path filter, and the NOT applies to the latest row.
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","not":{"name":{"contains":"secret"}},"columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":30}
-      gql: |
-        MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)
-        WHERE NOT g.name CONTAINS 'secret'
-        RETURN g.name
-    expect:
-      compile_only: true
-      sql_contains:
-        - "WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT id FROM _narrow_g))"
-        - "AS g WHERE ((NOT multiSearchAny(lower(g.name), [lower('secret')]))"
-
   - name: negation_no_existence_oracle_hidden
     description: |
       A NOT query over a project the caller cannot see returns the same empty result as a NOT query over a project that does not exist.
@@ -184,7 +168,6 @@ cases:
       gql: |
         MATCH (p:Project) WHERE p.id IN [1001] AND NOT p.name = 'x' RETURN p.name
     expect:
-      skip_requirements: [node_ids, "filter:name"]
       node_count: 0
 
   - name: negation_no_existence_oracle_missing
@@ -200,7 +183,6 @@ cases:
       gql: |
         MATCH (p:Project) WHERE p.id IN [1999] AND NOT p.name = 'x' RETURN p.name
     expect:
-      skip_requirements: [node_ids, "filter:name"]
       node_count: 0
 
   - name: negation_pagination_redacted

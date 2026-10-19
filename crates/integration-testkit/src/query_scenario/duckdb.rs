@@ -67,9 +67,6 @@ fn run_step(
         let Some(compiled) = assert_compilation(compiled, expect, key, &label) else {
             continue;
         };
-        if expect.compile_only {
-            continue;
-        }
         if expect.pages.is_empty() {
             let output = execute(database, &compiled, &label);
             let baseline = assert_output(&output, frontend, expect, &label);

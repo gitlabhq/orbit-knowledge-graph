@@ -19,5 +19,4 @@ query:
     RETURN a.id, b.id
 
 expect:
-  skip_requirements: ["node_ids", "relationship:CALLS"]
   node_count: 0

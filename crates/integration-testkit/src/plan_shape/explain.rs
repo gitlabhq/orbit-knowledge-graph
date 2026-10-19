@@ -417,6 +417,13 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
     (planned, emitted)
 }
 
+pub fn emitted(ast: &Node) -> Tree {
+    match ast {
+        Node::Query(value) => query(value),
+        Node::Insert(_) => leaf(Operator::Insert, ""),
+    }
+}
+
 fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
     filter(
         compiler::passes::plan::requirements::node_predicates(node)

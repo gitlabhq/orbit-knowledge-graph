@@ -21,7 +21,6 @@ cases:
       gql: |
         MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN f.path AS path, count(f) AS n ORDER BY path
     expect:
-      skip_requirements: [node_ids, aggregation_sort]
       row_values:
         - { path: README.md, n: 1 }
         - { path: src/clickhouse.rs, n: 1 }
@@ -33,7 +32,6 @@ cases:
       gql: |
         MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN f.language AS language, count(f) AS n ORDER BY n DESC
     expect:
-      skip_requirements: [node_ids, aggregation_sort]
       row_count: 2
       row_values:
         - { language: Rust, n: 2 }
@@ -45,7 +43,6 @@ cases:
       gql: |
         MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN max(f.id) AS top
     expect:
-      skip_requirements: [node_ids]
       row_count: 1
       row_values:
         - { top: 13002 }

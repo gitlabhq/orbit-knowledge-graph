@@ -15,8 +15,6 @@ query:
     MATCH (d:MergeRequestDiff)<-[:HAS_DIFF]-(n) WHERE d.head_commit_sha STARTS WITH 'aaaa' RETURN d, n
 
 expect:
-  skip_requirements:
-    - "filter:head_commit_sha"
   referential_integrity: true
   node_count: 3
   nodes:

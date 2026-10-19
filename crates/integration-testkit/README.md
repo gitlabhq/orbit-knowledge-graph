@@ -17,7 +17,7 @@ Shared test infrastructure for integration tests that need a real ClickHouse ins
 - **Arrow extractors**: `get_string_column`, `get_int64_column`, `get_uint64_column`,
   `get_boolean_column` for pulling typed columns out of `RecordBatch`.
 - **`ResponseView`**: Typed wrapper over `GraphResponse` for asserting query pipeline
-  output. Includes assertion enforcement that catches under-tested queries.
+  output.
 - **`query_scenario`**: Runs YAML query scenarios through the full query pipeline.
 - **`scenario`**: Runs YAML indexer scenarios: seeds source rows, runs handlers, and checks the graph.
 - **`plan_shape`**: Compiles plan-shape fixtures and checks the selected plan.
@@ -129,71 +129,15 @@ async fn writes_extra_data_then_queries(ctx: &TestContext) {
 ## ResponseView
 
 `ResponseView` wraps the `GraphResponse` returned by the query pipeline and provides
-typed helpers for looking up nodes, edges, and paths. It also enforces that tests
-actually assert the query features they exercise.
+typed helpers for looking up nodes, edges, and paths.
 
 ### Creating a view
 
-The only public constructor is `for_query`, which takes the compiled `Input` AST
-and the formatted `GraphResponse`:
+Use `from_response` with the formatted `GraphResponse`:
 
 ```rust
 use integration_testkit::visitor::{ResponseView, NodeExt};
-use compiler::{compile, Frontend};
-
-let compiled = compile(json, Frontend::JsonDsl, &ontology, &security_ctx).unwrap();
-// ... run pipeline, get response ...
-let resp = ResponseView::for_query(&compiled.input, response);
-```
-
-On construction, `for_query` validates two structural invariants:
-
-- The response's `query_type` matches the input (e.g. a traversal query must produce
-  a `"traversal"` response).
-- Single-node traversal and aggregation responses have zero edges (the formatter
-  never produces edges for these query shapes).
-
-### Assertion enforcement
-
-`for_query` inspects the `Input` AST and derives a set of requirements — one per
-query feature that needs to be asserted. When the `ResponseView` is dropped, it
-panics if any requirement was not satisfied.
-
-The mapping from query features to requirements:
-
-| Query feature | Requirement | Satisfied by |
-|---|---|---|
-| `order_by` | `OrderBy` | `assert_node_order` |
-| `filters: {field: ...}` | `Filter { field }` (one per field) | `assert_filter(entity, field, pred)` |
-| `node_ids: [...]` | `NodeIds` | `node_ids`, `assert_node_order`, `assert_node_count` |
-| `query_type: aggregation` | `Aggregation` | `assert_aggregation_value_i64`, `assert_row_value_i64`, `assert_group_row_value_i64` |
-| `group_by: ["<node>"]` | `Aggregation` | `assert_group_node_count`, `assert_group_node_ids`, `assert_group_node_row`, `assert_group_row_value_i64` |
-| `group_by: ["<node>.<property>"]` | `Aggregation` | `assert_group_column`, `assert_row_count`, `assert_row_value_i64`, `assert_row_value_str` |
-| `aggregation_sort` | `AggregationSort` | `assert_group_node_order` |
-| `query_type: path_finding` | `PathFinding` | `path_ids` |
-| `query_type: neighbors` | `Neighbors` | `edges_of_type`, `assert_edge_exists`, `assert_edge_absent` |
-| `relationships: [{type: T}]` | `Relationship { edge_type: T }` (one per type) | `edges_of_type`, `assert_edge_exists`, `assert_edge_absent` |
-| `range` | `Range` | `assert_node_count` |
-
-Requirements are granular: a query with two filter fields produces two `Filter`
-requirements, and the test must call `assert_filter` for each. A traversal with
-two relationship types produces two `Relationship` requirements.
-
-If a test drops a `ResponseView` without satisfying all requirements, the drop
-panics with a message listing exactly what's missing:
-
-```plaintext
-ResponseView dropped with unsatisfied assertion requirements:
-Filter on 'state' (call assert_filter for 'state')
-OrderBy (query has order_by — call assert_node_order)
-```
-
-### Escape hatch
-
-For edge cases where a test intentionally skips an assertion:
-
-```rust
-resp.skip_requirement(Requirement::OrderBy);
+let resp = ResponseView::from_response(response);
 ```
 
 ### Example: single-entity traversal with filter and ordering
@@ -208,14 +152,11 @@ async fn search_filter_eq(ctx: &TestContext) {
         "limit": 10
     }"#, &allow_all()).await;
 
-    // Satisfies Filter{field:"state"}
     resp.assert_filter("User", "state", |n| {
         n.prop_str("state") == Some("blocked")
     });
-    // Satisfies OrderBy + NodeIds
     resp.assert_node_order("User", &[5]);
 }
-// Drop checks: all requirements satisfied, no panic.
 ```
 
 ### Example: traversal with edges
@@ -232,7 +173,6 @@ async fn traversal_edges(ctx: &TestContext) {
         "limit": 10
     }"#, &allow_all()).await;
 
-    // Satisfies Relationship{edge_type:"MEMBER_OF"}
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_referential_integrity();
 }
@@ -395,15 +335,9 @@ only IDs and the relationship type.
 
 | Field | Type | Description |
 |---|---|---|
-| `compile_only` | bool | Only compile, skip execution |
 | `compile_error` | bool / string / {frontend: string} | Expect compile failure |
 | `compile_error_contains` | [string] / {frontend: [string]} | Error must contain every listed fragment |
 | `compile_error_not_contains` | [string] / {frontend: [string]} | Error must NOT contain |
-| `sql_contains` | [string] | Rendered SQL must contain these |
-| `sql_not_contains` | [string] | Rendered SQL must NOT contain these |
-| `indexes_used` | [{table, index}] | ClickHouse skip indexes that `EXPLAIN indexes = 1` must apply on the named table (`gl_user`, matched against the `ReadFromMergeTree` step) and that must each prune granules. Seed non-matching rows with `unmerged_seed` so there are parts to prune |
-| `hydration` | `none` / `static` / `dynamic` | Kind of hydration plan the compiler produced |
-| `settings` | {name: value} | ClickHouse SETTINGS pairs the compiled query carries, for example `{ use_query_cache: 0 }`. A `null` value asserts the setting is absent. The pairs come from the process-wide query settings; the `query_settings_scenarios` test loads the production defaults |
 
 **Pagination:**
 
@@ -417,7 +351,6 @@ only IDs and the relationship type.
 | Field | Type | Description |
 |---|---|---|
 | `repeat_count` | N | Recompile and run N times; compare node order within each entity type, properties, edges, aggregation rows, and pagination |
-| `skip_requirements` | [string] | Skip enforcement checks |
 
 #### `NodeExpect`
 

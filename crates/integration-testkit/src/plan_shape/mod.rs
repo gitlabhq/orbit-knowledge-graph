@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use compiler::input::Input;
 use compiler::passes::{frontend, lower, normalize, plan};
+use compiler::types::SecurityContext;
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
 use serde::Deserialize;
 
@@ -24,6 +25,15 @@ struct Scenario {
     logical: Assertions,
     physical: BTreeMap<String, PhysicalAssertions>,
     hydration: Option<HydrationSetup>,
+    #[serde(default)]
+    security: SecuritySetup,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct SecuritySetup {
+    admin: bool,
+    paths: Vec<String>,
 }
 
 impl Scenario {
@@ -64,6 +74,8 @@ struct HydrationSetup {
 struct PhysicalAssertions {
     planned: Option<Assertions>,
     emitted: Option<Assertions>,
+    final_ast: Option<Assertions>,
+    point_lookup: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -231,7 +243,11 @@ fn check<M: OrbitQueryModel>(
     model: &M,
     backend: &str,
     path: &Path,
-    build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
+    build: impl Fn(
+        &Input,
+        plan::HydrationCompileOptions,
+        &HashSet<String>,
+    ) -> compiler::Result<plan::QueryPlan>,
 ) {
     for (language, raw) in &scenario.query {
         let label = format!(
@@ -272,12 +288,16 @@ fn check<M: OrbitQueryModel>(
             .logical
             .check(&explain::logical(&input), &format!("{label}.logical"))
             .unwrap_or_else(|error| panic!("{error}"));
-        let plan = build(&input, options).unwrap_or_else(|error| panic!("{label}: {error}"));
+        let plan = build(&input, options, &HashSet::new())
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
         let lowered = lower::emit(&plan, &input).unwrap_or_else(|error| panic!("{label}: {error}"));
         let (planned, emitted) = explain::physical(&plan, &lowered.ast);
         let assertions = &scenario.physical[backend];
         assert!(
-            assertions.planned.is_some() || assertions.emitted.is_some(),
+            assertions.planned.is_some()
+                || assertions.emitted.is_some()
+                || assertions.final_ast.is_some()
+                || assertions.point_lookup.is_some(),
             "{label}: missing assertion targets"
         );
         for (phase, assertions, actual) in [
@@ -299,6 +319,70 @@ fn check<M: OrbitQueryModel>(
                     .unwrap();
             }
             _ => unreachable!(),
+        }
+        if let Some(expected) = assertions.point_lookup {
+            assert_eq!(
+                plan.is_point_lookup(),
+                expected,
+                "{label}: point lookup mismatch"
+            );
+        }
+        if let Some(assertions) = &assertions.final_ast {
+            assert_eq!(
+                backend, "clickhouse",
+                "{label}: final_ast requires ClickHouse"
+            );
+            let mut final_input = input.clone();
+            let security = SecurityContext::new(
+                1,
+                if scenario.security.paths.is_empty() {
+                    vec!["1/".into()]
+                } else {
+                    scenario.security.paths.clone()
+                },
+            )
+            .unwrap()
+            .with_role(scenario.security.admin, None);
+            let proofs = compiler::passes::restrict::restrict(&mut final_input, model, &security)
+                .unwrap_or_else(|error| panic!("{label}: {error}"));
+            let scope = compiler::scope::prepare(&mut final_input, proofs, model);
+            let final_plan = build(&final_input, options, scope.table_scans())
+                .unwrap_or_else(|error| panic!("{label}: {error}"));
+            let mut final_lowered = lower::emit(&final_plan, &final_input)
+                .unwrap_or_else(|error| panic!("{label}: {error}"));
+            compiler::passes::response_policy::apply_text_excerpts(
+                &mut final_lowered.ast,
+                &final_input,
+                model,
+            );
+            compiler::passes::enforce::enforce_role_scans(
+                &mut final_lowered.ast,
+                &final_input,
+                &final_lowered.metadata,
+                model,
+            )
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+            compiler::passes::enforce::enforce_lowered_return(
+                &mut final_lowered.ast,
+                &final_input,
+                &final_lowered.metadata,
+                model,
+            )
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+            compiler::scope::apply(&mut final_lowered.ast, &scope, model)
+                .unwrap_or_else(|error| panic!("{label}: {error}"));
+            compiler::passes::security::apply_security_context(
+                &mut final_lowered.ast,
+                &security,
+                model,
+            )
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+            assertions
+                .check(
+                    &explain::emitted(&final_lowered.ast),
+                    &format!("{label}.physical.{backend}.final_ast"),
+                )
+                .unwrap_or_else(|error| panic!("{error}"));
         }
     }
 }
@@ -337,11 +421,11 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
             .map_or((&remote, &local), |(remote, local)| (remote, local));
         for backend in scenario.physical.keys() {
             match backend.as_str() {
-                "clickhouse" => check(&scenario, remote, backend, path, |input, options| {
-                    plan::plan_clickhouse(input, remote, options, &HashSet::new())
+                "clickhouse" => check(&scenario, remote, backend, path, |input, options, scans| {
+                    plan::plan_clickhouse(input, remote, options, scans)
                 }),
-                "duckdb" => check(&scenario, local, backend, path, |input, options| {
-                    plan::plan_duckdb(input, local, options, &HashSet::new())
+                "duckdb" => check(&scenario, local, backend, path, |input, options, scans| {
+                    plan::plan_duckdb(input, local, options, scans)
                 }),
                 _ => panic!("unknown backend {backend}"),
             }

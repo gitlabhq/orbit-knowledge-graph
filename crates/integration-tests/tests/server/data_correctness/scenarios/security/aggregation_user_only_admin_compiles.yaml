@@ -15,4 +15,3 @@ query:
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN count(u) AS cnt LIMIT 10
 
 expect:
-  compile_only: true

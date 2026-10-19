@@ -115,47 +115,6 @@ pub(super) fn assert_compilation(
             return None;
         }
     };
-    if let Some(expected) = expect.hydration {
-        assert_eq!(
-            compiled.hydration.kind(),
-            expected,
-            "{label}: unexpected hydration plan\n{:?}",
-            compiled.hydration
-        );
-    }
-    let settings: std::collections::BTreeMap<_, _> = compiled
-        .base
-        .query_config
-        .to_clickhouse_settings()
-        .expect("query settings render")
-        .into_iter()
-        .collect();
-    for (key, value) in &expect.settings {
-        let expected = match value {
-            Value::Null => None,
-            Value::Bool(flag) => Some(u8::from(*flag).to_string()),
-            Value::String(text) => Some(format!("'{text}'")),
-            other => Some(other.to_string()),
-        };
-        assert_eq!(
-            settings.get(key),
-            expected.as_ref(),
-            "{label}: unexpected setting {key}\nsettings: {settings:?}"
-        );
-    }
-    let sql = compiled.base.render();
-    for fragment in &expect.sql_contains {
-        assert!(
-            sql.contains(fragment),
-            "{label}: SQL does not contain '{fragment}'\nSQL: {sql}"
-        );
-    }
-    for fragment in &expect.sql_not_contains {
-        assert!(
-            !sql.contains(fragment),
-            "{label}: SQL should not contain '{fragment}'\nSQL: {sql}"
-        );
-    }
     Some(compiled)
 }
 

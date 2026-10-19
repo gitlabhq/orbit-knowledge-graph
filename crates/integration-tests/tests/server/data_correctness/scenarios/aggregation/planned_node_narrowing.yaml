@@ -25,7 +25,6 @@ query:
     RETURN c{.id, .name}, count(a) AS callers
 
 expect:
-  skip_requirements: ["filter:name"]
   row_count: 1
   groups:
     c:

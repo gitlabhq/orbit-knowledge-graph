@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use query_engine::compiler::{HydrationKind, QueryType};
+use query_engine::compiler::QueryType;
 use serde::Deserialize;
 
 use crate::scenario::Seed;
@@ -106,21 +106,12 @@ pub struct RedactionConfig {
     pub deny: BTreeMap<String, Vec<i64>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ExpectedIndex {
-    pub table: String,
-    pub index: String,
-}
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryExpect {
     /// Run the query N times and assert all responses are identical.
     #[serde(default)]
     pub repeat_count: Option<usize>,
-    #[serde(default)]
-    pub compile_only: bool,
     #[serde(default)]
     pub compile_error: Option<CompileErrorExpect>,
     #[serde(default)]
@@ -155,18 +146,6 @@ pub struct QueryExpect {
     /// node `v`, property `severity`.
     #[serde(default)]
     pub group_columns: BTreeMap<String, String>,
-    #[serde(default)]
-    pub sql_contains: Vec<String>,
-    #[serde(default)]
-    pub hydration: Option<HydrationKind>,
-    /// Expected ClickHouse SETTINGS pairs on the compiled query, for example
-    /// `{ use_query_cache: 0 }`. A `null` value asserts the setting is absent.
-    #[serde(default)]
-    pub settings: BTreeMap<String, serde_json::Value>,
-    #[serde(default)]
-    pub sql_not_contains: Vec<String>,
-    #[serde(default)]
-    pub indexes_used: Vec<ExpectedIndex>,
     /// Assert total edge count across all types.
     #[serde(default)]
     pub total_edge_count: Option<usize>,
@@ -200,8 +179,6 @@ pub struct QueryExpect {
     /// Multi-page pagination: the runner chains cursors automatically.
     #[serde(default)]
     pub pages: Vec<QueryExpect>,
-    #[serde(default)]
-    pub skip_requirements: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -294,15 +271,6 @@ pub struct AllPagesExpect {
 impl QueryExpect {
     pub fn validate_pages_exclusive(&self, scenario: &str) {
         let has_result_fields = self.has_result_assertions();
-        assert!(
-            !self.compile_only
-                || !(has_result_fields
-                    || self.repeat_count.is_some()
-                    || !self.pages.is_empty()
-                    || self.all_pages.is_some()
-                    || !self.indexes_used.is_empty()),
-            "{scenario}: compile_only cannot be combined with runtime assertions"
-        );
         if self.pages.is_empty() {
             assert!(
                 self.all_pages.is_none(),
@@ -318,15 +286,9 @@ impl QueryExpect {
         for (index, page) in self.pages.iter().enumerate() {
             assert!(
                 page.repeat_count.is_none()
-                    && !page.compile_only
                     && page.compile_error.is_none()
                     && !page.compile_error_contains.is_configured()
                     && !page.compile_error_not_contains.is_configured()
-                    && page.hydration.is_none()
-                    && page.settings.is_empty()
-                    && page.sql_contains.is_empty()
-                    && page.sql_not_contains.is_empty()
-                    && page.indexes_used.is_empty()
                     && page.pages.is_empty()
                     && page.all_pages.is_none(),
                 "{scenario}: page {} supports only result assertions",
@@ -375,7 +337,6 @@ impl QueryExpect {
             || self.has_more.is_some()
             || !self.gql_columns.is_empty()
             || !self.gql_column_names.is_empty()
-            || !self.skip_requirements.is_empty()
     }
 
     /// Derive a total node count from per-entity specs when `node_count` is

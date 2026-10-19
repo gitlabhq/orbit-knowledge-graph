@@ -1,0 +1,27 @@
+cases:
+  - name: Aggregation emits the authorized traversal path
+    security: { paths: [1/100/] }
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","id_range":{"start":1,"end":10000},"columns":["name"]},{"id":"u","entity":"User"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"group_by":["g"],"aggregations":[{"count":"u","as":"member_count"}],"limit":10}
+      gql: |
+        MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, count(u) AS member_count LIMIT 10
+    logical: { expect: ["(Aggregate group g AS g, COUNT(u) AS member_count (_))"] }
+    physical:
+      clickhouse:
+        final_ast:
+          expect: ["(Filter StartsWith(g.traversal_path, '1/100/'), ... (_))"]
+
+  - name: Aggregation emits every authorized traversal path
+    security: { paths: [1/100/, 1/102/] }
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","id_range":{"start":1,"end":10000},"columns":["name"]},{"id":"u","entity":"User"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"group_by":["g"],"aggregations":[{"count":"u","as":"member_count"}],"limit":10}
+      gql: |
+        MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, count(u) AS member_count LIMIT 10
+    logical: { expect: ["(Aggregate group g AS g, COUNT(u) AS member_count (_))"] }
+    physical:
+      clickhouse:
+        final_ast:
+          expect:
+            - "(Filter StartsWith(g.traversal_path, '1/100/') OR StartsWith(g.traversal_path, '1/102/'), ... (_))"

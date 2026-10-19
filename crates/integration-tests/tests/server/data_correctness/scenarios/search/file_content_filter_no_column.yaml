@@ -19,7 +19,6 @@ query:
 
 expect:
   node_count: 2
-  skip_requirements: ["filter:project_id"]
   nodes:
     File:
       order: [13001, 13002]

@@ -37,7 +37,6 @@ query:
     MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1003}) WHERE mr.state = 'merged' RETURN mr, p LIMIT 10
 
 expect:
-  skip_requirements: ["filter:state"]
   node_count: 2
   nodes:
     Project:

@@ -13,5 +13,4 @@ expect:
     MergeRequest: { ids: [2000, 2001, 2004, 2005] }
   edges:
     IN_PROJECT: [[2000, 1000], [2001, 1000], [2004, 1000], [2005, 1000]]
-  skip_requirements: ["filter:project_id"]
   referential_integrity: true
