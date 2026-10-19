@@ -295,11 +295,16 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
     }
 
     fn attach_nodes(&mut self) -> Result<()> {
-        let aliases: Vec<_> = self.nodes.keys().cloned().collect();
+        let aliases: Vec<String> = self
+            .facts
+            .input
+            .nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .filter(|alias| self.nodes.contains_key(alias) && self.facts.nodes[alias].joined)
+            .collect();
         for alias in aliases {
-            if self.facts.nodes[&alias].joined {
-                self.ensure_node(&alias)?;
-            }
+            self.ensure_node(&alias)?;
         }
         Ok(())
     }
@@ -464,9 +469,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                 self.read_relation(&physical_relation, alias, current_rows, predicates)?
             }
         };
-        if relation.max_hops == 1 {
-            self.bind_relation_ids(index, relation, source);
-        }
+        self.bind_relation_ids(index, relation, source);
         if relation.max_hops == 1
             && (self.facts.relations.len() > 1
                 || [&relation.from_node, &relation.to_node]
@@ -1032,12 +1035,15 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
 }
 
 fn filters_sort_key(predicate: &Predicate, sort_key: &[String]) -> bool {
-    let column = match predicate {
-        Predicate::RelationshipKinds { .. } => RELATIONSHIP_KIND_COLUMN,
-        Predicate::EntityKind { column, .. } => &column.name,
-        _ => return false,
-    };
-    sort_key.iter().any(|key| key == column)
+    let in_key = |column: &str| sort_key.iter().any(|key| key == column);
+    match predicate {
+        Predicate::RelationshipKinds { .. } => in_key(RELATIONSHIP_KIND_COLUMN),
+        Predicate::EntityKind { column, .. }
+        | Predicate::Ids { column, .. }
+        | Predicate::IdRange { column, .. } => in_key(&column.name),
+        Predicate::Membership { columns, .. } => columns.iter().all(|column| in_key(&column.name)),
+        _ => false,
+    }
 }
 
 fn edge_predicates<M: OrbitQueryModel + ?Sized>(

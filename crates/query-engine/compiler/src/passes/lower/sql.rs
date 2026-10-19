@@ -38,6 +38,7 @@ fn relation_resolves_latest_rows(ctes: &[crate::ast::Cte], table: &TableRef, ali
                     .iter()
                     .any(|cte| cte.name == *name && resolves_latest_rows(ctes, &cte.query, alias))
         }
+        TableRef::Union { alias: nested, .. } => nested == alias,
         _ => false,
     }
 }
