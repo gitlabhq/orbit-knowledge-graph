@@ -27,6 +27,7 @@ If your agent can run shell commands, use the [CLI and the GitLab Orbit skill](_
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
@@ -166,10 +167,10 @@ The endpoint has two tools. `list_commands` lists the GitLab Orbit commands with
 | Command | Description |
 |---------|-------------|
 | `query_graph` | Runs a query in the [Cypher query language](../queries/cypher.md). |
-| `get_graph_schema` | Returns the node types, their properties, and the relationship types. |
+| `get_graph_schema` | Returns the node types and relationship types, and the properties of the node types that you pass in `expand_nodes`. |
 | `get_response_format` | Returns the response JSON Schema of `query_graph` and its version. |
 
-`get_graph_schema` returns the whole schema. To get the schema of one node type only, run
+`get_graph_schema` returns the node types and relationship types. To also get the properties and relationships of a node type, pass its name in `expand_nodes`, for example `["MergeRequest"]`, or run
 `CALL db.schema('MergeRequest')` with `query_graph`. The `get_query_dsl` command belongs to the deprecated JSON query DSL.
 
 Your agent writes the queries for you. For precise control, give it a complete query to run with

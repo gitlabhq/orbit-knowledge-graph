@@ -54,7 +54,7 @@ Read this when a command fails with "command not found", an auth error, or a fea
 
 ## Exit 2: feature flag off, or old glab
 
-Cause 1: the `knowledge_graph` feature flag is off for your user, so every endpoint returns 404. Fix: ask an admin to enable it.
+Cause 1: GitLab Orbit is not available on your instance, so every endpoint returns 404. Fix: ask an administrator to set up GitLab Orbit.
 
 Cause 2: glab is older than v1.117.0 and does not know the flat `glab orbit` commands. Fix: check `glab --version` and upgrade.
 
@@ -69,7 +69,7 @@ glab auth login    # if expired
 
 ## Exit 4: no Knowledge Graph enabled namespaces
 
-Cause: your user has the feature flag, but belongs to no top-level group with Orbit turned on. Fix: an Owner of one of your top-level groups turns Orbit on under **Orbit > Configuration** in the GitLab UI.
+Cause: you belong to no top-level group with Orbit turned on. Fix: an Owner of one of your top-level groups turns Orbit on under **Settings > Orbit** in the GitLab UI.
 
 ## Exit 5: rate limited
 

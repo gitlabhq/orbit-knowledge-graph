@@ -14,6 +14,7 @@ title: Start a GitLab Orbit trial
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/19) in GitLab 19.5 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `orbit_trial`. Disabled by default.
@@ -37,7 +38,7 @@ Prerequisites:
 
 - The Owner role for the top-level group.
 - The group has a Premium or Ultimate subscription, and does not have the GitLab Orbit add-on.
-- The group is eligible for a trial. If it is not, the dialog shows `This group is not eligible for a GitLab Orbit trial.`
+- The group is eligible for a trial. If it is not, the **Orbit** settings page shows an alert that the group is not eligible for a free Orbit trial.
   To buy the add-on, [contact sales](https://about.gitlab.com/sales/).
 
 <!-- vale orbit.StandaloneProductName = NO -->

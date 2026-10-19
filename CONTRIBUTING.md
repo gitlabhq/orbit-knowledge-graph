@@ -55,9 +55,9 @@ mise docs:build       # The strict build that the docs_hugo_build CI job runs
 ```
 
 The tasks clone `docs-gitlab-com` into `target/docs-site/` one time and reuse it.
-To update the clone, run `git pull` in it.
+Each run updates the clone, unless it is on another branch or has local changes. In that case, run `git pull` in it.
 Both tasks write to `public/` in the clone, so stop `docs:serve` before you run `docs:build`.
-The global navigation is in that clone, in `data/en-us/navigation.yaml`.
+The tasks replace the GitLab Orbit section of `data/en-us/navigation.yaml` in that clone with `docs/navigation.yaml`. To change the GitLab Orbit navigation, edit `docs/navigation.yaml`.
 A page that is not in the navigation gives a warning.
 A navigation entry under `orbit/` that has no page fails the build.
 

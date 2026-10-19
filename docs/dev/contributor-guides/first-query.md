@@ -213,8 +213,8 @@ between them.
 
 ## Where to go next
 
-- [What Orbit indexes](../../source/schema.md) for the four
-  local node types and their properties.
+- [Local tables](../../source/local/_index.md#local-tables) for the four
+  local node types.
 - [Orbit CLI](../../source/cli.md) for
   direct `orbit`, `glab orbit`, and MCP usage.
 - [Cypher query language](../../source/queries/cypher.md) for remote graph queries, and the

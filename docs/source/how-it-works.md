@@ -15,6 +15,7 @@ title: How GitLab Orbit works
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
@@ -48,13 +49,13 @@ flowchart LR
 Each entity, such as a project, a user, or a function, is a node.
 Each relationship, such as a user who authored a merge request, is a directed edge. The graph has two connected layers:
 
-- The SDLC layer holds GitLab objects, such as groups, projects, merge requests, pipelines, and work items.
+- The software development lifecycle (SDLC) layer holds GitLab objects, such as groups, projects, merge requests, pipelines, and work items.
 - The code layer holds files, directories, definitions, and imports.
   A project contains branches, and a branch contains the files of the code layer.
 
 For the full list of node types and relationships, see [What GitLab Orbit indexes](schema.md).
 
-## Indexing
+## How GitLab Orbit indexes your data
 
 After you [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) for a group,
 the indexer builds the graph from two sources:
@@ -69,7 +70,7 @@ Results show your data as of the last index cycle.
 The first index takes from a few minutes to about 30 minutes for thousands of projects. Later updates take seconds to minutes.
 To check the progress, run `glab orbit graph-status --full-path <my-group>`.
 
-## Queries
+## How a query runs
 
 Queries use the [Cypher query language](queries/cypher.md).
 Every query follows the same path:
@@ -103,7 +104,7 @@ Your agent can use both graphs in the same conversation. For more information, s
 - GitLab Orbit indexes code on the default branch only.
   An answer about code on another branch reflects the default branch.
   For code that you have not merged, use the [local graph](local/_index.md).
-- GitLab Orbit resolves imports and calls within one repository.
+- GitLab Orbit resolves imports and calls in one repository.
   It matches dependencies between repositories by name only.
 - GitLab Orbit does not run on a GitLab Geo secondary site.
   After a failover, GitLab Orbit indexes the data again.
@@ -113,7 +114,7 @@ Your agent can use both graphs in the same conversation. For more information, s
 
 <!-- TODO(GA): confirm with Pricing what the add-on includes, and how GitLab Self-Managed and GitLab Dedicated are billed. -->
 The GitLab Orbit add-on includes GitLab Credits for GitLab Orbit queries.
-On GitLab.com, queries consume GitLab Credits on every access path, including GitLab Duo Agent Platform.
+On GitLab.com, queries consume GitLab Credits on every access path, including Agent Platform.
 For the rates, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
 For billing on GitLab Self-Managed and GitLab Dedicated, contact your GitLab account team.
 

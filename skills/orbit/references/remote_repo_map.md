@@ -7,7 +7,7 @@ Use it for inheritance trees, ancestor chains, included concerns, class members,
 ## Prerequisites
 
 - glab v1.117.0 or later, authenticated against GitLab.com.
-- The `knowledge_graph` feature flag enabled for the user.
+- GitLab Orbit turned on for a top-level group that you belong to.
 - The target project and branch indexed in Orbit Remote.
 - A token with access to the target project.
 
