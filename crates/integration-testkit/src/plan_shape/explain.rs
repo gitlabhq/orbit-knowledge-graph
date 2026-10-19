@@ -1,10 +1,10 @@
 use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
 use compiler::input::{ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
 use compiler::passes::plan::QueryPlan;
-use compiler::passes::plan::physical::{
+use compiler::passes::plan::graph::{
     ExecutionPlan, RelationGraph, RelationId, RelationNode, RelationRef,
 };
-use compiler::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
+use compiler::passes::plan::predicates::{Column, OutputValue, Predicate, Projection};
 use query_engine::compiler;
 use std::collections::HashMap;
 
@@ -420,7 +420,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
 
 fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
     filter(
-        compiler::passes::plan::requirements::node_predicates(node)
+        compiler::passes::plan::predicates::node_predicates(node)
             .iter()
             .flat_map(planned_predicate)
             .collect(),
@@ -534,11 +534,6 @@ fn relation_node(
             planned_projections(outputs),
             vec![relation_ref(input, graph, materialized, current)],
         ),
-        RelationNode::Distinct { input } => Tree::node(
-            Operator::Distinct,
-            "",
-            vec![relation_ref(input, graph, materialized, current)],
-        ),
         RelationNode::Bind { alias, input } => Tree::node(
             Operator::Bind,
             alias,
@@ -576,16 +571,6 @@ fn relation_node(
                 relation_ref(left, graph, materialized, current),
                 relation_ref(right, graph, materialized, current),
             ],
-        ),
-        RelationNode::Sort { input, keys } => sort(
-            relation_ref(input, graph, materialized, current),
-            keys.iter()
-                .map(|(column, desc)| (planned_column(column), *desc)),
-        ),
-        RelationNode::Limit { input, rows } => Tree::node(
-            Operator::Limit,
-            rows.to_string(),
-            vec![relation_ref(input, graph, materialized, current)],
         ),
     }
 }
@@ -631,10 +616,6 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             format!("{} >= {start}", planned_column(column)),
             format!("{} <= {end}", planned_column(column)),
         ],
-        Predicate::ColumnsEqual { left, right } => vec![format!(
-            "{}.{} = {}.{}",
-            left.source, left.name, right.source, right.name
-        )],
         Predicate::Live { alias } => vec![format!("{alias}._deleted = false")],
         Predicate::EntityKind { column, entity } => vec![format!(
             "{} = {}",
@@ -712,8 +693,6 @@ fn planned_projections(values: &[Projection]) -> String {
             let value = match &projection.value {
                 OutputValue::Column(value) => planned_column(value),
                 OutputValue::Text(value) => text_literal(value),
-                OutputValue::Null => "NULL".into(),
-                OutputValue::EmptyTextArray => "[]".into(),
                 OutputValue::Depth(value) => value.to_string(),
                 OutputValue::Path(steps) => format!(
                     "path[{}]",
@@ -1008,17 +987,10 @@ fn exact_assertions_preserve_nested_filter_order() {
         },
     ];
     let mut graph = RelationGraph::default();
-    let read = graph.add(RelationNode::Read {
-        table: "gl_project".into(),
-        alias: "p".into(),
-        final_: false,
+    let read = graph.read("gl_project", "p", false);
+    let source = predicates.iter().fold(read, |relation, predicate| {
+        graph.filter(relation, vec![predicate.clone()])
     });
-    let source = predicates
-        .iter()
-        .fold(graph.from(read), |relation, predicate| {
-            relation.filter(vec![predicate.clone()])
-        })
-        .finish();
     let assertions: super::Assertions = orbit_utils::yaml::from_str(
         "exact: (Filter p.id = 1, p.star_count = 2 (Scan Table(gl_project) AS p))",
     )

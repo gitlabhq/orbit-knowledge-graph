@@ -4,7 +4,7 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::BoundFilter;
-use crate::passes::plan::helpers::denorm_tag_values;
+use crate::passes::plan::filters::denorm_tag_values;
 
 pub(crate) fn latest_row_dedup(
     alias: &str,

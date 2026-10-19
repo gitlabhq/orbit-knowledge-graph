@@ -1,6 +1,7 @@
 use super::QueryScope;
 use crate::passes::plan::QueryPlan;
-use crate::passes::plan::physical::{ReadOwner, RelationNode};
+use crate::passes::plan::graph::{ReadOwner, RelationNode};
+use crate::passes::plan::predicates::Predicate;
 
 pub fn apply_plan(plan: &mut QueryPlan, scope: &QueryScope) {
     let execution = match plan {
@@ -25,13 +26,8 @@ pub fn apply_plan(plan: &mut QueryPlan, scope: &QueryScope) {
     for (id, alias, proof) in filters {
         execution
             .graph
-            .transform(&mut execution.root, id, |relation| {
-                relation
-                    .filter(vec![crate::passes::plan::requirements::Predicate::Scope {
-                        alias,
-                        proof,
-                    }])
-                    .finish()
+            .transform(&mut execution.root, id, |graph, read| {
+                graph.filter(read, vec![Predicate::Scope { alias, proof }])
             });
     }
 }

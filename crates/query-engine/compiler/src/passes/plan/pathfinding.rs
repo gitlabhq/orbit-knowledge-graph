@@ -1,29 +1,26 @@
-use super::context::PlanningContext;
-use super::{EdgeTableConfig, PathFinding, Plan, find_node};
-use crate::error::Result;
 use query_data_model::OrbitQueryModel;
 
-pub(super) fn plan_pathfinding<M>(mut context: PlanningContext<'_, M>) -> Result<Plan<PathFinding>>
-where
-    M: OrbitQueryModel + ?Sized,
-{
-    let input = context.input;
-    let model = context.model;
+use super::{EdgeTableConfig, NodePlan, PathFinding, Plan};
+use crate::error::{QueryError, Result};
+use crate::input::*;
+
+pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
+    input: &Input,
+    model: &M,
+) -> Result<Plan<PathFinding>> {
     let path = input
         .path
         .as_ref()
-        .ok_or_else(|| crate::error::QueryError::Lowering("path config missing".into()))?;
-
-    let start_node = find_node(input, &path.from)?;
-    let end_node = find_node(input, &path.to)?;
-    let start_alias = start_node.id.clone();
-    let end_alias = end_node.id.clone();
-
-    let start_np = context.resolve_node(start_node)?;
-    let end_np = context.resolve_node(end_node)?;
-
-    let scoped_by_tp = start_np.has_traversal_path && end_np.has_traversal_path;
-    let edge = EdgeTableConfig::from_model(model, &path.rel_types);
+        .ok_or_else(|| QueryError::Lowering("path config missing".into()))?;
+    let node = |alias: &str| {
+        input
+            .node(alias)
+            .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
+    };
+    let start_node = node(&path.from)?;
+    let end_node = node(&path.to)?;
+    let start = NodePlan::resolve(start_node, model)?;
+    let end = NodePlan::resolve(end_node, model)?;
 
     let endpoint_kinds = |entity: &str, source: bool| {
         if !crate::passes::normalize::is_wildcard(&path.rel_types) {
@@ -34,7 +31,7 @@ where
         } else {
             model.graph().relationship_names(None, Some(entity))
         };
-        super::helpers::rel_kind_filter_values(&relationships)
+        (!crate::passes::normalize::is_wildcard(&relationships)).then_some(relationships)
     };
     let forward_first_hop_filter = start_node
         .entity
@@ -46,20 +43,18 @@ where
         .and_then(|entity| endpoint_kinds(entity, false));
 
     let max_depth = path.max_depth;
-    let forward_depth = max_depth / 2 + max_depth % 2;
-    let backward_depth = if max_depth >= 2 { max_depth / 2 } else { 0 };
-
-    context.nodes.insert(start_alias.clone(), start_np);
-    context.nodes.insert(end_alias.clone(), end_np);
-    Ok(context.finish(PathFinding {
-        start: start_alias,
-        end: end_alias,
+    let mut plan = Plan::new(PathFinding {
+        start: start.alias.clone(),
+        end: end.alias.clone(),
         max_depth,
-        forward_depth,
-        backward_depth,
-        edge,
+        forward_depth: max_depth / 2 + max_depth % 2,
+        backward_depth: if max_depth >= 2 { max_depth / 2 } else { 0 },
+        edge: EdgeTableConfig::from_model(model, &path.rel_types),
         forward_first_hop_filter,
         backward_first_hop_filter,
-        scoped_by_tp,
-    }))
+        scoped_by_tp: start.has_traversal_path && end.has_traversal_path,
+    });
+    plan.nodes.insert(start.alias.clone(), start);
+    plan.nodes.insert(end.alias.clone(), end);
+    Ok(plan)
 }

@@ -1,42 +1,35 @@
 use ontology::constants::*;
+use query_data_model::{DenormalizedDirection, OrbitQueryModel, RelationshipId};
 
-use crate::error::Result;
+use super::filters::{BoundFilter, lowerable_denorm};
+use super::{EdgeTableConfig, Neighbors, NodePlan, Plan};
+use crate::error::{QueryError, Result};
 use crate::input::*;
 
-use super::context::PlanningContext;
-use super::{EdgeTableConfig, Neighbors, Plan};
-use query_data_model::OrbitQueryModel;
-
-pub(super) fn plan_neighbors<M>(mut context: PlanningContext<'_, M>) -> Result<Plan<Neighbors>>
-where
-    M: OrbitQueryModel + ?Sized,
-{
-    let input = context.input;
-    let model = context.model;
+pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
+    input: &Input,
+    model: &M,
+) -> Result<Plan<Neighbors>> {
     let config = input
         .neighbors
         .as_ref()
-        .ok_or_else(|| crate::error::QueryError::Lowering("neighbors config missing".into()))?;
-
+        .ok_or_else(|| QueryError::Lowering("neighbors config missing".into()))?;
     let [center_node] = input.nodes.as_slice() else {
-        return Err(crate::error::QueryError::Lowering(
+        return Err(QueryError::Lowering(
             "neighbors query requires exactly one node".into(),
         ));
     };
-    let center_alias = center_node.id.clone();
-    let center_entity = center_node.entity.as_deref().ok_or_else(|| {
-        crate::error::QueryError::Lowering("neighbors center has no entity".into())
-    })?;
+    let center_entity = center_node
+        .entity
+        .as_deref()
+        .ok_or_else(|| QueryError::Lowering("neighbors center has no entity".into()))?;
     let center_entity_id = model
         .entity(center_entity)
         .map(|entity| entity.id)
-        .ok_or_else(|| {
-            crate::error::QueryError::Lowering("neighbors center entity is unknown".into())
-        })?;
+        .ok_or_else(|| QueryError::Lowering("neighbors center entity is unknown".into()))?;
+    let center = NodePlan::resolve(center_node, model)?;
+    let denormalized = super::denormalized_facts(input, model);
 
-    let center_np = context.resolve_node(center_node)?;
-
-    context.denormalized = super::denormalized_facts(input, model);
     let relationships: Vec<&str> = if config.rel_types.is_empty() {
         model
             .graph()
@@ -155,87 +148,79 @@ where
         })
         .map(str::to_string)
         .collect();
-    let covered = |filter: &super::BoundFilter,
-                   direction: query_data_model::DenormalizedDirection,
-                   relationships: &[query_data_model::RelationshipId]| {
+    let covered = |filter: &BoundFilter,
+                   direction: DenormalizedDirection,
+                   relationships: &[RelationshipId]| {
         relationships.is_empty()
-            || super::helpers::lowerable_denorm(filter, direction, &context.denormalized)
-                .is_some_and(|facts| {
-                    relationships.iter().all(|relationship| {
-                        model
-                            .relationship_routes(
-                                model.graph().relationship(*relationship).name.as_str(),
-                            )
-                            .into_iter()
-                            .any(|route| {
-                                route.source_entities().any(|source| {
-                                    route.target_entities().any(|target| {
-                                        facts.variants.contains(&(*relationship, source, target))
-                                    })
+            || lowerable_denorm(filter, direction, &denormalized).is_some_and(|facts| {
+                relationships.iter().all(|relationship| {
+                    model
+                        .relationship_routes(
+                            model.graph().relationship(*relationship).name.as_str(),
+                        )
+                        .into_iter()
+                        .any(|route| {
+                            route.source_entities().any(|source| {
+                                route.target_entities().any(|target| {
+                                    facts.variants.contains(&(*relationship, source, target))
                                 })
                             })
-                    })
+                        })
                 })
+            })
     };
-    let has_non_denorm = center_np.id_range.is_some()
-        || center_np.filters.iter().any(|(_, filter)| {
+    let has_non_denorm = center.id_range.is_some()
+        || center.filters.iter().any(|(_, filter)| {
             (direction != Direction::Incoming
                 && !covered(
                     filter,
-                    query_data_model::DenormalizedDirection::Source,
+                    DenormalizedDirection::Source,
                     &outgoing_relationships,
                 ))
                 || (direction != Direction::Outgoing
                     && !covered(
                         filter,
-                        query_data_model::DenormalizedDirection::Target,
+                        DenormalizedDirection::Target,
                         &incoming_relationships,
                     ))
         });
 
     let mut edge = EdgeTableConfig::from_model(model, &config.rel_types);
-    {
-        let tables_for = |source: bool| -> Vec<String> {
-            let mut tables: Vec<String> = relationships
-                .iter()
-                .flat_map(|relationship| model.relationship_routes(relationship))
-                .filter(|route| match source {
-                    true => route.has_source(center_entity_id),
-                    false => route.has_target(center_entity_id),
-                })
-                .map(|route| route.table.to_string())
-                .collect();
-            tables.sort();
-            tables.dedup();
-            tables
-        };
-        let outgoing = tables_for(true);
-        let incoming = tables_for(false);
-        if !outgoing.is_empty() {
-            edge.outgoing_tables = outgoing;
-        }
-        if !incoming.is_empty() {
-            edge.incoming_tables = incoming;
-        }
+    let tables_for = |source: bool| -> Vec<String> {
+        let mut tables: Vec<String> = relationships
+            .iter()
+            .flat_map(|relationship| model.relationship_routes(relationship))
+            .filter(|route| match source {
+                true => route.has_source(center_entity_id),
+                false => route.has_target(center_entity_id),
+            })
+            .map(|route| route.table.to_string())
+            .collect();
+        tables.sort();
+        tables.dedup();
+        tables
+    };
+    let outgoing = tables_for(true);
+    let incoming = tables_for(false);
+    if !outgoing.is_empty() {
+        edge.outgoing_tables = outgoing;
     }
-
-    context.node_edge_mappings.insert(
-        center_alias.clone(),
-        ("e".to_string(), SOURCE_ID_COLUMN.to_string()),
-    );
+    if !incoming.is_empty() {
+        edge.incoming_tables = incoming;
+    }
     let mut tables = edge.outgoing_tables.clone();
     tables.extend(edge.incoming_tables.iter().cloned());
     tables.sort();
     tables.dedup();
     let fused_table = (direction == Direction::Both
         && !has_non_denorm
-        && center_np.node_ids.len() != 1
-        && center_np.uses_default_pk()
+        && center.node_ids.len() != 1
+        && center.uses_default_pk()
         && tables.len() == 1)
         .then(|| tables.remove(0));
-    context.nodes.insert(center_alias.clone(), center_np);
-    Ok(context.finish(Neighbors {
-        center: center_alias,
+
+    let mut plan = Plan::new(Neighbors {
+        center: center.alias.clone(),
         direction,
         edge,
         has_non_denorm,
@@ -246,5 +231,12 @@ where
         incoming_cross_scope,
         outgoing_neighbor_paths: neighbor_paths(true),
         incoming_neighbor_paths: neighbor_paths(false),
-    }))
+    });
+    plan.node_edge_mappings.insert(
+        center.alias.clone(),
+        ("e".to_string(), SOURCE_ID_COLUMN.to_string()),
+    );
+    plan.nodes.insert(center.alias.clone(), center);
+    plan.denormalized = denormalized;
+    Ok(plan)
 }

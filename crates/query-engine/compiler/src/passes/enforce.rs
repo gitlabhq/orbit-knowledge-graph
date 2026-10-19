@@ -8,7 +8,7 @@ use crate::passes::lower::sql::{
     deleted_false, filter_to_expr, id_list_predicate, id_range_predicate, latest_rows_for_join,
 };
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
-use crate::passes::plan::helpers::{FilterOwner, ordered_filters};
+use crate::passes::plan::filters::{FilterOwner, ordered_filters};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::EntityAuthConfig;
 use std::collections::{HashMap, HashSet};

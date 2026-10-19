@@ -2,7 +2,7 @@ use super::sql;
 use crate::ast::*;
 use crate::input::OrderDirection;
 use crate::passes::plan::aggregation::{AggregationPlan, Group};
-use crate::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
+use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection};
 
 pub(super) fn column(value: &Column) -> Expr {
     Expr::col(&value.source, &value.name)
@@ -13,6 +13,13 @@ fn tuple(values: Vec<Expr>) -> Expr {
         [value] => value.clone(),
         _ => Expr::func(Function::Tuple, values),
     }
+}
+
+fn step(id: &Column, kind: &Column) -> Expr {
+    Expr::func(
+        Function::Array,
+        vec![Expr::func(Function::Tuple, vec![column(id), column(kind)])],
+    )
 }
 
 pub(super) fn predicate(value: &Predicate) -> Expr {
@@ -49,10 +56,6 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             Expr::binary(Op::Ge, column(value), Expr::int(*start)),
             Expr::binary(Op::Le, column(value), Expr::int(*end)),
         ),
-        Predicate::ColumnsEqual { left, right } => Expr::eq(
-            Expr::col(&left.source, &left.name),
-            Expr::col(&right.source, &right.name),
-        ),
         Predicate::Live { alias } => sql::deleted_false(alias),
         Predicate::EntityKind {
             column: value,
@@ -72,7 +75,7 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             keys,
         } => Expr::InSubquery {
             expr: Box::new(tuple(columns.iter().map(column).collect())),
-            cte_name: super::physical::relation_name(*relation),
+            cte_name: super::graph::relation_name(*relation),
             columns: keys.clone(),
         },
         Predicate::Scope { alias, proof } => crate::scope::scope_predicate(proof, alias),
@@ -86,10 +89,6 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
             let expression = match &value.value {
                 OutputValue::Column(value) => column(value),
                 OutputValue::Text(value) => Expr::string(value),
-                OutputValue::Null => Expr::Literal(serde_json::Value::Null),
-                OutputValue::EmptyTextArray => {
-                    Expr::param(SqlType::String.to_array(), serde_json::Value::Array(vec![]))
-                }
                 OutputValue::Depth(value) => Expr::int(i64::from(*value)),
                 OutputValue::Path(steps) => Expr::func(
                     Function::Array,
@@ -100,26 +99,12 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
                         })
                         .collect(),
                 ),
-                OutputValue::PathAppend { path, id, kind } => Expr::func(
-                    Function::ArrayConcat,
-                    vec![
-                        column(path),
-                        Expr::func(
-                            Function::Array,
-                            vec![Expr::func(Function::Tuple, vec![column(id), column(kind)])],
-                        ),
-                    ],
-                ),
-                OutputValue::PathPrepend { path, id, kind } => Expr::func(
-                    Function::ArrayConcat,
-                    vec![
-                        Expr::func(
-                            Function::Array,
-                            vec![Expr::func(Function::Tuple, vec![column(id), column(kind)])],
-                        ),
-                        column(path),
-                    ],
-                ),
+                OutputValue::PathAppend { path, id, kind } => {
+                    Expr::func(Function::ArrayConcat, vec![column(path), step(id, kind)])
+                }
+                OutputValue::PathPrepend { path, id, kind } => {
+                    Expr::func(Function::ArrayConcat, vec![step(id, kind), column(path)])
+                }
             };
             SelectExpr::new(expression, &value.name)
         })

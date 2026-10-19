@@ -1,8 +1,58 @@
 use std::collections::HashMap;
 
-use super::{BoundFilter, DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
-use crate::input::{ColumnSelection, FilterOp, InputFilter};
-use query_data_model::RelationalMapping;
+use query_data_model::{OrbitQueryModel, RelationalMapping};
+
+use super::predicates::{Column, Predicate};
+use super::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
+use crate::input::{FilterOp, InputFilter};
+
+#[derive(Clone)]
+pub struct BoundFilter {
+    pub filter: InputFilter,
+    pub property: Option<query_data_model::PropertyId>,
+    pub data_type: Option<ontology::DataType>,
+    pub selectivity: ontology::FieldSelectivity,
+    pub namespace_anchor: bool,
+    pub in_sort_key: bool,
+    pub text_indexed: bool,
+    pub unique: bool,
+    pub immutable: bool,
+}
+
+impl BoundFilter {
+    pub fn is_selective(&self) -> bool {
+        if self.namespace_anchor || self.filter.rhs_column.is_some() {
+            return false;
+        }
+        let high = self.selectivity == ontology::FieldSelectivity::High;
+        match self.filter.op {
+            Some(
+                FilterOp::Contains
+                | FilterOp::StartsWith
+                | FilterOp::EndsWith
+                | FilterOp::TokenMatch
+                | FilterOp::AllTokens
+                | FilterOp::AnyTokens,
+            ) => self.text_indexed,
+            Some(FilterOp::Ne | FilterOp::IsNotNull) => false,
+            None | Some(FilterOp::Eq | FilterOp::In) => high || self.text_indexed,
+            Some(_) => high,
+        }
+    }
+
+    pub fn at(&self, column: Column) -> Predicate {
+        Predicate::Property {
+            column,
+            filter: self.filter.clone(),
+            data_type: self.data_type,
+            selective: self.is_selective(),
+            in_sort_key: self.in_sort_key,
+            text_indexed: self.text_indexed,
+            unique: self.unique,
+            immutable: self.immutable,
+        }
+    }
+}
 
 pub enum FilterOwner<'a> {
     Entity(query_data_model::EntityId),
@@ -12,7 +62,7 @@ pub enum FilterOwner<'a> {
 pub fn ordered_filters(
     filters: &HashMap<String, Vec<InputFilter>>,
     owner: FilterOwner<'_>,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> Vec<(String, BoundFilter)> {
     let mut properties: Vec<_> = filters.iter().collect();
     properties.sort_unstable_by_key(|(property, _)| *property);
@@ -46,7 +96,7 @@ pub fn bind_filter(
     property: &str,
     filter: InputFilter,
     owner: &FilterOwner<'_>,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> BoundFilter {
     let (metadata, in_sort_key) = match owner {
         FilterOwner::Entity(entity) => {
@@ -92,18 +142,6 @@ pub fn bind_filter(
         unique: property_id.is_some_and(|property| model.property_unique(property)),
         immutable: property_id.is_some_and(|property| !model.property_mutable(property)),
     }
-}
-
-pub fn requested_columns(columns: &Option<ColumnSelection>) -> Vec<String> {
-    match columns {
-        Some(ColumnSelection::List(cols)) => cols.clone(),
-        Some(ColumnSelection::All) => vec!["*".to_string()],
-        None => vec![],
-    }
-}
-
-pub fn rel_kind_filter_values(types: &[String]) -> Option<Vec<String>> {
-    (!crate::passes::normalize::is_wildcard(types)).then(|| types.to_vec())
 }
 
 fn tag_value(value: &serde_json::Value) -> Option<String> {

@@ -1,10 +1,10 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
+mod graph;
 pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
-mod physical;
-mod requirements;
+mod predicates;
 pub(crate) mod sql;
 
 use crate::ast::*;
@@ -183,12 +183,12 @@ fn emit_traversal(
     input: &Input,
     output: EmitOutput,
     relations: &[EdgeRelation],
-    execution: &crate::passes::plan::physical::ExecutionPlan,
+    execution: &crate::passes::plan::graph::ExecutionPlan,
 ) -> Result<Node> {
     let mut query = output.into_query(vec![], vec![], vec![], input.limit);
     query.order_by = match (&input.order_by, &input.relationship_return.sort) {
         (Some(order), _) => vec![ordered(
-            requirements::column(&execution.property(&order.node, &order.property)),
+            predicates::column(&execution.property(&order.node, &order.property)),
             order.direction,
         )],
         (None, Some(sort)) => {
@@ -218,15 +218,15 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
     let mut nodes = HashMap::new();
     let node = match plan {
         QueryPlan::Traversal(plan) => {
-            let mut output = physical::execute(&plan.operation.execution);
+            let mut output = graph::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
             emit_traversal(input, output, &plan.relations, &plan.operation.execution)
         }
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
-            let mut output = physical::execute(&plan.operation.execution);
+            let mut output = graph::execute(&plan.operation.execution);
             nodes = output.take_bindings(plan, input)?;
-            Ok(requirements::aggregation(result, output, input.limit))
+            Ok(predicates::aggregation(result, output, input.limit))
         }
         QueryPlan::Neighbors(plan) => {
             let (query, binding) = neighbors::emit_neighbors(plan, input)?;

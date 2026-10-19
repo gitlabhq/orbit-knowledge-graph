@@ -1,10 +1,9 @@
+use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
+use query_data_model::OrbitQueryModel;
+
+use super::{Hydration, Plan, sort_key};
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
-
-use super::context::PlanningContext;
-use super::{Hydration, Plan};
-use query_data_model::OrbitQueryModel;
 
 const PREFIX_SET_PATH_THRESHOLD: usize = 256;
 
@@ -61,30 +60,27 @@ fn path_filter(
     )
 }
 
-pub(super) fn plan_hydration<M: OrbitQueryModel + ?Sized>(
-    context: PlanningContext<'_, M>,
+pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
+    input: &Input,
+    model: &M,
     options: HydrationCompileOptions,
 ) -> Result<Plan<Hydration>> {
-    let input = context.input;
-    let model = context.model;
     if input.nodes.is_empty() {
         return Err(QueryError::Lowering(
             "hydration requires at least one node".into(),
         ));
     }
-    let hydration_nodes = input
+    let nodes = input
         .nodes
         .iter()
         .map(|node| {
-            let table = node
-                .entity
-                .as_deref()
-                .and_then(|entity| model.entity_table(entity))
-                .ok_or_else(|| QueryError::Lowering("hydration node has no table".into()))?;
             let entity = node
                 .entity
-                .as_ref()
+                .as_deref()
                 .ok_or_else(|| QueryError::Lowering("hydration node has no entity".into()))?;
+            let table = model
+                .entity_table(entity)
+                .ok_or_else(|| QueryError::Lowering("hydration node has no table".into()))?;
             let columns = match &node.columns {
                 Some(ColumnSelection::List(cols)) => cols.clone(),
                 _ => vec![],
@@ -92,17 +88,14 @@ pub(super) fn plan_hydration<M: OrbitQueryModel + ?Sized>(
             Ok(HydrationNodePlan {
                 alias: node.id.clone(),
                 table: table.to_string(),
-                entity: entity.clone(),
+                entity: entity.to_string(),
                 id_property: node.id_property.clone(),
                 node_ids: node.node_ids.clone(),
                 columns,
                 path_filter: path_filter(&node.traversal_paths, options),
-                sort_key: context.latest_row_key(table)?.to_vec(),
+                sort_key: sort_key(model, table)?.to_vec(),
             })
         })
         .collect::<Result<Vec<_>>>()?;
-
-    Ok(context.finish(Hydration {
-        nodes: hydration_nodes,
-    }))
+    Ok(Plan::new(Hydration { nodes }))
 }
