@@ -12,7 +12,7 @@ use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_server_config::{AppConfig, NatsConfiguration};
 
-use super::common::dispatch::start_nats;
+use super::common::start_nats;
 use super::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};
 
 const IN_SYNC: i64 = 100;
