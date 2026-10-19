@@ -8,7 +8,7 @@ use orbit_server_config::QueryConfig;
 /// Kept in sync with config/default.yaml `path_finding:` block.
 const PATHFINDING_MAX_EXECUTION_TIME: u64 = 15;
 const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
-const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 100_000;
+const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 1_000_000;
 
 use crate::ast::visit::{visit_queries, visit_relations};
 use crate::ast::{Node, TableRef};

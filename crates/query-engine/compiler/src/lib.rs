@@ -1495,7 +1495,7 @@ mod tests {
         );
         assert!(sql.contains(" IN (SELECT"), "{sql}");
         assert!(
-            sql.contains("use_index_for_in_with_subqueries_max_values = 100000"),
+            sql.contains("use_index_for_in_with_subqueries_max_values = 1000000"),
             "{sql}"
         );
     }
