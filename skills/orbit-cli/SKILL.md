@@ -52,9 +52,9 @@ orbit context duckdb_client::search::DuckDbSearch::grep src/lib.rs:120-180 crate
 Quote `a|b|c` for OR alternatives. Plain words ignore case, `_`, and `-`; terms
 with regex characters match as regex. Output follows rg's heading layout: each
 file's path once, then `line:text` per match, in full. A `line-» Kind name:start-end
-←callers →callees` line precedes the matches inside each definition and ends with
-`also name in path:line` for same-name definitions outside the results, such as overrides
-and parallel implementations. `line-» imports`
+←callers →callees` line precedes the matches inside each definition. It ends with
+`also name in path:line` for same-name definitions outside the results, such as
+overrides. `line-» imports`
 names what an import line brings in, and `line-» outside indexed definitions` marks
 code no definition encloses. A path that does not exist searches tracked paths with the same last segment.
 A scoped search with no matches widens one directory at a time. A `»` line says what was searched.
@@ -66,16 +66,15 @@ The usual rg and grep flags work: `-A`/`-B`/`-C`, `-l`, `-c`, `-w`, `-F`, `-g`.
 Qualifiers work as in GitHub search. `is:` picks what to search: `is:def`,
 `is:class`, `is:method`, or `is:function` for definitions, `is:file` and `is:dir`
 to list where matches are. The other words are the search. `symbol:x` finds
-definitions named x; `file:x` keeps paths containing x, and alone lists them;
-`ext:rs` and `lang:py` filter files as rg `-g` and `-t` do. Unknown names such
-as `std::io` stay literal, and `-F` turns qualifiers off.
+definitions named x. `file:x` keeps paths containing x, and alone lists them.
+Unknown names such as `std::io` stay literal, and `-F` turns qualifiers off.
 
-A plain search, with no paths or file filters, also searches the GitLab project
-behind `origin` for work items, merge requests, commits, notes, and milestones.
+A plain search with no paths or file filters also searches the GitLab group
+behind `origin`. It finds issues, merge requests, commits, notes, and code in other projects.
 Those results print after the local ones as tokens such as `MergeRequest[42]`.
 Name `group/project`, `Project[id]`, or `Group[id]` as a path to search another
-project or group, including its code when there is no local checkout;
-`is:issue`, `is:mr`, `is:commit`, and `is:comment` search GitLab only,
+project or group, including its code when there is no local checkout.
+`is:issue`, `is:mr`, `is:commit`, and `is:comment` search GitLab only.
 `is:branch` finds branches with their merge requests and pipelines, and
 `repo:group/project` names the project.
 

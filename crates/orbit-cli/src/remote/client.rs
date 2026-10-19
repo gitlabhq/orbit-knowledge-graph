@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -255,16 +255,8 @@ impl OrbitClient {
         };
         let status = response.status();
         if !status.is_success() {
-            let retry_after = response
-                .headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.trim().parse().ok())
-                .map(Duration::from_secs);
             let body = response.text().await.unwrap_or_default();
-            let mut error = map_http_error(status.as_u16(), &body);
-            error.retry_after = retry_after;
-            return Err(error);
+            return Err(map_http_error(status.as_u16(), &body));
         }
         Ok(response)
     }
@@ -273,9 +265,9 @@ impl OrbitClient {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, RemoteError> {
-        self.send_raw(request)
-            .await
-            .map_err(|e| RemoteError::new(EXIT_GENERIC, request_failure_message("Orbit request", &e)))
+        self.send_raw(request).await.map_err(|e| {
+            RemoteError::new(EXIT_GENERIC, request_failure_message("Orbit request", &e))
+        })
     }
 
     async fn send_raw(

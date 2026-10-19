@@ -332,7 +332,7 @@ async fn pipeline_text(
     }
     let _ = writeln!(out, "failed_jobs[{}]:", jobs.len());
     for job in &jobs {
-        let _ = writeln!(out, "  job:{} {}", job["id"], job_line(job));
+        let _ = writeln!(out, "  {}", job_line(job));
     }
     Ok(out)
 }

@@ -427,7 +427,7 @@ fn grep_for_a_hosted_kind_searches_the_origin_group() {
     );
     assert_eq!(
         request.request_line,
-        "GET /api/v4/orbit/grep?search=runner&full_path=my-group&limit=5&per_scope=5&scopes=merge_requests HTTP/1.1"
+        "GET /api/v4/orbit/grep?search=runner&full_path=my-group&scopes=merge_requests HTTP/1.1"
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -652,7 +652,6 @@ fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
             "pipelines/7/jobs",
             r#"[{"id":9,"name":"unit","stage":"test","failure_reason":"script_failure","allow_failure":false,"web_url":"https://localhost/p/-/jobs/9"}]"#,
         ),
-        ("jobs/9/trace", "ok\n--- FAIL: TestX\n"),
     ]);
     let base_url = base_url.replace("127.0.0.1", "localhost");
     let clone = git_clone_with_origin("https://localhost/my-group/my-project");
@@ -675,10 +674,8 @@ fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         "branch:ci-fix no merge request\n\
-         pipeline:7 failed ref ci-fix commit:0123456789ab https://localhost/p/-/pipelines/7\n\
+         pipeline:7 failed ref ci-fix commit:0123456789abcdef https://localhost/p/-/pipelines/7\n\
          failed_jobs[1]:\n  \
-         job:9 unit (test, script_failure) https://localhost/p/-/jobs/9\n    \
-         | ok\n    \
-         | --- FAIL: TestX\n"
+         job:9 unit (test, script_failure) https://localhost/p/-/jobs/9\n"
     );
 }

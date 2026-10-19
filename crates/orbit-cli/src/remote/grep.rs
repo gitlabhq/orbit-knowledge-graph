@@ -510,7 +510,7 @@ mod tests {
                 "GitLab \"grep|search\" in gitlab.com/group/project, truncated:\n\
                  issue:group/other#2 opened  Grep issue\n\
                  mr:4 merged  Add scoped search\n\
-                 commit:0123456789ab  Fix grep\n\
+                 commit:0123456789abcdef0123  Fix grep\n\
                  comment on mr:4  grep should search notes\n\
                  g/lib/a.go\n\
                  10-// helper\n\
