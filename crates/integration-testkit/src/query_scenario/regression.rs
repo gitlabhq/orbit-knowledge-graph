@@ -49,6 +49,22 @@ fn rejects(query: Value, expect: &str, message: &str) {
     assert_panics(|| run_suite(query, expect), message);
 }
 
+#[test]
+fn plan_assertions_are_not_query_expectations() {
+    let query = json!({"gql": "MATCH (d:Definition {id: 1}) RETURN d.name"});
+    for field in [
+        "sql_contains: [SELECT]",
+        "sql_not_contains: [DROP]",
+        "indexes_used: [{table: gl_definition, index: idx_name}]",
+        "compile_only: true",
+        "hydration: static",
+        "settings: {use_query_cache: 1}",
+        "skip_requirements: [node_ids]",
+    ] {
+        rejects(query.clone(), field, "unknown field");
+    }
+}
+
 fn assert_panics(assertion: impl FnOnce() + std::panic::UnwindSafe, message: &str) {
     let failure = std::panic::catch_unwind(assertion).expect_err("wrong expectation must fail");
     let actual = failure

@@ -21,6 +21,31 @@ is a default for each case, and each case needs its own `name`.
 
 The fixtures cover access-path choices and their important eligibility guards.
 
+Final-output assertions use these optional ClickHouse fields:
+
+```yaml
+physical:
+  clickhouse:
+    final_ast:
+      expect: ["(Filter false, ... (_))"]
+    sql:
+      contains: ["SETTINGS use_query_cache = 0"]
+      not_contains: ["gl_edge"]
+    indexes:
+      - { table: gl_merge_request, name: idx_title }
+    settings:
+      contains: ["transform_null_in = 0"]
+```
+
+`sql` checks the rendered query. `indexes` checks the ClickHouse layout and
+requires the rendered SQL to read that table. `settings` checks the rendered
+SETTINGS clause. Data-correctness scenarios reject these fields.
+
+`migrated_data_correctness_sql.yaml` preserves every SQL and index assertion
+removed from the data-correctness suite. Each case uses the original query and
+the original assertion values. Production route cases remain grouped in
+`edge_scans/production_variant_routes.yaml`.
+
 CTE assertions refer to top-level named query definitions, not execution order.
 Use one of these forms in a planned or emitted assertion block:
 

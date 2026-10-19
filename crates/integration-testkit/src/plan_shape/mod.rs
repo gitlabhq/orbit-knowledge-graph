@@ -17,11 +17,12 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Scenario {
-    name: String,
+    name: Option<String>,
     ontology_overlay: Option<String>,
     query: BTreeMap<String, String>,
     #[serde(default)]
     missing_frontends: BTreeMap<String, String>,
+    #[serde(default)]
     logical: Assertions,
     physical: BTreeMap<String, PhysicalAssertions>,
     hydration: Option<HydrationSetup>,
@@ -121,6 +122,15 @@ struct CteAssertions {
 }
 
 impl Assertions {
+    fn is_empty(&self) -> bool {
+        self.bind.is_empty()
+            && self.expect.is_empty()
+            && self.reject.is_empty()
+            && self.occurrences.is_empty()
+            && self.ctes.is_none()
+            && self.exact.is_none()
+    }
+
     fn check(&self, actual: &pattern::Expression, label: &str) -> Result<(), String> {
         let cte_order = match &self.ctes {
             None => None,
@@ -271,7 +281,7 @@ fn check<M: OrbitQueryModel>(
         let label = format!(
             "{}: {} [{language}/{backend}]",
             path.display(),
-            scenario.name
+            scenario.name.as_deref().unwrap_or("unnamed")
         );
         let input = match language.as_str() {
             "json" => frontend::json_dsl::parse(raw, model).map(|(input, _)| input),
@@ -302,10 +312,12 @@ fn check<M: OrbitQueryModel>(
                 path_segment_budget: hydration.path_segment_budget,
             };
         }
-        scenario
-            .logical
-            .check(&explain::logical(&input), &format!("{label}.logical"))
-            .unwrap_or_else(|error| panic!("{error}"));
+        if !scenario.logical.is_empty() {
+            scenario
+                .logical
+                .check(&explain::logical(&input), &format!("{label}.logical"))
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
         let plan = build(&input, options, &HashSet::new())
             .unwrap_or_else(|error| panic!("{label}: {error}"));
         let lowered = lower::emit(&plan, &input).unwrap_or_else(|error| panic!("{label}: {error}"));
@@ -448,10 +460,16 @@ fn check<M: OrbitQueryModel>(
             }
             if let Some(assertions) = &assertions.settings {
                 for value in &assertions.contains {
-                    assert!(sql.contains(value), "{label}: SETTINGS missing '{value}'\n{sql}");
+                    assert!(
+                        sql.contains(value),
+                        "{label}: SETTINGS missing '{value}'\n{sql}"
+                    );
                 }
                 for value in &assertions.not_contains {
-                    assert!(!sql.contains(value), "{label}: SETTINGS contains '{value}'\n{sql}");
+                    assert!(
+                        !sql.contains(value),
+                        "{label}: SETTINGS contains '{value}'\n{sql}"
+                    );
                 }
             }
         }
@@ -515,7 +533,7 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
                 _ => panic!("unknown backend {backend}"),
             }
         }
-        println!("PASS {}", scenario.name);
+        println!("PASS {}", scenario.name.as_deref().unwrap_or("unnamed"));
     }
     println!("{cases} plan fixtures passed");
 }
