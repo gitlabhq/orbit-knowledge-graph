@@ -11,3 +11,9 @@ pub mod version;
 pub mod vfs;
 pub mod vfs_policies;
 pub mod yaml;
+
+use std::os::unix::fs::PermissionsExt;
+
+pub fn is_world_writable(path: &std::path::Path) -> std::io::Result<bool> {
+    Ok(std::fs::metadata(path)?.permissions().mode() & 0o002 != 0)
+}
