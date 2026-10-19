@@ -32,22 +32,23 @@ pub struct BoundFilter {
 
 impl BoundFilter {
     pub fn is_selective(&self) -> bool {
-        self.selectivity == ontology::FieldSelectivity::High
-            && !self.namespace_anchor
-            && self.filter.rhs_column.is_none()
-            && !matches!(
-                self.filter.op,
-                Some(
-                    FilterOp::Contains
-                        | FilterOp::StartsWith
-                        | FilterOp::EndsWith
-                        | FilterOp::TokenMatch
-                        | FilterOp::AllTokens
-                        | FilterOp::AnyTokens
-                        | FilterOp::Ne
-                        | FilterOp::IsNotNull
-                )
-            )
+        if self.namespace_anchor || self.filter.rhs_column.is_some() {
+            return false;
+        }
+        let high = self.selectivity == ontology::FieldSelectivity::High;
+        match self.filter.op {
+            Some(
+                FilterOp::Contains
+                | FilterOp::TokenMatch
+                | FilterOp::AllTokens
+                | FilterOp::AnyTokens,
+            ) => self.text_indexed,
+            Some(
+                FilterOp::StartsWith | FilterOp::EndsWith | FilterOp::Ne | FilterOp::IsNotNull,
+            ) => false,
+            None | Some(FilterOp::Eq | FilterOp::In) => high || self.text_indexed,
+            Some(_) => high,
+        }
     }
 
     pub fn at(&self, column: requirements::Column) -> requirements::Predicate {

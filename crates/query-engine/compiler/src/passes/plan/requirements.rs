@@ -91,36 +91,6 @@ impl Predicate {
         }
     }
 
-    pub fn prunes_granules(&self) -> bool {
-        match self {
-            Self::Boolean(expression) => expression.fold(
-                &|predicate| predicate.prunes_granules(),
-                &|children| children.into_iter().any(|prunes| prunes),
-                &|_| false,
-            ),
-            Self::Property {
-                filter,
-                text_indexed,
-                ..
-            } => {
-                self.is_selective()
-                    || *text_indexed
-                        && matches!(
-                            filter.op,
-                            None | Some(
-                                crate::input::FilterOp::Eq
-                                    | crate::input::FilterOp::In
-                                    | crate::input::FilterOp::Contains
-                                    | crate::input::FilterOp::TokenMatch
-                                    | crate::input::FilterOp::AllTokens
-                                    | crate::input::FilterOp::AnyTokens
-                            )
-                        )
-            }
-            _ => self.is_selective(),
-        }
-    }
-
     pub fn filters_sort_key(&self, sort_key: &[String]) -> bool {
         let in_key = |column: &str| sort_key.iter().any(|key| key == column);
         match self {
