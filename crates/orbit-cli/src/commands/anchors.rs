@@ -11,14 +11,6 @@ use regex::Regex;
 use crate::database::GraphReader;
 use crate::workspace::GitInfo;
 
-/// Definitions shown per call; GitLab text can name dozens of symbols.
-const MAX_DEFINITIONS: usize = 6;
-/// Lines shown on each side of a cited line.
-const AROUND: i64 = 2;
-/// A name defined in more places than this is too ambiguous to guess at.
-const MAX_SAME_NAME: i64 = 3;
-const MIN_NAME_LEN: usize = 5;
-
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Anchors {
     /// Repo-relative path and line, from stack traces, test output, and review anchors.
@@ -67,7 +59,7 @@ fn identifier_words(text: &str) -> Vec<String> {
     let mut names = Vec::new();
     let mut push = |token: &str| {
         for name in token.split(['.', '#', ':']).rev() {
-            if name.len() >= MIN_NAME_LEN && !names.iter().any(|known: &String| known == name) {
+            if !name.is_empty() && !names.iter().any(|known: &String| known == name) {
                 names.push(name.to_string());
             }
         }
@@ -108,6 +100,7 @@ pub(crate) fn indexed_files(client: &GraphReader, git: &GitInfo) -> Result<BTree
         .collect())
 }
 
+#[derive(Clone)]
 struct Found {
     id: i64,
     path: String,
@@ -156,13 +149,10 @@ FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2 AND fqn NOT LIKE '%
 }
 
 /// The definition enclosing each cited line, then definitions named in code spans that are unique
-/// enough to trust, at most [`MAX_DEFINITIONS`].
+/// enough to trust: defined in exactly one place.
 fn resolve(client: &GraphReader, git: &GitInfo, anchors: &Anchors) -> Result<Vec<Found>> {
     let mut found: Vec<Found> = Vec::new();
     for (path, line) in &anchors.lines {
-        if found.len() >= MAX_DEFINITIONS {
-            break;
-        }
         let enclosing = definitions(
             client,
             git,
@@ -187,46 +177,23 @@ fn resolve(client: &GraphReader, git: &GitInfo, anchors: &Anchors) -> Result<Vec
         }
     }
     for name in &anchors.names {
-        if found.len() >= MAX_DEFINITIONS {
-            break;
-        }
-        let named = definitions(
-            client,
-            git,
-            "name = ?3 ORDER BY (file_path LIKE '%test%' OR file_path LIKE '%spec%'), start_line LIMIT 4",
-            vec![name.clone().into()],
-        )?;
-        if (named.len() as i64) <= MAX_SAME_NAME
-            && let Some(def) = named.into_iter().next()
+        let named = definitions(client, git, "name = ?3 LIMIT 2", vec![name.clone().into()])?;
+        if let [def] = named.as_slice()
             && !found.iter().any(|known| known.id == def.id)
         {
-            found.push(def);
+            found.push(def.clone());
         }
     }
     Ok(found)
 }
 
-fn neighbor_names(client: &GraphReader, sql: &str, id: i64) -> Result<(Vec<String>, i64)> {
+fn neighbor_names(client: &GraphReader, sql: &str, id: i64) -> Result<Vec<String>> {
     let batches = client.query_arrow_json(sql, &[id.into()])?;
-    let names = duckdb_client::string_column(&batches, "name");
-    let total = duckdb_client::i64_column(&batches, "total")
-        .first()
-        .copied()
-        .unwrap_or(0);
-    Ok((names, total))
+    Ok(duckdb_client::string_column(&batches, "name"))
 }
 
-fn listed(label: &str, (names, total): (Vec<String>, i64)) -> Option<String> {
-    if names.is_empty() {
-        return None;
-    }
-    let more = total - names.len() as i64;
-    let suffix = if more > 0 {
-        format!(" (+{more})")
-    } else {
-        String::new()
-    };
-    Some(format!("  {label}: {}{suffix}", names.join(", ")))
+fn listed(label: &str, names: Vec<String>) -> Option<String> {
+    (!names.is_empty()).then(|| format!("  {label}: {}", names.join(", ")))
 }
 
 /// A compact view of the code GitLab text points at: per definition its header, signature, the
@@ -250,30 +217,24 @@ pub(crate) fn render(client: &GraphReader, git: &GitInfo, anchors: &Anchors) -> 
             ));
             show(&mut out, def.start);
         }
-        if let Some(line) = def.line {
-            let from = (line - AROUND).max(def.start + 1).max(1);
-            if from > def.start + 1 {
-                out.push_str("  ...\n");
-            }
-            for number in from..=(line + AROUND).min(def.end.max(line + AROUND)) {
-                show(&mut out, number);
-            }
+        if let Some(line) = def.line.filter(|line| *line != def.start) {
+            show(&mut out, line);
         }
         if def.id >= 0 {
             let callers = neighbor_names(
                 client,
-                "SELECT DISTINCT d.name AS name, COUNT(*) OVER () AS total FROM gl_edge e
+                "SELECT DISTINCT d.name AS name FROM gl_edge e
 JOIN gl_definition d ON d.id = e.source_id
 WHERE e.relationship_kind = 'CALLS' AND e.source_kind = 'Definition' AND e.target_id = ?1
-  AND e.source_id <> e.target_id LIMIT 6",
+  AND e.source_id <> e.target_id",
                 def.id,
             )?;
             let callees = neighbor_names(
                 client,
-                "SELECT DISTINCT d.name AS name, COUNT(*) OVER () AS total FROM gl_edge e
+                "SELECT DISTINCT d.name AS name FROM gl_edge e
 JOIN gl_definition d ON d.id = e.target_id
 WHERE e.relationship_kind = 'CALLS' AND e.target_kind = 'Definition' AND e.source_id = ?1
-  AND e.source_id <> e.target_id LIMIT 6",
+  AND e.source_id <> e.target_id",
                 def.id,
             )?;
             for row in [listed("called by", callers), listed("calls", callees)]

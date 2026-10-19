@@ -1,18 +1,7 @@
 use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError};
 
-pub(crate) const MAX_TOKENS: usize = 20;
-
 pub(crate) async fn fetch(client: OrbitClient, tokens: &[String]) -> Result<Vec<u8>, RemoteError> {
-    if tokens.len() > MAX_TOKENS {
-        return Err(RemoteError::new(
-            EXIT_GENERIC,
-            format!(
-                "{} GitLab references given; context reads at most {MAX_TOKENS} per call",
-                tokens.len()
-            ),
-        ));
-    }
     let tasks: Vec<_> = tokens
         .iter()
         .map(|token| {

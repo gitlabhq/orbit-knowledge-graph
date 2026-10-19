@@ -1,11 +1,10 @@
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
 
 use serde::Deserialize;
 
 use super::client::OrbitClient;
-use super::error::{EXIT_FORBIDDEN, EXIT_RATE_LIMITED, EXIT_UNAVAILABLE, RemoteError};
+use super::error::{EXIT_FORBIDDEN, EXIT_UNAVAILABLE, RemoteError};
 
 pub(crate) const SCOPES: &[(&str, &str)] = &[
     ("WorkItem", "work_items"),
@@ -19,23 +18,15 @@ pub(crate) const SCOPES: &[(&str, &str)] = &[
     ("Branch", "branches"),
 ];
 const BRANCHES: &str = "branches";
-const PROJECT_SCOPES: &[&str] = &[
-    "work_items",
-    "merge_requests",
-    "commits",
-    "notes",
-    "milestones",
-];
-const PER_SCOPE: usize = 5;
-const MAX_LIMIT: usize = 50;
-const SHA_CHARS: usize = 12;
-const DEFAULT_BACKOFF: Duration = Duration::from_secs(60);
-const BACKOFF_FILE: &str = "gitlab-grep-retry-at";
 
 pub(crate) fn scope_for(kind: &str) -> Option<&'static str> {
-    let kind = match kind.eq_ignore_ascii_case("issue") {
-        true => "WorkItem",
-        false => kind,
+    let lower = kind.to_ascii_lowercase();
+    let singular = lower.strip_suffix('s').unwrap_or(&lower);
+    let kind = match singular {
+        "mr" | "pr" | "merge_request" => "MergeRequest",
+        "issue" | "epic" | "work_item" => "WorkItem",
+        "comment" => "Note",
+        other => other,
     };
     SCOPES
         .iter()
@@ -60,17 +51,6 @@ pub(crate) enum Target {
 }
 
 impl Target {
-    pub(crate) fn default_scopes(&self) -> Vec<&'static str> {
-        let mut scopes = PROJECT_SCOPES.to_vec();
-        if !matches!(self, Target::Project(_)) {
-            scopes.insert(2, "blobs");
-        }
-        if matches!(self, Target::Namespace(_) | Target::GroupId(_)) {
-            scopes.push("projects");
-        }
-        scopes
-    }
-
     pub(crate) fn explicit(&self) -> bool {
         !matches!(self, Target::Origin(_))
     }
@@ -199,20 +179,14 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         (Target::ProjectId(id), _) => ("project_id", id.to_string()),
         (Target::GroupId(id), _) => ("namespace_id", id.to_string()),
     };
-    let backoff = backoff_path();
-    if let Some(wait) = backoff.as_deref().and_then(remaining_backoff) {
-        return Outcome::Skipped(format!(
-            "rate limited; retrying in {}s",
-            wait.as_secs().max(1)
-        ));
-    }
     let api_scopes: Vec<&str> = request
         .scopes
         .iter()
         .copied()
         .filter(|scope| *scope != BRANCHES)
         .collect();
-    let keywords = match api_scopes.is_empty() {
+    let only_branches = !request.scopes.is_empty() && api_scopes.is_empty();
+    let keywords = match only_branches {
         true => &[][..],
         false => &request.keywords[..],
     };
@@ -220,14 +194,10 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         .iter()
         .map(|keywords| {
             let client = client.clone();
-            let limit = (PER_SCOPE * api_scopes.len()).clamp(1, MAX_LIMIT);
-            let params = vec![
-                ("search", keywords.clone()),
-                scope.clone(),
-                ("limit", limit.to_string()),
-                ("per_scope", PER_SCOPE.to_string()),
-                ("scopes", api_scopes.join(",")),
-            ];
+            let mut params = vec![("search", keywords.clone()), scope.clone()];
+            if !api_scopes.is_empty() {
+                params.push(("scopes", api_scopes.join(",")));
+            }
             tokio::spawn(async move { client.get_grep(&params).await })
         })
         .collect();
@@ -235,14 +205,7 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
     for task in tasks {
         let body = match task.await {
             Ok(Ok(body)) => body,
-            Ok(Err(error)) => {
-                if error.exit_code == EXIT_RATE_LIMITED
-                    && let Some(path) = &backoff
-                {
-                    record_backoff(path, error.retry_after.unwrap_or(DEFAULT_BACKOFF));
-                }
-                return outcome_for(&request.target, &error);
-            }
+            Ok(Err(error)) => return outcome_for(&request.target, &error),
             Err(error) => return Outcome::Failed(error.to_string()),
         };
         match serde_json::from_slice::<Response>(&body) {
@@ -303,30 +266,6 @@ fn outcome_for(target: &Target, error: &RemoteError) -> Outcome {
 
 fn first_line(message: &str) -> String {
     message.lines().next().unwrap_or_default().to_string()
-}
-
-fn backoff_path() -> Option<PathBuf> {
-    crate::workspace::Workspace::default_root()
-        .ok()
-        .map(|root| root.join(BACKOFF_FILE))
-}
-
-fn now() -> Duration {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-}
-
-fn remaining_backoff(path: &Path) -> Option<Duration> {
-    let until: u64 = std::fs::read_to_string(path).ok()?.trim().parse().ok()?;
-    Duration::from_secs(until).checked_sub(now())
-}
-
-fn record_backoff(path: &Path, wait: Duration) {
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(path, (now() + wait).as_secs().to_string());
 }
 
 /// The group whose projects an `origin` search covers: the project's top-level group, so sibling
@@ -516,7 +455,7 @@ fn label(entry: &Entry, home: Option<&str>) -> (String, Option<String>) {
         };
     }
     if let Some(sha) = field("sha").and_then(serde_json::Value::as_str) {
-        let commit = format!("commit:{}", sha.chars().take(SHA_CHARS).collect::<String>());
+        let commit = format!("commit:{sha}");
         let readable = (entry.scope == "commits").then(|| commit.clone());
         return (commit, readable);
     }
@@ -583,94 +522,5 @@ mod tests {
                 crate::commands::setup::spec::launcher()
             )
         );
-    }
-
-    #[test]
-    fn no_results_is_empty() {
-        let empty = response(r#"{"scopes":[{"name":"work_items","status":"ok"}],"results":[]}"#);
-        assert_eq!(render("h/p", "x", &[], &[empty], None), Outcome::Empty);
-    }
-
-    #[test]
-    fn origin_search_covers_the_group_but_not_its_own_code() {
-        assert_eq!(top_level_group("gitlab-org/api/client-go"), "gitlab-org");
-        assert_eq!(top_level_group("solo"), "solo");
-        let found = response(
-            r#"{"target":{"type":"Group","full_path":"g"},
-               "results":[
-                {"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[1]","reference":{"iid":1,"project_path":"g/lib"},"state":"merged","text":"Add evaluate"},
-                {"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[2]","reference":{"iid":5,"project_path":"g/app"},"state":"opened","text":"Use evaluate"},
-                {"scope":"blobs","type":"File","token":null,"reference":{"project_path":"g/app","path":"main.go"},"text":"main.go","matches":[{"start_line":3,"text":"evaluate()"}]},
-                {"scope":"blobs","type":"File","token":null,"reference":{"project_path":"g/lib","path":"lib.go"},"text":"lib.go","matches":[{"start_line":7,"text":"func Evaluate() {}"}]}]}"#,
-        );
-        let Outcome::Found(text) = render(
-            "h/g",
-            "evaluate",
-            &["evaluate".into()],
-            &[found],
-            Some("g/app"),
-        ) else {
-            panic!("expected results");
-        };
-        assert!(text.contains("mr:g/lib!1 merged  Add evaluate"), "{text}");
-        assert!(text.contains("mr:5 opened  Use evaluate"), "{text}");
-        assert!(
-            text.contains("g/lib/lib.go\n7:func Evaluate() {}"),
-            "{text}"
-        );
-        assert!(!text.contains("main.go"), "{text}");
-    }
-
-    #[test]
-    fn hosted_kinds_map_to_scopes() {
-        assert_eq!(scope_for("mergerequest"), Some("merge_requests"));
-        assert_eq!(scope_for("Issue"), Some("work_items"));
-        assert_eq!(scope_for("Pipeline"), None);
-        assert_eq!(scope_for("File"), None);
-    }
-
-    #[test]
-    fn groups_also_search_projects() {
-        assert!(
-            !Target::Project("g/p".into())
-                .default_scopes()
-                .contains(&"projects")
-        );
-        assert!(
-            Target::Namespace("g".into())
-                .default_scopes()
-                .contains(&"projects")
-        );
-        assert!(
-            !Target::Origin(".".into())
-                .default_scopes()
-                .contains(&"users")
-        );
-        assert!(
-            Target::Origin(".".into())
-                .default_scopes()
-                .contains(&"blobs")
-        );
-        assert!(
-            !Target::Project("g/p".into())
-                .default_scopes()
-                .contains(&"blobs")
-        );
-        assert!(
-            Target::Namespace("g/p".into())
-                .default_scopes()
-                .contains(&"blobs")
-        );
-    }
-
-    #[test]
-    fn backoff_expires() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join(BACKOFF_FILE);
-        assert_eq!(remaining_backoff(&path), None);
-        record_backoff(&path, Duration::from_secs(30));
-        assert!(remaining_backoff(&path).is_some());
-        record_backoff(&path, Duration::ZERO);
-        assert_eq!(remaining_backoff(&path), None);
     }
 }

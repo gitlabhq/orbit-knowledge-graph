@@ -8,10 +8,6 @@ use super::{Options, Output, kind};
 use crate::remote::grep::{Request, Target, scope_for, scope_order};
 use crate::remote::token;
 
-const MAX_KEYWORDS: usize = 3;
-const MAX_REQUESTS: usize = 6;
-const KEYWORD_BYTES: std::ops::RangeInclusive<usize> = 2..=256;
-
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Local {
     pub(super) repo: Option<PathBuf>,
@@ -122,20 +118,8 @@ pub(super) fn route(
         }
         return Ok(route);
     };
-    let kept = targets.len().min(MAX_REQUESTS / keywords.len());
-    let dropped: Vec<String> = targets.drain(kept..).map(|t| target_name(&t)).collect();
-    if !dropped.is_empty() {
-        route.skipped.push(format!(
-            "GitLab search sends at most {MAX_REQUESTS} requests, one per term and target; \
-             skipped {}",
-            dropped.join(", ")
-        ));
-    }
     for target in targets.drain(..) {
-        let scopes = match kinds.is_empty() {
-            true => target.default_scopes(),
-            false => hosted_scopes(kinds),
-        };
+        let scopes = hosted_scopes(kinds);
         route.remote.push(Request {
             target,
             keywords: keywords.clone(),
@@ -167,8 +151,6 @@ fn searchable(query: Option<&str>, kinds: &[String], options: &Options) -> Optio
         .ok()?
         .into_iter()
         .filter(|alternative| options.fixed || !Term::parse(alternative).is_regex())
-        .filter(|alternative| KEYWORD_BYTES.contains(&alternative.len()))
-        .take(MAX_KEYWORDS)
         .collect();
     (!keywords.is_empty()).then_some(keywords)
 }
@@ -192,10 +174,6 @@ fn every_kind_hosted(kinds: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn kinds(names: &[&str]) -> Vec<String> {
-        names.iter().map(|name| name.to_string()).collect()
-    }
 
     fn plan(query: &str, kinds: &[String], paths: &[&str], options: &Options) -> Result<Route> {
         route(
@@ -233,166 +211,6 @@ mod tests {
         };
         assert_eq!(request.target, Target::Origin(".".into()));
         assert_eq!(request.keywords, ["run_grep", "Context"]);
-        assert_eq!(
-            request.scopes,
-            [
-                "work_items",
-                "merge_requests",
-                "blobs",
-                "commits",
-                "notes",
-                "milestones"
-            ]
-        );
-    }
-
-    #[test]
-    fn local_paths_and_code_filters_stay_local() {
-        let route = plan("grep", &[], &["src/lib.rs"], &Options::default()).unwrap();
-        assert_eq!(
-            route.local,
-            [Local {
-                repo: None,
-                paths: vec!["src/lib.rs".into()],
-            }]
-        );
-        assert!(route.remote.is_empty());
-        for options in [
-            Options {
-                output: Output::Files,
-                ..Options::default()
-            },
-            Options {
-                invert: true,
-                ..Options::default()
-            },
-            Options {
-                globs: vec!["*.rs".into()],
-                ..Options::default()
-            },
-        ] {
-            assert!(
-                plan("grep", &[], &[], &options).unwrap().remote.is_empty(),
-                "{options:?}"
-            );
-        }
-        assert!(
-            plan("fn .*grep", &[], &[], &Options::default())
-                .unwrap()
-                .remote
-                .is_empty()
-        );
-        assert!(
-            plan("grep", &kinds(&["function"]), &[], &Options::default())
-                .unwrap()
-                .remote
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn gitlab_targets_replace_the_checkout() {
-        let route = plan(
-            "grep",
-            &[],
-            &[
-                "gitlab-org/cli",
-                "Group[9]",
-                "Project:4",
-                "gitlab.com/g/p/-/issues",
-            ],
-            &Options::default(),
-        )
-        .unwrap();
-        assert!(route.local.is_empty());
-        let targets: Vec<&Target> = route.remote.iter().map(|r| &r.target).collect();
-        assert_eq!(
-            targets,
-            [
-                &Target::Namespace("gitlab-org/cli".into()),
-                &Target::GroupId(9),
-                &Target::ProjectId(4),
-                &Target::Namespace("gitlab.com/g/p/-/issues".into()),
-            ]
-        );
-        assert!(route.remote[1].scopes.contains(&"projects"));
-    }
-
-    #[test]
-    fn indexed_checkouts_search_locally_and_remotely() {
-        let route = plan(
-            "grep",
-            &[],
-            &["https://gitlab.com/GitLab-org/GitLab/-/tree/main", "src"],
-            &Options::default(),
-        )
-        .unwrap();
-        assert_eq!(
-            route.local,
-            [
-                Local {
-                    repo: None,
-                    paths: vec!["src".into()],
-                },
-                Local {
-                    repo: Some("/checkouts/gitlab".into()),
-                    paths: Vec::new(),
-                }
-            ]
-        );
-        assert_eq!(
-            route.remote[0].target,
-            Target::Project("gitlab-org/gitlab".into())
-        );
-    }
-
-    #[test]
-    fn requests_are_capped() {
-        let route = plan("aa|bb|cc", &[], &["g/a", "g/b", "g/c"], &Options::default()).unwrap();
-        assert_eq!(route.remote.len(), 2);
-        assert!(
-            route.skipped[0].ends_with("skipped g/c"),
-            "{:?}",
-            route.skipped
-        );
-    }
-
-    #[test]
-    fn gitlab_targets_need_a_plain_search() {
-        assert!(plan("fn .*x", &[], &["gitlab-org/cli"], &Options::default()).is_err());
-        let route = plan("fn .*x", &[], &["gitlab-org/gitlab"], &Options::default()).unwrap();
-        assert_eq!(route.local.len(), 1);
-        assert!(route.skipped[0].starts_with("GitLab search of gitlab-org/gitlab needs"));
-    }
-
-    #[test]
-    fn hosted_kinds_pick_scopes_and_skip_the_checkout() {
-        let only = plan(
-            "grep",
-            &kinds(&["MergeRequest", "Issue"]),
-            &[],
-            &Options::default(),
-        )
-        .unwrap();
-        assert!(only.local.is_empty());
-        assert_eq!(only.remote[0].scopes, ["work_items", "merge_requests"]);
-        let mixed = plan(
-            "grep",
-            &kinds(&["MergeRequest", "function"]),
-            &[],
-            &Options::default(),
-        )
-        .unwrap();
-        assert_eq!(mixed.local, [here()]);
-        assert_eq!(mixed.remote[0].scopes, ["merge_requests"]);
-        let unsearched = plan(
-            "grep",
-            &kinds(&["MergeRequest", "Pipeline"]),
-            &[],
-            &Options::default(),
-        )
-        .unwrap();
-        assert!(unsearched.local.is_empty());
-        assert_eq!(unsearched.remote[0].scopes, ["merge_requests"]);
+        assert!(request.scopes.is_empty());
     }
 }

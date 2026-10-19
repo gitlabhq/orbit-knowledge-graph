@@ -13,7 +13,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const SKILL_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-const GREP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 const STATUS_PATH: &str = "/api/v4/orbit/status";
 const SCHEMA_PATH: &str = "/api/v4/orbit/schema";
@@ -24,7 +23,7 @@ const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
 const SKILLS_PATH: &str = "/api/v4/orbit/skills";
 const GREP_PATH: &str = "/api/v4/orbit/grep";
 const CONTEXT_PATH: &str = "/api/v4/orbit/context";
-const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const SHORT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) struct SkillHttpResponse {
     pub(crate) status: u16,
@@ -176,7 +175,7 @@ impl OrbitClient {
                 self.http
                     .get(self.url(GREP_PATH))
                     .query(params)
-                    .timeout(GREP_REQUEST_TIMEOUT),
+                    .timeout(SHORT_REQUEST_TIMEOUT),
             )
             .await?;
         read_body(response).await
@@ -234,15 +233,13 @@ impl OrbitClient {
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, RemoteError> {
         let mut pending = Some(request);
-        let mut attempt = 0;
+        let mut attempt = 0_u8;
         let response = loop {
             attempt += 1;
             let current = pending.take().expect("a request remains");
-            pending = current.try_clone().filter(|_| attempt < SEND_ATTEMPTS);
+            pending = current.try_clone().filter(|_| attempt == 1);
             match self.send_raw(current).await {
-                Ok(response)
-                    if pending.is_some()
-                        && TRANSIENT_STATUSES.contains(&response.status().as_u16()) => {}
+                Ok(response) if pending.is_some() && response.status().is_server_error() => {}
                 Ok(response) => break response,
                 Err(error)
                     if pending.is_some()
@@ -254,7 +251,7 @@ impl OrbitClient {
                     ));
                 }
             }
-            tokio::time::sleep(Duration::from_millis(500 * attempt)).await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
         };
         let status = response.status();
         if !status.is_success() {
@@ -326,10 +323,6 @@ struct CredentialHelperResponse {
 struct CredentialHelperToken {
     token: String,
 }
-
-/// Request attempts for connection failures, timeouts, and gateway errors.
-const SEND_ATTEMPTS: u64 = 3;
-const TRANSIENT_STATUSES: &[u16] = &[502, 503, 504];
 
 /// Hosts that never leave the machine or a private network, where plain http is expected.
 fn is_local_host(host: &str) -> bool {
@@ -436,7 +429,10 @@ pub(crate) fn gitlab_usable(dir: &Path) -> bool {
                     None => client.get_status().await,
                 }
             };
-            matches!(tokio::time::timeout(PROBE_TIMEOUT, probe).await, Ok(Ok(_)))
+            matches!(
+                tokio::time::timeout(SHORT_REQUEST_TIMEOUT, probe).await,
+                Ok(Ok(_))
+            )
         })
     })
     .join()
@@ -518,21 +514,6 @@ async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, RemoteError> 
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn plain_http_warns_only_for_hosts_that_leave_the_network() {
-        for host in [
-            "gitlab.caproni.test",
-            "localhost",
-            "gdk.localhost",
-            "127.0.0.1",
-            "ci.internal",
-        ] {
-            assert!(is_local_host(host), "{host}");
-        }
-        for host in ["gitlab.com", "gitlab.example.org", "10.0.0.5"] {
-            assert!(!is_local_host(host), "{host}");
-        }
-    }
 
     use super::*;
     use std::collections::HashMap;

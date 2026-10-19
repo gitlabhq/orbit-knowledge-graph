@@ -7,14 +7,6 @@ use serde_json::Value;
 use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, RemoteError};
 
-const MAX_CANDIDATES: usize = 10;
-const MAX_SEARCH_WORDS: usize = 3;
-const MAX_FAILED_JOBS: usize = 5;
-const TRACED_JOBS: usize = 3;
-const TRACE_LINES: usize = 30;
-const MAX_CHANGED_FILES: usize = 100;
-const SHORT_SHA: usize = 12;
-
 static TERMINAL_NOISE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"\x1b\[[0-9;]*[A-Za-z]|section_(?:start|end):\d+:[^\r\n]*")
         .expect("terminal noise pattern is valid")
@@ -77,7 +69,7 @@ fn text(value: &Value) -> &str {
 }
 
 fn short(sha: &str) -> String {
-    sha.chars().take(SHORT_SHA).collect()
+    sha.to_string()
 }
 
 fn names(value: &Value) -> Vec<String> {
@@ -250,7 +242,7 @@ pub(crate) async fn search_text(
     let mut by_length = words(wanted);
     by_length.sort_by_key(|word| std::cmp::Reverse(word.len()));
     let mut candidates: Vec<String> = Vec::new();
-    for word in by_length.into_iter().take(MAX_SEARCH_WORDS) {
+    for word in by_length {
         let found = get_json(
             client,
             &path,
@@ -269,7 +261,6 @@ pub(crate) async fn search_text(
     }
     let tasks: Vec<_> = ranked
         .iter()
-        .take(MAX_CANDIDATES)
         .map(|name| {
             let (client, project, name) = (client.clone(), encoded.clone(), name.clone());
             tokio::spawn(async move {
@@ -301,9 +292,6 @@ pub(crate) async fn search_text(
             );
         }
         let _ = writeln!(out, "{row}");
-    }
-    if ranked.len() > MAX_CANDIDATES {
-        let _ = writeln!(out, "+{} more", ranked.len() - MAX_CANDIDATES);
     }
     let _ = writeln!(
         out,
@@ -338,22 +326,13 @@ async fn pipeline_text(
         .cloned()
         .unwrap_or_default()
         .into_iter()
-        .take(MAX_FAILED_JOBS)
         .collect();
     if jobs.is_empty() {
         return Ok(out);
     }
     let _ = writeln!(out, "failed_jobs[{}]:", jobs.len());
-    for (index, job) in jobs.iter().enumerate() {
-        let _ = writeln!(out, "  {}", job_line(job));
-        if index >= TRACED_JOBS {
-            continue;
-        }
-        if let Some(job_id) = job["id"].as_i64() {
-            for line in trace(client, project, job_id).await {
-                let _ = writeln!(out, "    | {line}");
-            }
-        }
+    for job in &jobs {
+        let _ = writeln!(out, "  job:{} {}", job["id"], job_line(job));
     }
     Ok(out)
 }
@@ -384,7 +363,7 @@ async fn trace(client: &OrbitClient, project: &str, job: i64) -> Vec<String> {
         .get_api(&format!("projects/{project}/jobs/{job}/trace"), &[])
         .await
     {
-        Ok(trace) => trace_tail(&String::from_utf8_lossy(&trace)),
+        Ok(trace) => trace_lines(&String::from_utf8_lossy(&trace)),
         Err(_) => Vec::new(),
     }
 }
@@ -437,7 +416,7 @@ async fn commit_text(
     if let Ok(diff) = get_json(
         client,
         &format!("{base}/diff"),
-        &[("per_page", MAX_CHANGED_FILES.to_string())],
+        &[("per_page", "100".into())],
     )
     .await
     {
@@ -480,7 +459,7 @@ async fn commit_text(
     Ok(out)
 }
 
-pub(crate) fn trace_tail(trace: &str) -> Vec<String> {
+pub(crate) fn trace_lines(trace: &str) -> Vec<String> {
     let lines: Vec<String> = trace
         .lines()
         .map(|line| {
@@ -492,34 +471,5 @@ pub(crate) fn trace_tail(trace: &str) -> Vec<String> {
         })
         .filter(|line| !line.is_empty())
         .collect();
-    lines[lines.len().saturating_sub(TRACE_LINES)..].to_vec()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn names(list: &[&str]) -> Vec<String> {
-        list.iter().map(|name| name.to_string()).collect()
-    }
-
-    #[test]
-    fn branches_rank_by_exact_name_then_matched_words() {
-        let candidates = names(&["fix-approvals", "aa/show-approval-rules", "main", "rules"]);
-        assert_eq!(
-            rank("approval rules", &candidates),
-            vec!["aa/show-approval-rules", "fix-approvals", "rules"]
-        );
-        assert_eq!(rank("rules", &candidates)[0], "rules");
-        assert!(rank("deploy", &candidates).is_empty());
-    }
-
-    #[test]
-    fn traces_keep_the_last_lines_without_terminal_codes() {
-        let trace = "section_start:1:step\r\x1b[0K\x1b[32;1mRunning\x1b[0;m\nprogress 10%\rprogress 100%\n\n--- FAIL: TestX\n";
-        assert_eq!(
-            trace_tail(trace),
-            vec!["Running", "progress 100%", "--- FAIL: TestX"]
-        );
-    }
+    lines
 }

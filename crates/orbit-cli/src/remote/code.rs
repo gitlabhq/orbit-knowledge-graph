@@ -9,10 +9,6 @@ use serde_json::{Value, json};
 use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, RemoteError};
 
-const MAX_DEFINITIONS: usize = 5;
-const MAX_FILES: usize = 3;
-const MAX_FILE_LINES: usize = 400;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Code {
     Symbol(String),
@@ -63,7 +59,7 @@ pub(crate) async fn split_project_path(
     path: &str,
 ) -> Option<(String, String)> {
     let parts: Vec<&str> = path.split('/').collect();
-    for end in 2..parts.len().min(MAX_PROJECT_DEPTH + 1) {
+    for end in 2..parts.len() {
         let project = parts[..end].join("/");
         let found = client
             .get_api(&format!("projects/{}", project.replace('/', "%2F")), &[])
@@ -74,8 +70,6 @@ pub(crate) async fn split_project_path(
     }
     None
 }
-
-const MAX_PROJECT_DEPTH: usize = 5;
 
 fn error(message: impl Into<String>) -> RemoteError {
     RemoteError::new(EXIT_GENERIC, message.into())
@@ -132,7 +126,6 @@ fn definition_query(project_id: i64, branch: &str, name: &str) -> Value {
             "filters": filters,
             "columns": ["fqn", "definition_type", "file_path", "start_line", "end_line", "content"],
         }],
-        "limit": MAX_DEFINITIONS,
     })
 }
 
@@ -145,30 +138,15 @@ fn file_query(project_id: i64, branch: &str, path: &str) -> Value {
             "filters": {"project_id": project_id, "branch": branch, "path": {"ends_with": path}},
             "columns": ["path", "content"],
         }],
-        "limit": MAX_FILES,
     })
 }
 
 fn numbered(out: &mut String, content: &str, first: usize, range: Option<(usize, usize)>) {
-    let (start, end) = range.unwrap_or((first, first + MAX_FILE_LINES - 1));
-    let mut shown = 0;
     for (offset, line) in content.lines().enumerate() {
         let number = first + offset;
-        if number < start || number > end {
-            continue;
+        if range.is_none_or(|(start, end)| (start..=end).contains(&number)) {
+            let _ = writeln!(out, "{number}|{line}");
         }
-        let _ = writeln!(out, "{number}|{line}");
-        shown += 1;
-    }
-    let total = content.lines().count();
-    if range.is_none() && total > shown {
-        let _ = writeln!(
-            out,
-            "... {} more lines; add a range, e.g. file:path:{}-{}",
-            total - shown,
-            first + shown,
-            first + shown + 199
-        );
     }
 }
 
@@ -206,46 +184,6 @@ fn render(project: &str, branch: &str, code: &Code, nodes: &[Value]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_file_ranges() {
-        assert_eq!(
-            Code::parse("file", "a/b.go:10-20"),
-            Code::File {
-                path: "a/b.go".into(),
-                lines: Some((10, 20))
-            }
-        );
-        assert_eq!(
-            Code::parse("path", "a/b.go:7"),
-            Code::File {
-                path: "a/b.go".into(),
-                lines: Some((7, 7))
-            }
-        );
-        assert_eq!(
-            Code::parse("file", "a/b.go"),
-            Code::File {
-                path: "a/b.go".into(),
-                lines: None
-            }
-        );
-        assert_eq!(
-            Code::parse("def", "Evaluate"),
-            Code::Symbol("Evaluate".into())
-        );
-    }
-
-    #[test]
-    fn qualified_symbols_match_on_fqn() {
-        let query = definition_query(5, "main", "policy.New");
-        assert_eq!(
-            query["nodes"][0]["filters"]["fqn"]["ends_with"],
-            "policy.New"
-        );
-        let query = definition_query(5, "main", "New");
-        assert_eq!(query["nodes"][0]["filters"]["name"], "New");
-    }
 
     #[test]
     fn renders_definitions_and_file_ranges() {

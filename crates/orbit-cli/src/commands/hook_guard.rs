@@ -20,7 +20,7 @@ pub(crate) enum Kind {
 const SEARCH_COMMANDS: &[&str] = &["ack", "ag", "egrep", "fgrep", "grep", "rg", "ripgrep"];
 
 const COMMAND_WRAPPERS: &[&str] = &[
-    "command", "env", "git", "nice", "nohup", "sudo", "time", "xargs",
+    "command", "env", "git", "nice", "nohup", "sudo", "time", "timeout", "xargs",
 ];
 
 const WRAPPER_VALUE_FLAGS: &[&str] = &[
@@ -28,10 +28,6 @@ const WRAPPER_VALUE_FLAGS: &[&str] = &[
 ];
 
 const SHELLS: &[&str] = &["bash", "sh", "zsh"];
-
-const GLAB_SUBCOMMANDS: &[&str] = &["api", "ci", "issue", "job", "mr", "pipeline", "search"];
-
-const TIMING_WRAPPERS: &[&str] = &["timeout"];
 
 const PATTERN_FLAGS: &[&str] = &["-e", "-f", "--regexp", "--file"];
 
@@ -119,12 +115,8 @@ fn calls_glab(call: &Value) -> bool {
                 || w.contains('=')
                 || w.parse::<f64>().is_ok()
                 || COMMAND_WRAPPERS.contains(&program(w))
-                || TIMING_WRAPPERS.contains(&program(w))
         });
-        words.next().map(program) == Some("glab")
-            && words
-                .next()
-                .is_some_and(|sub| GLAB_SUBCOMMANDS.contains(&sub))
+        words.next().map(program) == Some("glab") && words.next() != Some("orbit")
     })
 }
 
@@ -327,35 +319,6 @@ fn searches_tree(words: &[String], piped: bool, cwd: &Path, root: &Path) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn glab_calls_get_the_gitlab_nudge_only_when_orbit_reaches_gitlab() {
-        let context = |response: Option<Value>| {
-            response.and_then(|r| {
-                r["hookSpecificOutput"]["additionalContext"]
-                    .as_str()
-                    .map(str::to_string)
-            })
-        };
-        for command in [
-            "glab mr view 42",
-            "glab issue list --search approval",
-            "timeout 25 glab ci view 2>&1 | head",
-            "cd /app && glab api projects/:id/merge_requests",
-            "GITLAB_HOST=x glab mr list",
-        ] {
-            let call =
-                json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_input": {"command": command}});
-            let text = context(respond(Kind::Search, &call, true)).unwrap_or_default();
-            assert!(text.contains("instead of glab"), "{command}: {text}");
-            assert!(respond(Kind::Search, &call, false).is_none(), "{command}");
-        }
-        for command in ["glab auth status", "glab version", "echo glab mr"] {
-            let call =
-                json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_input": {"command": command}});
-            assert!(respond(Kind::Search, &call, true).is_none(), "{command}");
-        }
-    }
 
     #[test]
     fn grep_family_and_the_grep_tool_nudge() {

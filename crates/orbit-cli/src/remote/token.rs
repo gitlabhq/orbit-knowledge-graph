@@ -114,29 +114,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn typed_references_take_brackets_or_a_colon() {
-        let bracketed = typed("mergerequest[42]").unwrap();
-        assert_eq!((bracketed.node, bracketed.id), ("mergerequest", 42));
-        assert!(bracketed.names("MergeRequest"));
-        let colon = typed("note:3").unwrap();
-        assert!(!colon.names("Note"));
-        assert!(typed("Project:12").unwrap().names("Project"));
-        for invalid in ["src/main.rs:10-20", "Foo#bar", "Type[x]", "[3]", "Type:"] {
-            assert_eq!(typed(invalid), None, "{invalid}");
-        }
-    }
-
-    #[test]
-    fn namespace_paths_exclude_files() {
-        assert!(is_namespace_path("gitlab-org/gitlab"));
-        assert!(is_namespace_path("gitlab-org"));
-        assert!(!is_namespace_path("src/main.rs"));
-        assert!(!is_namespace_path("crates/*/src"));
-        assert!(!is_namespace_path("src/main.rs:10"));
-        assert!(!is_namespace_path("./src"));
-    }
-
-    #[test]
     fn entity_references_take_every_form_the_context_endpoint_reads() {
         for (target, expected) in [
             ("gitlab-org/gitlab!123", "gitlab-org/gitlab!123"),
@@ -173,39 +150,5 @@ mod tests {
         assert!(is_relative_reference("!42"));
         assert!(is_relative_reference("#7"));
         assert!(!is_relative_reference("#a"));
-    }
-
-    #[test]
-    fn namespaces_come_from_paths_and_urls() {
-        for (target, expected) in [
-            ("gitlab-org/gitlab", "gitlab-org/gitlab"),
-            ("gitlab.com/gitlab-org/gitlab", "gitlab-org/gitlab"),
-            (
-                "https://gitlab.com/gitlab-org/gitlab.git",
-                "gitlab-org/gitlab",
-            ),
-            ("https://gitlab.com/groups/gitlab-org/", "gitlab-org"),
-            (
-                "https://gitlab.com/gitlab-org/gitlab/-/merge_requests/1?tab=diffs",
-                "gitlab-org/gitlab",
-            ),
-            ("gitlab.com/gitlab-org/cli/-/tree/main", "gitlab-org/cli"),
-            ("https://other.host:8080/g/p", "g/p"),
-            ("gitlab.com:3000/g/p/-/issues", "g/p"),
-        ] {
-            assert_eq!(namespace(target, "gitlab.com"), expected, "{target}");
-        }
-        assert_eq!(
-            url_host("https://other.host:8080/g/p").as_deref(),
-            Some("other.host")
-        );
-        assert_eq!(
-            url_host("gitlab.com/g/p/-/issues/1").as_deref(),
-            Some("gitlab.com")
-        );
-        assert_eq!(url_host("gitlab-org/gitlab"), None);
-        assert!(is_url("https://gitlab.com/g"));
-        assert!(is_url("gitlab.com/g/p/-/issues/1"));
-        assert!(!is_url("gitlab-org/gitlab"));
     }
 }

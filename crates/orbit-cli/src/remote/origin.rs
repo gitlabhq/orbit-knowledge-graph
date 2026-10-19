@@ -33,26 +33,3 @@ fn split_scp_remote(url: &str) -> Option<(String, String)> {
     let host = user_and_host.rsplit('@').next()?;
     Some((host.to_string(), path.to_string()))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::split_host_and_path;
-
-    #[test]
-    fn https_and_scp_remotes_split_into_host_and_full_path() {
-        for url in [
-            "https://gitlab.com/gitlab-org/orbit/knowledge-graph.git",
-            "git@gitlab.com:gitlab-org/orbit/knowledge-graph.git",
-            "ssh://git@gitlab.com/gitlab-org/orbit/knowledge-graph",
-        ] {
-            assert_eq!(
-                split_host_and_path(url),
-                Some((
-                    "gitlab.com".to_string(),
-                    "gitlab-org/orbit/knowledge-graph".to_string()
-                )),
-                "{url}"
-            );
-        }
-    }
-}

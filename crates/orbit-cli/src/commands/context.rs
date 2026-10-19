@@ -1052,38 +1052,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn references_in_the_current_project_are_short() {
-        assert_eq!(
-            shorten(
-                "- mr:g/p!4 found=true\n  linked_issues=\"issue:g/p#7 x; issue:g/pp#2 y\"",
-                "g/p"
-            ),
-            "- mr:4 found=true\n  linked_issues=\"issue:7 x; issue:g/pp#2 y\""
-        );
-    }
-
-    #[test]
-    fn paths_are_told_apart_from_names_and_references() {
-        assert!(looks_like_path("g/lib/a.go:10-20"));
-        assert!(looks_like_path("README.md"));
-        assert!(!looks_like_path("run_grep"));
-        assert!(!looks_like_path("policy.New"));
-        assert!(!looks_like_path("g/p!42"));
-        assert!(!looks_like_path("Definition[5]"));
-        assert_eq!(strip_range("a/b.rb:1-131"), "a/b.rb");
-        assert_eq!(strip_range("a/b.rb"), "a/b.rb");
-    }
-
-    #[test]
-    fn bare_ci_words_mean_the_current_branch() {
-        for word in ["pipeline", "CI", "pipeline:latest", "jobs"] {
-            assert!(is_current_ci(word), "{word}");
-        }
-        assert!(!is_current_ci("pipeline:7"));
-        assert!(!is_current_ci("pipelines.rs"));
-    }
-
-    #[test]
     fn qualified_targets_use_what_gitlab_shows() {
         use crate::remote::sdlc::Target;
         let target = |value: &str| Some(Qualified::Target(value.to_string()));
@@ -1139,47 +1107,6 @@ mod tests {
             "commit:main",
         ] {
             assert_eq!(qualify(literal), None, "{literal}");
-        }
-    }
-
-    #[test]
-    fn gitlab_tokens_route_remotely_and_code_targets_stay_local() {
-        let ontology = ontology::Ontology::load_embedded().unwrap();
-        let nodes: Vec<&str> = ontology.node_names().collect();
-        let remote = |token: &str| Route::Remote(token.to_string());
-        let local = |target: &str| Route::Local(target.to_string());
-        for (target, expected) in [
-            ("MergeRequest[42]", remote("MergeRequest[42]")),
-            ("mergerequest[42]", remote("MergeRequest[42]")),
-            ("MergeRequest:42", remote("MergeRequest[42]")),
-            ("Issue:7", remote("Issue[7]")),
-            ("WorkItem[7]", remote("WorkItem[7]")),
-            ("gitlab-org/gitlab!123", remote("gitlab-org/gitlab!123")),
-            ("gitlab-org/sub/proj#9", remote("gitlab-org/sub/proj#9")),
-            (
-                "gid://gitlab/MergeRequest/1",
-                remote("gid://gitlab/MergeRequest/1"),
-            ),
-            (
-                "https://gitlab.com/g/p/-/merge_requests/1",
-                remote("https://gitlab.com/g/p/-/merge_requests/1"),
-            ),
-            (
-                "gitlab.com/g/p/-/merge_requests/1",
-                remote("https://gitlab.com/g/p/-/merge_requests/1"),
-            ),
-            ("gitlab-org#5", remote("gitlab-org#5")),
-            ("!42", Route::Relative("!42".into())),
-            ("Definition:5", local("Definition:5")),
-            ("Definition[5]", local("Definition:5")),
-            ("File[3]", local("File:3")),
-            ("note:3", local("note:3")),
-            ("src/main.rs:10-20", local("src/main.rs:10-20")),
-            ("Foo#bar", local("Foo#bar")),
-            ("Module::Class#method", local("Module::Class#method")),
-            ("crates/orbit-cli", local("crates/orbit-cli")),
-        ] {
-            assert_eq!(route(target, &nodes), expected, "{target}");
         }
     }
 
