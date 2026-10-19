@@ -1,4 +1,4 @@
-use strum::{EnumProperty, IntoEnumIterator};
+use strum::EnumProperty;
 
 use crate::tree::Cursor;
 
@@ -15,6 +15,7 @@ pub const CANONICAL_BASE: u16 = 0xE000;
     strum::EnumString,
     strum::IntoStaticStr,
     strum::EnumProperty,
+    strum::FromRepr,
 )]
 pub enum Canonical {
     #[strum(serialize = "__def")]
@@ -53,6 +54,8 @@ pub enum Canonical {
     Member,
     #[strum(serialize = "__object")]
     Object,
+    #[strum(serialize = "__type")]
+    Type,
     #[strum(serialize = "__ivar", props(value = "true"))]
     Ivar,
     #[strum(serialize = "__binding")]
@@ -106,58 +109,25 @@ pub enum Canonical {
 
     #[strum(
         serialize = "__function",
-        props(
-            def_type = "true",
-            callable = "true",
-            scoped = "true",
-            display = "Function"
-        )
+        props(def_type = "true", display = "Function")
     )]
     Function,
-    #[strum(
-        serialize = "__method",
-        props(
-            def_type = "true",
-            callable = "true",
-            scoped = "true",
-            display = "Method"
-        )
-    )]
+    #[strum(serialize = "__method", props(def_type = "true", display = "Method"))]
     Method,
-    #[strum(
-        serialize = "__class",
-        props(
-            def_type = "true",
-            callable = "true",
-            scoped = "true",
-            display = "Class"
-        )
-    )]
+    #[strum(serialize = "__class", props(def_type = "true", display = "Class"))]
     Class,
-    #[strum(
-        serialize = "__struct",
-        props(def_type = "true", scoped = "true", display = "Struct")
-    )]
+    #[strum(serialize = "__struct", props(def_type = "true", display = "Struct"))]
     Struct,
-    #[strum(
-        serialize = "__impl",
-        props(def_type = "true", scoped = "true", display = "Impl")
-    )]
+    #[strum(serialize = "__impl", props(def_type = "true", display = "Impl"))]
     ImplBlock,
-    #[strum(
-        serialize = "__trait",
-        props(def_type = "true", scoped = "true", display = "Trait")
-    )]
+    #[strum(serialize = "__trait", props(def_type = "true", display = "Trait"))]
     Trait,
     #[strum(
         serialize = "__interface",
         props(def_type = "true", display = "Interface")
     )]
     Interface,
-    #[strum(
-        serialize = "__enum",
-        props(def_type = "true", scoped = "true", display = "Enum")
-    )]
+    #[strum(serialize = "__enum", props(def_type = "true", display = "Enum"))]
     Enum,
     #[strum(
         serialize = "__variable",
@@ -186,20 +156,14 @@ pub enum Canonical {
     Property,
     #[strum(
         serialize = "__lambda",
-        props(
-            def_type = "true",
-            callable = "true",
-            display = "Lambda",
-            value = "true",
-            opaque = "true"
-        )
+        props(def_type = "true", display = "Lambda", value = "true", opaque = "true")
     )]
     Lambda,
     #[strum(serialize = "__field_def", props(def_type = "true", display = "Field"))]
     FieldDef,
     #[strum(
         serialize = "__enum_variant",
-        props(def_type = "true", callable = "true", display = "EnumVariant")
+        props(def_type = "true", display = "EnumVariant")
     )]
     EnumVariant,
     #[strum(serialize = "__macro", props(def_type = "true", display = "Macro"))]
@@ -241,12 +205,6 @@ impl Canonical {
     pub fn is_def_type(self) -> bool {
         self.get_str("def_type") == Some("true")
     }
-    pub fn is_callable(self) -> bool {
-        self.get_str("callable") == Some("true")
-    }
-    pub fn is_scoped(self) -> bool {
-        self.get_str("scoped") == Some("true")
-    }
     pub fn is_value(self) -> bool {
         self.get_str("value") == Some("true")
     }
@@ -267,24 +225,9 @@ pub fn def_type_of<S: crate::tree::Storage<Node = crate::tree::Node>>(
     })
 }
 
-pub fn has_def_type(cursor: Cursor) -> bool {
-    def_type_of(cursor).is_some()
-}
-
-pub fn is_callable_def(cursor: Cursor) -> bool {
-    def_type_of(cursor).is_some_and(|k| k.is_callable())
-}
-
-pub fn is_scoped_def(cursor: Cursor) -> bool {
-    def_type_of(cursor).is_some_and(|k| k.is_scoped())
-}
-
 impl Canonical {
     pub fn try_from_u16(kind: u16) -> Option<Self> {
-        if kind < CANONICAL_BASE {
-            return None;
-        }
-        Self::iter().find(|c| *c as u16 == kind)
+        Self::from_repr(kind)
     }
 }
 

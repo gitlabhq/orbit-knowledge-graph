@@ -1,0 +1,32 @@
+name: "C++: a field of an anonymous aggregate type is a member of the enclosing struct"
+
+fixtures:
+  - path: s.cpp
+    content: |
+      struct S {
+          void f() {
+              struct u {
+                  int k;
+              };
+          }
+
+          struct {
+              int i;
+              float x;
+          } u;
+
+      };
+
+      auto copy(S s) {
+          return s.u;
+      }
+
+tests:
+  - name: a member read through a receiver targets the field, not the local struct of its name declared earlier
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'copy' AND t.name = 'u'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["s::S::u"] } }
+      - { column_values: { field: kind, values: ["Field"] } }

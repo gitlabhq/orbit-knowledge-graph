@@ -1,0 +1,53 @@
+name: "Java: a record component read from the enclosing class links to the component"
+
+fixtures:
+  - path: Indexer.java
+    content: |
+      public class Indexer {
+          private record CachedState(Object accessor, Class<?> targetType) {
+          }
+
+          private record InvokerPair(Object member) {
+          }
+
+          private CachedState cached;
+
+          Class<?> readComponents(InvokerPair pair) {
+              Object m = pair.member;
+              CachedState state = this.cached;
+              return state.targetType;
+          }
+
+          Class<?> readAccessor() {
+              CachedState state = this.cached;
+              return state.targetType();
+          }
+      }
+
+tests:
+  - name: a component read without parentheses links to the component
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'readComponents' AND t.name = 'targetType'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Indexer.CachedState.targetType", kind: "Method" } }
+
+  - name: a component read through a parameter links to the component
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'readComponents' AND t.name = 'member'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Indexer.InvokerPair.member" } }
+
+  - name: the accessor call still links to the component
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'readAccessor' AND t.name = 'targetType'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Indexer.CachedState.targetType" } }

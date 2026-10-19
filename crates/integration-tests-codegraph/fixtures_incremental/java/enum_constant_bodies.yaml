@@ -1,0 +1,97 @@
+name: "Java: a call on an enum with constant bodies targets the declared method"
+
+fixtures:
+  - path: Main.java
+    content: |
+      interface Shape {
+          double area();
+      }
+
+      enum Op {
+          PLUS {
+              int apply(int a, int b) {
+                  return a + b;
+              }
+          },
+          MINUS {
+              int apply(int a, int b) {
+                  return a - b;
+              }
+          };
+
+          abstract int apply(int a, int b);
+      }
+
+      enum Fig implements Shape {
+          SQUARE {
+              public double area() {
+                  return 1.0;
+              }
+          },
+          DOT {
+              public double area() {
+                  return 0.0;
+              }
+          }
+      }
+
+      enum Mode {
+          FOO,
+          BAR;
+
+          int FOO() {
+              return 1;
+          }
+      }
+
+      class Calc {
+          int run(Op op) {
+              return op.apply(1, 2);
+          }
+
+          double size(Fig fig) {
+              return fig.area();
+          }
+
+          int call(Mode mode) {
+              return mode.FOO();
+          }
+
+          Mode read() {
+              return Mode.FOO;
+          }
+      }
+
+tests:
+  - name: a call on the enum targets the declared abstract method, not the override in the first constant body
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'run' AND t.name = 'apply'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Op.apply"] } }
+
+  - name: a method that exists only in the constant bodies targets the method that the enum inherits from its interface
+    description: "JLS 15.12: the compile-time declaration of fig.area() is the member Fig inherits from Shape; the constant-body overrides are runtime dispatch targets"
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'size' AND t.name = 'area'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Shape.area"] } }
+
+  - name: a call of a method that shares its name with a constant targets the method
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'call' AND t.name = 'FOO'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: kind, values: ["Method"] } }
+
+  - name: a read of a constant that shares its name with a method targets the constant
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'read' AND t.name = 'FOO'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: kind, values: ["EnumVariant"] } }

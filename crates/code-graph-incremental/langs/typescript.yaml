@@ -112,7 +112,7 @@ stages:
 
       # Constructor parameter property (only when accessibility_modifier present)
       - match: '(required_parameter **/(accessibility_modifier) pattern: $N type: (type_annotation $T:type_identifier))'
-        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T $T)))))'
+        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))))'
       - match: '(required_parameter **/(accessibility_modifier) pattern: $N)'
         replace: '(__def (__defname @$N) (__property))'
 
@@ -292,7 +292,10 @@ stages:
       - match: '(assignment_expression left: $N right: $R)'
         replace: '(__binding @$N $N (__rhs @$R $R))'
       - match: '(public_field_definition name: $N type: (type_annotation $T:type_identifier))'
-        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T $T)))))'
+        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))))'
+      - match: '(public_field_definition name: $N type: (type_annotation (function_type)) value:? $V)'
+        replace: '(__def (__defname @$N) (__property) $V)'
+        tag: { callable: "true" }
       - match: '(public_field_definition name: $N value: $V)'
         replace: '(__def (__defname @$N $N) (__property) $V)'
       - match: '(public_field_definition name: $N)'
@@ -343,6 +346,9 @@ stages:
       - match: '(method_definition **/(static) name: $N body: $B)'
         replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $B)'
         tag: { flavor: static }
+      - match: '(method_definition **/(get) name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
+        replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P $B)'
+        tag: { value: "true" }
       - match: '(method_definition name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
         replace: '(__def (__defname @$N|regex_replace("^#","") $N) (__method) $$$P $B)'
       - match: '(method_definition name: $N body: $B)'
@@ -368,6 +374,7 @@ stages:
     rules:
       - match: '(statement_block $$$V)'
         replace: '(__scope "block" $$$V)'
+        tag: { hoisted: "true" }
 
   - name: cjs-entries
     rules:
@@ -402,13 +409,25 @@ stages:
       - match: '(__def (__method))'
         tag: { callable: "true", scoped: "function" }
       - match: '(__def (__class))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
-        tag: { callable: "true" }
+        tag: { callable: "true", value: "true" }
       - match: '(__def (__enum))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
+      - match: '(__def (__interface))'
+        tag: { value: "true", declares_type: "true" }
+      - match: '(__def (__type_alias))'
+        tag: { value: "true", declares_type: "true" }
+      - match: '(__def (__property))'
+        tag: { value: "true" }
+      - match: '(__def (__property) (arrow_function))'
+        tag: { callable: "true", scoped: "function" }
+      - match: '(__def (__property) (function_expression))'
+        tag: { callable: "true" }
+      - match: '(__def (__variable))'
+        tag: { value: "true" }
 
   - name: tag-file-dir
     rules:

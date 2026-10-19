@@ -211,6 +211,9 @@ stages:
   - name: ssa-cleanup
     rules:
       # Struct fields: named → field def; embedded → supertype
+      - match: '(struct_field name: $N:field_identifier type: (func_type))'
+        replace: '(__def (__defname @$N) (__field_def))'
+        tag: { callable: "true" }
       - match: '(struct_field name: $N:field_identifier)'
         replace: '(__def (__defname @$N) (__field_def))'
       - match: '(struct_field type: $T:type_identifier)'
@@ -229,19 +232,29 @@ stages:
       - match: '(__def (__method))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__class))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
-        tag: { callable: "true" }
+        tag: { callable: "true", value: "true" }
       - match: '(__def (__struct))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
       - match: '(__def (__trait))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__enum))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
+      - match: '(__def (__interface))'
+        tag: { value: "true", declares_type: "true" }
+      - match: '(__def (__type_alias))'
+        tag: { value: "true", declares_type: "true" }
+      - match: '(__def (__field_def))'
+        tag: { value: "true" }
+      - match: '(__def (__variable))'
+        tag: { value: "true" }
+      - match: '(__def (__constant))'
+        tag: { value: "true" }
 
   - name: tag-file-dir
     rules:

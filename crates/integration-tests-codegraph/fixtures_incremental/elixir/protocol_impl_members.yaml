@@ -1,0 +1,46 @@
+name: "Elixir: a protocol is a trait and a defimpl is a part of its target module"
+
+fixtures:
+  - path: lib/size.ex
+    content: |
+      defprotocol Size do
+        def size(data)
+      end
+
+      defmodule Box do
+        defstruct [:items]
+
+        def items(box), do: box.items
+      end
+
+      defimpl Size, for: Box do
+        def size(box), do: length(Box.items(box))
+      end
+
+tests:
+  - name: the protocol is a trait definition
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Size'
+      RETURN d.fqn AS fqn, d.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "Size", kind: "Trait" } }
+
+  - name: the defimpl is a part of the target module
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Box'
+      RETURN d.definition_type AS kind
+    assert:
+      - { row_count: 2 }
+      - { row: { kind: "Class" } }
+      - { row: { kind: "Impl" } }
+
+  - name: the defimpl function calls the module function
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'size' AND t.name = 'items'
+      RETURN t.fqn AS callee
+    assert:
+      - { row: { callee: "Box.items" } }

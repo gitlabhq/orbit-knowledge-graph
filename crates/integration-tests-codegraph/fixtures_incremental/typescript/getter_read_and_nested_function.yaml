@@ -1,0 +1,50 @@
+name: "TypeScript: a getter read is a value and a nested function declaration is hoisted"
+
+fixtures:
+  - path: main.ts
+    content: |
+      class Diagnostic {
+        get severity(): number { return 1; }
+        level(): number { return 2; }
+      }
+      function report(d: Diagnostic): number {
+        const a = d.severity;
+        const b = helper();
+        return a + b;
+        function helper(): number { return 3; }
+      }
+
+  - path: widget.ts
+    content: |
+      function notify(): void {}
+      class Widget {
+        handler: () => void = () => { notify(); };
+        get #secret(): number { return 5; }
+      }
+
+tests:
+  - name: the getter read and the hoisted call resolve
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'report'
+      RETURN t.name AS callee
+    assert:
+      - { row: { callee: "severity" } }
+      - { row: { callee: "helper" } }
+
+  - name: a call in a function-typed field's arrow initializer links from the property
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Widget::handler'
+      RETURN t.name AS callee
+    assert:
+      - { row: { callee: "notify" } }
+
+  - name: a private getter drops the hash like the other methods
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'widget.ts' AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "Widget::secret" } }
