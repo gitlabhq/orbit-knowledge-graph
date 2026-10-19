@@ -179,7 +179,7 @@
             },
             "unique": {
               "type": "boolean",
-              "description": "At most one live row per value; an equality on it is a point lookup.",
+              "description": "One live row per value in its namespace; equality on it is a point lookup.",
               "default": false
             },
             "mutable": {
