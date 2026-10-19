@@ -42,7 +42,7 @@ For automation without a personal account, use a [service account](../security.m
 
 ## Billing
 
-Query calls consume GitLab Credits. For more information, see [billing](../how-it-works.md#billing).
+For which endpoints consume GitLab Credits, see [billing](../how-it-works.md#billing).
 
 ## Endpoints
 
@@ -135,7 +135,7 @@ curl --request POST \
 
 ## Schema endpoint
 
-Returns all node types, their properties and types, and all relationship types.
+Returns all node types and relationship types. To also get the properties and relationships of node types, pass their names in `expand`, for example `?expand=MergeRequest,Project`, or `?expand=*` for every node type.
 In a query, `CALL db.schema()` returns the same information.
 
 ```shell

@@ -46,16 +46,16 @@ If the page shows **Orbit is not turned on for your groups yet**, ask an Owner o
 
 ## Step 1: Turn on GitLab Orbit for your group
 
-To turn on GitLab Orbit on GitLab.com:
+To turn on GitLab Orbit:
 
 1. In the top bar, select **Search or go to** and find your top-level group.
-1. Select **Settings** > **Orbit**.
+1. In the left sidebar, select **Settings** > **Orbit**.
 1. Turn on the **Turn on Orbit** toggle.
 1. If your group does not have the GitLab Orbit add-on, select **Start free trial** in the dialog.
    For what the trial includes, see [start a GitLab Orbit trial](trial.md).
 
-The page shows **Orbit is indexing**, then **Orbit is ready**. The first index takes from a few minutes
-to about 30 minutes for thousands of projects. Continue with the next steps while it runs.
+The page shows **Orbit is indexing**, then **Orbit is ready**. The first index can take up to a few hours.
+Continue with the next steps while it runs.
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
