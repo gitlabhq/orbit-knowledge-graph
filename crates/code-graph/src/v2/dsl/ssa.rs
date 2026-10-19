@@ -695,7 +695,6 @@ impl<'a> SsaEngine<'a> {
                             *op = replacement.clone();
                         }
                     }
-                    // Invalidate witnesses that reference collapsed phis.
                     for w in &mut phi.witnesses {
                         if let Some(wv) = w
                             && phi_vals.contains(wv)
