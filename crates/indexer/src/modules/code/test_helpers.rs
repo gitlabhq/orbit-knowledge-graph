@@ -41,6 +41,11 @@ impl EventBuilder {
         self
     }
 
+    pub fn with_null(mut self, name: &'static str) -> Self {
+        self.columns.push((name, Value { value: None }));
+        self
+    }
+
     pub fn build(self) -> (Vec<String>, ReplicationEvent) {
         let column_names: Vec<String> = self.columns.iter().map(|(n, _)| n.to_string()).collect();
         let event_columns: Vec<Column> = self
