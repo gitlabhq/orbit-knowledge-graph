@@ -1,0 +1,81 @@
+name: "Python: the calls in a conditional expression link and join the local"
+
+fixtures:
+  - path: conditional.py
+    content: |
+      class Item:
+          def touch(self):
+              pass
+
+
+      class Other:
+          def touch(self):
+              pass
+
+
+      def make():
+          return Item()
+
+
+      def make_other():
+          return Other()
+
+
+      def helper():
+          pass
+
+
+      def other():
+          pass
+
+
+      def pick(c):
+          x = make() if c else make_other()
+          x.touch()
+
+
+      def as_return(c):
+          return helper() if c else other()
+
+
+      def as_argument(c):
+          print(helper() if c else other())
+
+
+      def in_condition(c):
+          return 1 if helper() else 2
+
+tests:
+  - name: "both arms of a conditional expression link"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["pick", "as_return", "as_argument"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 8 }
+      - { row: { caller: pick, callee: make } }
+      - { row: { caller: pick, callee: make_other } }
+      - { row: { caller: as_return, callee: helper } }
+      - { row: { caller: as_return, callee: other } }
+      - { row: { caller: as_argument, callee: helper } }
+      - { row: { caller: as_argument, callee: other } }
+
+  - name: "the local joins the two arms"
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
+      WHERE caller.name = "pick" AND callee.name = "touch"
+      RETURN owner.name AS owner
+      ORDER BY owner
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: owner, values: ["Item", "Other"] } }
+
+  - name: "the condition of a conditional expression links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "in_condition"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: helper } }

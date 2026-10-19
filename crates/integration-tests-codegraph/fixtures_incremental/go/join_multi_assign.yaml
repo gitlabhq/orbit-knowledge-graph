@@ -1,0 +1,51 @@
+name: "Go: a multi-assigned receiver reassigned in a branch types the member call"
+
+fixtures:
+  - path: main.go
+    content: |
+      package main
+
+      type File struct{}
+
+      func (f *File) Close() {}
+
+      func Open(name string) (*File, error) {
+      	return &File{}, nil
+      }
+
+      func Create(name string) (*File, error) {
+      	return &File{}, nil
+      }
+
+      func use(fresh bool) {
+      	f, err := Open("a")
+      	if fresh {
+      		f, err = Create("a")
+      	}
+      	if err != nil {
+      		return
+      	}
+      	f.Close()
+      }
+
+      func single() {
+      	f, _ := Open("a")
+      	f.Close()
+      }
+
+tests:
+  - name: a receiver assigned by two multi-assigns reaches Close
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'use' AND t.name = 'Close'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: a receiver assigned by one multi-assign reaches Close
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'single' AND t.name = 'Close'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }

@@ -145,6 +145,7 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
             text,
             kids,
             optional,
+            labelled,
         } => {
             if *optional {
                 let text_empty =
@@ -188,6 +189,8 @@ pub(crate) fn materialize(t: &mut Tree, fill: &Fill, p: &Pat, parent: NodeId, pl
                     start_col: src.start_col,
                     end_row: src.end_row,
                     end_col: src.end_col,
+                    lifted: false,
+                    labelled: *labelled,
                 },
             );
             for k in kids {

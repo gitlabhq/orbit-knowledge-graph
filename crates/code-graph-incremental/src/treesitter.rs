@@ -277,6 +277,8 @@ fn from_tree_sitter(
             start_col: sp.column as u32,
             end_row: ep.row as u32,
             end_col: ep.column as u32,
+            lifted: false,
+            labelled: false,
         },
     );
     tree.label = label.to_string();
@@ -315,6 +317,8 @@ fn from_tree_sitter(
                 start_col: sp.column as u32,
                 end_row: ep.row as u32,
                 end_col: ep.column as u32,
+                lifted: false,
+                labelled: false,
             },
         );
 

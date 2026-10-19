@@ -438,3 +438,48 @@ fn file_stats_keep_files_killed_by_the_resolve_budget() {
     assert!(skipped.iter().all(|killed| killed.label == "resolve"));
     assert_eq!(sorted_paths(&files), ["a.py", "b.py"]);
 }
+
+#[test]
+fn a_join_chain_resolves_in_work_linear_in_its_reaching_pairs() {
+    fn resolve_ms(joins: usize) -> f64 {
+        let mut source = String::from(
+            "pub struct Node;\n\nimpl Node {\n    pub fn new() -> Node {\n        Node\n    }\n\n    pub fn next(&self) -> Node {\n        Node\n    }\n}\n\npub fn walk(c: bool) {\n    let mut n = Node::new();\n",
+        );
+        source += &"    if c {\n        n = n.next();\n    }\n".repeat(joins);
+        source += "}\n";
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir(repo.path().join("src")).unwrap();
+        write_all(
+            repo.path(),
+            &[
+                (
+                    "Cargo.toml",
+                    "[package]\nname = \"chain\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+                ),
+                ("src/lib.rs", &source),
+            ],
+        );
+        let env = Env::with_limits(SupportLang::Rust, Limits::UNLIMITED).unwrap();
+        let (context, _) = templates::index(Context::new(&env, common::walk(repo.path())))
+            .unwrap()
+            .finish();
+        context
+            .report
+            .phases
+            .iter()
+            .filter(|phase| phase.name == "resolve")
+            .map(|phase| phase.elapsed.as_secs_f64() * 1000.0)
+            .sum()
+    }
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .stack_size(templates::WORKER_STACK_BYTES)
+        .build()
+        .unwrap();
+    let best = |joins| (0..3).map(|_| resolve_ms(joins)).fold(f64::MAX, f64::min);
+    let (small, large) = pool.install(|| (best(200), best(1600)));
+    assert!(
+        large < 128.0 * small.max(5.0),
+        "resolving 8x the joins went from {small:.0} ms to {large:.0} ms"
+    );
+}
