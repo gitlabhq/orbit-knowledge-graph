@@ -14,6 +14,7 @@ title: GitLab Orbit Local
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
@@ -30,7 +31,7 @@ This page uses `glab orbit`. If you installed the standalone binary, type `orbit
 
 ## Compare the local and remote graphs
 
-| | Local graph | Remote graph |
+| Attribute | Local graph | Remote graph |
 |---|-------------|--------------|
 | Data | Code only | GitLab data and code |
 | Code version | The checkout on your machine, including commits that you have not pushed | The default branch of each project |
@@ -59,14 +60,13 @@ and writes definitions, imports, and cross-file references to the graph. A mediu
 The parser and [supported languages](../schema.md#supported-languages) are the same as for the remote graph.
 
 - To index each repository in a directory, give the path of the directory.
-- Indexing a checkout again replaces its graph. After you switch branches, `grep` and `context` index the new commit
+- Each indexed commit keeps its own graph. Indexing the same commit again replaces its graph. After you switch branches, `grep` and `context` index the new commit
   for you. Run `glab orbit index .` before you use `repo-map` or `sql` on it.
-- To keep graphs for more than one branch, index each branch from a separate checkout or worktree.
 - In a terminal, `index` shows its progress. In a pipe or a file, it prints JSON statistics.
 
 ## Search and read code
 
-`grep` searches every line of every file in the working tree, like `rg`, and adds the graph on top:
+`grep` searches every line of every file in the working tree, like `rg`, and adds definitions, callers, and callees from the graph:
 
 ```shell
 glab orbit grep read_file
@@ -120,9 +120,8 @@ glab orbit sql -F json "SELECT count(*) AS n FROM gl_definition"
 
 The SQL is read-only and runs directly on the graph tables.
 
-- Inside a checkout, the tables contain only its indexed commit. Outside a checkout, or if the commit is not indexed,
-  the query reads every indexed commit and prints a note on stderr.
-- Use `--repo <path>` for a different checkout, or `--all` for every repository.
+- By default, and with `--all`, the query reads every indexed commit of every repository, including earlier commits of the current checkout.
+- To query only the indexed commit of a checkout, use `--repo <path>`, for example `--repo .`.
 - `-F` accepts `table` (default), `json`, `ndjson`, and `csv`. `-f <file>` or `-` reads the SQL from a file or stdin.
 
 To list the tables and columns, run `glab orbit schema`, or `glab orbit schema gl_definition` for one table.
@@ -140,10 +139,10 @@ Each node type has its own table. All relationships are in one edge table.
 | `gl_definition` | `Definition` |
 | `gl_imported_symbol` | `ImportedSymbol` |
 | `gl_edge` | All relationships, with `source_kind`, `relationship_kind`, and `target_kind` columns |
-| `_orbit_manifest` | One row for each indexed repository, with its branch, commit, and status |
+| `_orbit_manifest` | One row for each indexed commit of each repository, with its branch, commit, and status |
 
 The local graph uses these relationships: `CONTAINS`, `DEFINES`, `IMPORTS`, `CALLS`, and `EXTENDS`.
-It has no `Branch`, `Project`, or SDLC nodes.
+It has no `Branch`, `Project`, or other software development lifecycle (SDLC) nodes.
 
 The local tables differ from the remote graph in these ways:
 
@@ -162,7 +161,7 @@ For setup and tools, see [local MCP server](../agents/mcp.md#local-mcp-server).
 
 ## Storage and privacy
 
-All indexed repositories share one DuckDB file at `~/.gitlab/orbit/graph.duckdb`.
+The CLI keeps the local graph in `~/.gitlab/orbit/local/`: one DuckDB file for each indexed commit under `revisions/`, and a `manifest.duckdb` file that lists them.
 
 - To keep the file in a different directory, set `ORBIT_DATA_DIR`.
 - If `~/.gitlab/orbit` does not exist, the CLI moves an earlier `~/.orbit` directory to it.

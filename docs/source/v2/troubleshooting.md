@@ -14,14 +14,17 @@ title: Troubleshooting GitLab Orbit
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
-- GitLab Orbit Remote [introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
-- GitLab Orbit Remote [changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-- GitLab Orbit Remote [enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
-- GitLab Orbit Remote [feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- GitLab Orbit Local [introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an experiment.
-- GitLab Orbit Local [changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to beta in GitLab 19.1.
+- Remote graph:
+  - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+  - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+  - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
+  - [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+- Local graph:
+  - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an experiment.
+  - [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to beta in GitLab 19.1.
 - Generally available in GitLab 19.x.
 
 {{< /history >}}
@@ -59,14 +62,14 @@ curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/insta
 
 The `@gitlab/orbit` npm package always uses the musl build on Linux.
 
-## Turn on GitLab Orbit and connect your agent
+## GitLab Orbit setup and agent connection
 
 <!-- vale orbit.StandaloneProductName = NO -->
 
 ### The Orbit settings page is missing
 
-The **Orbit** settings page appears only for the Owner of a top-level group on GitLab.com.
-If you are not an Owner, or you are in a subgroup, ask an Owner of the top-level group to turn on GitLab Orbit.
+On GitLab.com, the **Orbit** settings page appears only for users with the Owner role for a top-level group.
+If you do not have the Owner role, or you are in a subgroup, ask a user with the Owner role for the top-level group to turn on GitLab Orbit.
 On GitLab Self-Managed and GitLab Dedicated, an administrator turns it on in the **Admin** area.
 
 <!-- vale orbit.StandaloneProductName = YES -->
@@ -178,13 +181,13 @@ These errors come from the REST API and the MCP endpoint. The CLI reports every 
 
 ### Error: `insufficient_scope` on the MCP endpoint
 
-The token has none of the `mcp_orbit`, `mcp`, or `read_api` scopes.
+The token has none of the `mcp_orbit`, `mcp`, `read_api`, `api`, or `ai_workflows` scopes.
 Create a token with the `mcp_orbit` or `read_api` scope, or sign in again to grant the `mcp_orbit` scope.
 
 ### Error: `403 Forbidden - No Orbit enabled namespaces available`
 
-The service account does not have the Reporter role or higher in a group where GitLab Orbit is on.
-Add the account with the Reporter role or higher to such a group.
+The service account does not have the Reporter, Security Manager, Developer, Maintainer, or Owner role in a group where GitLab Orbit is on.
+Add the account to such a group with one of these roles.
 For more information, see [service accounts](security.md#service-accounts).
 
 ### Error: `403 Forbidden` with no message
@@ -227,7 +230,7 @@ These issues affect [GitLab Orbit Local](local/_index.md).
 ### Error: `no local graph found`
 
 ```plaintext
-Error: no local graph found at /Users/you/.gitlab/orbit/graph.duckdb. Index a repository first (`orbit index` inside it, or the `index` MCP tool).
+Error: no local graph found. Run `glab orbit index` first.
 ```
 
 You did not index the repository yet, or the path that you gave with `--db` does not exist.
@@ -244,12 +247,6 @@ Error: current commit 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b is not indexed in
 ```
 
 `repo-map` does not index the checkout for you. Run `glab orbit index .`, then run `repo-map` again.
-
-### Note: `not inside a git checkout`
-
-Outside a Git checkout, `glab orbit sql` prints
-`note: . is not inside a git checkout; querying every indexed commit (as with --all)`.
-The note is not an error. The query runs on all indexed repositories.
 
 ### Error: `The local graph is busy`
 

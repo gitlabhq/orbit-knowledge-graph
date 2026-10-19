@@ -15,6 +15,7 @@ title: GitLab Orbit queries
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
@@ -38,7 +39,7 @@ Queries use the [Cypher query language](cypher.md).
 
 ## Run a query
 
-Pass the query text to the CLI:
+Pass the query text to the [GitLab Orbit CLI](../cli.md):
 
 ```shell
 glab orbit query "MATCH (p:Project {full_path: 'gitlab-org/orbit/knowledge-graph'}) RETURN p.name, p.full_path LIMIT 1"

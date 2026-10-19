@@ -14,6 +14,7 @@ title: Connect your agent
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
@@ -113,7 +114,7 @@ mkdir -p ~/.claude/skills && ln -s ~/.agents/skills/orbit ~/.claude/skills/orbit
 ### Use the wrapper skill
 
 The `orbit-wrapper` skill loads the skill that your GitLab instance serves, so it always matches your instance and CLI.
-The installed `orbit` skill is a copy that you update with `--force`. The wrapper loads the current skill each time, so it needs no updates.
+The installed `orbit` skill is a copy that you update with `--force`.
 Install it in place of the `orbit` skill. The `npx` command needs [Node.js](https://nodejs.org/):
 
 ```shell

@@ -15,6 +15,7 @@ title: GitLab Orbit
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
@@ -78,12 +79,12 @@ Then it answers from the rows. The answer is similar to:
 
 <!-- TODO(GA): confirm with Pricing what the add-on includes. -->
 - GitLab Orbit is a paid add-on for top-level groups with a Premium or Ultimate subscription.
-  The add-on includes GitLab Credits for GitLab Orbit queries. On GitLab.com, an Owner can [start a free trial](trial.md).
-- An Owner turns on GitLab Orbit for a top-level group on GitLab.com. On GitLab Self-Managed and GitLab Dedicated,
-  an administrator does. GitLab Orbit then indexes the group, its subgroups, and projects.
+  On GitLab.com, an Owner can [start a free trial](trial.md).
+- An Owner turns on GitLab Orbit for a top-level group. On GitLab Self-Managed and GitLab Dedicated,
+  an administrator can also turn it on. GitLab Orbit then indexes the group, its subgroups, and projects.
   On GitLab Dedicated, GitLab runs GitLab Orbit for you.
 - On GitLab Self-Managed, an administrator [sets up GitLab Orbit](self-managed/_index.md) first.
-- To query the graph, you need at least the Reporter role. Security data needs the Security Manager role.
+- To query the graph, you need the Reporter, Security Manager, Developer, Maintainer, or Owner role. Security data needs the Security Manager role.
   For more information, see [roles](security.md#roles).
 
 ## Connect your agent
@@ -102,8 +103,7 @@ offline and with no GitLab account. For more information, see [GitLab Orbit Loca
 
 ## Billing
 
-Queries consume GitLab Credits on every access path, including GitLab Duo Agent Platform.
-For more information, see [billing](how-it-works.md#billing).
+For which calls consume GitLab Credits on each offering, see [billing](how-it-works.md#billing).
 
 ## Reference
 

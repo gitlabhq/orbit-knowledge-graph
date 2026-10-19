@@ -5,7 +5,7 @@ remove_date: '2027-01-10'
 
 <!-- markdownlint-disable -->
 
-This document was moved to [another location](./agents/_index.md).
+This document was moved to [another location](agents/_index.md).
 
 <!-- This redirect file can be deleted after <2027-01-10>. -->
 <!-- Redirects that point to other docs in the same project expire in three months. -->
