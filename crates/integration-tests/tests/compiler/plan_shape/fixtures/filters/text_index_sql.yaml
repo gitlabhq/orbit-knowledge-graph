@@ -1,0 +1,65 @@
+cases:
+  - name: Case-insensitive user prefix uses the ngram index expression
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"],"filters":{"username":{"starts_with":"ALI"}}}],"limit":10}
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username STARTS WITH 'ALI' RETURN u.username LIMIT 10
+    logical: { expect: ["(Filter starts_with(u.username, 'ALI'), ... (_))"] }
+    physical:
+      clickhouse:
+        sql: { contains: ["startsWith(lower(u.username), lower('ALI'))"] }
+        indexes: [{ table: gl_user, name: idx_username_ngram }]
+
+  - name: Case-insensitive user suffix uses the ngram index expression
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"],"filters":{"username":{"ends_with":"ICE"}}}],"limit":10}
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username ENDS WITH 'ICE' RETURN u.username LIMIT 10
+    logical: { expect: ["(Filter ends_with(u.username, 'ICE'), ... (_))"] }
+    physical:
+      clickhouse:
+        sql: { contains: ["endsWith(lower(u.username), lower('ICE'))"] }
+        indexes: [{ table: gl_user, name: idx_username_ngram }]
+
+  - name: Token operators use the text index functions
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","id_range":{"start":2000,"end":2200},"columns":["title"],"filters":{"title":[{"token_match":"FIX"},{"all_tokens":"LOGIN Crash"},{"any_tokens":"URGENT ios"}]}}],"limit":10}
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND token_match(mr.title, 'FIX') AND all_tokens(mr.title, 'LOGIN Crash') AND any_tokens(mr.title, 'URGENT ios') RETURN mr.title LIMIT 10
+    logical: { expect: ["(Filter token_match(mr.title, 'FIX'), all_tokens(mr.title, 'LOGIN Crash'), any_tokens(mr.title, 'URGENT ios'), ... (_))"] }
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - "hasToken(lower(mr.title), lower('FIX'))"
+            - "hasAllTokens(lower(mr.title), lower('LOGIN Crash'))"
+            - "hasAnyTokens(lower(mr.title), lower('URGENT ios'))"
+        indexes: [{ table: gl_merge_request, name: idx_title }]
+
+  - name: File path token matching reads the text index
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","filters":{"file_path":{"token_match":"src"}},"columns":["file_path"]}],"limit":10}
+      gql: |
+        MATCH (d:Definition) WHERE token_match(d.file_path, 'src') RETURN d.file_path LIMIT 10
+    logical: { expect: ["(Filter token_match(d.file_path, 'src') (_))"] }
+    physical:
+      clickhouse:
+        sql: { contains: ["hasToken(lower(d.file_path), lower('src'))"] }
+        indexes: [{ table: gl_definition, name: idx_file_path }]
+
+  - name: Sort-key prefix remains case-sensitive
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"d","entity":"Definition","filters":{"branch":{"starts_with":"MAI"}},"columns":["branch"]}],"limit":10}
+      gql: |
+        MATCH (d:Definition) WHERE d.branch STARTS WITH 'MAI' RETURN d.branch LIMIT 10
+    logical: { expect: ["(Filter starts_with(d.branch, 'MAI') (_))"] }
+    physical:
+      clickhouse:
+        sql:
+          contains: ["startsWith(d.branch, 'MAI')"]
+          not_contains: ["lower(d.branch)"]

@@ -1,0 +1,33 @@
+cases:
+  - name: A surviving NOT pins null membership semantics
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem) WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3] RETURN wi.weight LIMIT 10
+    logical: { expect: ["(Filter NOT (wi.weight IN [3]), ... (_))"] }
+    physical:
+      clickhouse:
+        settings: { contains: ["transform_null_in = 0"] }
+
+  - name: Positive membership leaves null membership semantics unset
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem) WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight IN [3] RETURN wi.weight LIMIT 10
+    logical: { expect: ["(Filter wi.weight IN [3], ... (_))"] }
+    physical:
+      clickhouse:
+        settings: { not_contains: ["transform_null_in"] }
+
+  - name: A complemented NOT leaves null membership semantics unset
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":3},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem) WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight = 3 RETURN wi.weight LIMIT 10
+    logical: { expect: ["(Filter wi.weight != 3, ... (_))"] }
+    physical:
+      clickhouse:
+        settings: { not_contains: ["transform_null_in"] }

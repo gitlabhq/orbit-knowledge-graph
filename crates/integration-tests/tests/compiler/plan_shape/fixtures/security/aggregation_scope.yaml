@@ -11,6 +11,8 @@ cases:
       clickhouse:
         final_ast:
           expect: ["(Filter StartsWith(g.traversal_path, '1/100/'), ... (_))"]
+        sql:
+          contains: ["startsWith", "traversal_path", "1/100/"]
 
   - name: Aggregation emits every authorized traversal path
     security: { paths: [1/100/, 1/102/] }
@@ -25,3 +27,48 @@ cases:
         final_ast:
           expect:
             - "(Filter StartsWith(g.traversal_path, '1/100/') OR StartsWith(g.traversal_path, '1/102/'), ... (_))"
+        sql:
+          contains: ["startsWith", "1/100/", "1/102/"]
+
+  - name: Reporter vulnerability aggregation fails closed
+    security: { paths: [1/100/] }
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","id_range":{"start":1,"end":10000},"columns":["name"]},{"id":"v","entity":"Vulnerability"}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"vuln_count"}],"limit":10}
+      gql: |
+        MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id <= 10000 RETURN p{.id, .name}, count(v) AS vuln_count LIMIT 10
+    logical: { expect: ["(Aggregate group p AS p, COUNT(v) AS vuln_count (_))"] }
+    physical:
+      clickhouse:
+        final_ast:
+          expect: ["(Filter false, ... (_))", "(Filter StartsWith(p.traversal_path, '1/100/'), ... (_))"]
+        sql:
+          contains: ["1/100/", "false"]
+
+  - name: Reporter property-grouped vulnerability aggregation fails closed
+    security: { paths: [1/100/] }
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","id_range":{"start":1,"end":10000}},{"id":"v","entity":"Vulnerability"}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["v.severity"],"aggregations":[{"count":"v","as":"vuln_count"}],"limit":10}
+      gql: |
+        MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id <= 10000 RETURN v.severity, count(v) AS vuln_count LIMIT 10
+    logical: { expect: ["(Aggregate group v.severity AS v_severity, COUNT(v) AS vuln_count (_))"] }
+    physical:
+      clickhouse:
+        final_ast:
+          expect: ["(Aggregate group v.severity, v.severity AS v_severity, ... (Bind v (Project * (Filter false, ... (_)))))"]
+        sql:
+          contains: ["v.severity AS v_severity", "GROUP BY v.severity", "false"]
+
+  - name: Reporter negated vulnerability aggregation stays fail closed
+    security: { paths: [1/100/] }
+    query:
+      gql: |
+        MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id <= 10000 AND NOT (v.severity = 'critical' AND v.state = 'detected') RETURN p{.id, .name}, count(v) AS vuln_count LIMIT 10
+    missing_frontends:
+      json: The JSON frontend does not expose grouped boolean predicates.
+    logical: { expect: ["(Filter NOT ((v.severity = 'critical') AND (v.state = 'detected')) (_))"] }
+    physical:
+      clickhouse:
+        sql:
+          contains: ["1/100/", "false", "NOT"]

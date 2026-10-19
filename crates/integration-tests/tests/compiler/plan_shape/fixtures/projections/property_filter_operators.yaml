@@ -39,3 +39,13 @@ physical:
     final_ast:
       expect:
         - (Filter Contains(Lower(p.name), Lower('orbit')), StartsWith(Lower(p.name), Lower('git')), EndsWith(Lower(p.name), Lower('lab')), TokenMatch(Lower(p.name), Lower('graph')), AllTokens(Lower(p.name), Lower('graph query')), AnyTokens(Lower(p.name), Lower('code data')), p.name IS NOT NULL, p.description IS NULL, ... (_))
+    sql:
+      contains:
+        - "multiSearchAny(lower(p.name), [lower('orbit')])"
+        - "startsWith(lower(p.name), lower('git'))"
+        - "endsWith(lower(p.name), lower('lab'))"
+        - "hasToken(lower(p.name), lower('graph'))"
+        - "hasAllTokens(lower(p.name), lower('graph query'))"
+        - "hasAnyTokens(lower(p.name), lower('code data'))"
+    indexes:
+      - { table: gl_project, name: idx_name_ngram }

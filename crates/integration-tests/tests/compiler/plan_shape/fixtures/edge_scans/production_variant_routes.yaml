@@ -15,6 +15,7 @@ cases:
     physical:
       clickhouse:
         planned: { expect: ["(Scan Table(gl_ci_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+        sql: { contains: [gl_ci_edge], not_contains: [gl_edge] }
 
   - name: Stage IN_PROJECT scans the CI edge table
     query:
@@ -103,6 +104,7 @@ cases:
     physical:
       clickhouse:
         planned: { expect: ["(Scan Table(gl_sec_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+        sql: { contains: [gl_sec_edge] }
 
   - name: Finding IN_PROJECT scans the security edge table
     query:
@@ -235,6 +237,7 @@ cases:
     physical:
       clickhouse:
         planned: { expect: ["(Scan Table(gl_diff_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+        sql: { contains: [gl_diff_edge] }
 
   - name: MergeRequestDiffFile IN_PROJECT scans the diff edge table
     query:
@@ -257,6 +260,7 @@ cases:
     physical:
       clickhouse:
         planned: { expect: ["(Scan Table(gl_code_edge) AS _orbit_edge_0)"], reject: ["(Scan Table(gl_edge) ...)"] }
+        sql: { contains: [gl_code_edge], not_contains: [gl_edge] }
 
   - name: Project CONTAINS Branch scans the code edge table
     query:

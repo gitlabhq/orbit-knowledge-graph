@@ -69,13 +69,30 @@ struct HydrationSetup {
     paths: BTreeMap<String, Vec<String>>,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 struct PhysicalAssertions {
     planned: Option<Assertions>,
     emitted: Option<Assertions>,
     final_ast: Option<Assertions>,
     point_lookup: Option<bool>,
+    sql: Option<SqlAssertions>,
+    indexes: Vec<IndexAssertion>,
+    settings: Option<SqlAssertions>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct SqlAssertions {
+    contains: Vec<String>,
+    not_contains: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IndexAssertion {
+    table: String,
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -248,6 +265,7 @@ fn check<M: OrbitQueryModel>(
         plan::HydrationCompileOptions,
         &HashSet<String>,
     ) -> compiler::Result<plan::QueryPlan>,
+    index_exists: impl Fn(&str, &str) -> bool,
 ) {
     for (language, raw) in &scenario.query {
         let label = format!(
@@ -297,7 +315,10 @@ fn check<M: OrbitQueryModel>(
             assertions.planned.is_some()
                 || assertions.emitted.is_some()
                 || assertions.final_ast.is_some()
-                || assertions.point_lookup.is_some(),
+                || assertions.point_lookup.is_some()
+                || assertions.sql.is_some()
+                || !assertions.indexes.is_empty()
+                || assertions.settings.is_some(),
             "{label}: missing assertion targets"
         );
         for (phase, assertions, actual) in [
@@ -327,10 +348,14 @@ fn check<M: OrbitQueryModel>(
                 "{label}: point lookup mismatch"
             );
         }
-        if let Some(assertions) = &assertions.final_ast {
+        if assertions.final_ast.is_some()
+            || assertions.sql.is_some()
+            || !assertions.indexes.is_empty()
+            || assertions.settings.is_some()
+        {
             assert_eq!(
                 backend, "clickhouse",
-                "{label}: final_ast requires ClickHouse"
+                "{label}: final output assertions require ClickHouse"
             );
             let mut final_input = input.clone();
             let security = SecurityContext::new(
@@ -377,12 +402,58 @@ fn check<M: OrbitQueryModel>(
                 model,
             )
             .unwrap_or_else(|error| panic!("{label}: {error}"));
-            assertions
-                .check(
-                    &explain::emitted(&final_lowered.ast),
-                    &format!("{label}.physical.{backend}.final_ast"),
-                )
-                .unwrap_or_else(|error| panic!("{error}"));
+            let mut query_config = orbit_server_config::QueryConfig {
+                use_query_cache: Some(true),
+                query_cache_ttl: Some(10),
+                ..Default::default()
+            };
+            query_config.compiler_derived.null_in_is_unknown = final_input.has_negation();
+            if final_plan.is_point_lookup() {
+                query_config.use_query_cache = Some(false);
+            }
+            if let Some(assertions) = &assertions.final_ast {
+                assertions
+                    .check(
+                        &explain::emitted(&final_lowered.ast),
+                        &format!("{label}.physical.{backend}.final_ast"),
+                    )
+                    .unwrap_or_else(|error| panic!("{error}"));
+            }
+            let sql = compiler::codegen(&final_lowered.ast, Default::default(), query_config)
+                .unwrap_or_else(|error| panic!("{label}: {error}"))
+                .render();
+            if let Some(assertions) = &assertions.sql {
+                for value in &assertions.contains {
+                    assert!(sql.contains(value), "{label}: SQL missing '{value}'\n{sql}");
+                }
+                for value in &assertions.not_contains {
+                    assert!(
+                        !sql.contains(value),
+                        "{label}: SQL contains '{value}'\n{sql}"
+                    );
+                }
+            }
+            for index in &assertions.indexes {
+                assert!(
+                    index_exists(&index.table, &index.name),
+                    "{label}: table {} has no index {}",
+                    index.table,
+                    index.name
+                );
+                assert!(
+                    sql.contains(&index.table),
+                    "{label}: SQL does not read indexed table {}\n{sql}",
+                    index.table
+                );
+            }
+            if let Some(assertions) = &assertions.settings {
+                for value in &assertions.contains {
+                    assert!(sql.contains(value), "{label}: SETTINGS missing '{value}'\n{sql}");
+                }
+                for value in &assertions.not_contains {
+                    assert!(!sql.contains(value), "{label}: SETTINGS contains '{value}'\n{sql}");
+                }
+            }
         }
     }
 }
@@ -421,12 +492,26 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
             .map_or((&remote, &local), |(remote, local)| (remote, local));
         for backend in scenario.physical.keys() {
             match backend.as_str() {
-                "clickhouse" => check(&scenario, remote, backend, path, |input, options, scans| {
-                    plan::plan_clickhouse(input, remote, options, scans)
-                }),
-                "duckdb" => check(&scenario, local, backend, path, |input, options, scans| {
-                    plan::plan_duckdb(input, local, options, scans)
-                }),
+                "clickhouse" => check(
+                    &scenario,
+                    remote,
+                    backend,
+                    path,
+                    |input, options, scans| plan::plan_clickhouse(input, remote, options, scans),
+                    |table, index| {
+                        remote.layout().schema().table(table).is_some_and(|table| {
+                            table.options.indexes.iter().any(|item| item.name == index)
+                        })
+                    },
+                ),
+                "duckdb" => check(
+                    &scenario,
+                    local,
+                    backend,
+                    path,
+                    |input, options, scans| plan::plan_duckdb(input, local, options, scans),
+                    |_, _| false,
+                ),
                 _ => panic!("unknown backend {backend}"),
             }
         }

@@ -1,0 +1,59 @@
+cases:
+  - name: Single-node datetime stays in the base projection
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[3000],"columns":["created_at"]}],"limit":10}
+      gql: |
+        MATCH (n:Note {id: 3000}) RETURN n.created_at LIMIT 10
+    logical: { expect: ["(Project n.created_at (_))"] }
+    physical:
+      clickhouse:
+        sql: { contains: ["AS n_created_at"] }
+
+  - name: Filter-only group properties stay inline while user properties hydrate
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]},{"id":"g","entity":"Group","filters":{"name":{"contains":"Private"}},"columns":["name","visibility_level"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":20}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 AND g.name CONTAINS 'Private' RETURN u.username, g.name, g.visibility_level LIMIT 20
+    logical: { expect: ["(Project g.name, g.visibility_level (_))"] }
+    physical:
+      clickhouse:
+        sql:
+          contains: ["AS g_name", "AS g_visibility_level"]
+          not_contains: ["AS u_username"]
+
+  - name: FK traversal projects both endpoints inline
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[3000],"columns":["confidential","created_at"]},{"id":"u","entity":"User","columns":["username"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}],"limit":20}
+      gql: |
+        MATCH (n:Note {id: 3000})<-[:AUTHORED]-(u:User) RETURN n.confidential, n.created_at, u.username LIMIT 20
+    logical: { expect: ["(Project n.confidential, n.created_at (_))", "(Project u.username (_))"] }
+    physical:
+      clickhouse:
+        sql: { contains: ["AS n_confidential", "AS n_created_at", "AS u_username"] }
+
+  - name: Virtual content stays out of SQL while stored dependencies stay inline
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","node_ids":[13000],"columns":["name","content"]}],"limit":5}
+      gql: |
+        MATCH (f:File {id: 13000}) RETURN f.name, f.content LIMIT 5
+    logical: { expect: ["(Project f.name, f.content (_))"] }
+    physical:
+      clickhouse:
+        sql:
+          contains: ["AS f_name"]
+          not_contains: ["f_content", "f.content"]
+
+  - name: Traversal projects user and merge request properties
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title","state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":20}
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, mr.title, mr.state LIMIT 20
+    logical: { expect: ["(Project u.username (_))", "(Project mr.title, mr.state (_))"] }
+    physical:
+      clickhouse:
+        sql: { contains: ["AS u_username", "AS mr_title", "AS mr_state"] }
