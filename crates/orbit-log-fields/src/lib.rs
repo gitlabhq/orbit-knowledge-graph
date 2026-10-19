@@ -115,6 +115,7 @@ pub mod safe {
         ENTITY = "entity";
         /// Comma separated.
         ENTITIES = "entities";
+        /// Comma separated.
         REQUESTED_ENTITIES = "requested_entities";
         /// Entity or relationship kind that an SDLC indexing plan writes.
         PLAN_TARGET = "plan_target";
