@@ -80,13 +80,6 @@ For more information, see [turn on indexing for a group](self-managed/orbit-setu
    glab auth login
    ```
 
-1. On GitLab.com, if more than one of your top-level groups has GitLab Orbit turned on,
-   select the group that GitLab Orbit bills for your queries:
-   1. In the upper-right corner, select your avatar.
-   1. Select **Preferences**.
-   1. In **Billable Orbit namespace**, select a group.
-   1. Select **Save changes**.
-
 1. Check the indexing progress. When indexing is complete, the summary ends with `Ready.`
 
    ```shell

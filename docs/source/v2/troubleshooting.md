@@ -141,19 +141,6 @@ Wait a few minutes, then send the query again.
 The group does not meet the conditions for a trial, or already has the GitLab Orbit add-on.
 To buy the add-on, [contact sales](https://about.gitlab.com/sales/). For more information, see [start a GitLab Orbit trial](trial.md).
 
-### Error: `billing_namespace_required`
-
-<!-- vale orbit.StandaloneProductName = NO -->
-
-The query fails with HTTP `422` and `Select a billing namespace for Orbit to attribute usage.`
-`glab orbit query` exits with code 1.
-
-On GitLab.com, you are a member of more than one top-level group with GitLab Orbit turned on,
-and you have not selected the group that GitLab Orbit bills.
-In your preferences, select a group in **Billable Orbit namespace**.
-
-<!-- vale orbit.StandaloneProductName = YES -->
-
 ### Results are missing recent data
 
 The indexer has not finished indexing the group or project yet.

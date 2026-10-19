@@ -124,14 +124,6 @@ For billing on GitLab Self-Managed and GitLab Dedicated, contact your GitLab acc
 
 - A query that succeeds consumes GitLab Credits, also when it returns no rows. A failed query and `CALL db.schema()` do not.
 - GitLab Orbit bills each query to one top-level group.
-
-  <!-- vale orbit.StandaloneProductName = NO -->
-
-  On GitLab.com, if more than one of your groups has GitLab Orbit turned on, select one in
-  **Billable Orbit namespace** in your preferences. Until you do, your queries fail.
-
-  <!-- vale orbit.StandaloneProductName = YES -->
-
 - When the group has no GitLab Credits left, or its [free trial](trial.md) ends, queries fail.
   See [troubleshooting](troubleshooting.md#error-gitlab-credits-exhausted).
 - The local graph never consumes GitLab Credits.
