@@ -8,7 +8,9 @@ use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, RemoteError};
 
 static TERMINAL_NOISE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"\x1b\[[0-9;]*[A-Za-z]|section_(?:start|end):\d+:[^\r\n]*")
+    regex::Regex::new(
+        r"\x1b\[[0-9;]*[A-Za-z]|section_(?:start|end):\d+:[^\r\n]*|^\d{4}-\d\d-\d\dT[\d:.]+Z \d\d[OE]\+? ?",
+    )
         .expect("terminal noise pattern is valid")
 });
 
@@ -170,10 +172,16 @@ async fn latest_pipeline(
     let pipelines = get_json(
         client,
         &format!("projects/{project}/pipelines"),
-        &[("ref", branch.to_string()), ("per_page", "1".into())],
+        &[("ref", branch.to_string()), ("per_page", "20".into())],
     )
     .await?;
-    Ok(pipelines.as_array().and_then(|list| list.first()).cloned())
+    // `[ci skip]` pushes leave skipped pipelines on top of the one that ran.
+    let list = pipelines.as_array().cloned().unwrap_or_default();
+    Ok(list
+        .iter()
+        .find(|pipeline| text(&pipeline["status"]) != "skipped")
+        .or(list.first())
+        .cloned())
 }
 
 pub(crate) async fn read(
@@ -519,4 +527,25 @@ pub(crate) fn trace_lines(trace: &str) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .collect();
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn job_logs_drop_timestamps_and_keep_lines_around_failures() {
+        let mut log =
+            vec!["2026-10-17T17:26:41.334491Z 01O --- FAIL: TestLimit (0.01s)".to_string()];
+        log.extend((0..30).map(|n| format!("2026-10-17T17:26:41.334491Z 01O step {n}")));
+        let lines = trace_lines(&log.join("\n"));
+        assert_eq!(lines[0], "--- FAIL: TestLimit (0.01s)");
+        let excerpt = failure_excerpt(&lines);
+        assert_eq!(
+            excerpt[..2],
+            ["1: --- FAIL: TestLimit (0.01s)", "2: step 0"]
+        );
+        assert_eq!(excerpt[4], "...");
+        assert_eq!(excerpt.last().unwrap(), "31: step 29");
+    }
 }

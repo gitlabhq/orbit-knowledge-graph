@@ -592,7 +592,7 @@ fn serve_routes(
 }
 
 #[test]
-fn context_branch_target_reads_its_merge_request_and_failed_branch_pipeline() {
+fn context_branch_target_reads_its_merge_request_and_last_failed_pipeline() {
     let (base_url, handle) = serve_routes(vec![
         (
             "merge_requests?",
@@ -600,7 +600,7 @@ fn context_branch_target_reads_its_merge_request_and_failed_branch_pipeline() {
         ),
         (
             "pipelines?ref=fix-ci",
-            r#"[{"id":7,"status":"failed","ref":"fix-ci","sha":"0123456789abcdef","web_url":"https://localhost/p/-/pipelines/7"}]"#,
+            r#"[{"id":8,"status":"skipped"},{"id":7,"status":"failed","ref":"fix-ci","sha":"0123456789abcdef","web_url":"https://localhost/p/-/pipelines/7"}]"#,
         ),
         ("pipelines/7/jobs", "[]"),
         ("pipelines?ref=refs", r#"[{"id":8,"status":"skipped"}]"#),
