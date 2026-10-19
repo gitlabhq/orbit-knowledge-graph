@@ -170,38 +170,7 @@ fn emit_node(
         }
         RelationNode::Filter { input, predicates } => {
             let mut output = emit_ref(input, graph, materialized, current);
-            let mut joined_relations = HashSet::new();
-            for (index, planned) in predicates.iter().enumerate() {
-                if let crate::passes::plan::requirements::Predicate::Membership {
-                    columns,
-                    relation,
-                    keys,
-                } = planned
-                    && let [value] = columns.as_slice()
-                    && let [key] = keys.as_slice()
-                {
-                    if !joined_relations.insert(*relation) {
-                        continue;
-                    }
-                    let context = current.unwrap_or(id);
-                    let keys_alias = format!("_orbit_keys_{}_{}_{}", relation.0, context.0, index);
-                    let keys = emit_ref(
-                        &RelationRef::from(*relation).alias(&keys_alias),
-                        graph,
-                        materialized,
-                        current,
-                    );
-                    output.from = TableRef::join(
-                        crate::ast::JoinType::Semi,
-                        output.from,
-                        keys.from,
-                        Expr::eq(column(value), Expr::col(&keys_alias, key)),
-                    );
-                    output.predicates.extend(keys.predicates);
-                } else {
-                    output.predicates.push(predicate(planned));
-                }
-            }
+            output.predicates.extend(predicates.iter().map(predicate));
             output
         }
         RelationNode::Project { input, outputs } => {

@@ -517,11 +517,6 @@ impl Context {
                     Ok(format!("{left_sql} CROSS JOIN {right_sql}"))
                 } else {
                     let on_expr = self.emit_expr(on);
-                    let join_type = if *join_type == JoinType::Semi {
-                        "SEMI".to_string()
-                    } else {
-                        join_type.to_string()
-                    };
                     Ok(format!(
                         "{left_sql} {join_type} JOIN {right_sql} ON {on_expr}"
                     ))

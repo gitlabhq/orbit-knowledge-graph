@@ -198,7 +198,6 @@ pub enum TableRef {
 #[strum(serialize_all = "UPPERCASE")]
 pub enum JoinType {
     Inner,
-    Semi,
     Left,
     Cross,
 }
