@@ -77,6 +77,7 @@ pub async fn create_tables_with_selective_cloning(
     if &scope != requested_scope {
         orbit_log_fields::warn!(
             safe(REQUESTED_MIGRATION_SCOPE) = requested_scope.as_str(),
+            safe(REQUESTED_ENTITIES) = requested_scope.sdlc_entities(),
             safe(MIGRATION_SCOPE) = scope.as_str(),
             safe(ENTITIES) = scope.sdlc_entities(),
             "migration scope widened because a changed table has writers outside the requested scope"

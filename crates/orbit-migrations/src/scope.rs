@@ -81,10 +81,11 @@ impl std::fmt::Display for MigrationScope {
             Self::Full => write!(f, "scope \"*\""),
             Self::None => write!(f, "scope none"),
             Self::Code => write!(f, "scope code"),
-            Self::Sdlc(_) => match self.sdlc_entities() {
-                Some(list) => write!(f, "scope sdlc, entities [{list}]"),
-                None => write!(f, "scope sdlc"),
-            },
+            Self::Sdlc(entities) if entities.is_empty() => write!(f, "scope sdlc"),
+            Self::Sdlc(entities) => {
+                let list = entities.iter().cloned().collect::<Vec<_>>().join(", ");
+                write!(f, "scope sdlc, entities [{list}]")
+            }
         }
     }
 }
