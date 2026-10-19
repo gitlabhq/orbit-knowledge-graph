@@ -77,6 +77,11 @@ pre-commit:
     - name: prompt-version-bump
       run: bash ./scripts/checks/check-prompt-version-bump.sh
       glob: "config/prompts/**/*.yml"
+    - name: gitlab-ci
+      run: mise exec -- glab ci lint --include-jobs
+      glob:
+        - ".gitlab-ci.yml"
+        - ".gitlab/ci/**/*.yml"
     - name: ontology-schema
       run: mise run ontology:validate
       glob: "config/ontology/**/*.yaml"
