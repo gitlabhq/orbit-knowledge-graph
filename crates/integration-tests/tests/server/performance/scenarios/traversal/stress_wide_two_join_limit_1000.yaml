@@ -15,6 +15,3 @@ query:
       ],
       "limit": 1000
     }
-
-expect:
-  compile_only: true

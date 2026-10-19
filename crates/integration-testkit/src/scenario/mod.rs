@@ -168,6 +168,13 @@ pub(crate) fn discover(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+pub fn yaml_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    discover(root, &mut files);
+    files.sort();
+    files
+}
+
 pub(crate) fn scenario_name(root: &Path, file: &Path) -> String {
     let relative = file
         .strip_prefix(root)

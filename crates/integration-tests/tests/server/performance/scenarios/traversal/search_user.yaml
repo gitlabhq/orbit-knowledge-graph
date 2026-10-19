@@ -7,6 +7,3 @@ query:
       "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
       "limit": 5
     }
-
-expect:
-  compile_only: true

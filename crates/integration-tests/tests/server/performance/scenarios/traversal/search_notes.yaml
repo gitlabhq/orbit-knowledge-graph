@@ -7,6 +7,3 @@ query:
       "nodes": [{"id": "n", "entity": "Note", "node_ids": [3240810]}],
       "limit": 100
     }
-
-expect:
-  compile_only: true
