@@ -49,10 +49,11 @@ impl Handler for NamespaceDeletionHandler {
             message.to_event().map_err(|error| match error {
                 SerializationError::Json(err) => HandlerError::Deserialization(err),
             })?;
+        let message_span = tracing::Span::current();
+        message_span.record("gl_root_namespace_id", payload.namespace_id);
 
         if !payload.traversal_path.is_valid() {
             error!(
-                namespace_id = payload.namespace_id,
                 traversal_path = %payload.traversal_path,
                 "invalid traversal_path: must match <org_id>/<namespace_id>/"
             );
@@ -61,6 +62,7 @@ impl Handler for NamespaceDeletionHandler {
                 payload.traversal_path
             )));
         }
+        message_span.record("traversal_path", payload.traversal_path.as_str());
 
         let still_deleted = self
             .store
@@ -69,10 +71,7 @@ impl Handler for NamespaceDeletionHandler {
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 
         if !still_deleted {
-            info!(
-                namespace_id = payload.namespace_id,
-                "namespace was re-enabled, skipping deletion and clearing schedule"
-            );
+            info!("namespace was re-enabled, skipping deletion and clearing schedule");
 
             self.store
                 .mark_deletion_complete(payload.namespace_id, &payload.traversal_path)
@@ -83,11 +82,7 @@ impl Handler for NamespaceDeletionHandler {
         }
 
         let started_at = Instant::now();
-        info!(
-            namespace_id = payload.namespace_id,
-            traversal_path = %payload.traversal_path,
-            "starting namespace deletion"
-        );
+        info!(dispatch_id = %payload.dispatch_id, "starting namespace deletion");
 
         let outcomes = self
             .store
@@ -99,7 +94,6 @@ impl Handler for NamespaceDeletionHandler {
             if let Some(ref error) = outcome.error {
                 self.metrics.record_table_error();
                 warn!(
-                    namespace_id = payload.namespace_id,
                     table = %outcome.table,
                     error,
                     "failed to delete namespace data from table"
@@ -108,7 +102,6 @@ impl Handler for NamespaceDeletionHandler {
             } else {
                 self.metrics.record_table_deleted(outcome.duration_seconds);
                 info!(
-                    namespace_id = payload.namespace_id,
                     table = %outcome.table,
                     duration_ms = (outcome.duration_seconds * 1000.0) as u64,
                     "namespace data deleted from table"
@@ -128,11 +121,7 @@ impl Handler for NamespaceDeletionHandler {
             .await
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 
-        info!(
-            namespace_id = payload.namespace_id,
-            traversal_path = %payload.traversal_path,
-            "deleted namespace checkpoints"
-        );
+        info!("deleted namespace checkpoints");
 
         self.store
             .mark_deletion_complete(payload.namespace_id, &payload.traversal_path)
@@ -141,7 +130,6 @@ impl Handler for NamespaceDeletionHandler {
 
         let elapsed = started_at.elapsed();
         info!(
-            namespace_id = payload.namespace_id,
             duration_ms = elapsed.as_millis() as u64,
             "namespace deletion completed"
         );

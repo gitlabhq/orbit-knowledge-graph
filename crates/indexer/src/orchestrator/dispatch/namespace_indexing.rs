@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use tracing::{debug, warn};
+use tracing::{Instrument, debug, info_span, warn};
 use uuid::Uuid;
 
 use super::DispatchOutcome;
@@ -38,38 +38,40 @@ impl NamespaceIndexingDispatch {
 
         for namespace in namespaces {
             let traversal_path = &namespace.traversal_path;
-            if !traversal_path.is_valid() {
-                warn!(
-                    namespace_id = namespace.namespace_id,
-                    %traversal_path,
-                    "skipping namespace with invalid traversal_path"
-                );
-                continue;
-            }
-
-            let request = NamespaceIndexingRequest {
-                namespace: namespace.namespace_id,
-                traversal_path: traversal_path.clone(),
-                watermark,
-                dispatch_id: Uuid::new_v4(),
-                campaign_id: campaign_id.clone(),
-                targets: namespace.targets.clone(),
-            };
-            let subscription = request.publish_subscription();
-            let envelope = Envelope::new(&request).map_err(TaskError::new)?;
-
-            match self.nats.publish(&subscription, &envelope).await {
-                Ok(()) => {
-                    outcome.dispatched += 1;
-                    debug!(
-                        namespace_id = namespace.namespace_id,
-                        %traversal_path,
-                        "dispatched namespace indexing request"
-                    );
+            let span = info_span!(
+                "dispatch_namespace",
+                gl_root_namespace_id = namespace.namespace_id,
+                traversal_path = tracing::field::Empty,
+            );
+            let dispatch = async {
+                if !traversal_path.is_valid() {
+                    warn!(%traversal_path, "skipping namespace with invalid traversal_path");
+                    return Ok(());
                 }
-                Err(NatsError::PublishDuplicate) => outcome.skipped += 1,
-                Err(error) => return Err(TaskError::new(error)),
-            }
+                tracing::Span::current().record("traversal_path", traversal_path.as_str());
+
+                let request = NamespaceIndexingRequest {
+                    namespace: namespace.namespace_id,
+                    traversal_path: traversal_path.clone(),
+                    watermark,
+                    dispatch_id: Uuid::new_v4(),
+                    campaign_id: campaign_id.clone(),
+                    targets: namespace.targets.clone(),
+                };
+                let subscription = request.publish_subscription();
+                let envelope = Envelope::new(&request).map_err(TaskError::new)?;
+
+                match self.nats.publish(&subscription, &envelope).await {
+                    Ok(()) => {
+                        outcome.dispatched += 1;
+                        debug!("dispatched namespace indexing request");
+                    }
+                    Err(NatsError::PublishDuplicate) => outcome.skipped += 1,
+                    Err(error) => return Err(TaskError::new(error)),
+                }
+                Ok::<(), TaskError>(())
+            };
+            dispatch.instrument(span).await?;
         }
 
         Ok(outcome)

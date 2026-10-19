@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
-use tracing::{debug, info, warn};
+use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 
 use crate::checkpoint::{Checkpoint, CheckpointStore};
@@ -87,26 +87,36 @@ impl NamespaceDeletionScheduler {
 
         let mut reconciled = 0u64;
         for root in &roots {
-            if !root.is_valid() {
-                warn!(
-                    traversal_path = %root,
-                    "skipping reconcile for enabled namespace with invalid traversal_path"
-                );
-                continue;
-            }
-
-            let outcomes = self.store.reconcile_moved_entities(root).await;
-            for outcome in &outcomes {
-                if let Some(error) = &outcome.error {
+            let span = info_span!(
+                "reconcile_namespace",
+                gl_root_namespace_id = tracing::field::Empty,
+                traversal_path = tracing::field::Empty,
+            );
+            let reconcile = async {
+                if !root.is_valid() {
                     warn!(
                         traversal_path = %root,
-                        table = %outcome.table,
-                        error,
-                        "failed to reconcile moved entities for table"
+                        "skipping reconcile for enabled namespace with invalid traversal_path"
                     );
+                    return;
                 }
-            }
-            reconciled += 1;
+                let span = tracing::Span::current();
+                span.record("gl_root_namespace_id", root.top_level_namespace_id());
+                span.record("traversal_path", root.as_str());
+
+                let outcomes = self.store.reconcile_moved_entities(root).await;
+                for outcome in &outcomes {
+                    if let Some(error) = &outcome.error {
+                        warn!(
+                            table = %outcome.table,
+                            error,
+                            "failed to reconcile moved entities for table"
+                        );
+                    }
+                }
+                reconciled += 1;
+            };
+            reconcile.instrument(span).await;
         }
 
         info!(
@@ -188,38 +198,44 @@ impl NamespaceDeletionScheduler {
         let mut skipped = 0u64;
 
         for entry in &entries {
-            let request = NamespaceDeletionRequest {
-                namespace_id: entry.namespace_id,
-                traversal_path: entry.traversal_path.clone(),
-                dispatch_id,
-            };
-
-            let subscription = request.publish_subscription();
-            let envelope = Envelope::new(&request).map_err(|error| {
-                self.metrics.record_error(self.name(), "publish");
-                TaskError::new(error)
-            })?;
-
-            match self.nats.publish(&subscription, &envelope).await {
-                Ok(()) => {
-                    dispatched += 1;
-                    debug!(
-                        namespace_id = entry.namespace_id,
-                        "dispatched namespace deletion request"
-                    );
-                }
-                Err(crate::nats::NatsError::PublishDuplicate) => {
-                    skipped += 1;
-                    debug!(
-                        namespace_id = entry.namespace_id,
-                        "skipped, deletion request already in-flight"
-                    );
-                }
-                Err(error) => {
-                    self.metrics.record_error(self.name(), "publish");
-                    return Err(TaskError::new(error));
-                }
+            let span = info_span!(
+                "dispatch_namespace_deletion",
+                gl_root_namespace_id = entry.namespace_id,
+                traversal_path = tracing::field::Empty,
+            );
+            if entry.traversal_path.is_valid() {
+                span.record("traversal_path", entry.traversal_path.as_str());
             }
+            let dispatch = async {
+                let request = NamespaceDeletionRequest {
+                    namespace_id: entry.namespace_id,
+                    traversal_path: entry.traversal_path.clone(),
+                    dispatch_id,
+                };
+
+                let subscription = request.publish_subscription();
+                let envelope = Envelope::new(&request).map_err(|error| {
+                    self.metrics.record_error(self.name(), "publish");
+                    TaskError::new(error)
+                })?;
+
+                match self.nats.publish(&subscription, &envelope).await {
+                    Ok(()) => {
+                        dispatched += 1;
+                        debug!("dispatched namespace deletion request");
+                    }
+                    Err(crate::nats::NatsError::PublishDuplicate) => {
+                        skipped += 1;
+                        debug!("skipped, deletion request already in-flight");
+                    }
+                    Err(error) => {
+                        self.metrics.record_error(self.name(), "publish");
+                        return Err(TaskError::new(error));
+                    }
+                }
+                Ok(())
+            };
+            dispatch.instrument(span).await?;
         }
 
         self.metrics

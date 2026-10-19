@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use siphon_proto::LogicalReplicationEvents;
 use siphon_proto::replication_event::Operation;
-use tracing::{debug, warn};
+use tracing::{Instrument, debug, info_span, warn};
 
 use crate::nats::NatsServices;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
@@ -115,37 +115,43 @@ impl Route for CodeIndexingTaskRoute {
         let mut outcome = RouteOutcome::default();
 
         for request in requests.into_values() {
-            let envelope = Envelope::new(&request).map_err(|error| {
-                self.metrics.record_error(METRIC_NAME, "publish");
-                TaskError::new(error)
-            })?;
-
-            match self
-                .nats
-                .publish(&request.publish_subscription(), &envelope)
-                .await
-            {
-                Ok(()) => {
-                    outcome.dispatched += 1;
-                    debug!(
-                        task_id = request.task_id,
-                        project_id = request.project_id,
-                        "dispatched code indexing task request"
-                    );
-                }
-                Err(crate::nats::NatsError::PublishDuplicate) => {
-                    outcome.skipped += 1;
-                    debug!(
-                        task_id = request.task_id,
-                        project_id = request.project_id,
-                        "skipped code indexing task request, already in-flight"
-                    );
-                }
-                Err(error) => {
-                    self.metrics.record_error(METRIC_NAME, "publish");
-                    return Err(TaskError::new(error));
-                }
+            let span = info_span!(
+                "dispatch_code_indexing_task",
+                task_id = request.task_id,
+                gl_project_id = request.project_id,
+                gl_root_namespace_id = request.traversal_path.top_level_namespace_id(),
+                traversal_path = tracing::field::Empty,
+            );
+            if request.traversal_path.is_valid_any_depth() {
+                span.record("traversal_path", request.traversal_path.as_str());
             }
+            let dispatch = async {
+                let envelope = Envelope::new(&request).map_err(|error| {
+                    self.metrics.record_error(METRIC_NAME, "publish");
+                    TaskError::new(error)
+                })?;
+
+                match self
+                    .nats
+                    .publish(&request.publish_subscription(), &envelope)
+                    .await
+                {
+                    Ok(()) => {
+                        outcome.dispatched += 1;
+                        debug!("dispatched code indexing task request");
+                    }
+                    Err(crate::nats::NatsError::PublishDuplicate) => {
+                        outcome.skipped += 1;
+                        debug!("skipped code indexing task request, already in-flight");
+                    }
+                    Err(error) => {
+                        self.metrics.record_error(METRIC_NAME, "publish");
+                        return Err(TaskError::new(error));
+                    }
+                }
+                Ok(())
+            };
+            dispatch.instrument(span).await?;
         }
 
         if outcome.dispatched > 0 || outcome.skipped > 0 {
