@@ -1,0 +1,29 @@
+name: "Ruby: calls inside a lambda bound to a local reach the callee"
+
+fixtures:
+  - path: main.rb
+    content: |
+      def helper(x)
+        x
+      end
+
+      def run
+        f = lambda { |x| helper(x) }
+        f.call(1)
+      end
+
+      def stabby
+        g = ->(x) { helper(x) }
+        g.call(2)
+      end
+
+tests:
+  - name: the stabby lambda is a def; an identifier assigned a lambda block stays a Kernel#lambda call owned by run (engine gap)
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'helper'
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { empty: false }
+      - { column_values: { field: caller, values: ["g", "run"] } }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::common::DummyClaims;
-use crate::indexer::common::dispatch::start_nats;
+use crate::indexer::common::start_nats;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use integration_testkit::TestContext;
 use jsonwebtoken::{EncodingKey, Header, encode};

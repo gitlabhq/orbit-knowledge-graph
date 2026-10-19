@@ -203,7 +203,6 @@ impl EntityHandler {
                 .await
         } else {
             info!(
-                entity = %self.plan.name,
                 partitions = ranges.len(),
                 "running partitioned initial load"
             );
@@ -239,7 +238,6 @@ impl EntityHandler {
                         // A parent still at its first-pass start re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
                         Err(incomplete) => {
                             info!(
-                                entity = %self.plan.name,
                                 checkpoint = %checkpoint_key,
                                 incomplete = incomplete.len(),
                                 partitions = %incomplete.join(", "),
@@ -256,7 +254,6 @@ impl EntityHandler {
         match &result {
             Ok(stats) => {
                 debug!(
-                    entity = %self.plan.name,
                     read_rows = stats.read_rows,
                     read_bytes = stats.read_bytes,
                     written_rows = stats.written_rows,
@@ -322,7 +319,7 @@ impl EntityHandler {
                 observer: Arc::clone(&parent_pipeline_context.observer),
             };
 
-            set.spawn(async move {
+            let task = async move {
                 pipeline
                     .run_plan(
                         &partition_context,
@@ -333,7 +330,8 @@ impl EntityHandler {
                         window,
                     )
                     .await
-            });
+            };
+            set.spawn(task.in_current_span());
         }
 
         let mut errors = Vec::new();
@@ -397,6 +395,16 @@ impl Handler for EntityHandler {
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
         let request = self.deserialize(message)?;
+        let message_span = tracing::Span::current();
+        message_span.record("gl_root_namespace_id", request.namespace_id);
+        message_span.record(
+            "traversal_path",
+            request
+                .traversal_path
+                .as_ref()
+                .filter(|path| path.is_valid())
+                .map(TraversalPath::as_str),
+        );
 
         if !request.indexing_requested(&self.plan.target) {
             debug!(
@@ -409,21 +417,12 @@ impl Handler for EntityHandler {
         }
 
         let started_at = Utc::now();
-        let span = match &request.namespace_id {
-            Some(id) => info_span!(
-                "entity_indexing",
-                entity = %self.plan.name,
-                namespace_id = id,
-                dispatch_id = %request.dispatch_id,
-                campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
-            ),
-            None => info_span!(
-                "entity_indexing",
-                entity = %self.plan.name,
-                dispatch_id = %request.dispatch_id,
-                campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
-            ),
-        };
+        let span = info_span!(
+            "entity_indexing",
+            entity = %self.plan.name,
+            dispatch_id = %request.dispatch_id,
+            campaign_id = request.campaign_id.as_deref(),
+        );
 
         async {
             let result = self.execute(context.clone(), request).await;

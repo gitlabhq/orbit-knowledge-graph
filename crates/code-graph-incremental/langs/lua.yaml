@@ -59,26 +59,26 @@ stages:
   - name: retag-calls
     rules:
       - match: '(function_call name: (dot_index_expression table: $T:identifier field: $F:identifier) arguments: $A)'
-        replace: '(__call (__callee (__member @$F (__object @$T))) $A)'
+        replace: '(__call (__callee (__member @$F (__object @$T $T))) $A)'
       - match: '(function_call name: (method_index_expression table: $T:identifier method: $F:identifier) arguments: $A)'
-        replace: '(__call (__callee (__member @$F (__object @$T))) $A)'
+        replace: '(__call (__callee (__member @$F (__object @$T $T))) $A)'
       - match: '(function_call name: $F:identifier arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
 
   - name: classify
     rules:
       - match: '(local_assignment $N:__name $V:table_constructor)'
-        replace: '(__def (__defname @$N) (__class) $V)'
+        replace: '(__def (__defname @$N $N) (__class) $V)'
       - match: '(local_assignment $N:__name $V:__call)'
-        replace: '(__binding @$N (__declaration) (__rhs $V))'
+        replace: '(__binding @$N $N (__declaration) (__rhs $V))'
       - match: '(local_assignment $N:__name $V)'
-        replace: '(__binding @$N (__declaration) (__rhs @$V))'
+        replace: '(__binding @$N $N (__declaration) (__rhs @$V $V))'
       - match: '(assignment_statement (variable_list $N:identifier) (expression_list $V:table_constructor))'
         replace: '(__def (__defname @$N) (__class) $V)'
       - match: '(assignment_statement (variable_list $N:identifier) (expression_list $V:__call))'
         replace: '(__binding @$N (__rhs $V))'
       - match: '(assignment_statement (variable_list $N:identifier) (expression_list $V))'
-        replace: '(__binding @$N (__rhs @$V))'
+        replace: '(__binding @$N (__rhs @$V $V))'
       - match: '(if_statement condition: $C $$$X)'
         replace: '(__ssa_branch $C (__ssa_arm $$$X))'
       - match: '(for_statement body: $B)'
@@ -101,7 +101,7 @@ stages:
       - match: '(block $$$B)'
         replace: '(__scope $$$B)'
       - match: '(__ssa_return (expression_list $V:identifier))'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:
@@ -110,19 +110,19 @@ stages:
       - match: '(__def (__method))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__class))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
-        tag: { callable: "true" }
+        tag: { callable: "true", value: "true" }
       - match: '(__def (__struct))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
       - match: '(__def (__trait))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__enum))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
 
   - name: tag-file-dir
     rules:

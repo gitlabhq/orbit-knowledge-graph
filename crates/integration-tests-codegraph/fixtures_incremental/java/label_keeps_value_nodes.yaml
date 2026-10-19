@@ -1,0 +1,30 @@
+name: "Java: a value label keeps the calls inside its expression"
+
+fixtures:
+  - path: com/example/Shapes.java
+    content: |
+      package com.example;
+      public class Shapes {
+          int f() { return 1; }
+          Shapes g() { return this; }
+          void sum() { int x = this.f() + f(); }
+          void cond() { int w = true ? f() : 0; }
+          void mul() { int x = 0; x = f() * 2; }
+          void cast() { Object o = (Object) g(); }
+          void chain() { Shapes y = g().g(); }
+      }
+
+tests:
+  - name: "a call inside a sum, conditional, assignment, cast or chain root links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["sum", "cond", "mul", "cast", "chain"]
+      RETURN caller.name AS caller, callee.name AS callee, count(caller) AS n
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 5 }
+      - { row: { caller: sum, callee: f } }
+      - { row: { caller: cond, callee: f } }
+      - { row: { caller: mul, callee: f } }
+      - { row: { caller: cast, callee: g } }
+      - { row: { caller: chain, callee: g } }

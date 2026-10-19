@@ -818,6 +818,7 @@ impl Pipeline {
             sem_tx.send(()).unwrap();
         }
 
+        let span = tracing::Span::current();
         std::thread::scope(|s| {
             for (family, files) in &files_by_family {
                 sem_rx.recv().unwrap();
@@ -835,7 +836,9 @@ impl Pipeline {
                 let edges_count = &edges_count;
                 let all_errors = &all_errors;
                 let worker_threads = ctx.config.worker_threads;
+                let span = &span;
                 s.spawn(move || {
+                    let _entered = span.enter();
                     if ctx.is_cancelled() {
                         sem_tx.send(()).ok();
                         return;
@@ -848,6 +851,20 @@ impl Pipeline {
                     if worker_threads > 0 {
                         pool_builder = pool_builder.num_threads(worker_threads);
                     }
+                    // The pool serves one family of one project, so all of its jobs belong
+                    // to this span.
+                    let pool_builder = pool_builder.spawn_handler(|thread| {
+                        let span = span.clone();
+                        let mut builder = std::thread::Builder::new();
+                        if let Some(name) = thread.name() {
+                            builder = builder.name(name.to_owned());
+                        }
+                        if let Some(stack_size) = thread.stack_size() {
+                            builder = builder.stack_size(stack_size);
+                        }
+                        builder.spawn(move || span.in_scope(|| thread.run()))?;
+                        Ok(())
+                    });
                     let pool = match pool_builder.build() {
                         Ok(pool) => pool,
                         Err(e) => {
@@ -2498,5 +2515,81 @@ namespace MyApp {
         assert_eq!(*progress.discoveries.lock().unwrap(), vec![(5, 4)]);
         assert_eq!(progress.parsed.load(Ordering::Relaxed), 4);
         assert_eq!(progress.resolved.load(Ordering::Relaxed), 4);
+    }
+
+    #[derive(Clone, Default)]
+    struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct LoggingProgress;
+
+    impl ProgressObserver for LoggingProgress {
+        fn files_advanced(&self, _phase: ProgressPhase, _count: usize) {
+            tracing::info!("files advanced");
+        }
+    }
+
+    #[test]
+    fn logs_from_language_worker_threads_carry_the_caller_span() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let mut inventory = Vec::new();
+        for index in 0..64 {
+            let name = format!("m{index}.py");
+            let content = format!("def f{index}():\n    pass\n");
+            std::fs::write(root.join(&name), &content).unwrap();
+            inventory.push(FileInventoryEntry {
+                path: name,
+                size: content.len() as u64,
+                decision: Decision::Parse,
+                label: Default::default(),
+            });
+        }
+        // Worker threads log to the global subscriber, not to a thread-local default.
+        let buffer = LogBuffer::default();
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber).unwrap();
+
+        let span = tracing::info_span!("project", gl_root_namespace_id = 9970_u64);
+        span.in_scope(|| {
+            Pipeline::run_with_tracer(
+                root,
+                Arc::new(FileInventory::new(inventory)),
+                PipelineConfig {
+                    progress: Arc::new(LoggingProgress),
+                    worker_threads: 4,
+                    ..Default::default()
+                },
+                crate::v2::trace::Tracer::new(false),
+                Arc::new(TestCapture::new()),
+                Arc::new(|_: &str, _: RecordBatch| Ok(())),
+            )
+        });
+
+        let logs = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        let lines: Vec<&str> = logs
+            .lines()
+            .filter(|line| line.contains("files advanced"))
+            .collect();
+        assert!(!lines.is_empty(), "{logs}");
+        let outside_span: Vec<&&str> = lines
+            .iter()
+            .filter(|line| !line.contains("gl_root_namespace_id=9970"))
+            .collect();
+        assert!(outside_span.is_empty(), "{outside_span:#?}");
     }
 }

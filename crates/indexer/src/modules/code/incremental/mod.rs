@@ -62,7 +62,9 @@ pub(super) async fn load(
     };
     let reader = StreamReader::new(stream.map(|result| result.map_err(std::io::Error::other)));
     let handle = tokio::runtime::Handle::current();
+    let span = tracing::Span::current();
     let result = tokio::task::spawn_blocking(move || {
+        let _entered = span.enter();
         Vfs::load(
             Archive(SyncIoBridge::new_with_handle(reader, handle)),
             CodePolicy,

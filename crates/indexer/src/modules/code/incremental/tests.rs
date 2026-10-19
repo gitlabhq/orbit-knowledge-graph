@@ -859,13 +859,7 @@ async fn excluded_files_past_the_file_limit_do_not_fail_the_repository() {
     let repository = load(stream(build_tar_gz(&files)), &config).await.unwrap();
     assert_eq!(repository.usage().files, 5);
     assert_eq!(repository.usage().dropped_listed, 7);
-    let logs = Logs::default();
-    let writer = logs.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(move || writer.clone())
-        .with_ansi(false)
-        .finish();
-    let _logging = tracing::subscriber::set_default(subscriber);
+    let (logs, _logging) = crate::testkit::logs::capture_logs();
     let sink = Arc::new(|_: &str, _: RecordBatch| Ok(()));
     let report = IndexFixture::new()
         .run_with(&config, &files, options(), sink)
@@ -875,23 +869,9 @@ async fn excluded_files_past_the_file_limit_do_not_fail_the_repository() {
     assert_eq!(report.stats.files_parsed, 2);
     assert_eq!(report.stats.files_discovered, 12);
     assert_eq!(report.stats.files_skipped, 10);
-    let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    let logs = logs.text();
     assert!(logs.contains("WARN"), "{logs}");
     assert!(logs.contains("dropped=7"), "{logs}");
-}
-
-#[derive(Clone, Default)]
-struct Logs(Arc<Mutex<Vec<u8>>>);
-
-impl std::io::Write for Logs {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
 }
 
 #[tokio::test]

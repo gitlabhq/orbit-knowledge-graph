@@ -95,7 +95,7 @@ fn generate_test_pki(server_sans: &[String]) -> TestPki {
 
 async fn resolve_container_host() -> String {
     // Start a throwaway container to discover the host (localhost vs docker in CI)
-    let probe = GenericImage::new("nats", "2.11-alpine")
+    let probe = GenericImage::new("nats", "2.15.0-alpine")
         .with_mapped_port(0, ContainerPort::Tcp(4222))
         .start()
         .await
@@ -151,7 +151,7 @@ async fn start_nats_tls_container(
 ) -> (testcontainers::ContainerAsync<GenericImage>, String) {
     let config_data = nats_tls_config().into_bytes();
 
-    let container = GenericImage::new("nats", "2.11-alpine")
+    let container = GenericImage::new("nats", "2.15.0-alpine")
         .with_copy_to("/etc/nats/nats.conf", config_data)
         .with_copy_to("/etc/nats/ca.pem", pki.ca_cert_pem.as_bytes().to_vec())
         .with_copy_to(
@@ -164,7 +164,7 @@ async fn start_nats_tls_container(
         )
         .with_cmd(vec!["--config", "/etc/nats/nats.conf"])
         .with_mapped_port(0, ContainerPort::Tcp(4222))
-        .with_ready_conditions(vec![WaitFor::seconds(5)])
+        .with_ready_conditions(vec![WaitFor::message_on_stderr("Server is ready")])
         .start()
         .await
         .expect("failed to start NATS TLS container");
@@ -178,7 +178,10 @@ async fn start_nats_tls_container(
         .await
         .expect("failed to get NATS port");
 
-    (container, format!("{host}:{port}"))
+    let url = format!("{host}:{port}");
+    super::common::wait_for_nats_port(&url).await;
+
+    (container, url)
 }
 
 #[tokio::test]

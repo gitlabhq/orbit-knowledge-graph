@@ -47,7 +47,7 @@ stages:
       - match: '(compilation_unit $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_clause name: $N:package_identifier)'
-        replace: '(sc_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
+        replace: '(sc_pkg (__package @$N $N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*"))))'
         tag: { import_type: Import }
         tag_on: __import
       - match: '(return_expression $$$V)'
@@ -59,11 +59,11 @@ stages:
       - match: '(extends_clause type: $T:type_identifier $$$W:type_identifier)'
         replace: '(extends_clause (__supertype @$T) $$$W=>__supertype)'
       - match: '(class_parameter name: $N:identifier type: $T:type_identifier)'
-        replace: '(sc_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
+        replace: '(sc_prop (__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T))))) (__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T)))))'
       - match: '(class_parameter name: $N:identifier)'
         replace: '(__def (__defname @$N) (__property))'
       - match: '(parameter name: $N:identifier type: $T:type_identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
       - match: '(parameter name: $N:identifier)'
         replace: '(__binding @$N)'
 
@@ -76,7 +76,7 @@ stages:
       - match: '(field_expression value: $O:call_expression field: $F:identifier)'
         replace: '(__member @$F (__object $O))'
       - match: '(field_expression value: $O field: $F:identifier)'
-        replace: '(__member @$F (__object @$O))'
+        replace: '(__member @$F (__object @$O $O))'
 
   - name: retag-calls
     rules:
@@ -85,14 +85,14 @@ stages:
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:identifier arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
         tag: { implicit_self: "true" }
       - match: '(call_expression function: $F arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
       - match: '(instance_expression $T:type_identifier $A:arguments)'
-        replace: '(__call (__callee @$T) $A)'
+        replace: '(__call (__callee @$T $T) $A)'
       - match: '(instance_expression $T:type_identifier)'
-        replace: '(__call (__callee @$T))'
+        replace: '(__call (__callee @$T $T))'
 
   - name: classify
     rules:
@@ -103,15 +103,15 @@ stages:
       - match: '(val_definition pattern: $N:identifier type:? $T:type_identifier value: $V:__ssa_branch)'
         replace: '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs $V))'
       - match: '(val_definition pattern: $N:identifier type:? $T:type_identifier value: $V)'
-        replace: '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs @$V $V))'
       - match: '(var_definition pattern: $N:identifier type:? $T:type_identifier value: $V:__call)'
         replace: '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs $V))'
       - match: '(var_definition pattern: $N:identifier type:? $T:type_identifier value: $V)'
-        replace: '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__ssa_typed? @$T) (__rhs @$V $V))'
       - match: '(assignment_expression left: $N:identifier right: $R:__call)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_expression left: $N:identifier right: $R)'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N (__rhs @$R $R))'
       - match: '(throw_expression $$$V)'
         replace: '(__ssa_branch $$$V)'
       - match: '(if_expression condition: $C consequence: $Q alternative:? $A)'
@@ -125,7 +125,7 @@ stages:
       - match: '(while_expression body: $B)'
         replace: '(__ssa_loop $B)'
       - match: '(function_definition $M?:modifiers name: $N:identifier $TP?:type_parameters parameters: $P return_type:? $RT:type_identifier body: $B)'
-        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $P $B)'
+        replace: '(__def (__defname @$N $N) (__function) (__ssa_return_type? @$RT) $M $P $B)'
       - match: '(function_definition $M?:modifiers name: $N:identifier $TP?:type_parameters return_type:? $RT:type_identifier body: $B)'
         replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$RT) $M $B)'
       - match: '(function_declaration $M?:modifiers name: $N:identifier parameters:? $P return_type:? $RT:type_identifier)'
@@ -145,29 +145,32 @@ stages:
     rules:
       - match: '(block $$$B)'
         replace: '(__scope $$$B)'
+        tag: { hoisted: "true" }
       - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:
       - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", scoped: "true" }
       - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", scoped: "true" }
       - match: '(__def (__class))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
-        tag: { callable: "true" }
+        tag: { callable: "true", value: "true" }
       - match: '(__def (__struct))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
       - match: '(__def (__trait))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__enum))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
+      - match: '(__def (__property))'
+        tag: { value: "true" }
 
   - name: tag-file-dir
     rules:

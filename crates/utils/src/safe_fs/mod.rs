@@ -6,8 +6,6 @@ mod syscalls;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
-use rustix::fs::{AtFlags, FileType, readlinkat, statat};
-
 pub enum Entry {
     File(File),
     Symlink(PathBuf),
@@ -70,16 +68,46 @@ pub fn inspect(path: &Path) -> io::Result<Option<Entry>> {
         .unwrap_or(Path::new("."));
     let parent = syscalls::open(parent, true)?;
     let name = path.file_name().ok_or(io::ErrorKind::InvalidInput)?;
-    let metadata = statat(&parent, name, AtFlags::SYMLINK_NOFOLLOW)?;
+    inspect_in(path, &parent, name)
+}
+
+#[cfg(unix)]
+fn inspect_in(
+    path: &Path,
+    parent: &std::fs::File,
+    name: &std::ffi::OsStr,
+) -> io::Result<Option<Entry>> {
+    use rustix::fs::{AtFlags, FileType, readlinkat, statat};
+    use std::os::unix::ffi::OsStrExt;
+
+    let metadata = statat(parent, name, AtFlags::SYMLINK_NOFOLLOW)?;
     Ok(match FileType::from_raw_mode(metadata.st_mode) {
         FileType::RegularFile => Some(Entry::File(File::new(path.into(), metadata.st_size as u64))),
         FileType::Symlink => {
-            use std::os::unix::ffi::OsStrExt;
-            let target = readlinkat(&parent, name, Vec::new())?;
+            let target = readlinkat(parent, name, Vec::new())?;
             Some(Entry::Symlink(PathBuf::from(std::ffi::OsStr::from_bytes(
                 target.to_bytes(),
             ))))
         }
         _ => None,
+    })
+}
+
+// Looks up the leaf by path, not relative to `parent`. `File::read` re-validates
+// every component, so a swapped ancestor can at most misreport metadata.
+#[cfg(windows)]
+fn inspect_in(
+    path: &Path,
+    _parent: &std::fs::File,
+    _name: &std::ffi::OsStr,
+) -> io::Result<Option<Entry>> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    let file_type = metadata.file_type();
+    Ok(if file_type.is_symlink() {
+        Some(Entry::Symlink(std::fs::read_link(path)?))
+    } else if file_type.is_file() {
+        Some(Entry::File(File::new(path.into(), metadata.len())))
+    } else {
+        None
     })
 }

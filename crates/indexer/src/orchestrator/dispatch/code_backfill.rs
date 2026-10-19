@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use arrow::record_batch::RecordBatch;
 use futures::StreamExt;
 use rand::seq::SliceRandom;
-use tracing::{debug, info};
+use tracing::{Instrument, debug, info, info_span};
 use uuid::Uuid;
 
 use super::DispatchOutcome;
@@ -120,8 +120,17 @@ impl CodeBackfill {
         order.shuffle(&mut rand::rng());
         for index in order {
             let (namespace_id, traversal_path) = &namespaces[index];
+            let span = info_span!(
+                "code_backfill_namespace",
+                gl_root_namespace_id = *namespace_id,
+                traversal_path = tracing::field::Empty,
+            );
+            if traversal_path.is_valid() {
+                span.record("traversal_path", traversal_path.as_str());
+            }
             let pending = self
-                .fetch_pending_for_namespace(*namespace_id, traversal_path, share)
+                .fetch_pending_for_namespace(traversal_path, share)
+                .instrument(span)
                 .await?;
             if pending.is_empty() {
                 outcome.drained_paths.push(traversal_path.clone());
@@ -200,7 +209,6 @@ impl CodeBackfill {
 
     async fn fetch_pending_for_namespace(
         &self,
-        namespace_id: i64,
         traversal_path: &TraversalPath,
         share: usize,
     ) -> Result<Vec<PendingProject>, TaskError> {
@@ -211,18 +219,13 @@ impl CodeBackfill {
             .await?;
 
         if projects.is_empty() {
-            debug!(
-                namespace_id,
-                already_checkpointed, "no pending projects in namespace"
-            );
+            debug!(already_checkpointed, "no pending projects in namespace");
             return Ok(Vec::new());
         }
 
         debug!(
-            namespace_id,
             count = projects.len(),
-            already_checkpointed,
-            "fetched pending projects for code backfill"
+            already_checkpointed, "fetched pending projects for code backfill"
         );
 
         Ok(projects)
@@ -247,6 +250,7 @@ impl CodeBackfill {
                 traversal_path: project.traversal_path.clone(),
                 dispatch_id,
                 campaign_id: campaign_id.clone(),
+                repository_storage: None,
             };
 
             let subscription = request.publish_subscription();

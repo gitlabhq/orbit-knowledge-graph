@@ -133,6 +133,7 @@ pub enum Pat {
         text: Text,
         kids: Vec<Pat>,
         optional: bool,
+        labelled: bool,
     },
     Cap {
         slot: u16,

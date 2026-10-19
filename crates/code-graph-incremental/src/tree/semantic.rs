@@ -1,8 +1,9 @@
 use std::ops::ControlFlow;
 
-use super::{Cursor, Edge, EdgeKind, Node, Step, Storage};
+use super::{Cursor, Edge, EdgeKind, Node, Storage};
 use crate::canonical::Canonical as C;
 use crate::resolver::CLASS_LIKE;
+use crate::tags::ReservedTags;
 
 impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn kind(self) -> u16 {
@@ -19,6 +20,22 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     }
     pub fn named(self) -> bool {
         self.node().named
+    }
+    pub fn lifted(self) -> bool {
+        self.node().lifted
+    }
+    pub fn labelled(self) -> bool {
+        self.node().labelled
+    }
+    pub fn is_value(self) -> bool {
+        C::try_from_u16(self.kind()).is_some_and(C::is_value)
+    }
+    pub fn stands_for(self, child: Self) -> bool {
+        !(self.labelled() && child.lifted())
+    }
+    pub fn value_child(self, kind: C) -> Option<Self> {
+        self.children()
+            .find(|node| node.is(kind) && self.stands_for(*node))
     }
     pub fn field(self) -> u16 {
         self.node().field
@@ -68,8 +85,34 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn is_dispatch_contract(self) -> bool {
         self.has(C::Trait) || self.has(C::Interface)
     }
+    pub fn role(self) -> Role {
+        let call = match self.is(C::Callee) {
+            true => self.parent(),
+            false => Some(self).filter(|node| node.is(C::Call)),
+        };
+        match call {
+            Some(call) if call.has(C::Type) => Role::Type,
+            Some(call) if !call.has(C::Property) => Role::Callable,
+            _ => Role::Value,
+        }
+    }
+    pub fn is_member_of(self, owner: Self) -> bool {
+        let mut header = self.child(C::Binding).is_some_and(|b| b.has(C::Ivar));
+        let mut node = self;
+        while let Some(up) = node.ancestors().find(|up| up.is(C::Def) || up.is(C::Scope)) {
+            if up.index() == owner.index() {
+                return true;
+            }
+            let header = std::mem::take(&mut header);
+            if up.is(C::Scope) || !(up.has(C::ImplBlock) || header) {
+                return false;
+            }
+            node = up;
+        }
+        false
+    }
     pub fn reference(self) -> Self {
-        self.child(C::Call)
+        self.value_child(C::Call)
             .filter(|call| call.has(C::Property))
             .and_then(|call| call.child(C::Callee))
             .unwrap_or(self)
@@ -78,26 +121,27 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
         self.child(C::Callee)?.child(C::Member)
     }
     pub fn chain_root(self) -> Self {
-        std::iter::successors(Some(self), |node| node.child(C::Member)?.child(C::Object))
-            .last()
-            .unwrap_or(self)
+        std::iter::successors(Some(self), |node| {
+            node.value_child(C::Member)?.child(C::Object)
+        })
+        .last()
+        .unwrap_or(self)
     }
     pub fn tail_expr(self) -> Self {
-        let stop = |node: &Self| {
-            node.is(C::Call)
-                || node.is(C::SsaBranch)
-                || node.is(C::SsaReturn)
-                || node.is(C::Member)
-                || node.is(C::Obj)
-        };
+        let stop = |node: &Self| node.is_value() || node.is(C::SsaBranch) || node.is(C::SsaReturn);
         std::iter::successors(Some(self), |node| {
-            (!stop(node)).then(|| node.last_named()).flatten()
+            (!stop(node))
+                .then(|| node.last_named())
+                .flatten()
+                .filter(|tail| node.stands_for(*tail))
         })
         .last()
         .unwrap_or(self)
     }
     pub fn rhs_callee(self) -> Option<u32> {
-        self.child(C::Rhs)?.child(C::Call)?.child_sym(C::Callee)
+        self.child(C::Rhs)?
+            .value_child(C::Call)?
+            .child_sym(C::Callee)
     }
     pub fn bare_rhs(self) -> Option<Self> {
         self.child(C::Rhs)
@@ -110,9 +154,9 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     pub fn typed(self) -> Option<Self> {
         self.child(C::SsaTyped).or_else(|| {
             let rhs = self.child(C::Rhs)?;
-            rhs.child(C::Call)
+            rhs.value_child(C::Call)
                 .and_then(|call| call.child(C::Callee))
-                .or_else(|| rhs.child(C::Member))
+                .or_else(|| rhs.value_child(C::Member))
         })
     }
     pub fn enclosing_def(self, kinds: &'a [C]) -> Option<Self> {
@@ -143,13 +187,20 @@ impl<'a, S: Storage<Node = Node>> Cursor<'a, S> {
     }
 }
 
+pub fn is_name_text(text: &str) -> bool {
+    !text.is_empty()
+        && !text
+            .chars()
+            .any(|c| c.is_whitespace() || "()[]{}<>*&,;'\"=+/%^|~".contains(c))
+}
+
 pub fn infer_return_type<S: Storage<Node = Node>>(def: Cursor<'_, S>) -> Option<u32> {
     if let Some(sym) = def.child_sym(C::SsaReturnType) {
         return Some(sym);
     }
     let mut bindings = rustc_hash::FxHashMap::default();
     def.walk().run(|node, walk| {
-        if node.is(C::Def) && node.index() != def.index() {
+        if node.is(C::Def) && node.index() != def.index() || node.is(C::Lambda) {
             walk.skip_subtree();
             return ControlFlow::Continue(());
         }
@@ -163,6 +214,7 @@ pub fn infer_return_type<S: Storage<Node = Node>>(def: Cursor<'_, S>) -> Option<
         if node.is(C::SsaReturn) {
             let value = node
                 .children()
+                .filter(|child| node.stands_for(*child))
                 .find(|child| child.is(C::Call) || child.sym_opt().is_some())
                 .and_then(|child| {
                     if child.is(C::Call) {
@@ -180,22 +232,42 @@ pub fn infer_return_type<S: Storage<Node = Node>>(def: Cursor<'_, S>) -> Option<
     })
 }
 
-pub fn find_method_in<'a, S: Storage<Node = Node>>(
-    class: Cursor<'a, S>,
-    name: u32,
-) -> Option<Cursor<'a, S>> {
-    class.descend(|node| {
-        if node.is(C::Def)
-            && node.index() != class.index()
-            && node.child_sym(C::DefName) == Some(name)
-        {
-            return Step::Out(node);
-        }
-        if node.is_class() && !node.has(C::ImplBlock) {
-            return Step::Over;
-        }
-        Step::Into
-    })
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    Value,
+    Callable,
+    Type,
+}
+
+pub fn members_named<'a, S: Storage<Node = Node>>(
+    owner: Cursor<'a, S>,
+) -> impl Iterator<Item = (u32, u32)> + 'a {
+    let nested = |node: Cursor<'a, S>| node.is_class() && !node.has(C::ImplBlock);
+    owner
+        .descendants_pruned(nested)
+        .filter(|def| def.is(C::Def))
+        .filter_map(|def| Some((def.child_sym(C::DefName)?, def.index())))
+}
+
+pub fn find_member_in<'a, S: Storage<Node = Node>>(
+    owner: Cursor<'a, S>,
+    defs: impl Iterator<Item = Cursor<'a, S>>,
+    role: Role,
+    tags: &ReservedTags,
+) -> Option<u32> {
+    let tag = match role {
+        Role::Value => tags.value,
+        Role::Callable => tags.callable,
+        Role::Type => tags.declares_type,
+    };
+    let both = |def: Cursor<'a, S>| def.has_tag(tags.value) && def.has_tag(tags.callable);
+    let mut defs = defs.filter(|def| def.has_tag(tag) && def.is_member_of(owner));
+    let first = defs.next()?;
+    let best = match both(first) {
+        true => defs.find(|def| !both(*def)).unwrap_or(first),
+        false => first,
+    };
+    Some(best.index())
 }
 
 pub fn members_by_level<N, I, T>(

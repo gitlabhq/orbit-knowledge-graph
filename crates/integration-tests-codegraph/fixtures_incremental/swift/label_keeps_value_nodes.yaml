@@ -1,0 +1,29 @@
+name: "Swift: a value label keeps the calls inside its expression"
+
+fixtures:
+  - path: Shapes.swift
+    content: |
+      class Shapes {
+          func f() -> Int { return 1 }
+          func g() -> Shapes { return self }
+          func sum() { let x = self.f() + f() }
+          func cond() { let w = true ? f() : 0 }
+          func mul() { var x = 0; x = f() * 2 }
+          func cast() { let o = g() as Any }
+          func chain() { let y = g().g() }
+      }
+
+tests:
+  - name: "a call inside a sum, conditional, assignment, cast or chain root links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["sum", "cond", "mul", "cast", "chain"]
+      RETURN caller.name AS caller, callee.name AS callee, count(caller) AS n
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 5 }
+      - { row: { caller: sum, callee: f } }
+      - { row: { caller: cond, callee: f } }
+      - { row: { caller: mul, callee: f } }
+      - { row: { caller: cast, callee: g } }
+      - { row: { caller: chain, callee: g } }

@@ -1,0 +1,179 @@
+name: "Rust: calls inside a let-bound closure belong to the enclosing function"
+
+fixtures:
+  - path: main.rs
+    content: |
+      struct Foo {
+          x: i32,
+      }
+
+      impl Foo {
+          fn run(&self) {}
+      }
+
+      struct Bar;
+
+      impl Bar {
+          fn run(&self) {}
+      }
+
+      fn helper(x: i32) -> i32 {
+          x
+      }
+
+      fn run() -> i32 {
+          let f = |x: i32| helper(x);
+          f(1)
+      }
+
+      fn deferred() -> i32 {
+          let g;
+          g = |x: i32| helper(x);
+          g(2)
+      }
+
+      fn block_body() -> i32 {
+          let h = move |x: i32| {
+              let y = helper(x);
+              y
+          };
+          h(3)
+      }
+
+      fn nested() -> i32 {
+          let outer = |x: i32| {
+              let inner = |y: i32| helper(y);
+              inner(x)
+          };
+          outer(4)
+      }
+
+      fn looped() {
+          for i in 0..3 {
+              let f = |x: i32| helper(x);
+              f(i);
+          }
+      }
+
+      fn apply(f: impl Fn(i32) -> i32) -> i32 {
+          f(5)
+      }
+
+      fn passed() -> i32 {
+          apply(|x: i32| helper(x))
+      }
+
+      fn shadowing(x: Foo) {
+          let h = |x| x.run();
+          h(Bar);
+      }
+
+      fn helper_with(f: impl Fn(i32) -> i32) -> i32 {
+          f(6)
+      }
+
+      fn after_closure(x: Foo) {
+          helper_with(|x| helper(x));
+          x.run();
+      }
+
+      fn after_typed_closure(x: Foo) {
+          let total = helper_with(|x: i32| helper(x));
+          x.run();
+      }
+
+      fn first() {}
+
+      fn second() {}
+
+      fn no_leak() {
+          let mut target: fn() = first;
+          let unused = || {
+              target = second;
+          };
+          target();
+      }
+
+      fn returns_inside() {
+          let make = |flag: bool| {
+              return if flag { Foo { x: 1 } } else { Foo { x: 2 } };
+          };
+          make(true);
+      }
+
+      fn user() {
+          let r = returns_inside();
+          r.run();
+      }
+
+tests:
+  - name: every closure body call reaches helper from the enclosing function
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name = 'helper'
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 8 }
+      - { column_values: { field: caller, values: ["after_closure", "after_typed_closure", "block_body", "deferred", "looped", "nested", "passed", "run"] } }
+
+  - name: the closures are not Definitions and calling them adds no edge
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.name IN ['f', 'g', 'h', 'outer', 'inner', 'make', 'unused']
+          RETURN d.name AS name
+        assert:
+          - { empty: true }
+      - query: |
+          MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+          WHERE caller.name IN ['run', 'deferred', 'block_body', 'nested', 'looped']
+          RETURN callee.name AS callee
+        assert:
+          - { column_values: { field: callee, values: ["helper"] } }
+
+  - name: a closure passed as an argument keeps the enclosing owner
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'passed'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { column_values: { field: callee, values: ["apply", "helper"] } }
+
+  - name: a closure argument keeps its parameter out of the outer block
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['after_closure', 'after_typed_closure'] AND callee.name = 'run'
+      RETURN caller.name AS caller, callee.fqn AS callee
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "after_closure", callee: "Foo::run" } }
+      - { row: { caller: "after_typed_closure", callee: "Foo::run" } }
+
+  - name: an untyped closure parameter shadows the outer typed local
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'shadowing' AND callee.name = 'run'
+      RETURN callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: a write inside an uncalled closure does not change the outer local
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'no_leak'
+      RETURN callee.name AS callee
+    assert:
+      - { column_values: { field: callee, values: ["first"] } }
+
+  # `returns_inside` returns unit, so `r.run()` is ill-typed on purpose: the engine
+  # must not take the closure's `return` as the function's return value.
+  - name: a return inside a closure is not the function's return value
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'user'
+      RETURN callee.name AS callee
+    assert:
+      - { column_values: { field: callee, values: ["returns_inside"] } }

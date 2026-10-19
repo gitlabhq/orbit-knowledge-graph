@@ -1,0 +1,119 @@
+name: "JavaScript: a call result joined with a constructor result types the member call"
+
+fixtures:
+  - path: main.js
+    content: |
+      import { makeImported } from './maker.js';
+
+      class Foo {
+        bar() {}
+      }
+
+      class Foo2 {
+        bar() {}
+      }
+
+      function make() {
+        return new Foo();
+      }
+
+      function callThenNew(c) {
+        let x = make();
+        if (c) {
+          x = new Foo2();
+        }
+        x.bar();
+      }
+
+      function newThenCall(c) {
+        let x = new Foo2();
+        if (c) {
+          x = make();
+        }
+        x.bar();
+      }
+
+      function callOnly() {
+        let x = make();
+        x.bar();
+      }
+
+      function newOnly(c) {
+        let x = new Foo();
+        if (c) {
+          x = new Foo2();
+        }
+        x.bar();
+      }
+
+      function ternary(c) {
+        let x = c ? make() : new Foo2();
+        x.bar();
+      }
+
+      function importedCallThenNew(c) {
+        let x = makeImported();
+        if (c) {
+          x = new Foo2();
+        }
+        x.bar();
+      }
+
+  - path: maker.js
+    content: |
+      export class Made {
+        bar() {}
+      }
+
+      export function makeImported() {
+        return new Made();
+      }
+
+tests:
+  - name: a call result joined with a constructor result reaches both bar methods
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'callThenNew'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Foo2", "Foo2::bar", "Foo::bar", "make"] } }
+
+  - name: the join order does not matter
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'newThenCall'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Foo2", "Foo2::bar", "Foo::bar", "make"] } }
+
+  - name: a conditional expression joins the same way
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'ternary'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Foo2", "Foo2::bar", "Foo::bar", "make"] } }
+
+  - name: an imported call result joined with a constructor result reaches both bar methods
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'importedCallThenNew'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Foo2", "Foo2::bar", "Made::bar", "makeImported"] } }
+
+  - name: a call result alone still types the member call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'callOnly'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Foo::bar", "make"] } }
+
+  - name: two constructor results still reach both bar methods
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'newOnly'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Foo", "Foo2", "Foo2::bar", "Foo::bar"] } }

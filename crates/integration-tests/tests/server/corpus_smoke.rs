@@ -21,8 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
 use crate::common::{
-    DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, derive_clickhouse_data_model,
-    load_ontology,
+    DummyClaims, GRAPH_SCHEMA_SQL, TestContext, derive_clickhouse_data_model, load_ontology,
 };
 use compiler::{Frontend, parse_input};
 use comrak::nodes::{NodeCodeBlock, NodeValue};
@@ -495,9 +494,9 @@ async fn run_stages(ctx: &mut QueryPipelineContext) -> Result<PipelineOutput, Pi
 #[tokio::test]
 async fn corpus_smoke() {
     orbit_server_config::query::init(orbit_server_config::AppConfig::embedded_defaults().query);
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     load_seed(&ctx, "data_correctness").await;
-    ctx.optimize_all().await;
+    ctx.optimize_if_needed().await;
 
     let ontology = load_ontology();
     let data_model = derive_clickhouse_data_model(&ontology);

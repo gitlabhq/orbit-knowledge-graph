@@ -9,7 +9,8 @@ exists to break the dependency cycle: it depends on `orbit-server`, `compiler`, 
 ```plaintext
 tests/
   local.rs              # local binary (no Docker)
-  containers.rs         # containers binary (ClickHouse and NATS testcontainers)
+  server_containers.rs  # server container tests
+  indexer_containers.rs # indexer container tests
   cli.rs                # cli binary (the orbit binary as a subprocess)
   billing_boundary.rs   # billing_boundary binary (orbit-billing dependents)
   common/               # shared helpers
@@ -23,11 +24,12 @@ tests/
 | Binary | Tests | CI job |
 |---|---|---|
 | `local` | compiler and querying pipeline, no Docker | `compiler-integration-test` |
-| `containers` | ClickHouse and NATS testcontainers | `integration-test`, `integration-test-data-correctness`, `corpus-smoke-test` |
+| `server_containers` | Server tests with ClickHouse | `integration-test`, `integration-test-data-correctness`, `corpus-smoke-test` |
+| `indexer_containers` | Indexer tests with ClickHouse and NATS | `integration-test`, `integration-test-data-correctness` |
 | `cli` | the `orbit` CLI | `cli-integration-test` |
 | `billing_boundary` | only `orbit-server` depends on `orbit-billing` | `billing-boundary-check` |
 
-The three `containers` lanes run each container test one time.
+The three container-test lanes run each container test one time.
 `integration-test-lane-coverage-check` fails if a test is in no lane or in two lanes.
 
 New correctness tests are YAML suites. See
@@ -57,13 +59,13 @@ cargo nextest run --test local -E 'test(querying_pipeline::)'            # query
 
 # Container tests
 export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
-cargo nextest run --test containers                                      # all container tests
-cargo nextest run --test containers -E 'test(data_correctness)'          # one suite
-cargo nextest run --test containers -E 'test(infra_canary)'              # canary
+cargo nextest run --test server_containers --test indexer_containers     # all container tests
+cargo nextest run --test server_containers -E 'test(data_correctness)'   # one suite
+cargo nextest run --test server_containers -E 'test(infra_canary)'       # canary
 
 # Run YAML-driven scenarios, optionally filtered by category
-cargo nextest run --test containers -E 'test(data_correctness_scenarios)'
-SCENARIO_FILTER=search cargo nextest run --test containers -E 'test(data_correctness_scenarios)'
+cargo nextest run --test server_containers -E 'test(data_correctness_scenarios)'
+SCENARIO_FILTER=search cargo nextest run --test server_containers -E 'test(data_correctness_scenarios)'
 ```
 
 ## Test architecture
@@ -96,7 +98,7 @@ See the [integration-testkit README](../integration-testkit/README.md) for the
 3. If it writes extra data, add it to the `run_subtests!` block and call the seed
    function at the top of the test body.
 4. If you need a new server test module, add `pub mod foo;` to
-   `containers.rs` and create `server/foo.rs`.
+   `server_containers.rs` and create `server/foo.rs`.
 
 ### Rust-only data correctness tests
 

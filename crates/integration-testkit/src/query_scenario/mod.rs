@@ -188,7 +188,7 @@ async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, pr
     .catch_unwind()
     .await;
     let cleanup = if let Some(database) = database {
-        AssertUnwindSafe(ctx.execute(&format!("DROP DATABASE IF EXISTS `{database}` SYNC")))
+        AssertUnwindSafe(ctx.drop_fork(&database))
             .catch_unwind()
             .await
     } else {
@@ -253,7 +253,7 @@ async fn run_case(
         } else {
             crate::scenario::seed::apply_seed(&forked, &cfg.extra_seed, &settings, &columns, name)
                 .await;
-            forked.optimize_all().await;
+            forked.optimize_if_needed().await;
         }
         forked
     } else {
@@ -290,7 +290,7 @@ async fn run_case(
                 name,
             )
             .await;
-            ctx.optimize_all().await;
+            ctx.optimize_if_needed().await;
         }
         let name = &step_label(name, index, steps.len());
         for (frontend_key, query_str) in &step.query {

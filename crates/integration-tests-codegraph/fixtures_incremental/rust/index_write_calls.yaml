@@ -1,0 +1,46 @@
+name: "Rust: a call in the index of an assignment target links"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "index_write"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub struct Item;
+
+      pub struct Holder {
+          pub items: Vec<i32>,
+      }
+
+      pub fn make() -> Item {
+          Item
+      }
+
+      pub fn slot() -> usize {
+          0
+      }
+
+      pub fn index_write(a: &mut Vec<Item>) {
+          a[slot()] = make();
+      }
+
+      pub fn member_index_write(h: &mut Holder) {
+          h.items[slot()] += 1;
+      }
+
+tests:
+  - name: "the call in the index links next to the call on the right-hand side"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["index_write", "member_index_write"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: index_write, callee: make } }
+      - { row: { caller: index_write, callee: slot } }
+      - { row: { caller: member_index_write, callee: slot } }

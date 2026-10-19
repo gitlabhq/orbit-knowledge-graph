@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::common::compile_model;
 use crate::common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, admin_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, TestContext, admin_security_context,
     derive_clickhouse_data_model, load_ontology, run_redaction, test_security_context,
 };
 use integration_testkit::{run_subtests, run_subtests_shared, t};
@@ -2496,7 +2496,7 @@ async fn no_alias_aggregation_with_sort(ctx: &TestContext) {
 
 #[tokio::test]
 async fn graph_formatter_e2e() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     seed(&ctx).await;
 
     // Read-only subtests share one database (seed once, query many).

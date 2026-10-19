@@ -1,0 +1,64 @@
+name: "TypeScript: the call at the root of a method chain links and types the chain"
+
+fixtures:
+  - path: src/chain.ts
+    content: |
+      class Item {
+        touch(): void {}
+      }
+
+      class Items {
+        first(): Item {
+          return new Item();
+        }
+
+        all(): Item[] {
+          return [];
+        }
+
+        count(): number {
+          return 0;
+        }
+      }
+
+      function makeItems(): Items {
+        return new Items();
+      }
+
+      function chainInConst() {
+        const n = makeItems().count();
+      }
+
+      function chainAsStatement() {
+        makeItems().first().touch();
+      }
+
+      function chainInLoop() {
+        for (const item of makeItems().all()) {
+          item.touch();
+        }
+      }
+
+tests:
+  - name: "the call at the root of a method chain links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["chainInConst", "chainAsStatement", "chainInLoop"] AND callee.name = "makeItems"
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: caller, values: ["chainAsStatement", "chainInConst", "chainInLoop"] } }
+
+  - name: "the methods on the chain resolve through the return type of the root call"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["chainInConst", "chainAsStatement", "chainInLoop"] AND callee.name <> "makeItems"
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: chainAsStatement, callee: first } }
+      - { row: { caller: chainAsStatement, callee: touch } }
+      - { row: { caller: chainInConst, callee: count } }
+      - { row: { caller: chainInLoop, callee: all } }

@@ -775,6 +775,37 @@ unit-test:
     - ./scripts/dev/run-unit-tests.sh --profile ci
     - sccache --show-stats || true
 
+# No --all-targets: some tests are unix-only.
+windows-cli-check:
+  stage: test
+  extends:
+    - .job-template
+    - .sccache-template
+  needs: []
+  variables:
+    CC_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang
+    CXX_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang++
+    AR_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-ar
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
+      changes:
+        - "**/*.rs"
+        - "**/Cargo.toml"
+        - Cargo.lock
+        - rust-toolchain.toml
+        - .cargo/config.toml
+        - .gitlab-ci.yml
+        - scripts/ci/install-llvm-mingw.sh
+  before_script:
+    - !reference [.sccache-template, before_script]
+    - ./scripts/ci/install-llvm-mingw.sh
+    - export PATH="/opt/llvm-mingw/bin:$PATH"
+    - rustup target add x86_64-pc-windows-gnullvm
+  script:
+    - cargo check --locked --target x86_64-pc-windows-gnullvm -p orbit-cli --bin orbit --features duckdb-client/bundled
+    - sccache --show-stats || true
+
 compiler-integration-test:
   stage: test
   extends:
@@ -835,10 +866,10 @@ cli-integration-test:
     - !reference [.sccache-template, before_script]
     - |
       docker pull clickhouse/clickhouse-server:${CLICKHOUSE_VERSION} &
-      docker pull nats:2.11-alpine &
+      docker pull nats:2.15.0-alpine &
       wait
   script:
-    - cargo nextest run --profile ci --all-features --test containers -E "$NEXTEST_FILTER"
+    - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --test indexer_containers -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
 
 integration-test:
@@ -883,7 +914,7 @@ corpus-smoke-test:
   script:
     # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
     # against a real ClickHouse schema (no correctness assertions).
-    - cargo nextest run --profile ci --all-features --test containers --no-capture -E "$NEXTEST_FILTER"
+    - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --no-capture -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
 
 # Benchmark Stage

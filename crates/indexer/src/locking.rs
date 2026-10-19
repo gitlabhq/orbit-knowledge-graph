@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use tracing::{debug, warn};
+use tracing::{Instrument, debug, warn};
 
 use crate::nats::{KvPutOptions, KvPutResult};
 
@@ -132,11 +132,12 @@ impl Drop for LockGuard {
     fn drop(&mut self) {
         if let Some(service) = self.service.take() {
             let key = std::mem::take(&mut self.key);
-            tokio::spawn(async move {
+            let release = async move {
                 if let Err(e) = service.release(&key).await {
                     warn!(key = %key, error = %e, "lock release on guard drop failed");
                 }
-            });
+            };
+            tokio::spawn(release.in_current_span());
         }
     }
 }

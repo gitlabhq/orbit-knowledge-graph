@@ -1,0 +1,102 @@
+name: "Kotlin: a call on an enum with entry bodies or a sealed class targets the declared member"
+
+fixtures:
+  - path: a/Kinds.kt
+    content: |
+      package a
+
+      enum class Kind {
+          FIRST {
+              override fun create(): Int = 1
+          },
+          SECOND {
+              override fun create(): Int = 2
+          };
+
+          abstract fun create(): Int
+      }
+
+      sealed class Shape {
+          abstract fun area(): Int
+
+          object Square : Shape() {
+              override fun area(): Int = 1
+          }
+
+          object Dot : Shape() {
+              override fun area(): Int = 0
+          }
+      }
+
+      class Box {
+          class Item {
+              fun go(): Int = 1
+          }
+
+          companion object {
+              val Item: Int = 2
+          }
+      }
+
+      fun useKind(kind: Kind): Int = kind.create()
+
+      fun useShape(shape: Shape): Int = shape.area()
+
+      fun read(): Int = Box.Item
+
+  - path: b/Use.kt
+    content: |
+      package b
+
+      import a.Box
+
+      fun make(): Int {
+          val item: Box.Item = Box.Item()
+          return item.go()
+      }
+
+      fun typed(item: Box.Item): Int = item.go()
+
+tests:
+  - name: a call on the enum targets the declared abstract function, not the override in the first entry body
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'useKind' AND t.name = 'create'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["a.Kind.create"] } }
+
+  - name: a call on the sealed class targets the declared abstract function, not the override in a nested object
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'useShape' AND t.name = 'area'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["a.Shape.area"] } }
+
+  - name: a qualified type of a nested class next to a companion property of its name resolves to the class
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'make' AND t.name = 'go'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["a.Box.Item.go"] } }
+
+  - name: a parameter typed by the nested class next to a companion property of its name is typed by the class
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'typed' AND t.name = 'go'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["a.Box.Item.go"] } }
+
+  - name: a read of the shared name in expression position takes the companion property
+    # Known gap: a nested class and a companion property of one name are both values and callables in the Kotlin rules, so the first declaration wins.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'read' AND t.name = 'Item'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "a.Box.Companion.Item", kind: "Property" } }

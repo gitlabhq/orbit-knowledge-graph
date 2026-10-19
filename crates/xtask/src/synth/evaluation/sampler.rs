@@ -216,7 +216,6 @@ impl ParameterSampler {
                     r.traversal_path.as_str(),
                 )
                 .organization_id()?;
-                // Append trailing slash for SecurityContext format
                 let path = if r.traversal_path.ends_with('/') {
                     r.traversal_path
                 } else {

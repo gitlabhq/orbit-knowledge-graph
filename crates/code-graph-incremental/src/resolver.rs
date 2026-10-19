@@ -16,8 +16,8 @@ use crate::rules::ResolveConfig;
 use crate::sentinel::{Killed, Sentinel};
 use crate::tags::ReservedTags;
 use crate::tree::{
-    CallResolution, Compact, Edge, EdgeKind, find_method_in, infer_return_type, members_by_level,
-    reachable,
+    CallResolution, Compact, Edge, EdgeKind, Role, find_member_in, infer_return_type, is_name_text,
+    members_by_level, members_named, reachable,
 };
 type Tree = crate::tree::Tree<Compact>;
 type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
@@ -458,6 +458,7 @@ impl Resolver {
             extensions: &extensions,
             declared_members: &declared_members,
             chains: trees.iter().map(|_| Default::default()).collect(),
+            site_classes: trees.iter().map(|_| Default::default()).collect(),
             exporters: &exporters,
             imports: &imports,
         };
@@ -590,9 +591,7 @@ fn expand(
     for e in wave1.iter().filter(|e| e.kind == EdgeKind::Extends) {
         ctx.extends_of.entry(e.from()).or_default().push(e.to());
     }
-    ctx.chains
-        .iter_mut()
-        .for_each(|memo| memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear());
+    ctx.clear_memos();
     cross_edges.extend(&wave1);
     ctx.run.check()?;
 
@@ -686,6 +685,7 @@ fn expand(
                     .or_insert(e.to());
             }
         }
+        ctx.clear_memos();
         wave = wave
             .par_iter()
             .flat_map(|ce| resolve_type_edges(ctx, ce))
@@ -726,6 +726,7 @@ struct ResolveCtx<'a> {
     extensions: &'a FxHashMap<u32, Vec<Loc>>,
     declared_members: &'a [MemberCache],
     chains: Vec<ChainMemo>,
+    site_classes: Vec<SiteMemo>,
     exporters: &'a [FxHashSet<u32>],
     imports: &'a [FxHashMap<u32, (u32, u32)>],
 }
@@ -785,6 +786,15 @@ impl ResolveCtx<'_> {
             .flat_map(move |n| self.imports_to.get(&(fi as u32, n.index())))
             .flatten()
             .copied()
+    }
+
+    fn clear_memos(&mut self) {
+        for memo in &mut self.chains {
+            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
+        }
+        for memo in &mut self.site_classes {
+            memo.get_mut().unwrap_or_else(|e| e.into_inner()).clear();
+        }
     }
 }
 
@@ -946,35 +956,35 @@ fn gather_imports_for(
 }
 
 const PROPAGATE_CHECK_INTERVAL: usize = 100_000;
-type MemberCache = std::sync::Mutex<FxHashMap<u32, std::sync::Arc<FxHashMap<u32, u32>>>>;
+type MemberCache = std::sync::Mutex<FxHashMap<u32, std::sync::Arc<FxHashMap<u32, Vec<u32>>>>>;
 
-fn members_of(ctx: &ResolveCtx, owner: Cursor) -> std::sync::Arc<FxHashMap<u32, u32>> {
-    let cache = &ctx.declared_members[owner.fi() as usize];
-    if let Some(members) = cache
+fn members_of(ctx: &ResolveCtx, owner: Cursor) -> std::sync::Arc<FxHashMap<u32, Vec<u32>>> {
+    let mut cache = ctx.declared_members[owner.fi() as usize]
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(&owner.index())
-    {
-        return members.clone();
-    }
-    let mut members = FxHashMap::default();
-    let mut walk = owner.walk();
-    while let Some(node) = walk.next() {
-        if node.is(C::Def) {
-            if let Some(name) = node.child_sym(C::DefName) {
-                members.entry(name).or_insert(node.index());
-            }
-            if node.is_class() && !node.has(C::ImplBlock) {
-                walk.skip_subtree();
-            }
-        }
-    }
+        .unwrap_or_else(|e| e.into_inner());
     cache
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
         .entry(owner.index())
-        .or_insert_with(|| std::sync::Arc::new(members))
+        .or_insert_with(|| {
+            let mut index: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+            for (name, def) in members_named(owner) {
+                index.entry(name).or_default().push(def);
+            }
+            std::sync::Arc::new(index)
+        })
         .clone()
+}
+
+fn member_in<'a>(
+    ctx: &'a ResolveCtx,
+    owner: Cursor<'a>,
+    name: u32,
+    role: Role,
+) -> Option<Cursor<'a>> {
+    let members = members_of(ctx, owner);
+    let defs = members.get(&name).into_iter().flatten();
+    let defs = defs.map(|&def| owner.jump(owner.fi(), def));
+    let node = find_member_in(owner, defs, role, &ctx.tags)?;
+    Some(owner.jump(owner.fi(), node))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1377,7 +1387,7 @@ fn qualified<'a>(
     let mut current = root(ctx.lang.syms.lookup(segments.next()?))?;
     for segment in segments {
         let name = ctx.lang.syms.lookup(segment);
-        current = method_up(ctx, current, name, current.fi() as usize)
+        current = method_up(ctx, current, name, current.fi() as usize, Role::Value)
             .into_iter()
             .exactly_one()
             .ok()?;
@@ -1426,21 +1436,19 @@ fn dispatch(
     class: Option<Cursor>,
     uses: &[&Edge],
 ) -> Vec<Edge> {
+    let id = |c: Cursor| (c.fi(), c.index());
+    let mut own_class = None;
     uses.iter()
         .filter_map(|usage| {
             let call = ctx.corpus.jump(usage.from_tree, usage.site?);
             let reaching = ctx.producers.get(&(usage.from_tree, usage.site?));
             let class = match reaching {
-                Some(reaching) if reaching.len() > 1 => lub(
-                    ctx,
-                    reaching.iter().map(|e| {
-                        let reached = ctx.corpus.follow(e);
-                        match (reached.fi(), reached.index()) == (producer.fi(), producer.index()) {
-                            true => class,
-                            false => producer_class(ctx, reached),
-                        }
-                    }),
-                ),
+                Some(reaching) if reaching.len() > 1 => {
+                    let own = *own_class.get_or_insert_with(|| {
+                        class.map(id) == producer_class(ctx, producer).map(id)
+                    });
+                    site_class(ctx, usage, reaching, producer, class, own).or(class)
+                }
                 _ => class,
             };
             let from = ctx.corpus.jump(usage.from_tree, usage.from_node);
@@ -1460,7 +1468,7 @@ fn dispatch(
                 return Some(Either::Right(call_edges(from, targets, usage.site)));
             };
             let class = match call.member().and_then(|m| m.child(C::Object)) {
-                Some(object) if object.child(C::Member).is_some() => {
+                Some(object) if object.value_child(C::Member).is_some() => {
                     chain(ctx, object, &|_| Some(class))?
                 }
                 _ => class,
@@ -1469,10 +1477,10 @@ fn dispatch(
                 return None;
             }
             let targets = match call.member() {
-                Some(member) => member_targets(ctx, member, class),
+                Some(member) => member_targets(ctx, member, class, call.role()),
                 None => class.child_sym(C::Callable).map_or_else(
                     || vec![class],
-                    |name| method_up(ctx, class, name, usage.from_fi()),
+                    |name| method_up(ctx, class, name, usage.from_fi(), Role::Callable),
                 ),
             };
             Some(Either::Right(call_edges(from, targets, usage.site)))
@@ -1501,6 +1509,39 @@ fn external_of(ctx: &ResolveCtx, producer: Cursor) -> Option<(u32, u32)> {
 enum Owner<'a> {
     Class(Cursor<'a>),
     External((u32, u32)),
+}
+
+fn site_class<'a>(
+    ctx: &'a ResolveCtx,
+    usage: &Edge,
+    reaching: &[&Edge],
+    producer: Cursor<'a>,
+    class: Option<Cursor<'a>>,
+    own_class: bool,
+) -> Option<Cursor<'a>> {
+    let id = |c: Cursor| (c.fi(), c.index());
+    let key = match own_class {
+        true => (usage.site?, None, None),
+        false => (usage.site?, Some(id(producer)), class.map(id)),
+    };
+    let memo = &ctx.site_classes[usage.from_tree as usize];
+    if let Some(&found) = memo.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return found.map(|(fi, node)| ctx.corpus.jump(fi, node));
+    }
+    let found = lub(
+        ctx,
+        reaching.iter().map(|e| {
+            let reached = ctx.corpus.follow(e);
+            match id(reached) == id(producer) {
+                true => class,
+                false => producer_class(ctx, reached),
+            }
+        }),
+    );
+    memo.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, found.map(id));
+    found
 }
 
 fn producer_class<'a>(ctx: &'a ResolveCtx, producer: Cursor<'a>) -> Option<Cursor<'a>> {
@@ -1536,7 +1577,7 @@ fn class_of<'a>(ctx: &'a ResolveCtx, callee: Cursor<'a>) -> Option<Cursor<'a>> {
     } else if let Some(ty) = target.child(C::SsaReturnType) {
         resolve_chain(ctx, ty)
     } else if let Some(branch) = target
-        .descendants_pruned(|n| n.is(C::Def))
+        .descendants_pruned(|n| n.is(C::Def) || n.is(C::Lambda))
         .find(|n| n.is(C::SsaReturn))
         .and_then(|r| r.child(C::SsaBranch))
     {
@@ -1559,6 +1600,8 @@ thread_local! {
 }
 
 type ChainMemo = std::sync::Mutex<FxHashMap<u32, Option<(u32, u32)>>>;
+type SiteKey = (u32, Option<(u32, u32)>, Option<(u32, u32)>);
+type SiteMemo = std::sync::Mutex<FxHashMap<SiteKey, Option<(u32, u32)>>>;
 
 struct Resolving((u32, u32));
 
@@ -1624,7 +1667,8 @@ fn enclosing_alias<'a>(ctx: &'a ResolveCtx, r: Cursor<'a>) -> Option<Cursor<'a>>
         }
         let bound = d
             .children()
-            .filter(|c| c.is(C::Binding) && c.sym() == sym && c.children().count() == 1)
+            .filter(|c| c.is(C::Binding) && c.sym() == sym)
+            .filter(|c| c.has(C::Qualifier) || (!r.has(C::Qualifier) && c.children().count() == 1))
             .find_map(|c| c.child(C::SsaTyped))
             .filter(|bound| bound.sym() != sym)?;
         resolve_chain(ctx, bound)
@@ -1637,12 +1681,21 @@ fn chain<'a>(
     root: &dyn Fn(Cursor<'a>) -> Option<Cursor<'a>>,
 ) -> Option<Cursor<'a>> {
     let c = c.reference();
-    let Some(m) = c.has(C::Object).then_some(c).or_else(|| c.child(C::Member)) else {
+    let Some(m) = c
+        .has(C::Object)
+        .then_some(c)
+        .or_else(|| c.value_child(C::Member))
+    else {
         return value_type(ctx, root(c)?);
     };
+    if c.labelled()
+        && let Some(found) = root(c).and_then(|r| value_type(ctx, r))
+    {
+        return Some(found);
+    }
     let object = m.child(C::Object)?;
     let receiver = stacker::maybe_grow(RED_ZONE, STACK_SEGMENT, || chain(ctx, object, root))?;
-    let targets = member_targets(ctx, m, receiver);
+    let targets = member_targets(ctx, m, receiver, c.role());
     let member = targets.into_iter().exactly_one().ok()?;
     value_type(ctx, member)
 }
@@ -1798,12 +1851,18 @@ fn branch_type<'a>(ctx: &'a ResolveCtx, branch: Cursor<'a>) -> Option<Cursor<'a>
     lub(ctx, arms)
 }
 
-fn method_up<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32, fi: usize) -> Vec<Cursor<'a>> {
+fn method_up<'a>(
+    ctx: &'a ResolveCtx,
+    cls: Cursor<'a>,
+    name: u32,
+    fi: usize,
+    role: Role,
+) -> Vec<Cursor<'a>> {
     let jump = |(sf, n): (u32, u32)| ctx.corpus.jump(sf, n);
     let inherited = members_by_level(
         vec![(cls.fi(), cls.index())],
         |id| supertypes(ctx, jump(id)),
-        |id| declared_member(ctx, jump(id), name).map(|m| (m.fi(), m.index())),
+        |id| declared_member(ctx, jump(id), name, role).map(|m| (m.fi(), m.index())),
     );
     if !inherited.is_empty() {
         return inherited.into_iter().map(jump).collect();
@@ -1815,9 +1874,10 @@ fn member_targets<'a>(
     ctx: &'a ResolveCtx,
     member: Cursor<'a>,
     receiver: Cursor<'a>,
+    role: Role,
 ) -> Vec<Cursor<'a>> {
     let Some(constraint) = member.child(C::Dispatch) else {
-        return method_up(ctx, receiver, member.sym(), member.fi() as usize);
+        return method_up(ctx, receiver, member.sym(), member.fi() as usize, role);
     };
     let Some(contract) = resolve_reference(ctx, constraint)
         .or_else(|| {
@@ -1843,12 +1903,13 @@ fn member_targets<'a>(
     if implementations.next().is_some() {
         return Vec::new();
     }
-    find_method_in(implementation, member.sym())
-        .or_else(|| {
-            find_method_in(contract, member.sym()).filter(|method| !method.has(C::Declaration))
+    let find = |role| {
+        member_in(ctx, implementation, member.sym(), role).or_else(|| {
+            member_in(ctx, contract, member.sym(), role)
+                .filter(|method| !method.has(C::Declaration))
         })
-        .into_iter()
-        .collect()
+    };
+    find(role).into_iter().collect()
 }
 
 fn extension_members<'a>(
@@ -1880,21 +1941,18 @@ fn extension_members<'a>(
         .collect()
 }
 
-fn declared_member<'a>(ctx: &'a ResolveCtx, cls: Cursor<'a>, name: u32) -> Option<Cursor<'a>> {
+fn declared_member<'a>(
+    ctx: &'a ResolveCtx,
+    cls: Cursor<'a>,
+    name: u32,
+    role: Role,
+) -> Option<Cursor<'a>> {
     let parts = partial_key(cls, ctx.packages).and_then(|k| ctx.partials.get(&k));
     let parts = parts.into_iter().flatten().map(|l| cls.jump(l.fi, l.node));
     std::iter::once(cls)
         .chain(impl_blocks_of(ctx, cls))
         .chain(parts.filter(|d| (d.fi(), d.index()) != (cls.fi(), cls.index())))
-        .find_map(|owner| {
-            if owner.is(C::Def) {
-                members_of(ctx, owner)
-                    .get(&name)
-                    .map(|&node| owner.jump(owner.fi(), node))
-            } else {
-                find_method_in(owner, name)
-            }
-        })
+        .find_map(|owner| member_in(ctx, owner, name, role))
 }
 
 /// Cross-file edges for one file that the import pass cannot produce:
@@ -1918,9 +1976,10 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
     let named: FxHashSet<u32> = named.iter().map(|n| local(*n)).collect();
     let builtins = &ctx.env.rules_for(&ctx.trees[fi].label).config.link.builtins;
     let unbound = |from: Cursor, sym: u32| -> Vec<Edge> {
+        let guessable = is_name_text(ctx.lang.syms.resolve(sym));
         let wild = wild
             .iter()
-            .filter(|_| !named.contains(&sym) && !builtins.contains(&sym));
+            .filter(|_| guessable && !named.contains(&sym) && !builtins.contains(&sym));
         wild.map(|&w| from.edge_to(from.jump(fi as u32, w), EdgeKind::Imports))
             .collect()
     };
@@ -1975,13 +2034,13 @@ fn resolve_file(ctx: &ResolveCtx, fi: usize) -> Result<Vec<Edge>, Killed> {
                 {
                     out.extend(call_edges(
                         from,
-                        member_targets(ctx, m, target),
+                        member_targets(ctx, m, target, node.role()),
                         Some(node.index()),
                     ));
                 }
                 Some(target) if m.has(C::Dispatch) && target.is_dispatch_contract() => {}
                 Some(target) if cross(target) && target.is_class() => {
-                    let members = method_up(ctx, target, m.sym(), fi);
+                    let members = method_up(ctx, target, m.sym(), fi, node.role());
                     out.extend(call_edges(from, members, Some(node.index())));
                 }
                 None => {
@@ -2033,7 +2092,8 @@ fn inherited_calls<'a>(
         }
         for parent in parents {
             let site = Some(call.index());
-            out.extend(call_edges(from, method_up(ctx, *parent, name, fi), site));
+            let targets = method_up(ctx, *parent, name, fi, call.role());
+            out.extend(call_edges(from, targets, site));
         }
     }
     out
@@ -2054,9 +2114,9 @@ fn destructure_calls<'a>(
             .find(|b| b.is(C::Binding) && b.sym_opt() == Some(s))?;
         resolve_chain(ctx, binding.typed()?)
     };
-    let class = match (d.child(C::Call), d.child(C::Rhs)) {
+    let class = match (d.value_child(C::Call), d.child(C::Rhs)) {
         (Some(pattern), _) => pattern.child(C::Callee).and_then(|k| resolve_chain(ctx, k)),
-        (None, Some(value)) => match value.child(C::Call) {
+        (None, Some(value)) => match value.value_child(C::Call) {
             Some(call) => producer_class(ctx, call),
             None => typed_local(value),
         },
@@ -2082,7 +2142,7 @@ fn destructure_calls<'a>(
         .flat_map(|(slot, component)| {
             call_edges(
                 from,
-                method_up(ctx, class, component.sym(), fi),
+                method_up(ctx, class, component.sym(), fi, Role::Callable),
                 Some(slot.index()),
             )
         })

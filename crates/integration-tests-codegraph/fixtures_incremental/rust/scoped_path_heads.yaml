@@ -1,0 +1,147 @@
+name: "Rust: the head of a scoped path names a module or type, never a value binding"
+
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "heads"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      mod remote;
+
+      use std::ptr;
+
+      use crate::remote::Remote;
+
+      struct Slot {
+          value: u32,
+      }
+
+      impl Slot {
+          fn read(&self) -> u32 {
+              self.value
+          }
+      }
+
+      trait Reader {
+          fn read_all() -> u32;
+      }
+
+      fn closure_param(slot: *mut u32) {
+          let fill = |ptr| unsafe { ptr::write(ptr, 1) };
+          fill(slot);
+      }
+
+      fn with(slot: *mut u32, fill: impl Fn(*mut u32)) {
+          fill(slot);
+      }
+
+      fn closure_argument(slot: *mut u32) {
+          with(slot, |ptr| unsafe { ptr::write(ptr, 3) });
+      }
+
+      fn fn_param(ptr: *mut u32) {
+          unsafe { ptr::write(ptr, 2) }
+      }
+
+      fn local_binding(slot: *mut u32) -> u32 {
+          let ptr = slot;
+          unsafe { ptr::read(ptr) }
+      }
+
+      fn typed_param(ptr: Slot) -> Slot {
+          unsafe { ptr::read(&ptr) }
+      }
+
+      fn remote_param(ptr: Remote) -> Remote {
+          unsafe { ptr::read(&ptr) }
+      }
+
+      fn type_param<T: Reader>(_value: T) -> u32 {
+          T::read_all()
+      }
+
+      fn local_import(slot: *mut u32) -> u32 {
+          use core::ptr;
+          let ptr = slot;
+          unsafe { ptr::read(ptr) }
+      }
+
+      fn local_import_only(slot: *mut u32) -> usize {
+          use std::mem;
+          let mem = slot;
+          mem::size_of_val(&mem)
+      }
+
+      fn receiver(ptr: Slot) -> u32 {
+          ptr.read()
+      }
+
+      fn closure_receiver(slot: Slot) -> u32 {
+          let read = |ptr: Slot| ptr.read();
+          read(slot)
+      }
+
+  - path: src/remote.rs
+    content: |
+      pub struct Remote;
+
+      impl Remote {
+          pub fn read(&self) -> u32 {
+              0
+          }
+      }
+
+tests:
+  - name: a scoped call reaches the imported module past a value binding of the same name
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE target.import_path = 'std::ptr'
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 6 }
+      - { column_values: { field: caller, values: ["closure_argument", "closure_param", "fn_param", "local_binding", "remote_param", "typed_param"] } }
+
+  - name: a scoped call does not reach a method of the shadowing parameter's type
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['closure_argument', 'closure_param', 'fn_param', 'local_binding', 'remote_param', 'typed_param']
+        AND callee.name = 'read'
+      RETURN caller.name AS caller
+    assert:
+      - { empty: true }
+
+  - name: a scoped call on a type parameter reaches the method of its bound
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'type_param'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Reader::read_all" } }
+
+  - name: a let over an import at the same depth keeps the scoped call on that import
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name IN ['local_import', 'local_import_only']
+      RETURN caller.name AS caller, target.import_path AS path
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "local_import", path: "core::ptr" } }
+      - { row: { caller: "local_import_only", path: "std::mem" } }
+
+  - name: a bare receiver of the same name still binds to the parameter
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ['receiver', 'closure_receiver'] AND callee.name = 'read'
+      RETURN caller.name AS caller, callee.fqn AS callee
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "closure_receiver", callee: "Slot::read" } }
+      - { row: { caller: "receiver", callee: "Slot::read" } }

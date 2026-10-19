@@ -55,6 +55,11 @@ stages:
       - match: '(match_arm value: $V)'
         replace: '(__ssa_arm $V)'
 
+      - match: '(closure_expression $$$C)'
+        replace: '(__lambda $$$C)'
+      - match: '(array_expression $$$E)'
+        replace: '(__arr $$$E)'
+
       # self.field → __ivar
       - match: '(field_expression value: (self) field: $F)'
         replace: '(__ivar @$F (__object "self"))'
@@ -70,68 +75,75 @@ stages:
       - match: '(field_initializer field: $N value: $V)'
         replace: '(__field @$N (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$V $V)))'
       - match: '(shorthand_field_initializer $N)'
-        replace: '(__field @$N (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$N)))'
+        replace: '(__field @$N $N (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$N)))'
       - match: '(field_initializer_list $$$F:__field)'
         replace: '(__obj $$$F)'
       - match: '(field_expression value: $O:__ivar field: $F)'
         replace: '(__member @$F (__object $O))'
       - match: '(field_expression value: $O field: $F)'
-        replace: '(__member @$F (__object @$O))'
+        replace: '(__member @$F (__object @$O $O))'
 
   - name: retag-calls
     rules:
+      - match: '(call_expression function: (parenthesized_expression $F:__lambda) arguments: $A)'
+        replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: (parenthesized_expression $F:__member) arguments: $A)'
-        replace: '(__call (__callee $F) $A)'
+        replace: '(__call (__property) (__callee $F) $A)'
       - match: '(call_expression function: (parenthesized_expression $F:__ivar) arguments: $A)'
-        replace: '(__call (__callee $F) $A)'
+        replace: '(__call (__property) (__callee $F) $A)'
       - match: '(call_expression function: $F:__ivar arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       # Operators desugar to the trait methods they call
       - match: '(binary_expression left: $L operator: $OP right: $R)'
-        replace: '(__call (__callee (__member @$OP|kind|map("+:add","-:sub","*:mul","/:div","%:rem","&:bitand","|:bitor","^:bitxor","<<:shl",">>:shr","==:eq","!=:ne","<:lt","<=:le",">:gt",">=:ge") (__object @$L))) $R)'
+        replace: '(__call (__callee (__member @$OP|kind|map("+:add","-:sub","*:mul","/:div","%:rem","&:bitand","|:bitor","^:bitxor","<<:shl",">>:shr","==:eq","!=:ne","<:lt","<=:le",">:gt",">=:ge") (__object @$L $L))) $R)'
       - match: '(compound_assignment_expr left: $L operator: $OP right: $R)'
-        replace: '(__call (__callee (__member @$OP|kind|map("+=:add_assign","-=:sub_assign","*=:mul_assign","/=:div_assign","%=:rem_assign","&=:bitand_assign","|=:bitor_assign","^=:bitxor_assign","<<=:shl_assign",">>=:shr_assign") (__object @$L))) $R)'
+        replace: '(__call (__callee (__member @$OP|kind|map("+=:add_assign","-=:sub_assign","*=:mul_assign","/=:div_assign","%=:rem_assign","&=:bitand_assign","|=:bitor_assign","^=:bitxor_assign","<<=:shl_assign",">>=:shr_assign") (__object @$L $L))) $R)'
       - match: '(unary_expression $OP $E)'
-        replace: '(__call (__callee (__member @$OP|kind|map("-:neg","!:not","*:deref") (__object @$E))))'
-      - match: '(index_expression $E $I)'
-        replace: '(__call (__callee (__member "index" (__object @$E))) $I)'
+        replace: '(__call (__callee (__member @$OP|kind|map("-:neg","!:not","*:deref") (__object @$E $E))))'
+      - match: '(index_expression $E:_*_named $I:_*_named)'
+        replace: '(__call (__callee (__member "index" (__object @$E $E))) $I)'
+      # `f()?` and `f().await` carry the value of the call they wrap
+      - match: '(try_expression $E:__call)'
+        replace: '$E'
+      - match: '(await_expression $E:__call)'
+        replace: '$E'
       - match: '(try_expression $E)'
-        replace: '(__call (__callee (__member "branch" (__object @$E))))'
+        replace: '(__call (__callee (__member "branch" (__object @$E $E))))'
       - match: '(await_expression $E)'
-        replace: '(__call (__callee (__member "poll" (__object @$E))))'
+        replace: '(__call (__callee (__member "poll" (__object @$E $E))))'
       # Record construction is a call to the struct
       - match: '(struct_expression name: $N body: $B)'
-        replace: '(__call (__callee @$N) $B)'
+        replace: '(__call (__callee @$N $N) $B)'
       # `let f = Service::new;` aliases the associated function
       - match: '(let_declaration pattern: $N value: (scoped_identifier path: $P name: $M:(identifier "/^[a-z]/")))'
-        replace: '(__binding @$N (__declaration) (__rhs (__member @$M (__object @$P))))'
+        replace: '(__binding @$N (__declaration) (__rhs (__member @$M (__object @$P $P (__qualifier)))))'
 
       # self::f() is the local scope
       - match: '(call_expression function: (scoped_identifier path: (self) name: $N) arguments: $A)'
-        replace: '(__call (__callee @$N) $A)'
+        replace: '(__call (__callee @$N $N) $A)'
       # crate::a::f() / super::f() / std::m::f(): a scoped import plus a plain call
       - match: '(call_expression function: (scoped_identifier "/^(crate|super|std|core|alloc)::/" path: $P name: $N) arguments: $A)'
-        replace: '(__call (__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$N)) (__callee @$N) $A)'
+        replace: '(__call (__import (__source @$P $P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$N)) (__callee @$N $N) $A)'
       - match: '(call_expression function: (scoped_identifier path: (bracketed_type (qualified_type type: $T alias: $Q)) name: $N) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object @$T $T) (__dispatch @$Q))) $A)'
+        replace: '(__call (__callee (__member @$N (__object @$T $T) (__dispatch @$Q $Q))) $A)'
       # Vec::<u8>::new(): the turbofish is not part of the type name
       - match: '(call_expression function: (scoped_identifier path: (generic_type type: $T) name: $N) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object @$T))) $A)'
+        replace: '(__call (__callee (__member @$N (__object @$T $T (__qualifier)))) $A)'
       # Scoped call: Shape::Circle(5.0) → __call with __member callee
       - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A:(arguments (reference_expression value: $R:identifier)))'
-        replace: '(__call (__callee (__member @$N (__object @$P) (__dispatch @$P (__object @$R)))) $A)'
+        replace: '(__call (__callee (__member @$N (__object @$P $P (__qualifier)) (__dispatch @$P (__object @$R)))) $A)'
       - match: '(call_expression function: (scoped_identifier path: $P name: $N) arguments: $A)'
-        replace: '(__call (__callee (__member @$N (__object @$P))) $A)'
+        replace: '(__call (__callee (__member @$N (__object @$P $P (__qualifier)))) $A)'
       - match: '(call_expression function: $F arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
 
   - name: type-params
     rules:
       # `T: Pinger` binds T to its first bound
       - match: '(type_parameter name: $T bounds: (trait_bounds **/$B:type_identifier))'
-        replace: '(__binding @$T (__ssa_typed @$B))'
+        replace: '(__binding @$T (__qualifier) (__ssa_typed @$B))'
 
   - name: imports
     rules:
@@ -150,32 +162,32 @@ stages:
 
       # use a::b::*;  and  pub use a::b::*;
       - match: '(use_declaration (__visibility !(crate)) argument: (use_wildcard $P))'
-        replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name "*"))'
+        replace: '(__import (__source @$P $P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name "*"))'
         tag: { import_type: ReExportGlob }
       - match: '(use_declaration argument: (use_wildcard $P))'
-        replace: '(__import (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name "*"))'
+        replace: '(__import (__source @$P $P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) (__name "*"))'
         tag: { import_type: GlobUse }
 
       # use a::b as c;  pub(crate) stays private
       - match: '(use_declaration (__visibility !(crate)) argument: (use_as_clause path: $P alias: $A))'
-        replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$P|or("field:name","id") (__alias @$A)))'
+        replace: '(__import (__source @$P $P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$P|or("field:name","id") (__alias @$A)))'
         tag: { import_type: ReExportAliased }
       - match: '(use_declaration argument: (use_as_clause path: $P alias: $A))'
-        replace: '(__import (__source @$P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$P|or("field:name","id") (__alias @$A)))'
+        replace: '(__import (__source @$P $P) (__source_path @$P|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$P|or("field:name","id") (__alias @$A)))'
         tag: { import_type: AliasedUse }
 
       # use a::{b, c as d, self};  one import per entry, built in the next stage
       - match: '(use_declaration (__visibility !(crate)) argument: (scoped_use_list path: $P list: (use_list $$$E)))'
-        replace: '(use_group (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) $$$E:_*_named->pub_use_entry)'
+        replace: '(use_group (__source @$P $P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) $$$E:_*_named->pub_use_entry)'
       - match: '(use_declaration argument: (scoped_use_list path: $P list: (use_list $$$E)))'
-        replace: '(use_group (__source @$P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) $$$E:_*_named->use_entry)'
+        replace: '(use_group (__source @$P $P) (__source_path @$P|replace("::","/")|regex_replace("^crate(/|$)","")) $$$E:_*_named->use_entry)'
 
       # use crate::foo::Bar;
       - match: '(use_declaration (__visibility !(crate)) argument: $A:scoped_identifier)'
-        replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$A|field("name")))'
+        replace: '(__import (__source @$A $A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$A|field("name")))'
         tag: { import_type: PubUse }
       - match: '(use_declaration argument: $A:scoped_identifier)'
-        replace: '(__import (__source @$A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$A|field("name")))'
+        replace: '(__import (__source @$A $A) (__source_path @$A|field("path")|replace("::","/")|regex_replace("^crate(/|$)","")) (__name @$A|field("name")))'
         tag: { import_type: Use }
 
       # use foo;
@@ -221,7 +233,7 @@ stages:
       - match: '(field_pattern name: $N pattern: $P:unpack_pattern)'
         replace: '(unpack_field (__name @$N) $P)'
       - match: '(field_pattern name: $N pattern: $P)'
-        replace: '(unpack_field @$P (__name @$N))'
+        replace: '(unpack_field @$P $P (__name @$N))'
       - match: '(field_pattern name: $N)'
         replace: '(unpack_field @$N (__name @$N))'
       - match: '(struct_pattern $$$P:unpack_field)'
@@ -229,36 +241,41 @@ stages:
 
   - name: classify
     rules:
+      # `&f()` and `(f())` carry the value of the call they wrap
+      - match: '(reference_expression value: $V:__call)'
+        replace: '$V'
+      - match: '(parenthesized_expression $V:__call)'
+        replace: '$V'
       - match: '(let_declaration pattern: $P:unpack_pattern value: $V)'
         replace: '(unpack (__binding @$P|child_sym("__object") (__rhs @$V $V)) $P)'
       - match: '(tuple_expression $$$V:_*_named)'
         replace: '(__obj $$$V:_*_named->tuple_value)'
       # Preserve subtree when RHS contains canonical structure
       - match: '(let_declaration pattern: $N value: $V:__ssa_branch)'
-        replace: '(__binding @$N (__declaration) (__rhs $V))'
+        replace: '(__binding @$N $N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V:block)'
-        replace: '(__binding @$N (__declaration) (__rhs $V))'
+        replace: '(__binding @$N $N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V:__call)'
-        replace: '(__binding @$N (__declaration) (__rhs $V))'
+        replace: '(__binding @$N $N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V:__member)'
-        replace: '(__binding @$N (__declaration) (__rhs $V))'
+        replace: '(__binding @$N $N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V:__obj)'
-        replace: '(__binding @$N (__declaration) (__rhs $V))'
+        replace: '(__binding @$N $N (__declaration) (__rhs $V))'
       - match: '(let_declaration pattern: $N value: $V)'
-        replace: '(__binding @$N (__declaration) (__rhs @$V))'
+        replace: '(__binding @$N $N (__declaration) (__rhs @$V $V))'
       - match: '(let_declaration pattern: $N)'
-        replace: '(__binding @$N (__declaration))'
+        replace: '(__binding @$N $N (__declaration))'
       # Reassignment
       - match: '(assignment_expression left: $N right: $R:__obj)'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N $N (__rhs $R))'
       - match: '(assignment_expression left: $N:__ivar right: $R)'
-        replace: '(__binding $N (__rhs @$R) $R)'
+        replace: '(__binding $N (__rhs @$R $R))'
       - match: '(assignment_expression left: $N right: $R:__call)'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N $N (__rhs $R))'
       - match: '(assignment_expression left: $N:__member right: $R)'
-        replace: '(__binding $N (__rhs @$R) $R)'
+        replace: '(__binding $N (__rhs @$R $R))'
       - match: '(assignment_expression left: $N right: $R)'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N $N (__rhs @$R $R))'
       - match: '(const_item name: $N)'
         replace: '(__def (__defname @$N) (__constant))'
       - match: '(static_item name: $N)'
@@ -268,7 +285,7 @@ stages:
       - match: '(associated_type name: $N)'
         replace: '(__def (__defname @$N) (__type_alias))'
       - match: '(type_item name: $N type: $T)'
-        replace: '(__def (__defname @$N) (__type_alias) (__ssa_typed @$T))'
+        replace: '(__def (__defname @$N) (__type_alias) (__ssa_typed @$T $T))'
       - match: '(type_item name: $N)'
         replace: '(__def (__defname @$N) (__type_alias))'
 
@@ -277,10 +294,14 @@ stages:
         replace: '(__ssa_branch $COND (__ssa_arm $C) (__ssa_arm? $A))'
       - match: '(match_expression value: $V body: (match_block $$$ARMS:__ssa_arm))'
         replace: '(__ssa_branch $V $$$ARMS)'
-      - match: '(for_expression body: $B)'
-        replace: '(__ssa_loop $B)'
-      - match: '(while_expression body: $B)'
-        replace: '(__ssa_loop $B)'
+      - match: '(for_expression pattern: $N:identifier value: $V body: $B)'
+        replace: '(__scope (__ssa_loop $V (__binding @$N (__declaration)) $B))'
+      - match: '(for_expression pattern: (mut_pattern $N:identifier) value: $V body: $B)'
+        replace: '(__scope (__ssa_loop $V (__binding @$N (__declaration)) $B))'
+      - match: '(for_expression value: $V body: $B)'
+        replace: '(__ssa_loop $V $B)'
+      - match: '(while_expression condition: $C body: $B)'
+        replace: '(__ssa_loop $C $B)'
       - match: '(loop_expression body: $B)'
         replace: '(__ssa_loop $B)'
 
@@ -288,29 +309,31 @@ stages:
       - match: '(parameter pattern: (mut_pattern $N) type: $T)'
         replace: '(parameter (identifier @$N) $T)'
       - match: '(parameter pattern: $N type: (reference_type type: (generic_type type: $T)))'
-        replace: '(__binding @$N (__ssa_typed @$T))'
+        replace: '(__binding @$N $N (__ssa_typed @$T $T))'
       - match: '(parameter pattern: $N type: (reference_type type: $T))'
-        replace: '(__binding @$N (__ssa_typed @$T))'
+        replace: '(__binding @$N $N (__ssa_typed @$T $T))'
       - match: '(parameter pattern: $N type: (generic_type type: $T))'
-        replace: '(__binding @$N (__ssa_typed @$T))'
+        replace: '(__binding @$N $N (__ssa_typed @$T $T))'
       - match: '(parameter pattern: $N:identifier type: $T)'
-        replace: '(__binding @$N (__ssa_typed @$T))'
+        replace: '(__binding @$N (__ssa_typed @$T $T))'
       - match: '(parameter pattern: $N:identifier)'
         replace: '(__binding @$N)'
+      - match: '(closure_parameters $$$P:identifier|__binding)'
+        replace: '(closure_parameters $$$P->__binding)'
 
       # Trait method signatures (no body) — self variant first
       - match: '(function_signature_item name: $N **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R)'
-        replace: '(__def (__defname @$N) (__method) (__declaration) (__ssa_return_type? @$R) $$$P)'
+        replace: '(__def (__defname @$N) (__method) (__declaration) (__ssa_return_type? @$R $R) $$$P)'
         tag: { flavor: self_method }
       - match: '(function_signature_item name: $N parameters: (parameters $$$P:__binding) return_type:? $R)'
-        replace: '(__def (__defname @$N) (__function) (__declaration) (__ssa_return_type? @$R) $$$P)'
+        replace: '(__def (__defname @$N) (__function) (__declaration) (__ssa_return_type? @$R $R) $$$P)'
 
       # Functions — self variant first, then generic
       - match: '(function_item name: $N type_parameters:? (type_parameters $$$TP) **/(self_parameter) parameters: (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__visibility)'
-        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R) $$$ANN $$$TP $$$P $B)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$R $R) $$$ANN $$$TP $$$P $B)'
         tag: { flavor: self_method }
       - match: '(function_item name: $N type_parameters:? (type_parameters $$$TP) parameters: (parameters $$$P:__binding) return_type:? $R body: $B $$$ANN:__visibility)'
-        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R) $$$ANN $$$TP $$$P $B)'
+        replace: '(__def (__defname @$N) (__function) (__ssa_return_type? @$R $R) $$$ANN $$$TP $$$P $B)'
 
       # Fields: named ones by name, tuple ones by position
       - match: '(field_declaration name: $N)'
@@ -320,7 +343,7 @@ stages:
 
       # Containers (after functions)
       - match: '(struct_item name: $N !(field_declaration_list) !(ordered_field_declaration_list))'
-        replace: '(__def (__defname @$N) (__struct) (__binding (__rhs (__call (__callee @$N)))))'
+        replace: '(__def (__defname @$N) (__struct) (__binding (__rhs (__call (__callee @$N $N)))))'
       - match: '(struct_item name: $N body:? $B)'
         replace: '(__def (__defname @$N) (__struct) $B)'
       - match: '(union_item name: $N body: $B)'
@@ -345,26 +368,26 @@ stages:
       # Blanket impl: impl<T> Trait for T — type matches type param, skip defname
       - match: '(impl_item **/(type_parameter $TP) trait: $T type: $TY body: $B)'
         where: '$TY == $TP'
-        replace: '(__def (__impl) (__supertype @$T) $B)'
+        replace: '(__def (__impl) (__supertype @$T $T) $B)'
       # impl Deref for Wrapper { type Target = Service; }: autoderef gives Wrapper Service's methods
       - match: '(impl_item trait: $T:(type_identifier "Deref") type: $TY body: $B **/(__def (__defname "Target") (__type_alias) $TG:__ssa_typed))'
-        replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) (__supertype @$TG) $B)'
+        replace: '(__def (__defname @$TY $TY) (__impl) (__alias "Self") (__supertype @$T) (__supertype @$TG) $B)'
       - match: '(impl_item trait: $T:(scoped_type_identifier name: (type_identifier "Deref")) type: $TY body: $B **/(__def (__defname "Target") (__type_alias) $TG:__ssa_typed))'
-        replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) (__supertype @$TG) $B)'
+        replace: '(__def (__defname @$TY $TY) (__impl) (__alias "Self") (__supertype @$T $T) (__supertype @$TG) $B)'
       # Generic impl: impl<T> Trait for Wrapper<T>
       - match: '(impl_item trait: $T type: (generic_type type: $TY) body: $B)'
-        replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) $B)'
+        replace: '(__def (__defname @$TY $TY) (__impl) (__alias "Self") (__supertype @$T $T) $B)'
       - match: '(impl_item trait: $T type: $TY body: $B)'
-        replace: '(__def (__defname @$TY) (__impl) (__alias "Self") (__supertype @$T) $B)'
+        replace: '(__def (__defname @$TY $TY) (__impl) (__alias "Self") (__supertype @$T $T) $B)'
       - match: '(impl_item type: (generic_type type: $T) body: $B)'
-        replace: '(__def (__defname @$T) (__impl) (__alias "Self") $B)'
+        replace: '(__def (__defname @$T $T) (__impl) (__alias "Self") $B)'
       - match: '(impl_item type: $T body: $B)'
-        replace: '(__def (__defname @$T) (__impl) (__alias "Self") $B)'
+        replace: '(__def (__defname @$T $T) (__impl) (__alias "Self") $B)'
 
   - name: scoped-supertypes
     rules:
       - match: '(__object $T:scoped_type_identifier)'
-        replace: '(__object (__member @$T|field("name") (__object @$T|field("path"))))'
+        replace: '(__object (__member @$T|field("name") $T (__object @$T|field("path"))))'
       # `impl zoo::traits::Audible for X` / `trait Bark: crate::traits::Audible`:
       # a path in supertype position is a scoped import of its last segment
       - match: '(__supertype "/::/")'
@@ -384,9 +407,9 @@ stages:
   - name: ssa-cleanup
     rules:
       - match: '(unpack_field $N:__name $P:unpack_pattern)'
-        replace: '(unpack (__binding @$P|child_sym("__object") (__rhs (__member @$N (__object @$ROOT|ancestor_sym("__object"))))) $P)'
+        replace: '(unpack (__binding @$P|child_sym("__object") (__rhs (__member @$N $N (__object @$ROOT|ancestor_sym("__object"))))) $P)'
       - match: '(unpack_field $N:__name)'
-        replace: '(__binding @$ROOT (__declaration) (__rhs (__member @$N (__object @$ROOT|ancestor_sym("__object")))))'
+        replace: '(__binding @$ROOT (__declaration) (__rhs (__member @$N $N (__object @$ROOT|ancestor_sym("__object")))))'
       - match: '(arguments $$$V:_*_named)'
         replace: '(__args $$$V:_*_named->tuple_value)'
 
@@ -396,16 +419,19 @@ stages:
         replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs (__obj $F $$$REST))))'
       - match: '(tuple_value $C:__callee $$$REST)'
         replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs (__call $C $$$REST))))'
+      # An argument takes the tuple_value kind; a closure argument gets its lambda back
+      - match: '(tuple_value $P:closure_parameters $$$REST)'
+        replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs (__lambda $P $$$REST))))'
       - match: '(tuple_value)'
         replace: '(__field @$ROOT|sibling_index (__binding @$ROOT|tree_node_id|prepend("$value:") (__rhs @$ROOT $ROOT)))'
       - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
       - match: '(__ssa_arm $V:identifier)'
-        replace: '(__ssa_arm (__rhs @$V))'
+        replace: '(__ssa_arm (__rhs @$V $V))'
       - match: '(__ssa_arm (block $V:identifier))'
-        replace: '(__ssa_arm (__rhs @$V))'
+        replace: '(__ssa_arm (__rhs @$V $V))'
       - match: '(__ssa_arm (else_clause (block $V:identifier)))'
-        replace: '(__ssa_arm (__rhs @$V))'
+        replace: '(__ssa_arm (__rhs @$V $V))'
       - match: '(__ssa_arm (else_clause $V:block))'
         replace: '(__ssa_arm $V)'
 
@@ -418,23 +444,33 @@ stages:
   - name: tag-defs
     rules:
       - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", scoped: "true" }
       - match: '(__def (__method))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__class))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
-        tag: { callable: "true" }
+        tag: { callable: "true", value: "true" }
       - match: '(__def (__struct))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
       - match: '(__def (__trait))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__enum))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
+      - match: '(__def (__type_alias))'
+        tag: { value: "true", declares_type: "true" }
+      - match: '(__def (__field_def))'
+        tag: { value: "true" }
+      - match: '(__def (__property))'
+        tag: { value: "true" }
+      - match: '(__def (__constant))'
+        tag: { value: "true" }
+      - match: '(__def (__static_constant))'
+        tag: { value: "true" }
 
   - name: tag-module-path
     rules:

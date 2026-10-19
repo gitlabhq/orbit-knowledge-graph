@@ -78,11 +78,13 @@ fn list_tests(filter: Option<&str>) -> Result<BTreeSet<String>> {
         "list",
         "--all-features",
         "--test",
-        "containers",
+        "server_containers",
+        "--test",
+        "indexer_containers",
         "-p",
         "integration-tests",
         "--message-format",
-        "oneline",
+        "json",
     ]);
     if let Some(filter) = filter {
         command.args(["-E", filter]);
@@ -101,16 +103,30 @@ fn list_tests(filter: Option<&str>) -> Result<BTreeSet<String>> {
 }
 
 fn parse_test_list(stdout: &str) -> Result<BTreeSet<String>> {
-    stdout
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            line.split_once(char::is_whitespace)
-                .map(|(_, test)| test.trim().to_string())
-                .filter(|test| !test.is_empty())
-                .with_context(|| format!("unexpected cargo nextest list output: {line}"))
+    let value: serde_json::Value = serde_json::from_str(stdout)?;
+    let suites = value
+        .get("rust-suites")
+        .and_then(serde_json::Value::as_object)
+        .context("nextest JSON has no rust-suites object")?;
+    Ok(suites
+        .values()
+        .flat_map(|suite| {
+            suite
+                .get("testcases")
+                .and_then(serde_json::Value::as_object)
+                .into_iter()
+                .flat_map(|tests| {
+                    tests
+                        .iter()
+                        .filter(|(_, test)| {
+                            test.pointer("/filter-match/status")
+                                .and_then(serde_json::Value::as_str)
+                                == Some("matches")
+                        })
+                        .map(|(name, _)| name.clone())
+                })
         })
-        .collect()
+        .collect())
 }
 
 fn partition_issues(
@@ -171,7 +187,7 @@ mod tests {
 
     #[test]
     fn parses_nextest_oneline_output() {
-        let output = "integration-tests::containers first::test\n\nintegration-tests::containers second::test\n";
+        let output = r#"{"rust-suites":{"server":{"testcases":{"first::test":{"filter-match":{"status":"matches"}}}},"indexer":{"testcases":{"second::test":{"filter-match":{"status":"matches"}}}}}}"#;
 
         assert_eq!(
             parse_test_list(output).unwrap(),
@@ -181,8 +197,8 @@ mod tests {
 
     #[test]
     fn rejects_malformed_nextest_oneline_output() {
-        assert!(parse_test_list("missing-separator").is_err());
-        assert!(parse_test_list("integration-tests::containers  ").is_err());
+        assert!(parse_test_list("not-json").is_err());
+        assert!(parse_test_list(r#"{"rust-suites":null}"#).is_err());
     }
 
     #[test]

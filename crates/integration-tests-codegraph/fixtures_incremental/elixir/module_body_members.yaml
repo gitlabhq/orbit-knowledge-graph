@@ -1,0 +1,54 @@
+name: "Elixir: a function in a module body is a member of the module"
+
+fixtures:
+  - path: lib/box.ex
+    content: |
+      defmodule Box do
+        def first do
+          helper = 1
+          helper
+        end
+
+        def helper do
+          :ok
+        end
+
+        def third do
+          helper()
+        end
+      end
+
+  - path: lib/use.ex
+    content: |
+      defmodule Use do
+        def run do
+          Box.helper()
+        end
+      end
+
+tests:
+  - name: a bare call from another function targets the module function, not the local of its name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'third' AND t.name = 'helper'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box.helper", kind: "Function" } }
+
+  - name: a call through the module name from another module targets the module function
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'run' AND t.name = 'helper'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Box.helper", kind: "Function" } }
+
+  - name: the local keeps its own read and has no edge to the module function
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'first' AND t.name = 'helper'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 0 }

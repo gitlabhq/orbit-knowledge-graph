@@ -54,12 +54,13 @@ fixtures:
 
 tests:
   - name: "Callable aliases and receiver types survive inner declarations"
+    # The callable reference `::first` is a use of the function, so it adds its own row next to the call through the alias.
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = 'run'
       RETURN caller.file_path AS file, callee.name AS target
     assert:
-      - { row_count: 7 }
+      - { row_count: 8 }
       - { row: { file: local/main.kt, target: first } }
       - { row: { file: callable/main.kt, target: first } }
       - { row: { file: shadow/main.kt, target: First } }
