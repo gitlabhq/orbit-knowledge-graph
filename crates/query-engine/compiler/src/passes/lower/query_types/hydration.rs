@@ -13,10 +13,20 @@ use ontology::constants::*;
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 
-use super::sql::{deleted_false, latest_row_dedup};
-use crate::passes::plan::{HydrationNodePlan, hydration::HydrationPathFilter};
+use super::Emitted;
+use crate::passes::lower::sql::{deleted_false, latest_row_dedup};
+use crate::passes::plan::query_types::hydration::HydrationPathFilter;
+use crate::passes::plan::{Hydration, HydrationNodePlan, Plan};
 
 use orbit_utils::traversal_path::TraversalPath;
+
+pub(crate) fn emit(plan: &Plan<Hydration>) -> Result<Emitted> {
+    Ok(Emitted {
+        ast: emit_hydration(&plan.operation.nodes)?,
+        nodes: std::collections::HashMap::new(),
+        stable_order: vec![],
+    })
+}
 
 pub fn emit_hydration(nodes: &[HydrationNodePlan]) -> Result<Node> {
     let mut arms = nodes.iter().map(emit_arm);
@@ -216,7 +226,7 @@ mod tests {
             },
         )
         .unwrap();
-        super::super::emit(&plan, &input).unwrap().ast
+        crate::passes::lower::emit(&plan, &input).unwrap().ast
     }
 
     #[test]

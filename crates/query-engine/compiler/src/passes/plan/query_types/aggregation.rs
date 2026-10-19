@@ -2,12 +2,16 @@ use std::collections::HashMap;
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use super::NodePlan;
-use super::graph::{ExecutionPlan, RelationNode};
-use super::predicates::{Column, Predicate};
+use query_data_model::OrbitQueryModel;
+
+use crate::error::Result;
 use crate::input::{
     AggExpr, AggFunction, Input, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
 };
+use crate::passes::plan::graph::{ExecutionPlan, RelationNode};
+use crate::passes::plan::pattern::Pattern;
+use crate::passes::plan::predicates::{Column, Predicate};
+use crate::passes::plan::{NodePlan, Plan};
 
 #[derive(Clone, PartialEq)]
 pub struct Group {
@@ -21,6 +25,11 @@ pub struct Measure {
     pub name: String,
 }
 
+pub struct Aggregation {
+    pub execution: ExecutionPlan,
+    pub result: AggregationPlan,
+}
+
 pub struct AggregationPlan {
     pub groups: Vec<Group>,
     pub group_outputs: Vec<(Group, String)>,
@@ -29,7 +38,17 @@ pub struct AggregationPlan {
     pub order: Option<InputAggSort>,
 }
 
-pub(super) fn plan(
+pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
+    input: &Input,
+    model: &M,
+) -> Result<Plan<Aggregation>> {
+    let pattern = Pattern::new(input, model)?;
+    let execution = pattern.execution()?;
+    let result = aggregation_plan(input, &pattern.nodes, &execution);
+    Ok(pattern.into_plan(execution, |execution| Aggregation { execution, result }))
+}
+
+fn aggregation_plan(
     input: &Input,
     nodes: &HashMap<String, NodePlan>,
     execution: &ExecutionPlan,

@@ -220,7 +220,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
         QueryPlan::Traversal(plan) => execution_tree(&plan.operation.execution),
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
-            let group = |value: &compiler::passes::plan::aggregation::Group| {
+            let group = |value: &compiler::passes::plan::query_types::aggregation::Group| {
                 let column = planned_column(&value.column);
                 value.truncate.map_or_else(
                     || column.clone(),
@@ -357,7 +357,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 .nodes
                 .iter()
                 .map(|node| {
-                    use compiler::passes::plan::hydration::HydrationPathFilter;
+                    use compiler::passes::plan::query_types::hydration::HydrationPathFilter;
                     let mut predicates = Vec::new();
                     if !node.node_ids.is_empty() {
                         predicates.push(format!(

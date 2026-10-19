@@ -1,7 +1,5 @@
 use super::sql;
 use crate::ast::*;
-use crate::input::OrderDirection;
-use crate::passes::plan::aggregation::{AggregationPlan, Group};
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection};
 
 pub(super) fn column(value: &Column) -> Expr {
@@ -109,56 +107,4 @@ pub(super) fn projections(values: &[Projection]) -> Vec<SelectExpr> {
             SelectExpr::new(expression, &value.name)
         })
         .collect()
-}
-
-fn group(value: &Group) -> Expr {
-    let column = column(&value.column);
-    match value.truncate {
-        Some(unit) => Expr::TimeBucket {
-            unit,
-            value: Box::new(column),
-        },
-        None => column,
-    }
-}
-
-pub(super) fn aggregation(plan: &AggregationPlan, output: super::EmitOutput, limit: u32) -> Node {
-    let condition = Expr::conjoin(plan.condition.iter().map(predicate).collect());
-    let select = plan
-        .group_outputs
-        .iter()
-        .map(|(value, name)| SelectExpr::new(group(value), name))
-        .chain(plan.measures.iter().map(|measure| {
-            SelectExpr::new(
-                Expr::Aggregate {
-                    function: measure.function,
-                    argument: measure
-                        .argument
-                        .as_ref()
-                        .map(|value| Box::new(column(value))),
-                    distinct: false,
-                    condition: condition.clone().map(Box::new),
-                },
-                &measure.name,
-            )
-        }))
-        .collect();
-    let order = plan
-        .order
-        .iter()
-        .map(|order| {
-            let value = Expr::ident(&order.column);
-            if order.direction == OrderDirection::Desc {
-                OrderExpr::desc(value)
-            } else {
-                OrderExpr::asc(value)
-            }
-        })
-        .collect();
-    Node::Query(Box::new(output.into_query(
-        select,
-        plan.groups.iter().map(group).collect(),
-        order,
-        limit,
-    )))
 }

@@ -1,10 +1,23 @@
 use query_data_model::OrbitQueryModel;
 
-use super::{EdgeTableConfig, NodePlan, PathFinding, Plan};
+use super::EdgeTableConfig;
 use crate::error::{QueryError, Result};
 use crate::input::*;
+use crate::passes::plan::{NodePlan, Plan};
 
-pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
+pub struct PathFinding {
+    pub start: String,
+    pub end: String,
+    pub max_depth: u32,
+    pub forward_depth: u32,
+    pub backward_depth: u32,
+    pub edge: EdgeTableConfig,
+    pub forward_first_hop_filter: Option<Vec<String>>,
+    pub backward_first_hop_filter: Option<Vec<String>>,
+    pub scoped_by_tp: bool,
+}
+
+pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
     input: &Input,
     model: &M,
 ) -> Result<Plan<PathFinding>> {

@@ -116,6 +116,7 @@ pub(super) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
     pub nodes: HashMap<String, NodePlan>,
     pub relations: Vec<EdgeRelation>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
+    scans: Vec<Option<String>>,
 }
 
 impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
@@ -146,69 +147,67 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
     }
 }
 
-pub(super) struct Planned<'a, M: OrbitQueryModel + ?Sized> {
-    pattern: Pattern<'a, M>,
-    execution: ExecutionPlan,
-    node_edge_mappings: HashMap<String, (String, String)>,
-}
+impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
+    pub(super) fn new(input: &'a Input, model: &'a M) -> Result<Self> {
+        let nodes = nodes::build_nodes(input, model);
+        let mut pattern = Self {
+            input,
+            model,
+            relations: relations::build_relations(input, model, &nodes),
+            nodes,
+            denormalized: super::denormalized_facts(input, model),
+            scans: Vec::new(),
+        };
+        let placement = conditions::place_conditions(&pattern)?;
+        conditions::bind_scan_conditions(&mut pattern, &placement)?;
+        nodes::assign_node_access(&mut pattern, &placement.joined_nodes);
+        relations::linearize_relations(&mut pattern.relations, &pattern.nodes)?;
+        if pattern.aggregate() {
+            let groups: HashSet<&str> = node_group_ids(&input.aggregation.group_by).collect();
+            for node in pattern.nodes.values_mut() {
+                node.emit_select = groups.contains(node.alias.as_str());
+            }
+        }
+        pattern.scans = placement.scans;
+        Ok(pattern)
+    }
 
-impl<'a, M: OrbitQueryModel + ?Sized> Planned<'a, M> {
-    pub fn finish<T>(self, operation: impl FnOnce(&Pattern<'a, M>, ExecutionPlan) -> T) -> Plan<T> {
-        let operation = operation(&self.pattern, self.execution);
+    /// The relation graph for the pattern, with the conditions that span nodes applied at its root.
+    pub(super) fn execution(&self) -> Result<ExecutionPlan> {
+        let mut execution = steps::RelationBuilder::new(self).build()?;
+        let conditions = self
+            .input
+            .predicates
+            .iter()
+            .zip(&self.scans)
+            .filter(|(_, scan)| scan.is_none())
+            .map(|(root, _)| conditions::bind_tree(self, root, Some(&execution.bindings)))
+            .collect::<Result<_>>()?;
+        execution.root = execution.graph.filter(execution.root, conditions);
+        Ok(execution)
+    }
+
+    pub(super) fn into_plan<T>(
+        self,
+        execution: ExecutionPlan,
+        operation: impl FnOnce(ExecutionPlan) -> T,
+    ) -> Plan<T> {
+        let node_edge_mappings = execution
+            .bindings
+            .iter()
+            .map(|binding| {
+                (
+                    binding.node.clone(),
+                    (binding.alias.clone(), binding.column.clone()),
+                )
+            })
+            .collect();
         Plan {
-            nodes: self.pattern.nodes,
-            relations: self.pattern.relations,
-            node_edge_mappings: self.node_edge_mappings,
-            denormalized: self.pattern.denormalized,
-            operation,
+            nodes: self.nodes,
+            relations: self.relations,
+            node_edge_mappings,
+            denormalized: self.denormalized,
+            operation: operation(execution),
         }
     }
-}
-
-pub(super) fn plan<'a, M>(input: &'a Input, model: &'a M) -> Result<Planned<'a, M>>
-where
-    M: OrbitQueryModel + ?Sized,
-{
-    let nodes = nodes::build_nodes(input, model);
-    let mut pattern = Pattern {
-        input,
-        model,
-        relations: relations::build_relations(input, model, &nodes),
-        nodes,
-        denormalized: super::denormalized_facts(input, model),
-    };
-    let placement = conditions::place_conditions(&pattern)?;
-    conditions::bind_scan_conditions(&mut pattern, &placement)?;
-    nodes::assign_node_access(&mut pattern, &placement.joined_nodes);
-    relations::linearize_relations(&mut pattern.relations, &pattern.nodes)?;
-    if pattern.aggregate() {
-        let groups: HashSet<&str> = node_group_ids(&input.aggregation.group_by).collect();
-        for node in pattern.nodes.values_mut() {
-            node.emit_select = groups.contains(node.alias.as_str());
-        }
-    }
-    let mut execution = steps::RelationBuilder::new(&pattern).build()?;
-    let conditions = input
-        .predicates
-        .iter()
-        .zip(&placement.scans)
-        .filter(|(_, scan)| scan.is_none())
-        .map(|(root, _)| conditions::bind_tree(&pattern, root, Some(&execution.bindings)))
-        .collect::<Result<_>>()?;
-    execution.root = execution.graph.filter(execution.root, conditions);
-    let node_edge_mappings = execution
-        .bindings
-        .iter()
-        .map(|binding| {
-            (
-                binding.node.clone(),
-                (binding.alias.clone(), binding.column.clone()),
-            )
-        })
-        .collect();
-    Ok(Planned {
-        pattern,
-        execution,
-        node_edge_mappings,
-    })
 }

@@ -4,19 +4,42 @@
 
 use ontology::constants::*;
 
-use super::NodeBinding;
+use super::Emitted;
 use crate::ast::*;
 use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
+use crate::passes::lower::NodeBinding;
 
-use super::sql::{
+use crate::passes::lower::sql::{
     dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
 use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
 
-pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBinding)> {
+pub(crate) fn emit(plan: &Plan<Neighbors>, input: &Input) -> Result<Emitted> {
+    let (ast, binding) = emit_neighbors(plan, input)?;
+    let stable_order = match plan.operation.direction {
+        Direction::Both => vec![
+            OrderExpr::asc(Expr::ident(redaction_id_column(&plan.operation.center))),
+            OrderExpr::asc(Expr::ident(neighbor_id_column())),
+            OrderExpr::asc(Expr::ident(relationship_type_column())),
+            OrderExpr::asc(Expr::ident(neighbor_is_outgoing_column())),
+        ],
+        _ => vec![
+            OrderExpr::asc(Expr::col("e", SOURCE_ID_COLUMN)),
+            OrderExpr::asc(Expr::col("e", TARGET_ID_COLUMN)),
+            OrderExpr::asc(Expr::col("e", RELATIONSHIP_KIND_COLUMN)),
+        ],
+    };
+    Ok(Emitted {
+        ast,
+        nodes: std::collections::HashMap::from([(plan.operation.center.clone(), binding)]),
+        stable_order,
+    })
+}
+
+fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBinding)> {
     let Neighbors {
         center: center_alias,
         direction,

@@ -1,19 +1,16 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
 mod graph;
-pub mod hydration;
-pub mod neighbors;
-pub mod pathfinding;
 mod predicates;
+pub mod query_types;
 pub(crate) mod sql;
 
 use crate::ast::*;
-use crate::constants::EDGE_TYPE_SUFFIX;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use std::collections::HashMap;
 
-use super::plan::{EdgeRelation, Plan, QueryPlan};
+use super::plan::{Plan, QueryPlan};
 
 #[derive(Clone, Default)]
 pub struct LoweredMetadata {
@@ -158,85 +155,14 @@ impl EmitOutput {
     }
 }
 
-fn multi_type_edge_types(node: &Node, relations: &[EdgeRelation]) -> Vec<Expr> {
-    let Node::Query(query) = node else {
-        return Vec::new();
-    };
-    relations
-        .iter()
-        .filter(|hop| {
-            hop.max_hops == 1
-                && (hop.rel_types.len() > 1
-                    || crate::passes::normalize::is_wildcard(&hop.rel_types))
-        })
-        .filter_map(|hop| edge_type(query, hop))
-        .collect()
-}
-
-fn edge_type(query: &Query, relation: &EdgeRelation) -> Option<Expr> {
-    query
-        .selected(&format!("{}{}", relation.column_prefix(), EDGE_TYPE_SUFFIX))
-        .cloned()
-}
-
-fn emit_traversal(
-    input: &Input,
-    output: EmitOutput,
-    relations: &[EdgeRelation],
-    execution: &crate::passes::plan::graph::ExecutionPlan,
-) -> Result<Node> {
-    let mut query = output.into_query(vec![], vec![], vec![], input.limit);
-    query.order_by = match (&input.order_by, &input.relationship_return.sort) {
-        (Some(order), _) => vec![ordered(
-            predicates::column(&execution.property(&order.node, &order.property)),
-            order.direction,
-        )],
-        (None, Some(sort)) => {
-            let edge_type = relations
-                .iter()
-                .find(|hop| hop.input_index == sort.relationship)
-                .and_then(|hop| edge_type(&query, hop))
-                .ok_or_else(|| {
-                    QueryError::Lowering("sorted relationship has no edge type column".into())
-                })?;
-            vec![ordered(edge_type, sort.direction)]
-        }
-        (None, None) => Vec::new(),
-    };
-    Ok(Node::Query(Box::new(query)))
-}
-
-fn ordered(expr: Expr, direction: OrderDirection) -> OrderExpr {
-    if direction == OrderDirection::Desc {
-        OrderExpr::desc(expr)
-    } else {
-        OrderExpr::asc(expr)
-    }
-}
-
 pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
-    let mut nodes = HashMap::new();
-    let node = match plan {
-        QueryPlan::Traversal(plan) => {
-            let mut output = graph::execute(&plan.operation.execution);
-            nodes = output.take_bindings(plan, input)?;
-            emit_traversal(input, output, &plan.relations, &plan.operation.execution)
-        }
-        QueryPlan::Aggregation(plan) => {
-            let result = &plan.operation.result;
-            let mut output = graph::execute(&plan.operation.execution);
-            nodes = output.take_bindings(plan, input)?;
-            Ok(predicates::aggregation(result, output, input.limit))
-        }
-        QueryPlan::Neighbors(plan) => {
-            let (query, binding) = neighbors::emit_neighbors(plan, input)?;
-            nodes.insert(plan.operation.center.clone(), binding);
-            Ok(query)
-        }
-        QueryPlan::PathFinding(plan) => pathfinding::emit_pathfinding(plan, input),
-        QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes),
-    }?;
-
+    let emitted = match plan {
+        QueryPlan::Traversal(plan) => query_types::traversal::emit(plan, input)?,
+        QueryPlan::Aggregation(plan) => query_types::aggregation::emit(plan, input)?,
+        QueryPlan::Neighbors(plan) => query_types::neighbors::emit(plan, input)?,
+        QueryPlan::PathFinding(plan) => query_types::pathfinding::emit(plan, input)?,
+        QueryPlan::Hydration(plan) => query_types::hydration::emit(plan)?,
+    };
     let edges = plan
         .relations()
         .iter()
@@ -250,68 +176,12 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
             }
         })
         .collect();
-    let stable_order = match plan {
-        QueryPlan::Hydration(_) => vec![],
-        QueryPlan::Aggregation(_) => match &node {
-            Node::Query(query) => query.group_by.iter().cloned().map(OrderExpr::asc).collect(),
-            Node::Insert(_) => Vec::new(),
-        },
-        QueryPlan::PathFinding(_) => vec![
-            OrderExpr::asc(Expr::func(
-                Function::ToString,
-                vec![Expr::col("paths", crate::constants::path_column())],
-            )),
-            OrderExpr::asc(Expr::func(
-                Function::ToString,
-                vec![Expr::col("paths", crate::constants::edge_kinds_column())],
-            )),
-        ],
-        QueryPlan::Neighbors(plan) => match plan.operation.direction {
-            Direction::Both => vec![
-                OrderExpr::asc(Expr::ident(crate::constants::redaction_id_column(
-                    &plan.operation.center,
-                ))),
-                OrderExpr::asc(Expr::ident(crate::constants::neighbor_id_column())),
-                OrderExpr::asc(Expr::ident(crate::constants::relationship_type_column())),
-                OrderExpr::asc(Expr::ident(crate::constants::neighbor_is_outgoing_column())),
-            ],
-            _ => vec![
-                OrderExpr::asc(Expr::col("e", ontology::constants::SOURCE_ID_COLUMN)),
-                OrderExpr::asc(Expr::col("e", ontology::constants::TARGET_ID_COLUMN)),
-                OrderExpr::asc(Expr::col(
-                    "e",
-                    ontology::constants::RELATIONSHIP_KIND_COLUMN,
-                )),
-            ],
-        },
-        QueryPlan::Traversal(_) if input.relationships.is_empty() => input
-            .nodes
-            .iter()
-            .filter_map(|node| nodes.get(&node.id))
-            .map(|binding| OrderExpr::asc(binding.identity().clone()))
-            .collect(),
-        QueryPlan::Traversal(plan) => input
-            .nodes
-            .iter()
-            .filter_map(|node| nodes.get(&node.id))
-            .map(|binding| binding.identity().clone())
-            .fold(Vec::new(), |mut order, identity| {
-                if !order.contains(&identity) {
-                    order.push(identity);
-                }
-                order
-            })
-            .into_iter()
-            .chain(multi_type_edge_types(&node, &plan.relations))
-            .map(OrderExpr::asc)
-            .collect(),
-    };
     Ok(LoweredQuery {
-        ast: node,
+        ast: emitted.ast,
         metadata: LoweredMetadata {
-            nodes,
+            nodes: emitted.nodes,
             edges,
-            stable_order,
+            stable_order: emitted.stable_order,
         },
     })
 }

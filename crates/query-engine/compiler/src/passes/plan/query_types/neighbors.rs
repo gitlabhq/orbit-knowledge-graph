@@ -1,12 +1,27 @@
 use ontology::constants::*;
 use query_data_model::{DenormalizedDirection, OrbitQueryModel, RelationshipId};
 
-use super::filters::{BoundFilter, lowerable_denorm};
-use super::{EdgeTableConfig, Neighbors, NodePlan, Plan};
+use super::EdgeTableConfig;
 use crate::error::{QueryError, Result};
 use crate::input::*;
+use crate::passes::plan::filters::{BoundFilter, lowerable_denorm};
+use crate::passes::plan::{NodePlan, Plan, denormalized_facts};
 
-pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
+pub struct Neighbors {
+    pub center: String,
+    pub direction: Direction,
+    pub edge: EdgeTableConfig,
+    pub has_non_denorm: bool,
+    pub fused_table: Option<String>,
+    pub outgoing_kinds: Vec<String>,
+    pub incoming_kinds: Vec<String>,
+    pub incoming_scope_preserving: Vec<String>,
+    pub incoming_cross_scope: Vec<String>,
+    pub outgoing_neighbor_paths: Vec<(String, String)>,
+    pub incoming_neighbor_paths: Vec<(String, String)>,
+}
+
+pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
     input: &Input,
     model: &M,
 ) -> Result<Plan<Neighbors>> {
@@ -28,7 +43,7 @@ pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
         .map(|entity| entity.id)
         .ok_or_else(|| QueryError::Lowering("neighbors center entity is unknown".into()))?;
     let center = NodePlan::resolve(center_node, model)?;
-    let denormalized = super::denormalized_facts(input, model);
+    let denormalized = denormalized_facts(input, model);
 
     let relationships: Vec<&str> = if config.rel_types.is_empty() {
         model

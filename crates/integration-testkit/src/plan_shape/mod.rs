@@ -775,7 +775,7 @@ reject:
 #[test]
 fn hydration_planning_selects_paths_before_sql_rendering() {
     use compiler::input::{InputNode, QueryType};
-    use compiler::passes::plan::hydration::HydrationPathFilter;
+    use compiler::passes::plan::query_types::hydration::HydrationPathFilter;
     use orbit_utils::traversal_path::TraversalPath;
 
     let model = ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))

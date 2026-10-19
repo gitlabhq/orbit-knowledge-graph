@@ -12,13 +12,31 @@ use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::sql::{
+use super::Emitted;
+use crate::passes::lower::sql::{
     dedup_query, deleted_false, denorm_tag_expr, filter_to_expr, final_edge_table_scan,
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
 use crate::passes::plan::{NodePlan, PathFinding, Plan};
 
-pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
+pub(crate) fn emit(plan: &Plan<PathFinding>, input: &Input) -> Result<Emitted> {
+    Ok(Emitted {
+        ast: emit_pathfinding(plan, input)?,
+        nodes: std::collections::HashMap::new(),
+        stable_order: vec![
+            OrderExpr::asc(Expr::func(
+                Function::ToString,
+                vec![Expr::col("paths", path_column())],
+            )),
+            OrderExpr::asc(Expr::func(
+                Function::ToString,
+                vec![Expr::col("paths", edge_kinds_column())],
+            )),
+        ],
+    })
+}
+
+fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
     let pf = &plan.operation;
     let start_np = &plan.nodes[&pf.start];
     let end_np = &plan.nodes[&pf.end];

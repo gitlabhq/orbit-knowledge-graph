@@ -1,9 +1,9 @@
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 use query_data_model::OrbitQueryModel;
 
-use super::{Hydration, Plan, sort_key};
 use crate::error::{QueryError, Result};
 use crate::input::*;
+use crate::passes::plan::{Plan, sort_key};
 
 const PREFIX_SET_PATH_THRESHOLD: usize = 256;
 
@@ -11,6 +11,10 @@ const PREFIX_SET_PATH_THRESHOLD: usize = 256;
 pub struct HydrationCompileOptions {
     pub dynamic: bool,
     pub path_segment_budget: Option<usize>,
+}
+
+pub struct Hydration {
+    pub nodes: Vec<HydrationNodePlan>,
 }
 
 pub struct HydrationNodePlan {
@@ -60,7 +64,7 @@ fn path_filter(
     )
 }
 
-pub(super) fn plan<M: OrbitQueryModel + ?Sized>(
+pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
     input: &Input,
     model: &M,
     options: HydrationCompileOptions,
