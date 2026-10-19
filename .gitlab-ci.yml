@@ -775,6 +775,37 @@ unit-test:
     - ./scripts/dev/run-unit-tests.sh --profile ci
     - sccache --show-stats || true
 
+# No --all-targets: some tests are unix-only.
+windows-cli-check:
+  stage: test
+  extends:
+    - .job-template
+    - .sccache-template
+    - .no-cargo-home-cache
+  needs: []
+  variables:
+    LLVM_MINGW_VERSION: "20260505"
+    CC_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang
+    CXX_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang++
+    AR_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-ar
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
+      changes:
+        - "**/*.rs"
+        - "**/Cargo.toml"
+        - Cargo.lock
+        - rust-toolchain.toml
+        - scripts/ci/install-llvm-mingw.sh
+  before_script:
+    - !reference [.sccache-template, before_script]
+    - ./scripts/ci/install-llvm-mingw.sh
+    - export PATH="/opt/llvm-mingw/bin:$PATH"
+    - rustup target add x86_64-pc-windows-gnullvm
+  script:
+    - cargo check --locked --target x86_64-pc-windows-gnullvm -p orbit-cli --bin orbit --features duckdb-client/bundled
+    - sccache --show-stats || true
+
 compiler-integration-test:
   stage: test
   extends:
