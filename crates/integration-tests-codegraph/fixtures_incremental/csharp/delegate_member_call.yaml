@@ -1,0 +1,28 @@
+name: "C#: a call on a Func, Action or Predicate property reaches the property"
+
+fixtures:
+  - path: A.cs
+    content: |
+      using System;
+      class Runner {
+          Func<int> Factory { get; set; }
+          Predicate<int> Check { get; set; }
+          Action Hook { get; set; }
+          int Run() {
+              Hook();
+              Check(1);
+              return Factory();
+          }
+      }
+
+tests:
+  - name: the calls reach the delegate-typed properties
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'Run'
+      RETURN t.name AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: "Factory", kind: "Property" } }
+      - { row: { callee: "Check", kind: "Property" } }
+      - { row: { callee: "Hook", kind: "Property" } }

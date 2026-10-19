@@ -1,0 +1,83 @@
+name: "PHP: a read of a promoted constructor property links to the property"
+
+fixtures:
+  - path: Props.php
+    content: |
+      <?php
+
+      namespace Probe;
+
+      class Holder
+      {
+          public function __construct(public Holder $next)
+          {
+          }
+      }
+
+      class Dependency
+      {
+          public function __construct(public string $value, public $raw = null)
+          {
+          }
+      }
+
+      class XPathExpr
+      {
+          public function __construct(private string $element = '')
+          {
+          }
+
+          public function join(string $combiner, self $expr): self
+          {
+              $this->element = $expr->element.$combiner;
+
+              return $this;
+          }
+
+          public function after(Dependency $dep): string
+          {
+              return $dep->value.$dep->raw;
+          }
+
+          public function next(Holder $holder): Holder
+          {
+              return $holder->next;
+          }
+      }
+
+tests:
+  - name: a typed promoted property read links to the property
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'after' AND t.name = 'value'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Probe\\Dependency\\value", kind: "Property" } }
+
+  - name: an untyped promoted property read links to the property
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'after' AND t.name = 'raw'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Probe\\Dependency\\raw" } }
+
+  - name: a promoted property read through a self-typed parameter links to the property
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'join' AND t.name = 'element'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Probe\\XPathExpr\\element" } }
+
+  - name: a class-typed promoted property read links to the property
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'next' AND t.name = 'next'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Probe\\Holder\\next" } }

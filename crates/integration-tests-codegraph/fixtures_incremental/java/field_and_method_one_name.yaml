@@ -1,0 +1,213 @@
+name: "Java: a field and a method of one name keep separate bindings"
+
+fixtures:
+  - path: Main.java
+    content: |
+      class Other {
+          void b() {}
+      }
+
+      class Box {
+          Other x = new Other();
+
+          Box x() {
+              if (x != null) {
+                  x.b();
+              }
+              return new Box();
+          }
+
+          void b() {}
+
+          void go() {
+              x.b();
+          }
+
+          void goCall() {
+              x().b();
+          }
+
+          void setX(Other v) {
+              x = v;
+          }
+      }
+
+      class Sub extends Box {
+          void viaSuper() {
+              x.b();
+          }
+      }
+
+      abstract class Iter {
+          abstract void next();
+      }
+
+      class Set {
+          Iter it() {
+              return new Iter() {
+                  final Other first = first();
+
+                  void next() {
+                      first.b();
+                  }
+
+                  Object again() {
+                      return first();
+                  }
+              };
+          }
+
+          int indexOf() {
+              return first().hashCode();
+          }
+
+          Other first() {
+              return new Other();
+          }
+      }
+
+      class Late {
+          Late x() {
+              return new Late();
+          }
+
+          void b() {}
+
+          Other x = new Other();
+
+          void goCall() {
+              x().b();
+          }
+      }
+
+      class Base {
+          Base x() {
+              return new Base();
+          }
+
+          void b() {}
+      }
+
+      class Sub extends Base {
+          Other x = new Other();
+
+          void goCall() {
+              x().b();
+          }
+      }
+
+      public class Main {
+          static class Nested {
+              Nested x() {
+                  return new Nested();
+              }
+
+              void b() {}
+
+              void goCall() {
+                  x().b();
+              }
+          }
+      }
+
+tests:
+  - name: the method x reads the field x and has no self edge
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'x' AND t.name IN ['x', 'b']
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Other.b", kind: "Method" } }
+
+  - name: a read of x types the receiver by the field, not by the method of the same name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'go'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Other.b", kind: "Method" } }
+
+  - name: a call of x() targets the method and types the receiver by its return
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Box.goCall'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Box.b", "Box.x"] } }
+
+  - name: an inherited read of x types the receiver by the field
+    # Known gap: a bare read of an inherited field is not bound in the subclass scope, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'viaSuper'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Other.b", kind: "Method" } }
+
+  - name: an assignment to x is not a call
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'setX' AND t.name = 'x'
+      RETURN t.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: a bare call after an anonymous class field of the same name targets the method
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Set.indexOf' AND t.name = 'first'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Set.first", kind: "Method" } }
+
+  - name: a bare call inside the anonymous class targets the method, not the field of the same name
+    # Known gap: inside the anonymous class the bare name resolves through the value of the field of its name, so the call has no edge, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Set.it.again'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Set.first", kind: "Method" } }
+
+  - name: a chained call on a method of a nested class types by its return
+    # Known gap: a return type that names a nested class is not resolved, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Main.Nested.goCall'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["Main.Nested.b", "Main.Nested.x"] } }
+
+  - name: the anonymous class field keeps its own read
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Set.it.next'
+      RETURN t.fqn AS callee
+    assert:
+      - { row: { callee: "Other.b" } }
+
+  - name: a bare call of a field name declared after the method of its name targets the method
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Late.goCall'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["Late.b", "Late.x"] } }
+      - { column_values: { field: kind, values: ["Method"] } }
+
+  - name: a bare call of a field name whose method is inherited targets the inherited method
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'Sub.goCall'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { column_values: { field: callee, values: ["Base.b", "Base.x"] } }
+      - { column_values: { field: kind, values: ["Method"] } }

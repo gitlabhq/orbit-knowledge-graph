@@ -138,7 +138,7 @@ stages:
 
       # Parameters: typed → SSA-typed binding that references its type
       - match: '(formal_parameter type: $T:__member name: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T))))'
+        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
       - match: '(formal_parameter type: $T:type_identifier name: $N:identifier)'
         replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
       - match: '(formal_parameter name: $N:identifier)'
@@ -146,7 +146,7 @@ stages:
       - match: '(spread_parameter (variable_declarator name: $N:identifier))'
         replace: '(__binding @$N)'
       - match: '(catch_formal_parameter (catch_type $T:__member) name: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__callee $T))))'
+        replace: '(__binding @$N (__ssa_typed $T) (__rhs (__call (__type) (__callee $T))))'
       - match: '(catch_formal_parameter (catch_type $T:type_identifier) name: $N:identifier)'
         replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
       - match: '(catch_formal_parameter name: $N:identifier)'
@@ -204,7 +204,7 @@ stages:
   - name: classify
     rules:
       - match: '(local_variable_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))'
-        replace: '(java_local $V (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__callee $T)))))'
+        replace: '(java_local $V (__binding @$N (__declaration) (__ssa_typed $T) (__rhs (__call (__type) (__callee $T)))))'
       # Local variables
       - match: '(local_variable_declaration type: (type_identifier "var") declarator: (variable_declarator name: $N:identifier value: $V:__call))'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
@@ -262,10 +262,10 @@ stages:
         replace: '(__ssa_loop $B)'
 
       - match: '(field_declaration type: $T:__member declarator: (variable_declarator name: $N:identifier value:? $V))'
-        replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__callee $T)))) $V)'
+        replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee $T)))) $V)'
       # Fields: typed class fields seed this.x dispatch
       - match: '(field_declaration type: $T:type_identifier declarator: (variable_declarator name: $N:identifier value:? $V))'
-        replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__callee @$T $T)))) $V)'
+        replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))) $V)'
       - match: '(field_declaration declarator: (variable_declarator name: $N:identifier value:? $V))'
         replace: '(__def (__defname @$N) (__field_def) $V)'
       - match: '(constant_declaration declarator: (variable_declarator name: $N:identifier))'
@@ -305,12 +305,17 @@ stages:
       - match: '(record_component "/^equals$/")'
         replace: '(__def (__defname @$ROOT) (__method) (formal_parameters (__binding "o")))'
         unique: '(__def (__method))'
+      - match: '(record_component "/^(hashCode|toString)$/")'
+        replace: '(__def (__defname @$ROOT) (__method) (formal_parameters))'
+        unique: '(__def (__method) (formal_parameters !(__binding)))'
       - match: '(record_component $T:__ssa_typed)'
         replace: '(__def (__defname @$ROOT) (__method) (__ssa_return_type @$T) (formal_parameters))'
         unique: '(__def (__method) (formal_parameters !(__binding)))'
+        tag: { value: "true" }
       - match: '(record_component)'
         replace: '(__def (__defname @$ROOT) (__method) (formal_parameters))'
         unique: '(__def (__method) (formal_parameters !(__binding)))'
+        tag: { value: "true" }
 
   - name: ssa-cleanup
     rules:
@@ -326,19 +331,25 @@ stages:
       - match: '(__def (__method))'
         tag: { callable: "true", scoped: "true", definition_span: "true" }
       - match: '(__def (__class))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
-        tag: { callable: "true" }
+        tag: { callable: "true", value: "true" }
       - match: '(__def (__struct))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
       - match: '(__def (__trait))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__enum))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
+      - match: '(__def (__interface))'
+        tag: { value: "true", declares_type: "true" }
+      - match: '(__def (__field_def))'
+        tag: { value: "true" }
+      - match: '(__def (__constant))'
+        tag: { value: "true" }
 
   - name: tag-file-dir
     rules:

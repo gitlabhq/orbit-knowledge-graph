@@ -1,0 +1,39 @@
+name: "TypeScript: a local function with a property's name is not typed by the property"
+
+fixtures:
+  - path: main.ts
+    content: |
+      class Other {
+        bind(target: unknown): void {}
+      }
+
+      class A {
+        cb: Other = new Other();
+
+        m(): void {
+          function cb(): void {}
+          cb.bind(this);
+        }
+
+        read(): void {
+          this.cb.bind(this);
+        }
+      }
+
+tests:
+  - name: a read of a local function does not type by the property of the same name
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'A::m'
+      RETURN t.fqn AS callee
+    assert:
+      - { not: true, row: { callee: "Other::bind" } }
+
+  - name: a read of the property types by the property
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'A::read' AND t.name = 'bind'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Other::bind" } }
