@@ -161,10 +161,7 @@ impl ClickHouseStaleDataCleaner {
             reason,
         };
 
-        debug!(
-            table,
-            %traversal_path, project_id, branch, "tombstoning stale rows"
-        );
+        debug!(table, "tombstoning stale rows");
         let stale = self
             .client
             .query(query)
@@ -216,7 +213,7 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
             .await?;
         }
 
-        debug!(project_id, branch, "stale data deletion complete");
+        debug!("stale data deletion complete");
         Ok(())
     }
 }

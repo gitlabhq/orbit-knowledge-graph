@@ -1,3 +1,23 @@
+## [0.149.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.148.0...v0.149.0) (2026-10-19)
+
+### Features
+
+* **indexer:** ship production insert settings as Orbit defaults ([ce697aa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ce697aa0975fef16879f0fe452f4c1470cfcff6a)) by Michael Angelo Rivera
+* **indexer:** take the repository storage from the code indexing task ([6f09df1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6f09df1cb83c7b0ba7900047dc87f0f2a701e198)) by Dmitry Gruzd
+
+### Fixes
+
+* **code-graph-incremental:** link calls in expressions ([2a5e397](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2a5e39788eded88c1f84c064a741856f4deb8307)) by Michael Angelo Rivera
+* **code-graph-incremental:** link calls to the right member ([5021d86](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5021d8651c10e046824388ae35dd3985f5d61dcb)) by Michael Angelo Rivera
+* **integration-tests:** add missing repository_storage and clear narration lint ([d5211f1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d5211f1011f75a6f5f6dfce8c3b9083ef9168ca9)) by Dmitry Gruzd
+* **orbit-cli:** say 'timed out' and include the cause in request failures ([b32ce1f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b32ce1fa46d5c79f9b26038f79a5abe006d5bd82)) by Dmitry Gruzd
+* **utils:** build safe_fs and vfs scratch on Windows ([f7b238a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f7b238a6a8843ea25df344677bce4c91f5208003)) by Dmitry Gruzd
+
+### Other
+
+* **integration:** speed up test-container integration tests by up to 7.1x ([41303ed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/41303ed3eb70d526064499f71f931e1435e08b7c)) by Michael Usachenko
+* **nats:** replace fixed startup delays ([0598f11](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0598f11d6dce382180dc6b4ab50b22a0a4e15819)) by Michael Usachenko
+
 ## [0.148.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.147.0...v0.148.0) (2026-10-18)
 
 ### Features

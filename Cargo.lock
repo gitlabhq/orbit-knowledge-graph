@@ -1400,6 +1400,7 @@ dependencies = [
  "tempfile",
  "toml",
  "tracing",
+ "tracing-subscriber",
  "treesitter-visit",
  "triomphe",
 ]
