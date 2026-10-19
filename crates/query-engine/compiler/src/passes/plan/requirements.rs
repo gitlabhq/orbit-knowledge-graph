@@ -20,7 +20,7 @@ impl Column {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Predicate {
     Boolean(crate::input::BooleanExpression<Box<Predicate>>),
     ColumnsEqual {

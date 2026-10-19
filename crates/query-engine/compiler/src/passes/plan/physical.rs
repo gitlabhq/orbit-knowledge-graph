@@ -158,6 +158,17 @@ impl Relation<'_> {
 #[derive(Default)]
 pub struct RelationGraph {
     nodes: Vec<RelationNode>,
+    reads: Vec<(ReadKey, RelationId)>,
+}
+
+#[derive(PartialEq)]
+struct ReadKey {
+    table: String,
+    alias: String,
+    owner: ReadOwner,
+    key: Vec<String>,
+    predicates: Vec<Predicate>,
+    selective_latest: bool,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -244,6 +255,31 @@ impl RelationGraph {
     }
 
     pub(crate) fn current_rows(
+        &mut self,
+        table: &str,
+        alias: &str,
+        owner: ReadOwner,
+        key: &[String],
+        predicates: Vec<Predicate>,
+        selective_latest: bool,
+    ) -> RelationId {
+        let read = ReadKey {
+            table: table.to_string(),
+            alias: alias.to_string(),
+            owner: owner.clone(),
+            key: key.to_vec(),
+            predicates: predicates.clone(),
+            selective_latest,
+        };
+        if let Some((_, id)) = self.reads.iter().find(|(planned, _)| *planned == read) {
+            return *id;
+        }
+        let id = self.plan_current_rows(table, alias, owner, key, predicates, selective_latest);
+        self.reads.push((read, id));
+        id
+    }
+
+    fn plan_current_rows(
         &mut self,
         table: &str,
         alias: &str,
