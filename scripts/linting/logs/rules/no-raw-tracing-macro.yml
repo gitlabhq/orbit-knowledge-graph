@@ -11,7 +11,7 @@ rule:
     - kind: macro_invocation
       has:
         field: macro
-        regex: '^(::)?tracing::((trace|debug|info|warn|error)(_span)?|event|span)$'
+        regex: '^(::)?(orbit_log_fields::__)?tracing::((trace|debug|info|warn|error)(_span)?|event|span)$'
     - kind: identifier
       regex: '^((trace|debug|info|warn|error)(_span)?|event|span)$'
       inside:
@@ -28,7 +28,7 @@ rule:
     - kind: use_as_clause
       regex: '^(::)?(tracing|orbit_log_fields)(::((trace|debug|info|warn|error)(_span)?|event|span))?\s+as\b'
     - kind: use_as_clause
-      regex: '^((trace|debug|info|warn|error)(_span)?|event|span)\s+as\b'
+      regex: '^(self|(trace|debug|info|warn|error)(_span)?|event|span)\s+as\b'
       inside:
         kind: use_list
         inside:

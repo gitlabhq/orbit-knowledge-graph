@@ -25,3 +25,6 @@ invalid:
     fn prod() { println!("x"); }
   - 'writeln!(std::io::stderr(), "x");'
   - 'write!(io::stdout(), "x");'
+  - |
+    #[cfg(any(feature = "test-utils", feature = "x"))]
+    fn f() { println!("x"); }

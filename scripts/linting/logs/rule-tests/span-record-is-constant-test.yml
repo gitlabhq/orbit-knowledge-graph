@@ -7,3 +7,5 @@ valid:
 invalid:
   - 'span.record("gl_root_namespace_id", id);'
   - 'tracing::Span::current().record("branch", branch.as_str());'
+  - 'span.record(REASON, value);'
+  - 'tracing::Span::current().record(orbit_log_fields::safe::REASON, value);'

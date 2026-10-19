@@ -4,4 +4,4 @@ rule:
   kind: macro_invocation
   has:
     field: macro
-    regex: '^(::)?((orbit_log_fields|tracing)::)?(trace|debug|info|warn|error|event|span|trace_span|debug_span|info_span|warn_span|error_span)$'
+    regex: '^(::)?((orbit_log_fields::(__tracing::)?|tracing::))?(trace|debug|info|warn|error|event|span|trace_span|debug_span|info_span|warn_span|error_span)$'

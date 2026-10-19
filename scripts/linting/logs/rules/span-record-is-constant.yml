@@ -1,7 +1,7 @@
 id: span-record-is-constant
 language: rust
 severity: error
-message: Name the recorded span field with a constant from orbit_log_fields.
+message: Name the recorded span field with `safe::NAME` or `expanded::NAME` from orbit_log_fields.
 rule:
   kind: call_expression
   all:
@@ -18,7 +18,8 @@ rule:
     - has:
         field: arguments
         has:
-          kind: string_literal
           nthChild: 1
+          not:
+            regex: '^(safe|expanded)::[A-Z][A-Z0-9_]*$'
   not:
     matches: test-code

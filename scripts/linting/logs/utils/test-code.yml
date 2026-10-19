@@ -17,7 +17,7 @@ rule:
                 - kind: line_comment
                 - kind: block_comment
           kind: attribute_item
-          regex: '^#\[cfg\((test|(any|all)\([^()]*\btest\b[^()]*\))\)\]'
+          regex: '^#\[cfg\((test|(any|all)\(([^()]*,\s*)?test\s*(,[^()]*)?\))\)\]'
       - kind: function_item
         follows:
           stopBy:
