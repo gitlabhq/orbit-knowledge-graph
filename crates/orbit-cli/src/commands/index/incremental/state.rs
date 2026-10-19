@@ -207,34 +207,38 @@ pub(super) fn changed_since_snapshot(
         .collect()
 }
 
-impl Project<'_> {
-    pub(super) fn refresh(&self, changed: Vec<String>) -> Result<()> {
-        let saved = self.load_state()?;
-        let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
-        let repository = input::paths(&self.git.repo_path, changed)?;
-        let mut exporter = Exporter::new(self.git, self.writer, self.ontology);
-        for (family, paths) in input::split(&repository, owner).into_values() {
-            let snapshot = self.snapshot_path(family);
-            let (env, state) = State::load(&snapshot, family)
-                .with_context(|| format!("failed to load {}", snapshot.display()))?;
-            let resolved = templates::reindex(
-                Context::new(&env, input::paths(&self.git.repo_path, paths.clone())?),
-                state,
-                Vec::new(),
-            )?;
-            let revisited: Vec<u32> = resolved.value().resolved.clone();
-            let (_, displayed) = resolved.then(Display)?.finish();
-            let state = displayed.state;
-            let mut files: rustc_hash::FxHashSet<String> = paths.into_iter().collect();
-            files.extend(
-                revisited
-                    .into_iter()
-                    .filter_map(|index| state.trees.get(index as usize))
-                    .map(|tree| tree.label.to_string()),
-            );
-            state.save(&env, &snapshot)?;
-            exporter.replace(&env, &state, &files)?;
-        }
-        Ok(())
+pub(super) fn refresh_families(
+    git: &GitInfo,
+    ontology: &ontology::Ontology,
+    state_dir: &std::path::Path,
+    owner: Option<SupportLang>,
+    changed: Vec<String>,
+) -> Result<Vec<super::output::Replacement>> {
+    let repository = input::paths(&git.repo_path, changed)?;
+    let mut replacements = Vec::new();
+    for (family, paths) in input::split(&repository, owner).into_values() {
+        let snapshot = snapshot_file(state_dir, family);
+        let (env, state) = State::load(&snapshot, family)
+            .with_context(|| format!("failed to load {}", snapshot.display()))?;
+        let resolved = templates::reindex(
+            Context::new(&env, input::paths(&git.repo_path, paths.clone())?),
+            state,
+            Vec::new(),
+        )?;
+        let revisited: Vec<u32> = resolved.value().resolved.clone();
+        let (_, displayed) = resolved.then(Display)?.finish();
+        let state = displayed.state;
+        let mut files: rustc_hash::FxHashSet<String> = paths.into_iter().collect();
+        files.extend(
+            revisited
+                .into_iter()
+                .filter_map(|index| state.trees.get(index as usize))
+                .map(|tree| tree.label.to_string()),
+        );
+        state.save(&env, &snapshot)?;
+        replacements.push(super::output::replacement(
+            git, ontology, &env, &state, &files,
+        )?);
     }
+    Ok(replacements)
 }

@@ -684,7 +684,7 @@ fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
 }
 
 #[test]
-fn grep_refreshes_an_edited_file_into_the_incremental_graph() {
+fn grep_refreshes_an_edited_file_into_the_incremental_graph_in_the_background() {
     let repo = tempfile::tempdir().expect("tempdir");
     std::fs::write(repo.path().join("util.py"), "def helper():\n    return 1\n").unwrap();
     std::fs::write(
@@ -722,8 +722,15 @@ fn grep_refreshes_an_edited_file_into_the_incremental_graph() {
     )
     .unwrap();
 
-    let found = orbit(edited.path(), &["grep", "added"]);
-    assert!(found.contains("Function added"), "{found}");
+    let first = orbit(edited.path(), &["grep", "added"]);
+    assert!(first.contains("edited since index"), "{first}");
+    let found = (0..60)
+        .map(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            orbit(edited.path(), &["grep", "added"])
+        })
+        .find(|found| found.contains("Function added"))
+        .expect("a background refresh brings the edit into the graph");
     assert!(!found.contains("edited since index"), "{found}");
 
     orbit(fresh.path(), &["index", "."]);

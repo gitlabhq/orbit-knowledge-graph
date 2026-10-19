@@ -504,15 +504,16 @@ fn run_local(
     targets: &[String],
 ) -> Result<String> {
     use crate::commands::index::incremental::{Freshness, refresh};
-    let (out, git, shown) = render_local(repo.clone(), db.clone(), targets)?;
+    let (out, git, shown) = render_local(repo, db.clone(), targets)?;
     let mut files: Vec<&str> = shown.iter().map(String::as_str).collect();
     files.sort_unstable();
     files.dedup();
-    match refresh(&git.repo_path, db.clone(), &files) {
-        Ok(Freshness::Fresh) => Ok(out),
-        Ok(Freshness::Refreshed) => Ok(render_local(repo, db, targets)?.0),
-        _ => Ok(format!("{}{out}", edited_note(&git, &shown))),
-    }
+    let edited = match refresh(&git.repo_path, db, &files) {
+        Ok(Freshness::Fresh) => Default::default(),
+        Ok(Freshness::Stale(changed)) => changed.into_iter().collect(),
+        _ => workspace::edited_since_index(&git.repo_path, &files),
+    };
+    Ok(format!("{}{out}", edited_note(&git, edited)))
 }
 
 fn render_local(
@@ -580,11 +581,7 @@ fn render_local(
 }
 
 /// Warns that the graph describes the indexed commit when a shown file has changed since.
-fn edited_note(git: &workspace::GitInfo, shown: &[String]) -> String {
-    let mut files: Vec<&str> = shown.iter().map(String::as_str).collect();
-    files.sort_unstable();
-    files.dedup();
-    let edited = workspace::edited_since_index(&git.repo_path, &files);
+fn edited_note(git: &workspace::GitInfo, edited: std::collections::BTreeSet<String>) -> String {
     match edited.is_empty() {
         true => String::new(),
         false => format!(
