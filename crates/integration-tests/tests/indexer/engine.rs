@@ -23,9 +23,9 @@ use orbit_arrow::ArrowUtils;
 use orbit_server_config::{ClickHouseConfiguration, NatsConfiguration, SubscriptionConfig};
 use serde::{Deserialize, Serialize};
 use testcontainers::GenericImage;
-use testcontainers::core::{ContainerPort, ImageExt, WaitFor};
+use testcontainers::core::{ContainerPort, ImageExt};
 use testcontainers::runners::AsyncRunner;
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
+use testcontainers_modules::nats::Nats;
 
 const STREAM: &str = "test_stream";
 const SUBJECT: &str = "test.events";
@@ -99,44 +99,37 @@ impl Handler for TestHandler {
 
 struct TestContext {
     _nats_container: testcontainers::ContainerAsync<Nats>,
-    _clickhouse_container: testcontainers::ContainerAsync<GenericImage>,
+    _clickhouse_container: Option<testcontainers::ContainerAsync<GenericImage>>,
     nats_url: String,
     clickhouse_endpoint: String,
+    database: String,
 }
 
 impl TestContext {
     async fn new() -> Self {
-        let (nats_container, nats_url) = Self::start_nats().await;
-        let (clickhouse_container, clickhouse_endpoint) = Self::start_clickhouse().await;
+        let (nats_container, nats_url) = super::common::start_nats().await;
+        let (clickhouse_container, clickhouse_endpoint, database) =
+            match std::env::var("GKG_TEST_CLICKHOUSE_URL") {
+                Ok(_) => {
+                    let context = integration_testkit::TestContext::new(&[]).await;
+                    (None, context.config.url, context.config.database)
+                }
+                Err(_) => {
+                    let (container, endpoint) = Self::start_clickhouse().await;
+                    (Some(container), endpoint, DATABASE.to_string())
+                }
+            };
 
         Self::create_nats_stream(&nats_url).await;
-        Self::setup_clickhouse_table(&clickhouse_endpoint).await;
+        Self::setup_clickhouse_table(&clickhouse_endpoint, &database).await;
 
         Self {
             _nats_container: nats_container,
             _clickhouse_container: clickhouse_container,
             nats_url,
             clickhouse_endpoint,
+            database,
         }
-    }
-
-    async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
-        let container = Nats::default()
-            .with_cmd(&NatsServerCmd::default().with_jetstream())
-            .with_tag("2.11-alpine")
-            .with_mapped_port(0, ContainerPort::Tcp(4222))
-            .with_ready_conditions(vec![WaitFor::seconds(3)])
-            .start()
-            .await
-            .expect("failed to start NATS container");
-
-        let host = container.get_host().await.expect("failed to get host");
-        let port = container
-            .get_host_port_ipv4(4222)
-            .await
-            .expect("failed to get port");
-
-        (container, format!("{host}:{port}"))
     }
 
     async fn start_clickhouse() -> (testcontainers::ContainerAsync<GenericImage>, String) {
@@ -181,11 +174,11 @@ impl TestContext {
             .expect("failed to create stream");
     }
 
-    async fn setup_clickhouse_table(endpoint: &str) {
+    async fn setup_clickhouse_table(endpoint: &str, database: &str) {
         let client = Self::connect_clickhouse_with_retry(endpoint).await;
         client
             .execute(&format!(
-                "CREATE TABLE IF NOT EXISTS {DATABASE}.{TABLE} (
+                "CREATE TABLE IF NOT EXISTS {database}.{TABLE} (
                     id Int32,
                     name String
                 ) ENGINE = MergeTree() ORDER BY id"
@@ -236,7 +229,7 @@ impl TestContext {
     fn create_writer(&self) -> Arc<ClickHouseWriter> {
         Arc::new(ClickHouseWriter::new(
             ClickHouseConfiguration {
-                database: DATABASE.to_string(),
+                database: self.database.clone(),
                 url: self.clickhouse_endpoint.clone(),
                 username: USERNAME.to_string(),
                 password: Some(PASSWORD.to_string()),
@@ -267,7 +260,7 @@ impl TestContext {
     async fn query_count(&self) -> u64 {
         let client = ArrowClickHouseClient::new(
             &self.clickhouse_endpoint,
-            DATABASE,
+            &self.database,
             USERNAME,
             Some(PASSWORD),
             &std::collections::HashMap::new(),

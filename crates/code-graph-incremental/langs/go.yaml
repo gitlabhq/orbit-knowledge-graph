@@ -111,17 +111,20 @@ stages:
 
   - name: retag-expressions
     rules:
+      # `(f())` carries the value of the call it wraps
+      - match: '(parenthesized_expression $V:__call)'
+        replace: '$V'
       - match: '(selector_expression operand: $O:__member field: $F)'
         replace: '(__member @$F (__object $O))'
       - match: '(selector_expression operand: $O:__call field: $F)'
         replace: '(__member @$F (__object $O))'
       - match: '(selector_expression operand: $O field: $F)'
-        replace: '(__member @$F (__object @$O))'
+        replace: '(__member @$F (__object @$O $O))'
 
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
 
   - name: imports
     rules:
@@ -143,13 +146,13 @@ stages:
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__call))'
         replace: '(__binding @$N (__declaration) (__rhs $R))'
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R))'
-        replace: '(__binding @$N (__declaration) (__rhs @$R))'
+        replace: '(__binding @$N (__declaration) (__rhs @$R $R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))'
         replace: '(__binding @$N (__ssa_typed @$R) (__rhs $R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__call))'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R))'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N (__rhs @$R $R))'
 
       # var/const: a __def for the graph plus a __binding for SSA
       - match: '(var_spec name: $N:identifier type: $T:type_identifier value: (expression_list $V))'
@@ -161,7 +164,7 @@ stages:
       - match: '(var_spec name: $N:identifier value: (expression_list $V:__call))'
         replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs $V)))'
       - match: '(var_spec name: $N:identifier value: (expression_list $V))'
-        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs @$V)))'
+        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs @$V $V)))'
       - match: '(var_spec name: $N:identifier)'
         replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N))'
       - match: '(const_spec name: $N:identifier)'
@@ -176,25 +179,17 @@ stages:
         replace: '(__ssa_branch $$$CASES->__ssa_arm)'
       - match: '(select_statement $$$CASES:communication_case|default_case)'
         replace: '(__ssa_branch $$$CASES->__ssa_arm)'
-      - match: '(for_statement body: $B)'
-        replace: '(__ssa_loop $B)'
-
-      # Struct fields: named → field def; embedded → supertype
-      - match: '(field_declaration name: $N:field_identifier type: (func_type))'
-        replace: '(__def (__defname @$N) (__field_def))'
-        tag: { callable: "true" }
-      - match: '(field_declaration name: $N:field_identifier)'
-        replace: '(__def (__defname @$N) (__field_def))'
-      - match: '(field_declaration type: $T:type_identifier)'
-        replace: '(__supertype @$T)'
+      - match: '(for_statement $$$H body: $B)'
+        replace: '(__ssa_loop $$$H $B)'
 
       # Interface method signatures
       - match: '(method_elem name: $N parameters: $P result:? $RT:type_identifier)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'
 
       # Types
-      - match: '(type_spec name: $N type: (struct_type (field_declaration_list $$$F)))'
-        replace: '(__def (__defname @$N) (__struct) $$$F)'
+      # Only a named struct type defines fields; an anonymous struct in a value does not
+      - match: '(type_spec name: $N type: (struct_type (field_declaration_list $$$F:field_declaration)))'
+        replace: '(__def (__defname @$N) (__struct) $$$F->struct_field)'
       - match: '(type_spec name: $N type: (interface_type $$$M))'
         replace: '(__def (__defname @$N) (__interface) $$$M)'
       - match: '(type_spec name: $N)'
@@ -215,10 +210,18 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      # Struct fields: named → field def; embedded → supertype
+      - match: '(struct_field name: $N:field_identifier type: (func_type))'
+        replace: '(__def (__defname @$N) (__field_def))'
+        tag: { callable: "true" }
+      - match: '(struct_field name: $N:field_identifier)'
+        replace: '(__def (__defname @$N) (__field_def))'
+      - match: '(struct_field type: $T:type_identifier)'
+        replace: '(__supertype @$T)'
       - match: '(__ssa_return (expression_list $V:__struct_lit))'
         replace: '(__ssa_return (__call (__callee @$V) $V))'
       - match: '(__ssa_return (expression_list $V:identifier))'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:

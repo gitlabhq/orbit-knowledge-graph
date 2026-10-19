@@ -4,9 +4,9 @@ Shared test infrastructure for integration tests that need a real ClickHouse ins
 
 ## What it provides
 
-- **`TestContext`**: Starts a ClickHouse container via testcontainers, runs schema DDL,
+- **`TestContext`**: Connects to the shared ClickHouse test service, runs schema DDL,
   and exposes `query()`, `execute()`, and `query_parameterized()` for Arrow-based results.
-- **`TestContext::fork()`**: Creates an isolated database per subtest so subtests can run
+- **`TestContext::fork()`**: Clones an isolated database per subtest so subtests can run
   in parallel against one container.
 - **`TestContext::optimize_all()`**: Queries `system.tables` for the current database and
   runs `OPTIMIZE TABLE … FINAL` concurrently on every table. Call after seeding data.
@@ -32,24 +32,20 @@ mise test:integration
 colima stop gkg
 ```
 
-The `test:integration` tasks set `DOCKER_HOST` to the Colima socket. If you run
-`cargo nextest` directly, export it:
-
-```shell
-export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
-cargo nextest run --test containers
-```
+The `test:integration` tasks set `DOCKER_HOST` and start one ClickHouse container.
+Local tasks reuse the named `gkg-clickhouse-local` container. Remove it to force a clean server.
+Run container tests through the mise tasks so the shared service is configured.
 
 ## Usage
 
 Only `integration-tests` depends on this crate, in its `[dev-dependencies]`.
 
 ```rust
-use integration_testkit::{TestContext, run_subtests, SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL};
+use integration_testkit::{TestContext, run_subtests, GRAPH_SCHEMA_SQL};
 
 #[tokio::test]
 async fn my_integration_test() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[GRAPH_SCHEMA_SQL]).await;
     run_subtests!(&ctx, subtest_a, subtest_b);
 }
 
@@ -71,11 +67,11 @@ Most test suites are read-only. The typical pattern is:
 
 ```rust
 use integration_testkit::{run_subtests, run_subtests_shared, TestContext,
-                          SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL};
+                          GRAPH_SCHEMA_SQL};
 
 #[tokio::test]
 async fn my_test_suite() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[GRAPH_SCHEMA_SQL]).await;
     seed(&ctx).await;
 
     // Read-only subtests: seed once, query many.

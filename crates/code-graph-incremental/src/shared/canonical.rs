@@ -44,19 +44,19 @@ pub enum Canonical {
     Name,
     #[strum(serialize = "__alias")]
     Alias,
-    #[strum(serialize = "__call")]
+    #[strum(serialize = "__call", props(value = "true"))]
     Call,
     #[strum(serialize = "__callee")]
     Callee,
     #[strum(serialize = "__args")]
     Args,
-    #[strum(serialize = "__member")]
+    #[strum(serialize = "__member", props(value = "true"))]
     Member,
     #[strum(serialize = "__object")]
     Object,
     #[strum(serialize = "__type")]
     Type,
-    #[strum(serialize = "__ivar")]
+    #[strum(serialize = "__ivar", props(value = "true"))]
     Ivar,
     #[strum(serialize = "__binding")]
     Binding,
@@ -78,9 +78,9 @@ pub enum Canonical {
     #[strum(serialize = "__default_export")]
     DefaultExport,
 
-    #[strum(serialize = "__obj")]
+    #[strum(serialize = "__obj", props(value = "true", opaque = "true"))]
     Obj,
-    #[strum(serialize = "__arr")]
+    #[strum(serialize = "__arr", props(value = "true", opaque = "true"))]
     Arr,
     #[strum(serialize = "__field")]
     ConfigField,
@@ -154,7 +154,10 @@ pub enum Canonical {
         props(def_type = "true", display = "Property")
     )]
     Property,
-    #[strum(serialize = "__lambda", props(def_type = "true", display = "Lambda"))]
+    #[strum(
+        serialize = "__lambda",
+        props(def_type = "true", display = "Lambda", value = "true", opaque = "true")
+    )]
     Lambda,
     #[strum(serialize = "__field_def", props(def_type = "true", display = "Field"))]
     FieldDef,
@@ -178,6 +181,8 @@ pub enum Canonical {
     Declaration,
     #[strum(serialize = "__dispatch")]
     Dispatch,
+    #[strum(serialize = "__qualifier")]
+    Qualifier,
 }
 
 impl From<Canonical> for u16 {
@@ -199,6 +204,12 @@ pub fn is_canonical(kind: u16) -> bool {
 impl Canonical {
     pub fn is_def_type(self) -> bool {
         self.get_str("def_type") == Some("true")
+    }
+    pub fn is_value(self) -> bool {
+        self.get_str("value") == Some("true")
+    }
+    pub fn is_opaque_value(self) -> bool {
+        self.get_str("opaque") == Some("true")
     }
     pub fn display_name(self) -> &'static str {
         self.get_str("display").unwrap_or("")

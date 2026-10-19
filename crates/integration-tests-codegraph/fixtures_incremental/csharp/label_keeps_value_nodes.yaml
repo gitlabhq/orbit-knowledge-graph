@@ -1,0 +1,28 @@
+name: "C#: a value label keeps the calls inside its expression"
+
+fixtures:
+  - path: Shapes.cs
+    content: |
+      namespace Example {
+          class Shapes {
+              int F() => 1;
+              Shapes G() => this;
+              void Sum() { int x = this.F() + F(); }
+              void Cond() { int w = true ? F() : 0; }
+              void Mul() { int x = 0; x = F() * 2; }
+              void Cast() { object o = (object) G(); }
+              void Chain() { Shapes y = G().G(); }
+          }
+      }
+
+tests:
+  - name: "a call inside an assignment or at a chain root links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["Mul", "Chain"]
+      RETURN caller.name AS caller, callee.name AS callee, count(caller) AS n
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: Mul, callee: F } }
+      - { row: { caller: Chain, callee: G } }

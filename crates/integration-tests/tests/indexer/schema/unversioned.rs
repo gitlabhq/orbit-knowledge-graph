@@ -66,7 +66,7 @@ async fn attributes_compressed_bytes_to_top_level_namespaces() {
 
 impl NamespaceStorageSnapshotScenario {
     async fn new() -> Self {
-        let context = TestContext::new(&[SIPHON_SCHEMA_SQL, &GRAPH_SCHEMA_SQL]).await;
+        let context = TestContext::dedicated(&[SIPHON_SCHEMA_SQL, &GRAPH_SCHEMA_SQL]).await;
         let client = context.create_client();
         ensure_version_table(&client).await.unwrap();
         mark_version_active(&client, *SCHEMA_VERSION).await.unwrap();
@@ -150,7 +150,13 @@ impl NamespaceStorageSnapshotScenario {
 
     async fn optimize_graph_tables_and_refresh(&self) {
         self.context.optimize_all().await;
+        self.context
+            .execute("TRUNCATE TABLE namespace_storage_snapshot")
+            .await;
         self.refresh_and_wait().await;
+        self.context
+            .execute("OPTIMIZE TABLE namespace_storage_snapshot FINAL")
+            .await;
     }
 
     async fn assert_all_rows_have_compressed_bytes(&self) {
@@ -205,11 +211,11 @@ impl NamespaceStorageSnapshotScenario {
     }
 
     async fn assert_refresh_preserves_current_snapshot(&self) {
-        let rows_before_refresh = self.get_snapshot_row_count().await;
-        let bytes_before_refresh = self.get_snapshot_compressed_bytes().await;
         self.context
             .execute("OPTIMIZE TABLE namespace_storage_snapshot FINAL")
             .await;
+        let rows_before_refresh = self.get_snapshot_row_count().await;
+        let bytes_before_refresh = self.get_snapshot_compressed_bytes().await;
         self.refresh_and_wait().await;
         self.context
             .execute("OPTIMIZE TABLE namespace_storage_snapshot FINAL")

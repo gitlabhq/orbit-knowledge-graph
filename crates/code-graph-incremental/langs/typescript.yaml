@@ -91,6 +91,17 @@ config:
 stages:
   - name: normalize
     rules:
+      # `await f()`, `f() as T`, `f()!`, `(f())` and `f() satisfies T` carry the value of the call they wrap
+      - match: '(await_expression $V:call_expression)'
+        replace: '$V'
+      - match: '(as_expression $V:call_expression)'
+        replace: '$V'
+      - match: '(non_null_expression $V:call_expression)'
+        replace: '$V'
+      - match: '(parenthesized_expression $V:call_expression)'
+        replace: '$V'
+      - match: '(satisfies_expression $V:call_expression)'
+        replace: '$V'
       # <div> is an intrinsic element, not a component call
       - match: '(jsx_self_closing_element name: (identifier "/^[a-z]/") $$$A)'
         replace: '(jsx_intrinsic $$$A)'
@@ -101,15 +112,15 @@ stages:
 
       # Constructor parameter property (only when accessibility_modifier present)
       - match: '(required_parameter **/(accessibility_modifier) pattern: $N type: (type_annotation $T:type_identifier))'
-        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T)))))'
+        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))))'
       - match: '(required_parameter **/(accessibility_modifier) pattern: $N)'
         replace: '(__def (__defname @$N) (__property))'
 
       # Regular typed parameter → binding with SSA type hint
       - match: '(required_parameter pattern: $N type: (type_annotation $T:type_identifier))'
-        replace: '(__binding @$N (__declaration) (__ssa_typed @$T))'
+        replace: '(__binding @$N $N (__declaration) (__ssa_typed @$T))'
       - match: '(required_parameter pattern: $N)'
-        replace: '(__binding @$N (__declaration))'
+        replace: '(__binding @$N $N (__declaration))'
 
       - match: '(return_statement $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
@@ -124,7 +135,7 @@ stages:
 
       # Superclass: extends clause → __supertype
       - match: '(extends_clause value: $V)'
-        replace: '(__supertype @$V)'
+        replace: '(__supertype @$V $V)'
 
       # implements clause → individual __supertype nodes
       - match: '(implements_clause $$$TYPES:type_identifier $$$REST)'
@@ -157,7 +168,7 @@ stages:
       - match: '(member_expression object: $O:__ivar property: $M)'
         replace: '(__member @$M (__object $O))'
       - match: '(member_expression object: $O property: $M)'
-        replace: '(__member @$M (__object @$O))'
+        replace: '(__member @$M (__object @$O $O))'
 
   - name: retag-calls
     rules:
@@ -165,21 +176,21 @@ stages:
       - match: '(jsx_self_closing_element name: $N:__member $$$A)'
         replace: '(__call (__callee $N) $$$A)'
       - match: '(jsx_self_closing_element name: $N:identifier $$$A)'
-        replace: '(__call (__callee @$N) $$$A)'
+        replace: '(__call (__callee @$N $N) $$$A)'
       - match: '(jsx_element open_tag: (jsx_opening_element name: $N:__member $$$A) $$$C)'
         replace: '(__call (__callee $N) $$$A $$$C)'
       - match: '(jsx_element open_tag: (jsx_opening_element name: $N:identifier $$$A) $$$C)'
-        replace: '(__call (__callee @$N) $$$A $$$C)'
+        replace: '(__call (__callee @$N $N) $$$A $$$C)'
       - match: '(call_expression function: $F:__ivar arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
       - match: '(new_expression constructor: $C:__member arguments: $A)'
         replace: '(__call (__callee $C) $A)'
       - match: '(new_expression constructor: $C arguments: $A)'
-        replace: '(__call (__callee @$C) $A)'
+        replace: '(__call (__callee @$C $C) $A)'
 
   - name: imports
     rules:
@@ -227,14 +238,14 @@ stages:
         replace: '(__def (__defname @$N) (__function) $B)'
         tag: { exports: '@$P' }
       - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: (function_expression body: $B)))'
-        replace: '(__def (__defname @$P) (__function) $B)'
+        replace: '(__def (__defname @$P $P) (__function) $B)'
         tag: { exports: '@$P' }
       - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "module.exports") right: (function_expression body: $B)))'
         replace: '(__def (__defname @$P) (__function) $B)'
         tag: { exports: '@$P' }
       # exports.X = <value> → an exported variable
       - match: '(expression_statement (assignment_expression left: $P:__member **/(__object "exports") right: $V))'
-        replace: '(__def (__defname @$P) (__variable) $V)'
+        replace: '(__def (__defname @$P $P) (__variable) $V)'
         tag: { exports: '@$P' }
       # module.exports = function main() {} → the default export
       - match: '(expression_statement (assignment_expression left: (__member "exports" (__object "module")) right: (function_expression name: $N body: $B)))'
@@ -271,24 +282,24 @@ stages:
       - match: '(variable_declarator name: $N value: $V:arrow_function)'
         replace: '(__def (__defname @$N) (__declaration @$ROOT|ancestor_sym("variable_owner")) (__function) $V)'
       - match: '(variable_declarator name: $N value: $V:identifier)'
-        replace: '(__binding @$N (__declaration @$ROOT|ancestor_sym("variable_owner")) (__rhs @$V))'
+        replace: '(__binding @$N $N (__declaration @$ROOT|ancestor_sym("variable_owner")) (__rhs @$V $V))'
       - match: '(variable_declarator name: $N value: $V)'
-        replace: '(__binding @$N (__declaration @$ROOT|ancestor_sym("variable_owner")) (__rhs $V))'
+        replace: '(__binding @$N $N (__declaration @$ROOT|ancestor_sym("variable_owner")) (__rhs $V))'
       - match: '(variable_declarator name: $N)'
         replace: '(__binding @$N (__declaration @$ROOT|ancestor_sym("variable_owner")))'
       - match: '(assignment_expression left: $N right: $R:__call)'
-        replace: '(__binding @$N (__rhs $R))'
+        replace: '(__binding @$N $N (__rhs $R))'
       - match: '(assignment_expression left: $N right: $R)'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N $N (__rhs @$R $R))'
       - match: '(public_field_definition name: $N type: (type_annotation $T:type_identifier))'
-        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T)))))'
+        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))))'
       - match: '(public_field_definition name: $N type: (type_annotation (function_type)) value:? $V)'
         replace: '(__def (__defname @$N) (__property) $V)'
         tag: { callable: "true" }
       - match: '(public_field_definition name: $N value: $V)'
-        replace: '(__def (__defname @$N) (__property) $V)'
+        replace: '(__def (__defname @$N $N) (__property) $V)'
       - match: '(public_field_definition name: $N)'
-        replace: '(__def (__defname @$N) (__property))'
+        replace: '(__def (__defname @$N $N) (__property))'
 
       # Control flow
       - match: '(if_statement condition: $COND consequence: $C alternative:? $A)'
@@ -339,7 +350,7 @@ stages:
         replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P $B)'
         tag: { value: "true" }
       - match: '(method_definition name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
-        replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P $B)'
+        replace: '(__def (__defname @$N|regex_replace("^#","") $N) (__method) $$$P $B)'
       - match: '(method_definition name: $N body: $B)'
         replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $B)'
       - match: '(generator_function_declaration name: $N body: $B)'
@@ -382,12 +393,12 @@ stages:
 
       # export const X = ... → promote binding to Variable def
       - match: '(export_statement (variable_owner $B:__binding))'
-        replace: '(export_statement (__def (__defname @$B) (__variable)))'
+        replace: '(export_statement (__def (__defname @$B $B) (__variable)))'
 
   - name: ssa-cleanup
     rules:
       - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:
@@ -455,14 +466,14 @@ resolve:
           replace: '(__file "webpack.config.js" $$$F->__alias)'
         # tsconfig baseUrl → source root
         - match: '(__file "/^(ts|js)config\.json$/" (__obj (__field "compilerOptions" (__obj (__field "baseUrl" $V:__str) $$$REST))) $$$OUTER)'
-          replace: '(__file @$ROOT (__source_root @$V|strip_prefix("./") (__scope "bare_import")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
+          replace: '(__file @$ROOT (__source_root @$V|strip_prefix("./") $V (__scope "bare_import")) (__obj (__field "compilerOptions" (__obj $$$REST))) $$$OUTER)'
 
     - name: aliases
       rules:
         - match: '(__alias $V:__str)'
           replace: '(__alias @$ROOT (__str @$ROOT|concat("/", "tree_path:/", "child_sym:__str")|regex_replace("(^|/)webpack\.config\.js/[^/]+/", "$1")|regex_replace("(^|/)\./", "$1")|regex_loop("(^|/)([^/]*[^/.][^/]*|\.{3,})/\.\./", "$1")|regex_replace("^/", "")))'
         - match: '(path_alias (__arr $V:__str $$$REST))'
-          replace: '(__alias @$ROOT (__str @$V|strip_prefix("./")))'
+          replace: '(__alias @$ROOT (__str @$V|strip_prefix("./") $V))'
 
     - name: packages
       rules:

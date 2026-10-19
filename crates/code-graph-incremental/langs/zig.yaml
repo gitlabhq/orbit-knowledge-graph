@@ -40,7 +40,7 @@ stages:
       - match: '(return_expression $$$V)'
         replace: '(__ssa_return $$$V)'
       - match: '(parameter name: $N:identifier type: $T:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
       - match: '(parameter name: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(zig_enum_member name: $N:identifier)'
@@ -51,11 +51,11 @@ stages:
   - name: retag-calls
     rules:
       - match: '(call_expression function: (field_expression object: $O:identifier member: $M:identifier) $$$A)'
-        replace: '(__call (__callee (__member @$M (__object @$O))) $$$A)'
+        replace: '(__call (__callee (__member @$M (__object @$O $O))) $$$A)'
       - match: '(call_expression function: $F:identifier $$$A)'
-        replace: '(__call (__callee @$F) $$$A)'
+        replace: '(__call (__callee @$F $F) $$$A)'
       - match: '(struct_initializer $T:identifier $L:initializer_list)'
-        replace: '(__call (__callee @$T) $L)'
+        replace: '(__call (__callee @$T $T) $L)'
 
   - name: classify
     rules:
@@ -68,13 +68,13 @@ stages:
       - match: '(variable_declaration (const) $N:identifier $V:__call)'
         replace: '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N (__declaration) (__rhs $V)))'
       - match: '(variable_declaration (const) $N:identifier ("=") $V:identifier)'
-        replace: '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N (__declaration) (__rhs @$V)))'
+        replace: '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N (__declaration) (__rhs @$V $V)))'
       - match: '(variable_declaration (const) $N:identifier $$$V)'
         replace: '(zig_var (__def (__defname @$N) (__constant)) (__binding @$N $$$V))'
       - match: '(variable_declaration (var) $N:identifier $V:__call)'
         replace: '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N (__declaration) (__rhs $V)))'
       - match: '(variable_declaration (var) $N:identifier ("=") $V:identifier)'
-        replace: '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N (__declaration) (__rhs @$V)))'
+        replace: '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N (__declaration) (__rhs @$V $V)))'
       - match: '(variable_declaration (var) $N:identifier $$$V)'
         replace: '(zig_var (__def (__defname @$N) (__variable)) (__binding @$N $$$V))'
       - match: '(if_expression $$$X)'
@@ -99,7 +99,7 @@ stages:
       - match: '(block $$$B)'
         replace: '(__scope $$$B)'
       - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:

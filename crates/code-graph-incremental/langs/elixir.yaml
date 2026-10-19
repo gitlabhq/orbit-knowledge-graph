@@ -107,13 +107,13 @@ stages:
   - name: retag-calls
     rules:
       - match: '(call target: (dot left: $M:alias right: $F:identifier) $A:arguments)'
-        replace: '(ex_ref (__import (__source @$M) (__source_path @$M|replace(".", "/")) (__name @$M|split_last("."))) (__call (__callee (__member @$F (__object @$M|split_last(".")))) $A))'
+        replace: '(ex_ref (__import (__source @$M) (__source_path @$M|replace(".", "/")) (__name @$M|split_last("."))) (__call (__callee (__member @$F (__object @$M|split_last(".") $M))) $A))'
         tag: { import_type: Module }
         tag_on: __import
       - match: '(call target: (dot left: $M:identifier right: $F:identifier) $A:arguments)'
-        replace: '(__call (__callee (__member @$F (__object @$M))) $A)'
+        replace: '(__call (__callee (__member @$F (__object @$M $M))) $A)'
       - match: '(call target: $F:identifier $A:arguments $$$B)'
-        replace: '(__call (__callee @$F) $A $$$B)'
+        replace: '(__call (__callee @$F $F) $A $$$B)'
 
   - name: lexical-scopes
     rules:

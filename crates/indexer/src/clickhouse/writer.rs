@@ -189,6 +189,30 @@ mod tests {
     }
 
     #[test]
+    fn durable_inserts_from_embedded_defaults() {
+        use clickhouse_client::ClickHouseConfigurationExt;
+
+        let mut graph = orbit_server_config::AppConfig::embedded_defaults().graph;
+        let durable_sql = |graph: &orbit_server_config::ClickHouseConfiguration| {
+            graph
+                .build_client("graph")
+                .build_insert_sql_with_overrides("t", insert_overrides(WriteDurability::Durable))
+        };
+        assert_eq!(
+            durable_sql(&graph),
+            "INSERT INTO t SETTINGS async_insert=1, async_insert_busy_timeout_max_ms=1000, \
+             async_insert_busy_timeout_min_ms=1000, optimize_on_insert=0, \
+             wait_for_async_insert=1 FORMAT ArrowStream"
+        );
+        graph.replicated = true;
+        assert_eq!(
+            durable_sql(&graph),
+            "INSERT INTO t SETTINGS async_insert_busy_timeout_max_ms=1000, \
+             async_insert_busy_timeout_min_ms=1000, optimize_on_insert=0 FORMAT ArrowStream"
+        );
+    }
+
+    #[test]
     fn fire_and_forget_pins_async_without_waiting() {
         assert_eq!(
             insert_overrides(WriteDurability::FireAndForget),
