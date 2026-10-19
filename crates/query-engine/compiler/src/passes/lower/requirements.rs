@@ -10,6 +10,11 @@ pub(super) fn column(value: &Column) -> Expr {
 
 pub(super) fn predicate(value: &Predicate) -> Expr {
     match value {
+        Predicate::Boolean(expression) => expression.fold(
+            &|leaf| predicate(leaf),
+            &|children| Expr::conjoin(children).expect("validated non-empty condition group"),
+            &|child| Expr::unary(Op::Not, child),
+        ),
         Predicate::Property {
             column: value,
             filter,

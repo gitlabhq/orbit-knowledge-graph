@@ -19,10 +19,10 @@ Orbit Status Is Healthy
     Should Be Equal    ${resp.json()["system"]["status"]}    healthy
 
 Orbit Query POST
-    [Documentation]    POST /orbit/query expecting 200, retrying once on 502: the webserver
-    ...                recycles gRPC connections at a fixed age, and a query in flight at the
-    ...                boundary dies with a one-off 502 (#971).
-    [Arguments]    ${headers}    ${body}
+    [Documentation]    POST /orbit/query expecting ${expected_status}, retrying once on 502: the
+    ...                webserver recycles gRPC connections at a fixed age, and a query in flight at
+    ...                the boundary dies with a one-off 502 (#971).
+    [Arguments]    ${headers}    ${body}    ${expected_status}=200
     ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
     ...    headers=${headers}    json=${body}    expected_status=any
     IF    ${resp.status_code} == 502
@@ -30,7 +30,7 @@ Orbit Query POST
         ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
         ...    headers=${headers}    json=${body}    expected_status=any
     END
-    Should Be Equal As Integers    ${resp.status_code}    200
+    Should Be Equal As Integers    ${resp.status_code}    ${expected_status}
     ...    POST /orbit/query returned ${resp.status_code}: ${resp.text}
     RETURN    ${resp}
 
@@ -130,6 +130,14 @@ Orbit Query With Token
     ${resp}=    Orbit Query POST    ${headers}    ${body}
     RETURN    ${resp.json()}
 
+Orbit Query Is Rejected
+    [Documentation]    POST /orbit/query and assert a 400 whose body contains ${message}.
+    [Arguments]    ${query}    ${message}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    query=${query}
+    ${resp}=    Orbit Query POST    ${headers}    ${body}    expected_status=400
+    Should Contain    ${resp.json()["message"]}    ${message}
+
 Orbit Endpoint Smoke
     [Documentation]    GET /api/v4/orbit/${path} with the bot PAT. When the endpoint is present (200)
     ...                assert the body contains ${needle} (when given). A 404 is tolerated: the e2e
@@ -158,6 +166,28 @@ Orbit Query LLM
     ${body}=    Create Dictionary    query=${query}    response_format=llm
     ${resp}=    Orbit Query POST    ${headers}    ${body}
     RETURN    ${resp}
+
+Orbit Query Text
+    [Documentation]    POST /orbit/query with ${response_format} and return the response body text.
+    ...                Sends ${token} when given, else the e2e-bot PAT.
+    [Arguments]    ${query}    ${response_format}    ${token}=${None}
+    IF    $token is None
+        ${headers}=    GitLab Auth Headers
+    ELSE
+        ${headers}=    Create Dictionary    PRIVATE-TOKEN=${token}    Content-Type=application/json
+    END
+    ${body}=    Create Dictionary    query=${query}    response_format=${response_format}
+    ${resp}=    Orbit Query POST    ${headers}    ${body}
+    RETURN    ${resp.text}
+
+Orbit Query Rejected
+    [Documentation]    POST /orbit/query expecting a 400 compile error; returns the error message.
+    [Arguments]    ${query}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    query=${query}
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
+    ...    headers=${headers}    json=${body}    expected_status=400
+    RETURN    ${resp.json()["message"]}
 
 Result Node Ids Contain
     [Documentation]    Assert ${node_id} is among the ids of the nodes in a graph-shaped query

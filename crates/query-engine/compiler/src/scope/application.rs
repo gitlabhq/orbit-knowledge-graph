@@ -1,4 +1,4 @@
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
 use super::{QueryScope, resolved_scope_guard, scope_predicate};
 use crate::ast::visit::{visit_queries_mut, visit_relations};
@@ -8,7 +8,7 @@ use crate::error::Result;
 pub fn apply(
     node: &mut Node,
     scope: &QueryScope,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     let Node::Query(query) = node else {
         return Ok(());
@@ -27,7 +27,7 @@ fn apply_scan_predicates(
     table: &TableRef,
     target: &mut Option<Expr>,
     scope: &QueryScope,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) {
     visit_relations(table, &mut |relation| {
         if let TableRef::Scan {

@@ -1,0 +1,24 @@
+name: Go dot imports distinguish standard functions from unknown names
+fixtures:
+  - path: main.go
+    content: |
+      package main
+      import . "fmt"
+      func standard() { Println("hello") }
+      func unresolved() { UnknownFunction() }
+tests:
+  - name: Standard provider symbol has no speculative wildcard call
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name = 'standard'
+      RETURN target.import_path
+    assert:
+      - { empty: true }
+  - name: Missing inventory entry is not proof of absence
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name = 'unresolved'
+      RETURN target.import_path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: fmt } }

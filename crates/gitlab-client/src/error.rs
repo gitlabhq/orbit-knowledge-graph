@@ -36,8 +36,9 @@ pub enum GitlabClientError {
 impl CircuitBreakableError for GitlabClientError {
     fn is_transient(&self) -> bool {
         match self {
-            Self::Request(_) | Self::ServerError { .. } => true,
-            Self::Unauthorized
+            Self::Request(_) => true,
+            Self::ServerError { .. }
+            | Self::Unauthorized
             | Self::NotFound(_)
             | Self::ForcePush(_)
             | Self::JwtSigning(_)

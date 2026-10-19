@@ -13,7 +13,7 @@ use super::arrow_converter::{IndexerConverter, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
-use super::repository::cache::CachedRepository;
+use super::repository::resolver::Repository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::clickhouse::{BufferedWriter, BufferedWriterConfig, ClickHouseWriter, FlushToken};
@@ -64,7 +64,7 @@ impl IndexOutcome {
 }
 
 enum Fetched {
-    Repository(CachedRepository),
+    Repository(Repository),
     EmptyRepository,
 }
 
@@ -195,6 +195,24 @@ struct IndexedRun {
     rows_written: u64,
 }
 
+pub(super) struct IndexingReport {
+    pub stats: code_graph::v2::pipeline::PipelineStats,
+    pub errors: Vec<code_graph::v2::pipeline::PipelineError>,
+    pub skipped: Vec<code_graph::v2::error::SkippedFile>,
+    pub faults: Vec<code_graph::v2::error::FaultedFile>,
+}
+
+impl From<code_graph::v2::PipelineResult> for IndexingReport {
+    fn from(result: code_graph::v2::PipelineResult) -> Self {
+        Self {
+            stats: result.stats,
+            errors: result.errors,
+            skipped: result.skipped,
+            faults: result.faults,
+        }
+    }
+}
+
 pub struct CodeIndexer {
     resolver: RepositoryResolver,
     writer: BufferedWriter,
@@ -315,10 +333,7 @@ impl CodeIndexer {
         // Fetch plus the longest allowed wait can reach ack_wait; refresh the delivery first.
         context.progress.notify_in_progress().await;
         let lane = self
-            .acquire_indexing_lane(
-                &repository,
-                lock.time_left().saturating_sub(clock.remaining),
-            )
+            .acquire_indexing_lane(&repository, lock.time_left(), &cancel)
             .await?;
 
         let indexed = clock
@@ -359,12 +374,22 @@ impl CodeIndexer {
                 request.project_id,
                 &request.branch,
                 request.commit_sha.as_deref(),
+                request.traversal_path.top_level_namespace_id(),
+                &self.pipeline_config,
             )
             .await
         {
-            Ok(path) => {
+            Ok(repository) => {
                 self.metrics.record_resolution_strategy("full_download");
-                path
+                if let Repository::IncrementalEngine(files) = &repository {
+                    for file in files.files() {
+                        if let orbit_utils::vfs::Decision::List(reason) = file.decision() {
+                            self.metrics
+                                .record_archive_entry_skipped(reason, 1, file.size);
+                        }
+                    }
+                }
+                repository
             }
             Err(ResolveError::EmptyRepository { reason, detail }) => {
                 // A commit SHA proves content exists, so an empty archive is
@@ -417,21 +442,27 @@ impl CodeIndexer {
 
     async fn acquire_indexing_lane(
         &self,
-        repository: &CachedRepository,
+        repository: &Repository,
         within: Duration,
+        cancel: &CancellationToken,
     ) -> Result<Option<OwnedSemaphorePermit>, IndexError> {
         // A reserved big lane keeps a flood of small repos from starving monorepos.
-        let parseable = repository.file_inventory.count_by(|e| {
-            e.decision == code_graph::v2::Decision::Parse
-                && code_graph::v2::config::detect_language_from_path(&e.path).is_some()
-        });
-        let lane = if parseable <= self.small_repo_max_files {
+        let lane = if repository.parseable_files() <= self.small_repo_max_files {
             &self.small_indexing_slots
         } else {
             &self.big_indexing_slots
         };
         let queued = Instant::now();
-        match tokio::time::timeout(within, acquire(lane, "indexing")).await {
+        let permit = tokio::select! {
+            biased;
+            permit = tokio::time::timeout(within, acquire(lane, "indexing")) => permit,
+            () = lock_lost(cancel) => {
+                return Err(IndexError::NoLane {
+                    waited: queued.elapsed(),
+                });
+            }
+        };
+        match permit {
             Ok(permit) => {
                 self.metrics
                     .record_slot_wait("indexing_lane_wait", queued.elapsed());
@@ -445,7 +476,7 @@ impl CodeIndexer {
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
-        repository: &CachedRepository,
+        repository: &Repository,
         _lane: Option<OwnedSemaphorePermit>,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
@@ -479,15 +510,14 @@ impl CodeIndexer {
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
-        repository: &CachedRepository,
+        repository: &Repository,
         indexed_at: DateTime<Utc>,
         observer: &mut dyn IndexingObserver,
         cancel: CancellationToken,
     ) -> Result<IndexedRun, HandlerError> {
         let indexing_start = Instant::now();
-        let config = self.build_pipeline_config(context, cancel.clone());
         let (result, commit, metered_bytes) = self
-            .build_code_graph(request, repository, indexed_at, config)
+            .build_code_graph(context, request, repository, indexed_at, cancel.clone())
             .await?;
 
         // A cancelled run yields a partial graph with no error, so the fatal-error guard can't catch it.
@@ -565,18 +595,13 @@ impl CodeIndexer {
     /// Parse the repository, stream its batches to the writer under one project commit, return it.
     async fn build_code_graph(
         &self,
+        context: &HandlerContext,
         request: &IndexingRequest,
-        repository: &CachedRepository,
+        repository: &Repository,
         indexed_at: DateTime<Utc>,
-        config: PipelineConfig,
-    ) -> Result<
-        (
-            code_graph::v2::PipelineResult,
-            Arc<ProjectCommit>,
-            Arc<AtomicU64>,
-        ),
-        HandlerError,
-    > {
+        cancel: CancellationToken,
+    ) -> Result<(IndexingReport, Arc<ProjectCommit>, Arc<AtomicU64>), HandlerError> {
+        let limits = super::incremental::limits(&self.pipeline_config);
         let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
             request.traversal_path.clone(),
@@ -585,12 +610,6 @@ impl CodeIndexer {
             request.commit_sha.as_deref().unwrap_or("").to_string(),
             indexed_at,
         );
-
-        let converter: Arc<dyn code_graph::v2::GraphConverter> = Arc::new(IndexerConverter::new(
-            envelope,
-            &self.ontology,
-            self.table_names.clone(),
-        ));
 
         // remaining starts at 1: a sentinel the pipeline releases after the parse finishes, so
         // the commit can't finalize mid-stream even if every flushed part drains first.
@@ -644,32 +663,57 @@ impl CodeIndexer {
         });
 
         let code_graph_start = Instant::now();
-        let repo_dir = repository.path().to_path_buf();
-        let file_inventory = repository.file_inventory.clone();
+        let repository = repository.clone();
+        let ontology = self.ontology.clone();
+        let table_names = self.table_names.clone();
         let span = tracing::Span::current();
+        let legacy_config = self.build_pipeline_config(context, cancel.clone());
+        let progress = NatsHeartbeat {
+            runtime: tokio::runtime::Handle::current(),
+            notifier: context.progress.clone(),
+        };
+        let options = super::incremental::Options {
+            limits,
+            worker_threads: legacy_config.worker_threads,
+            concurrent_families: legacy_config.concurrent_languages(),
+            small_family_files: self.small_repo_max_files,
+            batch_bytes: orbit_utils::arrow::BATCH_BYTES,
+            cancelled: Arc::new(move || cancel.is_cancelled()),
+            family_finished: Arc::new(move || progress.family_finished()),
+        };
         let parsed = tokio::task::spawn_blocking(move || {
-            span.in_scope(|| {
-                Pipeline::run_with_tracer(
-                    &repo_dir,
-                    file_inventory,
-                    config,
+            span.in_scope(|| match repository {
+                Repository::IncrementalEngine(repository) => super::incremental::run(
+                    repository,
+                    options,
+                    envelope,
+                    ontology,
+                    table_names,
+                    on_batch,
+                ),
+                Repository::Extracted(repository) => Ok(Pipeline::run_with_tracer(
+                    repository.path(),
+                    repository.file_inventory.clone(),
+                    legacy_config,
                     tracer,
-                    converter,
+                    Arc::new(IndexerConverter::new(envelope, &ontology, table_names)),
                     on_batch,
                 )
+                .into()),
             })
         })
         .await;
-        let result = match parsed {
+        let result = match parsed
+            .map_err(|error| error.to_string())
+            .and_then(|result| result.map_err(|error| error.to_string()))
+        {
             Ok(result) => result,
             Err(e) => {
                 // The parse thread panicked; drop the sentinel so the leaked commit can finalize
                 // (as failed) instead of pinning the inflight count forever.
                 commit.failed.store(true, Ordering::Release);
                 commit.release();
-                return Err(HandlerError::Processing(format!(
-                    "pipeline thread panicked: {e}"
-                )));
+                return Err(HandlerError::Processing(format!("pipeline failed: {e}")));
             }
         };
         info!(
@@ -682,7 +726,7 @@ impl CodeIndexer {
 
     fn record_indexing_results(
         &self,
-        result: &code_graph::v2::PipelineResult,
+        result: &IndexingReport,
         observer: &mut dyn IndexingObserver,
         request: &IndexingRequest,
         indexing_start: Instant,
@@ -796,6 +840,12 @@ async fn acquire(
             .map(Some)
             .map_err(|e| HandlerError::Processing(format!("{name} slot closed: {e}"))),
         None => Ok(None),
+    }
+}
+
+async fn lock_lost(cancel: &CancellationToken) {
+    while !cancel.is_cancelled() {
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 

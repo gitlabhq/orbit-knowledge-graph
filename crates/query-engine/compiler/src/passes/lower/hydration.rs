@@ -107,7 +107,7 @@ fn emit_arm(node: &HydrationNodePlan) -> Query {
 }
 
 fn or_starts_with(alias: &str, paths: &[TraversalPath]) -> Option<Expr> {
-    or_balanced(paths.iter().map(|tp| starts_with_path(alias, tp)).collect())
+    Expr::or_all(paths.iter().map(|tp| Some(starts_with_path(alias, tp))))
 }
 
 fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
@@ -121,7 +121,7 @@ fn starts_with_path(alias: &str, tp: &TraversalPath) -> Expr {
 }
 
 fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
-    let lambda_param = "_gkg_path";
+    let lambda_param = "_orbit_path";
     Expr::func(
         Function::ArrayExists,
         vec![
@@ -146,22 +146,6 @@ fn array_exists_starts_with(alias: &str, paths: &[TraversalPath]) -> Expr {
             ),
         ],
     )
-}
-
-fn or_balanced(mut exprs: Vec<Expr>) -> Option<Expr> {
-    match exprs.len() {
-        0 => None,
-        1 => exprs.pop(),
-        _ => {
-            let right = exprs.split_off(exprs.len() / 2);
-            let left = exprs;
-            Some(Expr::binary(
-                Op::Or,
-                or_balanced(left)?,
-                or_balanced(right)?,
-            ))
-        }
-    }
 }
 
 #[cfg(test)]

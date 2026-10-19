@@ -11,6 +11,7 @@ bytes = { workspace = true }
 clickhouse-client = { workspace = true }
 futures = { workspace = true }
 ontology = { path = "../ontology" }
+query-data-model = { path = "../query-data-model" }
 nats-client = { path = "../nats-client" }
 orbit-versions = { path = "../orbit-versions" }
 orbit-utils = { path = "../utils" }

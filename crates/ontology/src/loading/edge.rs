@@ -11,8 +11,6 @@ use super::{EtlSettings, ReadOntologyFile};
 pub(crate) struct EdgeYaml {
     #[serde(default)]
     pub description: Option<String>,
-    /// Optional override for the ClickHouse table storing this edge type.
-    /// Defaults to the global `edge_table` from settings.
     #[serde(default)]
     pub table: Option<String>,
     #[serde(default)]
@@ -24,9 +22,14 @@ pub(crate) struct EdgeYaml {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EdgeVariantYaml {
+    #[serde(default, rename = "description")]
+    _description: Option<String>,
     from_node: EdgeNodeRef,
     to_node: EdgeNodeRef,
+    #[serde(default)]
+    table: Option<String>,
     #[serde(default)]
     fk_column: Option<String>,
     #[serde(default)]
@@ -46,7 +49,7 @@ impl EdgeYaml {
         relationship_kind: String,
         default_table: &str,
     ) -> Vec<EdgeEntity> {
-        let table = self.table.as_deref().unwrap_or(default_table).to_string();
+        let table = self.table.as_deref().unwrap_or(default_table);
         self.variants
             .iter()
             .map(|v| EdgeEntity {
@@ -55,7 +58,7 @@ impl EdgeYaml {
                 source_kind: v.from_node.node_type.clone(),
                 target: v.to_node.id.clone(),
                 target_kind: v.to_node.node_type.clone(),
-                destination_table: table.clone(),
+                destination_table: v.table.as_deref().unwrap_or(table).to_string(),
                 fk_column: v.fk_column.clone(),
                 scope: v.scope,
             })

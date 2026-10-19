@@ -1,0 +1,261 @@
+cases:
+- name: aggregation_negation_oracle_boolean
+  description: A complemented NOT on a Vulnerability boolean is no oracle for a Reporter
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+      access_level: 20
+  query:
+    json: |
+      {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"resolved_on_default_branch":{"ne":true}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    gql: |
+      MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.resolved_on_default_branch = true RETURN p{.id, .name}, count(v) AS c LIMIT 10
+  expect:
+    empty_aggregation: true
+    nodes:
+      Project:
+        absent: [1000]
+- name: aggregation_negation_oracle_complement_twin
+  description: The positive twin of the severity NOT is also empty, so the pair never reveals the total
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+      access_level: 20
+  query:
+    gql: |
+      MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT NOT v.severity = 'critical' RETURN p{.id, .name}, count(v) AS c LIMIT 10
+  expect:
+    empty_aggregation: true
+    nodes:
+      Project:
+        absent: [1000]
+- name: aggregation_negation_oracle_enum_ne
+  description: A complemented NOT on Vulnerability severity is no oracle for a Reporter
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+      access_level: 20
+  query:
+    json: |
+      {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"severity":{"ne":"critical"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    gql: |
+      MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'critical' RETURN p{.id, .name}, count(v) AS c LIMIT 10
+  expect:
+    empty_aggregation: true
+    nodes:
+      Project:
+        absent: [1000]
+- name: aggregation_negation_oracle_enum_not_in
+  description: NOT IN on Vulnerability severity is no oracle for a Reporter
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+      access_level: 20
+  query:
+    json: |
+      {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"severity":{"in":["critical","high"]}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    gql: |
+      MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity IN ['critical', 'high'] RETURN p{.id, .name}, count(v) AS c LIMIT 10
+  expect:
+    empty_aggregation: true
+    nodes:
+      Project:
+        absent: [1000]
+- name: aggregation_negation_oracle_guest_code
+  description: A Guest-only caller gets no rows for a NOT aggregation over code definitions
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+      access_level: 10
+  query:
+    json: |
+      {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","node_ids":[12000],"columns":["name"]},{"id":"b","entity":"Definition","not":{"name":{"in":["missing"]}}}],"relationships":[{"type":"CALLS","from":"a","to":"b"}],"group_by":["a"],"aggregations":[{"count":"b","as":"calls"}],"limit":10}
+    gql: |
+      MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition) WHERE NOT b.name IN ['missing'] RETURN a{.name}, count(b) AS calls LIMIT 10
+  expect: {empty_aggregation: true}
+- name: aggregation_negation_oracle_id_split
+  description: A negated ID bound is no binary-search oracle for a Reporter
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+      access_level: 20
+  query:
+    json: |
+      {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"id":{"lt":8001}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    gql: |
+      MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.id < 8001 RETURN p{.id, .name}, count(v) AS c LIMIT 10
+  expect:
+    empty_aggregation: true
+    nodes:
+      Project:
+        absent: [1000]
+- name: aggregation_negation_oracle_id_window
+  description: A negated ID window is no binary-search oracle for a Reporter
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+      access_level: 20
+  query:
+    json: |
+      {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"id":{"gte":8000,"lte":8001}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    gql: |
+      MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT (v.id >= 8000 AND v.id <= 8001) RETURN p{.id, .name}, count(v) AS c LIMIT 10
+  expect:
+    empty_aggregation: true
+    nodes:
+      Project:
+        absent: [1000]
+- name: aggregation_negation_oracle_mixed_roles
+  description: With Reporter and Developer paths, a NOT on severity counts only the Developer-scoped vulnerability
+  config:
+    security:
+      authorized_paths:
+      - {path: 1/100/, access_level: 20}
+      - {path: 1/101/, access_level: 30}
+  query:
+    json: |
+      {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","id_range":{"start":1,"end":10000},"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"severity":{"in":["critical"]}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"vuln_count"}],"limit":10}
+    gql: |
+      MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id <= 10000 AND NOT v.severity IN ['critical'] RETURN p{.id, .name}, count(v) AS vuln_count LIMIT 10
+  expect:
+    groups:
+      p:
+        rows:
+        - entity: Project
+          id: 1001
+          values: {vuln_count: 1}
+        absent:
+        - {entity: Project, id: 1000}
+        - {entity: Project, id: 1004}
+- name: aggregation_negation_oracle_null_check
+  description: A complemented NOT IS NULL on a Vulnerability timestamp is no oracle for a Reporter
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+      access_level: 20
+  query:
+    json: |
+      {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"detected_at":{"is_not_null":true}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    gql: |
+      MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.detected_at IS NULL RETURN p{.id, .name}, count(v) AS c LIMIT 10
+  expect:
+    empty_aggregation: true
+    nodes:
+      Project:
+        absent: [1000]
+- name: aggregation_negation_oracle_property_grouping
+  description: A property-grouped NOT on Vulnerability severity returns no rows for a Reporter
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+      access_level: 20
+  query:
+    json: |
+      {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"severity":{"ne":"low"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["v.severity"],"aggregations":[{"count":"v","as":"vuln_count"}],"limit":10}
+    gql: |
+      MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'low' RETURN v.severity, count(v) AS vuln_count LIMIT 10
+  expect:
+    group_columns: {v_severity: v.severity}
+    empty_aggregation: true
+- name: aggregation_negation_oracle_reporter_code_control
+  description: A Reporter gets the real count for the Guest code-definition NOT aggregation
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+      access_level: 20
+  query:
+    gql: |
+      MATCH (a:Definition {id: 12000})-[:CALLS]->(b:Definition) WHERE NOT b.name IN ['missing'] RETURN a{.name}, count(b) AS calls LIMIT 10
+  expect:
+    groups:
+      a:
+        entity: Definition
+        ids: [12000]
+        rows:
+        - entity: Definition
+          id: 12000
+          values: {calls: 1}
+- name: aggregation_negation_oracle_security_manager_control
+  description: A Security Manager sees the real count for the same NOT, so the Reporter scenarios are not vacuous
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+      access_level: 25
+  query:
+    json: |
+      {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","columns":["name"],"node_ids":[1000]},{"id":"v","entity":"Vulnerability","filters":{"severity":{"ne":"high"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    gql: |
+      MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT v.severity = 'high' RETURN p{.id, .name}, count(v) AS c LIMIT 10
+  expect:
+    skip_requirements: ['filter:severity']
+    groups:
+      p:
+        entity: Project
+        ids: [1000]
+        rows:
+        - entity: Project
+          id: 1000
+          values: {c: 1}
+- name: aggregation_negation_oracle_sql_drops_reporter
+  description: For a Reporter, the Vulnerability role filter stays in the SQL WHERE for a NOT group
+  config:
+    security:
+      paths: [1/100/]
+  query:
+    gql: |
+      MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id <= 10000 AND NOT (v.severity = 'critical' AND v.state = 'detected') RETURN p{.id, .name}, count(v) AS vuln_count LIMIT 10
+  expect:
+    sql_contains: [1/100/, 'false', NOT]
+    empty_aggregation: true
+- name: aggregation_negation_oracle_title_token
+  description: NOT on a Vulnerability title token is no oracle for a Reporter
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+      access_level: 20
+  query:
+    json: |
+      {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["id","name"]},{"id":"v","entity":"Vulnerability","not":{"title":{"token_match":"SQLi"}}}],"relationships":[{"type":"IN_PROJECT","from":"v","to":"p"}],"group_by":["p"],"aggregations":[{"count":"v","as":"c"}],"limit":10}
+    gql: |
+      MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(v:Vulnerability) WHERE NOT token_match(v.title, 'SQLi') RETURN p{.id, .name}, count(v) AS c LIMIT 10
+  expect:
+    empty_aggregation: true
+    nodes:
+      Project:
+        absent: [1000]
+- name: role_scoped_negation_aggregation
+  description: A matching grouped negation cannot bypass the vulnerability role requirement
+  config:
+    security:
+      authorized_paths:
+      - {path: 1/100/, access_level: 20}
+      - {path: 1/101/, access_level: 30}
+      - {path: 1/102/, access_level: 20}
+  query:
+    gql: |
+      MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability)
+      WHERE p.id >= 1000 AND p.id <= 1004
+        AND NOT (NOT p.id = 1000 AND NOT v.severity IN ['high', 'critical'])
+      RETURN p{.name}, count(v) AS vuln_count LIMIT 10
+  expect:
+    groups:
+      p:
+        entity: Project
+        ids: [1001]
+        rows:
+        - entity: Project
+          id: 1001
+          values: {vuln_count: 1}
+          properties: {name: Private Project}

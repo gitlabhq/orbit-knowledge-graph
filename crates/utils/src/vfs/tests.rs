@@ -42,7 +42,7 @@ impl Pass for Filter {
         if file.path.ends_with(".skip") {
             Decision::List("excluded")
         } else {
-            Decision::Keep(())
+            Decision::KeepLazy(())
         }
     }
     fn content(&self, file: &File<'_, ()>) -> Decision<()> {
@@ -288,6 +288,86 @@ fn storage_modes_share_content_and_enforce_exact_budgets() {
 }
 
 #[test]
+fn directory_classification_retains_accepted_bytes_in_memory_or_scratch() {
+    for resident in [0, 1024] {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.rs");
+        let content = b"fn main() {}";
+        std::fs::write(&path, content).unwrap();
+        std::fs::write(root.path().join("binary.rs"), b"\0binary").unwrap();
+        let vfs = Vfs::load(
+            super::sources::Directory(root.path()),
+            crate::vfs_policies::CodePolicy,
+            Limits {
+                resident_bytes: Some(resident),
+                ..Limits::default()
+            },
+            Options::default(),
+        )
+        .unwrap();
+        std::fs::remove_file(path).unwrap();
+        for _ in 0..2 {
+            assert_eq!(&*vfs.read("main.rs").unwrap(), content);
+        }
+        assert_eq!(
+            vfs.read("binary.rs").unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+        let usage = vfs.usage();
+        assert_eq!(
+            usage.resident,
+            if resident == 0 {
+                0
+            } else {
+                content.len() as u64
+            }
+        );
+        assert_eq!(
+            usage.spilled,
+            if resident == 0 {
+                content.len() as u64
+            } else {
+                0
+            }
+        );
+    }
+}
+
+#[test]
+fn metadata_keep_stores_content_unless_laziness_is_explicit() {
+    struct Acceptance(Decision<()>);
+    impl Pass for Acceptance {
+        type Tag = ();
+        fn metadata(&self, _: &File<'_, ()>) -> Decision<()> {
+            self.0
+        }
+    }
+    for decision in [Decision::Keep(()), Decision::KeepLazy(())] {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counter = reads.clone();
+        let vfs = load(
+            [(
+                "file",
+                read_on_demand(1, move |_| {
+                    counter.fetch_add(1, SeqCst);
+                    Ok(vec![b'x'])
+                }),
+            )],
+            Acceptance(decision),
+        );
+        let lazy = decision == Decision::KeepLazy(());
+        assert_eq!(reads.load(SeqCst), usize::from(!lazy));
+        assert!(vfs.files().next().unwrap().keeps());
+        for _ in 0..2 {
+            assert_eq!(&*vfs.read("file").unwrap(), b"x");
+        }
+        assert_eq!(reads.load(SeqCst), if lazy { 2 } else { 1 });
+        assert_eq!(vfs.files().next().unwrap().decision(), Decision::Keep(()));
+        assert_eq!(vfs.usage().resident, u64::from(!lazy));
+    }
+}
+
+#[test]
 fn policy_composition_preserves_laziness_and_borrowed_content() {
     struct Stage(Arc<AtomicUsize>);
     impl Pass for Stage {
@@ -295,15 +375,15 @@ fn policy_composition_preserves_laziness_and_borrowed_content() {
         fn metadata(&self, file: &File<'_, u8>) -> Decision<u8> {
             assert!(file.bytes().is_none());
             match file.decision() {
-                Decision::Pending => Decision::Keep(1),
-                Decision::Keep(tag) => Decision::Keep(tag + 1),
+                Decision::Pending => Decision::KeepLazy(1),
+                Decision::KeepLazy(tag) => Decision::KeepLazy(tag + 1),
                 decision => panic!("unexpected decision: {decision:?}"),
             }
         }
         fn content(&self, file: &File<'_, u8>) -> Decision<u8> {
             assert_eq!(file.bytes(), Some([].as_slice()));
             self.0.fetch_add(1, SeqCst);
-            let Decision::Keep(tag) = file.decision() else {
+            let (Decision::Keep(tag) | Decision::KeepLazy(tag)) = file.decision() else {
                 panic!("metadata must keep the file");
             };
             Decision::Keep(tag + 1)

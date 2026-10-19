@@ -1,17 +1,18 @@
 mod ast;
+mod errors;
 mod lower;
 mod syntax;
 
 use std::sync::Arc;
 
-use crate::config::{self, CompilerCtx as _};
+use crate::config::{self, CompilerCtx};
 use crate::metrics::CountErr;
+use crate::passes::codegen::PaginationContext;
 use crate::{CompiledQueryContext, Input, Ontology, QueryError, Result, SecurityContext};
+use errors::{invalid, parse_failure, syntax_error};
 use ontology::introspection::{
     IntrospectionScope, SchemaResponse, build_node_schema_response, build_schema_response,
 };
-use pest::Span;
-use pest::error::{ErrorVariant, LineColLocation};
 use pest_derive::Parser;
 
 #[derive(Parser)]
@@ -39,17 +40,27 @@ pub fn pair_outline(query: &str) -> Option<Vec<(usize, String)>> {
 }
 
 const MAX_QUERY_BYTES: usize = 32 * 1024;
-const MAX_NESTING: usize = 32;
+const MAX_NESTING: usize = crate::query_limits::MAX_PREDICATE_DEPTH;
 
-const INVARIANT_PREFIXES: [&str; 3] = [
-    "grammar produced",
-    "Nodes didn't match any pattern",
-    "pest_consume::parser",
-];
+#[derive(Debug, Clone)]
+pub struct ParsedQuery {
+    pub input: Input,
+    pub query_hash: u64,
+}
+
+impl ParsedQuery {
+    pub(crate) fn load(self, ctx: &mut impl CompilerCtx) {
+        ctx.set_input(self.input);
+        ctx.set_pagination(PaginationContext {
+            query_hash: self.query_hash,
+            ..Default::default()
+        });
+    }
+}
 
 #[derive(Debug)]
 pub enum RoutedStatement {
-    Query(Box<Input>),
+    Query(Box<ParsedQuery>),
     Schema(SchemaResponse),
 }
 
@@ -67,7 +78,7 @@ pub fn prepare(
     scope: IntrospectionScope,
 ) -> Result<PreparedStatement> {
     match route(raw, ontology, scope)? {
-        RoutedStatement::Query(input) => compile_query(*input, ontology, security_context)
+        RoutedStatement::Query(query) => compile_query(*query, ontology, security_context)
             .map(|compiled| PreparedStatement::Query(Box::new(compiled))),
         RoutedStatement::Schema(response) => Ok(PreparedStatement::Schema(response)),
     }
@@ -76,7 +87,6 @@ pub fn prepare(
 pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Result<RoutedStatement> {
     match parse_statement(raw).count_err()? {
         ast::Statement::Query(query) => lower::lower(raw, *query)
-            .map(|(input, _)| input)
             .count_err()
             .map(Box::new)
             .map(RoutedStatement::Query),
@@ -87,10 +97,10 @@ pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Resul
 }
 
 pub fn parse(raw: &str) -> Result<Input> {
-    parse_with_hash(raw).map(|(input, _)| input)
+    parse_with_hash(raw).map(|query| query.input)
 }
 
-pub fn parse_with_hash(raw: &str) -> Result<(Input, u64)> {
+pub fn parse_with_hash(raw: &str) -> Result<ParsedQuery> {
     match parse_statement(raw)? {
         ast::Statement::Query(query) => lower::lower(raw, *query),
         ast::Statement::SchemaCall { .. } => Err(QueryError::Validation(
@@ -100,23 +110,23 @@ pub fn parse_with_hash(raw: &str) -> Result<(Input, u64)> {
 }
 
 pub fn compile_query(
-    input: Input,
+    query: ParsedQuery,
     ontology: &Ontology,
     security_context: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let ontology = Arc::new(ontology.clone());
     let data_model = crate::data_model::clickhouse(Arc::clone(&ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
-    compile_query_model(input, &data_model, security_context)
+    compile_query_model(query, &data_model, security_context)
 }
 
 pub fn compile_query_model(
-    input: Input,
+    query: ParsedQuery,
     data_model: &Arc<query_data_model::ClickHouseDataModel>,
     security_context: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let mut ctx = config::ClickhouseGqlCtx::new(security_context.clone(), Arc::clone(data_model));
-    ctx.set_input(input);
+    query.load(&mut ctx);
     crate::finish(&mut ctx, config::run_clickhouse_gql)
 }
 
@@ -126,13 +136,10 @@ fn resolve_schema(
     scope: IntrospectionScope,
 ) -> Result<SchemaResponse> {
     let Some(name) = node else {
-        return Ok(build_schema_response(ontology, scope, &[]));
+        return build_schema_response(ontology, scope, &[])
+            .map_err(|error| QueryError::Validation(error.to_string()));
     };
-    if name == "*"
-        || ontology.get_node(&name).is_none()
-        || (scope == IntrospectionScope::Local
-            && !ontology.local_entity_names().contains(&name.as_str()))
-    {
+    if name == "*" || !scope.includes(ontology, &name) {
         return Err(QueryError::Validation(format!(
             "schema node '{name}' is unknown or unavailable in this scope"
         )));
@@ -143,15 +150,7 @@ fn resolve_schema(
 fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {
     check_bounds(raw)?;
     let statement = <QueryParser as pest_consume::Parser>::parse(Rule::Statement, raw)
-        .map_err(|error| {
-            let (line, column) = match error.line_col {
-                LineColLocation::Pos(position) | LineColLocation::Span(position, _) => position,
-            };
-            QueryError::Validation(format!(
-                "Orbit query syntax at line {line}, column {column}: {}\nExpected one MATCH ... RETURN statement, CALL db.schema(), or CALL db.schema('NodeName'); only AND predicates, named nodes, and bounded paths are supported.",
-                error.variant.message()
-            ))
-        })?
+        .map_err(parse_failure)?
         .single()
         .expect("Statement produces one pair");
     QueryParser::Statement(statement).map_err(syntax_error)
@@ -185,23 +184,4 @@ fn check_nesting(query: &str) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn syntax_error(error: pest_consume::Error<Rule>) -> QueryError {
-    let (line, column) = match error.line_col {
-        LineColLocation::Pos(pos) | LineColLocation::Span(pos, _) => pos,
-    };
-    let message = match &error.variant {
-        ErrorVariant::CustomError { message } => message.clone(),
-        variant => variant.message().into_owned(),
-    };
-    if INVARIANT_PREFIXES.iter().any(|p| message.starts_with(p)) {
-        return QueryError::PipelineInvariant(message);
-    }
-    QueryError::Validation(format!("line {line}, column {column}: {message}"))
-}
-
-fn invalid(span: Span<'_>, message: &str) -> QueryError {
-    let (line, column) = span.start_pos().line_col();
-    QueryError::Validation(format!("line {line}, column {column}: {message}"))
 }

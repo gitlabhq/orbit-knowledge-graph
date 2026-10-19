@@ -27,6 +27,7 @@ async fn graph_status() {
         projects_status_under_the_scope,
         empty_traversal_path_rejected,
         toon_renders_states_and_counts,
+        last_completed_at_is_on_the_scope_summary,
     );
 }
 
@@ -172,4 +173,17 @@ async fn toon_renders_states_and_counts(ctx: &TestContext) {
     assert!(text.contains("backfilling"), "TOON output: {text}");
     assert!(text.contains("code_review"), "TOON output: {text}");
     assert!(text.contains("count"), "TOON output: {text}");
+}
+
+async fn last_completed_at_is_on_the_scope_summary(ctx: &TestContext) {
+    let status = fetch_status(ctx, "1/113/").await;
+
+    assert_eq!(
+        status
+            .indexing
+            .expect("present")
+            .last_completed_at
+            .as_deref(),
+        Some("2026-01-01T00:00:00Z")
+    );
 }

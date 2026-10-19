@@ -638,8 +638,8 @@ mod tests {
 
     fn make_search_output() -> PipelineOutput {
         let schema = Arc::new(Schema::new(vec![
-            Field::new("_gkg_p_id", DataType::Int64, false),
-            Field::new("_gkg_p_type", DataType::Utf8, false),
+            Field::new("_orbit_p_id", DataType::Int64, false),
+            Field::new("_orbit_p_type", DataType::Utf8, false),
             Field::new("p_name", DataType::Utf8, false),
         ]));
         let batch = RecordBatch::try_new(
@@ -865,13 +865,13 @@ mod tests {
     }
 
     #[test]
-    fn node_properties_exclude_gkg_prefix() {
+    fn node_properties_exclude_orbit_prefix() {
         let output = make_search_output();
         let formatter = GraphFormatter;
         let response = formatter.build_response(&output);
 
         for node in &response.nodes {
-            assert!(!node.properties.keys().any(|k| k.starts_with("_gkg_")));
+            assert!(!node.properties.keys().any(|k| k.starts_with("_orbit_")));
             assert!(node.properties.contains_key("name"));
         }
     }
@@ -879,8 +879,8 @@ mod tests {
     #[test]
     fn property_named_type_does_not_corrupt_entity_type() {
         let schema = Arc::new(Schema::new(vec![
-            Field::new("_gkg_p_id", DataType::Int64, false),
-            Field::new("_gkg_p_type", DataType::Utf8, false),
+            Field::new("_orbit_p_id", DataType::Int64, false),
+            Field::new("_orbit_p_type", DataType::Utf8, false),
             Field::new("p_name", DataType::Utf8, false),
             Field::new("p_type", DataType::Utf8, false),
             Field::new("p_id", DataType::Int64, true),
@@ -939,9 +939,9 @@ mod tests {
         let node = &response.nodes[0];
         assert_eq!(
             node.entity_type, "Project",
-            "entity_type must come from _gkg_p_type"
+            "entity_type must come from _orbit_p_type"
         );
-        assert_eq!(node.id, 42, "id must come from _gkg_p_id");
+        assert_eq!(node.id, 42, "id must come from _orbit_p_id");
         assert!(
             !node.properties.contains_key("type"),
             "properties must not contain 'type' (would collide with entity_type under flatten)"
@@ -1017,8 +1017,8 @@ mod tests {
         let edge_list = ListArray::new(edge_field, edge_offsets, Arc::new(edge_struct), None);
 
         let schema = Arc::new(Schema::new(vec![
-            Field::new("_gkg_path", path_list.data_type().clone(), true),
-            Field::new("_gkg_edge_kinds", edge_list.data_type().clone(), true),
+            Field::new("_orbit_path", path_list.data_type().clone(), true),
+            Field::new("_orbit_edge_kinds", edge_list.data_type().clone(), true),
         ]));
         let batch = RecordBatch::try_new(
             schema,
@@ -1115,8 +1115,8 @@ mod tests {
         let edge_list = ListArray::new(edge_field, edge_offsets, Arc::new(edge_struct), None);
 
         let schema = Arc::new(Schema::new(vec![
-            Field::new("_gkg_path", path_list.data_type().clone(), true),
-            Field::new("_gkg_edge_kinds", edge_list.data_type().clone(), true),
+            Field::new("_orbit_path", path_list.data_type().clone(), true),
+            Field::new("_orbit_edge_kinds", edge_list.data_type().clone(), true),
         ]));
         let batch = RecordBatch::try_new(
             schema,

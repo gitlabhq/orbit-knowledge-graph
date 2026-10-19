@@ -1,5 +1,5 @@
 //! Neighbors emits its own redaction columns directly (rather than relying on
-//! the enforce pass's _gkg_* injection) since the center edge column differs
+//! the enforce pass's _orbit_* injection) since the center edge column differs
 //! per direction arm.
 
 use ontology::constants::*;
@@ -301,7 +301,7 @@ pub fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, No
 ///
 /// Inner query: scan the edge once with `WHERE (source side) OR (target side)`,
 /// projecting `arrayJoin(arrayFilter(matched, [out_tuple, in_tuple]))` so each
-/// row yields one entry per matched arm. Outer query: project the `_gkg_*`
+/// row yields one entry per matched arm. Outer query: project the `_orbit_*`
 /// columns out of the tuple. `arrayFilter` (not `multiIf`) keeps self-loop
 /// semantics: when both arms match the same edge, both rows are emitted.
 #[allow(clippy::too_many_arguments)]
@@ -385,10 +385,10 @@ fn build_fused_both_arm(
         Function::ArrayFilter,
         vec![
             Expr::lambda(
-                "_gkg_arm",
+                "_orbit_arm",
                 Expr::func(
                     Function::TupleElement,
-                    vec![Expr::ident("_gkg_arm"), Expr::int(1)],
+                    vec![Expr::ident("_orbit_arm"), Expr::int(1)],
                 ),
             ),
             Expr::func(Function::Array, vec![out_tuple, in_tuple]),
@@ -396,7 +396,7 @@ fn build_fused_both_arm(
     );
     let dir_row = Expr::func(Function::Unnest, vec![matched_only]);
 
-    const ROW_COL: &str = "_gkg_arm_row";
+    const ROW_COL: &str = "_orbit_arm_row";
     let rel_col = relationship_type_column();
     let tp_col = traversal_path_column(center_id);
     let mut inner_select = vec![
@@ -425,7 +425,7 @@ fn build_fused_both_arm(
         ..Default::default()
     };
 
-    let inner_alias = "_gkg_fused";
+    let inner_alias = "_orbit_fused";
     let te = |n: i64| {
         Expr::func(
             Function::TupleElement,

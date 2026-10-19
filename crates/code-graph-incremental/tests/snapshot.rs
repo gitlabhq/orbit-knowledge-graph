@@ -2,9 +2,10 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use code_graph_incremental::canonical::Canonical as C;
-use code_graph_incremental::pipeline::{Changes, SNAPSHOT_VERSION};
+use code_graph_incremental::pipeline::SNAPSHOT_VERSION;
 use code_graph_incremental::treesitter::SupportLang;
-use code_graph_incremental::{Context, Env, State, inventory, pattern, rules, templates};
+use code_graph_incremental::{Context, Env, State, pattern, rules, templates};
+mod common;
 
 const MAIN: &str = "from utils import helper\nhelper()\n";
 const UTILS: &str = "def helper():\n    pass\n";
@@ -21,8 +22,7 @@ fn write(root: &Path, files: &[(&str, &str)]) -> Vec<String> {
 }
 
 fn index(env: &Env, repo: &Path) -> State {
-    let inventory = inventory::walk(repo).unwrap().to_vec();
-    templates::index(Context::new(env), repo, inventory)
+    templates::index(Context::new(env, common::walk(repo)))
         .unwrap()
         .into_value()
         .state
@@ -32,14 +32,18 @@ fn reindex(env: &Env, state: State, repo: &Path, changed: Vec<String>, removed: 
     for path in removed {
         std::fs::remove_file(repo.join(path)).unwrap();
     }
-    let changes = Changes {
-        changed: inventory::classify(repo, changed),
-        removed: removed.iter().map(|s| s.to_string()).collect(),
-    };
-    templates::reindex(Context::new(env), state, repo, changes)
-        .unwrap()
-        .into_value()
-        .state
+    let changes = common::load(orbit_utils::vfs::sources::Diff {
+        root: repo,
+        paths: changed,
+    });
+    templates::reindex(
+        Context::new(env, changes),
+        state,
+        removed.iter().map(|s| s.to_string()).collect(),
+    )
+    .unwrap()
+    .into_value()
+    .state
 }
 
 fn save_and_load(env: &Env, state: &State) -> (Env, State) {
@@ -120,12 +124,18 @@ stages:
         &env.lang,
     )
     .unwrap();
-    for tree in &mut state.trees {
-        for stage in &edits {
-            pattern::apply_rewrites(tree, &env.lang, stage, &[]).unwrap();
-        }
-        tree.prune();
-    }
+    state.trees = state
+        .trees
+        .into_iter()
+        .map(|tree| {
+            let mut tree: code_graph_incremental::tree::Tree = tree.into();
+            for stage in &edits {
+                pattern::apply_rewrites(&mut tree, &env.lang, stage, &[]).unwrap();
+            }
+            tree.prune();
+            tree.into()
+        })
+        .collect();
     let structure = |state: &State| {
         state
             .trees

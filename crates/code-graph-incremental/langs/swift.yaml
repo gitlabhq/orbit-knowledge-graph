@@ -4,6 +4,18 @@
 # init, self./super. calls, control flow.
 
 config:
+  stdlib: [
+      { module: Swift, availability: implicit, precedence: runtime, symbols: [abs, assert, assertionFailure, debugPrint, dump, fatalError,
+      getVaList, isKnownUniquelyReferenced, max, min, numericCast, precondition,
+      preconditionFailure, print, readLine, repeatElement, sequence, stride,
+      swap, type, unsafeBitCast, unsafeDowncast, withExtendedLifetime,
+      withUnsafeBytes, withUnsafeMutableBytes, withUnsafeMutablePointer,
+      withUnsafePointer, withVaList, withoutActuallyEscaping, zip] },
+      { module: Foundation, symbols: [NSLog, NSStringFromClass, NSClassFromString,
+          NSStringFromSelector, NSSelectorFromString, NSHomeDirectory,
+          NSTemporaryDirectory, NSSearchPathForDirectoriesInDomains] },
+      { module: Dispatch }, { module: Darwin }, { module: Glibc }, { module: ObjectiveC },
+      { module: Combine }, { module: SwiftUI }, { module: UIKit }, { module: AppKit }, { module: XCTest }]
   resolve:
     lookup_from:
       - __source_root

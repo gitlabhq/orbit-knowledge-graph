@@ -24,6 +24,10 @@ pub const COMPLETED: CheckpointRow = CheckpointRow {
     attempts: 0,
     written_at: "now64(6)",
 };
+pub const COMPLETED_ON_NEW_YEAR: CheckpointRow = CheckpointRow {
+    indexed_at: "'2026-01-01 00:00:00'",
+    ..COMPLETED
+};
 pub const INCREMENTAL: CheckpointRow = CheckpointRow {
     cursor: INCREMENTAL_CURSOR,
     ..COMPLETED
@@ -113,6 +117,7 @@ pub async fn seed_namespaces(ctx: &TestContext) {
     seed_plans(ctx, 108, &[("SystemNote", PAGING_FIRST_PASS)]).await;
     seed_plans(ctx, 109, &[("MergeRequest", STARTED_FIRST_PASS)]).await;
     seed_plans(ctx, 112, &[]).await;
+    seed_plans(ctx, 113, &[("MergeRequest", COMPLETED_ON_NEW_YEAR)]).await;
     insert_checkpoints(ctx, &[("ns.106.Project".to_string(), COMPLETED)]).await;
 
     ctx.optimize_all().await;

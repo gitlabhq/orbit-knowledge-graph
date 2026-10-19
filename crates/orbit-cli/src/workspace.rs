@@ -2,24 +2,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
+use crate::database::{GraphReader, schema::graph_lacks_commit};
 use anyhow::{Context, Result};
-use duckdb_client::DuckDbClient;
 use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
 use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
-use serde_json::json;
-use strum::{AsRefStr, Display};
 
-/// Repo indexing status, stored as a DuckDB `repo_status` enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Display, AsRefStr)]
-#[strum(serialize_all = "lowercase")]
-pub enum RepoStatus {
-    Indexing,
-    Indexed,
-    Error,
-}
-
-/// Manages the `~/.gitlab/orbit/` workspace — graph database, repo discovery,
-/// and manifest.
 pub struct Workspace {
     root: PathBuf,
 }
@@ -49,8 +36,15 @@ impl Workspace {
         Ok(Self { root })
     }
 
-    pub fn db_path(&self) -> PathBuf {
-        self.root.join("graph.duckdb")
+    pub fn manifest_path(&self) -> PathBuf {
+        self.root.join("local/manifest.duckdb")
+    }
+
+    pub fn revision_path(&self, git: &GitInfo) -> PathBuf {
+        self.root
+            .join("local/revisions")
+            .join(git.project_id.to_string())
+            .join(format!("{}.duckdb", git.commit_sha))
     }
 
     /// Discover git repos in a directory, including nested repos when
@@ -109,14 +103,10 @@ fn migrate_legacy_root(legacy: &Path, root: PathBuf) -> PathBuf {
     }
 }
 
-/// Resolve the DuckDB path for a command: an explicit `--db` override wins,
-/// otherwise the default workspace's `graph.duckdb`. The result is absolute so
-/// that a later `set_current_dir` (e.g. `repo-map` anchoring at the repo root)
-/// cannot change which file a relative `--db` or `ORBIT_DATA_DIR` points at.
-pub fn resolve_db_path(db: Option<PathBuf>) -> Result<PathBuf> {
+pub fn resolve_db_path(db: Option<PathBuf>, git: &GitInfo) -> Result<PathBuf> {
     let path = match db {
         Some(p) => p,
-        None => Workspace::open_default()?.db_path(),
+        None => Workspace::open_default()?.revision_path(git),
     };
     absolutize(path)
 }
@@ -141,44 +131,125 @@ pub fn describe_graph_lock_conflict(error: &anyhow::Error) -> Option<String> {
 
 pub struct IndexedRepo {
     pub git: GitInfo,
-    pub client: DuckDbClient,
+    pub client: GraphReader,
 }
 
 pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
-    let db = resolve_db_path(db)?;
     let top_level = git_toplevel(&repo_path)
         .with_context(|| format!("failed to find git top-level for {}", repo_path.display()))?;
     let git = git_info(&top_level)
         .with_context(|| format!("failed to read git info for {}", top_level.display()))?;
+    let db_path = resolve_db_path(db.clone(), &git)?;
 
-    if graph_lacks_commit(&db, &git)? {
-        crate::commands::index::index_before_first_query(git.repo_path.clone(), Some(db.clone()))
+    if graph_lacks_commit(&db_path, &git.commit_sha)? {
+        crate::commands::index::index_before_first_query(git.repo_path.clone(), db)
             .context("failed to index the repository")?;
-        if graph_lacks_commit(&db, &git)? {
+        if graph_lacks_commit(&db_path, &git.commit_sha)? {
             anyhow::bail!(
                 "indexing finished but commit {} still has no rows in the local graph",
                 git.commit_sha
             );
         }
     }
-    let client = crate::sql::open_graph(Some(db))?;
+    let client = GraphReader::open(Some(db_path))?;
     Ok(IndexedRepo { git, client })
 }
 
-fn graph_lacks_commit(db: &Path, git: &GitInfo) -> Result<bool> {
-    if !db.exists() {
-        return Ok(true);
+/// The repo-relative `files` whose working-tree contents differ from the indexed commit:
+/// modified, added, renamed, or untracked. The graph describes the commit, so its definitions
+/// and line spans do not fit these files. Empty when git cannot answer.
+pub fn edited_since_index(repo: &Path, files: &[&str]) -> std::collections::BTreeSet<String> {
+    let mut edited = std::collections::BTreeSet::new();
+    if files.is_empty() {
+        return edited;
     }
-    let client = crate::sql::open_graph(Some(db.to_path_buf()))?;
-    if stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() != Some(CODE_INDEX_REVISION) {
-        return Ok(true);
+    let git_list = |args: &[&str]| -> Option<Vec<String>> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|output| output.status.success())?;
+        Some(
+            String::from_utf8_lossy(&output.stdout)
+                .split('\0')
+                .filter(|field| !field.is_empty())
+                .map(str::to_string)
+                .collect(),
+        )
+    };
+    let Some(status) = git_list(&[
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=no",
+        "--ignore-submodules=all",
+    ]) else {
+        return edited;
+    };
+    let mut changed = std::collections::HashSet::new();
+    let mut fields = status.into_iter();
+    while let Some(entry) = fields.next() {
+        let (Some(code), Some(path)) = (entry.get(..2), entry.get(3..)) else {
+            continue;
+        };
+        if code.contains(['R', 'C']) {
+            fields.next();
+        }
+        changed.insert(path.to_string());
     }
-    let files = client.query_arrow_json(
-        "SELECT COUNT(*) AS n FROM gl_file WHERE project_id = ?1 AND commit_sha = ?2",
-        &[git.project_id.into(), git.commit_sha.clone().into()],
-    )?;
-    Ok(duckdb_client::scalar_i64(&files) == 0)
+    let tracked: std::collections::HashSet<String> = git_list(&["ls-files", "-z"])
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    edited.extend(
+        files
+            .iter()
+            .filter(|file| changed.contains(**file) || !tracked.contains(**file))
+            .map(|file| file.to_string()),
+    );
+    edited
+}
+
+/// Repo-relative forms of `paths` given relative to the current directory, the repo, or absolute.
+/// `a,b` lists are split; `path:120-180` ranges keep only the path; unresolvable entries are kept as
+/// written (trimmed) so globs still work.
+pub fn repo_relative_paths(repo: &Path, paths: &[String]) -> Vec<String> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let root = dunce::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
+    paths
+        .iter()
+        .flat_map(|p| p.split(','))
+        .map(str::trim)
+        .map(|path| {
+            path.rsplit_once(':')
+                .filter(|(file, range)| {
+                    !file.is_empty()
+                        && !range.is_empty()
+                        && range.chars().all(|c| c.is_ascii_digit() || c == '-')
+                })
+                .map_or(path, |(file, _)| file)
+        })
+        .filter_map(|path| {
+            let relative = [cwd.join(path), repo.join(path)]
+                .into_iter()
+                .find_map(|candidate| {
+                    let full = dunce::canonicalize(candidate).ok()?;
+                    full.strip_prefix(&root)
+                        .ok()
+                        .map(|r| r.to_string_lossy().replace('\\', "/"))
+                })
+                .unwrap_or_else(|| {
+                    path.trim_start_matches("./")
+                        .trim_end_matches('/')
+                        .to_string()
+                });
+            (!relative.is_empty() && relative != ".").then_some(relative)
+        })
+        .collect()
 }
 
 fn absolutize(path: PathBuf) -> Result<PathBuf> {
@@ -188,151 +259,6 @@ fn absolutize(path: PathBuf) -> Result<PathBuf> {
         Ok(std::env::current_dir()
             .context("failed to read current directory")?
             .join(path))
-    }
-}
-
-const LOCAL_DDL_META_KEY: &str = "local_ddl";
-const CODE_INDEX_META_KEY: &str = "code_index_revision";
-const CODE_INDEX_REVISION: &str = "1";
-
-pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
-    let client = DuckDbClient::open(db_path).context("failed to open DuckDB")?;
-    if stored_meta(&client, LOCAL_DDL_META_KEY)?.as_deref() == Some(ddl)
-        && stored_meta(&client, CODE_INDEX_META_KEY)?.as_deref() == Some(CODE_INDEX_REVISION)
-    {
-        return Ok(());
-    }
-    let had_data = table_exists(&client, "_orbit_manifest")?;
-    drop(client);
-
-    if had_data {
-        tracing::warn!(
-            "local graph schema or code index changed; rebuilding {} (previously indexed repositories must be re-indexed)",
-            db_path.display()
-        );
-    }
-    remove_db_files(db_path)?;
-
-    let client = DuckDbClient::open(db_path).context("failed to open DuckDB")?;
-    client
-        .initialize_schema(ddl)
-        .context("failed to create schema")?;
-    client
-        .execute(
-            "INSERT INTO _orbit_meta (key, value) VALUES (?1, ?2), (?3, ?4)",
-            &[
-                json!(LOCAL_DDL_META_KEY),
-                json!(ddl),
-                json!(CODE_INDEX_META_KEY),
-                json!(CODE_INDEX_REVISION),
-            ],
-        )
-        .context("failed to record schema fingerprint")?;
-    Ok(())
-}
-
-fn stored_meta(client: &DuckDbClient, key: &str) -> Result<Option<String>> {
-    if !table_exists(client, "_orbit_meta")? {
-        return Ok(None);
-    }
-    let batches = client
-        .query_arrow_json(
-            "SELECT value FROM _orbit_meta WHERE key = ?1",
-            &[json!(key)],
-        )
-        .context("failed to read _orbit_meta")?;
-    Ok(duckdb_client::string_column(&batches, "value")
-        .into_iter()
-        .next())
-}
-
-fn table_exists(client: &DuckDbClient, name: &str) -> Result<bool> {
-    let batches = client
-        .query_arrow_json(
-            "SELECT CAST(COUNT(*) AS BIGINT) AS n FROM information_schema.tables WHERE table_name = ?1",
-            &[json!(name)],
-        )
-        .context("failed to query information_schema")?;
-    Ok(duckdb_client::scalar_i64(&batches) > 0)
-}
-
-fn remove_db_files(db_path: &Path) -> Result<()> {
-    let mut wal = db_path.as_os_str().to_owned();
-    wal.push(".wal");
-    for path in [db_path.to_path_buf(), PathBuf::from(wal)] {
-        if let Err(e) = std::fs::remove_file(&path)
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
-            return Err(e).with_context(|| {
-                format!(
-                    "failed to remove outdated local graph {}; delete it manually and retry",
-                    path.display()
-                )
-            });
-        }
-    }
-    Ok(())
-}
-
-pub fn set_status(
-    client: &DuckDbClient,
-    repo_path: &str,
-    project_id: i64,
-    status: RepoStatus,
-    error_message: Option<&str>,
-    git: Option<&GitInfo>,
-) -> Result<()> {
-    let parent = git.map(|g| g.parent_repo_path.to_string_lossy().to_string());
-    let branch = git.map(|g| g.branch.as_str());
-    let commit = git.map(|g| g.commit_sha.as_str());
-
-    client
-        .execute(
-            "INSERT INTO _orbit_manifest (repo_path, project_id, parent_repo_path, branch, commit_sha, status, error_message, last_indexed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6::repo_status, ?7, CASE WHEN ?6 = 'indexed' THEN now() ELSE NULL END)
-             ON CONFLICT (repo_path) DO UPDATE SET
-                 parent_repo_path = COALESCE(?3, parent_repo_path),
-                 branch = COALESCE(?4, branch),
-                 commit_sha = COALESCE(?5, commit_sha),
-                 status = ?6::repo_status,
-                 error_message = ?7,
-                 last_indexed_at = CASE WHEN ?6 = 'indexed' THEN now() ELSE last_indexed_at END",
-            &[
-                json!(repo_path),
-                json!(project_id),
-                parent.map_or(serde_json::Value::Null, |s| json!(s)),
-                branch.map_or(serde_json::Value::Null, |s| json!(s)),
-                commit.map_or(serde_json::Value::Null, |s| json!(s)),
-                json!(status.as_ref()),
-                error_message.map_or(serde_json::Value::Null, |s| json!(s)),
-            ],
-        )
-        .context("failed to upsert manifest")?;
-    Ok(())
-}
-
-/// Best-effort `error` manifest row for a repo git_info could not open; logged, never propagated so it can't mask the original error.
-pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
-    let key = dunce::canonicalize(repo_path)
-        .unwrap_or_else(|_| repo_path.to_path_buf())
-        .to_string_lossy()
-        .to_string();
-    let client = match DuckDbClient::open(db_path) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("failed to open DuckDB to record git failure for {key}: {e}");
-            return;
-        }
-    };
-    if let Err(e) = set_status(
-        &client,
-        &key,
-        project_id_from_path(&key),
-        RepoStatus::Error,
-        Some(error),
-        None,
-    ) {
-        tracing::warn!("failed to record git failure status for {key}: {e}");
     }
 }
 
@@ -501,8 +427,6 @@ mod tests {
         assert!(resolved.is_empty(), "{resolved:?}");
     }
 
-    const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
-
     #[test]
     fn resolve_root_prefers_the_explicit_override() {
         let home = tempfile::TempDir::new().unwrap();
@@ -559,145 +483,6 @@ mod tests {
 
         assert_eq!(root, legacy);
         assert!(legacy.join("graph.duckdb").exists());
-    }
-
-    #[test]
-    fn record_git_info_failure_writes_error_row() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let db = tmp.path().join("graph.duckdb");
-        let client = DuckDbClient::open(&db).unwrap();
-        client.initialize_schema(LOCAL_DDL).unwrap();
-        drop(client);
-
-        let repo = tmp.path().join("unopenable");
-        std::fs::create_dir_all(&repo).unwrap();
-        record_git_info_failure(&db, &repo, "failed to get current branch");
-
-        let client = DuckDbClient::open(&db).unwrap();
-        let rows = client
-            .query_arrow("SELECT CAST(status AS VARCHAR), error_message FROM _orbit_manifest")
-            .unwrap();
-        let batch = rows.first().expect("one row");
-        assert_eq!(batch.num_rows(), 1);
-        let status = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<arrow::array::StringArray>()
-            .unwrap();
-        let msg = batch
-            .column(1)
-            .as_any()
-            .downcast_ref::<arrow::array::StringArray>()
-            .unwrap();
-        assert_eq!(status.value(0), "error");
-        assert_eq!(msg.value(0), "failed to get current branch");
-    }
-
-    #[test]
-    fn remove_db_files_appends_wal_to_the_full_path() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let db = tmp.path().join("mydb");
-        let wal = tmp.path().join("mydb.wal");
-        std::fs::write(&db, b"").unwrap();
-        std::fs::write(&wal, b"").unwrap();
-
-        remove_db_files(&db).unwrap();
-
-        assert!(!db.exists());
-        assert!(!wal.exists());
-    }
-
-    #[test]
-    fn ensure_graph_schema_is_idempotent_and_preserves_data() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let db = tmp.path().join("graph.duckdb");
-
-        ensure_graph_schema(&db, LOCAL_DDL).unwrap();
-        let client = DuckDbClient::open(&db).unwrap();
-        client
-            .execute(
-                "INSERT INTO _orbit_manifest (repo_path, project_id) VALUES ('/r', 1)",
-                &[],
-            )
-            .unwrap();
-        drop(client);
-
-        ensure_graph_schema(&db, LOCAL_DDL).unwrap();
-        let client = DuckDbClient::open(&db).unwrap();
-        let batches = client
-            .query_arrow("SELECT count(*) FROM _orbit_manifest")
-            .unwrap();
-        let count = batches[0]
-            .column(0)
-            .as_any()
-            .downcast_ref::<arrow::array::Int64Array>()
-            .unwrap();
-        assert_eq!(count.value(0), 1);
-    }
-
-    #[test]
-    fn ensure_graph_schema_rebuilds_on_ddl_drift() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let db = tmp.path().join("graph.duckdb");
-        let old_ddl = "CREATE TABLE IF NOT EXISTS _orbit_meta (key VARCHAR PRIMARY KEY, value VARCHAR NOT NULL);
-             CREATE TABLE IF NOT EXISTS old_table (id BIGINT)";
-
-        ensure_graph_schema(&db, old_ddl).unwrap();
-        ensure_graph_schema(&db, LOCAL_DDL).unwrap();
-
-        let client = DuckDbClient::open(&db).unwrap();
-        assert!(!table_exists(&client, "old_table").unwrap());
-        assert!(table_exists(&client, "gl_definition").unwrap());
-        assert_eq!(
-            stored_meta(&client, LOCAL_DDL_META_KEY).unwrap().as_deref(),
-            Some(LOCAL_DDL)
-        );
-    }
-
-    #[test]
-    fn ensure_graph_schema_rebuilds_legacy_db_without_fingerprint() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let db = tmp.path().join("graph.duckdb");
-
-        let client = DuckDbClient::open(&db).unwrap();
-        client
-            .initialize_schema(
-                "CREATE TABLE IF NOT EXISTS _orbit_manifest (repo_path VARCHAR PRIMARY KEY, project_id BIGINT NOT NULL);
-                 CREATE TABLE IF NOT EXISTS gl_definition (id BIGINT NOT NULL)",
-            )
-            .unwrap();
-        client
-            .execute(
-                "INSERT INTO _orbit_manifest (repo_path, project_id) VALUES ('/r', 1)",
-                &[],
-            )
-            .unwrap();
-        drop(client);
-
-        ensure_graph_schema(&db, LOCAL_DDL).unwrap();
-
-        let client = DuckDbClient::open(&db).unwrap();
-        let batches = client
-            .query_arrow("SELECT count(*) FROM _orbit_manifest")
-            .unwrap();
-        let count = batches[0]
-            .column(0)
-            .as_any()
-            .downcast_ref::<arrow::array::Int64Array>()
-            .unwrap();
-        assert_eq!(count.value(0), 0);
-
-        let cols = client
-            .query_arrow(
-                "SELECT count(*) FROM information_schema.columns WHERE table_name = 'gl_definition'",
-            )
-            .unwrap();
-        let col_count = cols[0]
-            .column(0)
-            .as_any()
-            .downcast_ref::<arrow::array::Int64Array>()
-            .unwrap();
-        assert!(col_count.value(0) > 1);
     }
 
     #[test]

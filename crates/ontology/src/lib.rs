@@ -24,11 +24,9 @@ pub mod errors;
 pub mod etl;
 pub mod etl_sql;
 pub mod introspection;
-mod json_schema;
 mod loading;
 pub mod migrations;
 pub mod pipelines;
-pub mod query_dsl;
 pub mod sql_template;
 
 pub use constants::{
@@ -156,6 +154,7 @@ pub struct Ontology {
     pub(crate) denormalized_properties: Vec<DenormalizedProperty>,
     /// Declared pre-joined table chains; see [`denormalized`].
     pub(crate) denormalized_joins: Vec<denormalized::DenormalizedJoin>,
+    pub(crate) reordered_tables: Vec<denormalized::ReorderedTable>,
     /// Edge-producing entities derived by a Rust transform (keyed by name).
     /// These have no node table; they extract from the datalake and emit edges.
     pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
@@ -212,7 +211,7 @@ impl Ontology {
                     DEFAULT_PRIMARY_KEY.to_string(),
                 ],
             },
-            internal_column_prefix: "_gkg_".to_string(),
+            internal_column_prefix: "_orbit_".to_string(),
             local_entities: BTreeMap::new(),
             local_edge_table_name: None,
             local_edge_columns: Vec::new(),
@@ -220,6 +219,7 @@ impl Ontology {
             auxiliary_dictionaries: Vec::new(),
             denormalized_properties: Vec::new(),
             denormalized_joins: Vec::new(),
+            reordered_tables: Vec::new(),
             derived_entities: BTreeMap::new(),
             materialized_views: Vec::new(),
             refreshable_materialized_views: Vec::new(),
@@ -658,6 +658,11 @@ impl Ontology {
             }
         }
 
+        for copy in &mut self.reordered_tables {
+            copy.name = format!("{prefix}{}", copy.name);
+            copy.source = format!("{prefix}{}", copy.source);
+        }
+
         for aux in self.auxiliary_tables.iter_mut().filter(|aux| aux.versioned) {
             aux.name = format!("{prefix}{}", aux.name);
         }
@@ -896,22 +901,51 @@ impl Ontology {
         self.denormalized_properties
             .retain(|dp| allowed.contains(dp.edge_column.as_str()));
         self.denormalized_joins.clear();
+        self.reordered_tables.clear();
     }
 
-    /// Returns the destination table for a given relationship kind.
-    ///
-    /// Uses the first variant's `destination_table`. This is correct because
-    /// `EdgeYaml::to_entities()` assigns the same table to all variants of a
-    /// relationship kind — per-variant table routing is not supported.
-    ///
-    /// Falls back to the default edge table if the relationship kind is
-    /// unknown (e.g. wildcard queries).
+    pub fn edge_route(
+        &self,
+        relationship_kind: &str,
+        source_kind: &str,
+        target_kind: &str,
+    ) -> Option<&EdgeEntity> {
+        self.edges
+            .get(relationship_kind)?
+            .iter()
+            .find(|edge| edge.source_kind == source_kind && edge.target_kind == target_kind)
+    }
+
+    pub fn edge_tables_for_relationship(&self, relationship_kind: &str) -> BTreeSet<&str> {
+        if self.edges.get(relationship_kind).is_some_and(Vec::is_empty) {
+            return BTreeSet::from([self.default_edge_table.as_str()]);
+        }
+        self.edges
+            .get(relationship_kind)
+            .into_iter()
+            .flatten()
+            .map(|edge| edge.destination_table.as_str())
+            .collect()
+    }
+
+    pub fn validate_single_table_edge_routes(&self) -> Result<(), OntologyError> {
+        for kind in self.edge_names() {
+            if self.edge_tables_for_relationship(kind).len() > 1 {
+                return Err(OntologyError::Validation(format!(
+                    "relationship '{kind}' has split table routes; this consumer requires one table per relationship kind"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     #[must_use]
+    /// Requires `validate_single_table_edge_routes`; use `edge_tables_for_relationship` for split routes.
     pub fn edge_table_for_relationship(&self, relationship_kind: &str) -> &str {
         self.edges
             .get(relationship_kind)
             .and_then(|variants| variants.first())
-            .map(|e| e.destination_table.as_str())
+            .map(|edge| edge.destination_table.as_str())
             .unwrap_or(&self.default_edge_table)
     }
 
@@ -1014,6 +1048,10 @@ impl Ontology {
     #[must_use]
     pub fn denormalized_joins(&self) -> &[denormalized::DenormalizedJoin] {
         &self.denormalized_joins
+    }
+
+    pub fn reordered_tables(&self) -> &[denormalized::ReorderedTable] {
+        &self.reordered_tables
     }
 
     /// The join whose table is `table`, with or without a schema-version prefix.
@@ -1424,6 +1462,9 @@ impl Ontology {
     /// `sort_key` for edge tables, or `None` if the table is unknown.
     #[must_use]
     pub fn sort_key_for_table(&self, table: &str) -> Option<&[String]> {
+        if let Some(copy) = self.reordered_tables.iter().find(|copy| copy.name == table) {
+            return Some(&copy.sort_key);
+        }
         if let Some(config) = self.edge_table_configs.get(table) {
             return Some(&config.sort_key);
         }
@@ -2390,95 +2431,6 @@ mod tests {
         assert!(ontology.min_access_level_for_table("gl_project").is_none());
     }
 
-    #[test]
-    fn test_data_type_to_json_schema_type() {
-        assert_eq!(DataType::String.to_json_schema_type(), "string");
-        assert_eq!(DataType::Int.to_json_schema_type(), "integer");
-        assert_eq!(DataType::Float.to_json_schema_type(), "number");
-        assert_eq!(DataType::Bool.to_json_schema_type(), "boolean");
-        assert_eq!(DataType::Date.to_json_schema_type(), "string");
-        assert_eq!(DataType::DateTime.to_json_schema_type(), "string");
-        assert_eq!(DataType::Enum.to_json_schema_type(), "string");
-        assert_eq!(DataType::Uuid.to_json_schema_type(), "string");
-    }
-
-    fn base_schema() -> &'static str {
-        include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"))
-    }
-
-    #[test]
-    fn test_derive_json_schema() {
-        let ontology = Ontology::new()
-            .with_nodes(["User", "Project"])
-            .with_edges(["AUTHORED"])
-            .with_fields("User", [("username", DataType::String)]);
-
-        let result = ontology.derive_json_schema(base_schema()).unwrap();
-
-        let labels = result["$defs"]["EntityType"]["enum"].as_array().unwrap();
-        let label_strs: Vec<_> = labels.iter().filter_map(|v| v.as_str()).collect();
-        assert!(label_strs.contains(&"User"));
-        assert!(label_strs.contains(&"Project"));
-
-        let types = result["$defs"]["RelationshipTypeName"]["enum"]
-            .as_array()
-            .unwrap();
-        let type_strs: Vec<_> = types.iter().filter_map(|v| v.as_str()).collect();
-        assert!(type_strs.contains(&"AUTHORED"));
-
-        let user_props = &result["$defs"]["NodeProperties"]["User"];
-        assert!(user_props.is_object());
-        assert_eq!(user_props["username"]["type"], "string");
-    }
-
-    #[test]
-    fn test_derive_json_schema_errors() {
-        let ontology = Ontology::new();
-
-        let err = ontology.derive_json_schema("not valid json").unwrap_err();
-        assert!(err.to_string().contains("failed to parse base schema"));
-
-        let err = ontology.derive_json_schema("{}").unwrap_err();
-        assert!(err.to_string().contains("missing $defs"));
-    }
-
-    #[test]
-    fn test_derive_json_schema_with_enum_field() {
-        let mut enum_values = std::collections::BTreeMap::new();
-        enum_values.insert(1, "active".to_string());
-        enum_values.insert(2, "inactive".to_string());
-        enum_values.insert(3, "pending".to_string());
-
-        let node = NodeEntity {
-            name: "User".to_string(),
-            domain: "core".to_string(),
-            label: "username".to_string(),
-            fields: vec![Field {
-                name: "status".to_string(),
-                source: FieldSource::DatabaseColumn("status".to_string()),
-                data_type: DataType::Enum,
-                nullable: false,
-                enum_values: Some(enum_values),
-                enum_type: EnumType::Int,
-                ..Default::default()
-            }],
-            destination_table: "gl_user".to_string(),
-            ..Default::default()
-        };
-
-        let mut ontology = Ontology::new();
-        ontology.nodes.insert("User".to_string(), node);
-
-        let result = ontology.derive_json_schema(base_schema()).unwrap();
-
-        let status_schema = &result["$defs"]["NodeProperties"]["User"]["status"];
-        assert_eq!(status_schema["type"], "string");
-
-        let enum_array = status_schema["enum"].as_array().unwrap();
-        let enum_values: Vec<_> = enum_array.iter().filter_map(|v| v.as_str()).collect();
-        assert_eq!(enum_values, vec!["active", "inactive", "pending"]);
-    }
-
     fn assert_redaction(
         ontology: &Ontology,
         entity: &str,
@@ -2792,7 +2744,7 @@ properties:
                 "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
-                "_gkg_",
+                "_orbit_",
                 &EmptyReader,
             )
             .expect("should succeed");
@@ -2833,7 +2785,7 @@ properties:
                 "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
-                "_gkg_",
+                "_orbit_",
                 &EmptyReader,
             )
             .expect("should succeed");
@@ -2862,7 +2814,7 @@ schema_version: "1.0"
 settings:
   table_prefix: "kg_"
   default_edge_table: kg_edge
-  internal_column_prefix: "_gkg_"
+  internal_column_prefix: "_orbit_"
   default_entity_sort_key: [traversal_path, id]
   edge_tables:
     kg_edge:
@@ -3059,7 +3011,7 @@ properties:
                 "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
-                "_gkg_",
+                "_orbit_",
                 &EmptyReader,
             )
             .unwrap_err();
@@ -3107,7 +3059,7 @@ properties:
                 "nodes/test/test_node.yaml",
                 &default_sort_key,
                 &etl_settings,
-                "_gkg_",
+                "_orbit_",
                 &EmptyReader,
             )
             .expect("should succeed");

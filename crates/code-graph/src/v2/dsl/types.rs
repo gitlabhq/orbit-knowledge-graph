@@ -486,6 +486,9 @@ pub struct BindingRule {
     pub name_fields: &'static [&'static str],
     /// Alternative to name_fields: arbitrary Extract pipeline for name.
     pub name_extract: Option<Extract>,
+    /// When set, replaces `name_extract`/`name_fields`, for names an `Extract`
+    /// chain cannot express; a hook returning `None` binds nothing.
+    pub name_hook: Option<NameHookFn>,
     pub value_field: Option<&'static str>,
     /// Alternative to value_field: arbitrary Extract pipeline for RHS value node.
     pub value_extract: Option<Extract>,
@@ -504,6 +507,7 @@ pub fn binding(kind: &'static str, binding_kind: crate::v2::types::BindingKind) 
         binding_kind,
         name_fields: &["left"],
         name_extract: None,
+        name_hook: None,
         value_field: Some("right"),
         value_extract: None,
         instance_attr_prefixes: &[],
@@ -519,6 +523,11 @@ impl BindingRule {
 
     pub fn name_from_extract(mut self, extract: Extract) -> Self {
         self.name_extract = Some(extract);
+        self
+    }
+
+    pub fn name_hook(mut self, hook: NameHookFn) -> Self {
+        self.name_hook = Some(hook);
         self
     }
 
@@ -551,6 +560,9 @@ impl BindingRule {
     }
 
     pub fn extract_name(&self, node: &N<'_>) -> Option<String> {
+        if let Some(hook) = self.name_hook {
+            return hook(node);
+        }
         if let Some(extract) = &self.name_extract {
             return extract.apply(node);
         }
@@ -563,7 +575,7 @@ impl BindingRule {
     /// `parameter_declaration` has two `name` children), returns all.
     /// Falls back to `extract_name` for single-name bindings.
     pub fn extract_names(&self, node: &N<'_>) -> Vec<String> {
-        if self.name_extract.is_some() {
+        if self.name_hook.is_some() || self.name_extract.is_some() {
             return self.extract_name(node).into_iter().collect();
         }
         if let Some(&first_field) = self.name_fields.first() {

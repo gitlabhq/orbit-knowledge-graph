@@ -1,0 +1,86 @@
+# Check the ontology redaction config against the Rails contract of the GitLab that e2e pins; a cache hit skips the toolbox pull.
+.rails-contract-rules:
+  rules:
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - config/ontology/**/*
+        - crates/ontology/**/*
+        - e2e/config/versions.yaml
+        - scripts/rails-contract/**/*
+        - .gitlab/ci/rails-contract.yml
+      interruptible: true
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+.rails-contract-cache:
+  cache:
+    key:
+      prefix: rails-contract-v1
+      files:
+        - e2e/config/versions.yaml
+        - scripts/rails-contract/export.rb
+    paths:
+      - rails-contract.json
+
+rails-contract-image:
+  stage: lint
+  image: alpine:latest
+  tags:
+    - saas-linux-small-amd64
+  extends:
+    - .rails-contract-rules
+    - .rails-contract-cache
+  cache:
+    policy: pull
+  needs: []
+  script:
+    - apk add --no-cache yq
+    - image="registry.gitlab.com/gitlab-org/build/cng/gitlab-toolbox-ee@$(yq -r '.gitlab.images.toolbox.digest' e2e/config/versions.yaml)"
+    - if [ -s rails-contract.json ]; then image=alpine:latest; fi
+    - echo "RAILS_CONTRACT_EXPORT_IMAGE=$image" | tee rails-contract-image.env
+  artifacts:
+    paths:
+      - rails-contract.json
+    reports:
+      dotenv: rails-contract-image.env
+
+rails-contract-export:
+  stage: lint
+  image:
+    name: $RAILS_CONTRACT_EXPORT_IMAGE
+    entrypoint: [""]
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .rails-contract-rules
+    - .rails-contract-cache
+  needs:
+    - rails-contract-image
+  services:
+    - name: postgres:16
+      alias: postgres
+  variables:
+    POSTGRES_USER: git
+    POSTGRES_PASSWORD: secure password
+    POSTGRES_DB: gitlabhq_production
+    RAILS_ENV: production
+    GITLAB_LICENSE_MODE: test
+  script:
+    - '[ -s rails-contract.json ] || bash scripts/rails-contract/export-in-toolbox.sh rails-contract.json'
+  artifacts:
+    paths:
+      - rails-contract.json
+    expire_in: 1 week
+
+rails-contract-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .rails-contract-rules
+  needs:
+    - rails-contract-export
+  variables:
+    RAILS_CONTRACT_SNAPSHOT: $CI_PROJECT_DIR/rails-contract.json
+  script:
+    - mise run rails-contract:check

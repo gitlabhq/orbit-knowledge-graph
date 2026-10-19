@@ -54,14 +54,18 @@ pub(crate) fn filter_expression(
         | FilterOp::Gte
         | FilterOp::Lt
         | FilterOp::Lte) => comparison(col, op, typed(val())).expect("comparison operator"),
-        FilterOp::In => {
-            if let Some(arr) = filter.value.as_ref().and_then(|v| v.as_array()) {
-                Expr::col_in(alias, prop, parameter_type(data_type), arr.clone())
-                    .unwrap_or_else(|| Expr::param(SqlType::Bool, false))
-            } else {
-                Expr::param(SqlType::Bool, false)
-            }
-        }
+        FilterOp::In => Expr::col_in(
+            alias,
+            prop,
+            parameter_type(data_type),
+            filter
+                .value
+                .as_ref()
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default(),
+        )
+        .expect("validated non-empty IN list"),
         FilterOp::IsNull => Expr::unary(Op::IsNull, col),
         FilterOp::IsNotNull => Expr::unary(Op::IsNotNull, col),
         op => {

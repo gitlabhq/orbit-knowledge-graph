@@ -21,8 +21,8 @@ use types::QueryResult;
 
 pub use crate::content::PropertyMap;
 
-/// Tries the PK column first (`_gkg_{alias}_pk`), falling back to the
-/// redaction ID column (`_gkg_{alias}_id`).
+/// Tries the PK column first (`_orbit_{alias}_pk`), falling back to the
+/// redaction ID column (`_orbit_{alias}_id`).
 pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
     let pk_col = primary_key_column(&template.node_alias);
     let id_col = redaction_id_column(&template.node_alias);
@@ -38,7 +38,7 @@ pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) ->
     ids
 }
 
-/// Reads the `_gkg_{alias}_tp` column emitted by the enforce pass.
+/// Reads the `_orbit_{alias}_tp` column emitted by the enforce pass.
 pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<TraversalPath> {
     let tp_col = traversal_path_column(alias);
     let mut paths: Vec<TraversalPath> = result

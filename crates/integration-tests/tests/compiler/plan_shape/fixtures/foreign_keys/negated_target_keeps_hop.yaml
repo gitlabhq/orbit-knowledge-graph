@@ -1,0 +1,17 @@
+name: NOT on a pinned FK target keeps the target join so its columns stay readable
+query:
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000})
+    WHERE NOT (p.name CONTAINS 'Public' AND mr.state = 'opened')
+    RETURN mr.title
+missing_frontends:
+  json: JSON filters cannot express grouped negation.
+logical:
+  expect:
+    - (EdgeScan IN_PROJECT mr->p AS e1)
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Join ON p.id = mr.project_id (_) (_))
+        - (Scan Table(gl_project) AS p)

@@ -39,7 +39,7 @@ fn render_prompt(key: &str, context: minijinja::Value) -> String {
     environment.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
     environment
         .render_str(prompt(key).description(), context)
-        .expect("template placeholders are validated against the prompt file at build time")
+        .expect("template placeholders are validated against the prompt file by tests")
 }
 
 pub(super) fn list_commands_description(frontend: Frontend) -> String {

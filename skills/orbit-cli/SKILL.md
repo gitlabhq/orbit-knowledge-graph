@@ -5,10 +5,10 @@ description: >
   `glab orbit`). Reach for it when a question names a symbol or spans code
   structure. Examples: who calls or extends this, where it is defined, what
   a file defines, how definitions are distributed. One call replaces many
-  file reads and text greps. Works on the working tree and unpushed branches.
-  Not a fit: text or config search, reading one known file, or hosted
-  GitLab data (use the `orbit` skill).
-version: 0.18.2
+  file reads and text greps, including matches in config, templates, and docs.
+  Works on the working tree and unpushed branches. Not a fit: reading one known
+  file, or hosted GitLab data (use the `orbit` skill).
+version: 0.24.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -22,7 +22,7 @@ metadata:
 # Orbit local CLI skill
 
 The local CLI parses a checkout into a DuckDB property graph. `grep` finds
-definitions. `context` reads their source and relationships. `sql` runs
+every matching line in code, tests, config, and docs, labeled with its enclosing definition. `context` reads their source and relationships. `sql` runs
 read-only aggregations. `repo-map` orients you at the directory level. For
 production data, use the `orbit` skill.
 
@@ -44,17 +44,21 @@ If they decline, note the discrepancy in one line and continue with the correcte
 
 ```shell
 orbit index .
-orbit grep "rate limit" --path src --kind Method,Function
-orbit grep 'query_arrow|insert_batch|execute' --path crates/duckdb-client
-orbit context Definition:<id> src/lib.rs:120-180 crates/duckdb-client
+orbit grep "rate limit" src --kind Method,Function
+orbit grep 'query_arrow|insert_batch|execute' crates/duckdb-client
+orbit context duckdb_client::search::DuckDbSearch::grep src/lib.rs:120-180 crates/duckdb-client
 ```
 
-Quote `a|b|c` for OR alternatives. Each alternative uses conjunctive FTS, and a
-single token must also match literally, ignoring case. Results rank exact names,
-then name/path hits, then body mentions. Rows include Definition IDs and ranges;
-body mentions also show the count and first matching line.
+Quote `a|b|c` for OR alternatives. Plain words ignore case, `_`, and `-`; terms
+with regex characters match as regex. Each file is one row: matching lines are
+grouped under their enclosing definition as `Kind name:start-end`, followed by
+`←callers` and `→callees`. Files that define a term come first, then code, tests,
+and config or docs. A definition the query names prints first with its source.
+The usual rg and grep flags work: `-A`/`-B`/`-C`, `-l`, `-c`, `-w`, `-F`, `-g`.
+`--kind` takes definition kinds such as `Class,Method`. `--kind File` and
+`--kind Directory` list where the matches are, with their definitions.
 
-Pass Definition IDs, exact FQNs, paths, ranges, or directories to `context`.
+Pass names as printed by `grep`, paths, ranges, or directories to `context`.
 Definition targets show full source and indexed relationships. File targets show
 a compact map and at most ten connections per section, with omitted counts.
 `<--` is a caller and `-->` is a callee. Reuse the returned source.
@@ -77,8 +81,8 @@ Gotchas:
   belongs to Orbit Remote.
 - `definition_type` values are capitalized. `WHERE definition_type='function'`
   returns zero rows.
-- The graph holds every indexed checkout. `sql` scopes to the current commit,
-  and `--all` spans them all. Re-index after you check out a different commit.
+- `sql` queries all indexed revisions by default. Use `--repo .` for the current
+  checkout revision, or `--db PATH` for one file. Index a commit before querying it.
 
 ## References
 

@@ -1,0 +1,19 @@
+description: Wildcard columns leave out the hidden traversal_path field
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "p", "entity": "Project", "columns": "*", "node_ids": [1000]}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (p:Project {id: 1000}) RETURN properties(p) LIMIT 10
+
+expect:
+  node_count: 1
+  nodes:
+    Project:
+      ids: [1000]
+      prop_present: [name, full_path]
+      prop_absent: [traversal_path]

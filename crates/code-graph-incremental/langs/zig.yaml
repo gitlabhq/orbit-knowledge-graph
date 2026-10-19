@@ -4,6 +4,25 @@
 # initializer calls, control flow.
 
 config:
+  stdlib: [
+    { availability: implicit, symbols: ['@as', '@alignCast', '@alignOf', '@bitCast', '@bitOffsetOf',
+      '@bitSizeOf', '@byteSwap', '@call', '@cDefine', '@cImport', '@cInclude',
+      '@cUndef', '@clz', '@compileError', '@compileLog', '@ctz', '@embedFile',
+      '@enumFromInt', '@errorFromInt', '@errorName', '@errorReturnTrace',
+      '@field', '@fieldParentPtr', '@floatCast', '@floatFromInt', '@hasDecl',
+      '@hasField', '@import', '@inComptime', '@intCast', '@intFromBool',
+      '@intFromEnum', '@intFromError', '@intFromFloat', '@intFromPtr', '@max',
+      '@memcpy', '@memset', '@min', '@offsetOf', '@panic', '@popCount',
+      '@ptrCast', '@ptrFromInt', '@sizeOf', '@src', '@tagName', '@This',
+      '@trap', '@truncate', '@Type', '@typeInfo', '@typeName', '@TypeOf', '@Vector',
+      '@abs', '@addWithOverflow', '@atomicLoad', '@atomicRmw', '@atomicStore',
+      '@bitReverse', '@ceil', '@cmpxchgStrong', '@cmpxchgWeak', '@cos', '@divExact',
+      '@divFloor', '@divTrunc', '@exp', '@exp2', '@floor', '@log',
+      '@log2', '@log10', '@mod', '@mulAdd', '@mulWithOverflow', '@reduce', '@rem',
+      '@round', '@select', '@shlExact', '@shlWithOverflow', '@shrExact', '@shuffle',
+      '@sin', '@splat', '@sqrt', '@subWithOverflow', '@tan', '@trunc'] },
+    { module: std, precedence: runtime }, { module: builtin, precedence: runtime }
+  ]
   resolve:
     lookup_from:
       - __source_root

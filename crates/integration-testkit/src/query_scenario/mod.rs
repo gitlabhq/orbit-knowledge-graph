@@ -2,6 +2,7 @@
 //! tests but exercises the full query path: compile, execute, redact,
 //! hydrate, paginate, format, assert.
 
+mod duckdb;
 mod format;
 
 use std::path::Path;
@@ -9,12 +10,15 @@ use std::sync::Arc;
 
 use format::ExpectedIndex;
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, SecurityContext, compile_model,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
+    SecurityContext,
 };
-use query_engine::formatters::{GraphFormatter, ResultFormatter};
-use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
+use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
+use query_engine::pipeline::{
+    NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext, TypeMap,
+};
 use query_engine::shared::content::ColumnResolverRegistry;
-use query_engine::shared::{PipelineOutput, RedactionOutput};
+use query_engine::shared::{CompilationStage, PipelineOutput, RedactionOutput};
 
 use crate::context::TestContext;
 use crate::mock_redaction::MockRedactionService;
@@ -24,12 +28,13 @@ use crate::{
     SeededColumnResolver, collect_subtest_results, derive_clickhouse_data_model, load_ontology,
 };
 
+pub use duckdb::run_duckdb_dir;
 pub use format::{
     PathEdgeExpect, PresetOr, QueryExpect, QueryScenario, RedactionConfig, ScenarioConfig,
     SecurityOverride,
 };
 
-use orbit_server::pipeline::HydrationStage;
+use orbit_server::pipeline::{HydrationStage, RoutingOutput, RoutingStage};
 use orbit_server::redaction::QueryResult;
 
 /// Parse all YAML scenario files under `root` without executing them.
@@ -41,25 +46,36 @@ pub fn validate_parse(root: &str) {
     scenario::discover(root, &mut files);
     assert!(!files.is_empty(), "no files found under {}", root.display());
     for file in &files {
-        let raw =
-            std::fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
-        let _: QueryScenario =
-            orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+        scenario::read_cases::<QueryScenario>(file);
     }
+}
+
+fn read_scenarios(root: &Path, file: &Path) -> Vec<(String, QueryScenario)> {
+    let name = scenario::scenario_name(root, file);
+    scenario::read_cases(file)
+        .into_iter()
+        .map(|(case, scenario)| {
+            let name = case.map_or_else(|| name.clone(), |case| format!("{name}/{case}"));
+            (name, scenario)
+        })
+        .collect()
 }
 
 /// Load a named seed preset from `presets/seed.yaml` and apply it.
 pub async fn load_yaml_seed(ctx: &TestContext, presets_dir: &str, name: &str) {
-    let path = Path::new(presets_dir).join("seed.yaml");
+    let seed = seed_preset(Path::new(presets_dir), name);
+    let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
+    crate::scenario::seed::apply_seed(ctx, &seed, &Default::default(), &columns, name).await;
+}
+
+fn seed_preset(presets_dir: &Path, name: &str) -> Seed {
+    let path = presets_dir.join("seed.yaml");
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("seed presets at {}: {e}", path.display()));
-    let map: std::collections::BTreeMap<String, Seed> =
+    let mut map: std::collections::BTreeMap<String, Seed> =
         orbit_utils::yaml::from_str(&raw).unwrap_or_else(|e| panic!("invalid seed presets: {e}"));
-    let seed = map
-        .get(name)
-        .unwrap_or_else(|| panic!("unknown seed preset '{name}'"));
-    let columns = crate::scenario::seed::fetch_table_columns(ctx).await;
-    crate::scenario::seed::apply_seed(ctx, seed, &Default::default(), &columns, name).await;
+    map.remove(name)
+        .unwrap_or_else(|| panic!("unknown seed preset '{name}'"))
 }
 
 pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
@@ -68,8 +84,12 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let mut files = Vec::new();
     scenario::discover(root, &mut files);
     files.sort();
+    let mut scenarios: Vec<_> = files
+        .iter()
+        .flat_map(|file| read_scenarios(root, file))
+        .collect();
     assert!(
-        !files.is_empty(),
+        !scenarios.is_empty(),
         "no query scenario files found under {}",
         root.display()
     );
@@ -77,16 +97,16 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     if let Ok(filter) = std::env::var("SCENARIO_FILTER") {
         let filter = filter.trim();
         if !filter.is_empty() {
-            files.retain(|f| scenario::scenario_name(root, f).contains(filter));
+            scenarios.retain(|(name, _)| name.contains(filter));
             assert!(
-                !files.is_empty(),
+                !scenarios.is_empty(),
                 "SCENARIO_FILTER='{filter}' matched no query scenarios under {}",
                 root.display()
             );
         }
     }
 
-    scenario::assert_distinct_database_names(root, &files);
+    scenario::assert_distinct_database_names(scenarios.iter().map(|(name, _)| name.clone()));
 
     let concurrency: usize = std::env::var("SUBTEST_CONCURRENCY")
         .ok()
@@ -96,8 +116,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     let ctx = Arc::new(ctx.clone());
 
     let mut handles = Vec::new();
-    for file in files {
-        let name = scenario::scenario_name(root, &file);
+    for (name, scenario) in scenarios {
         let semaphore = Arc::clone(&semaphore);
         let ctx = Arc::clone(&ctx);
         let presets = Arc::clone(&presets);
@@ -106,7 +125,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
             let _permit = semaphore.acquire_owned().await.unwrap();
             let started = std::time::Instant::now();
             eprintln!("--- {task_name}");
-            run_scenario(&ctx, &file, &task_name, &presets).await;
+            run_scenario(&ctx, scenario, &task_name, &presets).await;
             eprintln!("    {task_name} {:.2?}", started.elapsed());
         });
         handles.push((name, handle));
@@ -115,12 +134,7 @@ pub async fn run_dir(ctx: &TestContext, root: &str, presets: &str) {
     collect_subtest_results(handles).await;
 }
 
-async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path) {
-    let raw = std::fs::read_to_string(file)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", file.display()));
-    let scenario: QueryScenario = orbit_utils::yaml::from_str(&raw)
-        .unwrap_or_else(|e| panic!("{name}: invalid scenario: {e}"));
-
+async fn run_scenario(ctx: &TestContext, scenario: QueryScenario, name: &str, presets: &Path) {
     let cfg = &scenario.config;
 
     let needs_fork = !cfg.extra_seed.is_empty();
@@ -186,7 +200,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
             continue;
         };
         run_frontend(
-            (&ctx, &data_model),
+            (&ctx, &data_model, &ontology),
             (frontend, frontend_key),
             query_str,
             &security,
@@ -199,7 +213,11 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, presets: &Path
 }
 
 async fn run_frontend(
-    (ctx, data_model): (&TestContext, &Arc<query_data_model::ClickHouseDataModel>),
+    (ctx, data_model, ontology): (
+        &TestContext,
+        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<ontology::Ontology>,
+    ),
     (frontend, frontend_key): (Frontend, &str),
     query: &str,
     security: &SecurityContext,
@@ -209,7 +227,8 @@ async fn run_frontend(
 ) {
     let label = &format!("{name} [{frontend_key}]");
 
-    let compiled = match compile_model(query, frontend, data_model, security) {
+    let compiled = compile_like_server(query, frontend, (data_model, ontology), security).await;
+    let compiled = match compiled {
         Ok(c) => {
             let expects_error = !matches!(
                 expect.compile_error,
@@ -219,7 +238,7 @@ async fn run_frontend(
                 !expects_error,
                 "{label}: expected compile error but got success"
             );
-            Arc::new(c)
+            c
         }
         Err(e) => match &expect.compile_error {
             None | Some(format::CompileErrorExpect::Flag(false)) => {
@@ -279,21 +298,47 @@ async fn run_frontend(
     if !expect.pages.is_empty() {
         expect.validate_pages_exclusive(label);
         run_pages(
-            ctx, frontend, query, data_model, security, redaction, expect, label,
+            ctx,
+            frontend,
+            query,
+            (data_model, ontology),
+            security,
+            redaction,
+            expect,
+            label,
         )
         .await;
         return;
     }
 
-    let resp = execute_pipeline(ctx, frontend, &compiled, data_model, security, redaction).await;
+    let output = execute_output(
+        ctx,
+        frontend,
+        &compiled,
+        (data_model, ontology),
+        security,
+        redaction,
+    )
+    .await;
+    if frontend == Frontend::Gql {
+        assert_gql_table(&output, expect, label);
+    }
+    let resp = GraphFormatter.format(&output);
 
     if let Some(n) = expect.repeat_count {
         assert!(n >= 2, "{label}: repeat_count must be >= 2");
         let baseline_node_ids = canonical_ids(&resp);
         let baseline_edges = canonical_edges(&resp);
         for run in 2..=n {
-            let rerun =
-                execute_pipeline(ctx, frontend, &compiled, data_model, security, redaction).await;
+            let rerun = execute_pipeline(
+                ctx,
+                frontend,
+                &compiled,
+                (data_model, ontology),
+                security,
+                redaction,
+            )
+            .await;
             assert_eq!(
                 baseline_node_ids,
                 canonical_ids(&rerun),
@@ -307,11 +352,7 @@ async fn run_frontend(
         }
     }
 
-    let response: query_engine::formatters::GraphResponse =
-        serde_json::from_value(resp).expect("response should deserialize");
-    let view = ResponseView::for_query(&compiled.input, response);
-
-    apply_expect(&view, expect, label);
+    assert_response(&compiled.input, resp, expect, label);
 }
 
 fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], label: &str) {
@@ -398,7 +439,10 @@ async fn run_pages(
     ctx: &TestContext,
     frontend: Frontend,
     base_query: &str,
-    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+    (data_model, ontology): (
+        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<ontology::Ontology>,
+    ),
     security: &SecurityContext,
     redaction: &MockRedactionService,
     expect: &QueryExpect,
@@ -416,13 +460,19 @@ async fn run_pages(
     for (i, page_expect) in expect.pages.iter().enumerate() {
         let page_label = format!("{label} page {}", i + 1);
 
-        let compiled = Arc::new(
-            compile_model(&query_str, frontend, data_model, security)
-                .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}")),
-        );
+        let compiled = compile_like_server(&query_str, frontend, (data_model, ontology), security)
+            .await
+            .unwrap_or_else(|e| panic!("{page_label}: compile failed: {e}"));
 
-        let resp =
-            execute_pipeline(ctx, frontend, &compiled, data_model, security, redaction).await;
+        let resp = execute_pipeline(
+            ctx,
+            frontend,
+            &compiled,
+            (data_model, ontology),
+            security,
+            redaction,
+        )
+        .await;
         let response: query_engine::formatters::GraphResponse =
             serde_json::from_value(resp).expect("response should deserialize");
 
@@ -518,14 +568,73 @@ async fn run_pages(
     }
 }
 
+async fn compile_like_server(
+    query: &str,
+    frontend: Frontend,
+    (data_model, ontology): (
+        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<ontology::Ontology>,
+    ),
+    security: &SecurityContext,
+) -> Result<Arc<CompiledQueryContext>, PipelineError> {
+    let mut server_extensions = TypeMap::default();
+    server_extensions.insert(Arc::clone(data_model));
+    let mut pipeline_ctx = QueryPipelineContext {
+        frontend,
+        query_json: query.to_owned(),
+        compiled: None,
+        ontology: Arc::clone(ontology),
+        security_context: Some(security.clone()),
+        server_extensions,
+        phases: TypeMap::default(),
+    };
+    let mut obs = NoOpObserver;
+    if let RoutingOutput::Schema(_) = RoutingStage.execute(&mut pipeline_ctx, &mut obs).await? {
+        return Err(PipelineError::custom("schema calls are not graph queries"));
+    }
+    CompilationStage
+        .execute(&mut pipeline_ctx, &mut obs)
+        .await?;
+    pipeline_ctx
+        .compiled
+        .ok_or_else(|| PipelineError::custom("CompilationStage produced no query"))
+}
+
 async fn execute_pipeline(
     ctx: &TestContext,
     frontend: Frontend,
     compiled: &Arc<CompiledQueryContext>,
-    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+    (data_model, ontology): (
+        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<ontology::Ontology>,
+    ),
     security: &SecurityContext,
     redaction: &MockRedactionService,
 ) -> serde_json::Value {
+    GraphFormatter.format(
+        &execute_output(
+            ctx,
+            frontend,
+            compiled,
+            (data_model, ontology),
+            security,
+            redaction,
+        )
+        .await,
+    )
+}
+
+async fn execute_output(
+    ctx: &TestContext,
+    frontend: Frontend,
+    compiled: &Arc<CompiledQueryContext>,
+    (data_model, ontology): (
+        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<ontology::Ontology>,
+    ),
+    security: &SecurityContext,
+    redaction: &MockRedactionService,
+) -> PipelineOutput {
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
 
@@ -547,7 +656,7 @@ async fn execute_pipeline(
         frontend,
         query_json: String::new(),
         compiled: Some(Arc::clone(compiled)),
-        ontology: Arc::clone(data_model.ontology()),
+        ontology: Arc::clone(ontology),
         security_context: Some(security.clone()),
         server_extensions,
         phases: TypeMap::default(),
@@ -563,26 +672,65 @@ async fn execute_pipeline(
         .await
         .expect("hydration should succeed");
 
-    let mut query_result = hydration_output.query_result;
+    pipeline_output(
+        compiled,
+        hydration_output.query_result,
+        hydration_output.redacted_count,
+        hydration_output.result_context,
+        compiled.base.sql.clone(),
+    )
+}
+
+fn pipeline_output(
+    compiled: &Arc<CompiledQueryContext>,
+    mut query_result: QueryResult,
+    redacted_count: usize,
+    result_context: ResultContext,
+    sql: String,
+) -> PipelineOutput {
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
         &compiled.input,
         &compiled.pagination,
     ));
-
-    let output = PipelineOutput {
+    PipelineOutput {
         row_count: query_result.authorized_count(),
-        redacted_count: hydration_output.redacted_count,
+        redacted_count,
         query_type: compiled.query_type.to_string(),
-        raw_query_strings: vec![compiled.base.sql.clone()],
+        raw_query_strings: vec![sql],
         compiled: Arc::clone(compiled),
         query_result,
-        result_context: hydration_output.result_context,
+        result_context,
         execution_log: vec![],
         pagination,
-    };
+    }
+}
 
-    GraphFormatter.format(&output)
+fn assert_response(input: &Input, response: serde_json::Value, expect: &QueryExpect, label: &str) {
+    let response: query_engine::formatters::GraphResponse =
+        serde_json::from_value(response).expect("response should deserialize");
+    apply_expect(&ResponseView::for_query(input, response), expect, label);
+}
+
+fn assert_gql_table(output: &PipelineOutput, expect: &QueryExpect, label: &str) {
+    if expect.gql_columns.is_empty() && expect.gql_column_names.is_empty() {
+        return;
+    }
+    let (header, rows) = GqlFormatter.table(output);
+    if !expect.gql_column_names.is_empty() {
+        assert_eq!(
+            header, expect.gql_column_names,
+            "{label}: gql column names mismatch"
+        );
+    }
+    for (name, values) in &expect.gql_columns {
+        let index = header
+            .iter()
+            .position(|column| column == name)
+            .unwrap_or_else(|| panic!("{label}: gql table has no column {name}: {header:?}"));
+        let actual: Vec<&str> = rows.iter().map(|row| row[index].as_str()).collect();
+        assert_eq!(actual, *values, "{label}: gql column {name} mismatch");
+    }
 }
 
 fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {

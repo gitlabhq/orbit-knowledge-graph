@@ -1,0 +1,9 @@
+description: An unsupported function in WHERE is named without echoing the compared literal
+
+query:
+  gql: |
+    MATCH (u:User) WHERE lower(u.username) = 'private-query-literal' RETURN u LIMIT 10
+
+expect:
+  compile_error: "function lower() is not supported: RETURN supports count"
+  compile_error_not_contains: ["private-query-literal"]

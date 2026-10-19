@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::time::Duration;
 
 use crate::intern::Lang;
@@ -294,11 +295,6 @@ fn from_tree_sitter(
         let field = cursor
             .field_id()
             .map_or(0, |f| field_map.get(f.get() as usize).copied().unwrap_or(0));
-        let sym = if ts.is_named() && ts.named_child_count() == 0 {
-            lang.syms.intern(&source[ts.start_byte()..ts.end_byte()])
-        } else {
-            0
-        };
         let sp = ts.start_position();
         let ep = ts.end_position();
 
@@ -310,7 +306,7 @@ fn from_tree_sitter(
                 field,
                 named: ts.is_named(),
                 synth: false,
-                sym,
+                sym: 0,
                 start: ts.start_byte() as u32,
                 end: ts.end_byte() as u32,
                 start_row: sp.row as u32,
@@ -385,17 +381,122 @@ pub fn parse(
     lang: &Lang,
     label: &str,
 ) -> Result<Tree, Killed> {
+    parse_with_sentinel(
+        source,
+        support_lang,
+        lang,
+        label,
+        &crate::sentinel::Sentinel::disabled(),
+    )
+}
+
+pub fn parse_with_sentinel(
+    source: &str,
+    support_lang: SupportLang,
+    lang: &Lang,
+    label: &str,
+    sentinel: &crate::sentinel::Sentinel,
+) -> Result<Tree, Killed> {
+    sentinel.check()?;
     CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
         c.ensure(support_lang, lang);
-        let ts_tree = c.parser.parse(source.as_bytes(), None).ok_or(Killed {
-            label: "tree-sitter",
-            path: label.to_string(),
-            elapsed: Duration::ZERO,
-            budget: Duration::ZERO,
-        })?;
-        Ok(from_tree_sitter(
-            source, &ts_tree, lang, &c.kinds, &c.fields, label,
-        ))
+        c.parser.reset();
+        let mut stopped = None;
+        let mut guard = parse_guard();
+        let mut progress = |state: &tree_sitter::ParseState| match sentinel.check() {
+            Ok(()) => guard(state.current_byte_offset()),
+            Err(error) => {
+                stopped = Some(error);
+                ControlFlow::Break(())
+            }
+        };
+        let mut input = |offset: usize, _: tree_sitter::Point| &source.as_bytes()[offset..];
+        let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
+        let ts_tree = c
+            .parser
+            .parse_with_options(&mut input, None, Some(options))
+            .ok_or_else(|| {
+                stopped.unwrap_or(Killed {
+                    cancelled: false,
+                    label: "tree-sitter",
+                    path: label.to_string(),
+                    elapsed: Duration::ZERO,
+                    budget: Duration::ZERO,
+                })
+            })?;
+        sentinel.check()?;
+        let tree = from_tree_sitter(source, &ts_tree, lang, &c.kinds, &c.fields, label);
+        sentinel.check()?;
+        Ok(tree)
     })
+}
+
+const MAX_STALL: u64 = 100_000;
+const STACK_RED_ZONE: usize = 256 * 1024;
+
+fn parse_guard() -> impl FnMut(usize) -> ControlFlow<()> {
+    let (mut last_offset, mut stalled) = (usize::MAX, 0);
+    move |offset| {
+        if stacker::remaining_stack().is_some_and(|left| left < STACK_RED_ZONE) {
+            return ControlFlow::Break(());
+        }
+        if offset != last_offset {
+            (last_offset, stalled) = (offset, 0);
+            return ControlFlow::Continue(());
+        }
+        stalled += 1;
+        match stalled > MAX_STALL {
+            true => ControlFlow::Break(()),
+            false => ControlFlow::Continue(()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[test]
+    fn a_parse_stops_after_too_many_steps_without_progress() {
+        let mut guard = parse_guard();
+        assert!(guard(0).is_continue());
+        assert!((0..MAX_STALL).all(|_| guard(0).is_continue()));
+        assert!(guard(0).is_break());
+        assert!(guard(1).is_continue());
+    }
+
+    #[test]
+    fn parsing_can_cancel_mid_file_and_reuse_the_parser() {
+        let checks = Arc::new(AtomicUsize::new(0));
+        let observed = checks.clone();
+        let sentinel = crate::sentinel::Sentinel::new("tree-sitter", "large.py", u64::MAX)
+            .with_cancellation(Arc::new(move || {
+                observed.fetch_add(1, Ordering::Relaxed) > 0
+            }));
+        let lang = Lang::default();
+        let source = "def example():\n    return 42\n".repeat(20000);
+        let error = parse_with_sentinel(&source, SupportLang::Python, &lang, "large.py", &sentinel)
+            .err()
+            .unwrap();
+        assert_eq!(error.label, "tree-sitter");
+        assert!(error.cancelled);
+        assert_eq!(error.to_string(), "tree-sitter cancelled");
+        assert_eq!(error.path, "large.py");
+        assert_eq!(error.budget, Duration::from_millis(u64::MAX));
+        assert!(checks.load(Ordering::Relaxed) >= 2);
+        assert!(
+            parse(
+                "def valid(): pass\n",
+                SupportLang::Python,
+                &lang,
+                "valid.py"
+            )
+            .is_ok()
+        );
+    }
 }

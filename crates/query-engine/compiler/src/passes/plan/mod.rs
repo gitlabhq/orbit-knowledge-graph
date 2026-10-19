@@ -1,4 +1,5 @@
 pub mod aggregation;
+mod conditions;
 mod context;
 pub mod edge_chain;
 pub(crate) mod edge_predicates;
@@ -19,7 +20,7 @@ use crate::input::*;
 
 pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity};
 pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 
 #[derive(Clone)]
@@ -29,6 +30,17 @@ pub struct BoundFilter {
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
     pub in_sort_key: bool,
+}
+
+impl BoundFilter {
+    pub fn at(&self, column: requirements::Column) -> requirements::Predicate {
+        requirements::Predicate::Property {
+            column,
+            filter: self.filter.clone(),
+            data_type: self.data_type,
+            in_sort_key: self.in_sort_key,
+        }
+    }
 }
 
 pub struct Plan<T> {
@@ -59,7 +71,7 @@ impl QueryPlan {
 
 pub fn denormalized_facts(
     input: &Input,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> HashMap<DenormalizedKey, DenormalizedProperty> {
     input
         .nodes
@@ -69,18 +81,29 @@ pub fn denormalized_facts(
             [DenormalizedDirection::Source, DenormalizedDirection::Target]
                 .into_iter()
                 .flat_map(move |direction| {
-                    node.filters.keys().filter_map(move |property| {
-                        let property = model.graph().property_id(entity, property)?;
-                        let key = DenormalizedKey {
-                            property,
-                            direction,
-                        };
-                        model
-                            .denormalized()
-                            .property(key)
-                            .cloned()
-                            .map(|facts| (key, facts))
-                    })
+                    node.filters
+                        .keys()
+                        .map(String::as_str)
+                        .chain(
+                            input
+                                .conditions()
+                                .filter(|condition| {
+                                    condition.target == PredicateTarget::Node(node.id.clone())
+                                })
+                                .map(|condition| condition.property.as_str()),
+                        )
+                        .filter_map(move |property| {
+                            let property = model.graph().property_id(entity, property)?;
+                            let key = DenormalizedKey {
+                                property,
+                                direction,
+                            };
+                            model
+                                .denormalized()
+                                .property(key)
+                                .cloned()
+                                .map(|facts| (key, facts))
+                        })
                 })
         })
         .collect()
@@ -136,7 +159,7 @@ pub struct EdgeTableConfig {
 }
 
 impl EdgeTableConfig {
-    pub fn from_model(model: &(impl QueryDataModel + ?Sized), rel_types: &[String]) -> Self {
+    pub fn from_model(model: &(impl OrbitQueryModel + ?Sized), rel_types: &[String]) -> Self {
         use std::collections::BTreeSet;
         let mut source_kinds = BTreeSet::new();
         let mut target_kinds = BTreeSet::new();
@@ -204,7 +227,7 @@ fn plan<M>(
     table_scans: &HashSet<String>,
 ) -> Result<QueryPlan>
 where
-    M: QueryDataModel + ?Sized,
+    M: OrbitQueryModel + ?Sized,
 {
     let context = context::PlanningContext {
         input,

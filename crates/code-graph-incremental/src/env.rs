@@ -12,6 +12,7 @@ use crate::treesitter::SupportLang;
 use crate::{rules, treesitter};
 
 pub struct Env {
+    pub export_config: crate::export::ExportConfig,
     pub lang: Lang,
     pub lang_id: SupportLang,
     pub members: Vec<SupportLang>,
@@ -31,7 +32,7 @@ pub struct FamilyResolve {
 
 impl Env {
     pub fn for_lang(lang_id: SupportLang) -> Result<Self, LoadError> {
-        Self::with_limits(lang_id, Limits::load()?)
+        Self::with_limits(lang_id, Limits::UNLIMITED)
     }
 
     pub fn with_limits(lang_id: SupportLang, limits: Limits) -> Result<Self, LoadError> {
@@ -68,6 +69,7 @@ impl Env {
             rules.insert(member, index);
         }
         Ok(Self {
+            export_config: crate::export::ExportConfig::embedded().clone(),
             lang,
             lang_id,
             members,

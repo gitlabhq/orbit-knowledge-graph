@@ -1,0 +1,21 @@
+name: C binding declarator name extraction (kg#1116)
+
+fixtures:
+  - path: callbacks.c
+    content: |
+      void on_event(void) { }
+
+      void dispatch(void) {
+          void (*handler)(void) = on_event;
+          handler();
+      }
+
+tests:
+  - name: "Call through a function-pointer local resolves to its initializer"
+    query: |
+      MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'callbacks::dispatch'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "callbacks::dispatch", callee: "callbacks::on_event" } }

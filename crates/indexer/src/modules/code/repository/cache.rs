@@ -33,9 +33,9 @@ pub enum RepositoryCacheError {
     RepositoryTooLarge,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CachedRepository {
-    dir: TempDir,
+    dir: Arc<TempDir>,
     pub file_inventory: Arc<FileInventory>,
 }
 
@@ -137,7 +137,7 @@ impl RepositoryCache for LocalRepositoryCache {
         }
 
         Ok(CachedRepository {
-            dir,
+            dir: Arc::new(dir),
             file_inventory: Arc::new(file_inventory),
         })
     }

@@ -66,6 +66,9 @@ pub enum IndexerError {
     #[error("Invalid engine configuration: {0}")]
     InvalidEngineConfig(#[from] EngineConfigError),
 
+    #[error("Invalid graph ClickHouse configuration: {0}")]
+    InvalidGraphConfig(#[from] orbit_server_config::ConfigurationError),
+
     #[error("Analytics tracker initialization failed: {0}")]
     Analytics(#[from] labkit_events::Error),
 }
@@ -95,6 +98,10 @@ impl From<&AppConfig> for DispatcherConfig {
 
 #[derive(Debug, Error)]
 pub enum DispatcherError {
+    #[error("invalid ontology: {0}")]
+    Ontology(#[from] ontology::OntologyError),
+    #[error("invalid layout: {0}")]
+    Layout(#[from] query_data_model::DataModelError),
     #[error("ontology archive error: {0}")]
     Archive(#[from] orbit_migrations::catalog::CatalogError),
 

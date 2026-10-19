@@ -375,11 +375,11 @@ fn neighbors_query() {
     let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("_gkg_neighbor_id"));
-    assert!(rendered.contains("_gkg_neighbor_type"));
-    assert!(rendered.contains("_gkg_relationship_type"));
+    assert!(rendered.contains("_orbit_neighbor_id"));
+    assert!(rendered.contains("_orbit_neighbor_type"));
+    assert!(rendered.contains("_orbit_relationship_type"));
     assert!(
-        rendered.contains("_gkg_neighbor_is_outgoing"),
+        rendered.contains("_orbit_neighbor_is_outgoing"),
         "bidirectional should include direction"
     );
     assert!(rendered.contains("gl_edge"));
@@ -536,10 +536,10 @@ fn valid_identifiers_produce_renderable_sql() {
     let rendered = result.base.render();
 
     assert!(!rendered.contains("{p"));
-    assert!(rendered.contains("_gkg_user_node_id"));
-    assert!(rendered.contains("_gkg__private_id"));
-    assert!(rendered.contains("_gkg_CamelCase_id"));
-    assert!(rendered.contains("_gkg_node123_id"));
+    assert!(rendered.contains("_orbit_user_node_id"));
+    assert!(rendered.contains("_orbit__private_id"));
+    assert!(rendered.contains("_orbit_CamelCase_id"));
+    assert!(rendered.contains("_orbit_node123_id"));
 }
 
 fn multi_table_ontology() -> std::sync::Arc<ontology::Ontology> {
@@ -1333,7 +1333,6 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User|Project) RETURN u",
         "MATCH (u IS User) RETURN u",
         "MATCH (u:User) WHERE u.id = 1 OR u.id = 2 RETURN u",
-        "MATCH (u:User) WHERE NOT u.id = 1 RETURN u",
         "MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u",
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
@@ -1468,6 +1467,113 @@ fn orbit_query_bounds_input_before_recursive_parsing() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn orbit_query_caps_reject_during_lowering() {
+    let nodes: Vec<String> = (0..4_000).map(|i| format!("(a{i})")).collect();
+    let properties: Vec<String> = (0..51).map(|i| format!("u.c{i}")).collect();
+    for (query, first_rejected, message) in [
+        (
+            format!("MATCH {} RETURN a0", nodes.join(",")),
+            "(a5)",
+            "a query declares at most 5 nodes",
+        ),
+        (
+            format!("MATCH (u:User) RETURN {}", properties.join(", ")),
+            "u.c50",
+            "a node projects at most 50 properties",
+        ),
+    ] {
+        let column = query.find(first_rejected).unwrap() + 1;
+        let expected = format!("line 1, column {column}: {message}");
+        let error = compiler::passes::frontend::gql::parse(&query).unwrap_err();
+        assert!(
+            matches!(&error, QueryError::Validation(m) if *m == expected),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn orbit_query_rejects_traversal_path_column_comparisons() {
+    let context = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
+    let query = "MATCH (p:Project {id: 5}) WHERE p.traversal_path = p.full_path RETURN p";
+    let error = compile(query, Frontend::Gql, &embedded_ontology(), &context).unwrap_err();
+    assert!(matches!(error, QueryError::Validation(_)), "{error:?}");
+}
+
+#[test]
+fn native_predicate_trees_are_bounded_before_planning() {
+    use compiler::input::{BooleanExpression, Condition, FilterOp, InputFilter, PredicateTarget};
+    let model =
+        query_data_model::ClickHouseDataModel::derive(crate::compiler::setup::embedded_ontology())
+            .unwrap();
+    let validator = compiler::passes::validate::Validator::new(&model);
+    let mut input =
+        compiler::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+    let leaf = |target| {
+        BooleanExpression::Leaf(Condition {
+            target,
+            property: "id".into(),
+            filter: InputFilter {
+                op: Some(FilterOp::In),
+                value: Some(serde_json::json!([1])),
+                ..Default::default()
+            },
+        })
+    };
+    let mut deep = leaf(PredicateTarget::Node("u".into()));
+    for _ in 0..1024 {
+        deep = BooleanExpression::Not(Box::new(deep));
+    }
+    input.predicates = vec![deep];
+    let error = validator.check_shape(&input).unwrap_err();
+    assert!(
+        error.to_string().contains("must not nest deeper than 32"),
+        "{error}"
+    );
+    input.predicates = vec![BooleanExpression::Not(Box::new(leaf(
+        PredicateTarget::Relationship(7),
+    )))];
+    let error = validator.check_shape(&input).unwrap_err();
+    assert!(
+        error.to_string().contains("undefined relationship"),
+        "{error}"
+    );
+}
+
+#[test]
+fn native_conditions_need_a_column() {
+    use compiler::input::{BooleanExpression, InputFilter};
+    let base = compiler::passes::frontend::gql::parse("MATCH (u:User {id: 1}) RETURN u").unwrap();
+    let mut empty_group = base.clone();
+    empty_group.predicates = vec![BooleanExpression::Not(Box::new(BooleanExpression::And(
+        vec![],
+    )))];
+    let mut empty_property = base;
+    empty_property.nodes[0].filters.insert(
+        String::new(),
+        vec![InputFilter {
+            value: Some(serde_json::json!(1)),
+            ..Default::default()
+        }],
+    );
+    for input in [empty_group, empty_property] {
+        let error = compiler::compile_input(
+            input,
+            Default::default(),
+            &crate::compiler::setup::embedded_ontology(),
+            &test_ctx(),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("every condition must compare a property"),
+            "{error}"
+        );
+    }
 }
 
 #[test]
@@ -1783,7 +1889,7 @@ fn orbit_query_page_matches_json_cursor() {
         "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 5";
     let compiled = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = compiled.base.render();
-    assert!(rendered.contains("_gkg_cursor_0"), "{rendered}");
+    assert!(rendered.contains("_orbit_cursor_0"), "{rendered}");
     assert!(rendered.contains("LIMIT 6"), "{rendered}");
     assert_eq!(compiled.input.cursor.as_ref().map(|c| c.page_size), Some(5));
 }
@@ -1995,7 +2101,8 @@ fn gql_prepares_queries_and_scoped_schema() {
         } else {
             assert_eq!(
                 serde_json::to_value(response).unwrap(),
-                serde_json::to_value(build_schema_response(&ontology, scope, &[])).unwrap(),
+                serde_json::to_value(build_schema_response(&ontology, scope, &[]).unwrap())
+                    .unwrap(),
             );
         }
     }

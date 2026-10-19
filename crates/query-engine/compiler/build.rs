@@ -1,15 +1,16 @@
-//! Fails the build if `config/schemas/graph_query.schema.json` and the mirrors
-//! in `src/schema_limits.rs` drift. Prior art: `crates/orbit-analytics/build.rs`.
+//! Checks that limits expressed in the JSON schema match the shared query limits.
 
 use std::path::PathBuf;
 
 use serde_json::Value;
 
-include!("src/schema_limits.rs");
+include!("src/query_limits.rs");
+include!("src/passes/frontend/json_dsl/schema_contract.rs");
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=src/schema_limits.rs");
+    println!("cargo:rerun-if-changed=src/query_limits.rs");
+    println!("cargo:rerun-if-changed=src/passes/frontend/json_dsl/schema_contract.rs");
 
     let schema_dir = PathBuf::from(std::env::var("SCHEMA_DIR").unwrap_or_else(|_| {
         panic!("SCHEMA_DIR must be set via .cargo/config.toml [env] when building the compiler")
@@ -128,7 +129,7 @@ fn check_array_branch_max_items(schema: &Value, ptr: &str, expected: usize) {
     assert_eq!(
         actual, expected as u64,
         "DRIFT: array branch under `{ptr}` maxItems = {actual} but compiler cap = {expected}. \
-         Update either the schema or src/schema_limits.rs so they match."
+         Update either the schema or src/query_limits.rs so they match."
     );
 }
 
@@ -165,7 +166,7 @@ fn assert_sorted_eq(ptr: &str, def: &str, mut actual: Vec<&str>, expected: &[&st
     assert_eq!(
         actual, expected,
         "DRIFT: `{ptr}` = {actual:?} but compiler `{def}` = {expected:?}. \
-         Update either the schema or src/schema_limits.rs so they match."
+         Update either the schema or src/passes/frontend/json_dsl/schema_contract.rs so they match."
     );
 }
 
@@ -178,7 +179,7 @@ fn check_maximum(schema: &Value, ptr: &str, expected: u32) {
     assert_eq!(
         actual, expected as u64,
         "DRIFT: `{field}` = {actual} but compiler cap = {expected}. \
-         Update either the schema or src/schema_limits.rs so they match."
+         Update either the schema or src/query_limits.rs so they match."
     );
 }
 
@@ -191,7 +192,7 @@ fn check_max_items(schema: &Value, ptr: &str, expected: usize) {
     assert_eq!(
         actual, expected as u64,
         "DRIFT: `{field}` = {actual} but compiler cap = {expected}. \
-         Update either the schema or src/schema_limits.rs so they match."
+         Update either the schema or src/query_limits.rs so they match."
     );
 }
 
@@ -204,7 +205,7 @@ fn check_max_length(schema: &Value, ptr: &str, expected: usize) {
     assert_eq!(
         actual, expected as u64,
         "DRIFT: `{field}` = {actual} but compiler cap = {expected}. \
-         Update either the schema or src/schema_limits.rs so they match."
+         Update either the schema or src/query_limits.rs so they match."
     );
 }
 
@@ -230,7 +231,7 @@ fn check_string_branch_max_length(schema: &Value, ptr: &str, expected: usize) {
     assert_eq!(
         actual, expected as u64,
         "DRIFT: string branch under `{ptr}` maxLength = {actual} but compiler cap = {expected}. \
-         Update either the schema or src/schema_limits.rs so they match."
+         Update either the schema or src/query_limits.rs so they match."
     );
 }
 
@@ -243,6 +244,6 @@ fn check_max_properties(schema: &Value, ptr: &str, expected: usize) {
     assert_eq!(
         actual, expected as u64,
         "DRIFT: `{field}` = {actual} but compiler cap = {expected}. \
-         Update either the schema or src/schema_limits.rs so they match."
+         Update either the schema or src/query_limits.rs so they match."
     );
 }

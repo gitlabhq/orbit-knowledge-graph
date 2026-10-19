@@ -23,8 +23,7 @@ pub struct RunSqlArgs {
     /// One or more read-only SQL statements, executed in order. Each element
     /// produces one result set in the returned JSON array, at the same index.
     pub sql: Vec<String>,
-    /// Optional override for the DuckDB file path. Defaults to the workspace
-    /// database (`~/.gitlab/orbit/graph.duckdb`).
+    /// Read one revision database. Omit to query all indexed revisions.
     #[serde(default)]
     pub db: Option<PathBuf>,
 }
@@ -38,7 +37,7 @@ pub struct GetGraphSchemaArgs {
 #[derive(Deserialize, schemars::JsonSchema)]
 pub struct IndexArgs {
     /// Filesystem path to a repository, a folder inside one, or a directory
-    /// containing one or more repositories. Each repo found is indexed into the workspace DuckDB.
+    /// containing one or more repositories. Each checkout revision has its own database.
     pub path: PathBuf,
     /// Worker threads. 0 (default) auto-detects from CPU cores.
     #[serde(default)]
@@ -46,8 +45,7 @@ pub struct IndexArgs {
     /// If true, include per-file skip/error breakdowns in the result.
     #[serde(default)]
     pub stats: bool,
-    /// Optional override for the DuckDB file path. Defaults to the workspace
-    /// database (`~/.gitlab/orbit/graph.duckdb`).
+    /// Write this revision to a specific DuckDB file.
     #[serde(default)]
     pub db: Option<PathBuf>,
 }
@@ -125,10 +123,8 @@ impl OrbitLocalServer {
         Parameters(args): Parameters<GetGraphSchemaArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         self.timed_tool("get_graph_schema", move || {
-            batches_to_json(&sql::query(
-                &sql::open_graph(args.db)?,
-                &sql::schema_introspection_sql(),
-            )?)
+            let reader = crate::database::GraphReader::open(args.db)?;
+            batches_to_json(&sql::query(&reader, &sql::schema_introspection_sql())?)
         })
         .await
     }
@@ -176,7 +172,7 @@ fn run_sql_impl(args: RunSqlArgs) -> Result<String> {
     if args.sql.is_empty() {
         anyhow::bail!("`sql` must contain at least one statement");
     }
-    let client = sql::open_graph(args.db)?;
+    let client = crate::database::GraphReader::open(args.db)?;
 
     let mut arrow_bytes = 0usize;
     let mut results = Vec::with_capacity(args.sql.len());

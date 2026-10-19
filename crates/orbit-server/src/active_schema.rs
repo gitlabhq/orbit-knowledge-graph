@@ -95,7 +95,7 @@ impl ActiveSchema {
             let next_change = match self.install_version(loader, target).await {
                 Ok(()) => changes.try_next().await?,
                 Err(error) => {
-                    warn!(%error, "active schema unavailable; retrying");
+                    warn!(error = %format_args!("{error:#}"), "active schema unavailable; retrying");
                     tokio::select! {
                         change = changes.try_next() => change?,
                         _ = sleep(retry_backoff) => continue,
@@ -209,8 +209,9 @@ impl SnapshotLoader {
         } else {
             self.catalog.load(version).await?.load_ontology()?
         };
+        let ontology = validate_servable_ontology(ontology)?;
         let ontology = Arc::new(ontology.with_schema_version_prefix(&table_prefix(version)));
-        let expected_tables: Vec<String> = GraphSchema::from_ontology(&ontology)
+        let expected_tables: Vec<String> = GraphSchema::from_ontology(&ontology)?
             .table_names()
             .into_iter()
             .map(String::from)
@@ -220,6 +221,16 @@ impl SnapshotLoader {
         }
         SchemaSnapshot::new(version, ontology).map(Arc::new)
     }
+}
+
+fn validate_servable_ontology(ontology: Ontology) -> anyhow::Result<Ontology> {
+    ontology.validate_single_table_edge_routes()?;
+    Ok(ontology)
+}
+
+#[cfg(any(test, feature = "testkit"))]
+pub fn validate_servable_archive(archive: &OntologyArchive) -> anyhow::Result<()> {
+    validate_servable_ontology(archive.load_ontology()?).map(drop)
 }
 
 fn fits_ontology(query: &NamedQuery, ontology: &Arc<Ontology>) -> Result<(), String> {

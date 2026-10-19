@@ -81,8 +81,8 @@ mod tests {
 
     fn make_test_result() -> (QueryResult, ResultContext) {
         let schema = Arc::new(Schema::new(vec![
-            Field::new("_gkg_p_id", DataType::Int64, false),
-            Field::new("_gkg_p_type", DataType::Utf8, false),
+            Field::new("_orbit_p_id", DataType::Int64, false),
+            Field::new("_orbit_p_type", DataType::Utf8, false),
         ]));
         let batch = RecordBatch::try_new(
             schema,
@@ -131,7 +131,7 @@ mod tests {
         let list_array = ListArray::new(list_field, offsets, Arc::new(struct_array), None);
 
         let schema = Arc::new(Schema::new(vec![
-            Field::new("_gkg_path", list_array.data_type().clone(), true),
+            Field::new("_orbit_path", list_array.data_type().clone(), true),
             Field::new("depth", DataType::Int64, false),
         ]));
         let batch = RecordBatch::try_new(

@@ -25,6 +25,27 @@ primary keys, and secondary indexes.
   these columns into the physical sort and primary keys where required. See
   [Code Indexing](../indexing/code_indexing.md).
 
+### Storage catalogs
+
+Each backend owns its storage catalog under `query-data-model/src/implementations/`.
+Both use `Layout<Relational<Backend>, Mapping>` with shared table, column, and key structures.
+`Layout<S, M>` pairs an explicit schema and mapping. The bound `M: Mapping<S>` enforces compatible types.
+`Relational<Backend>` owns the tables directly. `RelationalBackend` supplies physical types, options, and backend metadata.
+ClickHouse keeps codecs, engines, indexes, and auxiliary objects in those backend-specific types.
+DuckDB uses the same relational structures with its local type facts.
+`DataModel<S, M, A>` owns the graph, layout, and an independent policy value.
+Its fallible constructor derives the mapping from the supplied graph and schema. Private layout fields prevent callers from substituting an unrelated mapping.
+Constructors in `derive.rs` derive a storage schema once, then build its query mapping from that schema.
+The model does not retain the ontology. JSON frontend validation reads the graph and policy catalogs directly.
+The existing compiler uses `OrbitQueryModel` in `models/orbit.rs`, which combines relational mapping with GitLab policy.
+Backend implementations remain under `implementations/`; authorization policies live under `authz/`.
+Document storage can use the core model without implementing that Orbit contract.
+The ClickHouse catalog copies table, column, index, engine, and view declarations into owned metadata.
+It also resolves the source bindings for declared joined tables and records which entities write each table.
+Query mappings, DDL rendering, migration scope, and cleanup consume these facts.
+The DuckDB catalog records local node and edge layouts for its query mapping.
+Shared graph contracts contain logical identities; ClickHouse codecs and engine settings stay in its backend.
+
 ### Edge table schema
 
 Each physical edge table has ontology-defined columns and storage settings. For example,
@@ -162,7 +183,7 @@ Ungrouped aggregations can still elide targets used only as filters.
 | 9 | `scope_requirements` | Applies scope predicates inside each scan's query block and guards for removed scope anchors |
 | 10 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
 | 11 | `cursor` | Applies keyset pagination (stable order, probe limit, seek predicate, and readback columns) |
-| 12 | `check` | Verifies every namespaced graph-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
+| 12 | `check` | Verifies every namespaced graph-table path column carries a valid role-scoped `startsWith` predicate or a fail-closed false predicate ([Security](../security.md)) |
 | 13 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (FK shapes, sort and group targets) need no second query |
 | 14 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
 | 15 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
@@ -309,20 +330,9 @@ Direct projections and hydration apply ontology-derived [text excerpts](../../..
 The indexer writes denormalized, typed node and edge tables in ClickHouse via ETL rather than synchronous materialized views. The exact mechanisms for this are covered in [SDLC Indexing](../indexing/sdlc_indexing.md) and [Schema Management](../schema_management.md). Materialized views would require filtered license checks on every inserted row, reducing ingestion efficiency. ETL decouples transformation from ingestion, allowing the indexer to batch writes and maintain control over schema evolution without impacting ClickHouse insert performance. Materialized views are reserved for precomputing stable summaries (e.g., group closure) that change infrequently and do not require per-row filtering. But these are optional enhancements for performance and may be subject to change.
 Edge lookups use the ontology-declared sort keys, primary keys, and bloom filter indexes rather than per-table projections.
 
-## Unified Security and Performance Testing
+## Security and performance testing
 
-Security testing and performance testing share the same underlying techniques for the query engine. We treat them as a single validation effort:
-
-- **Fuzzing**: Automated generation of malformed, edge-case, and adversarial inputs to the JSON tool interface and (optionally) Cypher parser. The same fuzzer finds performance regressions (e.g., queries that blow up in time or memory). It will also surface authorization bypass attempts (e.g., queries missing required predicates).
-- **Automated Query Generation**: Property-based testing that generates random valid query shapes and verifies:
-  - All generated SQL includes `startsWith(traversal_path, ?)` predicates (security invariant).
-  - Query execution time stays within bounds (performance invariant).
-  - Result sets respect authorization constraints (correctness invariant).
-- **Automated Penetration Testing**: Scripted scenarios that attempt common bypass techniques (SQL injection, predicate stripping, cross-tenant access). These run as part of CI and are informed by the threat model.
-
-This unified approach validates security and performance together. An authorization check that slows queries unacceptably is as much a bug as one that fails to block unauthorized access. Results from fuzzing and automated testing feed back into both the threat model and the grammar-based validation described in [Authorization and Safety](#authorization-and-safety).
-
-In addition to the above, a formal threat model is being developed for the query engine. This will be tracked as an epic under the broader GKGaaS effort. It has specific issues for high-risk components such as the query planner and JSON-to-SQL transformation pipeline. For the full authorization model (tenant segregation, traversal path filtering, JWT verification, and final redaction), see [Security Architecture](../security.md).
+Security query scenarios, plan-shape fixtures, performance scenarios, and local fuzz targets check the query engine. For each test layer and its CI job, see [Testing](../testing.md). For the authorization model, see [Security Architecture](../security.md).
 
 ## References
 

@@ -1,0 +1,14 @@
+name: Review standard C function coverage
+fixtures:
+  - path: main.c
+    content: |
+      #include <math.h>
+      double run(double x) { return trunc(x); }
+tests:
+  - name: Standard trunc does not call the header
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name = 'run'
+      RETURN target.import_path
+    assert:
+      - { empty: true }

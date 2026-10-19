@@ -1,0 +1,44 @@
+name: "Python range contract: bytes 0-indexed, lines and chars 1-indexed"
+
+fixtures:
+  - path: pkg/user.py
+    content: |
+      class User:
+          def name(self) -> str:
+              return "u"
+
+  - path: pkg/imports.py
+    content: |
+      import os
+      from collections import OrderedDict
+
+tests:
+  - name: Python class is 1-indexed start and end, at byte 0
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'pkg/user.py' AND d.name = 'User'
+      RETURN d.start_line AS sl, d.end_line AS el, d.start_char AS sc, d.end_char AS ec, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 1, el: 3, sc: 1, ec: 19, sb: 0 } }
+
+  - name: Python method is 1-indexed, at 4-space indent
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'pkg/user.py' AND d.name = 'name'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 2, sc: 5, sb: 16 } }
+
+  # corrected: Python: `import os` binds the name `os` to the module, so the imported name is `os`.
+  - name: Python imports are 1-indexed
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'pkg/imports.py'
+      RETURN i.import_path AS path, i.identifier_name AS name, i.start_line AS sl, i.end_line AS el, i.start_char AS sc, i.start_byte AS sb
+      ORDER BY sl
+    assert:
+      - { row_count: 2 }
+      - { row: { path: "os", name: "os", sl: 1, el: 1, sc: 1, sb: 0 } }
+      - { row: { path: "collections", name: "OrderedDict", sl: 2, el: 2, sc: 1, sb: 10 } }

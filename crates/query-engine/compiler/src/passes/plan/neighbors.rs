@@ -6,11 +6,11 @@ use crate::input::*;
 use super::context::PlanningContext;
 use super::helpers::has_non_denorm_filters;
 use super::{EdgeTableConfig, Neighbors, Plan};
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
 pub(super) fn plan_neighbors<M>(mut context: PlanningContext<'_, M>) -> Result<Plan<Neighbors>>
 where
-    M: QueryDataModel + ?Sized,
+    M: OrbitQueryModel + ?Sized,
 {
     let input = context.input;
     let model = context.model;

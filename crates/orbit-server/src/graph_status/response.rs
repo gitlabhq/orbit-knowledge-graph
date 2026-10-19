@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::indexing_status::{DomainStatus, Phase, ScopeStatus};
+use crate::indexing_status::{DomainStatus, Phase, ScopeStatus, format_timestamp};
 use crate::proto::{
     GraphStatusDomain, GraphStatusItem, IndexingState, IndexingStatus, ProjectsStatus,
     StructuredGraphStatus,
@@ -17,7 +17,10 @@ pub fn build_structured_status(
             .iter()
             .filter_map(|domain| build_visible_domain(domain, counts))
             .collect(),
-        indexing: Some(build_indexing_status(status.phase)),
+        indexing: Some(IndexingStatus {
+            last_completed_at: status.last_completed_at.map(format_timestamp),
+            ..build_indexing_status(status.phase)
+        }),
         sdlc_indexing: Some(build_indexing_status(status.sdlc_phase)),
         code_indexing: status.code_phase.map(build_indexing_status),
     }

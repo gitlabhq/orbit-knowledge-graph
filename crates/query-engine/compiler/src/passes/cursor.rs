@@ -1,5 +1,5 @@
 //! Keyset pagination pass. Runs after enforce/security so the final
-//! ORDER BY is known: appends hidden `_gkg_cursor_N` readback columns for each
+//! ORDER BY is known: appends hidden `_orbit_cursor_N` readback columns for each
 //! sort key, lowers the decoded `after` token into a lexicographic seek
 //! predicate, and records the key count for the output stage.
 

@@ -17,7 +17,7 @@ use tracing::warn;
 pub use self::domains::{DomainStatus, EntityStatus};
 pub use self::phase::Phase;
 pub use self::projects::ProjectCoverage;
-pub use self::response::build_indexing_status_response;
+pub use self::response::{build_indexing_status_response, format_timestamp};
 
 use self::checkpoints::PlanCheckpoints;
 use self::phase::combine_phases;
@@ -30,6 +30,7 @@ pub struct ScopeStatus {
     pub phase: Phase,
     pub sdlc_phase: Phase,
     pub code_phase: Option<Phase>,
+    pub last_completed_at: Option<DateTime<Utc>>,
     pub projects: ProjectCoverage,
     pub domains: Vec<DomainStatus>,
 }
@@ -65,7 +66,7 @@ impl IndexingStatusService {
         );
         let checkpoints = checkpoints
             .inspect_err(|error| warn!(%error, "Indexing status could not read plan checkpoints"))
-            .ok();
+            .unwrap_or_default();
         let coverage = coverage
             .inspect_err(|error| warn!(%error, "Indexing status could not read project coverage"))
             .ok();
@@ -81,14 +82,7 @@ impl IndexingStatusService {
         scopes
             .iter()
             .map(|scope| {
-                build_scope_status(
-                    schema,
-                    &plans,
-                    scope,
-                    checkpoints.as_ref(),
-                    coverage.as_ref(),
-                    now,
-                )
+                build_scope_status(schema, &plans, scope, &checkpoints, coverage.as_ref(), now)
             })
             .collect()
     }
@@ -98,20 +92,25 @@ fn build_scope_status(
     schema: &SchemaSnapshot,
     plans: &[PipelineDescriptor],
     scope: &TraversalPath,
-    checkpoints: Option<&HashMap<i64, PlanCheckpoints>>,
+    checkpoints: &HashMap<i64, PlanCheckpoints>,
     coverage: Option<&HashMap<String, ProjectCoverage>>,
     now: DateTime<Utc>,
 ) -> ScopeStatus {
-    let root = scope.top_level_namespace_id();
+    let root_checkpoints = scope
+        .top_level_namespace_id()
+        .and_then(|root| checkpoints.get(&root));
+
     let plan_phases: Vec<(&PipelineDescriptor, Phase)> = plans
         .iter()
         .map(|plan| {
-            (
-                plan,
-                get_root_plan_phase(checkpoints, root, &plan.name, now),
-            )
+            let phase = root_checkpoints
+                .map(|by_plan| by_plan.get_plan_phase(&plan.name, now))
+                .unwrap_or(Phase::Unknown);
+            (plan, phase)
         })
         .collect();
+    let last_completed_at =
+        root_checkpoints.and_then(|by_plan| by_plan.get_last_completed_at(plans));
 
     // The Project plan writes the project list, so the code total is final only once it settles.
     let project_list_phase = combine_phases(
@@ -138,23 +137,8 @@ fn build_scope_status(
         phase,
         sdlc_phase,
         code_phase,
+        last_completed_at,
         projects: projects.unwrap_or_default(),
         domains,
     }
-}
-
-fn get_root_plan_phase(
-    checkpoints: Option<&HashMap<i64, PlanCheckpoints>>,
-    root: Option<i64>,
-    plan: &str,
-    now: DateTime<Utc>,
-) -> Phase {
-    let (Some(by_root), Some(root)) = (checkpoints, root) else {
-        return Phase::Unknown;
-    };
-    let no_checkpoints = PlanCheckpoints::default();
-    by_root
-        .get(&root)
-        .unwrap_or(&no_checkpoints)
-        .get_plan_phase(plan, now)
 }

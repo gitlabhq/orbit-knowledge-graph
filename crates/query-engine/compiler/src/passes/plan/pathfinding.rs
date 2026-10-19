@@ -1,11 +1,11 @@
 use super::context::PlanningContext;
 use super::{EdgeTableConfig, PathFinding, Plan, find_node};
 use crate::error::Result;
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
 pub(super) fn plan_pathfinding<M>(mut context: PlanningContext<'_, M>) -> Result<Plan<PathFinding>>
 where
-    M: QueryDataModel + ?Sized,
+    M: OrbitQueryModel + ?Sized,
 {
     let input = context.input;
     let model = context.model;

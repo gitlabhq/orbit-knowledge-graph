@@ -84,7 +84,7 @@ impl<T: Tag> Vfs<T> {
                 }
                 bytes.into()
             }
-            Content::Unavailable => return Err(unsupported(&entry.file)),
+            Content::Unavailable | Content::Excluded => return Err(unsupported(&entry.file)),
             Content::Failed(error) => return Err(io::Error::new(error.kind(), error.clone())),
             Content::Symlink(_) => return Err(not_found()),
         };

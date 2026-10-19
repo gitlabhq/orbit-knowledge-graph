@@ -2,6 +2,8 @@ pub mod active_schema;
 pub mod analytics;
 pub mod auth;
 mod billing_adapter;
+#[cfg(test)]
+mod build_validations;
 pub mod cli;
 pub mod clickhouse_setup;
 pub mod cluster_health;

@@ -47,7 +47,8 @@ pub async fn run_if_needed(
     campaign: &CampaignState,
 ) -> Result<(), DispatcherMigrationError> {
     let active = read_active_version(graph).await?;
-    let schema = GraphSchema::from_ontology_replicated(ontology, graph.is_replicated());
+    let schema = GraphSchema::from_ontology_replicated(ontology, graph.is_replicated())
+        .map_err(MigrationError::from)?;
 
     match active {
         None => {

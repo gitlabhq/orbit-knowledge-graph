@@ -1,0 +1,39 @@
+name: Branch aggregation counts matches joined through the original shared node
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "a", "entity": "Definition", "node_ids": [1]},
+        {"id": "b", "entity": "Definition"},
+        {"id": "c", "entity": "Definition"},
+        {"id": "d", "entity": "Definition"}
+      ],
+      "relationships": [
+        {"type": "CALLS", "from": "a", "to": "b"},
+        {"type": "CALLS", "from": "b", "to": "c"},
+        {"type": "CALLS", "from": "a", "to": "d"}
+      ],
+      "aggregations": [{"count": "d", "as": "matches"}]
+    }
+  gql: |
+    MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition),
+          (a)-[:CALLS]->(d:Definition)
+    RETURN count(d) AS matches
+logical:
+  expect:
+    - (Aggregate COUNT(d) AS matches (_))
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Join ON e0.source_id = e2.source_id (Join ON e0.target_id = e1.source_id (_) (_)) (_))
+        - (SemiJoin e2.source_id IN subquery (_) (Project e0p.source_id AS source_id (Filter e0p.source_id = 1, ... (_))))
+    emitted:
+      expect:
+        - (Join ON e0.source_id = e2.source_id (Join ON e0.target_id = e1.source_id (_) (_)) (_))
+  duckdb:
+    planned:
+      expect:
+        - (Join ON e0.source_id = e2.source_id (Join ON e0.target_id = e1.source_id (_) (_)) (_))
+        - (SemiJoin e2.source_id IN subquery (_) (Project e0p.source_id AS source_id (Filter e0p.source_id = 1, ... (_))))

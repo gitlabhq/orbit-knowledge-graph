@@ -1,5 +1,5 @@
 //! Schema-migration ledger and drift detection against a committed fingerprint
-//! snapshot. Shared by the build-time check and the `xtask` tooling. Runtime
+//! snapshot. Shared by the `orbit-server` unit test and the `xtask` tooling. Runtime
 //! SDLC plan lowering isn't fingerprinted, and each entry carries one scope.
 
 mod fingerprint;

@@ -414,7 +414,10 @@ async fn run_pipeline(
     db: &TestContext,
     json: &str,
     frontend: Frontend,
-    data_model: &Arc<query_data_model::ClickHouseDataModel>,
+    (data_model, ontology): (
+        &Arc<query_data_model::ClickHouseDataModel>,
+        &Arc<ontology::Ontology>,
+    ),
     claims: &Claims,
 ) -> Result<(), PipelineError> {
     let mut server_extensions = TypeMap::default();
@@ -429,7 +432,7 @@ async fn run_pipeline(
         frontend,
         query_json: json.to_string(),
         compiled: None,
-        ontology: Arc::clone(data_model.ontology()),
+        ontology: Arc::clone(ontology),
         security_context: None,
         server_extensions,
         phases: TypeMap::default(),
@@ -466,7 +469,8 @@ async fn corpus_smoke() {
     load_seed(&ctx, "data_correctness").await;
     ctx.optimize_all().await;
 
-    let data_model = derive_clickhouse_data_model(&load_ontology());
+    let ontology = load_ontology();
+    let data_model = derive_clickhouse_data_model(&ontology);
     // Admin claims -> Owner over org root, so access-gated entities are visible
     // and the real SQL runs (not `WHERE false`).
     let claims = Claims::dummy();
@@ -497,7 +501,14 @@ async fn corpus_smoke() {
             }
         };
 
-        let outcome = run_pipeline(&ctx, &json, case.frontend, &data_model, &claims).await;
+        let outcome = run_pipeline(
+            &ctx,
+            &json,
+            case.frontend,
+            (&data_model, &ontology),
+            &claims,
+        )
+        .await;
 
         match (case.expects_error, outcome) {
             (false, Err(e)) => failures.push(format!("{}: {e:?}", case.key)),

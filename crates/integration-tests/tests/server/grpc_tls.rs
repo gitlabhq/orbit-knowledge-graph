@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use clickhouse_client::ClickHouseConfigurationExt;
 use orbit_server::active_schema::ActiveSchema;
 use orbit_server::auth::JwtValidator;
 use orbit_server::cluster_health::ClusterHealthChecker;
@@ -20,7 +21,7 @@ fn build_grpc_server(tls_config: Option<ServerTlsConfig>) -> GrpcServer {
     GrpcServer::new(
         validator,
         ActiveSchema::pinned(ontology),
-        &clickhouse_config,
+        clickhouse_config.build_client("graph"),
         cluster_health,
         tls_config,
         orbit_server_config::AppConfig::embedded_defaults().grpc,
@@ -118,7 +119,7 @@ async fn grpc_plaintext_client_rejected_by_tls_server() {
 }
 
 #[tokio::test]
-async fn legacy_gkg_service_path_reaches_the_service() {
+async fn legacy_orbit_service_path_reaches_the_service() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let bound_addr = listener.local_addr().unwrap();
 

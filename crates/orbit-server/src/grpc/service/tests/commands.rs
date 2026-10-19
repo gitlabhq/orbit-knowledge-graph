@@ -5,7 +5,7 @@ fn service_without_schema() -> OrbitServiceImpl {
     OrbitServiceImpl::new(
         Arc::new(mock_validator()),
         Arc::new(ActiveSchema::default()),
-        &test_config(),
+        test_client(),
         ClusterHealthChecker::default().into_arc(),
         60,
         Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -69,9 +69,20 @@ async fn graph_schema_defaults_to_formatted_text() {
 }
 
 #[tokio::test]
-async fn graph_schema_ignores_unknown_expansion_nodes() {
-    let text = graph_schema_text(r#"{"expand_nodes":["FakeNode"]}"#).await;
-    assert!(text.contains("domains"));
+async fn graph_schema_rejects_unknown_expansion_nodes() {
+    let error = command_response(
+        "get_graph_schema",
+        r#"{"expand_nodes":["User","FakeNode"]}"#,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    assert!(error.message().contains("FakeNode"), "{}", error.message());
+    assert!(
+        error.message().contains("MergeRequest"),
+        "{}",
+        error.message()
+    );
 }
 
 #[tokio::test]
@@ -366,7 +377,7 @@ async fn schema_rpc_and_command_use_the_supplied_ontology() {
     let service = OrbitServiceImpl::new(
         Arc::new(mock_validator()),
         ActiveSchema::pinned(Arc::new(Ontology::new().with_nodes(["CustomNode"]))),
-        &test_config(),
+        test_client(),
         ClusterHealthChecker::default().into_arc(),
         60,
         Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),

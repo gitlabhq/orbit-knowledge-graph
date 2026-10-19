@@ -1,0 +1,8 @@
+description: An unsupported function in RETURN is named and the error lists the supported functions
+
+query:
+  gql: |
+    MATCH (m:MergeRequest)-[r]->(w:WorkItem) WHERE w.id = 1 RETURN m.id, labels(w) LIMIT 10
+
+expect:
+  compile_error: "function labels() is not supported: RETURN supports count, sum, avg, min, max, date_trunc, properties, and type"

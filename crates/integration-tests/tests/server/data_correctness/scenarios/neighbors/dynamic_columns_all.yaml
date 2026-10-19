@@ -19,6 +19,7 @@ expect:
       ids: [1]
     Group:
       ids: [100, 102]
+      prop_absent: [traversal_path]
       rows:
         - { id: 100, name: Public Group, visibility_level: public }
         - { id: 102, name: Internal Group, visibility_level: internal }

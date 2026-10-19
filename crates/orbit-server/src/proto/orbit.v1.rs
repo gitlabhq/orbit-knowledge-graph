@@ -654,6 +654,8 @@ pub struct NamespaceIndexingStatus {
     pub phase: i32,
     #[prost(message, repeated, tag = "3")]
     pub domains: ::prost::alloc::vec::Vec<DomainIndexingStatus>,
+    #[prost(string, optional, tag = "4")]
+    pub last_completed_at: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DomainIndexingStatus {

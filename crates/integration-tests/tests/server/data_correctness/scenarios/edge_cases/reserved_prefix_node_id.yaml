@@ -1,0 +1,14 @@
+description: Node IDs cannot use the internal column prefix
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "_orbit_p", "entity": "Project", "node_ids": [1000], "columns": ["id"]}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (_orbit_p:Project {id: 1000}) RETURN _orbit_p{.id} LIMIT 10
+
+expect:
+  compile_error: "node id \"_orbit_p\" conflicts with reserved prefix \"_orbit_\""

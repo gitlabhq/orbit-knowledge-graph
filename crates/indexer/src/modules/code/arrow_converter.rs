@@ -131,7 +131,7 @@ fn low_cardinality_columns(storage_columns: &[ontology::StorageColumn]) -> HashS
         .collect()
 }
 
-fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
+pub(super) fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
     let node = ontology
         .get_node(entity_name)
         .unwrap_or_else(|| panic!("entity '{entity_name}' not in ontology"));
@@ -179,7 +179,7 @@ fn column_type_for(
     }
 }
 
-fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
+pub(super) fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
     let dict_fields: HashSet<String> = ontology
         .edge_tables()
         .iter()
@@ -359,7 +359,7 @@ impl AsRecordBatch for BranchRow<'_> {
     }
 }
 
-fn convert_branch_row(
+pub(super) fn convert_branch_row(
     env: &IndexerEnvelope,
     specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
@@ -465,15 +465,15 @@ fn convert_semantic_edges(
     builder.finish()
 }
 
-struct IndexerEdgeRow<'a> {
-    env: &'a IndexerEnvelope,
-    source_id: i64,
-    target_id: i64,
-    edge_kind: &'a str,
-    source_node_kind: &'a str,
-    target_node_kind: &'a str,
-    source_tags: &'a [String],
-    target_tags: &'a [String],
+pub(super) struct IndexerEdgeRow<'a> {
+    pub(super) env: &'a IndexerEnvelope,
+    pub(super) source_id: i64,
+    pub(super) target_id: i64,
+    pub(super) edge_kind: &'a str,
+    pub(super) source_node_kind: &'a str,
+    pub(super) target_node_kind: &'a str,
+    pub(super) source_tags: &'a [String],
+    pub(super) target_tags: &'a [String],
 }
 
 impl AsRecordBatch for IndexerEdgeRow<'_> {
@@ -600,7 +600,7 @@ fn graph_edge_row<'a>(
     }
 }
 
-fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
+pub(super) fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
     let mut hasher = rustc_hash::FxHasher::default();
     project_id.hash(&mut hasher);
     branch.hash(&mut hasher);
@@ -614,7 +614,7 @@ fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
 /// values are the same regardless of which edge the node appears in.
 type TagProperties = std::collections::HashMap<String, Vec<(String, String)>>;
 
-fn build_tag_properties(ontology: &Ontology) -> TagProperties {
+pub(super) fn build_tag_properties(ontology: &Ontology) -> TagProperties {
     let mut map: TagProperties = std::collections::HashMap::new();
     let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
     for dp in ontology.denormalized_properties() {
@@ -679,63 +679,67 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
     ) -> Result<Vec<(String, RecordBatch)>, SinkError> {
         let data = convert_code_graph(&mut graph, &self.envelope, &self.specs)
             .map_err(|e| SinkError(format!("ClickHouse graph conversion: {e}")))?;
-        let mut result = vec![
-            (self.table_names.branch.clone(), data.branch),
-            (self.table_names.directory.clone(), data.directories),
-            (self.table_names.file.clone(), data.files),
-            (self.table_names.definition.clone(), data.definitions),
-            (
-                self.table_names.imported_symbol.clone(),
-                data.imported_symbols,
-            ),
-        ];
+        route_graph(data, &self.table_names)
+    }
+}
 
-        if data.edges.num_rows() > 0 {
-            use std::collections::HashMap;
+pub(super) fn route_graph(
+    data: ConvertedGraphData,
+    table_names: &super::config::CodeTableNames,
+) -> Result<Vec<(String, RecordBatch)>, SinkError> {
+    let mut result = vec![
+        (table_names.branch.clone(), data.branch),
+        (table_names.directory.clone(), data.directories),
+        (table_names.file.clone(), data.files),
+        (table_names.definition.clone(), data.definitions),
+        (table_names.imported_symbol.clone(), data.imported_symbols),
+    ];
 
-            // Cloned so the routing borrow detaches from `data.edges` and the
-            // single-table path can move the batch out instead of copying it.
-            let rel_col = data
-                .edges
-                .column_by_name("relationship_kind")
-                .ok_or_else(|| SinkError("edges batch missing relationship_kind column".into()))?
-                .clone();
-            let routing = EdgeRouting::resolve(&rel_col, &self.table_names)?;
+    if data.edges.num_rows() > 0 {
+        use std::collections::HashMap;
 
-            // Columns that only exist on gl_code_edge. Sub-batches going
-            // to other edge tables (gl_edge) must have them stripped.
-            let code_only_cols: &[&str] = &["project_id", "branch"];
+        // Cloned so the routing borrow detaches from `data.edges` and the
+        // single-table path can move the batch out instead of copying it.
+        let rel_col = data
+            .edges
+            .column_by_name("relationship_kind")
+            .ok_or_else(|| SinkError("edges batch missing relationship_kind column".into()))?
+            .clone();
+        let routing = EdgeRouting::resolve(&rel_col, table_names)?;
 
-            // Every semantic edge kind usually routes to one table, and `take`
-            // would copy the whole batch while the original is still live.
-            if let Some(table) = routing.single_table() {
-                let batch = if table.contains("code_edge") {
-                    data.edges
-                } else {
-                    drop_columns(&data.edges, code_only_cols)
-                };
-                result.push((table.to_string(), batch));
-                return Ok(result);
-            }
+        // Columns that only exist on gl_code_edge. Sub-batches going
+        // to other edge tables (gl_edge) must have them stripped.
+        let code_only_cols: &[&str] = &["project_id", "branch"];
 
-            let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
-            for (i, table) in routing.tables_by_row().enumerate() {
-                table_rows.entry(table).or_default().push(i as u32);
-            }
-
-            for (table, indices) in table_rows {
-                let idx_array = arrow::array::UInt32Array::from(indices);
-                let mut batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
-                    .map_err(|e| SinkError(format!("edge routing: {e}")))?;
-                if !table.contains("code_edge") {
-                    batch = drop_columns(&batch, code_only_cols);
-                }
-                result.push((table.to_string(), batch));
-            }
+        // Every semantic edge kind usually routes to one table, and `take`
+        // would copy the whole batch while the original is still live.
+        if let Some(table) = routing.single_table() {
+            let batch = if table.contains("code_edge") {
+                data.edges
+            } else {
+                drop_columns(&data.edges, code_only_cols)
+            };
+            result.push((table.to_string(), batch));
+            return Ok(result);
         }
 
-        Ok(result)
+        let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
+        for (i, table) in routing.tables_by_row().enumerate() {
+            table_rows.entry(table).or_default().push(i as u32);
+        }
+
+        for (table, indices) in table_rows {
+            let idx_array = arrow::array::UInt32Array::from(indices);
+            let mut batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
+                .map_err(|e| SinkError(format!("edge routing: {e}")))?;
+            if !table.contains("code_edge") {
+                batch = drop_columns(&batch, code_only_cols);
+            }
+            result.push((table.to_string(), batch));
+        }
     }
+
+    Ok(result)
 }
 
 /// Destination table per edge row. `relationship_kind` is `LowCardinality`, so

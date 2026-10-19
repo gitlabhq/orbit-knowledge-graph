@@ -8,6 +8,20 @@ table-prefix-aware migration orchestrator.
 
 ## Schema Definition
 
+The ontology declares storage. `Relational<ClickHouse>` resolves ClickHouse graph-table definitions and source bindings during derivation.
+The query catalog and DDL renderer consume those resolved definitions.
+Migration uses the catalog's writer map to classify graph-table rebuilds.
+Schema construction and view rendering return errors for invalid layouts. Migration classification reuses the constructed schema's layout.
+Cleanup construction and refreshable-view lifecycle operations propagate layout errors. Fingerprint generation fails on invalid view templates instead of omitting them.
+These backend-specific types contain owned data and require no compiler dependency or SQL parser.
+Query models own `Layout<Relational<ClickHouse>, ClickHouseBindings>`, which pairs the schema with its bindings.
+DDL consumes the relational schema. Shared types hold tables, columns, and keys; ClickHouse options hold physical settings.
+Shared graph contracts contain no ClickHouse codecs, engine settings, or MV definitions.
+Auxiliary tables, dictionaries, and declared materialized views also derive into the ClickHouse storage catalog.
+The catalog preserves table lifetimes, engine arguments, TTLs, dictionary settings, and view SQL or templates.
+Schema rendering, auxiliary fingerprints, and refreshable-view creation consume those catalog definitions.
+Graph cleanup uses only graph tables; the versioned schema inventory also includes versioned auxiliary tables.
+
 The schema is defined by node and relationship types in the ontology (`config/ontology/`) and
 materialized as ClickHouse DDL in `config/graph.sql`. The graph DDL creates property graph tables
 (one per node type, e.g. `gl_user`, `gl_project`) in the graph ClickHouse database. Ontology
@@ -23,7 +37,7 @@ the primary key keeps pruning.
 
 This file covers ClickHouse schema migration versions and archive-backed serving. The query **response format** is
 versioned separately as the `raw_output_format` semver pin in `config/versions.yaml` and
-enforced by `scripts/check-pinned-version.sh`. See
+enforced by `scripts/checks/check-pinned-version.sh`. See
 [ADR 004](decisions/004_unified_response_schema.md) for the response format contract.
 
 A request's `migration_version` is the version of the archive it was served from; telemetry and
@@ -142,7 +156,7 @@ convention). The prefix is applied at the call site when constructing ClickHouse
 - Identical retries succeed; different bytes for a published version fail. Published archives stay immutable.
 - Restore historical archives from their exact release, never from current sources.
 - Migration and rollback require usable active and target archives before changing versioned tables.
-- The server embeds and build-time validates every retained archive in `config/ontology-archives/`.
+- The server embeds every retained archive in `config/ontology-archives/`, and unit tests validate each one.
 - If the active archive is missing, the dispatcher publishes its bundled copy before migration. Existing entries are verified and reused, never replaced; corruption, conflicting concurrent publication, and NATS errors still block migration.
 - Legacy schema 93 (release `v0.115.0`) is bundled from its exact release sources, so it can upgrade directly without manual catalog seeding or an intermediate deployment. See `config/ontology-archives/README.md` for provenance and how to add support for another starting schema.
 - A missing active archive with no bundled copy still blocks migration before versioned DDL. Restore that archive from the exact release or add it to the supported bundle; do not synthesize it from current sources or ClickHouse tables.
@@ -166,6 +180,13 @@ promotion cannot switch tables under a running query.
 
 Loading an archive does not prove the binary can serve it; that depends on the archive loader,
 parser, and compiler. Validate a cross-version rollout before relying on it.
+
+Deploy variant-table parsing and routing support to every query server before publishing split-route archives.
+Older binaries can ignore a variant's `table` field and read the wrong table.
+The metadata-only release rejects split routes at dispatcher startup and server snapshot loading.
+Unknown edge-variant fields now fail parsing, but this cannot change older deployed binaries.
+If a server rejects the active archive, it clears its last installed snapshot. All query servers
+return `503` until an operator repairs the archive or rolls back the active version.
 
 ### Webserver readiness gate
 
@@ -239,8 +260,8 @@ prepare its schema version before exiting non-zero (see "Indexer readiness gate"
 
 ## CI and local enforcement
 
-The migration ledger is the versioned-schema gate. `orbit-server`'s build script fails if versioned
-ontology sources, generated versioned DDL, or auxiliary schema drift from the committed
+The migration ledger is the versioned-schema gate. A unit test fails on drift. It covers versioned
+ontology sources, generated versioned DDL, and auxiliary schema, each compared with the committed
 fingerprint snapshot (`config/schema-migrations.fingerprint.yaml`). It also fails if the ledger is malformed.
 Versioned drift requires `mise schema:bump`. Auxiliary-schema drift requires `mise schema:snapshot`
 and does not advance the schema pin or re-index graph data. The snapshot command refuses to
@@ -252,8 +273,7 @@ changes automatically affect both ClickHouse and DuckDB schemas.
 
 Because the snapshot hashes the canonicalized ontology, comment- and formatting-only
 edits do not require a bump. A genuinely non-invalidating change can bypass the CI base-diff
-guard with `[skip migration-ledger-check]` in the MR description; build-time fingerprint drift
-still fails.
+guard with `[skip migration-ledger-check]` in the MR description; fingerprint drift still fails.
 
 ### Ledger scopes
 
@@ -408,8 +428,8 @@ single project failure must not hold a schema migration open indefinitely.
 Completion is checkpoint-based, not row-count-based. A checkpoint entry proves the indexing
 pipeline ran and committed for that scope. It does not validate that the output tables contain
 the expected number of rows. This is the standard pattern for CDC/ETL systems. Silent data-loss
-bugs (e.g. an upstream source returning empty results) would not be caught by this check. Full
-data correctness validation is deferred to staging E2E tests.
+bugs (e.g. an upstream source returning empty results) would not be caught by this check. Container tests check row counts after a clone on small
+fixtures, but no production check compares row counts.
 
 ### Status transitions on completion
 

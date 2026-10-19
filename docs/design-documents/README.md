@@ -77,12 +77,13 @@ See the following design documents for more details on the Orbit architecture:
 - [Orbit Schema Management](schema_management.md)
 - [Orbit Security](security.md)
 - [Orbit Observability](observability.md)
+- [Orbit Testing](testing.md)
 - [Duo / Orbit Prompt Routing Architecture](duo_orbit_prompt_routing.md)
 - [Architecture Decision Records](decisions/): numbered ADRs covering storage choice, communication protocols, API design, indexing triggers, and more
 
 ## Runtime Breakdown
 
-Orbit Remote deploys the four `gkg-server` modes shown below. Orbit Local runs separately as the `orbit` CLI on a user's machine and stores its graph in `~/.gitlab/orbit/graph.duckdb`.
+Orbit Remote deploys the four `gkg-server` modes shown below. Orbit Local runs separately as the `orbit` CLI on a user's machine and stores revision databases and a separate manifest under `~/.gitlab/orbit/local/`.
 
 ```mermaid
 flowchart TD
@@ -160,26 +161,19 @@ The current implementation uses ClickHouse for remote graph storage and query ex
 - Code indexing progress is tracked in `code_indexing_checkpoint`.
 - The ontology in `config/ontology/` defines the mapping between entity names, properties, redaction metadata, ETL sources, and relationship kinds.
 
-Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote Query DSL and authorization pipeline. Release binaries statically link DuckDB's full-text search extension from a pinned source archive; development builds load the pinned extension artifact at runtime. Regenerate the source archive with `mise vendor -- duckdb`.
+Orbit Local generates its DuckDB tables from the same ontology, then writes Code Graph nodes and relationships into a workspace database. Local queries use read-only DuckDB SQL directly rather than the remote Query DSL and authorization pipeline.
 
-Local `grep` binds each complete OR alternative to DuckDB FTS `match_bm25` with
-`conjunctive := true` across definition names, FQNs/paths, and indexed source.
-Query preparation uses the index's FTS tokenizer and removes only empty tokens
-before conjunction, retaining every real term, including tokens absent from the
-index. Index-time identifier tokenization retains whole CamelCase names
-and split words. There is no query-time vocabulary removal or fallback matching.
-Single-token alternatives must also appear literally, case-insensitively, in the
-definition's FQN, path, or source. This removes matches that share only the
-underscore-split words of an identifier. Results order exact-name hits first, then
-name/path hits, then body-only mentions. Within each group, the best alternative's
-BM25 score orders results and definition ID breaks ties. SQL applies scopes and the
-result limit before Rust hydrates definitions. Exact status compares raw symbol names
-case-insensitively within scope before limiting. A second conjunctive FTS match
-restricted to name/path fields, with the same literal requirement, marks name/path
-hits. Search output contains IDs,
-names, kinds, file ranges, and match labels. Body-only rows add a mention count and the
-first matching source line. Explicit Definition context returns complete
-source.
+Local `grep` scans the working tree with ripgrep's engine (`grep-searcher`,
+`grep-regex`, `ignore`). Results follow `.gitignore` and see unsaved edits.
+Each OR alternative is a regex when it contains regex syntax. Otherwise it is
+a literal that ignores case, `_`, `-`, and spaces. The common rg and grep flags
+work, and unsupported ones are skipped with a warning. Each file prints as one
+row, with matching lines grouped under their enclosing indexed definition.
+Each definition shows its kind, span, callers, and callees. A definition that a
+plain term names prints first with its source. With `-A`, `-B`, or `-C`, output
+switches to rg's `path:line:text` lines. Files edited since the indexed commit
+are marked and carry no definitions, because the graph describes the commit.
+Files order defining code first, then other code, tests, and text files.
 
 ClickHouse was chosen over dedicated graph databases (Neo4j, FalkorDB, Memgraph, Neptune, SpannerGraph) after KuzuDB was archived in October 2025. The full evaluation, benchmarking results, and legal/procurement context are recorded in [ADR 000: ClickHouse as graph storage](decisions/000_clickhouse_graph_storage.md).
 

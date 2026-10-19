@@ -202,6 +202,30 @@ The reason and byte volume of skipped entries are exposed via the `gkg.indexer.c
 
 #### Transform (call graph construction)
 
+##### Incremental engine behind a feature flag
+
+The `code_graph_incremental` feature flag selects VFS archive loading in `RepositoryResolver::resolve`.
+It defaults to off and supports a root-namespace allowlist.
+The enabled path uses the archive source and a separate content policy, without creating an extraction tree.
+Filtered files remain cataloged, but their content is unavailable.
+The policy retains source and resolver inputs. The incremental engine groups source files by language family and reads their bytes and manifests from the VFS.
+
+The code pipeline settings `source_memory_budget_bytes` and `source_compress_spill` control retained content.
+The memory budget is small, so most repositories stay in memory and a large one spills the rest to one temporary file. A job that waits for a lane holds at most that much source. Zero spills all retained content.
+Spill compression defaults to off.
+The existing file-size and total-byte limits also apply, with total bytes charged before filtering.
+
+Each archive starts a fresh incremental-engine run; the server does not persist engine snapshots between jobs.
+An engine error that cannot succeed on retry dead-letters the job at once, as a fatal legacy pipeline error does. Examples are a rules load error and an export schema mismatch. A cancelled run and a failed hand-off to the buffered writer stay retryable.
+File and directory rows are emitted once across language families, including files rejected by the content policy.
+The server reuses the embedded export mapping with ontology-derived output schemas.
+The envelope supplies typed values for extra schema columns and overrides header constants such as traversal path.
+The engine validates mapped columns against the ontology and output schema. Required envelope values must be present.
+The server adds branch relationships and endpoint tags before routing batches through the existing buffered writer.
+Both engines share locking, heartbeats, stale-data cleanup, and checkpoint handling.
+Write failures and cancelled runs do not advance the checkpoint.
+Tree-sitter polls cancellation and the per-file parse deadline while parsing.
+
 ##### Parser architecture
 
 The `code-graph` crate contains the v2 pipeline stack under `src/v2/`. Code indexing uses several parser and analysis backends:
@@ -228,6 +252,24 @@ Orbit Local rebuilds its shared DuckDB graph when the code-index revision change
 even if repository commits have not changed. Repositories are re-indexed as used;
 Orbit Remote schema versions are unaffected.
 
+The incremental engine stores trees as `Tree<Mutable<Node>>` or `Tree<Compact<Node>>`.
+Storage owns its records and exposes node reads and updates through an associated node type.
+Generic cursor navigation works with any payload; code-specific helpers specialize on `Node`.
+`Mutable` uses
+`indextree` for structural rewrites. `Compact` stores node payloads and five
+32-bit links in a contiguous vector. Both use the same cursor operations.
+Parsing keeps source-backed text as byte spans until a rule needs a symbol.
+Canonicalization interns surviving text, releases the source, and builds compact
+storage directly from live nodes in preorder, before linking assigns edges.
+The compact vector reserves the live-node count rather than growing during conversion.
+The consuming `From` conversions preserve node IDs in both directions, including
+removed slots. `compact_and_remap` instead removes holes and renumbers nodes; use it
+before linking. Compact storage supports symbol and tag updates in place. Display
+uses the shared matcher to apply tag-only rules directly to compact trees. Rules
+that append or replace nodes convert one file at a time to mutable storage and back.
+Incremental indexing builds new trees for changed files and retains compact trees
+for unchanged files. Snapshot loading builds compact storage directly.
+
 The incremental engine distinguishes an undefined name from a local value whose
 target is unknown. Unknown locals block fallback to same-named imports or functions.
 Rust identifier initializers use ordinary bindings. Unit struct declarations have
@@ -247,6 +289,21 @@ function. Copies retain the current field values; whole-value replacement clears
 old fields. Calls through fields or loop joins retain their reaching values until
 the linker seals the loop back-edges.
 
+Language YAML groups external framework providers under `config.frameworks`.
+Each group has a unique `name` and a `providers` list using the same schema as
+`config.stdlib`. Both lists compile into the existing provider lookup tables.
+Ruby declares Rails library roots with runtime precedence to prevent unrelated
+repository paths from capturing framework imports. Explicit aliases and relative
+imports retain their existing behavior. Framework methods are not implicit globals;
+application methods with names such as `find`, `create`, and `render` still resolve.
+Framework groups are configured by the language rules, not detected from manifests.
+
+Ruby rules rewrite `send`, `public_send`, and `__send__` when the first argument
+is a literal symbol or a string without interpolation. The resulting call keeps
+its receiver, remaining arguments, and block. Dynamic names keep the original
+dispatch call. These rules assume the standard Ruby dispatch methods; they do
+not detect custom overrides of those methods.
+
 Language rules preserve lexical blocks as `__scope` nodes. The linker maps names
 to declaration identities, which also identify SSA variables and field slots.
 The linker allocates these keys per file; they do not enter the shared symbol
@@ -258,7 +315,10 @@ Incremental snapshots store live tree nodes in traversal order, with their arena
 IDs and parent IDs. Loading preserves those IDs and sibling order, including when
 nodes were added or removed after linking. Edges, tags, and cached resolver
 locations therefore keep their targets. Removed slots have no serialized node
-payload. Snapshot version 14 requires a fresh index for older saved graphs.
+payload. Snapshot version 15 requires a fresh index for older saved graphs.
+Snapshots also retain original import paths so resolved paths cannot change
+standard-library classification on reindex. Language YAML distinguishes builtin
+callable names, external module roots, and shadowable standard-library roots.
 Loading rebuilds the file index from saved trees and manifests before edits apply.
 
 Import discovery scans retained files only when the file index gains keys.
@@ -360,9 +420,9 @@ To avoid this, all code jobs stream their edges into one process-wide `BufferedW
 
 Each part insert is retried with bounded backoff (2s then 4s) before the part is declared failed. So a transient ClickHouse blip does not cost the project a full re-index on the next sweep tick. Only after the retries are exhausted is the part's token marked failed. The retry runs through the shared engine retry harness (`engine/retry.rs`). It is a local `RetryPolicy` driven by `drive`. This is the same vocabulary the SDLC datalake read, the schema-readiness wait, and the job-timeout policy use.
 
-Concurrency is split into two lanes by parsable-file count. The count uses `Decision::Parse` entries, not raw file count, so a repository of images or lockfiles is not misclassified as large. A wide lane (`small_indexing_slots`, default 6) serves the small-repo tail. A reserved lane (`big_indexing_slots`, default 2) means a flood of small repositories cannot starve monorepos.
+Concurrency is split into two lanes by parsable-file count. The count includes only files that the content filter keeps and that have a supported language. So a repository of images or lockfiles is not misclassified as large. Both engines use the same count, so a repository takes the same lane under either engine. A repository with more than `small_repo_max_files` such files takes the big lane. Unless they are set, the lane sizes come from the worker budget, which the CPU count and the container memory limit bound. A part of the indexing share, at least one, is the reserved lane (`big_indexing_slots`). The remainder, at least one, is the wide lane (`small_indexing_slots`) that serves the small-repo tail. The reserved lane means a flood of small repositories cannot starve monorepos. A job that finds its lane busy waits for up to the time left on its project lock lease. The heartbeat renews the lock and refreshes the NATS delivery during the wait. If no lane frees in that time, the job goes back to the queue without spending an attempt.
 
-A project is checkpointed only after its rows are durable. The handler attaches a per-project `ProjectCommit` token to every batch it submits, and holds a `+1` sentinel. The writer decrements the token as each part lands. Whichever decrement reaches zero finalizes the project. That decrement is either a flushed part, or the sentinel the pipeline drops after the parse finishes. Finalizing tombstones the prior version's stale rows, then writes the checkpoint. If any of the project's parts failed to flush, the token is marked failed and the checkpoint is skipped. So NATS redelivery retries it, and the backfill sweep dispatches it again one hour after its last attempt (re-indexing is idempotent). A crash before a part lands has the same effect. So does a job that hits its wall-clock timeout after submitting batches. Its run future is dropped before the sentinel is released, so the project never finalizes and is re-indexed. The `ProjectCommit` frees its in-flight slot on drop regardless, so the shutdown drain never wedges. This keeps the checkpoint the single durable record: no watermark, no durability handshake, no lease heartbeat, no lock renewal.
+A project is checkpointed only after its rows are durable. The handler attaches a per-project `ProjectCommit` token to every batch it submits, and holds a `+1` sentinel. The writer decrements the token as each part lands. Whichever decrement reaches zero finalizes the project. That decrement is either a flushed part, or the sentinel the pipeline drops after the parse finishes. Finalizing tombstones the prior version's stale rows, then writes the checkpoint. If any of the project's parts failed to flush, the token is marked failed and the checkpoint is skipped. So NATS redelivery retries it, and the backfill sweep dispatches it again one hour after its last attempt (re-indexing is idempotent). A crash before a part lands has the same effect. So does a job that hits its wall-clock timeout after submitting batches. Its run future is dropped before the sentinel is released, so the project never finalizes and is re-indexed. The `ProjectCommit` frees its in-flight slot on drop regardless, so the shutdown drain never wedges. This keeps the checkpoint the single durable record, with no watermark and no durability handshake. The project lock is not the durability boundary. The handler heartbeat renews it, and a lost lock cancels the job.
 
 Parts that span many namespaces are safe to query. The edge sort key is `(traversal_path, relationship_kind, …)`, so ClickHouse still prunes by primary key within a mixed part.
 

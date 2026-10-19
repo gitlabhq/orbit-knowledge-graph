@@ -21,6 +21,7 @@ impl Column {
 
 #[derive(Clone)]
 pub enum Predicate {
+    Boolean(crate::input::BooleanExpression<Box<Predicate>>),
     Property {
         column: Column,
         filter: InputFilter,
@@ -85,12 +86,7 @@ impl Projection {
 }
 
 pub fn property_filter(alias: &str, property: &str, bound: &BoundFilter) -> Predicate {
-    Predicate::Property {
-        column: Column::new(alias, property),
-        filter: bound.filter.clone(),
-        data_type: bound.data_type,
-        in_sort_key: bound.in_sort_key,
-    }
+    bound.at(Column::new(alias, property))
 }
 
 pub fn id_list(alias: &str, column: &str, ids: &[i64]) -> Predicate {
@@ -128,6 +124,7 @@ pub fn node_predicates(node: &NodePlan) -> Vec<Predicate> {
         .iter()
         .map(|(property, filter)| property_filter(&node.alias, property, filter))
         .collect();
+    predicates.extend(node.predicates.iter().cloned());
     if !node.node_ids.is_empty() {
         predicates.push(id_list(&node.alias, DEFAULT_PRIMARY_KEY, &node.node_ids));
     }

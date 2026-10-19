@@ -1,0 +1,8 @@
+description: A supported function with unsupported arguments says so instead of listing it as unknown
+
+query:
+  gql: |
+    MATCH (u:User) RETURN count(*)
+
+expect:
+  compile_error: "function count() is not supported: this function does not accept these arguments here"

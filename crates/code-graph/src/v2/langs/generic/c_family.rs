@@ -43,6 +43,13 @@ pub fn c_declarator_name(def: &N<'_>) -> Option<String> {
     Some(declared_name_node(def)?.text().to_string())
 }
 
+/// An unnamed parameter such as `void f(int *)` ends in an abstract declarator,
+/// which names nothing, so it binds nothing rather than binding `*`.
+pub fn binding_declarator_name(binding: &N<'_>) -> Option<String> {
+    let node = declared_name_node(binding)?;
+    (!node.kind().as_ref().starts_with("abstract_")).then(|| node.text().to_string())
+}
+
 /// Keep class qualifiers because they identify out-of-line members in the FQN.
 /// Normalize conversion operators at any depth because `qualified_identifier`
 /// is right-recursive.
@@ -100,4 +107,77 @@ fn descend_abstract_declarator<'r>(node: &N<'r>) -> Option<N<'r>> {
         node.children()
             .find(|c| c.is_named() && !NON_NAME_CHILDREN.contains(&c.kind().as_ref()))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::v2::config::Language;
+
+    fn binding_names(lang: Language, code: &str, kind: &str) -> Vec<Option<String>> {
+        let ast = lang.parse_ast(code, None).unwrap();
+        ast.root()
+            .dfs()
+            .filter(|n| n.kind().as_ref() == kind)
+            .map(|n| binding_declarator_name(&n))
+            .collect()
+    }
+
+    #[test]
+    fn c_parameters_bind_the_bare_identifier() {
+        assert_eq!(
+            binding_names(
+                Language::C,
+                "void f(int n, int *p, char **argv, void (*cb)(void)) {}",
+                "parameter_declaration",
+            ),
+            // A nested declarator carries its own parameter list, so an abstract
+            // parameter inside it contributes an extra entry here.
+            [Some("n"), Some("p"), Some("argv"), Some("cb"), None].map(|s| s.map(String::from)),
+        );
+    }
+
+    #[test]
+    fn c_initialized_locals_bind_the_bare_identifier() {
+        assert_eq!(
+            binding_names(
+                Language::C,
+                "void f(void) { int *x = 0; int (*fp)(int) = 0; }",
+                "init_declarator",
+            ),
+            [Some("x"), Some("fp")].map(|s| s.map(String::from)),
+        );
+    }
+
+    #[test]
+    fn cpp_reference_bindings_bind_the_bare_identifier() {
+        assert_eq!(
+            binding_names(
+                Language::Cpp,
+                "void f(int &r, const int &&rv) { int &alias = r; }",
+                "parameter_declaration",
+            ),
+            [Some("r"), Some("rv")].map(|s| s.map(String::from)),
+        );
+        assert_eq!(
+            binding_names(
+                Language::Cpp,
+                "void f(int &r) { int &alias = r; }",
+                "init_declarator"
+            ),
+            [Some("alias".to_string())],
+        );
+    }
+
+    #[test]
+    fn unnamed_parameters_bind_nothing() {
+        assert_eq!(
+            binding_names(
+                Language::C,
+                "void f(int *, char **);",
+                "parameter_declaration"
+            ),
+            [None, None],
+        );
+    }
 }

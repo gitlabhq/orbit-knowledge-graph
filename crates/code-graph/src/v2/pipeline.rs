@@ -601,6 +601,15 @@ impl Default for PipelineConfig {
     }
 }
 
+impl PipelineConfig {
+    pub fn concurrent_languages(&self) -> usize {
+        match self.max_concurrent_languages {
+            0 => 2,
+            n => n,
+        }
+    }
+}
+
 pub use orbit_utils::fs_walk::{Decision, FileInventory, FileInventoryEntry};
 
 /// Per-file timing captured during pipeline execution.
@@ -789,10 +798,7 @@ impl Pipeline {
         //    max_concurrent_languages run at once (default 2), each
         //    with its own rayon pool. Limits peak memory to N
         //    CodeGraphs + N rayon pools.
-        let max_langs = match ctx.config.max_concurrent_languages {
-            0 => 2,
-            n => n,
-        };
+        let max_langs = ctx.config.concurrent_languages();
         let directories_count = AtomicUsize::new(0);
         let files_count = AtomicUsize::new(0);
         let files_parsed = AtomicUsize::new(0);

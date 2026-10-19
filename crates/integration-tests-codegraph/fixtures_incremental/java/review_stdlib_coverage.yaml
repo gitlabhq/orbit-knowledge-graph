@@ -1,0 +1,16 @@
+name: Review Java implicit type coverage
+fixtures:
+  - path: Main.java
+    content: |
+      import third.party.*;
+      class Main {
+        void run() { throw new SecurityException(); }
+      }
+tests:
+  - name: Implicit java.lang constructor does not bind unrelated wildcard
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name = 'run'
+      RETURN target.import_path
+    assert:
+      - { empty: true }

@@ -1,0 +1,19 @@
+description: >
+  A filter on a relationship backed by a foreign key keeps the edge scan and
+  excludes rows. Every IN_PROJECT edge has source_kind MergeRequest, so the
+  filter matches nothing.
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["name"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p","filters":{"source_kind":{"ne":"MergeRequest"}}}],"limit":20}
+  gql: |
+    MATCH (p:Project {id: 1000})<-[r:IN_PROJECT]-(mr:MergeRequest)
+    WHERE r.source_kind <> 'MergeRequest'
+    RETURN p.name, mr.title LIMIT 20
+
+expect:
+  skip_requirements: [node_ids]
+  sql_contains: ["source_kind != 'MergeRequest'"]
+  node_count: 0
+  edges:
+    IN_PROJECT: []

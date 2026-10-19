@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum Feature {}
+pub enum Feature {
+    CodeGraphIncremental,
+}
 
 /// A feature flag scoped to root namespaces: `enabled` toggles it, an empty
 /// `namespaces` list means every namespace, otherwise only those ids.
@@ -97,5 +99,32 @@ mod tests {
     fn unknown_flag_is_rejected() {
         let result = orbit_utils::yaml::from_str::<FeaturesConfig>("not_a_real_flag: true");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn incremental_indexing_defaults_off_and_respects_namespace_scope() {
+        let flag = Feature::CodeGraphIncremental;
+        assert!(!FeaturesConfig::default().is_enabled_for(flag, Some(42)));
+        for (enabled, namespaces, expected) in [
+            (false, vec![], false),
+            (true, vec![], true),
+            (true, vec![42], true),
+            (true, vec![7], false),
+        ] {
+            let config = FeaturesConfig::from_iter([(
+                flag,
+                FeatureScope {
+                    enabled,
+                    namespaces,
+                },
+            )]);
+            assert_eq!(config.is_enabled_for(flag, Some(42)), expected);
+        }
+        let config: FeaturesConfig = orbit_utils::yaml::from_str(
+            "code_graph_incremental: {enabled: true, namespaces: [42]}",
+        )
+        .unwrap();
+        assert!(config.is_enabled_for(flag, Some(42)));
+        assert!(!config.is_enabled_for(flag, None));
     }
 }

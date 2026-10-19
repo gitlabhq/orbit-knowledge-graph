@@ -1,0 +1,17 @@
+name: Scala standard provider and implicit prelude names
+fixtures:
+  - path: Main.scala
+    content: |
+      import scala.math._
+      object Main {
+        def run(): Double = sqrt(4.0)
+        def implicitCall(): Unit = println("hello")
+      }
+tests:
+  - name: Standard and prelude calls avoid wildcard fallback
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name IN ['run', 'implicitCall']
+      RETURN target.import_path
+    assert:
+      - { empty: true }

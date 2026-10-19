@@ -4,10 +4,10 @@ use std::slice;
 use std::sync::Arc;
 use std::time::Duration;
 
-use clickhouse_client::ClickHouseConfigurationExt;
+use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
 use ontology::introspection::SchemaResponse;
-use orbit_server_config::{AnalyticsConfig, ClickHouseConfiguration};
+use orbit_server_config::AnalyticsConfig;
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::Frontend;
 use query_engine::pipeline::PipelineError;
@@ -167,12 +167,12 @@ impl OrbitServiceImpl {
     pub fn new(
         validator: Arc<JwtValidator>,
         active_schema: Arc<ActiveSchema>,
-        clickhouse_config: &ClickHouseConfiguration,
+        client: ArrowClickHouseClient,
         cluster_health: Arc<ClusterHealthChecker>,
         stream_timeout_secs: u64,
         analytics_config: Arc<AnalyticsConfig>,
     ) -> Self {
-        let client = Arc::new(clickhouse_config.build_client());
+        let client = Arc::new(client);
         let tool_service = ToolService::default();
         let pipeline = QueryPipelineService::new(
             Arc::clone(&client),
@@ -512,7 +512,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let response = if req.format == ResponseFormat::Llm as i32 {
             let toon_text = ToolService::build_schema_toon(&schema.ontology, &req.expand_nodes)
-                .map_err(|e| Status::internal(e.to_string()))?;
+                .map_err(command_error_to_status)?;
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::FormattedText(toon_text)),
             }
@@ -807,8 +807,7 @@ impl OrbitServiceImpl {
                 let should_expand = expand_nodes.iter().any(|e| e == "*" || e == &n.name);
 
                 let properties = if should_expand {
-                    n.fields
-                        .iter()
+                    n.listed_fields()
                         .map(|f| SchemaProperty {
                             name: f.name.clone(),
                             data_type: format!("{}", f.data_type),
@@ -1000,6 +999,7 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 mod tests {
     mod billing;
     mod commands;
+    mod query_errors;
     mod quota;
     mod skills;
     mod status;
@@ -1007,7 +1007,9 @@ mod tests {
     use super::*;
     use crate::proto::orbit_service_client::OrbitServiceClient;
     use crate::proto::orbit_service_server::{OrbitService, OrbitServiceServer};
+    use clickhouse_client::ClickHouseConfigurationExt;
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+    use orbit_server_config::ClickHouseConfiguration;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::metadata::MetadataValue;
 
@@ -1023,6 +1025,10 @@ mod tests {
         orbit_server_config::AppConfig::embedded_defaults().graph
     }
 
+    fn test_client() -> ArrowClickHouseClient {
+        test_config().build_client("graph")
+    }
+
     fn test_service() -> OrbitServiceImpl {
         test_service_on(&test_config())
     }
@@ -1031,7 +1037,7 @@ mod tests {
         OrbitServiceImpl::new(
             Arc::new(mock_validator()),
             ActiveSchema::pinned(test_ontology()),
-            clickhouse,
+            clickhouse.build_client("graph"),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1107,7 +1113,8 @@ mod tests {
             &test_ontology(),
             Default::default(),
             &[],
-        );
+        )
+        .unwrap();
         let formatter = query_formatter(ResponseFormat::Gql as i32).unwrap();
         let result =
             schema_query_result(&schema, formatter.format_name() != FormatName::Raw).unwrap();
@@ -1161,7 +1168,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            &test_config(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1194,7 +1201,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            &test_config(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1233,7 +1240,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            &test_config(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1260,7 +1267,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            &test_config(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1281,7 +1288,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            &test_config(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1313,7 +1320,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            &test_config(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1335,12 +1342,23 @@ mod tests {
     }
 
     #[test]
+    fn test_structured_schema_leaves_out_hidden_properties() {
+        let response =
+            OrbitServiceImpl::build_structured_schema(&test_ontology(), &["Project".to_string()]);
+        let project = response.nodes.iter().find(|n| n.name == "Project").unwrap();
+        let names: Vec<&str> = project.properties.iter().map(|p| p.name.as_str()).collect();
+
+        assert!(names.contains(&"full_path"), "{names:?}");
+        assert!(!names.contains(&"traversal_path"), "{names:?}");
+    }
+
+    #[test]
     fn test_structured_schema_edges_have_variants() {
         let validator = Arc::new(mock_validator());
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            &test_config(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1371,7 +1389,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(test_ontology()),
-            &test_config(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
@@ -1510,7 +1528,7 @@ mod tests {
         let service = OrbitServiceImpl::new(
             validator,
             ActiveSchema::pinned(Arc::clone(&ontology)),
-            &test_config(),
+            test_client(),
             ClusterHealthChecker::default().into_arc(),
             60,
             Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),

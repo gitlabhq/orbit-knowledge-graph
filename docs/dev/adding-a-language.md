@@ -10,7 +10,7 @@ Mirror its structure when in doubt.
 mise install                # rustc, cargo, nextest, lefthook, etc.
 mise trust                  # in fresh worktrees
 mise build
-mise test:fast              # ~30 s; no Docker required
+mise test:fast              # no Docker required
 ```
 
 No GDK, ClickHouse, or NATS needed. The v2 pipeline tests run in-process
@@ -38,7 +38,7 @@ crates/
 
   integration-tests-codegraph/
     fixtures/<lang>/  # YAML test fixtures, one directory per language
-    tests/suites.rs   # yaml_test!(name, "path.yaml") — must register each fixture
+    build.rs          # generates one test per fixture YAML file
     README.md         # fixture format reference
 ```
 
@@ -59,7 +59,6 @@ Sizes from the C and C++ MRs. All paths relative to `crates/`.
 | `code-graph/src/v2/langs/generic/mod.rs` | +1 `pub mod` | +1 |
 | `code-graph/src/v2/registry.rs` | +2 `use`; +1 `register_v2_pipelines!` row | +3 |
 | `integration-tests-codegraph/fixtures/<lang>/*.yaml` | 3+ fixtures | ~150 |
-| `integration-tests-codegraph/tests/suites.rs` | **+1 `yaml_test!` per fixture** | +N |
 | `docs/design-documents/indexing/code_indexing.md` | Add language to tree-sitter bullet | +2 |
 
 Total: ~700-1,400 LoC across 12-16 files.
@@ -308,6 +307,8 @@ The macro generates `dispatch_language`, `lang_ctx_for`, and
 `crates/integration-tests-codegraph/fixtures/<lang>/*.yaml`. Format
 documented in
 [`integration-tests-codegraph/README.md`](../../crates/integration-tests-codegraph/README.md).
+The build script makes one test for each YAML file, so you do not register
+fixtures.
 
 Write at least three covering these areas (names are suggestions: existing
 languages use varied names like `resolution.yaml`, `simple_call.yaml`):
@@ -365,33 +366,18 @@ Full assertion vocabulary (`row`, `row_count`, `empty`, `match`, `unique`,
 `no_nulls`, `column_values`, `count_equals`, `count_gte`, `where`, `not`):
 [fixtures README](../../crates/integration-tests-codegraph/README.md).
 
-### Step 6 — Register fixtures in `tests/suites.rs`
-
-> **Fixtures are not auto-discovered.** A YAML file in `fixtures/<lang>/`
-> does nothing until registered here. This is the most commonly missed step.
-
-`crates/integration-tests-codegraph/tests/suites.rs`:
-
-```rust
-yaml_test!(lang_definitions,      "lang/definitions.yaml");
-yaml_test!(lang_imports,          "lang/imports.yaml");
-yaml_test!(lang_call_resolution,  "lang/call_resolution.yaml");
-```
-
-Convention: `<lang>_<fixture_name>`.
-
-### Step 7 — Run tests
+### Step 6 — Run tests
 
 ```shell
 cargo nextest run -p integration-tests-codegraph -E 'test(<lang>)'  # just yours
-cargo nextest run -p integration-tests-codegraph                     # full suite
+mise test:integration:codegraph                                      # full suite
 mise lint:code                                                       # must pass for CI
 mise lint:code:fix                                                   # auto-fix
 ```
 
 For debugging: `--no-fail-fast --retries 0`.
 
-### Step 8 — Update the design doc
+### Step 7 — Update the design doc
 
 In
 [`docs/design-documents/indexing/code_indexing.md`](../design-documents/indexing/code_indexing.md),
@@ -402,12 +388,11 @@ add the language to the tree-sitter bullet under **Parser architecture**:
 + - **Python, Kotlin, Java, C#, Go, Ruby, C, C++, and <Lang>** use tree-sitter grammars.
 ```
 
-### Step 9 — Open the MR
+### Step 8 — Open the MR
 
 - Title: `feat(code-graph): add <Lang> language support`
 - Body: `Closes #NNN`
-- CI checks: `cargo fmt`, clippy (all features), ontology schema, agent file
-  sync, markdownlint/Vale/lychee, unit + integration tests
+- CI checks: see [Testing](../design-documents/testing.md#ci-checks).
 
 ## Pre-flight checklist
 
@@ -419,7 +404,6 @@ add the language to the tree-sitter bullet under **Parser architecture**:
 - [ ] `pub mod <lang>;` in `langs/generic/mod.rs`
 - [ ] Pipeline registered in `register_v2_pipelines!`
 - [ ] 3+ fixtures (definitions, imports, call resolution)
-- [ ] **Each fixture registered in `tests/suites.rs`**
 - [ ] `cargo nextest run -p integration-tests-codegraph -E 'test(<lang>)'` green
 - [ ] `mise lint:code` clean
 - [ ] `code_indexing.md` updated

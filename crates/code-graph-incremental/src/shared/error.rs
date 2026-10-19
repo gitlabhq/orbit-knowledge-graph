@@ -36,6 +36,10 @@ pub enum Error {
     Load(LoadError),
     Killed(Killed),
     Export(arrow::error::ArrowError),
+    Panic {
+        family: &'static str,
+        message: String,
+    },
 }
 
 impl std::fmt::Display for Error {
@@ -44,6 +48,7 @@ impl std::fmt::Display for Error {
             Self::Load(e) => write!(f, "load: {e}"),
             Self::Killed(k) => write!(f, "budget: {k}"),
             Self::Export(e) => write!(f, "export: {e}"),
+            Self::Panic { family, message } => write!(f, "{family} panicked: {message}"),
         }
     }
 }

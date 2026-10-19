@@ -288,7 +288,7 @@ impl<'l> Ctx<'l> {
     }
 }
 
-pub(crate) type Cap = SmallVec<[NodeId; 1]>;
+pub(crate) type Cap<I = NodeId> = SmallVec<[I; 1]>;
 
 impl Rewrite {
     pub fn new(

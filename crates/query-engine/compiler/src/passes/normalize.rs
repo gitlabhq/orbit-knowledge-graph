@@ -1,5 +1,5 @@
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, Direction, Input, QueryType};
+use crate::input::{ColumnSelection, Direction, Input, InputFilter, PredicateTarget, QueryType};
 use ontology::EnumType;
 #[cfg(test)]
 use ontology::Ontology;
@@ -18,7 +18,7 @@ pub fn build_entity_auth(ontology: &ontology::Ontology) -> HashMap<String, Entit
         .unwrap_or_default()
 }
 
-pub fn normalize<M: query_data_model::QueryDataModel>(input: Input, model: &M) -> Result<Input> {
+pub fn normalize<M: query_data_model::OrbitQueryModel>(input: Input, model: &M) -> Result<Input> {
     let mut input = input;
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
@@ -44,32 +44,95 @@ pub fn normalize<M: query_data_model::QueryDataModel>(input: Input, model: &M) -
             let columns = properties
                 .iter()
                 .filter(|property| model.property_realization(**property).is_some())
+                .filter(|property| !model.property_is_hidden(**property))
                 .map(|property| model.graph().property(*property).name.clone())
                 .collect();
             node.columns = Some(ColumnSelection::List(columns));
         }
 
         for (column, filters) in &mut node.filters {
-            let Some(property) = model.property(entity, column) else {
-                continue;
-            };
-            // Only coerce int-based enums; string enums are already strings in the source
-            if property.enum_type != EnumType::Int {
-                continue;
-            }
-            let Some(enum_values) = property.enum_values.as_ref() else {
-                continue;
-            };
             for filter in filters {
-                let Some(value) = &filter.value else {
-                    continue;
-                };
-                filter.value = Some(coerce_value(value, enum_values));
+                coerce_filter(filter, model.property(entity, column));
             }
         }
     }
+    let nodes = &input.nodes;
+    for root in &mut input.predicates {
+        root.visit_mut(&mut |predicate| {
+            if let PredicateTarget::Node(alias) = &predicate.target
+                && let Some(entity) = nodes
+                    .iter()
+                    .find(|node| node.id == *alias)
+                    .and_then(|node| node.entity.as_deref())
+            {
+                coerce_filter(
+                    &mut predicate.filter,
+                    model.property(entity, &predicate.property),
+                );
+            }
+        });
+    }
     infer_wildcard_relationship_kinds(&mut input, model);
+    resolve_relationship_types(&mut input, model)?;
+    check_shared_foreign_keys(&input, model)?;
     Ok(input)
+}
+
+fn resolve_relationship_types(
+    input: &mut Input,
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+) -> Result<()> {
+    let (conditions, predicates) = std::mem::take(&mut input.predicates)
+        .into_iter()
+        .partition::<Vec<_>, _>(|root| root.relationship_type().is_some());
+    input.predicates = predicates;
+    for root in &conditions {
+        let Some((condition, negated)) = root.relationship_type() else {
+            continue;
+        };
+        let PredicateTarget::Relationship(index) = condition.target else {
+            continue;
+        };
+        let names = condition.relationship_type_names().unwrap_or_default();
+        let types = match (&mut input.path, &mut input.neighbors) {
+            (Some(path), _) => &mut path.rel_types,
+            (_, Some(neighbors)) => &mut neighbors.rel_types,
+            _ => &mut input.relationships[index].types,
+        };
+        if is_wildcard(types) {
+            *types = match negated {
+                true => model.graph().relationship_names(None, None),
+                false => names.iter().map(|name| name.to_string()).collect(),
+            };
+        }
+        types.retain(|kind| names.contains(&kind.as_str()) != negated);
+        if types.is_empty() {
+            return Err(QueryError::Validation(
+                "type(r) excludes every relationship type the pattern allows".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_shared_foreign_keys(
+    input: &Input,
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+) -> Result<()> {
+    for (index, rel) in input.relationships.iter().enumerate() {
+        if rel.types.len() > 1
+            && input.relationship_return.uses(index)
+            && let (Some(from), Some(to)) = (input.entity_of(&rel.from), input.entity_of(&rel.to))
+            && model.foreign_key(&rel.types, from, to).is_some()
+        {
+            return Err(QueryError::Validation(format!(
+                "{} share one foreign key between {from} and {to}, so type() and a returned relationship cannot tell them apart; match one relationship type, such as -[r:{}]->",
+                rel.types.join("|"),
+                rel.types[0]
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn is_wildcard(types: &[String]) -> bool {
@@ -78,7 +141,7 @@ pub(crate) fn is_wildcard(types: &[String]) -> bool {
 
 fn infer_wildcard_relationship_kinds(
     input: &mut Input,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) {
     let entity_for: HashMap<&str, &str> = input
         .nodes
@@ -156,6 +219,16 @@ fn coerce_value(value: &Value, enum_values: &BTreeMap<i64, String>) -> Value {
             Value::Array(coerced)
         }
         _ => value.clone(),
+    }
+}
+
+fn coerce_filter(filter: &mut InputFilter, property: Option<&query_data_model::Property>) {
+    if let Some(property) = property
+        && property.enum_type == EnumType::Int
+        && let Some(enum_values) = &property.enum_values
+        && let Some(value) = &filter.value
+    {
+        filter.value = Some(coerce_value(value, enum_values));
     }
 }
 

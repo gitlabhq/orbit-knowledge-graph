@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::sync::LazyLock;
@@ -16,7 +15,7 @@ use super::graph::{
     ColumnDescriptor, GraphEdge, GraphResponse, GroupColumnDescriptor, PaginationResponse,
     group_node_cell,
 };
-use super::text::{column_order, truncate, truncated_len};
+use super::text::column_order;
 use super::{FormatName, GraphFormatter, ResultFormatter};
 
 pub static TOON_OUTPUT_FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| {
@@ -122,39 +121,14 @@ fn write_node_table(out: &mut String, entity: &str, entries: &IndexMap<i64, &Pro
         .into_iter()
         .collect();
     keys.sort_by(|a, b| column_order(a, b));
-    let truncated: BTreeSet<&str> = keys
-        .iter()
-        .copied()
-        .filter(|key| {
-            entries.values().any(|properties| {
-                properties
-                    .get(*key)
-                    .is_some_and(|value| truncated_len(value, key).is_some())
-            })
-        })
-        .collect();
-    let mut columns = vec![Cow::Borrowed("id")];
-    for key in &keys {
-        columns.push(Cow::Borrowed(*key));
-        if truncated.contains(key) {
-            columns.push(Cow::Owned(format!("{key}_len")));
-        }
-    }
+    let columns: Vec<&str> = std::iter::once("id").chain(keys.iter().copied()).collect();
     write_header(out, 1, entity, entries.len(), &columns);
     for (id, properties) in entries {
         out.push_str("    ");
         let _ = write!(out, "{id}");
         for key in &keys {
             out.push(',');
-            let value = properties.get(*key).unwrap_or(&Value::Null);
-            match value {
-                Value::String(text) => write_text(out, &truncate(text, key)),
-                other => write_value(out, other),
-            }
-            if truncated.contains(key) {
-                out.push(',');
-                write_optional(out, truncated_len(value, key));
-            }
+            write_value(out, properties.get(*key).unwrap_or(&Value::Null));
         }
         out.push('\n');
     }
@@ -212,23 +186,14 @@ fn write_row_table(out: &mut String, rows: &[Properties]) {
                 Some((_, id, _)) => {
                     let _ = write!(out, "{id}");
                 }
-                None => match cell {
-                    Value::String(text) => write_text(out, &truncate(text, column)),
-                    other => write_value(out, other),
-                },
+                None => write_value(out, cell),
             }
         }
         out.push('\n');
     }
 }
 
-fn write_header(
-    out: &mut String,
-    depth: usize,
-    name: &str,
-    len: usize,
-    columns: &[impl AsRef<str>],
-) {
+fn write_header(out: &mut String, depth: usize, name: &str, len: usize, columns: &[&str]) {
     out.push_str(&"  ".repeat(depth));
     write_key(out, name);
     let _ = write!(out, "[{len}]");
@@ -238,7 +203,7 @@ fn write_header(
             if index > 0 {
                 out.push(',');
             }
-            write_key(out, column.as_ref());
+            write_key(out, column);
         }
         out.push('}');
     }
@@ -413,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn node_tables_order_columns_fill_nulls_truncate_and_drop_controls() {
+    fn node_tables_order_columns_fill_nulls_keep_full_text_and_drop_controls() {
         let text = encode_response(&response(
             "traversal",
             vec![
@@ -432,21 +397,14 @@ mod tests {
         ));
         assert!(
             text.starts_with(
-                "query_type: traversal\nnodes:\n  MergeRequest[2]{id,iid,state,web_url,created_at,title,title_len}:\n"
+                "query_type: traversal\nnodes:\n  MergeRequest[2]{id,iid,state,web_url,created_at,title}:\n"
             ),
             "{text}"
         );
         let rows = &decoded(&text)["nodes"]["MergeRequest"];
         assert_eq!(rows[0]["state"], Value::Null);
-        assert_eq!(rows[0]["title_len"], 255);
-        let title = rows[0]["title"].as_str().unwrap();
-        assert_eq!(title.chars().count(), 199);
-        assert!(
-            title.starts_with("[31mttt") && title.ends_with("..."),
-            "{title}"
-        );
+        assert_eq!(rows[0]["title"], format!("[31m{}", "t".repeat(250)));
         assert_eq!(rows[1]["title"], "ab\tc");
-        assert_eq!(rows[1]["title_len"], Value::Null);
     }
 
     #[test]
@@ -489,9 +447,6 @@ mod tests {
                 .clone(),
         ]);
         let value = decoded(&encode_response(&aggregation));
-        assert_eq!(
-            value["rows"][0]["title"].as_str().unwrap().chars().count(),
-            200
-        );
+        assert_eq!(value["rows"][0]["title"], "t".repeat(250));
     }
 }

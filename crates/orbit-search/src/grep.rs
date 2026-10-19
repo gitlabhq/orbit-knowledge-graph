@@ -1,22 +1,5 @@
 use std::collections::HashSet;
 
-pub struct GrepOutcome {
-    pub alternatives: Vec<String>,
-    pub exact_alternatives: Vec<String>,
-    pub matches: Vec<GrepMatch>,
-    pub total: usize,
-}
-
-pub struct GrepMatch {
-    pub id: i64,
-    pub score: f64,
-    pub exact_name: bool,
-    pub name_match: bool,
-    pub body_offset: Option<usize>,
-    pub body_text: String,
-    pub mentions: usize,
-}
-
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RecallFilter {
     pub kinds: Vec<String>,
@@ -30,16 +13,39 @@ impl RecallFilter {
 
 pub fn query_alternatives(query: &str) -> Result<Vec<String>, String> {
     let mut seen = HashSet::new();
-    let mut alternatives = Vec::new();
-    for alternative in query.split('|').map(str::trim) {
-        if !alternative.chars().any(char::is_alphanumeric) {
-            return Err(format!("no usable search terms in query: {query:?}"));
-        }
-        if seen.insert(alternative.to_lowercase()) {
-            alternatives.push(alternative.to_string());
-        }
+    let alternatives: Vec<String> = split_top_level(query)
+        .into_iter()
+        .map(|a| a.trim().to_string())
+        .filter(|a| !a.is_empty() && seen.insert(a.to_lowercase()))
+        .collect();
+    match alternatives.is_empty() {
+        true => Err(format!("no usable search terms in query: {query:?}")),
+        false => Ok(alternatives),
     }
-    Ok(alternatives)
+}
+
+fn split_top_level(query: &str) -> Vec<String> {
+    let (mut parts, mut current, mut depth) = (Vec::new(), String::new(), 0i32);
+    let mut chars = query.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                current.push(c);
+                current.extend(chars.next());
+                continue;
+            }
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            '|' if depth <= 0 => {
+                parts.push(std::mem::take(&mut current));
+                continue;
+            }
+            _ => {}
+        }
+        current.push(c);
+    }
+    parts.push(current);
+    parts
 }
 
 #[cfg(test)]
@@ -56,9 +62,13 @@ mod tests {
     }
 
     #[test]
-    fn empty_and_punctuation_alternatives_are_rejected() {
-        for query in ["", " ", "!?", "|", "clone|", "clone||prepare", "clone|?!"] {
+    fn only_empty_queries_are_rejected() {
+        for query in ["", " ", "|", " | "] {
             assert!(query_alternatives(query).is_err(), "{query:?}");
         }
+        assert_eq!(
+            query_alternatives("clone||prepare|").unwrap(),
+            ["clone", "prepare"]
+        );
     }
 }

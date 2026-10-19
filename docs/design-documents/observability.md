@@ -161,7 +161,12 @@ The query engine fires a single counter during compilation, with a closed-enum `
 
 *Circuit breaker metrics (resilience):*
 
-The circuit breaker wraps external service calls (initially ClickHouse) and tracks state transitions and call outcomes. The `MetricsObserver` in [`orbit-observability::resilience`](../../crates/orbit-observability/src/resilience.rs) implements the `CircuitBreakerObserver` trait to emit these counters. State transitions also produce structured `tracing` events: `warn` when a circuit opens, `info` when it closes or enters half-open.
+The circuit breaker guards calls to the graph ClickHouse, the datalake ClickHouse, and the GitLab API. Each client creates its own breaker, and clones of a client share it. Each process builds one client per service and passes clones to its callers, so all calls to a service share one circuit. The `service` label is the name the client is built with: `graph`, `datalake`, or `gitlab`. Only failures that show the service itself is in trouble count toward opening a circuit:
+
+- ClickHouse: network errors, `TOO_MANY_PARTS`, `TOO_MANY_SIMULTANEOUS_QUERIES`, and `MEMORY_LIMIT_EXCEEDED` from the server-wide memory tracker (the only one that reports `current RSS`). A timeout or a query or user memory limit comes from one query, so it does not count.
+- GitLab: network errors. An HTTP error response is a reply about one project (for example, a 5xx for a missing repository), so it does not count.
+
+No client constructor skips the breaker. Health checks go through a breaker too, so an open circuit reports the service as down until a half-open probe succeeds. The `MetricsObserver` in [`orbit-observability::resilience`](../../crates/orbit-observability/src/resilience.rs) implements the `CircuitBreakerObserver` trait to emit these counters. State transitions also produce structured `tracing` events: `warn` when a circuit opens, `info` when it closes or enters half-open.
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|

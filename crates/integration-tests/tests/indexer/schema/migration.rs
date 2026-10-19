@@ -45,7 +45,7 @@ async fn setup() -> (TestContext, ontology::Ontology, MigrationMetrics) {
 }
 
 fn test_schema(ontology: &ontology::Ontology) -> GraphSchema {
-    GraphSchema::from_ontology(ontology)
+    GraphSchema::from_ontology(ontology).unwrap()
 }
 
 fn lock() -> Arc<dyn LockService> {
@@ -54,6 +54,44 @@ fn lock() -> Arc<dyn LockService> {
 
 fn campaign() -> indexer::campaign::CampaignState {
     indexer::campaign::CampaignState::new()
+}
+
+#[test]
+fn reordered_table_declarations_do_not_change_deployed_schema() {
+    let base = ontology::Ontology::load_embedded().unwrap();
+    let overlay = integration_testkit::load_ontology_overlay("reordered_edges");
+    let base_schema = test_schema(&base);
+    let overlay_schema = test_schema(&overlay);
+    assert_eq!(
+        base_schema
+            .tables
+            .iter()
+            .map(|table| table.name.as_str())
+            .collect::<Vec<_>>(),
+        overlay_schema
+            .tables
+            .iter()
+            .map(|table| table.name.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        base_schema
+            .views
+            .iter()
+            .map(|view| view.name.as_str())
+            .collect::<Vec<_>>(),
+        overlay_schema
+            .views
+            .iter()
+            .map(|view| view.name.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !overlay_schema
+            .tables
+            .iter()
+            .any(|table| table.name == "gl_code_edge_by_target")
+    );
 }
 
 #[tokio::test]
@@ -1138,12 +1176,17 @@ impl MigrationScenario {
         let table_names =
             CodeTableNames::from_ontology(&self.ontology).expect("code tables must resolve");
         let store = Arc::new(ClickHouseCheckpointStore::new(Arc::new(
-            self.ctx.config.build_client(),
+            self.ctx.config.build_client("graph"),
         )));
-        CodeStaleSweep::new(self.ctx.config.build_client(), &table_names, store, 10)
-            .run_for_drained(&[TraversalPath::new_unchecked("1/100/")])
-            .await
-            .expect("sweep failed");
+        CodeStaleSweep::new(
+            self.ctx.config.build_client("graph"),
+            &table_names,
+            store,
+            10,
+        )
+        .run_for_drained(&[TraversalPath::new_unchecked("1/100/")])
+        .await
+        .expect("sweep failed");
     }
 
     async fn live_edge_exists(&self, kind: &str, source_id: u64) -> bool {
@@ -1511,7 +1554,7 @@ async fn garbage_collection_keeps_most_recent_retired_version_by_created_at() {
     ))
     .await;
 
-    let schema = GraphSchema::from_ontology(&ontology);
+    let schema = GraphSchema::from_ontology(&ontology).unwrap();
     let entities = find_droppable_entities(&client, &schema, 2, &[])
         .await
         .unwrap();

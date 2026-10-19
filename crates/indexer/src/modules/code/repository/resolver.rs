@@ -101,6 +101,28 @@ pub struct RepositoryResolver {
     cache: Arc<dyn RepositoryCache>,
 }
 
+#[derive(Debug, Clone)]
+pub enum Repository {
+    Extracted(CachedRepository),
+    IncrementalEngine(super::super::incremental::Repository),
+}
+
+impl Repository {
+    pub(in crate::modules::code) fn parseable_files(&self) -> usize {
+        let detected =
+            |path: &str| code_graph::v2::config::detect_language_from_path(path).is_some();
+        match self {
+            Repository::Extracted(repository) => repository
+                .file_inventory
+                .count_by(|e| e.decision == code_graph::v2::Decision::Parse && detected(&e.path)),
+            Repository::IncrementalEngine(repository) => repository
+                .files()
+                .filter(|file| file.keeps() && detected(&file.path))
+                .count(),
+        }
+    }
+}
+
 impl RepositoryResolver {
     pub fn new(
         repository_service: Arc<dyn RepositoryService>,
@@ -117,9 +139,17 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         commit_sha: Option<&str>,
-    ) -> Result<CachedRepository, ResolveError> {
+        namespace_id: Option<i64>,
+        config: &orbit_server_config::CodeIndexingPipelineConfig,
+    ) -> Result<Repository, ResolveError> {
         let ref_name = commit_sha.unwrap_or(branch);
-        self.full_download(project_id, branch, ref_name).await
+        let virtual_config = orbit_server_config::features::enabled_for(
+            orbit_server_config::features::Feature::CodeGraphIncremental,
+            namespace_id,
+        )
+        .then_some(config);
+        self.full_download(project_id, branch, ref_name, virtual_config)
+            .await
     }
 
     async fn full_download(
@@ -127,10 +157,14 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         ref_name: &str,
-    ) -> Result<CachedRepository, ResolveError> {
+        virtual_config: Option<&orbit_server_config::CodeIndexingPipelineConfig>,
+    ) -> Result<Repository, ResolveError> {
         info!(
             project_id,
-            branch, ref_name, "downloading repository archive"
+            branch,
+            ref_name,
+            incremental = virtual_config.is_some(),
+            "downloading repository archive"
         );
 
         drive(&ARCHIVE_DOWNLOAD_RETRY, |attempt| async move {
@@ -150,7 +184,11 @@ impl RepositoryResolver {
                 }
             };
 
-            match self.cache.extract_archive(archive_stream).await {
+            let repository = match virtual_config {
+                Some(config) => super::super::incremental::load(archive_stream, config).await.map(Repository::IncrementalEngine),
+                None => self.cache.extract_archive(archive_stream).await.map(Repository::Extracted),
+            };
+            match repository {
                 Ok(path) => Step::Done(path),
                 Err(RepositoryCacheError::EmptyArchive) => Step::GiveUp(ResolveError::EmptyRepository {
                     reason: EmptyRepositoryReason::EmptyArchive,
@@ -314,9 +352,77 @@ mod tests {
         encoder.finish().unwrap()
     }
 
+    #[tokio::test]
+    async fn both_engines_count_the_same_parseable_files() {
+        let archive = build_test_tar_gz(
+            &[
+                ("src/main.py", "x = 1\n"),
+                (".gitlab-ci.yml", "a: 1\n"),
+                ("config/app.yaml", "b: 2\n"),
+                ("infra/main.tf", "resource \"a\" \"b\" {}\n"),
+                ("README.md", "readme"),
+                ("logo.png", "image"),
+            ],
+            "abc",
+        );
+        let stream = |bytes: Vec<u8>| -> super::super::ByteStream {
+            Box::pin(futures::stream::once(async move {
+                Ok(bytes::Bytes::from(bytes))
+            }))
+        };
+        let dir = tempfile::TempDir::new().unwrap();
+        let cache =
+            LocalRepositoryCache::new(dir.path().into(), u64::MAX, 0, CodeMetrics::default());
+        let extracted = Repository::Extracted(
+            cache
+                .extract_archive(stream(archive.clone()))
+                .await
+                .unwrap(),
+        );
+        let config = orbit_server_config::AppConfig::embedded_defaults()
+            .engine
+            .handlers
+            .code_indexing_task
+            .pipeline;
+        let loaded = Repository::IncrementalEngine(
+            super::super::super::incremental::load(stream(archive), &config)
+                .await
+                .unwrap(),
+        );
+        assert_eq!(extracted.parseable_files(), 4);
+        assert_eq!(loaded.parseable_files(), 4);
+    }
+
+    struct LegacyResolver(RepositoryResolver);
+
+    impl LegacyResolver {
+        async fn resolve(
+            &self,
+            project: i64,
+            branch: &str,
+            commit: Option<&str>,
+        ) -> Result<CachedRepository, ResolveError> {
+            let config = orbit_server_config::AppConfig::embedded_defaults()
+                .engine
+                .handlers
+                .code_indexing_task
+                .pipeline;
+            match self
+                .0
+                .resolve(project, branch, commit, None, &config)
+                .await?
+            {
+                Repository::Extracted(repository) => Ok(repository),
+                Repository::IncrementalEngine(_) => {
+                    panic!("feature defaults must select legacy extraction")
+                }
+            }
+        }
+    }
+
     fn create_resolver(
         service: Arc<ScriptedRepositoryService>,
-    ) -> (tempfile::TempDir, RepositoryResolver) {
+    ) -> (tempfile::TempDir, LegacyResolver) {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let metrics = CodeMetrics::default();
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
@@ -326,7 +432,7 @@ mod tests {
             metrics,
         ));
         let resolver = RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache);
-        (temp_dir, resolver)
+        (temp_dir, LegacyResolver(resolver))
     }
 
     #[tokio::test]

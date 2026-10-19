@@ -1,0 +1,177 @@
+cases:
+- name: admin_bypass_filter
+  description: type(r) cannot bypass the admin-only restriction. A non-admin who types the relationship
+    with type(r) and filters on an admin-only field must still be rejected.
+  query:
+    gql: |
+      MATCH (u:User)-[r]->(g:Group {id: 100})
+      WHERE type(r) = 'MEMBER_OF' AND u.is_admin = true
+      RETURN u.username LIMIT 10
+  expect: {compile_error: administrator}
+- name: admin_neighbors_strips_non_admin
+  description: type(r) does not expose admin-only fields. Non-admin neighbors typed with WHERE type(r)
+    = 'MEMBER_OF' and returning properties(n) strip admin-only fields, like the typed pattern form.
+  query:
+    gql: |
+      MATCH (g:Group {id: 100})<-[r]-(n) WHERE type(r) = 'MEMBER_OF' RETURN g, properties(n), type(r)
+  expect:
+    node_count: 4
+    nodes:
+      Group:
+        ids: [100]
+      User:
+        ids: [1, 2, 6]
+        prop_present: [username]
+        prop_absent: [is_admin, is_auditor]
+    edges:
+      MEMBER_OF:
+      - [1, 100]
+      - [2, 100]
+      - [6, 100]
+- name: cross_org_relationship_type_excludes
+  description: type(r) does not widen access across org boundaries. User 1 authored MRs in both org 1
+    and org 2. A traversal that types the relationship with WHERE type(r) = 'AUTHORED', scoped to org
+    1, must not return org-2 MR 9100.
+  config:
+    security:
+      org_id: 1
+      paths: [1/]
+  query:
+    gql: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE type(r) = 'AUTHORED'
+      RETURN u, mr.title, type(r) LIMIT 50
+  expect:
+    node_count: 3
+    nodes:
+      MergeRequest:
+        ids: [2000, 2001]
+        absent: [9100]
+    edges:
+      AUTHORED:
+      - [1, 2000]
+      - [1, 2001]
+- name: cross_org_relationship_type_neighbors_excludes
+  description: type(r) on a neighbors query does not widen access across org boundaries. The unlabeled
+    endpoint may be any entity, and org-2 MR 9100 must still be excluded.
+  config:
+    security:
+      org_id: 1
+      paths: [1/]
+  query:
+    gql: |
+      MATCH (u:User {id: 1})-[r]->(n) WHERE type(r) = 'AUTHORED' RETURN u, n, type(r)
+  expect:
+    node_count: 6
+    referential_integrity: true
+    nodes:
+      User:
+        ids: [1]
+      MergeRequest:
+        ids: [2000, 2001]
+        absent: [9100]
+    edges:
+      AUTHORED:
+      - [1, 2000]
+      - [1, 2001]
+      - [1, 3000]
+      - [1, 4000]
+      - [1, 4002]
+- name: not_cross_org_excludes
+  description: NOT type(r) only narrows the relationship types. User 1 authored MR 9100 in org 2; NOT
+    type(r) = 'APPROVED' scoped to org 1 must not return it.
+  config:
+    security:
+      org_id: 1
+      paths: [1/]
+  query:
+    gql: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE NOT type(r) = 'APPROVED'
+      RETURN u, mr.title, type(r) LIMIT 50
+  expect:
+    node_count: 3
+    nodes:
+      MergeRequest:
+        ids: [2000, 2001]
+        absent: [9100, 2002]
+    edges:
+      AUTHORED:
+      - [1, 2000]
+      - [1, 2001]
+      ASSIGNED: []
+      CLOSED: []
+      LAST_EDITED_BY: []
+      MERGED: []
+      REOPENED: []
+      REVIEWER: []
+      UPDATED_BY: []
+- name: not_redaction_hides
+  description: NOT type(r) matches that redaction denies return neither the merge request nor its edge.
+  config:
+    redaction:
+      allow:
+        user: [1]
+        merge_request: [2000, 2002]
+  query:
+    gql: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE NOT type(r) = 'APPROVED'
+      RETURN u, mr.title, type(r) LIMIT 50
+  expect:
+    node_count: 2
+    nodes:
+      MergeRequest:
+        ids: [2000]
+        absent: [2001, 2002]
+    edges:
+      AUTHORED:
+      - [1, 2000]
+      ASSIGNED: []
+      CLOSED: []
+      LAST_EDITED_BY: []
+      MERGED: []
+      REOPENED: []
+      REVIEWER: []
+      UPDATED_BY: []
+    edge_absent:
+      AUTHORED:
+      - [1, 2001]
+- name: not_unknown_name_no_echo
+  description: NOT type(r) IN [...] with one name that the schema does not have rejects with the same
+    static message and does not echo the unknown name.
+  query:
+    gql: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE NOT type(r) IN ['AUTHORED', 'NOPE_PRIVATE_TYPE']
+      RETURN u LIMIT 10
+  expect:
+    compile_error: type() names a relationship type that the schema does not have
+    compile_error_not_contains: [NOPE_PRIVATE_TYPE]
+- name: path_finding_scoped_excludes
+  description: RETURN type(r) in path finding does not widen the scope. Scoped to 1/100/, the one-hop
+    path to Group 100 is found and the path to Group 102 in 1/102/ is not.
+  config:
+    security:
+      org_id: 1
+      paths: [1/100/]
+  query:
+    gql: |
+      MATCH p = ANY SHORTEST (start:User {id: 1})-[r:MEMBER_OF*1]->(g:Group) WHERE g.id IN [100, 102] RETURN p, type(r)
+  expect:
+    referential_integrity: true
+    path_count: 1
+    path_destinations:
+      Group: [100]
+- name: unknown_name_no_echo
+  description: A type(r) name that the schema does not have rejects with a static message that says names
+    are uppercase and case-sensitive, and does not echo the literal
+  query:
+    gql: |
+      MATCH (u:User {id: 1})-[r]->(mr:MergeRequest)
+      WHERE type(r) = 'NOPE_PRIVATE_TYPE'
+      RETURN u LIMIT 10
+  expect:
+    compile_error: type() names a relationship type that the schema does not have; relationship type names
+      are uppercase and case-sensitive
+    compile_error_not_contains: [NOPE_PRIVATE_TYPE]

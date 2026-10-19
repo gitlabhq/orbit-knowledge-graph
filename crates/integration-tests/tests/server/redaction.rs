@@ -626,12 +626,12 @@ async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
     .unwrap();
 
     for col in [
-        "_gkg_u_id",
-        "_gkg_u_type",
-        "_gkg_g_id",
-        "_gkg_g_type",
-        "_gkg_p_id",
-        "_gkg_p_type",
+        "_orbit_u_id",
+        "_orbit_u_type",
+        "_orbit_g_id",
+        "_orbit_g_type",
+        "_orbit_p_id",
+        "_orbit_p_type",
     ] {
         assert!(
             query.base.sql.contains(&format!("AS {col}")),
@@ -755,29 +755,34 @@ async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
         .rows()
         .first()
         .map(|r| {
-            ["_gkg_g_id", "_gkg_g_type", "_gkg_p_id", "_gkg_p_type"]
-                .iter()
-                .filter(|c| r.get(c).is_some())
-                .map(|s| s.to_string())
-                .collect()
+            [
+                "_orbit_g_id",
+                "_orbit_g_type",
+                "_orbit_p_id",
+                "_orbit_p_type",
+            ]
+            .iter()
+            .filter(|c| r.get(c).is_some())
+            .map(|s| s.to_string())
+            .collect()
         })
         .unwrap_or_default();
 
     assert!(
-        columns_before.contains("_gkg_g_id"),
-        "_gkg_g_id should exist before redaction"
+        columns_before.contains("_orbit_g_id"),
+        "_orbit_g_id should exist before redaction"
     );
     assert!(
-        columns_before.contains("_gkg_g_type"),
-        "_gkg_g_type should exist before redaction"
+        columns_before.contains("_orbit_g_type"),
+        "_orbit_g_type should exist before redaction"
     );
     assert!(
-        columns_before.contains("_gkg_p_id"),
-        "_gkg_p_id should exist before redaction"
+        columns_before.contains("_orbit_p_id"),
+        "_orbit_p_id should exist before redaction"
     );
     assert!(
-        columns_before.contains("_gkg_p_type"),
-        "_gkg_p_type should exist before redaction"
+        columns_before.contains("_orbit_p_type"),
+        "_orbit_p_type should exist before redaction"
     );
 
     let mut mock_service = MockRedactionService::new();
@@ -796,20 +801,20 @@ async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
 
     for row in result.authorized_rows() {
         assert!(
-            row.get("_gkg_g_id").is_some(),
-            "_gkg_g_id preserved after redaction"
+            row.get("_orbit_g_id").is_some(),
+            "_orbit_g_id preserved after redaction"
         );
         assert!(
-            row.get("_gkg_g_type").is_some(),
-            "_gkg_g_type preserved after redaction"
+            row.get("_orbit_g_type").is_some(),
+            "_orbit_g_type preserved after redaction"
         );
         assert!(
-            row.get("_gkg_p_id").is_some(),
-            "_gkg_p_id preserved after redaction"
+            row.get("_orbit_p_id").is_some(),
+            "_orbit_p_id preserved after redaction"
         );
         assert!(
-            row.get("_gkg_p_type").is_some(),
-            "_gkg_p_type preserved after redaction"
+            row.get("_orbit_p_type").is_some(),
+            "_orbit_p_type preserved after redaction"
         );
     }
 
@@ -958,19 +963,19 @@ fn fail_closed_null_id_denies_row() {
 
     let batch = make_batch(vec![
         (
-            "_gkg_u_id",
+            "_orbit_u_id",
             Arc::new(Int64Array::from(vec![Some(1), None, Some(3)])) as Arc<dyn Array>,
         ),
         (
-            "_gkg_u_type",
+            "_orbit_u_type",
             Arc::new(StringArray::from(vec!["User", "User", "User"])) as Arc<dyn Array>,
         ),
         (
-            "_gkg_p_id",
+            "_orbit_p_id",
             Arc::new(Int64Array::from(vec![100, 200, 300])) as Arc<dyn Array>,
         ),
         (
-            "_gkg_p_type",
+            "_orbit_p_type",
             Arc::new(StringArray::from(vec!["Project", "Project", "Project"])) as Arc<dyn Array>,
         ),
     ]);
@@ -1935,12 +1940,12 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
     .unwrap();
 
     assert!(
-        query.base.sql.contains("_gkg_u_id"),
-        "SQL should include _gkg_u_id"
+        query.base.sql.contains("_orbit_u_id"),
+        "SQL should include _orbit_u_id"
     );
     assert!(
-        query.base.sql.contains("_gkg_u_type"),
-        "SQL should include _gkg_u_type"
+        query.base.sql.contains("_orbit_u_type"),
+        "SQL should include _orbit_u_type"
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
@@ -1985,11 +1990,11 @@ fn fail_closed_null_type_denies_row() {
 
     let batch = make_batch(vec![
         (
-            "_gkg_u_id",
+            "_orbit_u_id",
             Arc::new(Int64Array::from(vec![1, 2])) as Arc<dyn Array>,
         ),
         (
-            "_gkg_u_type",
+            "_orbit_u_type",
             Arc::new(StringArray::from(vec![Some("User"), None])) as Arc<dyn Array>,
         ),
     ]);
@@ -2039,13 +2044,13 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
     .unwrap();
 
     assert!(
-        query.base.sql.contains("_gkg_u_id"),
-        "SQL must include _gkg_u_id for redaction. Got: {}",
+        query.base.sql.contains("_orbit_u_id"),
+        "SQL must include _orbit_u_id for redaction. Got: {}",
         query.base.sql
     );
     assert!(
-        query.base.sql.contains("_gkg_u_type"),
-        "SQL must include _gkg_u_type for redaction. Got: {}",
+        query.base.sql.contains("_orbit_u_type"),
+        "SQL must include _orbit_u_type for redaction. Got: {}",
         query.base.sql
     );
 
@@ -2084,7 +2089,7 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
     }
 }
 
-async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &TestContext) {
+async fn column_selection_wildcard_returns_listed_columns_plus_mandatory(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
@@ -2108,12 +2113,12 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &Test
     .unwrap();
 
     assert!(
-        query.base.sql.contains("_gkg_g_id"),
-        "wildcard must include _gkg_g_id for redaction"
+        query.base.sql.contains("_orbit_g_id"),
+        "wildcard must include _orbit_g_id for redaction"
     );
     assert!(
-        query.base.sql.contains("_gkg_g_type"),
-        "wildcard must include _gkg_g_type for redaction"
+        query.base.sql.contains("_orbit_g_type"),
+        "wildcard must include _orbit_g_type for redaction"
     );
 
     assert!(
@@ -2129,8 +2134,8 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &Test
         "wildcard should include g_visibility_level column"
     );
     assert!(
-        query.base.sql.contains("g_traversal_path"),
-        "wildcard should include g_traversal_path column"
+        !query.base.sql.contains("g_traversal_path"),
+        "wildcard must leave out the hidden g_traversal_path column"
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
@@ -2173,12 +2178,12 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
     .unwrap();
 
     assert!(
-        query.base.sql.contains("_gkg_u_id"),
-        "mandatory _gkg_u_id must be present when columns omitted"
+        query.base.sql.contains("_orbit_u_id"),
+        "mandatory _orbit_u_id must be present when columns omitted"
     );
     assert!(
-        query.base.sql.contains("_gkg_u_type"),
-        "mandatory _gkg_u_type must be present when columns omitted"
+        query.base.sql.contains("_orbit_u_type"),
+        "mandatory _orbit_u_type must be present when columns omitted"
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
@@ -2234,29 +2239,29 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
     .unwrap();
 
     assert!(
-        query.base.sql.contains("_gkg_u_id"),
-        "User node must have _gkg_u_id. SQL: {}",
+        query.base.sql.contains("_orbit_u_id"),
+        "User node must have _orbit_u_id. SQL: {}",
         query.base.sql
     );
     assert!(
-        query.base.sql.contains("_gkg_u_type"),
-        "User node must have _gkg_u_type"
+        query.base.sql.contains("_orbit_u_type"),
+        "User node must have _orbit_u_type"
     );
     assert!(
-        query.base.sql.contains("_gkg_g_id"),
-        "Group node must have _gkg_g_id"
+        query.base.sql.contains("_orbit_g_id"),
+        "Group node must have _orbit_g_id"
     );
     assert!(
-        query.base.sql.contains("_gkg_g_type"),
-        "Group node must have _gkg_g_type"
+        query.base.sql.contains("_orbit_g_type"),
+        "Group node must have _orbit_g_type"
     );
     assert!(
-        query.base.sql.contains("_gkg_p_id"),
-        "Project node must have _gkg_p_id"
+        query.base.sql.contains("_orbit_p_id"),
+        "Project node must have _orbit_p_id"
     );
     assert!(
-        query.base.sql.contains("_gkg_p_type"),
-        "Project node must have _gkg_p_type"
+        query.base.sql.contains("_orbit_p_type"),
+        "Project node must have _orbit_p_type"
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
@@ -2469,12 +2474,12 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
     .unwrap();
 
     assert!(
-        query.base.sql.contains("_gkg_p_id"),
-        "mandatory _gkg_p_id must exist"
+        query.base.sql.contains("_orbit_p_id"),
+        "mandatory _orbit_p_id must exist"
     );
     assert!(
-        query.base.sql.contains("_gkg_p_type"),
-        "mandatory _gkg_p_type must exist"
+        query.base.sql.contains("_orbit_p_type"),
+        "mandatory _orbit_p_type must exist"
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
@@ -2549,22 +2554,22 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
     .unwrap();
 
     assert!(
-        query.base.sql.contains("_gkg_u_id"),
-        "group_by node must have _gkg_u_id"
+        query.base.sql.contains("_orbit_u_id"),
+        "group_by node must have _orbit_u_id"
     );
     assert!(
-        query.base.sql.contains("_gkg_u_type"),
-        "group_by node must have _gkg_u_type"
+        query.base.sql.contains("_orbit_u_type"),
+        "group_by node must have _orbit_u_type"
     );
 
     // Aggregated target rows are collapsed, so they carry no redaction columns.
     assert!(
-        !query.base.sql.contains("_gkg_mr_id"),
-        "aggregated target node should not have _gkg_mr_id"
+        !query.base.sql.contains("_orbit_mr_id"),
+        "aggregated target node should not have _orbit_mr_id"
     );
     assert!(
-        !query.base.sql.contains("_gkg_mr_type"),
-        "aggregated target node should not have _gkg_mr_type"
+        !query.base.sql.contains("_orbit_mr_type"),
+        "aggregated target node should not have _orbit_mr_type"
     );
 
     assert!(
@@ -2647,12 +2652,12 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
     .unwrap();
 
     assert!(
-        query.base.sql.contains("_gkg_u_id"),
-        "group_by node must have _gkg_u_id"
+        query.base.sql.contains("_orbit_u_id"),
+        "group_by node must have _orbit_u_id"
     );
     assert!(
-        query.base.sql.contains("_gkg_u_type"),
-        "group_by node must have _gkg_u_type"
+        query.base.sql.contains("_orbit_u_type"),
+        "group_by node must have _orbit_u_type"
     );
 
     assert!(
@@ -2778,8 +2783,8 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
     )
     .unwrap();
 
-    assert!(query.base.sql.contains("_gkg_u_id"));
-    assert!(query.base.sql.contains("_gkg_u_type"));
+    assert!(query.base.sql.contains("_orbit_u_id"));
+    assert!(query.base.sql.contains("_orbit_u_type"));
     assert!(query.base.sql.contains("u_username"));
 
     assert!(
@@ -2859,26 +2864,26 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     .unwrap();
 
     assert!(
-        query.base.sql.contains("_gkg_u_id"),
-        "neighbors query must include _gkg_u_id for center node. SQL: {}",
+        query.base.sql.contains("_orbit_u_id"),
+        "neighbors query must include _orbit_u_id for center node. SQL: {}",
         query.base.sql
     );
     assert!(
-        query.base.sql.contains("_gkg_u_type"),
-        "neighbors query must include _gkg_u_type"
+        query.base.sql.contains("_orbit_u_type"),
+        "neighbors query must include _orbit_u_type"
     );
 
     assert!(
-        query.base.sql.contains("_gkg_neighbor_id"),
-        "must include _gkg_neighbor_id"
+        query.base.sql.contains("_orbit_neighbor_id"),
+        "must include _orbit_neighbor_id"
     );
     assert!(
-        query.base.sql.contains("_gkg_neighbor_type"),
-        "must include _gkg_neighbor_type"
+        query.base.sql.contains("_orbit_neighbor_type"),
+        "must include _orbit_neighbor_type"
     );
     assert!(
-        query.base.sql.contains("_gkg_relationship_type"),
-        "must include _gkg_relationship_type"
+        query.base.sql.contains("_orbit_relationship_type"),
+        "must include _orbit_relationship_type"
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
@@ -3177,13 +3182,13 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 
     let f = result.ctx().get("f").unwrap().clone();
 
-    // File uses indirect auth — _gkg_f_id holds the owning Project ID (1000),
+    // File uses indirect auth — _orbit_f_id holds the owning Project ID (1000),
     // not the File's own ID (3000), because redaction resolves through the owner.
     for row in result.iter() {
         assert_eq!(
             row.get_id(&f),
             Some(1000),
-            "center _gkg_f_id should be the owning Project ID for indirect-auth entities"
+            "center _orbit_f_id should be the owning Project ID for indirect-auth entities"
         );
         assert_eq!(row.get_type(&f), Some("File"), "center type should be File");
         let neighbor = row.neighbor_node().expect("neighbor should be present");
@@ -3289,8 +3294,8 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 ///
 /// Path: File 3000 → (DEFINES) → Definition 5000.
 /// Both authorize via Project 1000, but Project is not a node in the path.
-/// PathFinding has no static _gkg_* nodes (enforce.rs line 107), so all nodes
-/// are dynamic (from _gkg_path array) with their own entity IDs. find_owner_id
+/// PathFinding has no static _orbit_* nodes (enforce.rs line 107), so all nodes
+/// are dynamic (from _orbit_path array) with their own entity IDs. find_owner_id
 /// can only find the owner if it's actually in the path. Since File and
 /// Definition store their own IDs (3000, 5000), not project_id, the owner
 /// cannot be resolved → fail-closed.
@@ -3732,7 +3737,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
 
     for row in result.iter() {
         let neighbor_type = row
-            .get("_gkg_neighbor_type")
+            .get("_orbit_neighbor_type")
             .and_then(|v| v.as_string().map(|s| s.as_str()));
         assert_eq!(
             neighbor_type,
@@ -3758,7 +3763,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     let authorized_neighbor_ids: HashSet<i64> = result
         .authorized_rows()
         .filter_map(|row| {
-            row.get("_gkg_neighbor_id")
+            row.get("_orbit_neighbor_id")
                 .and_then(|v| v.as_int64().copied())
         })
         .collect();
@@ -4426,7 +4431,7 @@ async fn redaction_integration() {
         search_fail_closed_no_authorization,
         search_preserves_metadata_columns_after_redaction,
         column_selection_specific_columns_includes_mandatory_columns,
-        column_selection_wildcard_returns_all_columns_plus_mandatory,
+        column_selection_wildcard_returns_listed_columns_plus_mandatory,
         column_selection_omitted_includes_mandatory_columns,
         column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns,
         column_selection_redaction_works_with_specific_columns,

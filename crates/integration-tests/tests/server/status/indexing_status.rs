@@ -41,6 +41,8 @@ async fn indexing_status() {
         indexed_project_is_no_longer_a_gap,
         source_code_waits_for_the_project_list,
         only_the_default_branch_counts,
+        last_completed_at_is_the_oldest_plan_completion,
+        no_last_completed_at_while_a_first_pass_pages,
     );
 }
 
@@ -233,6 +235,7 @@ async fn organization_path_is_unknown(ctx: &TestContext) {
     assert_eq!(status.phase, Phase::Unknown);
     assert_eq!(status.sdlc_phase, Phase::Unknown);
     assert_eq!(domain_phase(&status, "code_review"), Phase::Unknown);
+    assert_eq!(status.last_completed_at, None);
 }
 
 async fn unreadable_checkpoints_are_unknown(ctx: &TestContext) {
@@ -385,4 +388,19 @@ async fn only_the_default_branch_counts(ctx: &TestContext) {
         }
     );
     assert_eq!(status.code_phase, Some(Phase::NotStarted));
+}
+
+async fn last_completed_at_is_the_oldest_plan_completion(ctx: &TestContext) {
+    let status = read_one(ctx, "1/113/").await;
+
+    assert_eq!(
+        status.last_completed_at,
+        Some("2026-01-01T00:00:00Z".parse().unwrap())
+    );
+}
+
+async fn no_last_completed_at_while_a_first_pass_pages(ctx: &TestContext) {
+    let status = read_one(ctx, "1/101/").await;
+
+    assert_eq!(status.last_completed_at, None);
 }

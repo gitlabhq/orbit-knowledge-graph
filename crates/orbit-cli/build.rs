@@ -37,7 +37,7 @@ fn main() {
         })
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
 
-    // Publish strips the leading `v` (scripts/upload-local-cli-release.sh uses
+    // Publish strips the leading `v` (scripts/release/upload-local-cli-release.sh uses
     // `${CI_COMMIT_TAG#v}`), so the package-registry version glab downloads and
     // compares against in `--update` is a bare semver. Match that here.
     let version = version.strip_prefix('v').unwrap_or(&version);

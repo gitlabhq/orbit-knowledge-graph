@@ -298,7 +298,7 @@ async fn search_exact_properties(ctx: &TestContext) {
     assert!(alice["id"].is_string());
     assert!(alice["username"].is_string());
     assert!(
-        alice.get("_gkg_u_id").is_none(),
+        alice.get("_orbit_u_id").is_none(),
         "internal columns must not leak"
     );
 
@@ -699,7 +699,7 @@ async fn path_finding_exact_path(ctx: &TestContext) {
         assert!(node["id"].is_string());
         assert!(node["type"].is_string());
         assert!(
-            node.get("_gkg_path").is_none(),
+            node.get("_orbit_path").is_none(),
             "internal path column must not leak"
         );
     }
@@ -1756,7 +1756,7 @@ async fn search_wildcard_columns(ctx: &TestContext) {
     );
 
     assert!(
-        alice.get("_gkg_u_id").is_none(),
+        alice.get("_orbit_u_id").is_none(),
         "internal columns must not leak in wildcard mode"
     );
 }

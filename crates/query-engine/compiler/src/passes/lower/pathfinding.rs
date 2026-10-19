@@ -118,7 +118,7 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
                 edge_kinds_column(),
             ),
         ],
-        from: TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
+        from: TableRef::cte(FORWARD_CTE, FORWARD_ALIAS),
         where_clause: Expr::and_all([
             Some(Expr::binary(
                 Op::Eq,
@@ -189,8 +189,8 @@ pub fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node>
             }
             TableRef::join(
                 JoinType::Inner,
-                TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
-                TableRef::scan(BACKWARD_CTE, BACKWARD_ALIAS),
+                TableRef::cte(FORWARD_CTE, FORWARD_ALIAS),
+                TableRef::cte(BACKWARD_CTE, BACKWARD_ALIAS),
                 join_cond,
             )
         },
@@ -249,7 +249,7 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
     let table = np.table.as_deref().unwrap_or("");
     let has_tp = np.has_traversal_path;
 
-    if !force_cte && !np.node_ids.is_empty() {
+    if !force_cte && np.is_id_pinned_only() {
         return Anchor {
             edge_filter: Expr::col_in(
                 "e1",
@@ -330,7 +330,7 @@ fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
     // by edges carrying only the deeper tp, so equality yields an empty scope.
     let arm = |cte: &str, alias: &str| Query {
         select: vec![SelectExpr::col(alias, TRAVERSAL_PATH_COLUMN)],
-        from: TableRef::scan(cte, alias),
+        from: TableRef::cte(cte, alias),
         group_by: vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN)],
         ..Default::default()
     };
@@ -348,7 +348,7 @@ const PATH_SCOPE_START_ALIAS: &str = "_path_scope_start";
 const PATH_SCOPE_END_ALIAS: &str = "_path_scope_end";
 
 fn endpoint_filter(np: &NodePlan, alias: &str, col: &str) -> Option<Expr> {
-    if !np.node_ids.is_empty() {
+    if np.is_id_pinned_only() {
         return Expr::col_in(
             alias,
             col,

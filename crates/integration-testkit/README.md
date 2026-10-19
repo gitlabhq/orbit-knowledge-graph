@@ -4,39 +4,36 @@ Shared test infrastructure for integration tests that need a real ClickHouse ins
 
 ## What it provides
 
-- **`TestContext`** — Starts a ClickHouse container via testcontainers, runs schema DDL,
+- **`TestContext`**: Starts a ClickHouse container via testcontainers, runs schema DDL,
   and exposes `query()`, `execute()`, and `query_parameterized()` for Arrow-based results.
-- **`TestContext::fork()`** — Creates an isolated database per subtest so subtests can run
+- **`TestContext::fork()`**: Creates an isolated database per subtest so subtests can run
   in parallel against one container.
-- **`TestContext::optimize_all()`** — Queries `system.tables` for the current database and
+- **`TestContext::optimize_all()`**: Queries `system.tables` for the current database and
   runs `OPTIMIZE TABLE … FINAL` concurrently on every table. Call after seeding data.
-- **`run_subtests_shared!`** — Macro that runs all subtests in parallel against the same
+- **`run_subtests_shared!`**: Macro that runs all subtests in parallel against the same
   shared database. Use for read-only subtests.
-- **`run_subtests!`** — Macro that forks a database per subtest and runs them concurrently.
+- **`run_subtests!`**: Macro that forks a database per subtest and runs them concurrently.
   Use for subtests that write data beyond the initial seed.
-- **Arrow extractors** — `get_string_column`, `get_int64_column`, `get_uint64_column`,
+- **Arrow extractors**: `get_string_column`, `get_int64_column`, `get_uint64_column`,
   `get_boolean_column` for pulling typed columns out of `RecordBatch`.
-- **`ResponseView`** — Typed wrapper over `GraphResponse` for asserting query pipeline
+- **`ResponseView`**: Typed wrapper over `GraphResponse` for asserting query pipeline
   output. Includes assertion enforcement that catches under-tested queries.
+- **`query_scenario`**: Runs YAML query scenarios through the full query pipeline.
+- **`scenario`**: Runs YAML indexer scenarios: seeds source rows, runs handlers, and checks the graph.
+- **`plan_shape`**: Compiles plan-shape fixtures and checks the selected plan.
 
 ## Prerequisites
 
-Query scenarios can set `config.ontology_overlay` to a name under
-`config/seeds/overlays/`. The override changes the query catalog for that scenario.
-Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL.
-
-Integration tests need a Docker-compatible runtime. The project uses Colima, managed
-through `mise.toml`:
+Integration tests need a Docker-compatible runtime. On macOS, use the `gkg` Colima profile:
 
 ```shell
-mise colima:start        # start the gkg Colima instance (12 GB RAM)
-mise test:integration    # run all integration tests (sets DOCKER_HOST automatically)
-mise colima:stop         # stop when done
+colima start gkg --memory 12
+mise test:integration
+colima stop gkg
 ```
 
-See `mise.toml` for the full task definitions. The `test:integration` task sets
-`DOCKER_HOST` to the Colima socket automatically. If running `cargo nextest` directly,
-export it yourself:
+The `test:integration` tasks set `DOCKER_HOST` to the Colima socket. If you run
+`cargo nextest` directly, export it:
 
 ```shell
 export DOCKER_HOST="unix://$HOME/.colima/gkg/docker.sock"
@@ -45,9 +42,7 @@ cargo nextest run --test containers
 
 ## Usage
 
-This crate is a dependency (not dev-dependency) because test crates like
-`integration-tests` and `indexer` import it as a regular dependency in their
-`[dev-dependencies]` section.
+Only `integration-tests` depends on this crate, in its `[dev-dependencies]`.
 
 ```rust
 use integration_testkit::{TestContext, run_subtests, SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL};
@@ -266,32 +261,55 @@ Methods: `prop`, `prop_str`, `prop_i64`, `prop_f64`, `prop_bool`, `has_prop`,
 
 ## Query scenarios
 
-Query scenarios are YAML-driven data correctness tests that replace handwritten Rust
-assertion code. They are the preferred way to add new correctness coverage. Each scenario
+Query scenarios are YAML data correctness tests. Each scenario
 declares a query, optional config overrides, and expected results. The harness seeds data,
 runs the full pipeline (compile, execute, redact, hydrate, paginate, format), and checks
 the response against the expectations.
 
 ### File structure
 
-Scenarios live under `tests/scenarios/` organized by category:
+Scenarios are in `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/`.
+Presets are in the sibling `data_correctness/presets/` directory.
 
-```
-tests/scenarios/
+```plaintext
+data_correctness/
 ├── presets/
-│   ├── security.yaml
 │   ├── redaction.yaml
+│   ├── security.yaml
 │   └── seed.yaml
-├── traversal/
-│   ├── basic.yaml
-│   └── filtering.yaml
-├── aggregation/
-│   └── group_by.yaml
-└── paths/
-    └── shortest_path.yaml
+└── scenarios/
+    ├── aggregation/
+    │   └── count_authored_mrs.yaml
+    ├── search/
+    │   └── contains_case_insensitive.yaml
+    └── security/
+        └── admin_aggregation_compiles.yaml
 ```
 
-Each YAML file contains one `QueryScenario` document.
+Each YAML file contains one `QueryScenario` document, or a `cases` list of them.
+In a `cases` file, every other top-level key is a default for each case. A case
+key replaces the default, and nested maps such as `config` merge key by key.
+A case reports failures as `<file>/<name>`, or `<file>/<index>` when it has no
+`name`.
+
+```yaml
+config:
+  security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
+cases:
+  - name: not_in
+    query:
+      gql: MATCH (u:User {id: 1}) WHERE NOT u.username IN ['bob'] RETURN u
+    expect: { node_count: 1 }
+  - name: admin_not_in
+    config: { security: admin_user }
+    query:
+      gql: MATCH (u:User {id: 2}) WHERE NOT u.username IN ['bob'] RETURN u
+    expect: { node_count: 0 }
+```
+
+A scenario can set `config.ontology_overlay` to a name under
+`config/seeds/overlays/`. The overlay changes the query catalog for that scenario.
+Use the suite-wide `GKG_TEST_ONTOLOGY_OVERLAY` when the overlay also changes DDL.
 
 ### `QueryScenario` format
 
@@ -312,6 +330,7 @@ Each YAML file contains one `QueryScenario` document.
 | `unmerged_seed` | bool | Default `false`. For extra seed rows, stop background merges on their tables, disable insert optimization, insert each row as its own part, and skip `OPTIMIZE`. Uses physical table names, such as `gl_project`. |
 | `security` | preset name or inline `SecurityOverride` | Authorization context |
 | `redaction` | preset name or inline `RedactionConfig` | Entity-level redaction |
+| `duckdb` | bool | Default `false`. Also run the scenario in local mode on an embedded DuckDB, through `run_duckdb_dir` in `cargo test --test local`. The runner creates the local tables from the ontology, inserts the preset and `extra_seed` rows of those tables, and applies the same `expect`. Local mode has no security or redaction, so use it only for scenarios on local entities, such as `Definition` and `File`, with CALLS rows in `gl_edge`. |
 
 #### `config.security` — `SecurityOverride`
 
@@ -345,6 +364,8 @@ Each YAML file contains one `QueryScenario` document.
 | `edge_count` | {TYPE: N} | Per-type edge count |
 | `referential_integrity` | bool | All edge endpoints have nodes |
 | `has_more` | bool | Pagination flag |
+| `gql_columns` | {column: [cell]} | Exact cells of a `gql` format table column, in row order |
+| `gql_column_names` | [column] | Exact `gql` format table header, in order |
 
 **Aggregation:**
 
@@ -362,7 +383,7 @@ Each YAML file contains one `QueryScenario` document.
 |---|---|---|
 | `path_count` | N | Number of paths |
 | `path_destinations` | {Entity: [ids]} | Path endpoint IDs |
-| `path_edges` | [[{from, from_id, type, to, to_id, step}]] | Per-path edge structure (all fields optional) |
+| `path_edges` | `[[{from, from_id, type, to, to_id, step}]]` | Per-path edge structure (all fields optional) |
 | `path_endpoint_absent` | [Entity] | Entities excluded from path edges |
 
 **Compilation:**
@@ -402,7 +423,7 @@ Each YAML file contains one `QueryScenario` document.
 | `filters` | {field: predicate} | Every node must match |
 | `prop_present` | [fields] | Properties that must exist |
 | `prop_absent` | [fields] | Properties that must not exist |
-| `rows` | [{id, prop: val}] | Per-node property assertions |
+| `rows` | `[{id, prop: val}]` | Per-node property assertions |
 
 Filter operators: `eq`, `in`, `starts_with`, `contains`, `ends_with`, `is_null`,
 `is_not_null`, `gte`, `lte`, `lt`.
@@ -417,8 +438,8 @@ Row values support `{repeat: str, count: N, suffix: str}` for expansion.
 | `count` | N | Group size |
 | `order` | [ids] | Ordered IDs |
 | `ids` | [ids] | Unordered IDs |
-| `rows` | [{entity, id, values: {col: val}, properties: {prop: val}}] | Per-row assertions |
-| `absent` | [{entity, id}] | Must NOT appear |
+| `rows` | `[{entity, id, values: {col: val}, properties: {prop: val}}]` | Per-row assertions |
+| `absent` | `[{entity, id}]` | Must NOT appear |
 
 #### `AllPagesExpect`
 
@@ -447,11 +468,13 @@ To reference a preset by name: `security: admin_user`. To inline: provide the st
 ### Running scenarios
 
 ```sh
-mise test:integration:server
+mise test:integration:data
+SCENARIO_FILTER=search mise test:integration:data
 ```
 
-Scenarios run as part of the server integration test suite. Each scenario file is
-discovered and executed automatically.
+The harness finds each scenario file and case. `SCENARIO_FILTER` keeps the cases whose
+name contains the filter. The `query_scenario_fixtures_parse` test in the `local` binary
+parses every file with no Docker.
 
 ### Example
 

@@ -27,13 +27,13 @@ impl TableCleanup {
         ontology: &ontology::Ontology,
         metrics: ScheduledTaskMetrics,
         config: TableCleanupConfig,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, query_data_model::DataModelError> {
+        Ok(Self {
             graph,
-            tables: list_graph_tables(ontology),
+            tables: list_graph_tables(ontology)?,
             metrics,
             config,
-        }
+        })
     }
 }
 
@@ -110,13 +110,17 @@ impl TableCleanup {
     }
 }
 
-fn list_graph_tables(ontology: &ontology::Ontology) -> Vec<String> {
-    ontology
-        .nodes()
-        .map(|node| node.destination_table.as_str())
-        .chain(ontology.edge_tables())
-        .map(|table| prefixed_table_name(table, *SCHEMA_VERSION))
-        .collect()
+fn list_graph_tables(
+    ontology: &ontology::Ontology,
+) -> Result<Vec<String>, query_data_model::DataModelError> {
+    let storage = query_data_model::Relational::<
+        query_data_model::implementations::clickhouse::layout::ClickHouse,
+    >::derive(ontology)?;
+    Ok(storage
+        .graph_tables()
+        .iter()
+        .map(|table| prefixed_table_name(&table.name, *SCHEMA_VERSION))
+        .collect())
 }
 
 fn build_apply_deleted_mask_sql(table: &str) -> String {
@@ -132,7 +136,7 @@ mod tests {
 
     fn all_tables() -> Vec<String> {
         let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-        list_graph_tables(&ontology)
+        list_graph_tables(&ontology).unwrap()
     }
 
     #[test]

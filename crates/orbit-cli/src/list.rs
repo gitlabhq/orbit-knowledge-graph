@@ -1,7 +1,7 @@
+use crate::database::manifest;
 use crate::sql_format::{self, Format};
 use crate::workspace;
-use anyhow::{Context, Result};
-use arrow::array::RecordBatch;
+use anyhow::Result;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -14,18 +14,21 @@ const MANIFEST_QUERY: &str = "SELECT \
        commit_sha, \
        CAST(status AS VARCHAR) AS status, \
        CAST(last_indexed_at AS VARCHAR) AS last_indexed_at, \
-       error_message \
+       error_message, database_path \
      FROM _orbit_manifest \
      ORDER BY _orbit_manifest.last_indexed_at DESC NULLS LAST, repo_path";
 
 pub fn run(format: Format, db: Option<PathBuf>) -> Result<()> {
-    let db_path = workspace::resolve_db_path(db)?;
+    let db_path = match db {
+        Some(path) => path,
+        None => workspace::Workspace::open_default()?.manifest_path(),
+    };
     let stdout = std::io::stdout().lock();
     run_to(format, &db_path, stdout)
 }
 
 fn run_to<W: Write>(format: Format, db_path: &Path, out: W) -> Result<()> {
-    let batches = load_manifest(db_path)?;
+    let batches = manifest::read(db_path, MANIFEST_QUERY)?;
     // An empty table render is noise for humans, but structured formats
     // must stay parseable on empty input (`orbit list -F json | jq`), so
     // only the table view suppresses the writers.
@@ -35,48 +38,17 @@ fn run_to<W: Write>(format: Format, db_path: &Path, out: W) -> Result<()> {
     sql_format::write(out, format, &batches)
 }
 
-fn load_manifest(db_path: &Path) -> Result<Vec<RecordBatch>> {
-    // Unlike `sql`/`schema`, a missing graph is a normal state for `list`,
-    // not an error. `try_exists` so an unreadable path still errors instead
-    // of reading as empty.
-    let present = db_path
-        .try_exists()
-        .with_context(|| format!("failed to check {}", db_path.display()))?;
-    if !present {
-        return Ok(Vec::new());
-    }
-    let client = duckdb_client::DuckDbClient::open_read_only(db_path)
-        .with_context(|| format!("failed to open {}", db_path.display()))?;
-    if !manifest_exists(&client)? {
-        return Ok(Vec::new());
-    }
-    client
-        .query_arrow(MANIFEST_QUERY)
-        .context("failed to read _orbit_manifest")
-}
-
-fn manifest_exists(client: &duckdb_client::DuckDbClient) -> Result<bool> {
-    let batches = client
-        .query_arrow(
-            "SELECT 1 FROM information_schema.tables \
-             WHERE table_schema = 'main' AND table_name = '_orbit_manifest'",
-        )
-        .context("failed to check for _orbit_manifest")?;
-    Ok(batches.iter().any(|b| b.num_rows() > 0))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::manifest;
     use crate::workspace::project_id_from_path;
-
-    const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
     // Mirrors `set_status`: only `indexed` rows get a timestamp, so
     // non-indexed rows exercise the NULL `last_indexed_at` path.
     fn seed(db_path: &Path, rows: &[(&str, &str, &str, &str)]) {
         let client = duckdb_client::DuckDbClient::open(db_path).unwrap();
-        client.initialize_schema(LOCAL_DDL).unwrap();
+        client.initialize_schema(manifest::MANIFEST_DDL).unwrap();
         for (repo, branch, commit, status) in rows {
             client
                 .execute(
@@ -130,7 +102,7 @@ mod tests {
     #[test]
     fn empty_manifest_emits_valid_empty_output() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let db = tmp.path().join("graph.duckdb");
+        let db = tmp.path().join("manifest.duckdb");
         seed(&db, &[]);
         assert_empty_state_output(&db);
         // DuckDB returns zero batches (not a 0-row batch) for an empty
@@ -141,7 +113,7 @@ mod tests {
     #[test]
     fn lists_indexed_repos_as_table() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let db = tmp.path().join("graph.duckdb");
+        let db = tmp.path().join("manifest.duckdb");
         seed(
             &db,
             &[
@@ -159,9 +131,9 @@ mod tests {
     #[test]
     fn surfaces_error_message_for_failed_repos() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let db = tmp.path().join("graph.duckdb");
+        let db = tmp.path().join("manifest.duckdb");
         let client = duckdb_client::DuckDbClient::open(&db).unwrap();
-        client.initialize_schema(LOCAL_DDL).unwrap();
+        client.initialize_schema(manifest::MANIFEST_DDL).unwrap();
         client
             .execute(
                 "INSERT INTO _orbit_manifest \
@@ -182,7 +154,7 @@ mod tests {
     #[test]
     fn lists_indexed_repos_as_json() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let db = tmp.path().join("graph.duckdb");
+        let db = tmp.path().join("manifest.duckdb");
         seed(
             &db,
             &[

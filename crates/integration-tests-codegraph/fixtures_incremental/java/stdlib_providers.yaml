@@ -1,0 +1,31 @@
+name: Java static providers preserve project overrides
+fixtures:
+  - path: Main.java
+    content: |
+      import static java.lang.Math.*;
+      class Main {
+        double standard(double x) { return sqrt(x); }
+      }
+  - path: Local.java
+    content: |
+      import static java.lang.Math.*;
+      class Local {
+        double sqrt(double x) { return x; }
+        double custom(double x) { return sqrt(x); }
+      }
+tests:
+  - name: Static standard call does not fall back to wildcard
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      WHERE caller.name = 'standard'
+      RETURN target.import_path
+    assert:
+      - { empty: true }
+  - name: Local method wins over standard provider
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(target:Definition)
+      WHERE caller.name = 'custom'
+      RETURN target.fqn AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: Local.sqrt } }

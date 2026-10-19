@@ -2,7 +2,7 @@
 # suits a laptop ClickHouse and GDK, and must NOT be promoted into config/default.yaml, which
 # underlays production.
 #
-# The mise dev tasks do not pass this file to --config directly: scripts/orbit-native-dev.sh
+# The mise dev tasks do not pass this file to --config directly: scripts/dev/orbit-native-dev.sh
 # deep-merges it with the values it reads from the GDK checkout (ClickHouse URLs, GitLab URL, Siphon
 # stream name, JWT keys, ClickHouse password), the mode's Prometheus port, and the Git-ignored
 # config/dev.local.yaml (personal overrides, highest priority) into .dev/<mode>.yaml.

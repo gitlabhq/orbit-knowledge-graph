@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
-use query_data_model::QueryDataModel;
+use query_data_model::OrbitQueryModel;
 
 use super::{QueryScope, ScopeProof, is_scope_only};
-use crate::input::{Direction, Input, InputNode, InputRelationship, QueryType};
+use crate::input::{Direction, Input, InputNode, InputRelationship, PredicateTarget, QueryType};
 
 pub fn prepare(
     input: &mut Input,
     proofs: HashMap<String, ScopeProof>,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> QueryScope {
     let mut scope = QueryScope {
         relationships: input
@@ -51,7 +51,10 @@ pub fn prepare(
                     .variant_scope(kind, to, from)
                     .is_some_and(ontology::EdgeVariantScope::is_scope_preserving)
         });
-    if !scope_preserving || !relationship.filters.is_empty() {
+    if !scope_preserving
+        || !relationship.filters.is_empty()
+        || input.references(&PredicateTarget::Relationship(*index))
+    {
         return scope;
     }
     let Some((anchor, target, target_proof)) = [&relationship.from, &relationship.to]
@@ -72,7 +75,7 @@ pub fn prepare(
     scope.nodes.insert(target, target_proof);
     scope.requirements.push(proof);
     scope.relationships.remove(index);
-    input.relationships.remove(index);
+    input.remove_relationship(index);
     input.nodes.retain(|node| node.id != anchor);
     scope
 }
@@ -82,7 +85,7 @@ fn container_target_scope(
     relationship: &InputRelationship,
     anchor: &InputNode,
     proofs: &HashMap<String, ScopeProof>,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> Option<(usize, ScopeProof)> {
     let target = if relationship.from == anchor.id {
         &relationship.to
@@ -127,7 +130,7 @@ fn container_target_scope(
 fn scope_only_container(
     input: &Input,
     node: &InputNode,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> bool {
     node.entity
         .as_deref()
@@ -153,17 +156,14 @@ fn scope_only_container(
             .order_by
             .as_ref()
             .is_some_and(|order| order.node == node.id)
-        && !input
-            .join_predicates
-            .iter()
-            .any(|predicate| predicate.lhs_node == node.id || predicate.rhs_node == node.id)
+        && !input.references(&PredicateTarget::Node(node.id.clone()))
 }
 
 fn relationship_proof(
     input: &Input,
     relationship: &InputRelationship,
     proofs: &HashMap<String, ScopeProof>,
-    model: &(impl QueryDataModel + ?Sized),
+    model: &(impl OrbitQueryModel + ?Sized),
 ) -> Option<ScopeProof> {
     let from_proof = proofs.get(&relationship.from);
     let to_proof = proofs.get(&relationship.to);

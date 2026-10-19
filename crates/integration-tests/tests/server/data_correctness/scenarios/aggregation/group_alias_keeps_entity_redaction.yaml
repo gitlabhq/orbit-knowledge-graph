@@ -1,0 +1,29 @@
+description: A named property group key leaves redaction on the grouped entity ID
+
+config:
+  redaction:
+    allow:
+      merge_request: [2000, 2004]
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2004]}],
+      "group_by": ["mr", {"key": "mr.iid", "as": "mr_number"}],
+      "aggregations": [{"count": "mr", "as": "n"}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id IN [2000, 2001, 2004] RETURN mr, mr.iid AS mr_number, count(mr) AS n LIMIT 10
+
+expect:
+  groups:
+    mr:
+      entity: MergeRequest
+      ids: [2000, 2004]
+      rows:
+        - { entity: MergeRequest, id: 2000, values: { n: 1, mr_number: 1 } }
+        - { entity: MergeRequest, id: 2004, values: { n: 1, mr_number: 5 } }
+      absent:
+        - { entity: MergeRequest, id: 2001 }

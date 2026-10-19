@@ -34,6 +34,7 @@ pub struct EdgeMeta {
     pub src_type_column: String,
     pub dst_column: String,
     pub dst_type_column: String,
+    pub relationship: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -108,7 +109,7 @@ pub fn enforce_lowered_return(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth.clone_from(model.entity_auth());
@@ -125,7 +126,7 @@ pub fn enforce_local_return(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |_| {
@@ -138,7 +139,7 @@ fn enforce_lowered_return_with(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     ctx: &mut ResultContext,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
@@ -183,6 +184,7 @@ fn enforce_lowered_return_with(
                 column_prefix: prefix,
                 path_column: edge.path_column.clone(),
                 rel_types: edge.rel_types.clone(),
+                relationship: edge.relationship,
                 from_alias: String::new(),
                 to_alias: String::new(),
             });
@@ -195,7 +197,7 @@ pub fn enforce_role_scans(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<()> {
     let Node::Query(query) = node else {
         return Ok(());
@@ -250,7 +252,7 @@ fn enforce_return_columns(
     selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
     bindings: &HashMap<String, NodeBinding>,
-    model: &(impl query_data_model::QueryDataModel + ?Sized),
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
     let select_len_before = q.select.len();

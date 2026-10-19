@@ -163,6 +163,11 @@
               "description": "Whether this field is only visible to instance administrators. Defaults to false. When true, non-admin users cannot select or filter on this field.",
               "default": false
             },
+            "hidden": {
+              "type": "boolean",
+              "description": "Whether to leave this field out of every client-facing listing: schemas, wildcard columns, and error candidates. Defaults to false. Explicit requests for the field still work.",
+              "default": false
+            },
             "selectivity": {
               "type": "string",
               "enum": [
@@ -570,9 +575,27 @@
           ],
           "additionalProperties": false
         },
+        "reordered_tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "source", "sort_key"],
+            "properties": {
+              "name": {"type": "string", "pattern": "^[a-z_]+$"},
+              "source": {"type": "string", "pattern": "^[a-z_]+$"},
+              "sort_key": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"}
+              }
+            }
+          }
+        },
         "denormalized_joins": {
           "type": "array",
-          "description": "Linear chains of tables pre-joined into gl_denorm_<name> tables, kept current by one materialized view per source table. Adjacent tables join on the id or edge id that links them; every scoped table keeps its own traversal_path in the row and the compiler filters each. Each declaration is a versioned table, so adding one is a schema bump.",
+          "description": "Linear join chains stored in versioned gl_denorm_<name> tables. Materialized views update them. Each scoped source keeps its own traversal_path column.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -659,7 +682,7 @@
           "type": "string",
           "pattern": "^_[a-z_]+$",
           "minLength": 5,
-          "description": "Prefix for internal columns injected by the compiler (e.g. '_gkg_'). Ontology field names starting with this prefix are rejected at load time."
+          "description": "Prefix for internal columns injected by the compiler (e.g. '_orbit_'). Ontology field names starting with this prefix are rejected at load time."
         },
         "local_db": {
           "type": "object",
@@ -806,7 +829,7 @@
         },
         "materialized_views": {
           "type": "array",
-          "description": "ClickHouse materialized views created after all graph tables. Views act as insert triggers that transform incoming data and write to a destination table or implicit storage. Each view must use exactly one storage mode: either to_table (TO-table mode) or engine (implicit-storage mode).",
+          "description": "ClickHouse materialized views created after graph tables. Each view uses either a to_table destination or its own engine.",
           "items": {
             "type": "object",
             "properties": {
@@ -1256,12 +1279,17 @@
         "prune_to_source",
         "prune_to_target"
       ],
-      "description": "How a resolved traversal_path prefix relates to an edge variant's endpoints. 'namespace_anchor': source FK points to a Project/Group anchor; propagates and enables anchor FK resolution. 'same_namespace': both endpoints share a namespace subtree; prefix propagates across the edge. 'prune_to_source'/'prune_to_target': confine the edge's own scan to the named endpoint's namespace WITHOUT propagating, so the other endpoint may be a global hub (User/Runner/Label) \u2014 the named endpoint must be path-scopable. Omitted (default): fail-closed, no scoping or propagation."
+      "description": "How traversal_path scope crosses an edge. namespace_anchor uses a Project or Group FK. same_namespace propagates within one subtree. prune_to_source and prune_to_target scope only the edge scan to that path-scopable endpoint. An omitted value does not scope or propagate."
     },
     "edgeVariant": {
       "type": "object",
       "description": "A specific source-target pair for an edge relationship.",
       "properties": {
+        "table": {
+          "type": "string",
+          "pattern": "^[a-z_]+$",
+          "description": "Optional edge table override from settings.edge_tables."
+        },
         "from_node": {
           "$ref": "#/definitions/edgeNodeReference"
         },

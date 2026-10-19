@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.33.8
+version: 0.33.12
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
 metadata:
@@ -46,6 +46,12 @@ Each `glab orbit query` has fixed per-call overhead. Prefer one `aggregation` qu
 When editing Orbit docs or skills, fence executable query JSON as `json orbit-query` so docs smoke tests run it.
 
 ## Running a query
+
+Queries accept at most 16 predicates total. Each node or relationship filter
+operator counts once, including repeated entries. A nonempty `node_ids` list
+counts as one predicate; `id_range` counts as two. An `IN` list counts once,
+with its existing value limit. If rejected, remove redundant conditions or
+simplify the query.
 
 Write the request body to a file and pass it to `glab orbit query --file`. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
 

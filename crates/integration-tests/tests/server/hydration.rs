@@ -48,7 +48,7 @@ async fn setup_test_data(ctx: &TestContext) {
     .await;
 
     // Source code entities -- File and Definition have redaction id_column = project_id,
-    // so their PK (_gkg_f_pk) differs from the auth ID (_gkg_f_id).
+    // so their PK (_orbit_f_pk) differs from the auth ID (_orbit_f_id).
     ctx.execute(&format!(
         "INSERT INTO {} (id, traversal_path, project_id, branch, path, name, extension, language) VALUES
          (5001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'lib.rs', 'rs', 'Rust'),
@@ -433,7 +433,7 @@ async fn neighbors_json_format(ctx: &TestContext) {
 
     let has_hydrated_prop = obj
         .keys()
-        .any(|k| !k.starts_with("_gkg_") && k != "u_id" && k != "u_type");
+        .any(|k| !k.starts_with("_orbit_") && k != "u_id" && k != "u_type");
     assert!(
         has_hydrated_prop,
         "neighbors JSON should have hydrated top-level properties, keys: {:?}",
@@ -808,8 +808,8 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
 
 /// Entities with `redaction.id_column != "id"` (e.g. File, Definition where auth
 /// uses `project_id`) must hydrate using the entity's own primary key
-/// (`_gkg_f_pk`), not the authorization ID (`_gkg_f_id`). Otherwise
-/// `collect_static_ids` reads `_gkg_f_id` (= project_id 1000) and the hydration
+/// (`_orbit_f_pk`), not the authorization ID (`_orbit_f_id`). Otherwise
+/// `collect_static_ids` reads `_orbit_f_id` (= project_id 1000) and the hydration
 /// query looks up `gl_file WHERE id = 1000`, returning nothing.
 async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
     let ontology = load_ontology();
@@ -1017,7 +1017,7 @@ async fn traversal_static_hydration_default_auth_entities(ctx: &TestContext) {
     });
     assert!(
         user_props_found,
-        "User username should be hydrated (fallback to _gkg_u_id when _gkg_u_pk absent)"
+        "User username should be hydrated (fallback to _orbit_u_id when _orbit_u_pk absent)"
     );
 
     let group_props_found = authorized.iter().any(|row| {

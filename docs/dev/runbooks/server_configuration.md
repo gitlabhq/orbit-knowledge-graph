@@ -29,7 +29,7 @@ value to `config/default.yaml`; nothing else. Tests that need a config start fro
 own clap configuration instead of `AppConfig`.
 
 The mise dev tasks (`server:start`, `server:dispatch`, `dev:web`, `dev:indexer`, `dev:dispatcher`,
-`dev:healthcheck`) run `scripts/orbit-native-dev.sh`. That script writes `.dev/<mode>.yaml` on every
+`dev:healthcheck`) run `scripts/dev/orbit-native-dev.sh`. That script writes `.dev/<mode>.yaml` on every
 start and passes it as the single `--config` file. The file is a `yq` deep merge of, in increasing priority:
 
 1. `config/dev.yaml`: the committed description of the dev environment: bind addresses, NATS URL and

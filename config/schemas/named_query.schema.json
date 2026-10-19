@@ -44,7 +44,7 @@
             "description": "JSON Schema the client-supplied value must satisfy at render time."
           },
           "example": {
-            "description": "Representative value substituted for build-time compilation against the ontology. Must satisfy schema."
+            "description": "Representative value substituted for test-time compilation against the ontology. Must satisfy schema."
           }
         }
       },

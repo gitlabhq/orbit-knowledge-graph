@@ -33,7 +33,7 @@ pub(crate) fn describe_valid_fields(node: &NodeEntity) -> String {
     let names: Vec<&str> = NODE_RESERVED_COLUMNS
         .iter()
         .copied()
-        .chain(node.fields.iter().map(|f| f.name.as_str()))
+        .chain(node.listed_fields().map(|f| f.name.as_str()))
         .filter(|name| seen.insert(*name))
         .collect();
 
