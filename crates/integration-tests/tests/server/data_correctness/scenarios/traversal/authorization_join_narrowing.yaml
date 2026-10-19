@@ -2,8 +2,6 @@ cases:
   - name: pinned_target_narrows_the_caller_join
     description: The caller redaction join reads only the keys of edges into the pinned definition, and the edge relation it reads more than once is materialized
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
     expect:
@@ -36,8 +34,6 @@ cases:
   - name: pinned_source_narrows_the_callee_join
     description: The callee redaction join reads only the keys of edges out of the pinned definition, and the edge relation it reads more than once is materialized
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[12000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":50}
       gql: |
         MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
     expect:
