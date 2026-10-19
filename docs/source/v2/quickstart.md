@@ -15,6 +15,7 @@ title: GitLab Orbit quickstart
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
@@ -33,8 +34,8 @@ To use GitLab Orbit only in GitLab Duo, complete step 1, then see [GitLab Orbit 
 
 - A top-level group with a Premium or Ultimate subscription and the GitLab Orbit add-on.
   To buy the add-on, [contact sales](https://about.gitlab.com/sales/). On GitLab.com, a group can also start a free trial in step 1.
-- On GitLab.com, the Owner role for the group to turn on GitLab Orbit.
-  If GitLab Orbit is already on, you need only the Reporter role. Start at step 2.
+- The Owner role for the group to turn on GitLab Orbit.
+  If GitLab Orbit is already on, the Reporter, Security Manager, Developer, Maintainer, or Owner role is enough. Start at step 2.
 - An agent on your machine, such as Claude Code, Codex, or OpenCode.
 - On GitLab Self-Managed, an administrator has [set up GitLab Orbit](self-managed/_index.md).
 
@@ -58,14 +59,14 @@ to about 30 minutes for thousands of projects. Continue with the next steps whil
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
-On GitLab Self-Managed and GitLab Dedicated, an administrator turns on indexing in the **Admin** area.
+On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on indexing in the **Admin** area.
 For more information, see [turn on indexing for a group](self-managed/orbit-setup.md#turn-on-indexing-for-a-group).
 
 ## Step 2: Install the CLI and sign in
 
 <!-- vale orbit.StandaloneProductName = NO -->
 
-1. Install the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) 1.117 or later. To check your version, run `glab version`.
+1. Install the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) 1.120 or later. To check your version, run `glab version`.
 1. Install the GitLab Orbit CLI. `glab` keeps the binary in its own directory, so you run it as `glab orbit`.
 
    ```shell

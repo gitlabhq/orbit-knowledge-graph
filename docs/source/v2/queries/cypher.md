@@ -15,6 +15,7 @@ title: GitLab Orbit Cypher query language
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1258) in GitLab 19.4 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `orbit_gql_queries`. Disabled by default.
@@ -24,7 +25,7 @@ title: GitLab Orbit Cypher query language
 
 GitLab Orbit accepts a read-only subset of [openCypher 9](https://opencypher.org/), which agents already know.
 It replaces the deprecated JSON query DSL. To send a query, see [run a query](_index.md#run-a-query).
-Code examples in these docs carry the label `gql`, the internal name of this query language.
+Code examples in this documentation carry the label `gql`, the internal name of this query language.
 
 ## Discover the schema
 
@@ -83,7 +84,7 @@ On GitLab.com, this query returns `482908721` and `278964`, the IDs that the exa
 
 - Comparisons: `=`, `<>` or `!=`, `<`, `<=`, `>`, `>=`. You can compare a property with a literal or with another property.
 - Lists: `x.state IN ['opened', 'merged']`, with up to 100 values.
-- Strings: `STARTS WITH`, `ENDS WITH`, and `CONTAINS`. The pattern needs at least 3 characters.
+- Strings: `STARTS WITH`, `ENDS WITH`, and `CONTAINS`. The pattern needs at least three characters.
   Matching ignores ASCII case, except on the `branch` property of code nodes, such as `File` and `Definition`.
 - Nulls: `IS NULL` and `IS NOT NULL`.
 
@@ -103,7 +104,8 @@ Words are runs of letters and digits, so `token_match(d.file_path, 'main')` matc
 - `all_tokens(property, 'first second')` requires every word, in any order.
 - `any_tokens(property, 'first second')` requires at least one of the words.
 
-Properties without a text index reject the token functions. For example:
+Properties without a text index reject the token functions.
+This query finds merge requests with both words in the title, in any order:
 
 ```gql orbit-query
 MATCH (mr:MergeRequest {project_id: 278964})
@@ -116,7 +118,7 @@ LIMIT 10
 These properties have a text index:
 
 <!-- The table below is generated from the ontology's `text` storage indexes. -->
-<!-- Do not edit it by hand: run `mise run docs:generate` and commit. CI fails on drift. -->
+<!-- Do not edit it by hand: run `mise run docs:generate` and commit. The `docs-generated-check` pre-commit hook fails on drift. -->
 <!-- BEGIN GENERATED: text-indexed-properties -->
 
 | Entity | Text-indexed properties |
@@ -196,7 +198,7 @@ When `pagination.truncated` is `true`, the result is incomplete.
 These forms are not supported and are rejected:
 write clauses, more than one statement, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`, `YIELD`, subqueries,
 `OR`, general `NOT`, `DISTINCT`, `count(*)`, arbitrary expressions, and `SKIP` or other offset pagination.
-Other functions, such as `type(r)` or `collect(x)`, are rejected with an error that names the function.
+`type(r)` returns the type of a one-hop relationship variable in `WHERE`, `RETURN`, and `ORDER BY`, but not as an aggregation group key. Other functions, such as `collect(x)`, are rejected with an error that names the function.
 
 Syntax errors report a line and column.
 
@@ -258,7 +260,7 @@ LIMIT 20
 ### Find the shortest path between two nodes
 
 Name the relationship type and keep the hop range small.
-An untyped `-[*1..3]->` follows every relationship and can time out.
+An untyped `-[*1..3]->` follows every relationship and might time out.
 
 ```gql orbit-query
 MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {full_path: 'gitlab-org/gitlab'})

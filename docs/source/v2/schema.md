@@ -15,6 +15,7 @@ title: What GitLab Orbit indexes
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
@@ -249,7 +250,6 @@ Entities related to source code structure, definitions, and imports.
 <!-- END GENERATED: schema-edges -->
 
 `EXTENDS` points from the child to the parent.
-A class that extends a base class is the source node. The base class is the target node.
 
 ## Properties resolved at query time
 
