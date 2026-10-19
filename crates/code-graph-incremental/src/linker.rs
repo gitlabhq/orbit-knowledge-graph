@@ -21,6 +21,19 @@ type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
 type WildcardImports = Rc<Vec<u32>>;
 
+fn member_of(node: Cursor<'_>) -> Option<Cursor<'_>> {
+    node.is(C::Member)
+        .then_some(node)
+        .or_else(|| node.child(C::Member))
+        .or_else(|| node.child(C::Ivar))
+}
+
+fn object_of(member: Cursor<'_>) -> Option<Cursor<'_>> {
+    member
+        .child(C::Object)
+        .filter(|object| !object.has(C::Qualifier))
+}
+
 fn edge_limit(edges: &[Edge], cap: usize, path: &str) -> Result<(), Killed> {
     if cap == 0 || edges.len() <= cap {
         return Ok(());
@@ -1017,19 +1030,28 @@ impl<'t> Fold<'t> {
     }
 
     fn member_binding(&self, node: Cursor<'_>) -> Option<(u32, u32)> {
-        let member = node
-            .is(C::Member)
-            .then_some(node)
-            .or_else(|| node.child(C::Member))
-            .or_else(|| node.child(C::Ivar))?;
-        let object = member
-            .child(C::Object)
-            .filter(|object| !object.has(C::Qualifier))?;
-        let root = self.binding(object.sym());
-        if self.statics.contains_key(&root) {
+        let member = member_of(node)?;
+        let mut object = object_of(member)?;
+        let mut path = Vec::new();
+        while object.sym() == 0 {
+            let inner = member_of(object)?;
+            path.push(inner.sym());
+            object = object_of(inner)?;
+        }
+        let root = path
+            .into_iter()
+            .rev()
+            .try_fold(self.binding(object.sym()), |binding, field| {
+                self.field_of(binding, field)
+            })?;
+        (root != 0 && !self.statics.contains_key(&root)).then_some((root, member.sym()))
+    }
+
+    fn field_of(&self, binding: u32, field: u32) -> Option<u32> {
+        if binding == 0 || self.statics.contains_key(&binding) {
             return None;
         }
-        Some((root, member.sym()))
+        self.fields.get(&binding)?.get(&field).copied()
     }
 
     fn field_slot(&self, node: Cursor<'_>) -> Option<u32> {
