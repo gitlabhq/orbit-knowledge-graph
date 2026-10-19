@@ -74,7 +74,10 @@ case removed) is not already in the old version of the file. Moves and
 re-indents pass. Renames are followed (`git diff -M`), so a renamed file keeps
 its old comments. Adjacent line comments are one comment.
 
-Skipped on purpose: rustdoc (`///`, `//!`, `/** */`), tool directives
+Skipped on purpose: rustdoc (`///`, `//!`, `/** */`; the rule in `CONTRIBUTING.md`
+still applies, but flagging it blocked about a third of merges for a handful of
+real redundant-comment threads, and clap derive turns `///` into `--help` text),
+tool directives
 (`#!`, PEP 723 headers, `shellcheck`, `clippy`, `yamllint`, and similar), files with an
 `@generated` marker in the first 2 KiB, fixture and snapshot paths, the
 `code-graph-incremental/langs` suites, and commits that conclude a merge.
