@@ -14,3 +14,13 @@ pub(crate) struct Emitted {
     pub nodes: HashMap<String, NodeBinding>,
     pub stable_order: Vec<OrderExpr>,
 }
+
+impl Emitted {
+    pub fn new(ast: Node) -> Self {
+        Self {
+            ast,
+            nodes: HashMap::new(),
+            stable_order: Vec::new(),
+        }
+    }
+}

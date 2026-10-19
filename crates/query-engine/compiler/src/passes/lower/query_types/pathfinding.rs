@@ -20,19 +20,15 @@ use crate::passes::lower::sql::{
 use crate::passes::plan::{NodePlan, PathFinding, Plan};
 
 pub(crate) fn emit(plan: &Plan<PathFinding>, input: &Input) -> Result<Emitted> {
+    let path_text = |column: &str| {
+        OrderExpr::asc(Expr::func(
+            Function::ToString,
+            vec![Expr::col("paths", column)],
+        ))
+    };
     Ok(Emitted {
-        ast: emit_pathfinding(plan, input)?,
-        nodes: std::collections::HashMap::new(),
-        stable_order: vec![
-            OrderExpr::asc(Expr::func(
-                Function::ToString,
-                vec![Expr::col("paths", path_column())],
-            )),
-            OrderExpr::asc(Expr::func(
-                Function::ToString,
-                vec![Expr::col("paths", edge_kinds_column())],
-            )),
-        ],
+        stable_order: vec![path_text(path_column()), path_text(edge_kinds_column())],
+        ..Emitted::new(emit_pathfinding(plan, input)?)
     })
 }
 

@@ -4,6 +4,8 @@
 
 use ontology::constants::*;
 
+use std::collections::HashMap;
+
 use super::Emitted;
 use crate::ast::*;
 use crate::constants::*;
@@ -33,9 +35,9 @@ pub(crate) fn emit(plan: &Plan<Neighbors>, input: &Input) -> Result<Emitted> {
         ],
     };
     Ok(Emitted {
-        ast,
-        nodes: std::collections::HashMap::from([(plan.operation.center.clone(), binding)]),
+        nodes: HashMap::from([(plan.operation.center.clone(), binding)]),
         stable_order,
+        ..Emitted::new(ast)
     })
 }
 

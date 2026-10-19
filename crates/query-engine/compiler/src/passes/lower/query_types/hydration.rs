@@ -21,11 +21,7 @@ use crate::passes::plan::{Hydration, HydrationNodePlan, Plan};
 use orbit_utils::traversal_path::TraversalPath;
 
 pub(crate) fn emit(plan: &Plan<Hydration>) -> Result<Emitted> {
-    Ok(Emitted {
-        ast: emit_hydration(&plan.operation.nodes)?,
-        nodes: std::collections::HashMap::new(),
-        stable_order: vec![],
-    })
+    Ok(Emitted::new(emit_hydration(&plan.operation.nodes)?))
 }
 
 pub fn emit_hydration(nodes: &[HydrationNodePlan]) -> Result<Node> {
