@@ -152,9 +152,9 @@ stages:
   - name: tag-defs
     rules:
       - match: '(__def (__function))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", scoped: "true" }
       - match: '(__def (__method))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", scoped: "true" }
       - match: '(__def (__class))'
         tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__lambda))'
