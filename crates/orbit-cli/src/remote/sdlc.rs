@@ -211,8 +211,20 @@ async fn read_branch(
     branch: &str,
 ) -> Result<Found, RemoteError> {
     if let Some(mr) = merge_request(client, encoded, branch).await? {
+        let mut note = format!("branch:{branch} mr:{} {}\n", mr.iid, mr.state);
+        // An MR's head pipeline can be skipped while the branch's own pipeline failed, so read both refs.
+        for reference in [
+            branch.to_string(),
+            format!("refs/merge-requests/{}/head", mr.iid),
+        ] {
+            if let Some(pipeline) = latest_pipeline(client, encoded, &reference).await?
+                && text(&pipeline["status"]) == "failed"
+            {
+                note.push_str(&pipeline_text(client, encoded, &pipeline).await?);
+            }
+        }
         return Ok(Found::MergeRequest {
-            note: format!("branch:{branch} mr:{} {}\n", mr.iid, mr.state),
+            note,
             reference: format!("{project}!{}", mr.iid),
         });
     }

@@ -592,12 +592,18 @@ fn serve_routes(
 }
 
 #[test]
-fn context_branch_target_reads_the_merge_request_of_that_branch() {
+fn context_branch_target_reads_its_merge_request_and_failed_branch_pipeline() {
     let (base_url, handle) = serve_routes(vec![
         (
             "merge_requests?",
             r#"[{"id":41,"iid":3,"state":"merged"},{"id":42,"iid":4,"state":"opened"}]"#,
         ),
+        (
+            "pipelines?ref=fix-ci",
+            r#"[{"id":7,"status":"failed","ref":"fix-ci","sha":"0123456789abcdef","web_url":"https://localhost/p/-/pipelines/7"}]"#,
+        ),
+        ("pipelines/7/jobs", "[]"),
+        ("pipelines?ref=refs", r#"[{"id":8,"status":"skipped"}]"#),
         ("orbit/context", "orbit_context version=1.1.0 entities=1\n"),
     ]);
     let base_url = base_url.replace("127.0.0.1", "localhost");
@@ -625,13 +631,15 @@ fn context_branch_target_reads_the_merge_request_of_that_branch() {
         requests[0].request_line
     );
     assert!(
-        requests[1].body.contains("my-group/my-project!4"),
+        requests[4].body.contains("my-group/my-project!4"),
         "{}",
-        requests[1].body
+        requests[4].body
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "branch:fix-ci mr:4 opened\norbit_context version=1.1.0 entities=1\n"
+        "branch:fix-ci mr:4 opened\n\
+         pipeline:7 failed ref fix-ci commit:0123456789abcdef https://localhost/p/-/pipelines/7\n\
+         orbit_context version=1.1.0 entities=1\n"
     );
 }
 
