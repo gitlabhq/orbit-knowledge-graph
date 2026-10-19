@@ -26,15 +26,13 @@ If your agent can run shell commands, use the [CLI and the GitLab Orbit skill](_
 
 {{< /details >}}
 
-<!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
-
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
 - [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Generally available in GitLab 19.x.
+- Generally available in GitLab 19.5.
 
 {{< /history >}}
 
@@ -156,7 +154,9 @@ Use GitLab Orbit to list the 5 most recently updated projects in my group.
 The first call opens your browser to sign in. Until you sign in, the client shows `Needs authentication`.
 Then the agent returns project names and paths.
 
-If the browser does not open, check your session with `glab auth status`, and sign in again with `glab auth login`.
+If the browser does not open, sign in again from your client.
+Your client uses its own OAuth sign-in, not your `glab` session.
+For example, remove the `gitlab-orbit` server from your client and add it again to restart the sign-in.
 For other errors, see [troubleshooting](../troubleshooting.md).
 
 ### Endpoint tools
