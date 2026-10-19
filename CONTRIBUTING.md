@@ -33,6 +33,8 @@ For test layers and CI jobs, see [Testing](docs/pages/engineering/testing/README
 ## Code
 
 - Default to no code comments. Write a comment only for a business requirement that the code cannot make clear.
+  The rule covers doc comments (`///`, `//!`): delete one that only restates the name or signature,
+  or cut it to one sentence on that requirement.
 - Rust doc examples compile in `mise test:fast`, and `ignore` blocks fail it. Use a plain or `no_run` block with hidden setup lines starting with `#`, or `text` for pseudo-code.
 - Reuse infrastructure before you add new infrastructure.
 - Before you change an area, read its design document and the crate `AGENTS.md`, if present.
