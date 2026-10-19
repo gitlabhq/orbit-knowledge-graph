@@ -15,6 +15,7 @@ title: GitLab Orbit REST API
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
@@ -51,7 +52,7 @@ Query calls consume GitLab Credits. For more information, see [billing](../how-i
 | `POST` | `/api/v4/orbit/query/:name` | Run a [named query](#named-queries) |
 | `GET` | `/api/v4/orbit/query/templates` | List the named queries that take no parameters |
 | `GET` | `/api/v4/orbit/schema` | Get the schema |
-| `GET` | `/api/v4/orbit/schema/dsl` | Get the JSON Schema of the deprecated JSON query DSL |
+| `GET` | `/api/v4/orbit/schema/dsl` | Get the JSON Schema of the deprecated JSON query DSL. Returns `404` when you use Cypher. Use `CALL db.schema()` instead. |
 | `GET` | `/api/v4/orbit/schema/format` | Get guidance for the response formats |
 | `GET` | `/api/v4/orbit/status` | Check your access and the cluster health |
 | `GET` | `/api/v4/orbit/graph_status` | Check indexing progress for a group or project |

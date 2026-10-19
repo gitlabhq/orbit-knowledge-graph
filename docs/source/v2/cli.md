@@ -14,13 +14,16 @@ title: GitLab Orbit CLI
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-- Commands that call the GitLab server [introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. Changed to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-- Commands that call the GitLab server [enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
-- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+- Commands that call the GitLab server:
+  - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
+  - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+  - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
+  - [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
 - Generally available in GitLab 19.x.
 
 {{< /history >}}
@@ -33,7 +36,7 @@ The CLI also indexes the code on your machine into a [local graph](local/_index.
 
 Prerequisites:
 
-- [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) 1.117 or later.
+- [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) 1.120 or later.
 
 ```shell
 glab orbit --install
@@ -162,6 +165,7 @@ To index, search, and run SQL on the local graph, see [GitLab Orbit Local](local
 
 {{< /details >}}
 
+Sign in with `glab auth login`.
 On GitLab Self-Managed and GitLab Dedicated, sign in with `glab auth login --hostname <host>`,
 and run `glab orbit` in a clone from that host.
 Without `glab`, the binary reads `GITLAB_TOKEN`, or uses `glab auth credential-helper`.
@@ -206,7 +210,7 @@ and scope that they changed, and the outcome. Remote requests carry the request 
 when it is set, the session ID of Claude Code or Codex.
 The CLI never sends repository content, file paths, or query text.
 
-Telemetry is on by default. To turn it off, run `orbit config set telemetry.enabled false`, the only setting.
+Telemetry is on by default, and it is the only saved setting. To turn it off, run `orbit config set telemetry.enabled false`.
 
 | Variable | Purpose |
 |----------|---------|

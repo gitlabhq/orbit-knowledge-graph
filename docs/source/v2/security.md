@@ -15,6 +15,7 @@ title: GitLab Orbit security
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
@@ -39,7 +40,7 @@ Turning on GitLab Orbit does not change existing access.
 |--------|--------------|
 | Query groups, projects, users, merge requests, CI/CD, and work items | Reporter |
 | Query security data | Security Manager |
-| [Turn on indexing](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) | Owner of the top-level group on GitLab.com. Administrator on GitLab Self-Managed and GitLab Dedicated. |
+| [Turn on indexing](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) | The Owner role for the top-level group. On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on indexing. |
 
 Security data is vulnerabilities, security findings, security scans, scanners, and CVE and CWE identifiers.
 It needs the Security Manager role, because GitLab cannot filter aggregate results after the query runs.
@@ -53,7 +54,7 @@ GitLab authorizes every query. GitLab Orbit adds no permissions of its own, and 
 
 GitLab enforces access in two layers:
 
-- Namespace scope. Results include only the groups, subgroups, and projects where you have the required role.
+- Namespace scope. Results include only the groups where you have the required role, directly or through a shared group, and their subgroups and projects. A role in a project only does not give access to that project.
   A group next to yours in the same parent group stays out of scope unless you have a role in it.
 - A check on each result. Before GitLab returns the results, it checks your permission on each item again,
   and removes each item that you cannot access. This check covers confidential items, SAML group links,

@@ -15,6 +15,7 @@ title: GitLab Orbit in GitLab Duo
 {{< /details >}}
 
 <!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
@@ -28,13 +29,13 @@ title: GitLab Orbit in GitLab Duo
 
 GitLab Duo Agent Platform agents use GitLab Orbit to answer questions about your GitLab data, such as
 cross-project dependencies, blast radius, pipeline inheritance, and vulnerability history.
-You do not install anything. When GitLab Orbit is on for your group, it is on in GitLab Duo by default.
+You do not install anything.
 Agents call the GitLab Orbit tools when the graph can answer a question, and their other tools when it cannot.
 
 ## Prerequisites
 
 - GitLab Orbit is [turned on for your group](../quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
-- You have access to [GitLab Duo Agent Platform](https://docs.gitlab.com/user/duo_agent_platform/).
+- You have access to [Agent Platform](https://docs.gitlab.com/user/duo_agent_platform/).
 
 ## Choose which agents use GitLab Orbit
 
@@ -72,7 +73,7 @@ Select it to change the same three options, labeled **Agentic chat**, **Foundati
 | The default GitLab Duo agent | General help with code, planning, security, and project management. |
 | Planner Agent | Work item owners, blockers, contributor load, and milestone progress across projects. |
 | Security Analyst Agent | Open vulnerabilities by severity, CVE coverage in the group, and when vulnerabilities were introduced. |
-| Data Analyst Agent | SDLC analytics, such as pipeline health, merge request cycle time, contributor patterns, and deployment frequency. |
+| Data Analyst Agent | Software development lifecycle (SDLC) analytics, such as pipeline health, merge request cycle time, contributor patterns, and deployment frequency. |
 | CI Expert Agent | Job failure causes, pipeline inheritance, slowest jobs, and projects that fail frequently. |
 | Developer Flow | A draft merge request from a work item. The graph gives the agent dependencies, owners, and blast radius. |
 | Custom flows | Your own flows, when the flow configuration lists the GitLab Orbit tools. |
@@ -132,13 +133,13 @@ For more prompts, see [use cases](../use-cases.md).
 ## Known issues
 
 - GitLab Orbit answers only about groups that have it turned on and that you can access.
-- A complex question can need a follow-up question to narrow the scope.
-- For large results, the answer can leave out source code. To get it, ask the agent to show the source.
+- A complex question might need a follow-up question to narrow the scope.
+- For large results, the answer might leave out source code. To get it, ask the agent to show the source.
 
 ## Billing
 
 GitLab Orbit queries from GitLab Duo agents consume GitLab Credits, in addition to the GitLab Credits for
-GitLab Duo Agent Platform. For more information, see [billing](../how-it-works.md#billing).
+Agent Platform. For more information, see [billing](../how-it-works.md#billing).
 
 ## Related topics
 
