@@ -91,6 +91,17 @@ impl Predicate {
         }
     }
 
+    pub fn is_point_lookup(&self) -> bool {
+        match self {
+            Self::Ids { values, .. } => values.len() == 1,
+            Self::Property { filter, .. } => {
+                matches!(filter.op, None | Some(crate::input::FilterOp::Eq))
+                    && !matches!(filter.value, Some(serde_json::Value::Array(_)))
+            }
+            _ => false,
+        }
+    }
+
     pub fn filters_sort_key(&self, sort_key: &[String]) -> bool {
         let in_key = |column: &str| sort_key.iter().any(|key| key == column);
         match self {

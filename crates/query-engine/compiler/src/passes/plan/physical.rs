@@ -528,7 +528,11 @@ impl RelationUsage {
         match graph.get(id) {
             RelationNode::Read { .. } | RelationNode::Owned { .. } => false,
             RelationNode::Filter { input, predicates } => {
-                predicates.iter().any(Self::selective_predicate) || Self::reusable(input.id, graph)
+                let selective: Vec<_> = predicates.iter().filter(|p| p.is_selective()).collect();
+                if !selective.is_empty() && selective.iter().all(|p| p.is_point_lookup()) {
+                    return false;
+                }
+                !selective.is_empty() || Self::reusable(input.id, graph)
             }
             RelationNode::Project { input, .. } | RelationNode::Bind { input, .. } => {
                 Self::reusable(input.id, graph)
@@ -540,10 +544,6 @@ impl RelationUsage {
             | RelationNode::Sort { .. }
             | RelationNode::Limit { .. } => true,
         }
-    }
-
-    fn selective_predicate(predicate: &Predicate) -> bool {
-        predicate.is_selective()
     }
 
     fn materialize(&mut self, id: RelationId) {
