@@ -279,6 +279,26 @@ fn local(
                     level = parents;
                 }
             }
+            let words: Vec<term::Term> = terms
+                .iter()
+                .filter(|term| !term.is_regex())
+                .flat_map(|term| term.raw.split_whitespace().map(term::Term::parse))
+                .collect();
+            if words.len() > terms.len()
+                && !options.fixed
+                && !options.invert
+                && options.output == Output::Lines
+                && !hits.iter().any(|hit| !hit.context)
+            {
+                let any = scan::scan(&root, &scope, &term::matcher(&words, &options)?, &options)?;
+                if any.iter().any(|hit| !hit.context) {
+                    notes.push(format!(
+                        "{NOTE}0 lines contain {:?}; showing lines with any of its words, files with the most of them first",
+                        alternatives.join("|")
+                    ));
+                    (hits, terms) = (any, words);
+                }
+            }
             let mut files: Vec<&str> = hits.iter().map(|h| h.file.as_str()).collect();
             files.sort();
             files.dedup();

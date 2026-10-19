@@ -97,10 +97,12 @@ fn tokens(query: &str) -> Vec<String> {
     tokens
 }
 
-fn glob_for(value: &str) -> String {
-    match value.contains(['*', '?', '[']) {
-        true => value.to_string(),
-        false => format!("*{value}*"),
+fn globs_for(value: &str) -> Vec<String> {
+    let value = value.trim_matches('/');
+    match (value.contains(['*', '?', '[']), value.contains('/')) {
+        (true, _) => vec![value.to_string()],
+        (false, false) => vec![format!("*{value}*")],
+        (false, true) => vec![format!("**/*{value}*"), format!("**/*{value}*/**")],
     }
 }
 
@@ -118,7 +120,7 @@ pub(super) fn parse(query: &str) -> Option<Parsed> {
             continue;
         }
         match name.to_ascii_lowercase().as_str() {
-            "file" | "path" if !value.is_empty() => parsed.globs.push(glob_for(value)),
+            "file" | "path" if !value.is_empty() => parsed.globs.extend(globs_for(value)),
             "repo" if !value.is_empty() => parsed.targets.push(value.to_string()),
             _ => match kind_for(name) {
                 Some(kind) => {
@@ -247,6 +249,10 @@ mod tests {
         );
         let parsed = parse("issue:rate limit path:src repo:g/p").unwrap();
         assert_eq!(parsed.globs, strings(&["*src*"]));
+        assert_eq!(
+            globs_for("pkg/kubelet/"),
+            strings(&["**/*pkg/kubelet*", "**/*pkg/kubelet*/**"])
+        );
         assert_eq!(parsed.targets, strings(&["g/p"]));
         assert_eq!(parse("type:go grep"), None);
         assert_eq!(parse("is:mr x"), None);

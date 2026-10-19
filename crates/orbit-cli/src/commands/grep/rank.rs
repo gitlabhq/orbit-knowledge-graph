@@ -145,8 +145,15 @@ pub(super) fn ranked<'a>(hits: &'a [Hit], alternatives: &[Term], collapse: bool)
         true => collapse_variants(text).0,
         false => text,
     };
-    let matches = |list: &[&Hit]| list.iter().filter(|h| !h.context).count();
-    let mut rows: Vec<(u8, usize, Row<'a>)> = code
+    let matches = |list: &[&Hit]| {
+        let found: Vec<&&Hit> = list.iter().filter(|h| !h.context).collect();
+        let distinct = alternatives
+            .iter()
+            .filter(|term| found.iter().any(|hit| term.mentions(&hit.text)))
+            .count();
+        (distinct, found.len())
+    };
+    let mut rows: Vec<(u8, (usize, usize), Row<'a>)> = code
         .into_iter()
         .map(|(file, list)| {
             let best = list
