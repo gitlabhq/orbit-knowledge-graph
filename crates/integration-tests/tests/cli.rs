@@ -221,6 +221,232 @@ fn reindex_idempotent() {
 }
 
 #[test]
+fn incremental_reindex_follows_the_working_tree() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    init_repo_at(
+        repo,
+        &[
+            ("Cargo.toml", "[package]\nname = \"demo\"\n"),
+            (
+                "src/lib.rs",
+                "pub mod util;\npub fn run() { util::helper(); }\n",
+            ),
+            ("src/util.rs", "pub fn helper() {}\n"),
+            ("lib/greeter.rb", "class Greeter\n  def hi; end\nend\n"),
+            ("lib/other.rb", "class Other\n  def stay; end\nend\n"),
+            ("README.md", "demo\n"),
+        ],
+    );
+    let orbit = |args: &[&str]| {
+        let out = orbit_cmd()
+            .args(args)
+            .env("ORBIT_DATA_DIR", data_dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "orbit {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let names = |sql: &str| -> Vec<String> {
+        let output = orbit_cmd()
+            .args(["sql", "-F", "json", "--repo", repo.to_str().unwrap(), sql])
+            .env("ORBIT_DATA_DIR", data_dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "sql failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let output: Value = serde_json::from_slice(&output.stdout).unwrap();
+        rows(&output)
+            .iter()
+            .map(|r| r["n"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let definitions = "SELECT fqn AS n FROM gl_definition ORDER BY fqn";
+    let files = "SELECT path AS n FROM gl_file ORDER BY path";
+
+    let out = orbit_cmd()
+        .args(["reindex", repo.to_str().unwrap(), "--ff=inc"])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "reindex before any index must fail");
+
+    orbit(&["index", repo.to_str().unwrap(), "--ff=inc"]);
+    let sorted = |defs: &[&str]| -> Vec<String> {
+        let mut all: Vec<String> = defs.iter().map(|s| s.to_string()).collect();
+        all.sort();
+        all
+    };
+    let ruby = ["Greeter", "Greeter::hi", "Other", "Other::stay"];
+    assert_eq!(
+        names(definitions),
+        sorted(&[&["run", "util::helper"][..], &ruby].concat())
+    );
+
+    std::fs::write(
+        repo.join("src/util.rs"),
+        "pub fn helper() {}\npub fn uncommitted() {}\n",
+    )
+    .unwrap();
+    orbit(&["reindex", repo.to_str().unwrap(), "--ff=inc"]);
+    assert_eq!(
+        names(definitions),
+        sorted(&[&["run", "util::helper", "util::uncommitted"][..], &ruby].concat())
+    );
+
+    std::fs::write(
+        repo.join("src/util.rs"),
+        "pub fn helper() {}\npub fn extra() {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        repo.join("lib/greeter.rb"),
+        "class Greeter\n  def hi; end\n  def bye; end\nend\n",
+    )
+    .unwrap();
+    git(repo, &["commit", "-qam", "edit"]);
+    std::fs::write(repo.join("src/new.rs"), "pub fn fresh() {}\n").unwrap();
+    orbit(&["reindex", repo.to_str().unwrap(), "--ff=inc"]);
+    let ruby = [
+        "Greeter",
+        "Greeter::bye",
+        "Greeter::hi",
+        "Other",
+        "Other::stay",
+    ];
+    assert_eq!(
+        names(definitions),
+        sorted(
+            &[
+                &["new::fresh", "run", "util::extra", "util::helper"][..],
+                &ruby
+            ]
+            .concat()
+        )
+    );
+
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-qm", "add new"]);
+    git(repo, &["mv", "src/new.rs", "src/moved.rs"]);
+    git(repo, &["rm", "-q", "README.md"]);
+    std::fs::create_dir_all(repo.join("py")).unwrap();
+    std::fs::write(repo.join("py/mod.py"), "def py_fn():\n    pass\n").unwrap();
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-qm", "rename, remove, add python"]);
+    orbit(&["reindex", repo.to_str().unwrap(), "--ff=inc"]);
+    assert_eq!(
+        names(definitions),
+        sorted(
+            &[
+                &[
+                    "moved::fresh",
+                    "py.mod.py_fn",
+                    "run",
+                    "util::extra",
+                    "util::helper"
+                ][..],
+                &ruby
+            ]
+            .concat()
+        )
+    );
+    assert_eq!(
+        names(files),
+        [
+            "Cargo.toml",
+            "lib/greeter.rb",
+            "lib/other.rb",
+            "py/mod.py",
+            "src/lib.rs",
+            "src/moved.rs",
+            "src/util.rs"
+        ]
+    );
+
+    let grep = orbit_cmd()
+        .args(["grep", "helper", "--repo", repo.to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        grep.status.success() && String::from_utf8_lossy(&grep.stdout).contains("util::helper"),
+        "grep after an incremental index: {}{}",
+        String::from_utf8_lossy(&grep.stdout),
+        String::from_utf8_lossy(&grep.stderr)
+    );
+
+    let state_dir = data_dir.path().join("var");
+    let snapshots: BTreeSet<String> = std::fs::read_dir(
+        state_dir
+            .read_dir()
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path(),
+    )
+    .unwrap()
+    .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+    .collect();
+    assert_eq!(
+        snapshots,
+        BTreeSet::from([
+            "graph.python.bin".to_string(),
+            "graph.ruby.bin".to_string(),
+            "graph.rust.bin".to_string()
+        ])
+    );
+    let manifest =
+        duckdb_client::DuckDbClient::open_read_only(&data_dir.path().join("local/manifest.duckdb"))
+            .unwrap();
+    let incremental_state = manifest
+        .query_arrow("SELECT state FROM _orbit_incremental_state")
+        .unwrap();
+    assert_eq!(
+        incremental_state
+            .iter()
+            .map(|batch| batch.num_rows())
+            .sum::<usize>(),
+        1
+    );
+
+    let rust_snapshot = state_dir
+        .read_dir()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path()
+        .join("graph.rust.bin");
+    std::fs::remove_file(&rust_snapshot).unwrap();
+    let before = names(definitions);
+    let failed = orbit_cmd()
+        .args(["reindex", repo.to_str().unwrap(), "--ff=inc"])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    assert_eq!(names(definitions), before);
+
+    let out = orbit_cmd()
+        .args(["reindex", repo.to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "reindex without --ff=inc must refuse"
+    );
+}
+
+#[test]
 fn index_db_flag_writes_to_custom_path() {
     let tmp = tempfile::TempDir::new().unwrap();
     let db_path = tmp.path().join("custom.duckdb");

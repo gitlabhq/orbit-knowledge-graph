@@ -268,7 +268,7 @@ same instruction block, MCP entry, and hooks by hand.
 
 Revision databases and a separate manifest are stored under `~/.gitlab/orbit/local/`.
 Graph files use `revisions/<project-id>/<commit-sha>.duckdb`.
-The `manifest.duckdb` file records their paths and status.
+The `manifest.duckdb` file records their paths, status, and incremental snapshot metadata.
 The canonical checkout path determines the project ID.
 Reindexing replaces that commit's graph and preserves other revisions.
 Use `orbit list -F json` to see database paths, or set `ORBIT_DATA_DIR` to change the workspace root. `orbit config` then reads and writes `$ORBIT_DATA_DIR/settings.json` too.

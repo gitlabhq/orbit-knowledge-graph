@@ -15,12 +15,14 @@ workspace = true
 mimalloc = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
 code-graph = { path = "../code-graph" }
+code-graph-incremental = { path = "../code-graph-incremental" }
 duckdb-client = { path = "../duckdb-client" }
 labkit-events = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics" }
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-markers"] }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
+orbit-arrow = { path = "../utils/arrow" }
 ontology = { path = "../ontology" }
 gitalisk-core = { workspace = true }
 clap = { workspace = true }
@@ -44,6 +46,7 @@ rustls = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
+rustc-hash = { workspace = true }
 sha2 = { workspace = true }
 strum = { workspace = true }
 toml_edit = { workspace = true }
