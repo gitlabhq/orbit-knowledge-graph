@@ -152,7 +152,7 @@ Local commands use the [local graph](local/_index.md) on your machine. They need
 | `config` | Read and write saved settings. | None |
 | `version` | Print the version. | None |
 
-For all flags, run `orbit <command> --help`.
+For all flags, run `glab orbit <command> --help`.
 To index, search, and run SQL on the local graph, see [GitLab Orbit Local](local/_index.md).
 
 ## Query the remote graph
@@ -210,7 +210,7 @@ and scope that they changed, and the outcome. Remote requests carry the request 
 when it is set, the session ID of Claude Code or Codex.
 The CLI never sends repository content, file paths, or query text.
 
-Telemetry is on by default, and it is the only saved setting. To turn it off, run `orbit config set telemetry.enabled false`.
+Telemetry is on by default, and it is the only saved setting. To turn it off, run `glab orbit config set telemetry.enabled false`.
 
 | Variable | Purpose |
 |----------|---------|
@@ -233,8 +233,7 @@ Telemetry is on by default, and it is the only saved setting. To turn it off, ru
 
 ## Billing
 
-`query` consumes GitLab Credits. Local commands never consume GitLab Credits.
-For more information, see [billing](how-it-works.md#billing).
+For which commands consume GitLab Credits, see [billing](how-it-works.md#billing).
 
 ## Related topics
 

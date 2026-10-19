@@ -22,7 +22,7 @@ title: GitLab Orbit in GitLab Duo
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
 - [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/261361) to on by default in GitLab Duo in GitLab 19.6.
+- GitLab Orbit in GitLab Duo [turned on by default](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/261361) in GitLab 19.6.
 - Generally available in GitLab 19.x.
 
 {{< /history >}}
@@ -55,7 +55,7 @@ To choose which agents use GitLab Orbit:
 
    | Option | Gives the GitLab Orbit tools to |
    |--------|---------------------------------|
-   | **Agentic Chat** | Agentic chat. |
+   | **Agentic Chat** | GitLab Duo Agentic Chat. |
    | **Other Foundational Agents** | Foundational agents outside chat, for example the Security Analyst Agent. |
    | **Custom Agents** | Custom agents that users build. |
 
@@ -99,7 +99,7 @@ Prerequisites:
 To add the tools:
 
 1. In the top bar, select **Search or go to** and find your group or project.
-1. Select **AI** > **Flows**.
+1. In the left sidebar, select **AI** > **Flows**.
 1. Select the flow you want to edit.
 1. In the upper-right corner, select **Edit**.
 1. Add the GitLab Orbit tools to the `toolset` of each agent component that needs them:

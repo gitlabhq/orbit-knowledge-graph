@@ -29,7 +29,7 @@ title: GitLab Orbit
 
 GitLab Orbit indexes your GitLab data and code into a graph that your agent can query.
 Ask what breaks if you change a service, who should review a file, or why pipelines fail.
-Your agent answers with a few graph queries, not hundreds of file reads and API calls.
+Your agent answers with a few graph queries in place of many file reads and API calls.
 
 {{< cards >}}
 

@@ -148,8 +148,9 @@ Until you install the GitLab Orbit chart, GitLab reports connection errors to Gi
 
 ## Make the credentials available to GitLab Orbit
 
+Create the GitLab Orbit namespace first.
 The values file in the next section expects a Secret named `gkg-secrets` in the GitLab Orbit namespace,
-with these keys. Create the namespace first.
+with these keys:
 
 | Key | Holds |
 |-----|-------|
@@ -282,7 +283,7 @@ GitLab Orbit indexes top-level groups. Subgroups and projects inherit indexing.
 <!-- vale orbit.StandaloneProductName = NO -->
 
 1. In the left sidebar, at the bottom, select **Admin**.
-1. Select **Orbit**.
+1. In the left sidebar, select **Orbit**.
 1. Under **Top-level groups**, select your group.
 1. Select **Actions** > **Turn on Orbit**.
 

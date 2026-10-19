@@ -170,7 +170,7 @@ The endpoint has two tools. `list_commands` lists the GitLab Orbit commands with
 | `get_graph_schema` | Returns the node types and relationship types, and the properties of the node types that you pass in `expand_nodes`. |
 | `get_response_format` | Returns the response JSON Schema of `query_graph` and its version. |
 
-`get_graph_schema` returns the node types and relationship types. To also get the properties and relationships of a node type, pass its name in `expand_nodes`, for example `["MergeRequest"]`, or run
+To get the properties and relationships of a node type, pass its name in `expand_nodes`, for example `["MergeRequest"]`, or run
 `CALL db.schema('MergeRequest')` with `query_graph`. The `get_query_dsl` command belongs to the deprecated JSON query DSL.
 
 Your agent writes the queries for you. For precise control, give it a complete query to run with
@@ -188,7 +188,7 @@ For query recipes and the query language reference, install the [GitLab Orbit sk
 
 ### Billing
 
-Queries through the MCP endpoint consume GitLab Credits. For more information, see [billing](../how-it-works.md#billing).
+For which calls consume GitLab Credits, see [billing](../how-it-works.md#billing).
 
 ## Local MCP server
 
@@ -209,7 +209,6 @@ Queries through the MCP endpoint consume GitLab Credits. For more information, s
 `orbit mcp serve` starts an MCP server over stdio. It reads only the local graph,
 keeps no cache or query history, and serves each client separately.
 The server has no URL, so clients that need a URL cannot connect to it.
-It never consumes GitLab Credits.
 
 Prerequisites:
 

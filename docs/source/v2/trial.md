@@ -46,7 +46,7 @@ Prerequisites:
 To start a trial:
 
 1. In the top bar, select **Search or go to** and find your top-level group.
-1. Select **Settings** > **Orbit**.
+1. In the left sidebar, select **Settings** > **Orbit**.
 1. Turn on the **Turn on Orbit** toggle.
 1. In the **Start a free Orbit trial?** dialog, select **Start free trial**.
 
@@ -62,7 +62,7 @@ To connect your agent, continue with the [quickstart](quickstart.md#step-2-insta
 ## When the trial ends
 
 The trial ends when its days end or its GitLab Credits run out, whichever comes first.
-GitLab Orbit then pauses for the group, and queries stop returning results.
+GitLab Orbit then pauses for the group, and queries fail.
 To keep using GitLab Orbit, [contact sales](https://about.gitlab.com/sales/) to buy the add-on or more GitLab Credits.
 
 GitLab keeps the indexed data for 30 days. If GitLab Orbit is on again in that time, indexing continues
