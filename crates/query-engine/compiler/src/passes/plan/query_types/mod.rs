@@ -1,3 +1,6 @@
+//! One planner per query type. Traversal and aggregation share the pattern planner; neighbors, path
+//! finding, and hydration have their own shapes. `EdgeTableConfig` is the edge routing the last two share.
+
 pub mod aggregation;
 pub mod hydration;
 pub mod neighbors;

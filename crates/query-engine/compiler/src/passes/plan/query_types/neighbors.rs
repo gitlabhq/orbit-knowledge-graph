@@ -1,3 +1,6 @@
+//! Neighbors: the center node, the edge tables and relationship kinds per direction, and whether the
+//! center's filters are answered by denormalized edge columns.
+
 use ontology::constants::*;
 use query_data_model::{DenormalizedDirection, OrbitQueryModel, RelationshipId};
 

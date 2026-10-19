@@ -1,3 +1,6 @@
+//! Relation planning: an `EdgeRelation` per input relationship (edge tables, layout, foreign-key
+//! shortcut), ordered most selective first along a connected chain.
+
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 

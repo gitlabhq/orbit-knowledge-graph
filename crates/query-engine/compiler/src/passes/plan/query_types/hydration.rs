@@ -1,3 +1,6 @@
+//! Hydration: per node, the table, ids, columns, and traversal-path filter that lowering reads
+//! properties with.
+
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 use query_data_model::OrbitQueryModel;
 

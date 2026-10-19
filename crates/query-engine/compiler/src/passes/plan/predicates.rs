@@ -1,3 +1,6 @@
+//! Predicates and projections the planner attaches to relations, and the facts about a predicate the
+//! planner asks for: selective, a point lookup, or filtering the sort key.
+
 use ontology::constants::*;
 
 use super::filters::BoundFilter;

@@ -1,3 +1,6 @@
+//! Node planning: a `NodePlan` per input node, and the decision whether each node joins the result
+//! as a table read or only narrows an edge scan.
+
 use std::collections::{HashMap, HashSet};
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;

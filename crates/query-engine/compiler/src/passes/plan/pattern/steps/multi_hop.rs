@@ -1,3 +1,6 @@
+//! Step for a variable-length relation: expand hop by hop from the pinned end and union the requested
+//! depths, carrying the path so far.
+
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
 

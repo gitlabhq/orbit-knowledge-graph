@@ -1,3 +1,6 @@
+//! Aggregation: plan the pattern like a traversal, then derive groups, measures, and the deferred
+//! latest-row condition from the relation graph.
+
 use std::collections::HashMap;
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;

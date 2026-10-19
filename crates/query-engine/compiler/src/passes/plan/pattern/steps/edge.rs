@@ -1,3 +1,6 @@
+//! Step for a relation stored as edge rows: read the current rows under the relation's predicates,
+//! narrow by known endpoint ids, join to the chain, and expose the edge columns.
+
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
 

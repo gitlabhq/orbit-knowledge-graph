@@ -1,3 +1,7 @@
+//! The MATCH pattern of a traversal or aggregation: planned nodes, planned relations, and the
+//! denormalized-column facts. `Pattern::new` runs the planning steps in order (nodes, relations,
+//! condition placement, node access, relation order); `Pattern::execution` assembles the relation graph.
+
 mod conditions;
 mod coverage;
 mod nodes;

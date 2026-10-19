@@ -1,3 +1,6 @@
+//! Path finding: start and end nodes, the forward and backward depth split, and the first-hop kind
+//! filters.
+
 use query_data_model::OrbitQueryModel;
 
 use super::EdgeTableConfig;

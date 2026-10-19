@@ -1,3 +1,11 @@
+//! Planning turns a validated query into a `QueryPlan`: the backend-neutral reads, joins, and
+//! outputs that lowering renders as SQL.
+//!
+//! `query_types/` picks the planner for the query type. Traversal and aggregation build a `pattern`
+//! (nodes, relations, conditions) whose steps assemble a `graph::RelationGraph`; `reuse` decides which
+//! relations lowering materializes; `filters` and `predicates` are the shared condition vocabulary.
+//! Neighbors, path finding, and hydration keep their own hand-written shapes.
+
 pub(crate) mod filters;
 pub mod graph;
 mod pattern;

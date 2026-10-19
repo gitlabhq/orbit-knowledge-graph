@@ -1,3 +1,6 @@
+//! Binds an input filter to the backend facts about its property (sort key, text index, selectivity,
+//! uniqueness, mutability). Those facts decide where the planner may apply the filter.
+
 use std::collections::HashMap;
 
 use query_data_model::{OrbitQueryModel, RelationalMapping};

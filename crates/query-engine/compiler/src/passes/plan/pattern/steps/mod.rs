@@ -1,3 +1,6 @@
+//! Assembles the relation graph: the shared chain state (root, bindings, id sets), node table reads,
+//! and the steps in `edge`, `fk`, and `multi_hop` that each add one relation to the chain.
+
 mod edge;
 mod fk;
 mod multi_hop;

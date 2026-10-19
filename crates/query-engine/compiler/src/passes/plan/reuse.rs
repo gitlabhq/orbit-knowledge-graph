@@ -1,3 +1,6 @@
+//! Decides which relations lowering materializes as CTEs: those referenced more than once and worth
+//! keeping (selective reads, joins, unions, latest-row picks). Point lookups are recomputed inline.
+
 use std::collections::HashMap;
 
 use super::graph::{RelationGraph, RelationId, RelationNode};
