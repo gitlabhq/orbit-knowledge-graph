@@ -13,8 +13,6 @@ title: Troubleshooting GitLab Orbit
 
 {{< /details >}}
 
-<!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
-
 {{< history >}}
 
 - Remote graph:
@@ -25,7 +23,7 @@ title: Troubleshooting GitLab Orbit
 - Local graph:
   - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an experiment.
   - [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to beta in GitLab 19.1.
-- Generally available in GitLab 19.x.
+- Generally available in GitLab 19.5.
 
 {{< /history >}}
 
