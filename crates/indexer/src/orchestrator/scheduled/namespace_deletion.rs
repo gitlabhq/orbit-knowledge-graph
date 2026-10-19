@@ -90,13 +90,17 @@ impl NamespaceDeletionScheduler {
             let span = info_span!(
                 "reconcile_namespace",
                 gl_root_namespace_id = root.top_level_namespace_id(),
-                traversal_path = root.as_str(),
+                traversal_path = tracing::field::Empty,
             );
             let reconcile = async {
                 if !root.is_valid() {
-                    warn!("skipping reconcile for enabled namespace with invalid traversal_path");
+                    warn!(
+                        traversal_path = %root,
+                        "skipping reconcile for enabled namespace with invalid traversal_path"
+                    );
                     return;
                 }
+                tracing::Span::current().record("traversal_path", root.as_str());
 
                 let outcomes = self.store.reconcile_moved_entities(root).await;
                 for outcome in &outcomes {

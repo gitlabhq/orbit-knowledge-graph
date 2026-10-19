@@ -41,13 +41,14 @@ impl NamespaceIndexingDispatch {
             let span = info_span!(
                 "dispatch_namespace",
                 gl_root_namespace_id = namespace.namespace_id,
-                traversal_path = traversal_path.as_str(),
+                traversal_path = tracing::field::Empty,
             );
             let dispatch = async {
                 if !traversal_path.is_valid() {
-                    warn!("skipping namespace with invalid traversal_path");
+                    warn!(%traversal_path, "skipping namespace with invalid traversal_path");
                     return Ok(());
                 }
+                tracing::Span::current().record("traversal_path", traversal_path.as_str());
 
                 let request = NamespaceIndexingRequest {
                     namespace: namespace.namespace_id,
