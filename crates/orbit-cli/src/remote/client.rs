@@ -216,8 +216,6 @@ impl OrbitClient {
     }
 }
 
-/// `reqwest::Error`'s Display omits its source chain, so a timeout and a
-/// refused connection would otherwise read the same.
 fn request_failure_message(action: &str, error: &reqwest::Error) -> String {
     if error.is_timeout() {
         return format!("{action} timed out: {error}");
