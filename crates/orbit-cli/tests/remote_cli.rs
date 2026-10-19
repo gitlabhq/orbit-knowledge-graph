@@ -412,12 +412,7 @@ fn grep_for_a_hosted_kind_searches_the_origin_group() {
     let clone = git_clone_with_origin("https://localhost/my-group/my-project");
     let data = tempfile::tempdir().expect("tempdir");
 
-    let output = run_orbit_with_data(
-        clone.path(),
-        data.path(),
-        &base_url,
-        &["grep", "runner", "--kind", "MergeRequest"],
-    );
+    let output = run_orbit_with_data(clone.path(), data.path(), &base_url, &["grep", "mr:runner"]);
     let request = handle.join().expect("join mock");
 
     assert!(

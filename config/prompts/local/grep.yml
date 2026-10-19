@@ -1,5 +1,5 @@
 name: grep
-version: 2.6.0
+version: 2.7.0
 short: Search every line in local code, tests, config, and docs
 description: >-
   Search every line in local code, tests, config, and docs, like ripgrep.
@@ -15,18 +15,18 @@ description: >-
   then code, tests, and config or docs. A definition the query names prints
   first with its source. Pass paths as with rg; rg and grep flags such as
   -A, -l, -w, and -g work.
-  Qualifiers in the query work as in GitHub search. `is:` picks what to search:
-  `is:def`, `is:class`, `is:method`, `is:file`, or `is:dir`, and on GitLab
-  `is:issue`, `is:mr`, `is:branch`, `is:commit`, or `is:comment`. The other words
-  are the search. `symbol:x` finds definitions named x. `file:x` keeps paths
-  containing x, and alone lists them. `repo:group/project` searches that GitLab
-  project. `-F` reads the query literally.
+  A kind and a colon start a search for the words after it, up to the next kind:
+  `orbit grep "mr:rate limit def:throttle"` runs two searches. Kinds are graph
+  nodes or short names: `def:`, `class:`, `method:`, `dir:`, and on GitLab `mr:`,
+  `issue:`, `branch:`, `commit:`, `comment:`. A trailing `def:` applies to the
+  words before it. `file:x` keeps paths containing x, and alone lists them.
+  `repo:group/project` searches that GitLab project. `-F` reads the query literally.
   A plain search without paths or file filters also searches the GitLab group
   behind `origin`. Its issues, merge requests, commits, notes, and other projects'
   code print after local results, with tokens for `context`. Name a GitLab project,
   group, URL, `Project[id]`, or `Group[id]` as a path to search it instead,
   including its code when it has no local checkout. An indexed checkout of that
   project is searched locally.
-  `is:issue`, `is:mr`, `is:commit`, `is:comment`, and `is:milestone` search only
-  GitLab. `is:branch` finds branches by words from their names, with their merge
-  requests and pipelines.
+  `mr:`, `issue:`, `commit:`, `comment:`, and `milestone:` search only GitLab.
+  `branch:` finds branches by words from their names, with their merge requests
+  and pipelines.

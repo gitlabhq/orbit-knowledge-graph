@@ -20,7 +20,7 @@ use crate::remote::grep::{Outcome, scope_for};
 use local::LocalBackend;
 
 /// What a search prints, following rg: matching lines, `-l` file names, `-c` counts, or
-/// nothing but the exit status with `-q`; `--kind File` and `--kind Directory` list where
+/// nothing but the exit status with `-q`; `file:` and `dir:` list where
 /// the matches are with their definitions.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Output {
@@ -67,10 +67,50 @@ pub(crate) async fn run(
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
     mut paths: Vec<String>,
-    mut filter: RecallFilter,
     mut options: Options,
 ) -> Result<()> {
-    let query = qualifier::apply(query, &mut filter.kinds, &mut options, &mut paths);
+    let sections = qualifier::apply(query, &mut options, &mut paths);
+    let mut found = false;
+    for section in sections {
+        if found {
+            println!();
+        }
+        let mut options = options.clone();
+        if section.query.as_deref() == Some(".") && section.kinds.is_empty() {
+            options.output = Output::Files;
+        }
+        let filter = RecallFilter {
+            kinds: section.kinds,
+        };
+        match search(
+            section.query,
+            repo.clone(),
+            db.clone(),
+            paths.clone(),
+            filter,
+            options,
+        )
+        .await
+        {
+            Ok(()) => found = true,
+            Err(error) if error.is::<NoMatches>() => {}
+            Err(error) => return Err(error),
+        }
+    }
+    match found {
+        true => Ok(()),
+        false => Err(NoMatches.into()),
+    }
+}
+
+async fn search(
+    query: Option<String>,
+    repo: Option<PathBuf>,
+    db: Option<PathBuf>,
+    paths: Vec<String>,
+    mut filter: RecallFilter,
+    options: Options,
+) -> Result<()> {
     let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new("."))).ok();
     let exists = |path: &str| {
         Path::new(path).exists() || root.as_ref().is_some_and(|root| root.join(path).exists())
@@ -104,7 +144,7 @@ pub(crate) async fn run(
         filter.kinds.retain(|kind| scope_for(kind).is_none());
         if route.local.is_empty() && !filter.kinds.is_empty() {
             eprintln!(
-                "orbit: skipping hosted is:{}; use `{} query`",
+                "orbit: skipping hosted {}; use `{} query`",
                 filter.kinds.join(", "),
                 crate::commands::setup::spec::launcher()
             );
@@ -275,7 +315,7 @@ fn local(
     }
     if !shown.is_empty() {
         for kind in &shown {
-            header.push_str(&format!(" is:{kind}"));
+            header.push_str(&format!(" {kind}:"));
         }
     }
     for language in &languages {
@@ -447,11 +487,11 @@ fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::K
          paths or file filters. Otherwise use `{launcher} query`"
     );
     if !kinds.hosted.is_empty() {
-        eprintln!("orbit: skipping hosted is:{hosted}; use `{launcher} query`");
+        eprintln!("orbit: skipping hosted {hosted}; use `{launcher} query`");
     }
     if !kinds.unknown.is_empty() {
         eprintln!(
-            "orbit: ignoring unknown is:{}; kinds here: File, Directory, Definition, {}",
+            "orbit: ignoring unknown {}; kinds here: File, Directory, Definition, {}",
             kinds.unknown.join(", "),
             known.join(", ")
         );

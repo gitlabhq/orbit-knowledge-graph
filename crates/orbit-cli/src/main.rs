@@ -160,21 +160,10 @@ struct GrepArgs {
     )]
     paths: Vec<String>,
 
-    #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP, hide = true)]
-    kind: Option<Kinds>,
-
     /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
-
-const KIND_ARG_HELP: &str = "Ontology node kinds, comma-separated. Definition kinds such as \
-                             `Class,Method` narrow matches; lowercase `function` or `class` \
-                             cover the whole family. `Definition` keeps matches inside any \
-                             definition. `File` and `Directory` list where matches are.";
-
-#[derive(Debug, Clone, PartialEq)]
-struct Kinds(Vec<String>);
 
 async fn run_grep(args: GrepArgs) -> Result<()> {
     use commands::grep::{Options, Output};
@@ -217,17 +206,7 @@ async fn run_grep(args: GrepArgs) -> Result<()> {
             _ => Output::Lines,
         },
     };
-    commands::grep::run(
-        query,
-        args.repo,
-        args.db,
-        paths,
-        orbit_search::RecallFilter {
-            kinds: kind_names(args.kind),
-        },
-        options,
-    )
-    .await
+    commands::grep::run(query, args.repo, args.db, paths, options).await
 }
 
 /// grep and rg flags that `orbit grep` already behaves as: line numbers, recursion, ignoring
@@ -327,20 +306,6 @@ fn tolerate_grep_flags(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString>
         }
     }
     out
-}
-
-fn parse_kinds(value: &str) -> Result<Kinds, String> {
-    let kinds: Vec<String> = value
-        .split([',', '|'])
-        .map(str::trim)
-        .filter(|kind| !kind.is_empty())
-        .map(str::to_string)
-        .collect();
-    Ok(Kinds(kinds))
-}
-
-fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
-    kinds.map(|Kinds(names)| names).unwrap_or_default()
 }
 
 fn context_target_help() -> String {

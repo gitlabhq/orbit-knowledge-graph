@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.27.0
+version: 0.28.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -44,7 +44,7 @@ If they decline, note the discrepancy in one line and continue with the correcte
 
 ```shell
 orbit index .
-orbit grep "is:method rate limit" src
+orbit grep "method:rate limit" src
 orbit grep 'query_arrow|insert_batch|execute' crates/duckdb-client
 orbit context duckdb_client::search::DuckDbSearch::grep src/lib.rs:120-180 crates/duckdb-client
 ```
@@ -61,10 +61,11 @@ before the matches. Pipe through `head` to bound output; `-m N` caps matches
 per file and `-M N` hides lines wider than N. Files that define
 a term come first, then code, tests, and config or docs. A definition the query names prints first with its source.
 The usual rg and grep flags work: `-A`/`-B`/`-C`, `-l`, `-c`, `-w`, `-F`, `-g`.
-Qualifiers work as in GitHub search. `is:` picks what to search: `is:def`,
-`is:class`, `is:method`, or `is:function` for definitions, `is:file` and `is:dir`
-to list where matches are. The other words are the search. `symbol:x` finds
-definitions named x. `file:x` keeps paths containing x, and alone lists them.
+A kind and a colon start a search for the words after it, up to the next kind, so
+`orbit grep "mr:rate limit def:throttle"` runs two searches. Kinds are graph nodes
+or short names: `def:`, `class:`, `method:`, or `function:` for definitions, and
+`file:` or `dir:` alone list where matches are. A trailing `def:` applies to the
+words before it. `file:x` keeps paths containing x, and alone lists them.
 Unknown names such as `std::io` stay literal, and `-F` turns qualifiers off.
 
 A plain search with no paths or file filters also searches the GitLab group
@@ -72,13 +73,13 @@ behind `origin`. It finds issues, merge requests, commits, notes, and code in ot
 Those results print after the local ones as tokens such as `MergeRequest[42]`.
 Name `group/project`, `Project[id]`, or `Group[id]` as a path to search another
 project or group, including its code when there is no local checkout.
-`is:issue`, `is:mr`, `is:commit`, and `is:comment` search GitLab only.
-`is:branch` finds branches with their merge requests and pipelines, and
+`mr:`, `issue:`, `commit:`, and `comment:` search GitLab only.
+`branch:` finds branches with their merge requests and pipelines, and
 `repo:group/project` names the project.
 
 ```shell
-orbit grep "is:mr rate limit repo:gitlab-org/gitlab"
-orbit grep "is:branch approval rules"
+orbit grep "mr:rate limit repo:gitlab-org/gitlab"
+orbit grep "branch:approval rules"
 orbit context mr:42 issue:7 src/lib.rs:120-180
 orbit context branch:fix-ci pipeline:123 job:456 commit:0123abc repo:gitlab-org/cli
 ```

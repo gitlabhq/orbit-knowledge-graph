@@ -3,7 +3,7 @@ use ontology::Ontology;
 
 use super::Output;
 
-/// `--kind` resolved against the ontology: definition kinds narrow matches, `File` and
+/// Qualifier kinds resolved against the ontology: definition kinds narrow matches, `File` and
 /// `Directory` list where matches are, and hosted nodes such as `MergeRequest` are reported.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Kinds {
@@ -92,15 +92,7 @@ const FAMILIES: &[&[&str]] = &[
         "methods",
         "callable",
     ],
-    &[
-        "type",
-        "types",
-        "class",
-        "classes",
-        "struct",
-        "structs",
-        "interface",
-    ],
+    &["class", "classes", "struct", "structs", "interface"],
     &[
         "var",
         "vars",
@@ -111,6 +103,10 @@ const FAMILIES: &[&[&str]] = &[
         "property",
     ],
 ];
+
+pub(super) fn is_family(name: &str) -> bool {
+    FAMILIES.iter().any(|aliases| aliases.contains(&name))
+}
 
 /// The family of a definition kind: the shared repo-map lists first, then the name, so
 /// labels such as `DecoratedClass` or a new language's kinds still land somewhere.

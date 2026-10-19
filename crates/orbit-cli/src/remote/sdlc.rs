@@ -224,7 +224,7 @@ async fn read_branch(
     let text = match branch_exists(client, encoded, branch).await? {
         true => format!("branch:{branch} no merge request or pipeline\n"),
         false => format!(
-            "branch:{branch} not found; find one with `{} grep 'is:branch words'`\n",
+            "branch:{branch} not found; find one with `{} grep 'branch:words'`\n",
             crate::commands::setup::spec::launcher()
         ),
     };
@@ -333,6 +333,11 @@ async fn pipeline_text(
     let _ = writeln!(out, "failed_jobs[{}]:", jobs.len());
     for job in &jobs {
         let _ = writeln!(out, "  {}", job_line(job));
+        if let Some(id) = job["id"].as_i64() {
+            for line in failure_excerpt(&trace(client, project, id).await) {
+                let _ = writeln!(out, "    | {line}");
+            }
+        }
     }
     Ok(out)
 }
@@ -457,6 +462,36 @@ async fn commit_text(
         }
     }
     Ok(out)
+}
+
+static FAILURE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+        r"\b(FAIL(ED|URE)?|ERROR|[Ee]rror|panic|Traceback|Exception|[Ff]ailed)\b|^\s*---\s*FAIL|^\s*●|✕|✗",
+    )
+    .expect("valid pattern")
+});
+
+/// The lines around each failure a job log reports, then its last lines. Test runners print the
+/// failing test far above the end of the log, so the tail alone rarely names it.
+fn failure_excerpt(lines: &[String]) -> Vec<String> {
+    let tail = lines.len().saturating_sub(20);
+    let mut wanted = std::collections::BTreeSet::new();
+    for (index, line) in lines[..tail].iter().enumerate() {
+        if FAILURE.is_match(line) {
+            wanted.extend(index.saturating_sub(3)..(index + 4).min(tail));
+        }
+    }
+    wanted.extend(tail..lines.len());
+    let mut out = Vec::new();
+    let mut last = None;
+    for index in wanted {
+        if last.is_some_and(|last| index > last + 1) || (last.is_none() && index > 0) {
+            out.push("...".to_string());
+        }
+        out.push(format!("{}: {}", index + 1, lines[index]));
+        last = Some(index);
+    }
+    out
 }
 
 pub(crate) fn trace_lines(trace: &str) -> Vec<String> {
