@@ -91,6 +91,18 @@ impl Predicate {
         }
     }
 
+    pub fn prunes_granules(&self) -> bool {
+        match self {
+            Self::Boolean(expression) => expression.fold(
+                &|predicate| predicate.prunes_granules(),
+                &|children| children.into_iter().any(|prunes| prunes),
+                &|_| false,
+            ),
+            Self::Property { text_indexed, .. } => *text_indexed || self.is_selective(),
+            _ => self.is_selective(),
+        }
+    }
+
     pub fn filters_sort_key(&self, sort_key: &[String]) -> bool {
         let in_key = |column: &str| sort_key.iter().any(|key| key == column);
         match self {
