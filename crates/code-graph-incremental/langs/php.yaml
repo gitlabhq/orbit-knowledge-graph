@@ -111,7 +111,7 @@ stages:
       - match: '(property_promotion_parameter type: $T:named_type name: (variable_name $N:name))'
         replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T $T)))))'
       - match: '(property_promotion_parameter name: (variable_name $N:name))'
-        replace: '(__def (__defname @$N) (__property))'
+        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N)))'
       - match: '(simple_parameter type: $T:named_type name: $N:variable_name)'
         replace: '(__binding @$N $N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
       - match: '(simple_parameter name: $N:variable_name)'
