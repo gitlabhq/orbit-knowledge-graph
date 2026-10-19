@@ -89,6 +89,7 @@ pub fn bind_filter(
         namespace_anchor: model.anchor_foreign_keys().contains_key(column),
         in_sort_key,
         text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),
+        unique: property_id.is_some_and(|property| model.property_unique(property)),
     }
 }
 

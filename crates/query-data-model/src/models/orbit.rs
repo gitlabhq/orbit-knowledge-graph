@@ -172,6 +172,10 @@ pub trait OrbitQueryModel {
         self.query_backend().has_text_index(property)
     }
 
+    fn property_unique(&self, property: PropertyId) -> bool {
+        self.query_backend().property_unique(property)
+    }
+
     fn admin_only(&self, entity: &str, property: &str) -> bool {
         self.property(entity, property)
             .is_some_and(|property| self.query_authorization().is_admin_only(property.id))

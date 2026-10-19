@@ -568,6 +568,8 @@ pub struct Field {
     /// High-selectivity columns (IDs, paths, names) narrow effectively.
     /// Derived automatically from `data_type` unless overridden in YAML.
     pub selectivity: FieldSelectivity,
+    /// At most one live row per value, so an equality on it is a point lookup.
+    pub unique: bool,
     pub description: Option<String>,
     pub traversal_path_lookup: Option<TraversalPathLookupSpec>,
     pub mutable: bool,
@@ -592,6 +594,7 @@ impl Default for Field {
             admin_only: false,
             hidden: false,
             selectivity: FieldSelectivity::High,
+            unique: false,
             description: None,
             traversal_path_lookup: None,
             mutable: true,

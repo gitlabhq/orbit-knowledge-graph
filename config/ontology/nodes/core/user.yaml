@@ -31,12 +31,14 @@ properties:
     type: string
     source: username
     nullable: false
+    unique: true
     description: "Unique handle."
 
   email:
     type: string
     source: email
     nullable: false
+    unique: true
     like_allowed: false
     admin_only: true
     description: "Primary email. Admins only until per-cell authz lands (gated by `read_user_email_address`)."

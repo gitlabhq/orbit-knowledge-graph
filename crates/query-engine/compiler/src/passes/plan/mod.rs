@@ -28,6 +28,7 @@ pub struct BoundFilter {
     pub namespace_anchor: bool,
     pub in_sort_key: bool,
     pub text_indexed: bool,
+    pub unique: bool,
 }
 
 impl BoundFilter {
@@ -59,6 +60,7 @@ impl BoundFilter {
             selective: self.is_selective(),
             in_sort_key: self.in_sort_key,
             text_indexed: self.text_indexed,
+            unique: self.unique,
         }
     }
 }

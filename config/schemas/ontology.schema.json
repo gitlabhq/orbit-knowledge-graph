@@ -177,6 +177,11 @@
               ],
               "description": "Filter selectivity hint for the query planner. 'low' = few distinct values (enums, booleans), 'high' = many distinct values. Auto-derived from type when omitted."
             },
+            "unique": {
+              "type": "boolean",
+              "description": "At most one live row per value; an equality on it is a point lookup.",
+              "default": false
+            },
             "mutable": {
               "type": "boolean",
               "description": "Whether this field can change after creation. Fields that never change (IDs, paths, timestamps) should be marked false.",

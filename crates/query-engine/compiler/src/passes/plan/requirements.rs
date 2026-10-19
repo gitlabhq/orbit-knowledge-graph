@@ -34,6 +34,7 @@ pub enum Predicate {
         selective: bool,
         in_sort_key: bool,
         text_indexed: bool,
+        unique: bool,
     },
     Ids {
         column: Column,
@@ -94,8 +95,9 @@ impl Predicate {
     pub fn is_point_lookup(&self) -> bool {
         match self {
             Self::Ids { values, .. } => values.len() == 1,
-            Self::Property { filter, .. } => {
-                matches!(filter.op, None | Some(crate::input::FilterOp::Eq))
+            Self::Property { unique, filter, .. } => {
+                *unique
+                    && matches!(filter.op, None | Some(crate::input::FilterOp::Eq))
                     && !matches!(filter.value, Some(serde_json::Value::Array(_)))
             }
             _ => false,

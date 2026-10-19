@@ -133,6 +133,7 @@ pub trait RelationalMapping: Send + Sync {
     fn property_selectivity(&self, property: PropertyId) -> Option<ontology::FieldSelectivity>;
     fn table_column_type(&self, table: &str, column: &str) -> Option<ontology::DataType>;
     fn has_text_index(&self, property: PropertyId) -> bool;
+    fn property_unique(&self, property: PropertyId) -> bool;
     fn table_path_scopable(&self, table: &str) -> bool;
     fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]>;
     fn default_edge_table(&self) -> &str;

@@ -190,6 +190,12 @@ impl RelationalMapping for ClickHouseBindings {
             .is_some_and(|facts| facts.has_text_index)
     }
 
+    fn property_unique(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_some_and(|facts| facts.unique)
+    }
+
     fn table_path_scopable(&self, table: &str) -> bool {
         self.table(table).is_some_and(|layout| layout.path_scopable)
     }
