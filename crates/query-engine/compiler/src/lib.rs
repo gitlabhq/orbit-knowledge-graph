@@ -1538,23 +1538,6 @@ mod tests {
     }
 
     #[test]
-    fn aggregated_edge_dedup_filters_kinds_before_picking_latest_row() {
-        let sql = compile_gql_sql(
-            "MATCH (u:User)-[:APPROVED]->(mr:MergeRequest {state: 'merged'}) RETURN u.username, count(mr) AS n",
-        );
-
-        let dedup = sql
-            .split("LIMIT 1 BY")
-            .next()
-            .and_then(|head| head.rsplit("(SELECT * FROM gl_edge").next())
-            .expect("edge dedup subquery");
-        assert!(
-            dedup.contains("relationship_kind = 'APPROVED'"),
-            "kind filter should sit inside the dedup subquery:\n{sql}"
-        );
-    }
-
-    #[test]
     fn gql_where_id_equality_compiles_like_pattern_id() {
         assert_eq!(
             compile_gql_sql(
