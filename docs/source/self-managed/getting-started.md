@@ -132,8 +132,8 @@ before you run the GitLab migrations on those releases:
 GitLab Orbit requires Kubernetes 1.33 or later, with the [`ImageVolume` feature gate](https://kubernetes.io/docs/tasks/configure-pod-container/image-volumes/) turned on and supported
 by the container runtime.
 
-On a separate cluster from GitLab, the cluster must reach GitLab, PostgreSQL, ClickHouse, and NATS,
-and GitLab must reach the cluster.
+If GitLab Orbit runs on a separate cluster from GitLab, that cluster must reach GitLab, PostgreSQL, ClickHouse, and NATS,
+and GitLab must reach that cluster.
 
 ## NATS
 
@@ -152,7 +152,7 @@ For more information, see [object storage for large rows](data-replication.md#ob
 
 ## Shared configuration values
 
-Use the same value in every component that reads it. No component checks these values against the others.
+Every component that reads one of these values must use the same value. No component checks these values against the others.
 If they do not match, the affected component starts but processes no data.
 
 | Value | Used by | Example |

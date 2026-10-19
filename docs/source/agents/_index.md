@@ -38,7 +38,7 @@ glab skills install --global orbit
 GitLab Duo Agent Platform has GitLab Orbit built in. See [GitLab Orbit in GitLab Duo](duo.md).
 For agents that cannot run shell commands, use an [MCP server](mcp.md).
 
-This page uses `glab orbit`. If you installed the standalone binary, type `orbit` in place of `glab orbit`.
+If you installed the standalone binary, run `orbit` in place of `glab orbit`.
 
 ## Set up your agents
 
@@ -114,8 +114,8 @@ mkdir -p ~/.claude/skills && ln -s ~/.agents/skills/orbit ~/.claude/skills/orbit
 ### Use the wrapper skill
 
 The `orbit-wrapper` skill loads the skill that your GitLab instance serves, so it always matches your instance and CLI.
-The installed `orbit` skill is a copy that you update with `--force`.
-Install it in place of the `orbit` skill. The `npx` command needs [Node.js](https://nodejs.org/):
+With `glab` 1.123 or later, `glab skills install orbit` already installs this wrapper under the name `orbit`. With earlier versions, the installed `orbit` skill is a copy that you update with `--force`.
+Install the wrapper in place of the `orbit` skill. The `npx` command needs [Node.js](https://nodejs.org/):
 
 ```shell
 npx skills add https://gitlab.com/gitlab-org/orbit/knowledge-graph --skill orbit-wrapper

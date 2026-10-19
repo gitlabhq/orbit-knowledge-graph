@@ -27,7 +27,7 @@ GitLab Orbit Local indexes the code on your machine into a local graph, so your 
 callers, and imports in code that you committed but have not pushed. It works offline and needs no GitLab account.
 For merge requests, pipelines, work items, and vulnerabilities, your agent queries the remote graph on GitLab.
 
-This page uses `glab orbit`. If you installed the standalone binary, type `orbit` in place of `glab orbit`.
+If you installed the standalone binary, run `orbit` in place of `glab orbit`.
 
 ## Compare the local and remote graphs
 
@@ -163,13 +163,13 @@ For setup and tools, see [local MCP server](../agents/mcp.md#local-mcp-server).
 
 The CLI keeps the local graph in `~/.gitlab/orbit/local/`: one DuckDB file for each indexed commit under `revisions/`, and a `manifest.duckdb` file that lists them.
 
-- To keep the file in a different directory, set `ORBIT_DATA_DIR`.
+- To keep the local graph in a different directory, set `ORBIT_DATA_DIR`.
 - If `~/.gitlab/orbit` does not exist, the CLI moves an earlier `~/.orbit` directory to it.
 - Local commands, except `mcp serve`, accept `--db <path>` for a different graph file.
 - When an update of the CLI changes the format of the local graph, the next `index` rebuilds the graph file.
   Index your other repositories again after you update.
 
-The local graph has no authorization layer. Anyone who can read the file can read all data in it.
+The local graph has no authorization layer. Anyone who can read its files can read all data in them.
 Index and query commands send no request off your machine. The CLI uses the network only to install and update
 the binary, fetch the GitLab Orbit skill, and send [telemetry](../cli.md#settings-and-telemetry).
 

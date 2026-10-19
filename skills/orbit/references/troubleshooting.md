@@ -52,7 +52,7 @@ Read this when a command fails with "command not found", an auth error, or a fea
 
 `glab orbit query --response-format raw` prints the full JSON error payload when the exit code alone is not enough.
 
-## Exit 2: feature flag off, or old glab
+## Exit 2: GitLab Orbit not available, or old glab
 
 Cause 1: GitLab Orbit is not available on your instance, so every endpoint returns 404. Fix: ask an administrator to set up GitLab Orbit.
 
@@ -89,7 +89,7 @@ For empty results and validation errors, use the query troubleshooting reference
 
 ## Service unavailable
 
-`glab orbit status` reports service health. It prints the `system` health object and exits 2 when your user has no Orbit access (see [Exit 2](#exit-2-feature-flag-off-or-old-glab)). On GitLab 19.1 and later the API wraps the response as `{ "user": {...}, "system": {...} | null }` and always returns 200. The CLI unwraps it for you.
+`glab orbit status` reports service health. It prints the `system` health object and exits 2 when your user has no Orbit access (see [Exit 2](#exit-2-gitlab-orbit-not-available-or-old-glab)). On GitLab 19.1 and later the API wraps the response as `{ "user": {...}, "system": {...} | null }` and always returns 200. The CLI unwraps it for you.
 
 If any component is unhealthy, retry with exponential backoff. If it persists, escalate in the team Slack channel.
 
