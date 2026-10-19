@@ -123,8 +123,11 @@ impl CodeBackfill {
             let span = info_span!(
                 "code_backfill_namespace",
                 gl_root_namespace_id = *namespace_id,
-                traversal_path = traversal_path.as_str(),
+                traversal_path = tracing::field::Empty,
             );
+            if traversal_path.is_valid() {
+                span.record("traversal_path", traversal_path.as_str());
+            }
             let pending = self
                 .fetch_pending_for_namespace(traversal_path, share)
                 .instrument(span)

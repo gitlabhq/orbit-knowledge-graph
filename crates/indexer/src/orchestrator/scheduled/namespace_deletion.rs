@@ -201,8 +201,11 @@ impl NamespaceDeletionScheduler {
             let span = info_span!(
                 "dispatch_namespace_deletion",
                 gl_root_namespace_id = entry.namespace_id,
-                traversal_path = entry.traversal_path.as_str(),
+                traversal_path = tracing::field::Empty,
             );
+            if entry.traversal_path.is_valid() {
+                span.record("traversal_path", entry.traversal_path.as_str());
+            }
             let dispatch = async {
                 let request = NamespaceDeletionRequest {
                     namespace_id: entry.namespace_id,

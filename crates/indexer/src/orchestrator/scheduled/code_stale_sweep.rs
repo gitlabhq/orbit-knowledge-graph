@@ -81,8 +81,11 @@ impl CodeStaleSweep {
             let span = info_span!(
                 "code_stale_sweep_namespace",
                 gl_root_namespace_id = path.top_level_namespace_id(),
-                traversal_path = path.as_str(),
+                traversal_path = tracing::field::Empty,
             );
+            if path.is_valid() {
+                span.record("traversal_path", path.as_str());
+            }
             let sweep = async {
                 if let Err(error) = self.sweep_namespace(path).await {
                     failed += 1;

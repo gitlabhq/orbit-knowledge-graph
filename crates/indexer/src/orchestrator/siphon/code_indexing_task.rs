@@ -120,8 +120,11 @@ impl Route for CodeIndexingTaskRoute {
                 task_id = request.task_id,
                 gl_project_id = request.project_id,
                 gl_root_namespace_id = request.traversal_path.top_level_namespace_id(),
-                traversal_path = request.traversal_path.as_str(),
+                traversal_path = tracing::field::Empty,
             );
+            if request.traversal_path.is_valid_any_depth() {
+                span.record("traversal_path", request.traversal_path.as_str());
+            }
             let dispatch = async {
                 let envelope = Envelope::new(&request).map_err(|error| {
                     self.metrics.record_error(METRIC_NAME, "publish");

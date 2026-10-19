@@ -597,29 +597,9 @@ mod tests {
         })
     }
 
-    #[derive(Clone, Default)]
-    struct LogBuffer(Arc<parking_lot::Mutex<Vec<u8>>>);
-
-    impl std::io::Write for LogBuffer {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
     #[tokio::test]
     async fn tenant_recorded_by_a_handler_reaches_its_lines_and_the_engine_lines() {
-        let logs = LogBuffer::default();
-        let writer = logs.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .with_writer(move || writer.clone())
-            .with_ansi(false)
-            .finish();
-        let _default = tracing::subscriber::set_default(subscriber);
+        let (logs, _capture) = crate::testkit::logs::capture_logs();
 
         let handler = MockHandler::new("stream", "subject")
             .with_on_handle(|| {
@@ -642,7 +622,7 @@ mod tests {
         .instrument(message_span(&envelope, "stream.subject"))
         .await;
 
-        let logs = String::from_utf8(logs.0.lock().clone()).unwrap();
+        let logs = logs.text();
         for message in ["handler line", "handler failed"] {
             let line = logs
                 .lines()
