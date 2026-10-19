@@ -13,7 +13,6 @@ memchr = { workspace = true }
 regex = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }
-rustix = { workspace = true, features = ["fs"] }
 serde = { workspace = true }
 serde-saphyr = { workspace = true }
 serde_json = { workspace = true }
@@ -24,6 +23,9 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 typed-path = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["fs"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }

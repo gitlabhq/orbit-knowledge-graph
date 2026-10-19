@@ -4,7 +4,6 @@
 //! LZ4 block when compression reduces its size, so reads stay random-access.
 
 use std::io;
-use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
@@ -48,7 +47,7 @@ impl Scratch {
         };
         let len = bytes.len() as u64;
         let offset = add_capped(&self.end, LimitKind::SpilledBytes, len, self.cap)?;
-        self.file()?.write_all_at(bytes, offset)?;
+        write_all_at(self.file()?, bytes, offset)?;
         Ok(Content::Spilled {
             offset,
             len,
@@ -58,7 +57,7 @@ impl Scratch {
 
     pub(super) fn read(&self, offset: u64, len: u64, raw_len: u64) -> io::Result<Bytes> {
         let mut bytes = vec![0u8; len as usize];
-        self.file()?.read_exact_at(&mut bytes, offset)?;
+        read_exact_at(self.file()?, &mut bytes, offset)?;
         if len < raw_len {
             bytes = lz4_flex::block::decompress(&bytes, raw_len as usize)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -77,4 +76,50 @@ impl Scratch {
         let _ = self.file.set(file);
         Ok(self.file.get().expect("scratch file was just set"))
     }
+}
+
+#[cfg(unix)]
+fn write_all_at(file: &std::fs::File, bytes: &[u8], offset: u64) -> io::Result<()> {
+    std::os::unix::fs::FileExt::write_all_at(file, bytes, offset)
+}
+
+#[cfg(unix)]
+fn read_exact_at(file: &std::fs::File, bytes: &mut [u8], offset: u64) -> io::Result<()> {
+    std::os::unix::fs::FileExt::read_exact_at(file, bytes, offset)
+}
+
+// Windows seek_read/seek_write take an explicit offset but may transfer
+// fewer bytes than asked, so loop like the unix `*_exact_at` helpers.
+#[cfg(windows)]
+fn write_all_at(file: &std::fs::File, mut bytes: &[u8], mut offset: u64) -> io::Result<()> {
+    use std::os::windows::fs::FileExt;
+    while !bytes.is_empty() {
+        match file.seek_write(bytes, offset) {
+            Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+            Ok(written) => {
+                bytes = &bytes[written..];
+                offset += written as u64;
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn read_exact_at(file: &std::fs::File, mut bytes: &mut [u8], mut offset: u64) -> io::Result<()> {
+    use std::os::windows::fs::FileExt;
+    while !bytes.is_empty() {
+        match file.seek_read(bytes, offset) {
+            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+            Ok(read) => {
+                bytes = &mut bytes[read..];
+                offset += read as u64;
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
