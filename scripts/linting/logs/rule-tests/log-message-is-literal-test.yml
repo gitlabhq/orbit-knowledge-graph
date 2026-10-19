@@ -20,3 +20,4 @@ invalid:
   - 'info!("{{{x}}}");'
   - 'info!("done {}", n);'
   - 'orbit_log_fields::__tracing::info!("parsed {path}");'
+  - '__tracing::info!("parsed {path}");'

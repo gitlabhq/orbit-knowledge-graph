@@ -11,7 +11,7 @@ rule:
     - kind: macro_invocation
       has:
         field: macro
-        regex: '^(::)?(orbit_log_fields::__)?tracing::((trace|debug|info|warn|error)(_span)?|event|span)$'
+        regex: '^(::)?(orbit_log_fields::)?(__)?tracing::((trace|debug|info|warn|error)(_span)?|event|span)$'
     - kind: identifier
       regex: '^((trace|debug|info|warn|error)(_span)?|event|span)$'
       inside:
@@ -36,6 +36,8 @@ rule:
           has:
             field: path
             regex: '^(::)?(tracing|orbit_log_fields)$'
+    - kind: use_declaration
+      regex: '\b__tracing\b'
     - kind: use_wildcard
       regex: '^(::)?tracing::\*$'
     - kind: extern_crate_declaration

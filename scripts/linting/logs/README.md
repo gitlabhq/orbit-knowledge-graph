@@ -10,5 +10,5 @@ Run them with `mise run lint:logs`. The `log-safety-check` CI job and a
 lefthook pre-commit job run the same task. The task skips test code and the
 paths it lists.
 
-To suppress one finding, add `// ast-grep-ignore: <rule>` and the reason on the
-line above it.
+To suppress one finding, add `// ast-grep-ignore: <rule> -- <reason>` on the
+line above it. The reason must be on the same line.

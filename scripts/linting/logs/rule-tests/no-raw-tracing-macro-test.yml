@@ -27,3 +27,6 @@ invalid:
   - 'extern crate tracing as tr;'
   - 'use tracing::{self as t};'
   - 'orbit_log_fields::__tracing::info!("done");'
+  - 'use orbit_log_fields::__tracing as tr;'
+  - 'use orbit_log_fields::__tracing;'
+  - '__tracing::info!("done");'
