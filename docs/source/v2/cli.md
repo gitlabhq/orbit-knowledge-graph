@@ -13,8 +13,6 @@ title: GitLab Orbit CLI
 
 {{< /details >}}
 
-<!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
-
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
@@ -24,7 +22,7 @@ title: GitLab Orbit CLI
   - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
   - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
   - [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Generally available in GitLab 19.x.
+- Generally available in GitLab 19.5.
 
 {{< /history >}}
 

@@ -14,12 +14,10 @@ title: GitLab Orbit Cypher query language
 
 {{< /details >}}
 
-<!-- TODO(GA): set the GA release and link the GA work item in the history line. -->
-
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1258) in GitLab 19.4 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `orbit_gql_queries`. Disabled by default.
-- Generally available in GitLab 19.x.
+- Generally available in GitLab 19.5.
 
 {{< /history >}}
 
