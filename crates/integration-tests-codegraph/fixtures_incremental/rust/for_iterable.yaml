@@ -85,6 +85,30 @@ fixtures:
           }
       }
 
+      pub fn next_item() -> Option<Item> {
+          None
+      }
+
+      pub fn ready() -> bool {
+          false
+      }
+
+      pub fn loop_while_let() {
+          while let Some(x) = next_item() {
+              x.touch();
+          }
+      }
+
+      pub fn loop_while() {
+          while ready() {}
+      }
+
+      pub fn loop_labelled_while() {
+          'outer: while ready() {
+              break 'outer;
+          }
+      }
+
 tests:
   - name: "a call in the iterable links from the function that loops"
     query: |
@@ -109,6 +133,19 @@ tests:
     assert:
       - { row_count: 2 }
       - { column_values: { field: callee, values: ["pick", "pick_other"] } }
+
+  - name: "a call in a while condition links from the function that loops"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["loop_while_let", "loop_while", "loop_labelled_while"]
+        AND callee.name IN ["next_item", "ready"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: loop_labelled_while, callee: ready } }
+      - { row: { caller: loop_while, callee: ready } }
+      - { row: { caller: loop_while_let, callee: next_item } }
 
   - name: "the loop variable does not leak past the loop"
     query: |

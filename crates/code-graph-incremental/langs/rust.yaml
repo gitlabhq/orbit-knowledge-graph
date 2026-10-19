@@ -300,8 +300,8 @@ stages:
         replace: '(__scope (__ssa_loop $V (__binding @$N (__declaration)) $B))'
       - match: '(for_expression value: $V body: $B)'
         replace: '(__ssa_loop $V $B)'
-      - match: '(while_expression body: $B)'
-        replace: '(__ssa_loop $B)'
+      - match: '(while_expression condition: $C body: $B)'
+        replace: '(__ssa_loop $C $B)'
       - match: '(loop_expression body: $B)'
         replace: '(__ssa_loop $B)'
 
