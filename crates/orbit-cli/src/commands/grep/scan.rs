@@ -60,6 +60,10 @@ impl Sink for Collect<'_> {
     }
 }
 
+/// Reads in flight, as `git grep` keeps by default. File reads wait on the disk rather than the
+/// CPU, so one thread per CPU leaves a one-CPU container reading files one at a time.
+const READERS: usize = 8;
+
 pub(super) fn scan(
     repo: &Path,
     paths: &[String],
@@ -74,6 +78,7 @@ pub(super) fn scan(
         walk.add(root);
     }
     walk.hidden(false)
+        .threads(READERS.max(std::thread::available_parallelism().map_or(1, usize::from)))
         .require_git(false)
         .filter_entry(|entry| entry.file_name() != ".git");
     if !options.globs.is_empty() {

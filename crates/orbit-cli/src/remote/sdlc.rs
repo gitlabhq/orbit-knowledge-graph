@@ -175,7 +175,6 @@ async fn latest_pipeline(
         &[("ref", branch.to_string()), ("per_page", "20".into())],
     )
     .await?;
-    // `[ci skip]` pushes leave skipped pipelines on top of the one that ran.
     let list = pipelines.as_array().cloned().unwrap_or_default();
     Ok(list
         .iter()
@@ -220,7 +219,6 @@ async fn read_branch(
 ) -> Result<Found, RemoteError> {
     if let Some(mr) = merge_request(client, encoded, branch).await? {
         let mut note = format!("branch:{branch} mr:{} {}\n", mr.iid, mr.state);
-        // An MR's head pipeline can be skipped while the branch's own pipeline failed, so read both refs.
         for reference in [
             branch.to_string(),
             format!("refs/merge-requests/{}/head", mr.iid),
