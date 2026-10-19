@@ -280,7 +280,7 @@ GitLab Orbit indexes top-level groups. Subgroups and projects inherit indexing.
 
 <!-- vale orbit.StandaloneProductName = NO -->
 
-1. In the left sidebar, at the bottom, select **Admin**.
+1. In the upper-right corner, select **Admin**.
 1. In the left sidebar, select **Orbit**.
 1. Under **Top-level groups**, select your group.
 1. Select **Actions** > **Turn on Orbit**.

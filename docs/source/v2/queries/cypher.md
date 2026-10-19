@@ -86,7 +86,9 @@ On GitLab.com, this query returns `482908721` and `278964`, the IDs that the exa
   Matching ignores ASCII case, except on the `branch` property of code nodes, such as `File` and `Definition`.
 - Nulls: `IS NULL` and `IS NOT NULL`.
 
-Values are literals. For dates, use `date('2026-01-31')` or `datetime('2026-01-31T12:00:00Z')`.
+Values are literals.
+For dates, use an ISO 8601 string, such as `'2026-01-31'` or `'2026-01-31T12:00:00Z'`.
+You can wrap the string in `date()` or `datetime()`, but the result is the same.
 Group predicates with parentheses.
 Queries do not take parameters, so do not insert untrusted text into a query.
 

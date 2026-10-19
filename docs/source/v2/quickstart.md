@@ -58,6 +58,7 @@ Continue with the next steps while it runs.
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
+These steps work on every offering.
 On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on indexing in the **Admin** area.
 For more information, see [turn on indexing for a group](self-managed/orbit-setup.md#turn-on-indexing-for-a-group).
 
@@ -72,7 +73,8 @@ For more information, see [turn on indexing for a group](self-managed/orbit-setu
    glab orbit --install
    ```
 
-1. Sign in to GitLab. On GitLab Self-Managed or GitLab Dedicated, add `--hostname <gitlab.example.com>`.
+1. Sign in to GitLab. On GitLab Self-Managed or GitLab Dedicated, add `--hostname <gitlab.example.com>`,
+   then run `glab config set --global host <gitlab.example.com>` so that `glab orbit` uses your instance in any directory.
 
    ```shell
    glab auth login

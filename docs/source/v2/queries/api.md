@@ -130,6 +130,8 @@ curl --request POST \
 ```
 
 `GET /api/v4/orbit/query/templates` lists the named queries that take no parameters, with their query text.
+No endpoint lists the named queries that take parameters.
+For their names and parameters, see the [named query definitions](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/config/named_queries).
 
 ## Schema endpoint
 
