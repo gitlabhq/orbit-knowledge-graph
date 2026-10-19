@@ -93,8 +93,8 @@ fn inspect_in(
     })
 }
 
-// The parent handle pins every ancestor against rename or delete for the
-// duration of the call, so the leaf lookup cannot be redirected.
+// Looks up the leaf by path, not relative to `parent`. `File::read` re-validates
+// every component, so a swapped ancestor can at most misreport metadata.
 #[cfg(windows)]
 fn inspect_in(
     path: &Path,
