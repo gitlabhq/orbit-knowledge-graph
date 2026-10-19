@@ -282,8 +282,8 @@ stages:
         replace: '(__binding @$N (__rhs @$R))'
       - match: '(public_field_definition name: $N type: (type_annotation $T:type_identifier))'
         replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__type) (__callee @$T)))))'
-      - match: '(public_field_definition name: $N type: (type_annotation (function_type)))'
-        replace: '(__def (__defname @$N) (__property))'
+      - match: '(public_field_definition name: $N type: (type_annotation (function_type)) value:? $V)'
+        replace: '(__def (__defname @$N) (__property) $V)'
         tag: { callable: "true" }
       - match: '(public_field_definition name: $N value: $V)'
         replace: '(__def (__defname @$N) (__property) $V)'
@@ -336,7 +336,7 @@ stages:
         replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $B)'
         tag: { flavor: static }
       - match: '(method_definition **/(get) name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
-        replace: '(__def (__defname @$N) (__method) $$$P $B)'
+        replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P $B)'
         tag: { value: "true" }
       - match: '(method_definition name: $N parameters: (formal_parameters $$$P:__def|__binding) body: $B)'
         replace: '(__def (__defname @$N|regex_replace("^#","")) (__method) $$$P $B)'
@@ -412,7 +412,7 @@ stages:
       - match: '(__def (__property))'
         tag: { value: "true" }
       - match: '(__def (__property) (arrow_function))'
-        tag: { callable: "true" }
+        tag: { callable: "true", scoped: "function" }
       - match: '(__def (__property) (function_expression))'
         tag: { callable: "true" }
       - match: '(__def (__variable))'
