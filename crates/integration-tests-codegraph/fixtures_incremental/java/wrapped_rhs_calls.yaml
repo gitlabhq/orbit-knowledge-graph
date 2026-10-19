@@ -1,0 +1,56 @@
+name: "Java: a call behind a cast or parentheses on the right-hand side links and types the local"
+
+fixtures:
+  - path: Wrapped.java
+    content: |
+      class Item {
+          void touch() {}
+      }
+
+      class Other {
+          void touch() {}
+      }
+
+      class Wrapped {
+          Item make() { return new Item(); }
+
+          Object makeObject() { return new Item(); }
+
+          void letCast() {
+              var item = (Item) makeObject();
+              item.touch();
+          }
+
+          void letParens() {
+              var item = (make());
+              item.touch();
+          }
+
+          void rootCast() {
+              ((Item) makeObject()).touch();
+          }
+
+          void rootParens() {
+              (make()).touch();
+          }
+      }
+
+tests:
+  - name: "the call behind each wrapper links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["letCast", "letParens", "rootCast", "rootParens"] AND callee.name IN ["make", "makeObject"]
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 4 }
+
+  - name: "the method after parentheses resolves through the return type of the call, and after a cast into var through the cast type"
+    query: |
+      MATCH (owner:Definition)-[:DEFINES]->(callee:Definition)<-[:CALLS]-(caller:Definition)
+      WHERE caller.name IN ["letCast", "letParens", "rootParens"] AND callee.name = "touch"
+      RETURN caller.name AS caller, owner.name AS owner
+      ORDER BY caller
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: owner, values: ["Item"] } }

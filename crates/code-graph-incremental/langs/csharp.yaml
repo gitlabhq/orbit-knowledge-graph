@@ -29,7 +29,7 @@ stages:
     rules:
       # Namespaces first, before qualified names collapse
       - match: '(namespace_declaration name: $N body: (declaration_list $$$B))'
-        replace: '(namespace_declaration (cs_pkg (__package @$N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*")))) $$$B)'
+        replace: '(namespace_declaration (cs_pkg (__package @$N $N) (__module_export (__import (__source @$N) (__source_path @$N|replace(".", "/")|regex_replace("$", "/*")) (__name "*")))) $$$B)'
         tag: { import_type: WildcardImport }
         tag_on: __import
       - match: '(file_scoped_namespace_declaration name: $N)'
@@ -37,21 +37,21 @@ stages:
         tag: { import_type: WildcardImport }
         tag_on: __import
       - match: '(using_directive (static) $Q:qualified_name)'
-        replace: '(__import (__source @$Q) (__source_path @$Q|replace(".", "/")) (__name "*"))'
+        replace: '(__import (__source @$Q $Q) (__source_path @$Q|replace(".", "/")) (__name "*"))'
         tag: { import_type: StaticImport, callable: "true" }
       - match: '(using_directive (static) $Q:identifier)'
         replace: '(__import (__source @$Q) (__source_path @$Q) (__name "*"))'
         tag: { import_type: StaticImport, callable: "true" }
       - match: '(using_directive name: $A:identifier $Q:qualified_name)'
-        replace: '(__import (__source @$Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
+        replace: '(__import (__source @$Q $Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
       - match: '(using_directive name: $A:identifier $Q:alias_qualified_name)'
-        replace: '(__import (__source @$Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
+        replace: '(__import (__source @$Q $Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
       - match: '(using_directive name: $A:identifier $Q:generic_name)'
         replace: '(__import (__source @$Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
       - match: '(using_directive name: $A:identifier $Q:identifier)'
         replace: '(__import (__source @$Q) (__source_path @$Q|strip=global::|regex_replace("<.*$", "")|replace(".", "/")) (__name @$Q|regex_replace("<.*$", "")|split_last(".")|split_last("::") (__alias @$A)))'
       - match: '(using_directive $Q:qualified_name)'
-        replace: '(__import (__source @$Q) (__source_path @$Q|replace(".", "/")) (__name "*"))'
+        replace: '(__import (__source @$Q $Q) (__source_path @$Q|replace(".", "/")) (__name "*"))'
         tag: { import_type: WildcardImport }
       - match: '(using_directive $Q:identifier)'
         replace: '(__import (__source @$Q) (__source_path @$Q) (__name "*"))'
@@ -94,11 +94,11 @@ stages:
 
       # Parameters
       - match: '(parameter type: $T:identifier name: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
       - match: '(parameter name: $N:identifier)'
         replace: '(__binding @$N)'
       - match: '(catch_declaration type: $T:identifier name: $N:identifier)'
-        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T))))'
+        replace: '(__binding @$N (__ssa_typed @$T) (__rhs (__member (__object @$T $T))))'
 
   - name: retag-expressions
     rules:
@@ -117,27 +117,27 @@ stages:
       - match: '(member_access_expression (base) name: $M:identifier)'
         replace: '(__member @$M (__object (__ivar "base")))'
       - match: '(conditional_access_expression condition: $O:identifier (member_binding_expression name: $M:identifier))'
-        replace: '(__member @$M (__object @$O))'
+        replace: '(__member @$M (__object @$O $O))'
       - match: '(conditional_access_expression condition: $O (member_binding_expression name: $M:identifier))'
         replace: '(__member @$M (__object $O))'
       - match: '(member_access_expression expression: $O:cs_qualified name: $M:identifier)'
-        replace: '(__member @$M (__object @$O))'
+        replace: '(__member @$M (__object @$O $O))'
       - match: '(member_access_expression expression: $O name: $M:identifier)'
-        replace: '(__member @$M (__object @$O))'
+        replace: '(__member @$M (__object @$O $O))'
 
       - match: '(invocation_expression function: $F:__ivar arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(invocation_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(invocation_expression function: $F:identifier arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
         tag: { implicit_self: "true" }
       - match: '(invocation_expression function: $F arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
       - match: '(object_creation_expression type: $T:identifier arguments:? $A $$$B:initializer_expression)'
-        replace: '(__call (__callee @$T) $A $$$B)'
+        replace: '(__call (__callee @$T $T) $A $$$B)'
       - match: '(object_creation_expression type: $T:cs_qualified arguments:? $A)'
-        replace: '(__call (__callee @$T) $A)'
+        replace: '(__call (__callee @$T $T) $A)'
 
   - name: classify
     rules:
@@ -147,19 +147,19 @@ stages:
       - match: '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V:__ssa_branch))'
         replace: '(__binding @$N (__declaration) (__rhs $V))'
       - match: '(variable_declaration type: (implicit_type) (variable_declarator name: $N:identifier $V))'
-        replace: '(__binding @$N (__declaration) (__rhs @$V))'
+        replace: '(__binding @$N (__declaration) (__rhs @$V $V))'
       - match: '(variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $V:__call))'
         replace: '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)))'
       - match: '(variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $V:__ssa_branch))'
         replace: '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs $V)))'
       - match: '(variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $V))'
-        replace: '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V)))'
+        replace: '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T) (__rhs @$V $V)))'
       - match: '(variable_declaration type: $T:identifier (variable_declarator name: $N:identifier))'
         replace: '(cs_local (__binding @$N (__declaration) (__ssa_typed @$T)))'
       - match: '(variable_declaration (variable_declarator name: $N:identifier $V:__call))'
         replace: '(cs_local (__binding @$N (__declaration) (__rhs $V)))'
       - match: '(variable_declaration (variable_declarator name: $N:identifier $V))'
-        replace: '(cs_local (__binding @$N (__declaration) (__rhs @$V)))'
+        replace: '(cs_local (__binding @$N (__declaration) (__rhs @$V $V)))'
       - match: '(variable_declaration (variable_declarator name: $N:identifier))'
         replace: '(cs_local (__binding @$N (__declaration)))'
 
@@ -167,11 +167,11 @@ stages:
       - match: '(assignment_expression left: $N:__ivar right: $R:__call)'
         replace: '(__binding $N (__rhs $R))'
       - match: '(assignment_expression left: $N:__ivar right: $R)'
-        replace: '(__binding $N (__rhs @$R))'
+        replace: '(__binding $N (__rhs @$R $R))'
       - match: '(assignment_expression left: $N:identifier right: $R:__call)'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_expression left: $N:identifier right: $R)'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N (__rhs @$R $R))'
 
       # Control flow
       - match: '(if_statement condition: $C consequence: $Q alternative:? $A)'
@@ -197,11 +197,11 @@ stages:
 
       # Members
       - match: '(field_declaration $$$PRE (variable_declaration type: $T:identifier (variable_declarator name: $N:identifier $$$V)))'
-        replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))) $$$V)'
+        replace: '(__def (__defname @$N) (__field_def) (__binding (__ivar @$N) (__rhs (__call (__callee @$T $T)))) $$$V)'
       - match: '(field_declaration $$$PRE (variable_declaration (variable_declarator name: $N:identifier $$$V)))'
         replace: '(__def (__defname @$N) (__field_def) $$$V)'
       - match: '(property_declaration $$$PRE type: $T:identifier name: $N:identifier $$$B)'
-        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T)))) $$$B)'
+        replace: '(__def (__defname @$N) (__property) (__binding (__ivar @$N) (__rhs (__call (__callee @$T $T)))) $$$B)'
       - match: '(property_declaration $$$PRE name: $N:identifier $$$B)'
         replace: '(__def (__defname @$N) (__property) $$$B)'
       - match: '(enum_member_declaration name: $N:identifier)'
@@ -209,7 +209,7 @@ stages:
 
       # Callables
       - match: '(method_declaration $$$PRE returns: $RT:identifier name: $N:identifier parameters: $P body:? $B)'
-        replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $$$PRE $P (__call (__callee @$RT)) $B)'
+        replace: '(__def (__defname @$N) (__method) (__ssa_return_type @$RT) $$$PRE $P (__call (__callee @$RT $RT)) $B)'
       - match: '(method_declaration $$$PRE name: $N:identifier parameters: $P body:? $B)'
         replace: '(__def (__defname @$N) (__method) $$$PRE $P $B)'
       - match: '(constructor_declaration $$$PRE name: $N:identifier parameters: $P body: $B)'
@@ -236,7 +236,7 @@ stages:
   - name: ssa-cleanup
     rules:
       - match: '(__ssa_return $V:identifier)'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:

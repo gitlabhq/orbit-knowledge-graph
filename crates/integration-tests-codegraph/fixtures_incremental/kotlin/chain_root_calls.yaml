@@ -1,0 +1,53 @@
+name: "Kotlin: the call at the root of a method chain links and types the chain"
+
+fixtures:
+  - path: Chain.kt
+    content: |
+      class Item {
+          fun touch() {}
+      }
+
+      class Items {
+          fun first(): Item = Item()
+
+          fun count(): Int = 0
+      }
+
+      fun makeItems(): Items = Items()
+
+      fun chainInVal() {
+          val n = makeItems().count()
+      }
+
+      fun chainAsStatement() {
+          makeItems().first().touch()
+      }
+
+      fun chainInLoop() {
+          for (i in 0 until makeItems().count()) {
+          }
+      }
+
+tests:
+  - name: "the call at the root of a method chain links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["chainInVal", "chainAsStatement", "chainInLoop"] AND callee.name = "makeItems"
+      RETURN caller.name AS caller
+      ORDER BY caller
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: caller, values: ["chainAsStatement", "chainInLoop", "chainInVal"] } }
+
+  - name: "the methods on the chain resolve through the return type of the root call"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["chainInVal", "chainAsStatement", "chainInLoop"] AND callee.name IN ["first", "count", "touch"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: chainAsStatement, callee: first } }
+      - { row: { caller: chainAsStatement, callee: touch } }
+      - { row: { caller: chainInLoop, callee: count } }
+      - { row: { caller: chainInVal, callee: count } }

@@ -1,0 +1,65 @@
+name: "Java: a declared receiver assigned in try and in catch types the member call"
+
+fixtures:
+  - path: Main.java
+    content: |
+      public class Main {
+          static class Foo {
+              void bar() {}
+
+              static Foo fromString(String s) {
+                  return new Foo();
+              }
+          }
+
+          void tryAndCatch(String s) {
+              Foo f;
+              try {
+                  f = Foo.fromString(s);
+              } catch (IllegalArgumentException e) {
+                  f = new Foo();
+              }
+              f.bar();
+          }
+
+          void tryOnly(String s) {
+              Foo f;
+              try {
+                  f = Foo.fromString(s);
+              } catch (IllegalArgumentException e) {
+                  return;
+              }
+              f.bar();
+          }
+
+          void direct(String s) {
+              Foo f = Foo.fromString(s);
+              f.bar();
+          }
+      }
+
+tests:
+  - name: a receiver assigned in try and in catch reaches bar
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'tryAndCatch' AND t.name = 'bar'
+      RETURN t.fqn AS callee
+    assert:
+      - { empty: false }
+      - { column_values: { field: callee, values: ["Main.Foo.bar"] } }
+
+  - name: a receiver declared first and assigned in try reaches bar
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'tryOnly' AND t.name = 'bar'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: a receiver assigned at its declaration reaches bar
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'direct' AND t.name = 'bar'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
