@@ -1,4 +1,4 @@
-description: Admin caller bypasses User-only aggregation guard
+description: Admin caller can count unscoped users
 
 config:
   security: admin
@@ -15,3 +15,5 @@ query:
     MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN count(u) AS cnt LIMIT 10
 
 expect:
+  row_count: 1
+  row_values: [{ cnt: 7 }]

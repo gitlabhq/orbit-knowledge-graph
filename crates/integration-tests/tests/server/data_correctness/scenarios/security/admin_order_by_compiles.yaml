@@ -1,17 +1,24 @@
-description: Admin order_by on admin-only field compiles successfully
+description: Admin order_by on an admin-only field orders the returned users
 
 config:
   security: admin
+  extra_seed:
+    gl_user:
+      - { id: 6, username: "用户_émoji_🎉", name: "Ünïcödé Üser", state: active, user_type: human, email: unicode@example.com, is_admin: true, _version: { sql: "now64(6) + INTERVAL 1 SECOND" } }
 
 query:
   json: |
     {
       "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]}],
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 6, "end": 7}, "columns": ["username", "is_admin"]}],
       "order_by": "-u.is_admin",
       "limit": 10
     }
   gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.is_admin ORDER BY u.is_admin DESC LIMIT 10
+    MATCH (u:User) WHERE u.id >= 6 AND u.id <= 7 RETURN u.username, u.is_admin ORDER BY u.is_admin DESC LIMIT 10
 
 expect:
+  node_count: 2
+  nodes:
+    User:
+      order: [6, 7]

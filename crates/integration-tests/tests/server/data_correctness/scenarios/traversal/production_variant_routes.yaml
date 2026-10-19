@@ -202,6 +202,7 @@ cases:
           - { from: MergeRequest, from_id: 2500, to: Project, to_id: 1000 }
           - { from: Branch, from_id: 2601, to: Project, to_id: 1000 }
       referential_integrity: true
+
   - name: MergeRequestDiff IN_PROJECT preserves indirect authorization and scope
     description: Exact traversal routes through gl_diff_edge and excludes the same variant in another organization
     config:
@@ -222,6 +223,7 @@ cases:
           - { from: MergeRequestDiff, from_id: 20001, to: Project, to_id: 1000 }
       edge_count: { CONTAINS: 0 }
       referential_integrity: true
+
   - name: MergeRequestDiffFile IN_PROJECT preserves indirect authorization and scope
     description: Exact traversal routes through gl_diff_edge and excludes the same variant in another organization
     config:
@@ -241,6 +243,7 @@ cases:
         IN_PROJECT:
           - { from: MergeRequestDiffFile, from_id: 20002, to: Project, to_id: 1000 }
       referential_integrity: true
+
   - name: Vulnerability neighbors return every security route
     description: Vulnerability neighbors read every newly specialized security relationship from gl_sec_edge
     query:
@@ -270,6 +273,7 @@ cases:
         HAS_VULNERABILITY:
           - { from: Package, from_id: 2301, to: Vulnerability, to_id: 1401 }
       referential_integrity: true
+
   - name: Global user lifecycle routes exclude another namespace
     description: Split AUTHORED and vulnerability lifecycle routes prune to the authorized target namespace
     config:
@@ -297,6 +301,7 @@ cases:
         DISMISSED_BY:
           - { from: User, from_id: 1, to: Vulnerability, to_id: 1401 }
       referential_integrity: true
+
   - name: FIXES excludes another namespace through endpoint authorization
     description: The unscoped FIXES route retains only the merge request and vulnerability in the authorized namespace
     config:
@@ -316,6 +321,7 @@ cases:
         FIXES:
           - { from: MergeRequest, from_id: 2501, to: Vulnerability, to_id: 1401 }
       referential_integrity: true
+
   - name: Pipeline neighbors return every CI route
     description: Pipeline neighbors read CHILD_OF and both BUILT_BY variants from gl_ci_edge
     query:
@@ -337,6 +343,7 @@ cases:
           - { from: Package, from_id: 2301, to: Pipeline, to_id: 1101 }
           - { from: PackageFile, from_id: 2401, to: Pipeline, to_id: 1101 }
       referential_integrity: true
+
   - name: Branch neighbors return bridge and root containment routes
     description: Branch neighbors read Project, Directory, and File CONTAINS variants from gl_code_edge
     query:
@@ -358,6 +365,7 @@ cases:
           - { from: Branch, from_id: 2601, to: Directory, to_id: 2701 }
           - { from: Branch, from_id: 2601, to: File, to_id: 2801 }
       referential_integrity: true
+
   - name: Directory neighbors return nested containment routes
     description: Directory neighbors read Branch, Directory, and File CONTAINS variants from gl_code_edge
     query:
@@ -378,6 +386,7 @@ cases:
           - { from: Directory, from_id: 2701, to: Directory, to_id: 2702 }
           - { from: Directory, from_id: 2701, to: File, to_id: 2802 }
       referential_integrity: true
+
   - name: HAS_VULNERABILITY excludes another namespace
     description: The same-namespace security route retains only the package and vulnerability in the authorized namespace
     config:
@@ -397,6 +406,7 @@ cases:
         HAS_VULNERABILITY:
           - { from: Package, from_id: 2301, to: Vulnerability, to_id: 1401 }
       referential_integrity: true
+
   - name: Merge request pipeline branch chain crosses three edge tables
     description: A four-hop chain composes default, CI, and code edge tables without losing joins
     query:
@@ -423,6 +433,7 @@ cases:
         CONTAINS:
           - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
       referential_integrity: true
+
   - name: Merge request diff branch chain crosses three edge tables
     description: A four-hop chain composes default, diff, and code edge tables without losing joins
     query:
@@ -449,6 +460,7 @@ cases:
         CONTAINS:
           - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
       referential_integrity: true
+
   - name: Security scan directory chain crosses security and code tables
     description: A three-hop chain composes security and code edge tables without losing joins
     query:
@@ -471,6 +483,7 @@ cases:
           - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
           - { from: Branch, from_id: 2601, to: Directory, to_id: 2701 }
       referential_integrity: true
+
   - name: Merge request alternatives union default CI and diff tables
     description: Relationship alternatives return every authorized row across three physical tables and exclude another namespace
     config:
@@ -496,6 +509,7 @@ cases:
         HAS_DIFF:
           - { from: MergeRequest, from_id: 2500, to: MergeRequestDiff, to_id: 20001 }
       referential_integrity: true
+
   - name: Cross-table chain excludes another namespace
     description: Scope filtering excludes an otherwise valid default-CI-code chain in another organization
     config:
@@ -524,6 +538,7 @@ cases:
         CONTAINS:
           - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
       referential_integrity: true
+
   - name: Specialized routes exclude another namespace
     description: Security and code tables preserve namespace scope across their join
     config:
@@ -546,6 +561,7 @@ cases:
         CONTAINS:
           - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
       referential_integrity: true
+
   - name: Cross-table shortest path excludes another namespace
     description: A multi-table path frontier returns the authorized project and excludes the same path in another organization
     config:
@@ -566,6 +582,7 @@ cases:
       path_edges:
         - [{ from: Pipeline, from_id: 1101, type: IN_PROJECT, to: Project, to_id: 1000, step: 0 }, { from: Project, from_id: 1000, type: CONTAINS, to: Branch, to_id: 2601, step: 1 }]
       referential_integrity: true
+
   - name: Variable traversal excludes another namespace
     description: A two-hop variable traversal across CI and code tables returns only the authorized branch
     config:
@@ -586,6 +603,7 @@ cases:
           - { from: Pipeline, from_id: 1101, to: Branch, to_id: 2601 }
       edge_count: { CONTAINS: 0 }
       referential_integrity: true
+
   - name: Mixed-table aggregation excludes another namespace
     description: Aggregation across CI and code tables counts only the branch in the authorized namespace
     config:

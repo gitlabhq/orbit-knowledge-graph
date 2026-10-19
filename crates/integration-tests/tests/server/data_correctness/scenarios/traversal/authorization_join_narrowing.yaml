@@ -14,6 +14,7 @@ cases:
       edges:
         CALLS:
           - [12000, 12001]
+
   - name: pinned_source_narrows_the_callee_join
     description: The callee redaction join reads only the keys of edges out of the pinned definition
     query:
@@ -29,9 +30,18 @@ cases:
       edges:
         CALLS:
           - [12000, 12001]
+
   - name: unpinned_partner_keeps_the_full_join
-    description: Without a pinned partner there are no edge keys to narrow the redaction join
+    description: An unpinned CALLS traversal returns every definition in the selected project
     query:
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.project_id = 1000 RETURN caller, callee LIMIT 50
     expect:
+      node_count: 3
+      nodes:
+        Definition:
+          ids: [12000, 12001, 12002]
+      edges:
+        CALLS:
+          - [12000, 12001]
+          - [12001, 12002]

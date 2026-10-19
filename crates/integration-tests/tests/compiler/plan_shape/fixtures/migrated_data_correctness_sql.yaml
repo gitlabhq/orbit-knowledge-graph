@@ -1,1313 +1,1293 @@
 ---
 cases:
-- name: 'Migrated SQL assertion 1: fk_filter_only_target / top'
-  query:
-    json: |
-      {
-        "query_type": "aggregation",
-        "nodes": [
-          {"id": "mr", "entity": "MergeRequest"},
-          {"id": "p", "entity": "Project", "filters": {"name": "Public Project"}}
-        ],
-        "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-        "aggregations": [{"count": "mr", "as": "c"}],
-        "limit": 10
-      }
-    gql: |
-      MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {name: 'Public Project'})
-      RETURN count(mr) AS c LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - _filter_p
-        - mr.project_id IN
-        not_contains:
-        - gl_edge
-- name: 'Migrated SQL assertion 2: fk_filter_only_target_no_match / top'
-  query:
-    json: |
-      {
-        "query_type": "aggregation",
-        "nodes": [
-          {"id": "mr", "entity": "MergeRequest"},
-          {"id": "p", "entity": "Project", "filters": {"name": "Missing Project"}}
-        ],
-        "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-        "aggregations": [{"count": "mr", "as": "c"}],
-        "limit": 10
-      }
-    gql: |
-      MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {name: 'Missing Project'})
-      RETURN count(mr) AS c LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - _filter_p
-        - mr.project_id IN
-        not_contains:
-        - gl_edge
-- name: 'Migrated SQL assertion 3: narrowed_deleted_project / top'
-  query:
-    json: |
-      {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[970]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","id_range":{"start":9710,"end":9710},"filters":{"title":"a"}},{"id":"d","entity":"MergeRequestDiff"}],
-       "relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}],"group_by":["d.state"],"aggregations":[{"count":"d","as":"c"}],"limit":10}
-    gql: |
-      MATCH (g:Group {id: 970})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)
-      WHERE mr.id >= 9710 AND mr.id <= 9710 AND mr.title = 'a' RETURN d.state, count(d) AS c LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - _narrow_p
-        - LIMIT 1 BY p.traversal_path, p.id) AS p WHERE (p._deleted = false)
-        not_contains: []
-- name: 'Migrated SQL assertion 4: narrowed_stale_project_filter / top'
-  query:
-    json: |
-      {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[970]},{"id":"p","entity":"Project","filters":{"star_count":1}},{"id":"mr","entity":"MergeRequest"}],
-       "relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p.name"],"aggregations":[{"count":"mr","as":"c"}],"limit":10}
-    gql: |
-      MATCH (g:Group {id: 970})-[:CONTAINS]->(p:Project {star_count: 1})<-[:IN_PROJECT]-(mr:MergeRequest)
-      RETURN p.name, count(mr) AS c LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - _candidate_p
-        - LIMIT 1 BY p.traversal_path, p.id) AS p WHERE
-        not_contains:
-        - gl_edge
-- name: 'Migrated SQL assertion 5: renamed_scope_anchor / top'
-  query:
-    json: |
-      {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"g","entity":"Group","filters":{"full_path":"old"}}],
-       "relationships":[{"type":"CONTAINS","from":"p","to":"g","direction":"incoming"}],"aggregations":[{"count":"p","as":"c"}],"limit":10}
-    gql: 'MATCH (p:Project)<-[:CONTAINS]-(g:Group {full_path: ''old''}) RETURN count(p)
-      AS c LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - gl_group AS _scope FINAL
-        not_contains:
-        - gl_edge
-        - gl_group AS g
-- name: 'Migrated SQL assertion 6: like_ends_with / top'
-  query:
-    json: |
-      {
-          "query_type": "traversal",
-          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
-                   "filters": {"username": {"ends_with": "ICE"}}}],
-          "limit": 10
-      }
-    gql: 'MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username ENDS WITH
-      ''ICE'' RETURN u.username LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - endsWith(lower(u.username), lower('ICE'))
-        not_contains: []
-      indexes:
-      - table: gl_user
-        name: idx_username_ngram
-- name: 'Migrated SQL assertion 7: nulls / transform_null_in_pinned_for_not_tree'
-  query:
-    json: '{"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
-
-'
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3]
-      RETURN wi.weight LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - transform_null_in = 0
-        not_contains: []
-- name: 'Migrated SQL assertion 8: nulls / transform_null_in_absent_without_not'
-  query:
-    json: '{"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
-
-'
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight IN [3]
-      RETURN wi.weight LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains: []
-        not_contains:
-        - transform_null_in
-- name: 'Migrated SQL assertion 9: nulls / transform_null_in_absent_when_not_folds'
-  query:
-    json: '{"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":3},"columns":["weight"]}],"limit":10}
-
-'
-    gql: |
-      MATCH (wi:WorkItem)
-      WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight = 3
-      RETURN wi.weight LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains: []
-        not_contains:
-        - transform_null_in
-- name: 'Migrated SQL assertion 10: semantics / anchor_rewrite_keeps_relationship'
-  query:
-    gql: |
-      MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)<-[a:AUTHORED]-(u:User)
-      WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
-      RETURN p{.name}, count(mr) AS mrs LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - "(_orbit_edge_0.relationship_kind = 'IN_PROJECT')"
-        - NOT ((_orbit_edge_0.source_kind = 'User') AND has(_orbit_edge_0.source_tags,
-          'state:opened'))
-        not_contains: []
-  missing_frontends:
-    json: The original query scenario supplies only GQL.
-- name: 'Migrated SQL assertion 11: semantics / anchor_rewrite_last_relationship'
-  query:
-    gql: |
-      MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)
-      WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
-      RETURN p{.name}, count(mr) AS mrs LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - NOT ((_orbit_edge_0.source_kind = 'User') AND has(_orbit_edge_0.source_tags,
-          'state:opened'))
-        not_contains: []
-  missing_frontends:
-    json: The original query scenario supplies only GQL.
-- name: 'Migrated SQL assertion 12: semantics / not_fk_relationship_filter'
-  query:
-    gql: |
-      MATCH (p:Project {id: 1000})<-[r:IN_PROJECT]-(mr:MergeRequest)
-      WHERE NOT r.source_kind = 'MergeRequest'
-      RETURN p.name, mr.title LIMIT 20
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - source_kind != 'MergeRequest'
-        not_contains: []
-  missing_frontends:
-    json: The original query scenario supplies only GQL.
-- name: 'Migrated SQL assertion 13: semantics / two_hop_edge_negation_reversed'
-  query:
-    gql: |
-      MATCH (u:User)-[m:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project {id: 1000})
-      WHERE NOT (m.source_id = 2 AND g.visibility_level = 'public')
-      RETURN u.username, g.name, p.name LIMIT 20
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - "(_orbit_edge_0.relationship_kind = 'MEMBER_OF')"
-        - "(NOT ((_orbit_edge_0.source_id = 2) AND (g.visibility_level = 'public')))"
-        not_contains: []
-  missing_frontends:
-    json: The original query scenario supplies only GQL.
-- name: 'Migrated SQL assertion 14: contains_case_insensitive / top'
-  query:
-    json: |
-      {
-        "query_type": "traversal",
-        "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
-                   "columns": ["title"],
-                   "filters": {"title": {"contains": "SHIP FEAT"}}}],
-        "order_by": "mr.id",
-        "limit": 10
-      }
-    gql: |
-      MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS 'SHIP FEAT'
-      RETURN mr.title ORDER BY mr.id LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - multiSearchAny(lower(mr.title), [lower('SHIP FEAT')])
-        not_contains: []
-      indexes:
-      - table: gl_merge_request
-        name: idx_title_ngram
-- name: 'Migrated SQL assertion 15: contains_literal_characters / top'
-  query:
-    json: |
-      {
-        "query_type": "traversal",
-        "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
-                   "columns": ["title"],
-                   "filters": {"title": {"contains": "100% done_now c:\\temp"}}}],
-        "limit": 10
-      }
-    gql: |
-      MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS '100% done_now c:\\temp'
-      RETURN mr.title LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains: []
-        not_contains: []
-      indexes:
-      - table: gl_merge_request
-        name: idx_title_ngram
-- name: 'Migrated SQL assertion 16: datetime_inline_iso_utc / top'
-  query:
-    json: |
-      {
-          "query_type": "traversal",
-          "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "columns": ["created_at"]}],
-          "limit": 10
-      }
-    gql: 'MATCH (n:Note {id: 3000}) RETURN n.created_at LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - AS n_created_at
-        not_contains: []
-- name: 'Migrated SQL assertion 17: equality_uses_text_index / equality'
-  query:
-    json: |
-      {
-        "query_type": "traversal",
-        "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
-                   "columns": ["title"],
-                   "filters": {"title": "Ship feature E"}}],
-        "order_by": "mr.id",
-        "limit": 10
-      }
-    gql: |
-      MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title = 'Ship feature E'
-      RETURN mr.title ORDER BY mr.id LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - lower(mr.title) = lower(
-        not_contains: []
-      indexes:
-      - table: gl_merge_request
-        name: idx_title
-- name: 'Migrated SQL assertion 18: equality_uses_text_index / membership'
-  query:
-    json: |
-      {
-        "query_type": "traversal",
-        "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
-                   "columns": ["title"],
-                   "filters": {"title": {"in": ["Ship feature E", "ship feature f"]}}}],
-        "order_by": "mr.id",
-        "limit": 10
-      }
-    gql: |
-      MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title IN ['Ship feature E', 'ship feature f']
-      RETURN mr.title ORDER BY mr.id LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - lower(mr.title) IN tuple(lower(
-        not_contains: []
-      indexes:
-      - table: gl_merge_request
-        name: idx_title
-- name: 'Migrated SQL assertion 19: filter_starts_with / top'
-  query:
-    json: |
-      {
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
-                   "columns": ["username"],
-                   "filters": {"username": {"starts_with": "ALI"}}}],
-        "limit": 10
-      }
-    gql: 'MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username STARTS WITH
-      ''ALI'' RETURN u.username LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - startsWith(lower(u.username), lower('ALI'))
-        not_contains: []
-      indexes:
-      - table: gl_user
-        name: idx_username_ngram
-- name: 'Migrated SQL assertion 20: starts_with_sort_key_exact / top'
-  query:
-    json: |
-      {
-        "query_type": "traversal",
-        "nodes": [{"id": "d", "entity": "Definition", "id_range": {"start": 12000, "end": 12300},
-                   "columns": ["branch"],
-                   "filters": {"branch": {"starts_with": "MAI"}}}],
-        "limit": 10
-      }
-    gql: |
-      MATCH (d:Definition) WHERE d.id >= 12000 AND d.id <= 12300 AND d.branch STARTS WITH 'MAI'
-      RETURN d.branch LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - startsWith(d.branch, 'MAI')
-        not_contains:
-        - lower(d.branch)
-- name: 'Migrated SQL assertion 21: token_match_path_segment / top'
-  query:
-    json: |
-      {
-        "query_type": "traversal",
-        "nodes": [{"id": "d", "entity": "Definition", "id_range": {"start": 12000, "end": 12300},
-                   "columns": ["file_path"],
-                   "filters": {"file_path": {"token_match": "MAIN"}}}],
-        "order_by": "d.id",
-        "limit": 10
-      }
-    gql: |
-      MATCH (d:Definition) WHERE d.id >= 12000 AND d.id <= 12300 AND token_match(d.file_path, 'MAIN')
-      RETURN d.file_path ORDER BY d.id LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains: []
-        not_contains: []
-      indexes:
-      - table: gl_definition
-        name: idx_file_path
-- name: 'Migrated SQL assertion 22: token_operators_case_insensitive / top'
-  query:
-    json: |
-      {
-        "query_type": "traversal",
-        "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
-                   "columns": ["title"],
-                   "filters": {"title": [{"token_match": "FIX"}, {"all_tokens": "LOGIN Crash"}, {"any_tokens": "URGENT ios"}]}}],
-        "limit": 10
-      }
-    gql: |
-      MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200
-        AND token_match(mr.title, 'FIX') AND all_tokens(mr.title, 'LOGIN Crash') AND any_tokens(mr.title, 'URGENT ios')
-      RETURN mr.title LIMIT 10
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - hasToken(lower(mr.title), lower('FIX'))
-        - hasAllTokens(lower(mr.title), lower('LOGIN Crash'))
-        - hasAnyTokens(lower(mr.title), lower('URGENT ios'))
-        not_contains: []
-      indexes:
-      - table: gl_merge_request
-        name: idx_title
-- name: 'Migrated SQL assertion 23: virtual_column_hydrates_dependencies_only / top'
-  query:
-    json: |
-      {
-          "query_type": "traversal",
-          "nodes": [{"id": "f", "entity": "File", "node_ids": [13000], "columns": ["name", "content"]}],
-          "limit": 5
-      }
-    gql: 'MATCH (f:File {id: 13000}) RETURN f.name, f.content LIMIT 5
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - AS f_name
-        not_contains:
-        - f_content
-        - f.content
-- name: 'Migrated SQL assertion 24: aggregation_multi_path_sql_both_filters / top'
-  query:
-    json: |
-      {
-        "query_type": "aggregation",
-        "nodes": [
-          {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-          {"id": "u", "entity": "User"}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-        "group_by": ["g"],
-        "aggregations": [{"count": "u", "as": "member_count"}],
-        "limit": 10
-      }
-    gql: 'MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000
-      RETURN g{.id, .name}, count(u) AS member_count LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/100/
-    - 1/102/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - startsWith
-        - 1/100/
-        - 1/102/
-        not_contains: []
-- name: 'Migrated SQL assertion 25: aggregation_oracle / aggregation_negation_oracle_sql_drops_reporter'
-  query:
-    gql: 'MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id
-      <= 10000 AND NOT (v.severity = ''critical'' AND v.state = ''detected'') RETURN
-      p{.id, .name}, count(v) AS vuln_count LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/100/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - 1/100/
-        - 'false'
-        - NOT
-        not_contains: []
-  missing_frontends:
-    json: The original query scenario supplies only GQL.
-- name: 'Migrated SQL assertion 26: aggregation_sql_traversal_path_filter / top'
-  query:
-    json: |
-      {
-        "query_type": "aggregation",
-        "nodes": [
-          {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-          {"id": "u", "entity": "User"}
-        ],
-        "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-        "group_by": ["g"],
-        "aggregations": [{"count": "u", "as": "member_count"}],
-        "limit": 10
-      }
-    gql: 'MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000
-      RETURN g{.id, .name}, count(u) AS member_count LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/100/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - startsWith
-        - traversal_path
-        - 1/100/
-        not_contains: []
-- name: 'Migrated SQL assertion 27: aggregation_vulnerability_alias_collision / top'
-  query:
-    json: |
-      {
-        "query_type": "aggregation",
-        "nodes": [
-          {"id": "v", "entity": "Vulnerability", "node_ids": [8000]},
-          {"id": "n", "entity": "Note", "columns": ["id"]}
-        ],
-        "relationships": [{"type": "HAS_NOTE", "from": "v", "to": "n"}],
-        "group_by": ["n"],
-        "aggregations": [{"count": "v", "as": "v_id"}],
-        "limit": 10
-      }
-    gql: 'MATCH (v:Vulnerability {id: 8000})-[:HAS_NOTE]->(n:Note) RETURN n, count(v)
-      AS v_id LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/100/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - gl_vulnerability AS _role_v FINAL
-        - 'false'
-        not_contains: []
-- name: 'Migrated SQL assertion 28: aggregation_vulnerability_property_grouping_sql_drops_reporter
-    / top'
-  query:
-    json: |
-      {
-        "query_type": "aggregation",
-        "nodes": [
-          {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
-          {"id": "v", "entity": "Vulnerability"}
-        ],
-        "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-        "group_by": ["v.severity"],
-        "aggregations": [{"count": "v", "as": "vuln_count"}],
-        "limit": 10
-      }
-    gql: 'MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id
-      <= 10000 RETURN v.severity, count(v) AS vuln_count LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/100/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - v.severity AS v_severity
-        - GROUP BY v.severity
-        - 'false'
-        not_contains: []
-- name: 'Migrated SQL assertion 29: aggregation_vulnerability_sql_drops_reporter /
-    top'
-  query:
-    json: |
-      {
-        "query_type": "aggregation",
-        "nodes": [
-          {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
-          {"id": "v", "entity": "Vulnerability"}
-        ],
-        "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-        "group_by": ["p"],
-        "aggregations": [{"count": "v", "as": "vuln_count"}],
-        "limit": 10
-      }
-    gql: 'MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id
-      <= 10000 RETURN p{.id, .name}, count(v) AS vuln_count LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/100/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - 1/100/
-        - 'false'
-        not_contains: []
-- name: 'Migrated SQL assertion 30: multi_id_fk_target_role_floor / top'
-  query:
-    json: |
-      {
-        "query_type": "aggregation",
-        "nodes": [
-          {"id": "v", "entity": "Vulnerability"},
-          {"id": "n", "entity": "Note", "node_ids": [3000]},
-          {"id": "f", "entity": "VulnerabilityOccurrence", "node_ids": [90000, 90001]}
-        ],
-        "relationships": [
-          {"type": "HAS_NOTE", "from": "v", "to": "n"},
-          {"type": "HAS_FINDING", "from": "v", "to": "f"}
-        ],
-        "aggregations": [{"count": "v", "as": "n"}]
-      }
-    gql: |
-      MATCH (v:Vulnerability)-[:HAS_NOTE]->(n:Note {id: 3000})
-      MATCH (v)-[:HAS_FINDING]->(f:VulnerabilityOccurrence)
-      WHERE f.id IN [90000, 90001]
-      RETURN count(v) AS n
-  security:
-    admin: false
-    paths:
-    - 1/100/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - HAS_FINDING
-        - gl_vulnerability_occurrence AS _role_f FINAL
-        - 'false'
-        not_contains: []
-- name: 'Migrated SQL assertion 31: negation / negation_far_node_scan_keeps_scope'
-  query:
-    json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","not":{"name":{"contains":"secret"}},"columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":30}
-
-'
-    gql: |
-      MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)
-      WHERE NOT g.name CONTAINS 'secret'
-      RETURN g.name
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT id FROM _narrow_g))
-        - AS g WHERE ((NOT multiSearchAny(lower(g.name), [lower('secret')]))
-        not_contains: []
-- name: 'Migrated SQL assertion 32: authorization_join_narrowing / pinned_target_narrows_the_caller_join'
-  query:
-    json: '{"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
-
-'
-    gql: 'MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN
-      caller, def LIMIT 50
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - caller.id IN (SELECT id FROM _narrow_caller)
-        not_contains: []
-- name: 'Migrated SQL assertion 33: authorization_join_narrowing / pinned_source_narrows_the_callee_join'
-  query:
-    json: '{"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[12000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":50}
-
-'
-    gql: 'MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN
-      caller, callee LIMIT 50
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - callee.id IN (SELECT id FROM _narrow_callee)
-        not_contains: []
-- name: 'Migrated SQL assertion 34: authorization_join_narrowing / unpinned_partner_keeps_the_full_join'
-  query:
-    gql: 'MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.project_id
-      = 1000 RETURN caller, callee LIMIT 50
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - AS callee FINAL ON
-        not_contains:
-        - _narrow_
-  missing_frontends:
-    json: The original query scenario supplies only GQL.
-- name: 'Migrated SQL assertion 35: datetime_hydrated_matches_inline / top'
-  query:
-    json: |
-      {
-          "query_type": "traversal",
-          "nodes": [
-              {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
-              {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["created_at"]}
-          ],
-          "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
-          "limit": 10
-      }
-    gql: 'MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note) WHERE n.id >= 1
-      AND n.id <= 10000 RETURN n.created_at LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains: []
-        not_contains:
-        - AS n_created_at
-- name: 'Migrated SQL assertion 36: filter_only_node_projects_inline / top'
-  query:
-    json: |
-      {
-          "query_type": "traversal",
-          "nodes": [
-              {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-              {"id": "g", "entity": "Group", "filters": {"name": {"contains": "Private"}}, "columns": ["name", "visibility_level"]}
-          ],
-          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-          "limit": 20
-      }
-    gql: 'MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000
-      AND g.name CONTAINS ''Private'' RETURN u.username, g.name, g.visibility_level
-      LIMIT 20
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - AS g_name
-        - AS g_visibility_level
-        not_contains:
-        - AS u_username
-- name: 'Migrated SQL assertion 37: fk_inline_projection_skips_hydration / top'
-  query:
-    json: |
-      {
-          "query_type": "traversal",
-          "nodes": [
-              {"id": "n", "entity": "Note", "node_ids": [3000], "columns": ["confidential", "created_at"]},
-              {"id": "u", "entity": "User", "columns": ["username"]}
-          ],
-          "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-          "limit": 20
-      }
-    gql: 'MATCH (n:Note {id: 3000})<-[:AUTHORED]-(u:User) RETURN n.confidential, n.created_at,
-      u.username LIMIT 20
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - AS n_confidential
-        - AS n_created_at
-        - AS u_username
-        not_contains: []
-- name: 'Migrated SQL assertion 38: fk_relationship_filter_applies / top'
-  query:
-    json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["name"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p","filters":{"source_kind":{"ne":"MergeRequest"}}}],"limit":20}
-
-'
-    gql: |
-      MATCH (p:Project {id: 1000})<-[r:IN_PROJECT]-(mr:MergeRequest)
-      WHERE r.source_kind <> 'MergeRequest'
-      RETURN p.name, mr.title LIMIT 20
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - source_kind != 'MergeRequest'
-        not_contains: []
-- name: 'Migrated SQL assertion 39: user_authored_mr / top'
-  query:
-    json: |
-      {
-          "query_type": "traversal",
-          "nodes": [
-              {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
-              {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
-          ],
-          "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-          "limit": 20
-      }
-    gql: 'MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <=
-      10000 RETURN u.username, mr.title, mr.state LIMIT 20
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - AS u_username
-        - AS mr_title
-        - AS mr_state
-        not_contains: []
-- name: 'Migrated SQL assertion 40: code_calls_lossless / top'
-  query:
-    json: |
-      {
-          "query_type": "traversal",
-          "nodes": [
-              {"id": "caller", "entity": "Definition"},
-              {"id": "def", "entity": "Definition", "node_ids": [12000]}
-          ],
-          "relationships": [{"type": "CALLS", "from": "caller", "to": "def"}],
-          "limit": 50
-      }
-    gql: 'MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12000}) RETURN
-      caller, def LIMIT 50
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - gl_definition AS _scope WHERE
-        not_contains: []
-- name: 'Migrated SQL assertion 41: elided_missing_anchor_counts_nothing / top'
-  query:
-    json: |
-      {
+  - name: "Migrated SQL assertion 1: fk_filter_only_target / top"
+    query:
+      json: |
+        {
           "query_type": "aggregation",
           "nodes": [
-              {"id": "g", "entity": "Group", "filters": {"full_path": "no-such-group"}},
-              {"id": "p", "entity": "Project"},
-              {"id": "mr", "entity": "MergeRequest"},
-              {"id": "u", "entity": "User", "columns": ["username"]}
+            {"id": "mr", "entity": "MergeRequest"},
+            {"id": "p", "entity": "Project", "filters": {"name": "Public Project"}}
           ],
-          "relationships": [
-              {"type": "CONTAINS", "from": "g", "to": "p"},
-              {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-              {"type": "AUTHORED", "from": "u", "to": "mr"}
-          ],
-          "group_by": ["u"],
+          "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
           "aggregations": [{"count": "mr", "as": "c"}],
           "limit": 10
-      }
-    gql: 'MATCH (g:Group {full_path: ''no-such-group''})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User)
-      RETURN u.username, count(mr) AS c LIMIT 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {name: 'Public Project'})
+        RETURN count(mr) AS c LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - _filter_p
+            - mr.project_id IN
+          not_contains:
+            - gl_edge
 
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - "!= '0/')"
-        not_contains:
-        - gl_group AS g
-- name: 'Migrated SQL assertion 42: elision_chain_diff_files / top'
-  query:
-    json: |
-      {
+  - name: "Migrated SQL assertion 2: fk_filter_only_target_no_match / top"
+    query:
+      json: |
+        {
           "query_type": "aggregation",
           "nodes": [
-              {"id": "g", "entity": "Group", "filters": {"full_path": "g701"}},
-              {"id": "p", "entity": "Project"},
-              {"id": "mr", "entity": "MergeRequest"},
-              {"id": "d", "entity": "MergeRequestDiff"},
-              {"id": "f", "entity": "MergeRequestDiffFile"}
+            {"id": "mr", "entity": "MergeRequest"},
+            {"id": "p", "entity": "Project", "filters": {"name": "Missing Project"}}
           ],
-          "relationships": [
-              {"type": "CONTAINS", "from": "g", "to": "p"},
-              {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-              {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
-              {"type": "HAS_FILE", "from": "d", "to": "f"}
+          "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+          "aggregations": [{"count": "mr", "as": "c"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {name: 'Missing Project'})
+        RETURN count(mr) AS c LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - _filter_p
+            - mr.project_id IN
+          not_contains:
+            - gl_edge
+
+  - name: "Migrated SQL assertion 3: narrowed_deleted_project / top"
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[970]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","id_range":{"start":9710,"end":9710},"filters":{"title":"a"}},{"id":"d","entity":"MergeRequestDiff"}],
+         "relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}],"group_by":["d.state"],"aggregations":[{"count":"d","as":"c"}],"limit":10}
+      gql: |
+        MATCH (g:Group {id: 970})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)
+        WHERE mr.id >= 9710 AND mr.id <= 9710 AND mr.title = 'a' RETURN d.state, count(d) AS c LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - _narrow_p
+            - LIMIT 1 BY p.traversal_path, p.id) AS p WHERE (p._deleted = false)
+          not_contains: []
+
+  - name: "Migrated SQL assertion 4: narrowed_stale_project_filter / top"
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[970]},{"id":"p","entity":"Project","filters":{"star_count":1}},{"id":"mr","entity":"MergeRequest"}],
+         "relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p.name"],"aggregations":[{"count":"mr","as":"c"}],"limit":10}
+      gql: |
+        MATCH (g:Group {id: 970})-[:CONTAINS]->(p:Project {star_count: 1})<-[:IN_PROJECT]-(mr:MergeRequest)
+        RETURN p.name, count(mr) AS c LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - _candidate_p
+            - LIMIT 1 BY p.traversal_path, p.id) AS p WHERE
+          not_contains:
+            - gl_edge
+
+  - name: "Migrated SQL assertion 5: renamed_scope_anchor / top"
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project"},{"id":"g","entity":"Group","filters":{"full_path":"old"}}],
+         "relationships":[{"type":"CONTAINS","from":"p","to":"g","direction":"incoming"}],"aggregations":[{"count":"p","as":"c"}],"limit":10}
+      gql: |
+        MATCH (p:Project)<-[:CONTAINS]-(g:Group {full_path: 'old'}) RETURN count(p) AS c LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - gl_group AS _scope FINAL
+          not_contains:
+            - gl_edge
+            - gl_group AS g
+
+  - name: "Migrated SQL assertion 6: like_ends_with / top"
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
+                     "filters": {"username": {"ends_with": "ICE"}}}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username ENDS WITH 'ICE' RETURN u.username LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - endsWith(lower(u.username), lower('ICE'))
+          not_contains: []
+        indexes:
+          - table: gl_user
+            name: idx_username_ngram
+
+  - name: "Migrated SQL assertion 7: nulls / transform_null_in_pinned_for_not_tree"
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight IN [3]
+        RETURN wi.weight LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - transform_null_in = 0
+          not_contains: []
+
+  - name: "Migrated SQL assertion 8: nulls / transform_null_in_absent_without_not"
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"filters":{"weight":{"in":[3]}},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND wi.weight IN [3]
+        RETURN wi.weight LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains: []
+          not_contains:
+            - transform_null_in
+
+  - name: "Migrated SQL assertion 9: nulls / transform_null_in_absent_when_not_folds"
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","id_range":{"start":4000,"end":4010},"not":{"weight":3},"columns":["weight"]}],"limit":10}
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id >= 4000 AND wi.id <= 4010 AND NOT wi.weight = 3
+        RETURN wi.weight LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains: []
+          not_contains:
+            - transform_null_in
+
+  - name: "Migrated SQL assertion 10: semantics / anchor_rewrite_keeps_relationship"
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)<-[a:AUTHORED]-(u:User)
+        WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
+        RETURN p{.name}, count(mr) AS mrs LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - (_orbit_edge_0.relationship_kind = 'IN_PROJECT')
+            - NOT ((_orbit_edge_0.source_kind = 'User') AND has(_orbit_edge_0.source_tags, 'state:opened'))
+          not_contains: []
+    missing_frontends:
+      json: The original query scenario supplies only GQL.
+
+  - name: "Migrated SQL assertion 11: semantics / anchor_rewrite_last_relationship"
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)
+        WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
+        RETURN p{.name}, count(mr) AS mrs LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - NOT ((_orbit_edge_0.source_kind = 'User') AND has(_orbit_edge_0.source_tags, 'state:opened'))
+          not_contains: []
+    missing_frontends:
+      json: The original query scenario supplies only GQL.
+
+  - name: "Migrated SQL assertion 12: semantics / not_fk_relationship_filter"
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[r:IN_PROJECT]-(mr:MergeRequest)
+        WHERE NOT r.source_kind = 'MergeRequest'
+        RETURN p.name, mr.title LIMIT 20
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - source_kind != 'MergeRequest'
+          not_contains: []
+    missing_frontends:
+      json: The original query scenario supplies only GQL.
+
+  - name: "Migrated SQL assertion 13: semantics / two_hop_edge_negation_reversed"
+    query:
+      gql: |
+        MATCH (u:User)-[m:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project {id: 1000})
+        WHERE NOT (m.source_id = 2 AND g.visibility_level = 'public')
+        RETURN u.username, g.name, p.name LIMIT 20
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - (_orbit_edge_0.relationship_kind = 'MEMBER_OF')
+            - (NOT ((_orbit_edge_0.source_id = 2) AND (g.visibility_level = 'public')))
+          not_contains: []
+    missing_frontends:
+      json: The original query scenario supplies only GQL.
+
+  - name: "Migrated SQL assertion 14: contains_case_insensitive / top"
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                     "columns": ["title"],
+                     "filters": {"title": {"contains": "SHIP FEAT"}}}],
+          "order_by": "mr.id",
+          "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS 'SHIP FEAT'
+        RETURN mr.title ORDER BY mr.id LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - multiSearchAny(lower(mr.title), [lower('SHIP FEAT')])
+          not_contains: []
+        indexes:
+          - table: gl_merge_request
+            name: idx_title_ngram
+
+  - name: "Migrated SQL assertion 15: contains_literal_characters / top"
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                     "columns": ["title"],
+                     "filters": {"title": {"contains": "100% done_now c:\\temp"}}}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS '100% done_now c:\\temp'
+        RETURN mr.title LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains: []
+          not_contains: []
+        indexes:
+          - table: gl_merge_request
+            name: idx_title_ngram
+
+  - name: "Migrated SQL assertion 16: datetime_inline_iso_utc / top"
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "columns": ["created_at"]}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (n:Note {id: 3000}) RETURN n.created_at LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS n_created_at
+          not_contains: []
+
+  - name: "Migrated SQL assertion 17: equality_uses_text_index / equality"
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                     "columns": ["title"],
+                     "filters": {"title": "Ship feature E"}}],
+          "order_by": "mr.id",
+          "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title = 'Ship feature E'
+        RETURN mr.title ORDER BY mr.id LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - lower(mr.title) = lower(
+          not_contains: []
+        indexes:
+          - table: gl_merge_request
+            name: idx_title
+
+  - name: "Migrated SQL assertion 18: equality_uses_text_index / membership"
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                     "columns": ["title"],
+                     "filters": {"title": {"in": ["Ship feature E", "ship feature f"]}}}],
+          "order_by": "mr.id",
+          "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title IN ['Ship feature E', 'ship feature f']
+        RETURN mr.title ORDER BY mr.id LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - lower(mr.title) IN tuple(lower(
+          not_contains: []
+        indexes:
+          - table: gl_merge_request
+            name: idx_title
+
+  - name: "Migrated SQL assertion 19: filter_starts_with / top"
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000},
+                     "columns": ["username"],
+                     "filters": {"username": {"starts_with": "ALI"}}}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username STARTS WITH 'ALI' RETURN u.username LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - startsWith(lower(u.username), lower('ALI'))
+          not_contains: []
+        indexes:
+          - table: gl_user
+            name: idx_username_ngram
+
+  - name: "Migrated SQL assertion 20: starts_with_sort_key_exact / top"
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "d", "entity": "Definition", "id_range": {"start": 12000, "end": 12300},
+                     "columns": ["branch"],
+                     "filters": {"branch": {"starts_with": "MAI"}}}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (d:Definition) WHERE d.id >= 12000 AND d.id <= 12300 AND d.branch STARTS WITH 'MAI'
+        RETURN d.branch LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - startsWith(d.branch, 'MAI')
+          not_contains:
+            - lower(d.branch)
+
+  - name: "Migrated SQL assertion 21: token_match_path_segment / top"
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "d", "entity": "Definition", "id_range": {"start": 12000, "end": 12300},
+                     "columns": ["file_path"],
+                     "filters": {"file_path": {"token_match": "MAIN"}}}],
+          "order_by": "d.id",
+          "limit": 10
+        }
+      gql: |
+        MATCH (d:Definition) WHERE d.id >= 12000 AND d.id <= 12300 AND token_match(d.file_path, 'MAIN')
+        RETURN d.file_path ORDER BY d.id LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains: []
+          not_contains: []
+        indexes:
+          - table: gl_definition
+            name: idx_file_path
+
+  - name: "Migrated SQL assertion 22: token_operators_case_insensitive / top"
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2200},
+                     "columns": ["title"],
+                     "filters": {"title": [{"token_match": "FIX"}, {"all_tokens": "LOGIN Crash"}, {"any_tokens": "URGENT ios"}]}}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2200
+          AND token_match(mr.title, 'FIX') AND all_tokens(mr.title, 'LOGIN Crash') AND any_tokens(mr.title, 'URGENT ios')
+        RETURN mr.title LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - hasToken(lower(mr.title), lower('FIX'))
+            - hasAllTokens(lower(mr.title), lower('LOGIN Crash'))
+            - hasAnyTokens(lower(mr.title), lower('URGENT ios'))
+          not_contains: []
+        indexes:
+          - table: gl_merge_request
+            name: idx_title
+
+  - name: "Migrated SQL assertion 23: virtual_column_hydrates_dependencies_only / top"
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [{"id": "f", "entity": "File", "node_ids": [13000], "columns": ["name", "content"]}],
+            "limit": 5
+        }
+      gql: |
+        MATCH (f:File {id: 13000}) RETURN f.name, f.content LIMIT 5
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS f_name
+          not_contains:
+            - f_content
+            - f.content
+
+  - name: "Migrated SQL assertion 24: aggregation_multi_path_sql_both_filters / top"
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User"}
           ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "group_by": ["g"],
+          "aggregations": [{"count": "u", "as": "member_count"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, count(u) AS member_count LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/100/
+        - 1/102/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - startsWith
+            - 1/100/
+            - 1/102/
+          not_contains: []
+
+  - name: "Migrated SQL assertion 25: aggregation_oracle / aggregation_negation_oracle_sql_drops_reporter"
+    query:
+      gql: |
+        MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id <= 10000 AND NOT (v.severity = 'critical' AND v.state = 'detected') RETURN p{.id, .name}, count(v) AS vuln_count LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - 1/100/
+            - "false"
+            - NOT
+          not_contains: []
+    missing_frontends:
+      json: The original query scenario supplies only GQL.
+
+  - name: "Migrated SQL assertion 26: aggregation_sql_traversal_path_filter / top"
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "u", "entity": "User"}
+          ],
+          "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+          "group_by": ["g"],
+          "aggregations": [{"count": "u", "as": "member_count"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, count(u) AS member_count LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - startsWith
+            - traversal_path
+            - 1/100/
+          not_contains: []
+
+  - name: "Migrated SQL assertion 27: aggregation_vulnerability_alias_collision / top"
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "v", "entity": "Vulnerability", "node_ids": [8000]},
+            {"id": "n", "entity": "Note", "columns": ["id"]}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "v", "to": "n"}],
+          "group_by": ["n"],
+          "aggregations": [{"count": "v", "as": "v_id"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (v:Vulnerability {id: 8000})-[:HAS_NOTE]->(n:Note) RETURN n, count(v) AS v_id LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - gl_vulnerability AS _role_v FINAL
+            - "false"
+          not_contains: []
+
+  - name: "Migrated SQL assertion 28: aggregation_vulnerability_property_grouping_sql_drops_reporter / top"
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+            {"id": "v", "entity": "Vulnerability"}
+          ],
+          "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+          "group_by": ["v.severity"],
+          "aggregations": [{"count": "v", "as": "vuln_count"}],
+          "limit": 10
+        }
+      gql: |
+        MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id <= 10000 RETURN v.severity, count(v) AS vuln_count LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - v.severity AS v_severity
+            - GROUP BY v.severity
+            - "false"
+          not_contains: []
+
+  - name: "Migrated SQL assertion 29: aggregation_vulnerability_sql_drops_reporter / top"
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+            {"id": "v", "entity": "Vulnerability"}
+          ],
+          "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
           "group_by": ["p"],
-          "aggregations": [{"count": "f", "as": "c"}],
+          "aggregations": [{"count": "v", "as": "vuln_count"}],
           "limit": 10
-      }
-    gql: 'MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
-      WHERE g.full_path = ''g701'' RETURN p, count(f) AS c LIMIT 10
+        }
+      gql: |
+        MATCH (p:Project)<-[:IN_PROJECT]-(v:Vulnerability) WHERE p.id >= 1 AND p.id <= 10000 RETURN p{.id, .name}, count(v) AS vuln_count LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - 1/100/
+            - "false"
+          not_contains: []
 
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - gl_group AS _scope FINAL WHERE
-        - _scope.full_path = 'g701'
-        not_contains:
-        - gl_group AS g
-- name: 'Migrated SQL assertion 43: elision_depth_1_2_projects / top'
-  query:
-    json: |
-      {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"public-group"}},{"id":"x","entity":"Project"}],
-       "relationships":[{"type":"CONTAINS","from":"g","to":"x","hops":[1,2]}],"aggregations":[{"count":"x","as":"c"}],"limit":10}
-    gql: 'MATCH (g:Group {full_path: ''public-group''})-[:CONTAINS*1..2]->(x:Project)
-      RETURN count(x) AS c LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - countSubstrings(x.traversal_path
-        not_contains:
-        - gl_edge
-        - gl_group AS g
-- name: 'Migrated SQL assertion 44: elision_depth_1_groups / top'
-  query:
-    json: |
-      {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"public-group"}},{"id":"x","entity":"Group"}],
-       "relationships":[{"type":"CONTAINS","from":"g","to":"x","hops":[1,1]}],"aggregations":[{"count":"x","as":"c"}],"limit":10}
-    gql: 'MATCH (g:Group {full_path: ''public-group''})-[:CONTAINS]->(x:Group) RETURN
-      count(x) AS c LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - countSubstrings(x.traversal_path
-        not_contains:
-        - gl_edge
-        - gl_group AS g
-- name: 'Migrated SQL assertion 45: elision_depth_1_projects / top'
-  query:
-    json: |
-      {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"public-group"}},{"id":"x","entity":"Project"}],
-       "relationships":[{"type":"CONTAINS","from":"g","to":"x","hops":[1,1]}],"aggregations":[{"count":"x","as":"c"}],"limit":10}
-    gql: 'MATCH (g:Group {full_path: ''public-group''})-[:CONTAINS]->(x:Project) RETURN
-      count(x) AS c LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - countSubstrings(x.traversal_path
-        not_contains:
-        - gl_edge
-        - gl_group AS g
-- name: 'Migrated SQL assertion 46: elision_depth_2_projects / top'
-  query:
-    json: |
-      {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"public-group"}},{"id":"x","entity":"Project"}],
-       "relationships":[{"type":"CONTAINS","from":"g","to":"x","hops":[2,2]}],"aggregations":[{"count":"x","as":"c"}],"limit":10}
-    gql: 'MATCH (g:Group {full_path: ''public-group''})-[:CONTAINS*2..2]->(x:Project)
-      RETURN count(x) AS c LIMIT 10
-
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - countSubstrings(x.traversal_path
-        not_contains:
-        - gl_edge
-        - gl_group AS g
-- name: 'Migrated SQL assertion 47: elision_star_authored_mrs / top'
-  query:
-    json: |
-      {
+  - name: "Migrated SQL assertion 30: multi_id_fk_target_role_floor / top"
+    query:
+      json: |
+        {
           "query_type": "aggregation",
           "nodes": [
-              {"id": "g", "entity": "Group", "filters": {"full_path": "g700"}},
-              {"id": "p", "entity": "Project"},
-              {"id": "mr", "entity": "MergeRequest"},
-              {"id": "u", "entity": "User", "columns": ["username"]}
+            {"id": "v", "entity": "Vulnerability"},
+            {"id": "n", "entity": "Note", "node_ids": [3000]},
+            {"id": "f", "entity": "VulnerabilityOccurrence", "node_ids": [90000, 90001]}
           ],
           "relationships": [
-              {"type": "CONTAINS", "from": "g", "to": "p"},
-              {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-              {"type": "AUTHORED", "from": "u", "to": "mr"}
+            {"type": "HAS_NOTE", "from": "v", "to": "n"},
+            {"type": "HAS_FINDING", "from": "v", "to": "f"}
           ],
-          "group_by": ["u"],
-          "aggregations": [
-              {"count": "mr", "as": "c"},
-              {"count": "p.id", "as": "project_rows"},
-              {"count": "p.created_at", "as": "dated_projects"}
-          ],
-          "limit": 10
-      }
-    gql: 'MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User)
-      WHERE g.full_path = ''g700'' RETURN u{.id, .username}, count(mr) AS c, count(p.id)
-      AS project_rows, count(p.created_at) AS dated_projects LIMIT 10
+          "aggregations": [{"count": "v", "as": "n"}]
+        }
+      gql: |
+        MATCH (v:Vulnerability)-[:HAS_NOTE]->(n:Note {id: 3000})
+        MATCH (v)-[:HAS_FINDING]->(f:VulnerabilityOccurrence)
+        WHERE f.id IN [90000, 90001]
+        RETURN count(v) AS n
+    security:
+      admin: false
+      paths:
+        - 1/100/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - HAS_FINDING
+            - gl_vulnerability_occurrence AS _role_f FINAL
+            - "false"
+          not_contains: []
 
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - gl_group AS _scope FINAL WHERE
-        - _scope.full_path = 'g700'
-        - countSubstrings(p.traversal_path, '/')
-        not_contains:
-        - gl_group AS g
-- name: 'Migrated SQL assertion 48: incoming_pinned_subgroup_keeps_parent / top'
-  query:
-    json: |
-      {"query_type":"aggregation","nodes":[{"id":"child","entity":"Group","node_ids":[200]},{"id":"parent","entity":"Group","columns":["name"]}],
-       "relationships":[{"type":"CONTAINS","from":"child","to":"parent","direction":"incoming"}],"group_by":["parent"],"aggregations":[{"count":"parent","as":"n"}],"limit":10}
-    gql: 'MATCH (child:Group {id: 200})<-[:CONTAINS]-(parent:Group) RETURN parent{.id,
-      .name}, count(parent) AS n LIMIT 10
+  - name: "Migrated SQL assertion 31: negation / negation_far_node_scan_keeps_scope"
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","not":{"name":{"contains":"secret"}},"columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":30}
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)
+        WHERE NOT g.name CONTAINS 'secret'
+        RETURN g.name
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT id FROM _narrow_g))
+            - AS g WHERE ((NOT multiSearchAny(lower(g.name), [lower('secret')]))
+          not_contains: []
 
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - gl_edge
-        not_contains: []
-- name: 'Migrated SQL assertion 49: incoming_project_contains_branch / top'
-  query:
-    json: |
-      {
-        "query_type": "aggregation",
-        "nodes": [
-          {"id": "p", "entity": "Project", "node_ids": [7000]},
-          {"id": "b", "entity": "Branch"}
-        ],
-        "relationships": [{"type": "CONTAINS", "from": "p", "to": "b", "direction": "incoming"}],
-        "aggregations": [{"count": "b", "as": "c"}],
-        "limit": 10
-      }
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - gl_code_edge
-        not_contains: []
-  missing_frontends:
-    gql: The original query scenario supplies only JSON.
-- name: 'Migrated SQL assertion 50: many_anchors_keep_broad_filter / top'
-  query:
-    json: |
-      {
-          "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project", "node_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9], "columns": ["name"]}],
-          "limit": 10
-      }
-    gql: 'MATCH (p:Project) WHERE p.id IN [1, 2, 3, 4, 5, 6, 7, 8, 9] RETURN p.name
-      LIMIT 10
+  - name: "Migrated SQL assertion 32: authorization_join_narrowing / pinned_target_narrows_the_caller_join"
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
+      gql: |
+        MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - caller.id IN (SELECT id FROM _narrow_caller)
+          not_contains: []
 
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - startsWith(p.traversal_path, '1/')
-        not_contains:
-        - AS _scope
-- name: 'Migrated SQL assertion 51: missing_anchor_falls_back_to_broad_filter / top'
-  query:
-    json: |
-      {
-          "query_type": "traversal",
-          "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 5555}, "columns": ["title"]}],
-          "limit": 10
-      }
-    gql: 'MATCH (mr:MergeRequest {project_id: 5555}) RETURN mr.title LIMIT 10
+  - name: "Migrated SQL assertion 33: authorization_join_narrowing / pinned_source_narrows_the_callee_join"
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[12000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":50}
+      gql: |
+        MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - callee.id IN (SELECT id FROM _narrow_callee)
+          not_contains: []
 
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - AS _scope WHERE
-        - "= '0/')"
-        not_contains: []
-- name: 'Migrated SQL assertion 52: multi_anchor_or_lookups / top'
-  query:
-    json: |
-      {
-          "query_type": "traversal",
-          "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000, 1002], "columns": ["name"]}],
-          "limit": 10
-      }
-    gql: 'MATCH (p:Project) WHERE p.id IN [1000, 1002] RETURN p.name LIMIT 10
+  - name: "Migrated SQL assertion 34: authorization_join_narrowing / unpinned_partner_keeps_the_full_join"
+    query:
+      gql: |
+        MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.project_id = 1000 RETURN caller, callee LIMIT 50
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS callee FINAL ON
+          not_contains:
+            - _narrow_
+    missing_frontends:
+      json: The original query scenario supplies only GQL.
 
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - "(_scope.id = 1000)"
-        - "(_scope.id = 1002)"
-        - ") OR startsWith(p.traversal_path, (SELECT"
-        not_contains: []
-- name: 'Migrated SQL assertion 53: multi_edge_lossless / top'
-  query:
-    json: |
-      {
-          "query_type": "traversal",
+  - name: "Migrated SQL assertion 35: datetime_hydrated_matches_inline / top"
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
+                {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["created_at"]}
+            ],
+            "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note) WHERE n.id >= 1 AND n.id <= 10000 RETURN n.created_at LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains: []
+          not_contains:
+            - AS n_created_at
+
+  - name: "Migrated SQL assertion 36: filter_only_node_projects_inline / top"
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "g", "entity": "Group", "filters": {"name": {"contains": "Private"}}, "columns": ["name", "visibility_level"]}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "limit": 20
+        }
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 AND g.name CONTAINS 'Private' RETURN u.username, g.name, g.visibility_level LIMIT 20
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS g_name
+            - AS g_visibility_level
+          not_contains:
+            - AS u_username
+
+  - name: "Migrated SQL assertion 37: fk_inline_projection_skips_hydration / top"
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "n", "entity": "Note", "node_ids": [3000], "columns": ["confidential", "created_at"]},
+                {"id": "u", "entity": "User", "columns": ["username"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "limit": 20
+        }
+      gql: |
+        MATCH (n:Note {id: 3000})<-[:AUTHORED]-(u:User) RETURN n.confidential, n.created_at, u.username LIMIT 20
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS n_confidential
+            - AS n_created_at
+            - AS u_username
+          not_contains: []
+
+  - name: "Migrated SQL assertion 38: fk_relationship_filter_applies / top"
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"columns":["name"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p","filters":{"source_kind":{"ne":"MergeRequest"}}}],"limit":20}
+      gql: |
+        MATCH (p:Project {id: 1000})<-[r:IN_PROJECT]-(mr:MergeRequest)
+        WHERE r.source_kind <> 'MergeRequest'
+        RETURN p.name, mr.title LIMIT 20
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - source_kind != 'MergeRequest'
+          not_contains: []
+
+  - name: "Migrated SQL assertion 39: user_authored_mr / top"
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "limit": 20
+        }
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, mr.title, mr.state LIMIT 20
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS u_username
+            - AS mr_title
+            - AS mr_state
+          not_contains: []
+
+  - name: "Migrated SQL assertion 40: code_calls_lossless / top"
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "caller", "entity": "Definition"},
+                {"id": "def", "entity": "Definition", "node_ids": [12000]}
+            ],
+            "relationships": [{"type": "CALLS", "from": "caller", "to": "def"}],
+            "limit": 50
+        }
+      gql: |
+        MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12000}) RETURN caller, def LIMIT 50
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - gl_definition AS _scope WHERE
+          not_contains: []
+
+  - name: "Migrated SQL assertion 41: elided_missing_anchor_counts_nothing / top"
+    query:
+      json: |
+        {
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "filters": {"full_path": "no-such-group"}},
+                {"id": "p", "entity": "Project"},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "u", "entity": "User", "columns": ["username"]}
+            ],
+            "relationships": [
+                {"type": "CONTAINS", "from": "g", "to": "p"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+                {"type": "AUTHORED", "from": "u", "to": "mr"}
+            ],
+            "group_by": ["u"],
+            "aggregations": [{"count": "mr", "as": "c"}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (g:Group {full_path: 'no-such-group'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) RETURN u.username, count(mr) AS c LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - "!= '0/')"
+          not_contains:
+            - gl_group AS g
+
+  - name: "Migrated SQL assertion 42: elision_chain_diff_files / top"
+    query:
+      json: |
+        {
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "filters": {"full_path": "g701"}},
+                {"id": "p", "entity": "Project"},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "d", "entity": "MergeRequestDiff"},
+                {"id": "f", "entity": "MergeRequestDiffFile"}
+            ],
+            "relationships": [
+                {"type": "CONTAINS", "from": "g", "to": "p"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+                {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
+                {"type": "HAS_FILE", "from": "d", "to": "f"}
+            ],
+            "group_by": ["p"],
+            "aggregations": [{"count": "f", "as": "c"}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) WHERE g.full_path = 'g701' RETURN p, count(f) AS c LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - gl_group AS _scope FINAL WHERE
+            - _scope.full_path = 'g701'
+          not_contains:
+            - gl_group AS g
+
+  - name: "Migrated SQL assertion 43: elision_depth_1_2_projects / top"
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"public-group"}},{"id":"x","entity":"Project"}],
+         "relationships":[{"type":"CONTAINS","from":"g","to":"x","hops":[1,2]}],"aggregations":[{"count":"x","as":"c"}],"limit":10}
+      gql: |
+        MATCH (g:Group {full_path: 'public-group'})-[:CONTAINS*1..2]->(x:Project) RETURN count(x) AS c LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - countSubstrings(x.traversal_path
+          not_contains:
+            - gl_edge
+            - gl_group AS g
+
+  - name: "Migrated SQL assertion 44: elision_depth_1_groups / top"
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"public-group"}},{"id":"x","entity":"Group"}],
+         "relationships":[{"type":"CONTAINS","from":"g","to":"x","hops":[1,1]}],"aggregations":[{"count":"x","as":"c"}],"limit":10}
+      gql: |
+        MATCH (g:Group {full_path: 'public-group'})-[:CONTAINS]->(x:Group) RETURN count(x) AS c LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - countSubstrings(x.traversal_path
+          not_contains:
+            - gl_edge
+            - gl_group AS g
+
+  - name: "Migrated SQL assertion 45: elision_depth_1_projects / top"
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"public-group"}},{"id":"x","entity":"Project"}],
+         "relationships":[{"type":"CONTAINS","from":"g","to":"x","hops":[1,1]}],"aggregations":[{"count":"x","as":"c"}],"limit":10}
+      gql: |
+        MATCH (g:Group {full_path: 'public-group'})-[:CONTAINS]->(x:Project) RETURN count(x) AS c LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - countSubstrings(x.traversal_path
+          not_contains:
+            - gl_edge
+            - gl_group AS g
+
+  - name: "Migrated SQL assertion 46: elision_depth_2_projects / top"
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"public-group"}},{"id":"x","entity":"Project"}],
+         "relationships":[{"type":"CONTAINS","from":"g","to":"x","hops":[2,2]}],"aggregations":[{"count":"x","as":"c"}],"limit":10}
+      gql: |
+        MATCH (g:Group {full_path: 'public-group'})-[:CONTAINS*2..2]->(x:Project) RETURN count(x) AS c LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - countSubstrings(x.traversal_path
+          not_contains:
+            - gl_edge
+            - gl_group AS g
+
+  - name: "Migrated SQL assertion 47: elision_star_authored_mrs / top"
+    query:
+      json: |
+        {
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "filters": {"full_path": "g700"}},
+                {"id": "p", "entity": "Project"},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "u", "entity": "User", "columns": ["username"]}
+            ],
+            "relationships": [
+                {"type": "CONTAINS", "from": "g", "to": "p"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+                {"type": "AUTHORED", "from": "u", "to": "mr"}
+            ],
+            "group_by": ["u"],
+            "aggregations": [
+                {"count": "mr", "as": "c"},
+                {"count": "p.id", "as": "project_rows"},
+                {"count": "p.created_at", "as": "dated_projects"}
+            ],
+            "limit": 10
+        }
+      gql: |
+        MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) WHERE g.full_path = 'g700' RETURN u{.id, .username}, count(mr) AS c, count(p.id) AS project_rows, count(p.created_at) AS dated_projects LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - gl_group AS _scope FINAL WHERE
+            - _scope.full_path = 'g700'
+            - countSubstrings(p.traversal_path, '/')
+          not_contains:
+            - gl_group AS g
+
+  - name: "Migrated SQL assertion 48: incoming_pinned_subgroup_keeps_parent / top"
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"child","entity":"Group","node_ids":[200]},{"id":"parent","entity":"Group","columns":["name"]}],
+         "relationships":[{"type":"CONTAINS","from":"child","to":"parent","direction":"incoming"}],"group_by":["parent"],"aggregations":[{"count":"parent","as":"n"}],"limit":10}
+      gql: |
+        MATCH (child:Group {id: 200})<-[:CONTAINS]-(parent:Group) RETURN parent{.id, .name}, count(parent) AS n LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - gl_edge
+          not_contains: []
+
+  - name: "Migrated SQL assertion 49: incoming_project_contains_branch / top"
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
           "nodes": [
-              {"id": "mr", "entity": "MergeRequest", "columns": ["project_id"],
-               "filters": {"project_id": {"eq": 1000}}},
-              {"id": "diff", "entity": "MergeRequestDiff"},
-              {"id": "df", "entity": "MergeRequestDiffFile"}
+            {"id": "p", "entity": "Project", "node_ids": [7000]},
+            {"id": "b", "entity": "Branch"}
           ],
-          "relationships": [
-              {"type": "HAS_DIFF", "from": "mr", "to": "diff"},
-              {"type": "HAS_FILE", "from": "diff", "to": "df"}
-          ],
-          "limit": 50
-      }
-    gql: 'MATCH (mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:HAS_FILE]->(df:MergeRequestDiffFile)
-      WHERE mr.project_id = 1000 RETURN mr.project_id, diff, df LIMIT 50
+          "relationships": [{"type": "CONTAINS", "from": "p", "to": "b", "direction": "incoming"}],
+          "aggregations": [{"count": "b", "as": "c"}],
+          "limit": 10
+        }
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - gl_code_edge
+          not_contains: []
+    missing_frontends:
+      gql: The original query scenario supplies only JSON.
 
-'
-  security:
-    admin: false
-    paths:
-    - 1/
-  physical:
-    clickhouse:
-      sql:
-        contains:
-        - gl_project AS _scope WHERE
-        not_contains: []
+  - name: "Migrated SQL assertion 50: many_anchors_keep_broad_filter / top"
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9], "columns": ["name"]}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (p:Project) WHERE p.id IN [1, 2, 3, 4, 5, 6, 7, 8, 9] RETURN p.name LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - startsWith(p.traversal_path, '1/')
+          not_contains:
+            - AS _scope
+
+  - name: "Migrated SQL assertion 51: missing_anchor_falls_back_to_broad_filter / top"
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 5555}, "columns": ["title"]}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 5555}) RETURN mr.title LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - AS _scope WHERE
+            - = '0/')
+          not_contains: []
+
+  - name: "Migrated SQL assertion 52: multi_anchor_or_lookups / top"
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000, 1002], "columns": ["name"]}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (p:Project) WHERE p.id IN [1000, 1002] RETURN p.name LIMIT 10
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - (_scope.id = 1000)
+            - (_scope.id = 1002)
+            - ) OR startsWith(p.traversal_path, (SELECT
+          not_contains: []
+
+  - name: "Migrated SQL assertion 53: multi_edge_lossless / top"
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "columns": ["project_id"],
+                 "filters": {"project_id": {"eq": 1000}}},
+                {"id": "diff", "entity": "MergeRequestDiff"},
+                {"id": "df", "entity": "MergeRequestDiffFile"}
+            ],
+            "relationships": [
+                {"type": "HAS_DIFF", "from": "mr", "to": "diff"},
+                {"type": "HAS_FILE", "from": "diff", "to": "df"}
+            ],
+            "limit": 50
+        }
+      gql: |
+        MATCH (mr:MergeRequest)-[:HAS_DIFF]->(diff:MergeRequestDiff)-[:HAS_FILE]->(df:MergeRequestDiffFile) WHERE mr.project_id = 1000 RETURN mr.project_id, diff, df LIMIT 50
+    security:
+      admin: false
+      paths:
+        - 1/
+    physical:
+      clickhouse:
+        sql:
+          contains:
+            - gl_project AS _scope WHERE
+          not_contains: []

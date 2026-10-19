@@ -1,14 +1,17 @@
-description: Admin MAX aggregation on admin-only field compiles successfully
+description: Admin aggregation returns an admin-only boolean measure
 
 config:
   security: admin
+  extra_seed:
+    gl_user:
+      - { id: 6, username: "用户_émoji_🎉", name: "Ünïcödé Üser", state: active, user_type: human, email: unicode@example.com, is_admin: true, _version: { sql: "now64(6) + INTERVAL 1 SECOND" } }
 
 query:
   json: |
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+        {"id": "u", "entity": "User", "id_range": {"start": 6, "end": 6}, "columns": ["username"]},
         {"id": "g", "entity": "Group", "columns": ["name"]}
       ],
       "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -17,6 +20,12 @@ query:
       "limit": 10
     }
   gql: |
-    MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN g{.id, .name}, max(u.is_admin) AS has_admin LIMIT 10
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 6 AND u.id <= 6 RETURN g{.id, .name}, max(u.is_admin) AS has_admin LIMIT 10
 
 expect:
+  groups:
+    g:
+      entity: Group
+      ids: [100, 101]
+  gql_columns:
+    has_admin: ["TRUE", "TRUE"]

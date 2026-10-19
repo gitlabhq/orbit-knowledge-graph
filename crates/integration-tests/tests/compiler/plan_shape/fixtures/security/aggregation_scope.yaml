@@ -72,3 +72,16 @@ cases:
       clickhouse:
         sql:
           contains: ["1/100/", "false", "NOT"]
+
+  - name: Admin aggregation accepts an admin-only measure
+    security: { admin: true }
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]},{"id":"g","entity":"Group","columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"group_by":["g"],"aggregations":[{"max":"u.is_admin","as":"has_admin"}],"limit":10}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN g{.id, .name}, max(u.is_admin) AS has_admin LIMIT 10
+    logical: { expect: ["(Aggregate group g AS g, MAX(u.is_admin) AS has_admin (_))"] }
+    physical:
+      clickhouse:
+        sql:
+          contains: ["u.is_admin", "has_admin"]
