@@ -247,6 +247,7 @@ impl CodeBackfill {
                 traversal_path: project.traversal_path.clone(),
                 dispatch_id,
                 campaign_id: campaign_id.clone(),
+                repository_storage: None,
             };
 
             let subscription = request.publish_subscription();

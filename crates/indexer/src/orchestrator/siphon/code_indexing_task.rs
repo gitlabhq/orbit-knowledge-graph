@@ -81,6 +81,9 @@ impl CodeIndexingTaskRoute {
                     traversal_path: TraversalPath::new_unchecked(traversal_path),
                     dispatch_id: ctx.dispatch_id,
                     campaign_id: ctx.campaign_id.clone(),
+                    repository_storage: extractor
+                        .get_string(event, "repository_storage")
+                        .map(str::to_string),
                 };
                 latest
                     .entry(key)
@@ -211,6 +214,61 @@ mod tests {
         assert_eq!(request.branch.as_deref(), Some("main"));
         assert_eq!(request.commit_sha.as_deref(), Some("abc123"));
         assert_eq!(request.traversal_path, "/org/project-123");
+    }
+
+    #[tokio::test]
+    async fn copies_repository_storage_from_the_event() {
+        let nats = Arc::new(MockNatsServices::new());
+        let payload = build_replication_events(vec![
+            code_indexing_task_columns(42, 123, "refs/heads/main", "abc123", "/org/project-123")
+                .with_string("repository_storage", "gitaly-1")
+                .build(),
+        ]);
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
+
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
+
+        let published = nats.get_published();
+        let request: CodeIndexingTaskRequest =
+            serde_json::from_slice(&published[0].1.payload).unwrap();
+        assert_eq!(request.repository_storage.as_deref(), Some("gitaly-1"));
+    }
+
+    #[tokio::test]
+    async fn dispatches_without_the_repository_storage_column() {
+        let nats = Arc::new(MockNatsServices::new());
+        let payload = build_replication_events(vec![
+            code_indexing_task_columns(42, 123, "refs/heads/main", "abc123", "/org/project-123")
+                .build(),
+        ]);
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
+
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
+
+        let published = nats.get_published();
+        assert_eq!(published.len(), 1);
+        let request: CodeIndexingTaskRequest =
+            serde_json::from_slice(&published[0].1.payload).unwrap();
+        assert_eq!(request.repository_storage, None);
+    }
+
+    #[tokio::test]
+    async fn dispatches_with_a_null_repository_storage() {
+        let nats = Arc::new(MockNatsServices::new());
+        let payload = build_replication_events(vec![
+            code_indexing_task_columns(42, 123, "refs/heads/main", "abc123", "/org/project-123")
+                .with_null("repository_storage")
+                .build(),
+        ]);
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
+
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
+
+        let published = nats.get_published();
+        assert_eq!(published.len(), 1);
+        let request: CodeIndexingTaskRequest =
+            serde_json::from_slice(&published[0].1.payload).unwrap();
+        assert_eq!(request.repository_storage, None);
     }
 
     #[tokio::test]
