@@ -1,7 +1,7 @@
 {{ $v := fromYaml (readFile "../config/versions.yaml") }}
 {{ $gitlab := $v.gitlab }}
-{{ with env "E2E_GITLAB_LANE" }}{{ $gitlab = index $v.gitlab_lanes . }}{{ end }}
-{{ $imageTag := $gitlab | get "image_tag" "master" }}
+{{ $imageTag := "master" }}
+{{ with env "E2E_GITLAB_LANE" }}{{ $gitlab = index $v.gitlab_lanes . }}{{ $imageTag = printf "%s-stable" . }}{{ end }}
 global:
   edition: ee
   gatewayApi:

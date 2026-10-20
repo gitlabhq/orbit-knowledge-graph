@@ -2,7 +2,8 @@
 {{ $kctx := env "KCTX" | default "gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_e2e-harness" }}
 {{ $v := fromYaml (readFile "config/versions.yaml") }}
 {{ $gitlab := $v.gitlab }}
-{{ with env "E2E_GITLAB_LANE" }}{{ $gitlab = index $v.gitlab_lanes . }}{{ end }}
+{{ $gitlabChartRepo := "gitlab-devel" }}
+{{ with env "E2E_GITLAB_LANE" }}{{ $gitlab = index $v.gitlab_lanes . }}{{ $gitlabChartRepo = "gitlab-stable" }}{{ end }}
 
 helmDefaults:
   wait: true
@@ -95,7 +96,7 @@ releases:
   - name: gitlab
     namespace: e2e-{{ $sha }}-gitlab
     createNamespace: true
-    chart: {{ $gitlab | get "chart_repo" "gitlab-devel" }}/gitlab
+    chart: {{ $gitlabChartRepo }}/gitlab
     version: {{ $gitlab.chart }}
     labels:
       phase: infra
