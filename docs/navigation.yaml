@@ -1,43 +1,102 @@
-# The GitLab Orbit section of the docs.gitlab.com global navigation.
+# The GitLab Orbit sections of the docs.gitlab.com global navigation.
 # Source of truth until it merges in docs-gitlab-com data/en-us/navigation.yaml.
 # scripts/docs/site.sh replaces the GitLab Orbit section of the docs-gitlab-com
 # checkout with this file, so `mise docs:serve` and `docs_hugo_build` show these pages.
+# During the docs v2 review, the first section is the live navigation and the
+# second lists the docs/source/v2 pages. At cutover, drop the first section and
+# the v2/ prefix.
 
 - title: GitLab Orbit
   url: 'orbit/'
   submenu:
+    - title: Compare GitLab Orbit Remote and Local
+      url: 'orbit/compare-local-remote/'
+    - title: GitLab Orbit skill
+      url: 'orbit/ai_coding_agents/'
+    - title: GitLab Orbit Remote
+      url: 'orbit/remote/'
+      submenu:
+        - title: Getting started
+          url: 'orbit/remote/getting-started/'
+        - title: How it works
+          url: 'orbit/remote/how-it-works/'
+        - title: Security
+          url: 'orbit/remote/security/'
+        - title: Schema reference
+          url: 'orbit/remote/schema/'
+        - title: Cookbook
+          url: 'orbit/remote/cookbook/'
+        - title: Queries
+          url: 'orbit/remote/queries/'
+          submenu:
+            - title: Query language
+              url: 'orbit/remote/queries/query-language/'
+        - title: GitLab Duo Agent Platform
+          url: 'orbit/remote/access/duo/'
+        - title: MCP
+          url: 'orbit/remote/access/mcp/'
+        - title: glab orbit
+          url: 'orbit/remote/access/glab/'
+        - title: REST API
+          url: 'orbit/remote/access/api/'
+        - title: Troubleshooting
+          url: 'orbit/remote/troubleshooting/'
+    - title: GitLab Orbit Local
+      url: 'orbit/local/'
+      submenu:
+        - title: Getting started
+          url: 'orbit/local/getting-started/'
+        - title: How it works
+          url: 'orbit/local/how-it-works/'
+        - title: Schema reference
+          url: 'orbit/local/schema/'
+        - title: Connect your tools
+          url: 'orbit/local/access/'
+          submenu:
+            - title: GitLab Orbit CLI (orbit)
+              url: 'orbit/local/access/cli/'
+            - title: GitLab CLI (glab orbit)
+              url: 'orbit/local/access/glab/'
+            - title: GitLab Orbit Local MCP
+              url: 'orbit/local/access/mcp/'
+        - title: Troubleshooting
+          url: 'orbit/local/troubleshooting/'
+
+- title: GitLab Orbit v2 (preview)
+  url: 'orbit/v2/'
+  submenu:
     - title: Quickstart
-      url: 'orbit/quickstart/'
+      url: 'orbit/v2/quickstart/'
       submenu:
         - title: Start a free trial
-          url: 'orbit/trial/'
+          url: 'orbit/v2/trial/'
     - title: Use cases
-      url: 'orbit/use-cases/'
+      url: 'orbit/v2/use-cases/'
     - title: Connect your agent
-      url: 'orbit/agents/'
+      url: 'orbit/v2/agents/'
       submenu:
         - title: GitLab Orbit CLI
-          url: 'orbit/cli/'
+          url: 'orbit/v2/cli/'
           submenu:
             - title: GitLab Orbit Local
-              url: 'orbit/local/'
+              url: 'orbit/v2/local/'
         - title: GitLab Duo
-          url: 'orbit/agents/duo/'
+          url: 'orbit/v2/agents/duo/'
         - title: MCP servers
-          url: 'orbit/agents/mcp/'
+          url: 'orbit/v2/agents/mcp/'
     - title: Queries
-      url: 'orbit/queries/'
+      url: 'orbit/v2/queries/'
       submenu:
         - title: Cypher query language
-          url: 'orbit/queries/cypher/'
+          url: 'orbit/v2/queries/cypher/'
         - title: REST API
-          url: 'orbit/queries/api/'
+          url: 'orbit/v2/queries/api/'
     - title: How it works
-      url: 'orbit/how-it-works/'
+      url: 'orbit/v2/how-it-works/'
       submenu:
         - title: What GitLab Orbit indexes
-          url: 'orbit/schema/'
+          url: 'orbit/v2/schema/'
         - title: Security
-          url: 'orbit/security/'
+          url: 'orbit/v2/security/'
     - title: Troubleshooting
-      url: 'orbit/troubleshooting/'
+      url: 'orbit/v2/troubleshooting/'
