@@ -26,6 +26,27 @@ Commits title and keep it there through review.
 When ready for CI, remove `[skip ci]` from the title, then start a pipeline.
 Editing the title alone starts no pipeline.
 
+Before you commit, run the comment check on your staged changes:
+
+```shell
+uv run --quiet scripts/linting/comment_check.py --staged
+```
+
+Delete every flagged comment that restates the code. Keep a comment only for a
+constraint, invariant, gotcha, or workaround. Deleting is the fix. Do not set
+`COMMENTS_OK` to get past the check.
+
+Before you open or edit an MR, write the headline section within the template
+limits: 80 words, 3 inline code spans, and no bare identifiers. Save the
+description to a file and score it. The `lint:mr-description` job runs the same
+scorer:
+
+```shell
+python3 scripts/linting/score_description.py <description-file>
+```
+
+Move names, paths, and mechanics into the Agent context block.
+
 After you create a worktree, run `mise trust`. Then set the shared hooks path:
 
 ```shell
