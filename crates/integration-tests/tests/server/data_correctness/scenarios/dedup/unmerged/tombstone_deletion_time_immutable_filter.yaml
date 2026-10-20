@@ -17,7 +17,7 @@ query:
 
 expect:
   skip_requirements: ["filter:created_at"]
-  sql_contains: ["OR j._deleted"]
+  sql_contains: ["OR (j._deleted = true)"]
   node_count: 1
   nodes:
     Job: { ids: [9901] }

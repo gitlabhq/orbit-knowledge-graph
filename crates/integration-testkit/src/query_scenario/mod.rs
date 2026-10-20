@@ -440,11 +440,15 @@ async fn assert_indexes_used(
 }
 
 fn index_pruned(value: &serde_json::Value, index: &str) -> bool {
-    skip_index(value, index).is_some_and(|entry| {
+    let pruned = |entry: &serde_json::Value| {
         let initial = entry["Initial Granules"].as_u64().unwrap_or(0);
         let selected = entry["Selected Granules"].as_u64().unwrap_or(initial);
         selected < initial
-    })
+    };
+    skip_index(value, index).is_some()
+        && [index, "<Combined skip indexes>"]
+            .iter()
+            .any(|name| skip_index(value, name).is_some_and(pruned))
 }
 
 fn unversioned_table(description: &str) -> &str {

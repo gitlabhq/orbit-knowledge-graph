@@ -17,7 +17,7 @@ query:
 
 expect:
   skip_requirements: ["filter:created_at"]
-  sql_contains: ["OR mr._deleted"]
+  sql_contains: ["OR (mr._deleted = true)"]
   node_count: 1
   nodes:
     MergeRequest: { ids: [9801] }

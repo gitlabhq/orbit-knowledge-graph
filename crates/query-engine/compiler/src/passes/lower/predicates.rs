@@ -59,7 +59,10 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             Op::Or,
             Expr::conjoin(predicates.iter().map(predicate).collect())
                 .expect("tombstone guard wraps at least one predicate"),
-            Expr::col(alias, ontology::constants::DELETED_COLUMN),
+            Expr::eq(
+                Expr::col(alias, ontology::constants::DELETED_COLUMN),
+                Expr::param(SqlType::Bool, true),
+            ),
         ),
         Predicate::EntityKind {
             column: value,

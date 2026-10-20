@@ -623,8 +623,8 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
         Predicate::OrTombstone { predicates, alias } => {
             let guarded: Vec<_> = predicates.iter().flat_map(planned_predicate).collect();
             vec![match guarded.as_slice() {
-                [single] => format!("{single} OR {alias}._deleted"),
-                _ => format!("({}) OR {alias}._deleted", guarded.join(" AND ")),
+                [single] => format!("{single} OR {alias}._deleted = true"),
+                _ => format!("({}) OR {alias}._deleted = true", guarded.join(" AND ")),
             }]
         }
         Predicate::EntityKind { column, entity } => vec![format!(

@@ -30,4 +30,4 @@ cases:
     physical:
       clickhouse:
         planned:
-          expect: ["(Filter ..., b.name != 'skip' OR b._deleted (_))"]
+          expect: ["(Filter ..., b.name != 'skip' OR b._deleted = true (_))"]
