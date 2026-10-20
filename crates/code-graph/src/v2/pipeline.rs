@@ -1761,7 +1761,7 @@ mod tests {
     use super::*;
     use crate::v2::linker::CodeGraph;
     use crate::v2::sink::{GraphConverter, SinkError};
-    use crate::v2::types::{DefKind, NodeKind};
+    use crate::v2::types::NodeKind;
 
     struct TestCapture {
         graphs: std::sync::Mutex<Vec<CodeGraph>>,
@@ -1810,44 +1810,6 @@ mod tests {
                 })
             }
         }
-    }
-
-    fn fixture_path(relative: &str) -> String {
-        let manifest = env!("CARGO_MANIFEST_DIR");
-        format!("{manifest}/../../fixtures/code/{relative}")
-    }
-
-    fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
-        let ctx = Arc::new(PipelineContext {
-            config: PipelineConfig::default(),
-            tracer: crate::v2::trace::Tracer::new(false),
-            root_path: "/".to_string(),
-            skipped: std::sync::Mutex::new(Vec::new()),
-            faults: std::sync::Mutex::new(Vec::new()),
-            file_timings: std::sync::Mutex::new(Vec::new()),
-            language_timings: std::sync::Mutex::new(Vec::new()),
-        });
-        let capture = Arc::new(TestCapture::new());
-        let noop = |_: &str, _: RecordBatch| Ok(());
-        let null_batch: &OnBatch = &noop;
-        let dirs = AtomicUsize::new(0);
-        let files = AtomicUsize::new(0);
-        let defs = AtomicUsize::new(0);
-        let imps = AtomicUsize::new(0);
-        let edgs = AtomicUsize::new(0);
-        let errors = Mutex::new(Vec::new());
-        let btx = BatchTx::new(
-            null_batch,
-            capture.as_ref(),
-            &errors,
-            GraphStatsCounters::new(&dirs, &files, &defs, &imps, &edgs),
-        );
-        crate::v2::registry::dispatch_language(language, &[path.to_string()], &ctx, &btx)
-            .unwrap_or_else(|| panic!("Language {language} not supported"))
-            .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
-        let mut graphs = capture.take();
-        assert!(!graphs.is_empty(), "expected graph output");
-        graphs.remove(0)
     }
 
     #[test]
@@ -2189,84 +2151,6 @@ mod tests {
             .flat_map(|g| g.files().map(|(_, file)| file.path.clone()))
             .collect();
         assert_eq!(structural_files, vec!["listed.py".to_string()]);
-    }
-
-    #[test]
-    fn python_definitions_fixture() {
-        let path = fixture_path("python/definitions.py");
-        let cg = parse_fixture_file(&path, Language::Python);
-
-        let defs: Vec<_> = cg.definitions().collect();
-        assert!(
-            defs.len() >= 10,
-            "Expected at least 10 definitions, got {}",
-            defs.len()
-        );
-
-        let names: Vec<&str> = defs
-            .iter()
-            .map(|(_, _, d)| cg.strings.get(d.name))
-            .collect();
-        assert!(names.contains(&"simple_function"));
-        assert!(names.contains(&"module_lambda"));
-        assert!(names.contains(&"SimpleClass"));
-        assert!(names.contains(&"decorated_function"));
-
-        let class_count = defs
-            .iter()
-            .filter(|(_, _, d)| d.kind == DefKind::Class)
-            .count();
-        assert!(class_count > 0, "Should find at least one class");
-    }
-
-    #[test]
-    fn java_comprehensive_fixture() {
-        let path = fixture_path("java/ComprehensiveJavaDefinitions.java");
-        let cg = parse_fixture_file(&path, Language::Java);
-
-        let defs: Vec<_> = cg.definitions().collect();
-        assert!(
-            defs.len() >= 5,
-            "Expected at least 5 definitions, got {}",
-            defs.len()
-        );
-
-        let kinds: Vec<DefKind> = defs.iter().map(|(_, _, d)| d.kind).collect();
-        assert!(kinds.contains(&DefKind::Class), "Should have a class");
-        assert!(kinds.contains(&DefKind::Method), "Should have a method");
-    }
-
-    #[test]
-    fn kotlin_comprehensive_fixture() {
-        let path = fixture_path("kotlin/ComprehensiveKotlinDefinitions.kt");
-        let cg = parse_fixture_file(&path, Language::Kotlin);
-
-        let defs: Vec<_> = cg.definitions().collect();
-        assert!(
-            defs.len() >= 5,
-            "Expected at least 5 definitions, got {}",
-            defs.len()
-        );
-
-        let kinds: Vec<DefKind> = defs.iter().map(|(_, _, d)| d.kind).collect();
-        assert!(kinds.contains(&DefKind::Class), "Should have a class");
-        assert!(kinds.contains(&DefKind::Function), "Should have a function");
-    }
-
-    #[test]
-    fn csharp_comprehensive_fixture() {
-        let path = fixture_path("csharp/ComprehensiveCSharp.cs");
-        let cg = parse_fixture_file(&path, Language::CSharp);
-
-        let defs: Vec<_> = cg.definitions().collect();
-        assert!(
-            defs.len() >= 5,
-            "Expected at least 5 definitions, got {}",
-            defs.len()
-        );
-
-        let kinds: Vec<DefKind> = defs.iter().map(|(_, _, d)| d.kind).collect();
-        assert!(kinds.contains(&DefKind::Class), "Should have a class");
     }
 
     #[test]

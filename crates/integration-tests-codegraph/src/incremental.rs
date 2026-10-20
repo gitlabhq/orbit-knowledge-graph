@@ -203,7 +203,7 @@ fn check(
         name: String::new(),
         pipeline: None,
         fixtures: Vec::new(),
-        fixture_dir: None,
+        fixture_tree: None,
         trace: false,
         limits: None,
         max_tree_depth: None,
