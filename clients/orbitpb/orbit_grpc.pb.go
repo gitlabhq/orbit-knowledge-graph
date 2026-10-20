@@ -69,8 +69,9 @@ type OrbitServiceClient interface {
 	// No ClickHouse, no redaction. Supports selective node expansion.
 	// Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
 	GetGraphSchema(ctx context.Context, in *GetGraphSchemaRequest, opts ...grpc.CallOption) (*GetGraphSchemaResponse, error)
-	// Removed with the JSON Query DSL. Always returns NOT_FOUND and points to
-	// CALL db.schema(); kept so existing clients get a clear error.
+	// Removed with the JSON Query DSL. Returns NOT_FOUND for QUERY_LANGUAGE_GQL and
+	// points to CALL db.schema(). QUERY_LANGUAGE_JSON rejects with INVALID_ARGUMENT.
+	// Kept so existing clients get a clear error.
 	GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error)
 	// Lists the standalone Orbit Remote skills embedded in this deployment.
 	// Used by Rails to build GET /api/v4/orbit/skills.
@@ -275,8 +276,9 @@ type OrbitServiceServer interface {
 	// No ClickHouse, no redaction. Supports selective node expansion.
 	// Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
 	GetGraphSchema(context.Context, *GetGraphSchemaRequest) (*GetGraphSchemaResponse, error)
-	// Removed with the JSON Query DSL. Always returns NOT_FOUND and points to
-	// CALL db.schema(); kept so existing clients get a clear error.
+	// Removed with the JSON Query DSL. Returns NOT_FOUND for QUERY_LANGUAGE_GQL and
+	// points to CALL db.schema(). QUERY_LANGUAGE_JSON rejects with INVALID_ARGUMENT.
+	// Kept so existing clients get a clear error.
 	GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error)
 	// Lists the standalone Orbit Remote skills embedded in this deployment.
 	// Used by Rails to build GET /api/v4/orbit/skills.
