@@ -280,7 +280,6 @@ stages:
 
 resolve:
   stages:
-    # go.mod's module path maps import paths onto the module's directory
     - name: modules
       rules:
         - match: '(__file "go.mod" (__field "module" $V:__str))'
