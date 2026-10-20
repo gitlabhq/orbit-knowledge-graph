@@ -1,0 +1,41 @@
+id: log-field-is-constant
+language: rust
+severity: error
+message: Name log and span fields with `safe(NAME)` or `expanded(NAME)` from orbit_log_fields.
+note: |
+  The names keep one name per meaning, and the `safe`/`expanded` split is the
+  allowlist of the expanded logs policy. Add a missing name to
+  crates/orbit-log-fields.
+rule:
+  any:
+    - any:
+        - kind: identifier
+        - kind: string_literal
+      precedes:
+        regex: '^=$'
+    - kind: token_tree
+      regex: '^\{'
+      precedes:
+        regex: '^=$'
+    - any:
+        - kind: identifier
+        - kind: self
+      follows:
+        regex: '^[%?]$'
+        follows:
+          any:
+            - regex: '^\($'
+            - regex: '^,$'
+    - kind: identifier
+      follows:
+        any:
+          - regex: '^\($'
+          - regex: '^,$'
+      precedes:
+        any:
+          - regex: '^,$'
+          - regex: '^\)$'
+  inside:
+    matches: log-args
+  not:
+    matches: test-code

@@ -40,6 +40,10 @@ pre-commit:
     - name: comments
       run: scripts/linting/comment_check_hook.sh
       glob: "**/*.{rs,yaml,yml,toml,sh,py,js,mjs,ts,rb,css}"
+    # Advisory until every log call uses the orbit_log_fields macros.
+    - name: log-safety
+      run: mise run lint:logs || true
+      glob: "crates/**/*.rs"
     - name: prose
       run: mise exec -- uv run --quiet scripts/linting/prose_lint.py {staged_files}
       glob:
