@@ -29,7 +29,7 @@ GitLab Orbit does not install ClickHouse, Kubernetes, or NATS. They must exist a
 - A Premium or Ultimate subscription with the GitLab Orbit add-on.
 - Administrator access to the GitLab instance and to its PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.
-- ClickHouse 26.2 or later, set up for GitLab.
+- ClickHouse 26.4 or later, set up for GitLab.
 - Kubernetes 1.33 or later.
 - NATS with JetStream turned on.
 
@@ -48,7 +48,7 @@ Steps 1 to 3 do not depend on GitLab Orbit. You can verify each one on its own.
 
 ## ClickHouse
 
-GitLab Orbit requires ClickHouse 26.2 or later for full-text indexes and materialized common table expressions.
+GitLab Orbit requires ClickHouse 26.4 or later for full-text indexes and materialized common table expressions.
 The rest of GitLab also runs on 25.x releases, so check the version even if ClickHouse already serves GitLab.
 
 [Set up ClickHouse for GitLab](https://docs.gitlab.com/integration/clickhouse/) first, including

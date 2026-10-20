@@ -88,20 +88,14 @@
           url: 'orbit/v2/queries/query-language/'
         - title: REST API
           url: 'orbit/v2/queries/api/'
-    - title: Architecture
+    - title: How GitLab Orbit works
       url: 'orbit/v2/how-it-works/'
       submenu:
         - title: Indexed data
           url: 'orbit/v2/schema/'
         - title: Security
           url: 'orbit/v2/security/'
-        - title: Billing and credit usage
-          url: 'orbit/v2/billing/'
-        - title: Local graph
-          url: 'orbit/v2/local/'
-        - title: Glossary
-          url: 'orbit/v2/glossary/'
-    - title: Configure GitLab Orbit
+    - title: GitLab Self-Managed
       url: 'orbit/v2/self-managed/'
       submenu:
         - title: Get started

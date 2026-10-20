@@ -105,7 +105,7 @@ To set up a service account:
 1. [Create a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-personal-access-token-for-a-service-account)
    for the service account with the `read_api` scope. Service accounts cannot use fine-grained personal access tokens.
 1. [Add the service account](https://docs.gitlab.com/user/profile/service_accounts/#add-a-service-account-to-a-group-or-project)
-   to the lowest subgroup that has the data. If the tool must read security data, select the **Security Manager** role.
+   to the lowest subgroup that has the data, with the Reporter role. If the tool must read security data, select the **Security Manager** role.
 
 ### Verify the scope of a service account
 
