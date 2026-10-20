@@ -2,6 +2,7 @@
 {{ $gitlab := $v.gitlab }}
 {{ $imageTag := "master" }}
 {{ with env "E2E_GITLAB_LANE" }}{{ $gitlab = index $v.gitlab_lanes . }}{{ $imageTag = printf "%s-stable" . }}{{ end }}
+{{ $imageRepo := $gitlab | get "repository" "registry.gitlab.com/gitlab-org/build/cng" }}
 global:
   edition: ee
   gatewayApi:
@@ -156,6 +157,7 @@ gitlab:
     # just satisfies the chart helper that expects a non-empty tag. Every pod
     # in this deployment pulls the exact same image.
     image:
+      repository: "{{ $imageRepo }}/gitlab-webservice-ee"
       tag: "{{ $imageTag }}@{{ $gitlab.images.webservice.digest }}"
     # The e2e cluster is IPv4-only (pods have no ::1); IPv6 binds crash-loop puma with EADDRNOTAVAIL.
     puma:
@@ -177,6 +179,7 @@ gitlab:
       # payload into an empty Authorization header and 502s every query.
       # Schema note: webservice uses nested `image.tag`, but the workhorse
       # block uses flat `tag` (chart template `coalesce .workhorse.tag …`).
+      image: "{{ $imageRepo }}/gitlab-workhorse-ee"
       tag: "{{ $imageTag }}@{{ $gitlab.images.workhorse.digest }}"
       resources:
         requests:
@@ -187,6 +190,7 @@ gitlab:
           memory: 512Mi
   sidekiq:
     image:
+      repository: "{{ $imageRepo }}/gitlab-sidekiq-ee"
       tag: "{{ $imageTag }}@{{ $gitlab.images.sidekiq.digest }}"
     minReplicas: 1
     maxReplicas: 1
@@ -199,6 +203,7 @@ gitlab:
         memory: 4Gi
   toolbox:
     image:
+      repository: "{{ $imageRepo }}/gitlab-toolbox-ee"
       tag: "{{ $imageTag }}@{{ $gitlab.images.toolbox.digest }}"
     replicas: 1
     resources:
@@ -223,6 +228,7 @@ gitlab:
     enabled: false
   migrations:
     image:
+      repository: "{{ $imageRepo }}/gitlab-toolbox-ee"
       tag: "{{ $imageTag }}@{{ $gitlab.images.toolbox.digest }}"
     # Don't run post-deployment migrations in the migrations job at all. PDMs
     # are async-background cleanup that's free on an empty DB, and skipping
