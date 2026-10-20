@@ -1,9 +1,0 @@
-description: SKIP 0 LIMIT 1 keeps the single-row text budget
-
-query:
-  gql: |
-    MATCH (n:Note {id: 3002}) RETURN n.note SKIP 0 LIMIT 1
-
-expect:
-  compile_only: true
-  sql_contains: ["substringUTF8(n.note, 1, 1048576)"]

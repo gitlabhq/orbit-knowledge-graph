@@ -1,0 +1,197 @@
+missing_frontends:
+  json: The JSON DSL has no skip field.
+
+cases:
+  - name: SKIP lowers to an OFFSET past the probe row over identity tie-breakers
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username SKIP 4 LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Limit 3 (Offset 4 (Sort u.id (Project ... (_)))))"]
+
+  - name: OFFSET is a synonym for SKIP
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username OFFSET 4 LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Limit 3 (Offset 4 (Sort u.id (Project ... (_)))))"]
+
+  - name: SKIP 0 keeps the tie-breakers of later windows without an OFFSET
+    query:
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username SKIP 0 LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Offset 0 (Input traversal (...))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Limit 3 (Sort u.id (Project ... (_))))"]
+          reject: ["(Offset ... (_))"]
+
+  - name: SKIP without LIMIT pages the default window
+    query:
+      gql: |
+        MATCH (u:User) RETURN u.username SKIP 4
+    logical:
+      expect: ["(Limit 30 (Offset 4 (Input traversal (...))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Limit 31 (Offset 4 (Sort u.id (_))))"]
+
+  - name: Tie-breakers extend the requested sort
+    query:
+      gql: |
+        MATCH (u:User) RETURN u.username ORDER BY u.username DESC SKIP 4 LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Offset 4 (Sort u.username DESC (_))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Limit 3 (Offset 4 (Sort u.username DESC, u.id (_))))"]
+
+  - name: A requested sort on the identity is not repeated as a tie-breaker
+    query:
+      gql: |
+        MATCH (u:User) RETURN u.username ORDER BY u.id DESC SKIP 4 LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Offset 4 (Sort u.id DESC (_))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Limit 3 (Offset 4 (Sort u.id DESC (_))))"]
+
+  - name: Relationship SKIP sorts by every node identity
+    query:
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) RETURN u, mr SKIP 4 LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Limit 3 (Offset 4 (Sort mr.author_id, mr.id (_))))"]
+
+  - name: Multi-type relationship SKIP adds the edge type to the tie-breakers
+    query:
+      gql: |
+        MATCH (u:User)-[:AUTHORED|APPROVED]->(mr:MergeRequest) RETURN u, mr SKIP 4 LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Limit 3 (Offset 4 (Sort _orbit_edge_0.source_id, _orbit_edge_0.target_id, _orbit_edge_0.relationship_kind (_))))
+
+  - name: Code-graph relationship SKIP sorts by each backend's node identities
+    query:
+      gql: |
+        MATCH (a:Definition)-[:CALLS]->(b:Definition) RETURN a, b SKIP 4 LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Offset 4 (Input traversal (...))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Limit 3 (Offset 4 (Sort _orbit_edge_0.source_id, _orbit_edge_0.target_id (_))))"]
+      duckdb:
+        emitted:
+          expect: ["(Limit 3 (Offset 4 (Sort a.id, b.id (_))))"]
+
+  - name: DuckDB SKIP keeps the requested sort ahead of the tie-breaker
+    query:
+      gql: |
+        MATCH (f:File) RETURN f.path ORDER BY f.path SKIP 4 LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Offset 4 (Sort f.path (_))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Limit 3 (Offset 4 (Sort f.path, f.id (_))))"]
+      duckdb:
+        emitted:
+          expect: ["(Limit 3 (Offset 4 (Sort f.path, f.id (_))))"]
+
+  - name: Aggregation SKIP sorts by the group keys
+    query:
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest) WHERE u.id >= 1 AND u.id <= 10000
+        RETURN u{.id, .username}, count(mr) AS mr_count SKIP 2 LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Offset 2 (Aggregate group u AS u, COUNT(mr) AS mr_count (_))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Limit 3 (Offset 2 (Sort u.id, u.username (Aggregate ... (_)))))"]
+
+  - name: Both-direction neighbors SKIP sorts the whole union by projected aliases
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)--(n) WHERE mr.id IN [1, 2, 3] RETURN mr, n SKIP 20 LIMIT 20
+    logical:
+      expect: ["(Limit 20 (Offset 20 (Input neighbors (...))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Limit 21 (Offset 20 (Sort _orbit_mr_id, _orbit_neighbor_id, _orbit_relationship_type, _orbit_neighbor_is_outgoing (Union ALL (_) (_)))))
+          reject: ["(Sort e.source_id, ... (_))"]
+
+  - name: Path-finding SKIP sorts on the path arrays
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project)
+        WHERE `end`.id IN [1000, 1002, 1004] RETURN p SKIP 2 LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Offset 2 (Input path_finding (...))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Limit 3 (Offset 2 (Deduplicate LimitBy 1 BY paths.path_start_id, paths.path_end_id (Sort paths.depth, ToString(paths._orbit_path), ToString(paths._orbit_edge_kinds) (_)))))
+
+  - name: Path-finding LIMIT without SKIP orders only by depth
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project)
+        WHERE `end`.id IN [1000, 1002, 1004] RETURN p LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Input path_finding (...)))"]
+      reject: ["(Offset ... (_))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect: ["(Limit 3 (Deduplicate LimitBy 1 BY paths.path_start_id, paths.path_end_id (Sort paths.depth (_))))"]
+          reject: ["(Offset ... (_))"]
+
+  - name: A deep SKIP sizes text excerpts by every row the sort reads
+    query:
+      gql: |
+        MATCH (n:Note {id: 3002}) RETURN n.note SKIP 10000 LIMIT 1
+    logical:
+      expect: ["(Limit 1 (Offset 10000 (Input traversal (...))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Limit 2 (Offset 10000 (Sort n.id (Project Concat(Substring(n.note, 1, 209), If(ByteLength(n.note) > ByteLength(Substring(n.note, 1, 209)), ' [truncated]', '')) AS n_note (_)))))
+
+  - name: SKIP 0 keeps the single-row text budget
+    query:
+      gql: |
+        MATCH (n:Note {id: 3002}) RETURN n.note SKIP 0 LIMIT 1
+    logical:
+      expect: ["(Limit 1 (Offset 0 (Input traversal (...))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Limit 2 (Sort n.id (Project Concat(Substring(n.note, 1, 1048576), If(ByteLength(n.note) > ByteLength(Substring(n.note, 1, 1048576)), ' [truncated]', '')) AS n_note (_))))

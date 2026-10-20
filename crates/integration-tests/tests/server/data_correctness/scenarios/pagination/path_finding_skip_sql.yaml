@@ -1,9 +1,0 @@
-description: Path-finding SKIP sorts on the path arrays so windows stay deterministic
-
-query:
-  gql: |
-    MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project) WHERE `end`.id IN [1000, 1002, 1004] RETURN p SKIP 2 LIMIT 2
-
-expect:
-  compile_only: true
-  sql_contains: ["toString(paths._orbit_path)", "toString(paths._orbit_edge_kinds)", "LIMIT 3 OFFSET 2"]
