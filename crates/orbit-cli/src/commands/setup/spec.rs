@@ -308,7 +308,7 @@ mod tests {
                     " grep` must be used for search",
                     "Ignores case, `_`, `-`",
                     "`a|b` OR",
-                    "all you need in one call plus independent searches",
+                    "Batch all reads and searches you can name",
                 ] {
                     assert!(rendered.contains(phrase), "{launcher}: {phrase}");
                 }

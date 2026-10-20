@@ -1087,11 +1087,7 @@ pub(crate) fn render(
             } else {
                 format!("{}:{}-{}", def.file, def.start, def.end)
             };
-            writeln!(
-                out,
-                "Definition:{}  {}  [{}]  {loc}",
-                def.id, def.fqn, def.kind
-            )?;
+            writeln!(out, "{}  [{}]  {loc}", def.fqn, def.kind)?;
         }
         write_lines(out, lines, start, end)?;
     }
@@ -1227,9 +1223,9 @@ mod tests {
         render(&mut out, &defs, &lines, true).unwrap();
         assert_eq!(
             out,
-            "Definition:1  m::a  [Module]  L1-1\n1|pub mod a;\n\
-             Definition:1  m::b  [Module]  L2-2\n2|pub mod b;\n\n\
-             Definition:1  m::run  [Function]  L4-5\n4|fn run() {\n5|}\n"
+            "m::a  [Module]  L1-1\n1|pub mod a;\n\
+             m::b  [Module]  L2-2\n2|pub mod b;\n\n\
+             m::run  [Function]  L4-5\n4|fn run() {\n5|}\n"
         );
     }
 
@@ -1243,7 +1239,7 @@ mod tests {
         let mut out = String::new();
         render(&mut out, &defs, &lines, true).unwrap();
         assert!(out.contains("1|a\n2|b\n3|c\n"));
-        assert!(out.contains("Definition:1  m::b  [Function]  L20-25\n"));
+        assert!(out.contains("m::b  [Function]  L20-25\n"));
     }
 
     #[test]
@@ -1256,7 +1252,7 @@ mod tests {
         let mut out = String::new();
         render(&mut out, &defs, &lines, false).unwrap();
         assert_eq!(out.matches("2|b").count(), 1, "{out}");
-        assert!(out.contains("Definition:1  m::second  [Function]  src/lib.rs:2-3\n3|c"));
+        assert!(out.contains("m::second  [Function]  src/lib.rs:2-3\n3|c"));
     }
 
     #[test]
@@ -1270,8 +1266,8 @@ mod tests {
         render(&mut out, &defs, &lines, false).unwrap();
         assert_eq!(
             out,
-            "Definition:1  m::one  [Function]  src/lib.rs:3-4\n3|fn one() {\n4|}\n\n\
-             Definition:1  m::two  [Function]  src/lib.rs:6-7\n6|fn two() {\n7|}\n"
+            "m::one  [Function]  src/lib.rs:3-4\n3|fn one() {\n4|}\n\n\
+             m::two  [Function]  src/lib.rs:6-7\n6|fn two() {\n7|}\n"
         );
     }
 
@@ -1302,7 +1298,7 @@ mod tests {
             vec![1, 2, 3, 4, 6, 7, 8],
             "blank-only gaps are skipped"
         );
-        assert!(out.starts_with("1|use a;\n2|\n\nDefinition:1  m::one  [Function]"));
+        assert!(out.starts_with("1|use a;\n2|\n\nm::one  [Function]"));
         assert!(out.ends_with("7|}\n\n8|// tail\n"));
     }
 }

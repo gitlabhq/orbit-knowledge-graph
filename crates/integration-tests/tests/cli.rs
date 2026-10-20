@@ -1739,16 +1739,13 @@ fn grep_lists_matching_lines_with_their_definitions() {
     let fqn = "src.utils.read_file";
     let (by_name, err, ok) = run_cmd(&["context", fqn, "--repo", repo_arg], dd);
     assert!(ok, "{err}");
-    let reference = by_name.split_whitespace().next().unwrap().to_string();
-    assert!(reference.starts_with("Definition:"), "{by_name}");
-    let reference = reference.as_str();
+    assert!(by_name.starts_with(&format!("{fqn}  [")), "{by_name}");
     let (file, err, ok) = run_cmd(&["context", "src/utils.py", "--repo", repo_arg], dd);
     assert!(
-        ok && file.starts_with("File:") && !file.contains("return open"),
+        ok && file.starts_with("src/utils.py  [") && !file.contains("return open"),
         "{err}\n{file}"
     );
-    let file_id = file.split_whitespace().next().unwrap();
-    let args = ["context", file_id, fqn, reference, fqn, "--repo", repo_arg];
+    let args = ["context", "src/utils.py", fqn, fqn, "--repo", repo_arg];
     let (context, err, ok) = run_cmd(&args, dd);
     assert!(ok && context.contains(&file), "{err}\n{context}");
     assert_eq!(context.matches("return open(path).read()").count(), 1);
@@ -1841,20 +1838,9 @@ fn context_relationship_order_is_stable_across_overloads() {
         ("Target.ping", "Connections (5 indexed):"),
         ("Target", "Used via members (5 indexed):"),
     ] {
-        let (matches, stderr, ok) = run_cmd(&["context", fqn, "--repo", repo_arg], dd);
-        assert!(ok, "context {fqn} failed: {stderr}");
-        let reference = matches
-            .lines()
-            .filter(|line| line.trim_start().starts_with("Definition:"))
-            .find(|line| line.split_whitespace().nth(1) == Some(fqn))
-            .and_then(|line| line.split_whitespace().next())
-            .unwrap();
-        let args = ["context", reference, "--repo", repo_arg];
+        let args = ["context", fqn, "--repo", repo_arg];
         let (first, stderr, ok) = run_cmd(&args, dd);
-        assert!(ok, "context {reference} failed: {stderr}");
-        let (by_name, stderr, ok) = run_cmd(&["context", fqn, "--repo", repo_arg], dd);
         assert!(ok, "context {fqn} failed: {stderr}");
-        assert_eq!(first, by_name);
         assert!(
             first.find("public void ping() {}").unwrap() < first.find(section).unwrap(),
             "{first}"
@@ -1862,7 +1848,7 @@ fn context_relationship_order_is_stable_across_overloads() {
         assert_eq!(first.matches("<-- Caller.Caller ").count(), 2, "{first}");
         assert_eq!(first.matches("<-- Caller.run ").count(), 3, "{first}");
         for _ in 0..10 {
-            assert_eq!(first, run_cmd(&args, dd).0, "{reference} output changed");
+            assert_eq!(first, run_cmd(&args, dd).0, "{fqn} output changed");
         }
     }
     let args = ["context", "Caller.run", "Caller.run", "--repo", repo_arg];
@@ -1924,7 +1910,7 @@ fn file_context_bounds_connections_and_keeps_full_definition_followups() {
     let repo_arg = repo.to_str().unwrap();
     let (out, err, ok) = run_cmd(&["context", "src/models.py", "--repo", repo_arg], dd);
     assert!(ok && !out.contains("return 0"), "{err}\n{out}");
-    assert_eq!(out.matches("\n  Definition:").count(), 67, "{out}");
+    assert_eq!(out.matches("  [Function]  L").count(), 67, "{out}");
     assert_eq!(out.matches("connections omitted").count(), 2, "{out}");
     assert!(out.lines().count() < 110, "{out}");
     let (body, err, ok) = run_cmd(&["context", "src.models.entry_0", "--repo", repo_arg], dd);

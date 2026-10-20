@@ -10,7 +10,7 @@ instructions: |
   ## Orbit
 
   - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR; narrow with paths, `def:words`, or `file:x`.
-  - MANDATORY: `{{orbit}} context` must be used to read code, all you need in one call plus independent searches: `{{orbit}} context a.rs:10-40 Name; {{orbit}} grep 'x'`. Names show connections. Edit straight from its output; no separate read is needed.{{remote_gitlab}}
+  - MANDATORY: `{{orbit}} context` must be used to read code. Batch all reads and searches you can name, code with tests: `{{orbit}} context a.rs:10-40 a_test.rs:5-60 Name; {{orbit}} grep 'x'`. Names show connections. Edit straight from its output; no separate read is needed.{{remote_gitlab}}
 
 remote:
   remote_gitlab: "\n- MANDATORY: `{{orbit}}` must be used for GitLab instead of glab and glab api. `{{orbit}} grep 'mr:words'` or `'issue:words'` searches it; `{{orbit}} context mr:42 job:9` reads them, bare `{{orbit}} context` the branch's MR and CI failures, `repo:group/project symbol:Name` a sibling project."
