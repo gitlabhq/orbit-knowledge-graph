@@ -665,10 +665,10 @@ mod tests {
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
                 query_type: QueryType::Traversal,
+                ast: compiler::ast::Node::Query(Box::default()),
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
-                    index_queries: Vec::new(),
                     result_context: result_ctx.clone(),
                     query_config: Default::default(),
                     dialect: Default::default(),
@@ -714,10 +714,10 @@ mod tests {
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
                 query_type: QueryType::Aggregation,
+                ast: compiler::ast::Node::Query(Box::default()),
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
-                    index_queries: Vec::new(),
                     result_context: result_ctx.clone(),
                     query_config: Default::default(),
                     dialect: Default::default(),
@@ -911,10 +911,10 @@ mod tests {
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
                 query_type: QueryType::Traversal,
+                ast: compiler::ast::Node::Query(Box::default()),
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
-                    index_queries: Vec::new(),
                     result_context: result_ctx.clone(),
                     query_config: Default::default(),
                     dialect: Default::default(),
@@ -1040,10 +1040,10 @@ mod tests {
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
                 query_type: QueryType::PathFinding,
+                ast: compiler::ast::Node::Query(Box::default()),
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
-                    index_queries: Vec::new(),
                     result_context: result_ctx.clone(),
                     query_config: Default::default(),
                     dialect: Default::default(),
@@ -1139,10 +1139,10 @@ mod tests {
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
                 query_type: QueryType::PathFinding,
+                ast: compiler::ast::Node::Query(Box::default()),
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
-                    index_queries: Vec::new(),
                     result_context: result_ctx.clone(),
                     query_config: Default::default(),
                     dialect: Default::default(),

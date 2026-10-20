@@ -7,6 +7,7 @@ pub mod duckdb;
 
 use orbit_server_config::QueryConfig;
 
+use crate::ast::Node;
 use crate::input::{Input, QueryType};
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
@@ -39,7 +40,6 @@ pub enum SqlDialect {
 pub struct ParameterizedQuery {
     pub sql: String,
     pub params: HashMap<String, ParamValue>,
-    pub index_queries: Vec<IndexQuery>,
     pub result_context: ResultContext,
     /// Resolved query settings. Baked into the SQL SETTINGS clause by codegen
     /// and also applied as HTTP-level ClickHouse settings by the execution
@@ -49,14 +49,9 @@ pub struct ParameterizedQuery {
 }
 
 #[derive(Debug, Clone)]
-pub struct IndexQuery {
-    pub sql: String,
-    pub params: HashMap<String, ParamValue>,
-}
-
-#[derive(Debug, Clone)]
 pub struct CompiledQueryContext {
     pub query_type: QueryType,
+    pub ast: Node,
     pub base: ParameterizedQuery,
     pub hydration: HydrationPlan,
     pub input: Input,
@@ -102,22 +97,6 @@ impl ParameterizedQuery {
                     .into_owned()
             }
         }
-    }
-}
-
-impl IndexQuery {
-    pub fn render(&self) -> String {
-        static CH_RE: LazyLock<regex::Regex> =
-            LazyLock::new(|| regex::Regex::new(r"\{(\w+):[^}]+\}").expect("valid regex"));
-        CH_RE
-            .replace_all(&self.sql, |caps: &regex::Captures| {
-                let name = &caps[1];
-                match self.params.get(name) {
-                    Some(param) => param.render_clickhouse_literal(),
-                    None => caps[0].to_string(),
-                }
-            })
-            .into_owned()
     }
 }
 

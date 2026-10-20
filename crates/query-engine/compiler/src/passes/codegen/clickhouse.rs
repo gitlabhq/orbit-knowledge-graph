@@ -10,7 +10,7 @@ use crate::passes::enforce::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
-use super::{IndexQuery, ParamValue, ParameterizedQuery, SqlDialect};
+use super::{ParamValue, ParameterizedQuery, SqlDialect};
 use orbit_utils::query_types::ParamBindings;
 
 pub fn codegen(
@@ -18,20 +18,6 @@ pub fn codegen(
     result_context: ResultContext,
     query_config: QueryConfig,
 ) -> Result<ParameterizedQuery> {
-    let index_queries = match ast {
-        Node::Query(query) => query
-            .ctes
-            .iter()
-            .map(|cte| {
-                let mut ctx = Context::new();
-                Ok(IndexQuery {
-                    sql: ctx.emit_query(&cte.query)?,
-                    params: ctx.params.into_map(),
-                })
-            })
-            .collect::<Result<Vec<_>>>()?,
-        Node::Insert(_) => Vec::new(),
-    };
     let mut ctx = Context::new();
     let mut sql = match ast {
         Node::Query(q) => ctx.emit_query(q)?,
@@ -58,11 +44,38 @@ pub fn codegen(
     Ok(ParameterizedQuery {
         sql,
         params: ctx.params.into_map(),
-        index_queries,
         result_context,
         query_config,
         dialect: SqlDialect::ClickHouse,
     })
+}
+
+/// A CTE's name, its body as a statement of its own with the other CTEs attached, and its parameters.
+pub type CteStatement = (String, String, HashMap<String, ParamValue>);
+
+/// Each CTE body as a statement tests can EXPLAIN.
+pub fn cte_statements(ast: &Node) -> Result<Vec<CteStatement>> {
+    let Node::Query(query) = ast else {
+        return Ok(Vec::new());
+    };
+    query
+        .ctes
+        .iter()
+        .map(|cte| {
+            let statement = Query {
+                ctes: query
+                    .ctes
+                    .iter()
+                    .filter(|other| other.name != cte.name)
+                    .cloned()
+                    .collect(),
+                ..(*cte.query).clone()
+            };
+            let mut ctx = Context::new();
+            let sql = ctx.emit_query(&statement)?;
+            Ok((cte.name.clone(), sql, ctx.params.into_map()))
+        })
+        .collect()
 }
 
 /// # Trust boundary
@@ -1137,7 +1150,6 @@ mod tests {
         let pq = ParameterizedQuery {
             sql: "SELECT * FROM t WHERE kind = {p0:String} AND state = {p1:String}".into(),
             params,
-            index_queries: Vec::new(),
             result_context: empty_ctx(),
             query_config: QueryConfig::default(),
             dialect: SqlDialect::ClickHouse,
@@ -1170,7 +1182,6 @@ mod tests {
         let pq = ParameterizedQuery {
             sql: "SELECT * FROM t WHERE x IN {p0:Array(String)} AND y IN {p1:Array(Int64)}".into(),
             params,
-            index_queries: Vec::new(),
             result_context: empty_ctx(),
             query_config: QueryConfig::default(),
             dialect: SqlDialect::ClickHouse,
@@ -1275,7 +1286,6 @@ mod tests {
         let pq = ParameterizedQuery {
             sql: "SELECT {p0:String} AND {p1:Int64}".into(),
             params: HashMap::new(),
-            index_queries: Vec::new(),
             result_context: empty_ctx(),
             query_config: QueryConfig::default(),
             dialect: SqlDialect::ClickHouse,

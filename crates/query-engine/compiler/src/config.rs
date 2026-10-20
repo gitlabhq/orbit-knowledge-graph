@@ -139,12 +139,12 @@ compiler_pipeline_macros::define_compiler_ctx! {
             mutates: [query_plan, query_config]
         }
         codegen {
-            reads_state: [node, input, pagination]
-            mutates: [result_ctx, query_config, hydration_plan, pagination, output]
+            reads_state: [input]
+            mutates: [node, result_ctx, query_config, hydration_plan, pagination, output]
         }
         duckdb_codegen {
-            reads_state: [node, input, pagination]
-            mutates: [result_ctx, hydration_plan, pagination, output]
+            reads_state: [input]
+            mutates: [node, result_ctx, hydration_plan, pagination, output]
         }
     }
 
@@ -453,7 +453,7 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
     let query_config = ctx.take_query_config().unwrap_or_default();
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
-    let node = require(ctx.node().clone(), "node")?;
+    let node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
     let pagination = ctx.take_pagination().unwrap_or_default();
     let base = codegen::codegen(&node, result_context, query_config)?;
@@ -461,6 +461,7 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
         query_type,
+        ast: node,
         base,
         hydration,
         input,
@@ -473,7 +474,7 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
-    let node = require(ctx.node().clone(), "node")?;
+    let node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
     let pagination = ctx.take_pagination().unwrap_or_default();
     let base = codegen::duckdb::codegen(&node, result_context)?;
@@ -481,6 +482,7 @@ fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let has_virtual_columns = hydration_has_virtuals(&hydration);
     ctx.set_output(CompiledQueryContext {
         query_type,
+        ast: node,
         base,
         hydration,
         input,

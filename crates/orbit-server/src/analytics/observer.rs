@@ -200,10 +200,10 @@ mod tests {
         );
         obs.set_compiled(&CompiledQueryContext {
             query_type: query_engine::compiler::input::QueryType::Traversal,
+            ast: query_engine::compiler::ast::Node::Query(Box::default()),
             base: query_engine::compiler::passes::codegen::ParameterizedQuery {
                 sql: String::new(),
                 params: Default::default(),
-                index_queries: Vec::new(),
                 result_context: query_engine::compiler::passes::enforce::ResultContext::new(),
                 query_config: Default::default(),
                 dialect: query_engine::compiler::passes::codegen::SqlDialect::ClickHouse,

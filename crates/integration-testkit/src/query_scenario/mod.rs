@@ -16,6 +16,7 @@ use std::sync::Arc;
 use format::ExpectedIndex;
 use futures::FutureExt;
 use pagination::{PageCollection, next_page, with_after, without_cursor};
+use query_engine::compiler::passes::codegen::clickhouse::cte_statements;
 use query_engine::compiler::{
     AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ParameterizedQuery,
     ResultContext, SecurityContext,
@@ -345,7 +346,7 @@ async fn run_frontend(
     }
 
     if !expect.indexes_used.is_empty() {
-        assert_indexes_used(ctx, &compiled.base, &expect.indexes_used, label).await;
+        assert_indexes_used(ctx, &compiled, &expect.indexes_used, label).await;
     }
 
     if !expect.pages.is_empty() {
@@ -379,7 +380,7 @@ async fn run_frontend(
         let compiled = assert_compilation(compiled, expect, frontend_key, label)
             .expect("repeated query should compile");
         if !expect.indexes_used.is_empty() {
-            assert_indexes_used(ctx, &compiled.base, &expect.indexes_used, label).await;
+            assert_indexes_used(ctx, &compiled, &expect.indexes_used, label).await;
         }
         let output = execute_output(
             ctx,
@@ -397,33 +398,30 @@ async fn run_frontend(
 
 async fn assert_indexes_used(
     ctx: &TestContext,
-    query: &ParameterizedQuery,
+    compiled: &CompiledQueryContext,
     expected: &[ExpectedIndex],
     label: &str,
 ) {
+    let query = &compiled.base;
     let plan = ctx.explain_plan(query).await;
+    let ctes = cte_statements(&compiled.ast).expect("CTE statements render");
     for ExpectedIndex { table, index } in expected {
+        let mut cte_plans = Vec::new();
         let mut scans = Vec::new();
         read_from_merge_tree(&plan, table, &mut scans);
-        let mut applied = scans.iter().any(|scan| skip_index(scan, index).is_some());
-        let mut pruned = scans.iter().any(|scan| index_pruned(scan, index));
-        if !applied {
-            for sql in &query.index_queries {
-                let candidate = ParameterizedQuery {
-                    sql: sql.sql.clone(),
-                    params: sql.params.clone(),
-                    index_queries: Vec::new(),
+        if !scans.iter().any(|scan| skip_index(scan, index).is_some()) {
+            for (_, sql, params) in &ctes {
+                let statement = ParameterizedQuery {
+                    sql: sql.clone(),
+                    params: params.clone(),
                     result_context: query.result_context.clone(),
                     query_config: query.query_config.clone(),
                     dialect: query.dialect,
                 };
-                let plan = ctx.explain_plan(&candidate).await;
-                let mut candidate_scans = Vec::new();
-                read_from_merge_tree(&plan, table, &mut candidate_scans);
-                applied |= candidate_scans
-                    .iter()
-                    .any(|scan| skip_index(scan, index).is_some());
-                pruned |= candidate_scans.iter().any(|scan| index_pruned(scan, index));
+                cte_plans.push(ctx.explain_plan(&statement).await);
+            }
+            for cte_plan in &cte_plans {
+                read_from_merge_tree(cte_plan, table, &mut scans);
             }
         }
         assert!(
@@ -431,11 +429,11 @@ async fn assert_indexes_used(
             "{label}: no ReadFromMergeTree step for table {table}"
         );
         assert!(
-            applied,
+            scans.iter().any(|scan| skip_index(scan, index).is_some()),
             "{label}: skip index {index} not applied on any {table} scan"
         );
         assert!(
-            pruned,
+            scans.iter().any(|scan| index_pruned(scan, index)),
             "{label}: skip index {index} did not prune granules on any {table} scan"
         );
     }

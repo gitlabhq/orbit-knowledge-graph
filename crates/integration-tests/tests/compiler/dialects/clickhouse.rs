@@ -2124,3 +2124,34 @@ fn cursor_tokens_bind_to_the_ordered_keys() {
         "{error}"
     );
 }
+
+#[test]
+fn cte_statements_carry_the_ctes_they_read() {
+    let compiled = compile(
+        "MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) WHERE g.full_path = 'g701' RETURN p, count(f) AS c LIMIT 10",
+        Frontend::Gql,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
+    let statements = compiler::passes::codegen::clickhouse::cte_statements(&compiled.ast).unwrap();
+    assert!(
+        statements
+            .iter()
+            .any(|(_, sql, _)| sql.starts_with("WITH ")),
+        "expected a CTE body that reads another CTE"
+    );
+    for (own, sql, _) in &statements {
+        for (position, _) in sql.match_indices("_orbit_relation_") {
+            let digits: String = sql[position + "_orbit_relation_".len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            let name = format!("_orbit_relation_{digits}");
+            assert!(
+                &name == own || sql.contains(&format!("{name} AS ")),
+                "{name} is read but not defined in: {sql}"
+            );
+        }
+    }
+}
