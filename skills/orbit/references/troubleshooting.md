@@ -22,13 +22,13 @@ Read this when a command fails with "command not found", an auth error, or a fea
    glab auth login    # if not authenticated
    ```
 
-3. Orbit Remote: the feature flag is on for your namespace:
+3. Orbit Remote: GitLab Orbit is turned on for your top-level group:
 
    ```sh
    glab orbit graph-status --full-path GROUP_NAMESPACE
    ```
 
-   Exit 0 means ready to query. Exit 2 means the flag is off; ask your GitLab admin.
+   Exit 0 means ready to query. Exit 2 means GitLab Orbit is not available on your instance; ask your GitLab administrator.
 
 4. Orbit Local: no server needed:
 
@@ -45,7 +45,7 @@ Read this when a command fails with "command not found", an auth error, or a fea
 |------|------|--------------------------------------------------------------|
 | `0`  | 2xx  | Success.                                                     |
 | `1`  | n/a  | Generic error (parse error, IO error, malformed body).       |
-| `2`  | 404  | Orbit endpoint unavailable (typically: feature flag is off). |
+| `2`  | 404  | Orbit endpoint unavailable (typically: Orbit is not set up). |
 | `3`  | 401  | Not authenticated.                                           |
 | `4`  | 403  | Access denied (no Knowledge Graph enabled namespaces).       |
 | `5`  | 429  | Rate limited.                                                |

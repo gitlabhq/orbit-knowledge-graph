@@ -4,8 +4,8 @@ Paste-ready request bodies for each `query_type`. All examples omit
 `response_format`; the CLI defaults to `llm` (compact, agent-friendly). Pass
 `--response-format raw` when piping into `jq`.
 
-Every recipe assumes `glab auth login` has succeeded and the
-`knowledge_graph` feature flag is on for your user, with `orbit_gql_queries`
+Every recipe assumes `glab auth login` has succeeded, GitLab Orbit is turned on for a
+top-level group that you belong to, and `orbit_gql_queries` is
 off (JSON mode). These JSON recipes reject when that flag is on. In GQL mode,
 use the active command catalog and `CALL db.schema()` instead of JSON DSL
 guidance. See [`SKILL.md`](../SKILL.md) for prerequisites.

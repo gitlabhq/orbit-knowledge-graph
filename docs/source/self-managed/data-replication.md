@@ -141,7 +141,7 @@ The Rake task in the next section also grants the other two roles read access, f
 
 ## Create the publication and grants
 
-GitLab 19.2.2 and later ships an idempotent Rake task that creates the publication, the helper function that
+GitLab 19.2.2 and later includes an idempotent Rake task that creates the publication, the helper function that
 Siphon calls to add tables to it, and read access to every GitLab schema.
 
 {{< tabs >}}

@@ -32,14 +32,14 @@ For more information, see [storage and privacy](local/_index.md#storage-and-priv
 A role for a top-level group applies to each subgroup and project in it.
 Turning on GitLab Orbit does not change existing access.
 
-| Action | Minimum role |
-|--------|--------------|
-| Query groups, projects, users, merge requests, CI/CD, and work items | Reporter |
-| Query security data | Security Manager |
-| [Turn on indexing](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) | The Owner role for the top-level group. On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on indexing. |
+| Action | Roles |
+|--------|-------|
+| Query groups, projects, users, merge requests, CI/CD, and work items | Reporter, Security Manager, Developer, Maintainer, or Owner |
+| Query security data | Security Manager, Developer, Maintainer, or Owner |
+| [Turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) | The Owner role for the top-level group. On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn it on. |
 
 Security data is vulnerabilities, security findings, security scans, scanners, and CVE and CWE identifiers.
-It needs the Security Manager role, because GitLab cannot filter aggregate results after the query runs.
+It needs the Security Manager, Developer, Maintainer, or Owner role, because GitLab cannot filter aggregate results after the query runs.
 For a user with the Reporter role, the response leaves out security entities, even from aggregate counts.
 
 Queries from administrators and auditors return data from each group where GitLab Orbit is on, not only their own groups.
@@ -66,7 +66,7 @@ Results include only what the token owner can see in GitLab.
 | Access method | Authentication |
 |---------------|----------------|
 | [REST API](queries/api.md) | A personal access token with the `read_api` scope, or a fine-grained personal access token, sent as a Bearer token |
-| [MCP endpoint](agents/mcp.md) | GitLab OAuth. Native HTTP clients request the `mcp_orbit` scope. |
+| [MCP endpoint](agents/mcp.md) | GitLab OAuth, or a personal access token with the `mcp_orbit` or `read_api` scope. Native HTTP clients request the `mcp_orbit` scope. |
 | [GitLab Duo Agent Platform](agents/duo.md) | No token to configure |
 | [Service account](#service-accounts) | A personal access token of a bot user, scoped to the groups where the account is a member |
 
