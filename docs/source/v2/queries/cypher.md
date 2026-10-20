@@ -74,6 +74,9 @@ LIMIT 1
 ```
 
 On GitLab.com, this query returns `482908721` and `278964`, the IDs that the examples use.
+It returns them only if you have a role in the `gitlab-org` group.
+Otherwise, this query and the examples that use `gitlab-org/gitlab` or these IDs return no rows.
+To run the examples, query with the full path of one of your projects, and use the IDs that it returns.
 
 ## Filters
 
@@ -189,7 +192,7 @@ When `pagination.truncated` is `true`, the result is incomplete.
 
 ## Limits
 
-- A traversal has at most three hops. `-[:CONTAINS*1..3]->` is a bounded variable-length hop.
+- Each relationship spans at most three hops. `-[:CONTAINS*1..3]->` is a bounded variable-length hop.
 - A query has at most five nodes and five relationships.
 - `ORDER BY` takes one sort key.
 - `LIMIT` and `PAGE` accept 1 to 1000 rows.

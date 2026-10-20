@@ -81,10 +81,7 @@ Code Review Flow does not use GitLab Orbit. To use the graph in code review, [ad
 
 ## Use GitLab Orbit in a custom flow
 
-A [custom flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/) can use GitLab Orbit
-when you add the tools to the flow.
-
-### Add the tools to the flow
+To use GitLab Orbit in a [custom flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/), add its tools to the flow.
 
 Prerequisites:
 

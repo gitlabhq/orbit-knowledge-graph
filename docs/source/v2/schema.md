@@ -72,13 +72,11 @@ Most languages also get imports and cross-file calls.
 
 Some languages have limits:
 
-- C#: definitions and imports only.
 - Bash/Shell: function definitions and `source` or `.` imports only. No cross-file calls.
-- Rust: cross-file `CALLS` edges only. No other reference edges.
+- Rust: cross-file `CALLS` and `EXTENDS` edges. No other reference edges.
 - YAML: anchors and aliases. Mapping keys become definitions only in GitLab CI, ArgoCD,
   Helm, and Docker Compose files. No cross-file references.
 
-The JavaScript parser also reads Vue, GraphQL, and JSON files.
 Files in other languages still get a `File` node, with no definitions.
 
 ## Node types
