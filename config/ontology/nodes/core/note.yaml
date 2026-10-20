@@ -196,6 +196,7 @@ storage:
     - {name: author_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
+    - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_noteable_type, column: noteable_type, type: "set(14)", granularity: 2}
     - {name: idx_internal, column: internal, type: "minmax", granularity: 1}
     - {name: idx_confidential, column: confidential, type: "minmax", granularity: 1}
