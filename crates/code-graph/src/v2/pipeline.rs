@@ -90,11 +90,11 @@ fn build_file_inventory_graph(
 /// Emit a crash-surviving breadcrumb for a large in-flight file; low volume, stays on in production.
 pub(crate) fn breadcrumb_large_file(path: &str, bytes: u64, language: &str) {
     if bytes >= LARGE_FILE_BREADCRUMB_BYTES {
-        tracing::info!(
+        orbit_log_fields::info!(
             target: "code_graph::breadcrumb",
-            path,
-            bytes,
-            language,
+            expanded(FILE_PATH) = path,
+            safe(SIZE_BYTES) = bytes,
+            safe(LANGUAGE) = language,
             "indexing large file (crash breadcrumb)"
         );
     }
@@ -893,10 +893,10 @@ impl Pipeline {
                         ),
                     };
 
-                    tracing::info!(
-                        family = %family,
-                        file_count,
-                        threads = pool.current_num_threads(),
+                    orbit_log_fields::info!(
+                        safe(LANGUAGE_FAMILY) = family.as_str(),
+                        safe(FILE_COUNT) = file_count,
+                        safe(THREAD_COUNT) = pool.current_num_threads(),
                         "processing language family"
                     );
 
@@ -961,17 +961,17 @@ impl Pipeline {
                         Some(Err(vec![err.into()]))
                     }) {
                         Some(Ok(())) => {
-                            tracing::info!(
-                                family = %family,
-                                duration_ms = t_lang.elapsed().as_millis() as u64,
+                            orbit_log_fields::info!(
+                                safe(LANGUAGE_FAMILY) = family.as_str(),
+                                safe(DURATION_S) = t_lang.elapsed().as_secs_f64(),
                                 "language family done"
                             );
                             files_parsed.fetch_add(file_count, Ordering::Relaxed);
                         }
                         Some(Err(errors)) => {
-                            tracing::warn!(
-                                family = %family,
-                                error_count = errors.len(),
+                            orbit_log_fields::warn!(
+                                safe(LANGUAGE_FAMILY) = family.as_str(),
+                                safe(ERROR_COUNT) = errors.len(),
                                 "language processing failed"
                             );
                             // After the typed-outcome refactor the
@@ -990,9 +990,9 @@ impl Pipeline {
                             }
                         }
                         None => {
-                            tracing::debug!(
-                                family = %family,
-                                file_count,
+                            orbit_log_fields::debug!(
+                                safe(LANGUAGE_FAMILY) = family.as_str(),
+                                safe(FILE_COUNT) = file_count,
                                 "language family not supported, skipping"
                             );
                             files_skipped.fetch_add(file_count, Ordering::Relaxed);
@@ -1263,7 +1263,12 @@ impl FamilyPipeline {
                 let source = match std::fs::read(&abs_path) {
                     Ok(s) => s,
                     Err(e) => {
-                        tracing::debug!(path = f.path, error = %e, "failed to read file");
+                        orbit_log_fields::debug!(
+                            expanded(FILE_PATH) = f.path,
+                            safe(ERROR_TYPE) = FileFault::FileRead.as_metric_label(),
+                            expanded(ERROR_MESSAGE) = %e,
+                            "failed to read file"
+                        );
                         progress.files_advanced(ProgressPhase::Parse, 1);
                         return Some(ParseOutcome::Err(FaultedFile {
                             path: f.path.to_string(),
@@ -1294,7 +1299,12 @@ impl FamilyPipeline {
                 let mut result = match result {
                     Ok(r) => r,
                     Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, detail }) => {
-                        tracing::warn!(path = f.path, phase = phase.as_ref(), %detail, "parse aborted: per-file CPU budget");
+                        orbit_log_fields::warn!(
+                            expanded(FILE_PATH) = f.path,
+                            safe(PHASE) = phase.as_ref(),
+                            expanded(ADDITIONAL_DETAILS) = %detail,
+                            "parse aborted: per-file CPU budget"
+                        );
                         progress.files_advanced(ProgressPhase::Parse, 1);
                         return Some(ParseOutcome::Skip(SkippedFile {
                             path: f.path.clone(),
@@ -1304,7 +1314,12 @@ impl FamilyPipeline {
                         }));
                     }
                     Err(crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err)) => {
-                        tracing::debug!(path = f.path, error = %err, "failed to parse file");
+                        orbit_log_fields::debug!(
+                            expanded(FILE_PATH) = f.path,
+                            safe(ERROR_TYPE) = FileFault::InvalidUtf8.as_metric_label(),
+                            expanded(ERROR_MESSAGE) = %err,
+                            "failed to parse file"
+                        );
                         progress.files_advanced(ProgressPhase::Parse, 1);
                         return Some(ParseOutcome::Err(FaultedFile {
                             path: f.path.to_string(),
@@ -1433,10 +1448,10 @@ impl FamilyPipeline {
             });
         }
 
-        tracing::debug!(
-            total_defs,
-            total_imports,
-            elapsed = ?t0.elapsed(),
+        orbit_log_fields::debug!(
+            safe(DEFINITION_COUNT) = total_defs,
+            safe(IMPORT_COUNT) = total_imports,
+            safe(DURATION_S) = t0.elapsed().as_secs_f64(),
             "parse phase finished"
         );
 
@@ -1591,9 +1606,9 @@ impl FamilyPipeline {
             })
             .collect();
 
-        tracing::debug!(
-            total_edges = total_edges.load(std::sync::atomic::Ordering::Relaxed),
-            elapsed = ?t2.elapsed(),
+        orbit_log_fields::debug!(
+            safe(EDGE_COUNT) = total_edges.load(std::sync::atomic::Ordering::Relaxed),
+            safe(DURATION_S) = t2.elapsed().as_secs_f64(),
             "resolve phase finished"
         );
 
@@ -1705,7 +1720,10 @@ impl FamilyPipeline {
                 }
             }
             if phase3_edges > 0 {
-                tracing::info!(phase3_edges, "phase 3: cross-file edges resolved");
+                orbit_log_fields::info!(
+                    safe(EDGE_COUNT) = phase3_edges,
+                    "phase 3: cross-file edges resolved"
+                );
             }
         }
 
@@ -1741,13 +1759,13 @@ impl FamilyPipeline {
             total_ms,
         });
 
-        tracing::info!(
-            duration_ms = t0.elapsed().as_millis() as u64,
-            nodes = graph.graph.node_count(),
-            edges = graph.graph.edge_count(),
-            defs = graph.defs.len(),
-            imports = graph.imports.len(),
-            strings = graph.strings.len(),
+        orbit_log_fields::info!(
+            safe(DURATION_S) = t0.elapsed().as_secs_f64(),
+            safe(NODE_COUNT) = graph.graph.node_count(),
+            safe(EDGE_COUNT) = graph.graph.edge_count(),
+            safe(DEFINITION_COUNT) = graph.defs.len(),
+            safe(IMPORT_COUNT) = graph.imports.len(),
+            safe(STRING_COUNT) = graph.strings.len(),
             "family pipeline complete"
         );
 

@@ -1,5 +1,5 @@
 use clickhouse_client::ArrowClickHouseClient;
-use tracing::warn;
+use orbit_log_fields::warn;
 
 use crate::types::{ComponentHealth, Status};
 
@@ -33,7 +33,11 @@ impl ClickHouseChecker {
                 error: None,
             },
             Err(e) => {
-                warn!(instance = %instance.name, error = %e, "ClickHouse health check failed");
+                warn!(
+                    safe(COMPONENT) = instance.name.as_str(),
+                    expanded(ERROR_MESSAGE) = %e,
+                    "ClickHouse health check failed"
+                );
                 ComponentHealth {
                     name: instance.name.clone(),
                     status: Status::Unhealthy,

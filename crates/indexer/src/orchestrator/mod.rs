@@ -19,9 +19,9 @@ pub mod scheduled;
 pub mod siphon;
 
 use async_trait::async_trait;
+use orbit_log_fields::{info, warn};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TriggerError {
@@ -52,7 +52,7 @@ pub async fn launch(
         let token = cancel.clone();
         let name = trigger.name().to_owned();
         handles.spawn(async move {
-            info!(trigger = name, "trigger started");
+            info!(safe(TRIGGER) = name.as_str(), "trigger started");
             let result = trigger.run(token).await;
             (name, result)
         });
@@ -64,15 +64,19 @@ pub async fn launch(
     while let Some(joined) = handles.join_next().await {
         match joined {
             Ok((name, Ok(()))) => {
-                info!(trigger = name, "trigger stopped");
+                info!(safe(TRIGGER) = name.as_str(), "trigger stopped");
             }
             Ok((name, Err(error))) => {
-                warn!(trigger = name, %error, "trigger failed");
+                warn!(
+                    safe(TRIGGER) = name.as_str(),
+                    expanded(ERROR_MESSAGE) = %error,
+                    "trigger failed"
+                );
                 cancel.cancel();
                 first_error.get_or_insert(error);
             }
             Err(error) => {
-                warn!(%error, "trigger task panicked");
+                warn!(expanded(ERROR_MESSAGE) = %error, "trigger task panicked");
                 cancel.cancel();
                 panicked += 1;
             }

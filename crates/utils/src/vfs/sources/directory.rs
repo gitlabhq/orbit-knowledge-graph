@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use ignore::{WalkBuilder, WalkState};
-use tracing::warn;
+use orbit_log_fields::warn;
 use typed_path::Utf8UnixPathBuf;
 
 use super::{Loading, Put, Source, SourceError, Tag};
@@ -41,7 +41,10 @@ impl Source for Directory<'_> {
                             if e.io_error()
                                 .is_some_and(|io| io.kind() == ErrorKind::NotFound) =>
                         {
-                            warn!(error = %e, "skipping an entry deleted during the walk");
+                            warn!(
+                                expanded(ERROR_MESSAGE) = %e,
+                                "skipping an entry deleted during the walk"
+                            );
                             return WalkState::Continue;
                         }
                         Err(e) => return fail(SourceError::Io(std::io::Error::other(e))),

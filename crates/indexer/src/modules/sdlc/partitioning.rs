@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use arrow::array::{Array, StringArray};
 use arrow::record_batch::RecordBatch;
+use orbit_log_fields::{debug, warn};
 use serde_json::Value;
-use tracing::{debug, warn};
 
 use ontology::{Extract, Ontology};
 
@@ -109,17 +109,17 @@ impl PartitionStrategy {
             if probe_rows > 0 && self.min_rows > 0 {
                 // Returned rows cleared the probe's `total_rows >= min_rows` gate, so too-few-cuts on a real scope is the silent single-threaded fallback (#869).
                 warn!(
-                    batches = batches.len(),
-                    probe_rows,
-                    cuts = cuts.len(),
-                    count = self.count,
-                    table = %self.datalake_table,
+                    safe(BATCH_COUNT) = batches.len(),
+                    safe(ROW_COUNT) = probe_rows,
+                    safe(CUT_COUNT) = cuts.len(),
+                    safe(PARTITION_COUNT) = self.count,
+                    safe(TABLE) = self.datalake_table.as_str(),
                     "partition probe cleared min_rows but yielded too few cuts; load will run single-threaded"
                 );
             } else {
                 debug!(
-                    probe_rows,
-                    count = self.count,
+                    safe(ROW_COUNT) = probe_rows,
+                    safe(PARTITION_COUNT) = self.count,
                     "not partitioning: too few cuts to fill all partitions"
                 );
             }

@@ -91,12 +91,16 @@ fn hold_ty_interner() -> RwLockReadGuard<'static, ()> {
     {
         let waited = Instant::now();
         let exclusive = TY_INTERNER_GC.try_write_for(FORCE_TY_GC_MAX_WAIT);
-        let waited_ms = waited.elapsed().as_millis() as u64;
+        let waited_s = waited.elapsed().as_secs_f64();
         let swept = exclusive.is_some_and(|exclusive| {
             collect_ty_garbage(exclusive);
             true
         });
-        tracing::info!(waited_ms, swept, "rust-analyzer type interner sweep forced");
+        orbit_log_fields::info!(
+            safe(DURATION_S) = waited_s,
+            safe(OUTCOME) = if swept { "swept" } else { "lock_timeout" },
+            "rust-analyzer type interner sweep forced"
+        );
     }
     TY_INTERNER_GC.read()
 }
@@ -115,12 +119,12 @@ fn collect_ty_garbage(_exclusive: RwLockWriteGuard<'static, ()>) {
     RUST_JOBS_SINCE_TY_GC.store(0, Ordering::Relaxed);
     let started = Instant::now();
     match std::panic::catch_unwind(|| AnalysisHost::new(None).trigger_garbage_collection()) {
-        Ok(()) => tracing::debug!(
-            sweep_ms = started.elapsed().as_millis() as u64,
+        Ok(()) => orbit_log_fields::debug!(
+            safe(DURATION_S) = started.elapsed().as_secs_f64(),
             "rust-analyzer type interner swept"
         ),
-        Err(payload) => tracing::warn!(
-            error = %rust_panic_message(&payload),
+        Err(payload) => orbit_log_fields::warn!(
+            expanded(ERROR_MESSAGE) = rust_panic_message(&payload),
             "rust-analyzer type interner sweep panicked"
         ),
     }
@@ -207,16 +211,16 @@ impl LanguagePipeline for RustPipeline {
         })) {
             Ok(Ok(plan)) => Some(plan),
             Ok(Err(err)) => {
-                tracing::debug!(
-                    error = %err,
+                orbit_log_fields::debug!(
+                    expanded(ERROR_MESSAGE) = %err,
                     "rust v2 workspace load failed; falling back to standalone parsing"
                 );
                 None
             }
             Err(err) => {
                 let message = rust_panic_message(&err);
-                tracing::warn!(
-                    error = %message,
+                orbit_log_fields::warn!(
+                    expanded(ERROR_MESSAGE) = message,
                     "rust v2 workspace load panicked; falling back to standalone parsing"
                 );
                 None
@@ -239,11 +243,21 @@ impl LanguagePipeline for RustPipeline {
         for (path, error) in &output.errors {
             match error {
                 AnalyzerError::Skip { kind, detail } => {
-                    tracing::warn!(path, kind = %kind, %detail, "rust: skipped file");
+                    orbit_log_fields::warn!(
+                        expanded(FILE_PATH) = path,
+                        safe(REASON) = kind.as_metric_label(),
+                        expanded(ADDITIONAL_DETAILS) = detail,
+                        "rust: skipped file"
+                    );
                     ctx.record_skip(path.clone(), *kind, detail.clone());
                 }
                 AnalyzerError::Fault { kind, detail } => {
-                    tracing::warn!(path, kind = %kind, %detail, "rust: faulted file");
+                    orbit_log_fields::warn!(
+                        expanded(FILE_PATH) = path,
+                        safe(REASON) = kind.as_metric_label(),
+                        expanded(ADDITIONAL_DETAILS) = detail,
+                        "rust: faulted file"
+                    );
                     ctx.record_fault(path.clone(), *kind, detail.clone());
                 }
             }
@@ -280,7 +294,7 @@ impl LanguagePipeline for RustPipeline {
             let t_resolve = std::time::Instant::now();
             for edge in &file.edge_candidates {
                 if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-                    tracing::warn!("rust edge resolution timed out");
+                    orbit_log_fields::warn!("rust edge resolution timed out");
                     edge_timed_out = true;
                     let resolve_ms = t_resolve.elapsed().as_secs_f64() * 1000.0;
                     ctx.record_file_timing(FileTimingEntry {
@@ -403,17 +417,17 @@ fn parse_rust_files_with_workspaces(
         let workspace = match loaded {
             Ok(Ok(workspace)) => workspace,
             Ok(Err(err)) => {
-                tracing::warn!(
-                    manifest = %plan.manifest_path(workspace_id).display(),
-                    error = %err,
+                orbit_log_fields::warn!(
+                    expanded(MANIFEST_PATH) = %plan.manifest_path(workspace_id).display(),
+                    expanded(ERROR_MESSAGE) = %err,
                     "failed to load rust-analyzer workspace; continuing with others"
                 );
                 continue;
             }
             Err(payload) => {
-                tracing::warn!(
-                    manifest = %plan.manifest_path(workspace_id).display(),
-                    error = %rust_panic_message(&payload),
+                orbit_log_fields::warn!(
+                    expanded(MANIFEST_PATH) = %plan.manifest_path(workspace_id).display(),
+                    expanded(ERROR_MESSAGE) = rust_panic_message(&payload),
                     "rust-analyzer workspace load panicked; continuing with others"
                 );
                 continue;
@@ -1124,9 +1138,9 @@ impl<'a> ResolvedEdgeCollector<'a> {
             self.macro_depth += 1;
             for node in expanded.value.descendants() {
                 if self.expanded_macro_nodes >= MAX_EXPANDED_MACRO_NODES {
-                    tracing::debug!(
-                        file = self.relative_path,
-                        max_nodes = MAX_EXPANDED_MACRO_NODES,
+                    orbit_log_fields::debug!(
+                        expanded(FILE_PATH) = self.relative_path,
+                        safe(LIMIT) = MAX_EXPANDED_MACRO_NODES,
                         "rust macro expansion budget exhausted"
                     );
                     break;

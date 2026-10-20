@@ -1,6 +1,7 @@
 use circuit_breaker::CircuitBreakableError;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum GitlabClientError {
     #[error("HTTP request failed: {0}")]
     Request(#[from] reqwest::Error),

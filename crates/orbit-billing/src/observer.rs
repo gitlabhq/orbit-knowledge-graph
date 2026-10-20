@@ -74,7 +74,10 @@ impl BillingObserver {
             orbit_version: orbit_utils::version::get(),
         };
         serde_json::to_value(&metadata).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "failed to serialize billing metadata");
+            orbit_log_fields::warn!(
+                expanded(ERROR_MESSAGE) = %e,
+                "failed to serialize billing metadata"
+            );
             json!({})
         })
     }
@@ -82,36 +85,36 @@ impl BillingObserver {
     fn build_event(&self) -> Option<BillingEvent> {
         let correlation_id = correlation_id_string();
         let Some(raw_realm) = self.inputs.realm.as_deref() else {
-            tracing::warn!(
-                user_id = self.inputs.user_id,
-                source_type = %self.inputs.source_type,
-                root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
-                deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
-                correlation_id = %correlation_id,
+            orbit_log_fields::warn!(
+                safe(GL_USER_ID) = self.inputs.user_id,
+                safe(SOURCE_TYPE) = self.inputs.source_type.as_str(),
+                safe(GL_GOVERNING_NAMESPACE_ID) = self.inputs.root_namespace_id,
+                safe(DEPLOYMENT_TYPE) = self.inputs.deployment_type.as_deref(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
                 "billing event skipped: realm missing from JWT claims"
             );
             record_dropped(REASON_REALM_MISSING);
             return None;
         };
         let Some(realm) = normalize_realm(raw_realm) else {
-            tracing::warn!(
-                user_id = self.inputs.user_id,
-                raw_realm = raw_realm,
-                source_type = %self.inputs.source_type,
-                root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
-                deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
-                correlation_id = %correlation_id,
+            orbit_log_fields::warn!(
+                safe(GL_USER_ID) = self.inputs.user_id,
+                expanded(RAW_REALM) = raw_realm,
+                safe(SOURCE_TYPE) = self.inputs.source_type.as_str(),
+                safe(GL_GOVERNING_NAMESPACE_ID) = self.inputs.root_namespace_id,
+                safe(DEPLOYMENT_TYPE) = self.inputs.deployment_type.as_deref(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
                 "billing event skipped: unrecognized realm value"
             );
             record_dropped(REASON_REALM_UNRECOGNIZED);
             return None;
         };
         if realm == REALM_SAAS && self.inputs.root_namespace_id.is_none() {
-            tracing::warn!(
-                user_id = self.inputs.user_id,
-                source_type = %self.inputs.source_type,
-                deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
-                correlation_id = %correlation_id,
+            orbit_log_fields::warn!(
+                safe(GL_USER_ID) = self.inputs.user_id,
+                safe(SOURCE_TYPE) = self.inputs.source_type.as_str(),
+                safe(DEPLOYMENT_TYPE) = self.inputs.deployment_type.as_deref(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
                 "billing event skipped: root_namespace_id missing from SaaS JWT claims"
             );
             record_dropped(REASON_ROOT_NAMESPACE_MISSING);
@@ -157,14 +160,14 @@ impl BillingObserver {
         match builder.build() {
             Ok(event) => Some(event),
             Err(e) => {
-                tracing::error!(
-                    error = %e,
-                    user_id = self.inputs.user_id,
-                    realm = realm,
-                    source_type = %self.inputs.source_type,
-                    root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
-                    deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
-                    correlation_id = %correlation_id,
+                orbit_log_fields::error!(
+                    expanded(ERROR_MESSAGE) = %e,
+                    safe(GL_USER_ID) = self.inputs.user_id,
+                    safe(REALM) = realm,
+                    safe(SOURCE_TYPE) = self.inputs.source_type.as_str(),
+                    safe(GL_GOVERNING_NAMESPACE_ID) = self.inputs.root_namespace_id,
+                    safe(DEPLOYMENT_TYPE) = self.inputs.deployment_type.as_deref(),
+                    safe(CORRELATION_ID) = correlation_id.as_str(),
                     "failed to build billing event"
                 );
                 record_dropped(REASON_EVENT_BUILD_FAILED);
@@ -200,12 +203,12 @@ impl PipelineObserver for BillingObserver {
     fn finish(&self, _row_count: usize, _redacted_count: usize) {
         let correlation_id = correlation_id_string();
         if self.errored.get() {
-            tracing::info!(
-                user_id = self.inputs.user_id,
-                source_type = %self.inputs.source_type,
-                root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
-                deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
-                correlation_id = %correlation_id,
+            orbit_log_fields::info!(
+                safe(GL_USER_ID) = self.inputs.user_id,
+                safe(SOURCE_TYPE) = self.inputs.source_type.as_str(),
+                safe(GL_GOVERNING_NAMESPACE_ID) = self.inputs.root_namespace_id,
+                safe(DEPLOYMENT_TYPE) = self.inputs.deployment_type.as_deref(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
                 "billing event skipped: pipeline reported an error"
             );
             return;
@@ -213,48 +216,44 @@ impl PipelineObserver for BillingObserver {
         if let Some(ref tracker) = self.tracker
             && let Some(event) = self.build_event()
         {
-            let realm = self
-                .inputs
-                .realm
-                .as_deref()
-                .and_then(normalize_realm)
-                .unwrap_or("");
-            let _span = tracing::info_span!(
+            let realm = self.inputs.realm.as_deref().and_then(normalize_realm);
+            let _span = orbit_log_fields::info_span!(
                 "billing.track",
-                query_type = self.query_type,
-                user_id = self.inputs.user_id,
-                realm = realm,
-                source_type = %self.inputs.source_type,
-                root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
-                deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
-                correlation_id = %correlation_id,
+                safe(QUERY_TYPE) = self.query_type,
+                safe(GL_USER_ID) = self.inputs.user_id,
+                safe(REALM) = realm,
+                safe(SOURCE_TYPE) = self.inputs.source_type.as_str(),
+                safe(GL_GOVERNING_NAMESPACE_ID) = self.inputs.root_namespace_id,
+                safe(DEPLOYMENT_TYPE) = self.inputs.deployment_type.as_deref(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
             )
             .entered();
             match tracker.track(event) {
                 Ok(event_id) => {
-                    tracing::info!(
-                        event_id = %event_id,
-                        user_id = self.inputs.user_id,
-                        realm = realm,
-                        source_type = %self.inputs.source_type,
-                        query_type = self.query_type,
-                        root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
-                        deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
-                        correlation_id = %correlation_id,
+                    orbit_log_fields::info!(
+                        // ast-grep-ignore: log-safe-field-is-plain -- a UUID that Orbit generates
+                        safe(EVENT_ID) = event_id.to_string(),
+                        safe(GL_USER_ID) = self.inputs.user_id,
+                        safe(REALM) = realm,
+                        safe(SOURCE_TYPE) = self.inputs.source_type.as_str(),
+                        safe(QUERY_TYPE) = self.query_type,
+                        safe(GL_GOVERNING_NAMESPACE_ID) = self.inputs.root_namespace_id,
+                        safe(DEPLOYMENT_TYPE) = self.inputs.deployment_type.as_deref(),
+                        safe(CORRELATION_ID) = correlation_id.as_str(),
                         "billing event enqueued for delivery"
                     );
                     METRICS.emitted.add(1, &[]);
                 }
                 Err(e) => {
-                    tracing::error!(
-                        error = %e,
-                        user_id = self.inputs.user_id,
-                        realm = realm,
-                        query_type = self.query_type,
-                        source_type = %self.inputs.source_type,
-                        root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
-                        deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
-                        correlation_id = %correlation_id,
+                    orbit_log_fields::error!(
+                        expanded(ERROR_MESSAGE) = %e,
+                        safe(GL_USER_ID) = self.inputs.user_id,
+                        safe(REALM) = realm,
+                        safe(QUERY_TYPE) = self.query_type,
+                        safe(SOURCE_TYPE) = self.inputs.source_type.as_str(),
+                        safe(GL_GOVERNING_NAMESPACE_ID) = self.inputs.root_namespace_id,
+                        safe(DEPLOYMENT_TYPE) = self.inputs.deployment_type.as_deref(),
+                        safe(CORRELATION_ID) = correlation_id.as_str(),
                         "billing tracker rejected event at enqueue"
                     );
                     METRICS.rejected.add(1, &[]);

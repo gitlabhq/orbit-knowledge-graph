@@ -7,10 +7,10 @@ mod metrics;
 use std::sync::Arc;
 use std::time::Duration;
 
+use orbit_log_fields::{info, warn};
 use orbit_server_config::{BillingConfig, QuotaAuthMode};
 use tonic::{Code, Status};
 use tonic_types::{ErrorDetails, StatusExt};
-use tracing::{info, warn};
 
 use crate::constants::{QUOTA_MAX_CACHE_ENTRIES, REALM_SAAS, normalize_realm};
 use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
@@ -89,15 +89,16 @@ impl QuotaService {
             .as_ref()
             .map(|id| id.as_str().to_string())
             .unwrap_or_default();
+        let realm = inputs.realm.as_deref().and_then(normalize_realm);
 
         if inner.auth_mode == QuotaAuthMode::LicenseChecksum && inputs.license_checksum.is_none() {
             warn!(
-                user_id = inputs.user_id,
-                realm = inputs.realm.as_deref().unwrap_or(""),
-                instance_id = inputs.instance_id.as_deref().unwrap_or(""),
-                unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
-                source_type = %inputs.source_type,
-                correlation_id = %correlation_id,
+                safe(GL_USER_ID) = inputs.user_id,
+                safe(REALM) = realm,
+                safe(INSTANCE_ID) = inputs.instance_id.as_deref(),
+                safe(UNIQUE_INSTANCE_ID) = inputs.unique_instance_id.as_deref(),
+                safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
                 "quota gate decision: skipped (no license_checksum claim)"
             );
             record_skipped(&inputs.source_type);
@@ -110,11 +111,11 @@ impl QuotaService {
             && inputs.realm.as_deref().and_then(normalize_realm) == Some(REALM_SAAS)
         {
             warn!(
-                user_id = inputs.user_id,
-                realm = inputs.realm.as_deref().unwrap_or(""),
-                global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
-                source_type = %inputs.source_type,
-                correlation_id = %correlation_id,
+                safe(GL_USER_ID) = inputs.user_id,
+                safe(REALM) = realm,
+                expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
                 "quota gate decision: skipped (no root_namespace_id claim on SaaS)"
             );
             record_skipped(&inputs.source_type);
@@ -123,14 +124,14 @@ impl QuotaService {
 
         let Some(request) = CdotRequest::from_inputs(inputs, &correlation_id) else {
             warn!(
-                user_id = inputs.user_id,
-                realm = inputs.realm.as_deref().unwrap_or(""),
-                root_namespace_id = inputs.root_namespace_id.unwrap_or_default(),
-                global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
-                instance_id = inputs.instance_id.as_deref().unwrap_or(""),
-                unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
-                source_type = %inputs.source_type,
-                correlation_id = %correlation_id,
+                safe(GL_USER_ID) = inputs.user_id,
+                safe(REALM) = realm,
+                safe(GL_GOVERNING_NAMESPACE_ID) = inputs.root_namespace_id,
+                expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                safe(INSTANCE_ID) = inputs.instance_id.as_deref(),
+                safe(UNIQUE_INSTANCE_ID) = inputs.unique_instance_id.as_deref(),
+                safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                safe(CORRELATION_ID) = correlation_id.as_str(),
                 "quota check failed: required claim fields missing"
             );
             return Err(Status::internal(
@@ -144,48 +145,48 @@ impl QuotaService {
         match gate_decision {
             QuotaGateDecision::Allow => {
                 info!(
-                    user_id = inputs.user_id,
-                    realm = inputs.realm.as_deref().unwrap_or(""),
-                    root_namespace_id = inputs.root_namespace_id.unwrap_or_default(),
-                    global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
-                    instance_id = inputs.instance_id.as_deref().unwrap_or(""),
-                    unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
-                    source_type = %inputs.source_type,
-                    cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
-                    correlation_id = %correlation_id,
+                    safe(GL_USER_ID) = inputs.user_id,
+                    safe(REALM) = realm,
+                    safe(GL_GOVERNING_NAMESPACE_ID) = inputs.root_namespace_id,
+                    expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                    safe(INSTANCE_ID) = inputs.instance_id.as_deref(),
+                    safe(UNIQUE_INSTANCE_ID) = inputs.unique_instance_id.as_deref(),
+                    safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                    safe(CACHE_HIT) = matches!(cache_outcome, CacheOutcome::Hit),
+                    safe(CORRELATION_ID) = correlation_id.as_str(),
                     "quota gate decision: allow"
                 );
                 Ok(())
             }
             QuotaGateDecision::Failed(reason, block_reason) => {
                 warn!(
-                    user_id = inputs.user_id,
-                    realm = inputs.realm.as_deref().unwrap_or(""),
-                    root_namespace_id = inputs.root_namespace_id.unwrap_or_default(),
-                    global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
-                    instance_id = inputs.instance_id.as_deref().unwrap_or(""),
-                    unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
-                    source_type = %inputs.source_type,
-                    reason = ?reason,
-                    block_reason = block_reason.as_deref().unwrap_or("none"),
-                    cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
-                    correlation_id = %correlation_id,
+                    safe(GL_USER_ID) = inputs.user_id,
+                    safe(REALM) = realm,
+                    safe(GL_GOVERNING_NAMESPACE_ID) = inputs.root_namespace_id,
+                    expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                    safe(INSTANCE_ID) = inputs.instance_id.as_deref(),
+                    safe(UNIQUE_INSTANCE_ID) = inputs.unique_instance_id.as_deref(),
+                    safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                    safe(REASON) = <&str>::from(reason),
+                    expanded(BLOCK_REASON) = block_reason.as_deref().unwrap_or("none"),
+                    safe(CACHE_HIT) = matches!(cache_outcome, CacheOutcome::Hit),
+                    safe(CORRELATION_ID) = correlation_id.as_str(),
                     "quota gate decision: fail_closed"
                 );
                 Err(credits_exhausted_status(CHECK_FAILED_MESSAGE))
             }
             QuotaGateDecision::Deny(block_reason) => {
                 info!(
-                    user_id = inputs.user_id,
-                    realm = inputs.realm.as_deref().unwrap_or(""),
-                    root_namespace_id = inputs.root_namespace_id.unwrap_or_default(),
-                    global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
-                    instance_id = inputs.instance_id.as_deref().unwrap_or(""),
-                    unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
-                    source_type = %inputs.source_type,
-                    block_reason = block_reason.as_deref().unwrap_or("none"),
-                    cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
-                    correlation_id = %correlation_id,
+                    safe(GL_USER_ID) = inputs.user_id,
+                    safe(REALM) = realm,
+                    safe(GL_GOVERNING_NAMESPACE_ID) = inputs.root_namespace_id,
+                    expanded(GLOBAL_USER_ID) = inputs.global_user_id.as_deref(),
+                    safe(INSTANCE_ID) = inputs.instance_id.as_deref(),
+                    safe(UNIQUE_INSTANCE_ID) = inputs.unique_instance_id.as_deref(),
+                    safe(SOURCE_TYPE) = inputs.source_type.as_str(),
+                    expanded(BLOCK_REASON) = block_reason.as_deref().unwrap_or("none"),
+                    safe(CACHE_HIT) = matches!(cache_outcome, CacheOutcome::Hit),
+                    safe(CORRELATION_ID) = correlation_id.as_str(),
                     "quota gate decision: denied"
                 );
                 Err(credits_exhausted_status(CREDITS_EXHAUSTED_MESSAGE))

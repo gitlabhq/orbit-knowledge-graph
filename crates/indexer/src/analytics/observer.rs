@@ -129,7 +129,10 @@ impl SnowplowIndexingObserver {
         let common = match build_common(&self.config, root_namespace_id) {
             Ok(context) => context,
             Err(error) => {
-                tracing::warn!(%error, "failed to build orbit_common context, skipping indexing event");
+                orbit_log_fields::warn!(
+                    expanded(ERROR_MESSAGE) = %error,
+                    "failed to build orbit_common context, skipping indexing event"
+                );
                 return;
             }
         };
@@ -190,7 +193,10 @@ impl SnowplowIndexingObserver {
         match event {
             Ok(event) => self.tracker.track(event),
             Err(error) => {
-                tracing::warn!(%error, "failed to build indexing analytics event")
+                orbit_log_fields::warn!(
+                    expanded(ERROR_MESSAGE) = %error,
+                    "failed to build indexing analytics event"
+                )
             }
         }
     }
