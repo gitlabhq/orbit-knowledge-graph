@@ -96,5 +96,14 @@
           url: 'orbit/v2/schema/'
         - title: Security
           url: 'orbit/v2/security/'
+    - title: Configure GitLab Orbit
+      url: 'orbit/v2/self-managed/'
+      submenu:
+        - title: Get started
+          url: 'orbit/v2/self-managed/getting-started/'
+        - title: Set up data replication
+          url: 'orbit/v2/self-managed/data-replication/'
+        - title: Set up GitLab Orbit
+          url: 'orbit/v2/self-managed/orbit-setup/'
     - title: Troubleshooting
       url: 'orbit/v2/troubleshooting/'
