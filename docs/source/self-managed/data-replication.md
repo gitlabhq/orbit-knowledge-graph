@@ -52,6 +52,8 @@ find them, see:
 - [Siphon releases](https://gitlab.com/gitlab-org/analytics-section/siphon/-/releases)
 - [Siphon Helm chart releases](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts/-/releases)
 
+Use Siphon 0.0.130-beta or later. Earlier releases fail on the CNG table definitions.
+
 Set up replication in this order:
 
 1. Turn on logical replication in PostgreSQL.
@@ -82,9 +84,11 @@ The Siphon producer stops at startup unless `wal_level` is `logical`. Changes to
    postgresql['listen_address'] = '0.0.0.0'
    postgresql['md5_auth_cidr_addresses'] = ['10.0.0.0/8']
 
-   # Keep GitLab itself on the local socket. Without this, setting listen_address
-   # also repoints GitLab at that address, and GitLab loses its database connection.
+   # Keep GitLab and the container registry on the local socket. Without these lines,
+   # setting listen_address also repoints them at that address, and they lose their
+   # database connection.
    gitlab_rails['db_host'] = '/var/opt/gitlab/postgresql'
+   registry['database']['host'] = '/var/opt/gitlab/postgresql'
    ```
 
 1. Save the file, reconfigure GitLab, then restart PostgreSQL:
@@ -243,14 +247,14 @@ GRANT SELECT, INSERT, dictGet ON gitlab_clickhouse_main_production.* TO siphon_a
 GRANT siphon_app TO siphon;
 ```
 
-The `dictGet` grant is required. Without it, the pods still pass their health checks, because the probe
-only scrapes the metrics endpoint. The failure appears as permission errors in the consumer log. Every
+The `dictGet` grant is required. Without it, the pods still pass their health checks, because the probes
+check only that the consumer runs. The failure appears as permission errors in the consumer log. Every
 table backed by a dictionary stays empty.
 
 On a managed ClickHouse that restricts the `system` database, also run:
 
 ```sql
-GRANT SELECT ON system.tables, system.columns TO siphon_app;
+GRANT SELECT ON system.tables, SELECT ON system.columns TO siphon_app;
 ```
 
 ## Make the passwords available to Siphon
@@ -270,15 +274,17 @@ such as the External Secrets Operator. Do not store the plaintext elsewhere.
 ## Install Siphon
 
 If you use `configMode: split`, Siphon does not include its own table list. At pod startup, Siphon mounts the
-`gitlab-siphon-tables` image, which contains only the table definitions from the GitLab source tree. The
+`gitlab-siphon-tables` image, which contains only the table definitions from the GitLab source tree. The mount
+is an image volume, which needs a supported Kubernetes version. For more information, see
+[Kubernetes](getting-started.md#kubernetes). The
 GitLab cloud native images (CNG) build publishes the `gitlab-siphon-tables` image for every release. This
 means that Siphon's table list matches your GitLab version without manual updates.
 
 The image is `registry.gitlab.com/gitlab-org/build/cng/gitlab-siphon-tables`. It is not part of the Siphon
 project. `global.gitlabVersion` selects its tag and pins the replicated table set to your GitLab version.
 The chart converts the version to the CNG tag format, `vX.Y.Z`, so `19.5.0`, `v19.5.0`, and `v19.5.0-ee`
-all select the `v19.5.0` tag. CNG publishes the image from GitLab 19.5.0, and for some earlier patch
-releases. Before you install, confirm the tag exists in the
+all select the `v19.5.0` tag. CNG publishes the image for GitLab 19.5.0 and later, and for
+GitLab 19.3.5. Before you install, confirm the tag exists in the
 [`gitlab-siphon-tables` container registry](https://gitlab.com/gitlab-org/build/CNG/container_registry/11611957).
 A missing tag prevents pods from starting.
 
