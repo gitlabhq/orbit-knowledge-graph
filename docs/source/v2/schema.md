@@ -9,7 +9,6 @@ title: What GitLab Orbit indexes
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -19,8 +18,7 @@ title: What GitLab Orbit indexes
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
-- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Generally available in GitLab 19.5.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
 
 {{< /history >}}
 
@@ -266,7 +264,7 @@ Use these properties to read code without a separate call to the GitLab API.
 
 ## Identifiers and authorization
 
-- Query responses return all entity IDs as strings, also when the stored value is an integer.
+- Query responses return all entity IDs as strings, even when the stored value is an integer.
   This prevents precision loss in JavaScript clients for values above `Number.MAX_SAFE_INTEGER`.
 - On the server, a `Definition` ID is a content hash scoped to the project and branch.
   The same function in two projects has two different IDs.

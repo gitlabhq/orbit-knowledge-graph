@@ -88,7 +88,6 @@ To see what setup configured, run `glab orbit setup --dry-run`.
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -119,7 +118,7 @@ For all exit codes, see [exit codes](cli.md#exit-codes).
 Orbit API error (HTTP 400): {"code":"compile_error","message":"schema violation: Orbit query syntax at line 1, column 1: expected Statement ..."}
 ```
 
-The query uses the deprecated JSON query DSL. Rewrite it in the [Cypher query language](queries/cypher.md), for example:
+The query uses the deprecated JSON query domain-specific language (DSL). Rewrite it in the [Cypher query language](queries/cypher.md), for example:
 
 ```gql orbit-query
 MATCH (p:Project {full_path: 'gitlab-org/gitlab'})
@@ -157,7 +156,6 @@ glab orbit graph-status --full-path <my-group>
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -191,7 +189,6 @@ Give the account the Security Manager role for the group.
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -203,7 +200,7 @@ An agent in a custom flow does not call GitLab Orbit, and might say that it has 
 <!-- vale orbit.StandaloneProductName = NO -->
 
 The flow configuration does not list the GitLab Orbit tools, or the user who triggered the flow
-cleared **Other Foundational Agents** under **Orbit in GitLab Duo** in their preferences.
+cleared **Other Foundational Agents** in the **GitLab Orbit** section of their preferences.
 [Add the tools to the flow](agents/duo.md#add-the-tools-to-the-flow), and ask the user to select the option again.
 
 <!-- vale orbit.StandaloneProductName = YES -->

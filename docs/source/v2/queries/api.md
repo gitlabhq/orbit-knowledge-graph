@@ -19,8 +19,7 @@ title: GitLab Orbit REST API
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
-- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Generally available in GitLab 19.5.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
 
 {{< /history >}}
 
@@ -38,10 +37,6 @@ Send a personal access token with the `read_api` scope, or a
 Results include only what the token owner can access in GitLab.
 For automation without a personal account, use a [service account](../security.md#service-accounts).
 
-## Billing
-
-For which endpoints consume GitLab Credits, see [billing](../how-it-works.md#billing).
-
 ## Endpoints
 
 | Method | Endpoint | Description |
@@ -50,7 +45,7 @@ For which endpoints consume GitLab Credits, see [billing](../how-it-works.md#bil
 | `POST` | `/api/v4/orbit/query/:name` | Run a [named query](#named-queries) |
 | `GET` | `/api/v4/orbit/query/templates` | List the named queries that take no parameters |
 | `GET` | `/api/v4/orbit/schema` | Get the schema |
-| `GET` | `/api/v4/orbit/schema/dsl` | Get the JSON Schema of the deprecated JSON query DSL. Returns `404` when you use Cypher. Use `CALL db.schema()` instead. |
+| `GET` | `/api/v4/orbit/schema/dsl` | Get the JSON Schema of the deprecated JSON query domain-specific language (DSL). Returns `404` when you use Cypher. Use `CALL db.schema()` instead. |
 | `GET` | `/api/v4/orbit/schema/format` | Get guidance for the response formats |
 | `GET` | `/api/v4/orbit/status` | Check your access and the cluster health |
 | `GET` | `/api/v4/orbit/graph_status` | Check indexing progress for a group or project |
@@ -225,3 +220,4 @@ curl --header "Authorization: Bearer <your_token>" \
 - [Queries](_index.md)
 - [Cypher query language](cypher.md)
 - [Security](../security.md)
+- [Billing](../how-it-works.md#billing)
