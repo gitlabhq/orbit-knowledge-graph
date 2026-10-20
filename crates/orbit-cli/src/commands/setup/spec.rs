@@ -308,7 +308,7 @@ mod tests {
                     " grep` must be used for search",
                     "Ignores case, `_`, `-`",
                     "`a|b` OR",
-                    "definitions you need in one call",
+                    " context` reads code in one call",
                 ] {
                     assert!(rendered.contains(phrase), "{launcher}: {phrase}");
                 }
@@ -317,15 +317,15 @@ mod tests {
                     remote,
                     "{launcher}: {rendered}"
                 );
-                assert!(rendered.contains(" mr:42;") == remote, "{launcher}");
-                let budget = if remote { 150 } else { 105 };
+                assert!(rendered.contains("`mr:42 job:9`") == remote, "{launcher}");
+                let budget = if remote { 90 } else { 60 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
         let local = render_instructions(DIRECT_LAUNCHER, false);
-        assert!(local.contains("or `def:words`/`file:x`.\n"), "{local}");
-        assert!(
-            local.contains("in one call, plus independent searches: `orbit context a.rs:10-40; orbit grep 'x'`."),
+        assert_eq!(
+            local.lines().filter(|line| line.starts_with("- ")).count(),
+            2,
             "{local}"
         );
         assert!(search_nudge_text().contains("MANDATORY"));
