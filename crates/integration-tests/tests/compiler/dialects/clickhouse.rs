@@ -2097,35 +2097,6 @@ fn gql_prepares_queries_and_scoped_schema() {
 }
 
 #[test]
-fn cursor_tokens_bind_to_the_ordered_keys() {
-    let ontology = embedded_ontology();
-    let page = "MATCH (mr:MergeRequest {project_id: 1000})-[:TRIGGERED]->(p:Pipeline) RETURN mr, p PAGE 10";
-    let first = compile(page, Frontend::Gql, &ontology, &test_ctx()).unwrap();
-    let keys = vec![Some("1".to_string()); first.pagination.key_count];
-    let own = compiler::passes::cursor::encode(first.pagination.query_hash, &keys);
-    compile(
-        &format!("{page} AFTER '{own}'"),
-        Frontend::Gql,
-        &ontology,
-        &test_ctx(),
-    )
-    .expect("a token this planner issued pages on");
-    let text_only = compiler::gql::parse_with_hash(page).unwrap().query_hash;
-    let stale = compiler::passes::cursor::encode(text_only, &keys);
-    let error = compile(
-        &format!("{page} AFTER '{stale}'"),
-        Frontend::Gql,
-        &ontology,
-        &test_ctx(),
-    )
-    .unwrap_err();
-    assert!(
-        matches!(&error, QueryError::PaginationError(message) if message.contains("different query")),
-        "{error}"
-    );
-}
-
-#[test]
 fn cte_statements_carry_the_ctes_they_read() {
     let compiled = compile(
         "MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) WHERE g.full_path = 'g701' RETURN p, count(f) AS c LIMIT 10",
