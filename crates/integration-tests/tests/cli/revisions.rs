@@ -101,7 +101,7 @@ fn seed_revision(data_dir: &std::path::Path, name: &str, ddl: &str) -> std::path
     manifest
         .initialize_schema(include_str!(concat!(
             env!("CONFIG_DIR"),
-            "/local/manifest.sql"
+            "/orbit_cli/manifest.sql"
         )))
         .unwrap();
     manifest.execute("INSERT INTO _orbit_manifest (repo_path, project_id, commit_sha, database_path, status) VALUES (?1, 1, 'test', ?2, 'indexed')", &[name.into(), path.to_string_lossy().to_string().into()]).unwrap();

@@ -49,11 +49,8 @@ pub struct TestSuite {
     pub pipeline: Option<String>,
     #[serde(default)]
     pub fixtures: Vec<FixtureFile>,
-    /// Load all source files from this directory (relative to workspace root).
-    /// Files are discovered recursively and written to the temp dir preserving
-    /// relative paths. Combines with `fixtures` (inline files take precedence).
     #[serde(default)]
-    pub fixture_dir: Option<String>,
+    pub fixture_tree: Option<String>,
     /// When true, emit detailed engine/resolver trace events to stderr.
     #[serde(default)]
     pub trace: bool,

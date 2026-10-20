@@ -52,6 +52,13 @@ Use parts for large inputs, such as deep nesting or long chains:
       - "}\n"
 ```
 
+Suites that share the same source tree set `fixture_tree` to a YAML file under
+`fixture_trees/`. Inline `fixtures` can add or replace files from that tree.
+
+```yaml
+fixture_tree: kotlin_v1
+```
+
 A test can also use `queries` for multiple query blocks:
 
 ```yaml

@@ -1812,12 +1812,11 @@ mod tests {
         }
     }
 
-    fn fixture_path(relative: &str) -> String {
-        let manifest = env!("CARGO_MANIFEST_DIR");
-        format!("{manifest}/../../fixtures/code/{relative}")
-    }
-
-    fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
+    fn parse_source(language: Language, extension: &str, source: &str) -> CodeGraph {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(format!("source.{extension}"));
+        std::fs::write(&path, source).unwrap();
+        let path = path.to_string_lossy().into_owned();
         let ctx = Arc::new(PipelineContext {
             config: PipelineConfig::default(),
             tracer: crate::v2::trace::Tracer::new(false),
@@ -1842,7 +1841,7 @@ mod tests {
             &errors,
             GraphStatsCounters::new(&dirs, &files, &defs, &imps, &edgs),
         );
-        crate::v2::registry::dispatch_language(language, &[path.to_string()], &ctx, &btx)
+        crate::v2::registry::dispatch_language(language, &[path], &ctx, &btx)
             .unwrap_or_else(|| panic!("Language {language} not supported"))
             .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
         let mut graphs = capture.take();
@@ -2193,8 +2192,40 @@ mod tests {
 
     #[test]
     fn python_definitions_fixture() {
-        let path = fixture_path("python/definitions.py");
-        let cg = parse_fixture_file(&path, Language::Python);
+        let cg = parse_source(
+            Language::Python,
+            "py",
+            r#"
+def simple_function():
+    pass
+
+def generator_function():
+    yield 1
+
+@staticmethod
+def decorated_function():
+    pass
+
+async def async_function():
+    pass
+
+module_lambda = lambda x: x * 2
+
+def outer_function():
+    def inner_function():
+        pass
+    inner_lambda = lambda a: a
+
+class SimpleClass:
+    pass
+
+class ClassWithMethods:
+    def method(self):
+        pass
+    async def async_method(self):
+        pass
+"#,
+        );
 
         let defs: Vec<_> = cg.definitions().collect();
         assert!(
@@ -2221,8 +2252,30 @@ mod tests {
 
     #[test]
     fn java_comprehensive_fixture() {
-        let path = fixture_path("java/ComprehensiveJavaDefinitions.java");
-        let cg = parse_fixture_file(&path, Language::Java);
+        let cg = parse_source(
+            Language::Java,
+            "java",
+            r#"
+package example;
+
+interface Service {
+    void run();
+}
+
+enum State {
+    READY,
+    DONE
+}
+
+record User(String name) {}
+
+class Application implements Service {
+    Application() {}
+    public void run() {}
+    private void helper() {}
+}
+"#,
+        );
 
         let defs: Vec<_> = cg.definitions().collect();
         assert!(
@@ -2238,8 +2291,29 @@ mod tests {
 
     #[test]
     fn kotlin_comprehensive_fixture() {
-        let path = fixture_path("kotlin/ComprehensiveKotlinDefinitions.kt");
-        let cg = parse_fixture_file(&path, Language::Kotlin);
+        let cg = parse_source(
+            Language::Kotlin,
+            "kt",
+            r#"
+package example
+
+interface Service
+
+enum class State {
+    READY,
+    DONE
+}
+
+data class User(val name: String)
+
+class Application : Service {
+    fun run() {}
+    fun helper() {}
+}
+
+fun topLevel() {}
+"#,
+        );
 
         let defs: Vec<_> = cg.definitions().collect();
         assert!(
@@ -2255,8 +2329,33 @@ mod tests {
 
     #[test]
     fn csharp_comprehensive_fixture() {
-        let path = fixture_path("csharp/ComprehensiveCSharp.cs");
-        let cg = parse_fixture_file(&path, Language::CSharp);
+        let cg = parse_source(
+            Language::CSharp,
+            "cs",
+            r#"
+namespace Example;
+
+public interface IService
+{
+    void Run();
+}
+
+public enum State
+{
+    Ready,
+    Done
+}
+
+public record User(string Name);
+
+public class Application : IService
+{
+    public Application() {}
+    public void Run() {}
+    private void Helper() {}
+}
+"#,
+        );
 
         let defs: Vec<_> = cg.definitions().collect();
         assert!(
