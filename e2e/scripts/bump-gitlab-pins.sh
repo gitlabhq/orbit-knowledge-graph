@@ -15,9 +15,6 @@
 # shape on master; an unpinned :master workhorse against a pinned webservice
 # silently drops the Authorization header and 502s every query.
 #
-# With E2E_GITLAB_LANE=19-5, bumps .gitlab_lanes."19-5" instead: the newest
-# 19.5 release chart, the 19-5-stable-ee head, and the CNG `19-5-stable` build.
-#
 # Usage:
 #   e2e/scripts/bump-gitlab-pins.sh
 #   E2E_GITLAB_LANE=19-5 e2e/scripts/bump-gitlab-pins.sh

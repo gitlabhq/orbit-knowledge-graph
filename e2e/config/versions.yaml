@@ -35,10 +35,7 @@ gitlab:
       digest: "sha256:764e3e5634a0567b7c1ac880c639951a8fd12931b5798ffec21826ed6b119fec"
     toolbox:
       digest: "sha256:1309483072230d05b15ac89dde7ee6218950e47ed958635c74814f41089204c7"
-# Released GitLab versions for the e2e-gitlab-stable matrix, selected with
-# E2E_GITLAB_LANE. Same keys as `gitlab:`, from the release chart repo and the
-# CNG `<lane>-stable` builds. `E2E_GITLAB_LANE=<lane> scripts/bump-gitlab-pins.sh`
-# adds or bumps a lane.
+# e2e-gitlab-stable matrix pins. Add or bump: E2E_GITLAB_LANE=<lane> scripts/bump-gitlab-pins.sh
 gitlab_lanes:
   "19-5":
     chart: "10.5.0"
