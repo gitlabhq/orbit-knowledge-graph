@@ -119,17 +119,20 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         let pattern = self.pattern;
         let alias = &relation.alias;
         if pattern.aggregate() && pattern.relations.len() == 1 {
-            let rows = plain_edge_rows(&mut self.graph, relation, false)?;
             let Some(table) = relation.single_edge_table() else {
+                let rows = plain_edge_rows(&mut self.graph, relation, true)?;
                 return Ok(self.graph.filter(rows, predicates));
             };
+            let rows = plain_edge_rows(&mut self.graph, relation, false)?;
             let key = sort_key(pattern.model, table)?;
             let identity = predicates
                 .iter()
                 .filter(|predicate| predicate.filters_sort_key(key))
                 .cloned()
                 .collect();
-            let rows = self.graph.filter(rows, identity);
+            let rows = self
+                .graph
+                .filter(rows, Predicate::guard_tombstones(identity, key, alias));
             return Ok(self.graph.latest(rows, alias, key.to_vec(), predicates));
         }
         if relation.single_edge_table().is_some()

@@ -41,6 +41,13 @@ attributes (`created_at`, `*_id`), and absorbing enum values. Verified:
 `MergeRequest.state=merged` has 0/652127 un-merges; `Job.status` reverses on
 retry so is never stable.
 
+A tombstone is the exception. The indexer writes it with the sort key and
+defaults in every other column. An immutable filter such as `created_at >= X`
+rejects it, and the pick then resurrects the older live row. So a filter on a
+non-key column runs before the pick only as `(filter OR _deleted)`. The
+`minmax` skip index on `_deleted` keeps that disjunction to the granules that
+hold a tombstone.
+
 ## Selective current-row reads
 
 The planner can avoid a broad `FINAL` read when a positive predicate has a

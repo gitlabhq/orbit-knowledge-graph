@@ -55,6 +55,12 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             Expr::binary(Op::Le, column(value), Expr::int(*end)),
         ),
         Predicate::Live { alias } => sql::deleted_false(alias),
+        Predicate::OrTombstone { predicates, alias } => Expr::binary(
+            Op::Or,
+            Expr::conjoin(predicates.iter().map(predicate).collect())
+                .expect("tombstone guard wraps at least one predicate"),
+            Expr::col(alias, ontology::constants::DELETED_COLUMN),
+        ),
         Predicate::EntityKind {
             column: value,
             entity,

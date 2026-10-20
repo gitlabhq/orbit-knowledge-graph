@@ -230,11 +230,12 @@ The planner uses this form for exact IDs, bounded ID ranges, relation frontiers,
 | Hydration (UNION ALL arms) | Non-`FINAL` scan with `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`, outer `_deleted = false` | Hydration reads a tiny pinned `id IN (...)` set; dropping `FINAL` lets column pruning and projections apply (`FINAL` reconstructs full rows, defeating both). Dedup identity is the table's full sort key, matching `FINAL`'s per-ORDER-BY-key semantics. Falls back to `FINAL` when a table has no sort key. |
 | Main query node scans and joins | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Keeps traversal, aggregation, and single-node lookup semantics consistent. |
 | Fixed and variable stored-edge scans | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Prevents a newer edge tombstone from exposing an older live edge. |
-| Single-relation aggregation | Non-`FINAL` scan with `LIMIT 1 BY <replacement key> ORDER BY <replacement key>, _version DESC` | Resolves current edge rows before evaluating the aggregate condition. |
+| Single-relation aggregation | Non-`FINAL` scan with `LIMIT 1 BY <replacement key> ORDER BY <replacement key>, _version DESC`; `FINAL` per table when the relationship spans several edge tables | Resolves current edge rows before evaluating the aggregate condition. |
 
 Filter placement rules for current-row reads:
 
 - **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are emitted on the current-row read so ClickHouse can still use primary-key pruning where supported.
+- **Immutable non-key filters** (`created_at`, `author_id`) also run before the pick, as `(filter OR _deleted)`. A tombstone holds column defaults, and the guard lets it reach the pick and win.
 - **Mutable filters** (`state`, `status`, `draft`) evaluate after latest-row resolution, preventing stale row versions from matching. The selective form also uses them to find candidate keys.
 - **`_deleted = false`** is always applied after latest-row resolution, either on the `FINAL` scan or outside a wrapping subquery.
 - **Exact edge metadata** can enforce a node filter only when every selected relationship variant carries the current value.

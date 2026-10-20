@@ -68,6 +68,11 @@ pub enum Predicate {
         relation: RelationId,
         keys: Vec<String>,
     },
+    /// A tombstone keeps only its sort key, so a pre-pick filter on other columns must let it through.
+    OrTombstone {
+        predicates: Vec<Predicate>,
+        alias: String,
+    },
     Scope {
         alias: String,
         proof: crate::scope::ScopeProof,
@@ -83,6 +88,7 @@ impl Predicate {
                 &|_| false,
             ),
             Self::Property { selective, .. } => *selective,
+            Self::OrTombstone { predicates, .. } => predicates.iter().any(Predicate::is_selective),
             Self::Ids { .. } | Self::Membership { .. } => true,
             Self::IdRange { start, end, .. } => {
                 end.saturating_sub(*start) <= crate::passes::validate::MAX_ID_RANGE_SPAN
@@ -119,7 +125,6 @@ impl Predicate {
     }
 
     pub fn filters_sort_key(&self, sort_key: &[String]) -> bool {
-        let in_key = |column: &str| sort_key.iter().any(|key| key == column);
         match self {
             Self::Boolean(expression) => expression.fold(
                 &|predicate| predicate.filters_sort_key(sort_key),
@@ -127,11 +132,25 @@ impl Predicate {
                 &|filters| filters,
             ),
             Self::Property {
-                column,
                 filter,
-                immutable,
+                immutable: true,
                 ..
-            } => filter.rhs_column.is_none() && (*immutable || in_key(&column.name)),
+            } => filter.rhs_column.is_none(),
+            _ => self.on_sort_key(sort_key),
+        }
+    }
+
+    pub fn on_sort_key(&self, sort_key: &[String]) -> bool {
+        let in_key = |column: &str| sort_key.iter().any(|key| key == column);
+        match self {
+            Self::Boolean(expression) => expression.fold(
+                &|predicate| predicate.on_sort_key(sort_key),
+                &|children| children.into_iter().all(|on_key| on_key),
+                &|on_key| on_key,
+            ),
+            Self::Property { column, filter, .. } => {
+                filter.rhs_column.is_none() && in_key(&column.name)
+            }
             Self::Ids { column, .. }
             | Self::IdRange { column, .. }
             | Self::EntityKind { column, .. } => in_key(&column.name),
@@ -140,6 +159,23 @@ impl Predicate {
             Self::Scope { .. } => in_key(TRAVERSAL_PATH_COLUMN),
             _ => false,
         }
+    }
+
+    pub fn guard_tombstones(
+        predicates: Vec<Predicate>,
+        sort_key: &[String],
+        alias: &str,
+    ) -> Vec<Predicate> {
+        let (mut keyed, guarded): (Vec<_>, Vec<_>) = predicates
+            .into_iter()
+            .partition(|predicate| predicate.on_sort_key(sort_key));
+        if !guarded.is_empty() {
+            keyed.push(Self::OrTombstone {
+                predicates: guarded,
+                alias: alias.to_string(),
+            });
+        }
+        keyed
     }
 }
 
