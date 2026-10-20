@@ -179,12 +179,12 @@
             },
             "unique": {
               "type": "boolean",
-              "description": "At most one live row per value across the graph. The planner recomputes an equality on it inline instead of storing it.",
+              "description": "At most one live row per value; an equality on it is recomputed inline.",
               "default": false
             },
             "mutable": {
               "type": "boolean",
-              "description": "Whether this field can change after creation. Mark false only when every live version of a row carries the same value; the planner then filters on it before the latest-row pick.",
+              "description": "Whether this field can change after creation. False lets the planner filter on it before the latest-row pick.",
               "default": true
             },
             "terminal_values": {
