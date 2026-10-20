@@ -32,14 +32,14 @@ On GitLab Self-Managed and GitLab Dedicated, contact your GitLab account team.
 
 ## Start a trial
 
+<!-- vale orbit.StandaloneProductName = NO -->
+
 Prerequisites:
 
 - The Owner role for the top-level group.
 - The group has a Premium or Ultimate subscription, and does not have the GitLab Orbit add-on.
 - The group is eligible for a trial. If it is not, the **Orbit** settings page says that the group is not eligible and shows **Contact sales**.
   To buy the add-on, [contact sales](https://about.gitlab.com/sales/).
-
-<!-- vale orbit.StandaloneProductName = NO -->
 
 To start a trial:
 
