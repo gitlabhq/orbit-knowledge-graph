@@ -104,7 +104,7 @@ fn remove_db_files(db_path: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+    const LOCAL_DDL: &str = include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/graph_local.sql"));
 
     #[test]
     fn remove_db_files_appends_wal_to_the_full_path() {

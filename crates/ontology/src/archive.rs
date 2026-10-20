@@ -19,7 +19,7 @@ const MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_FILES: u64 = 4096;
 
 #[derive(Embed)]
-#[folder = "$CONFIG_DIR/ontology-archives"]
+#[folder = "$ORBIT_CONFIG_DIR/ontology-archives"]
 #[include = "*.tar.gz"]
 struct BundledArchives;
 

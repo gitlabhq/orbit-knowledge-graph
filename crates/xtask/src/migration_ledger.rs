@@ -22,7 +22,7 @@ const VERSIONS_REPO_PATH: &str = "config/versions.yaml";
 const REMEDIATION: &str = "Run `mise schema:bump` to record the change and re-snapshot.";
 
 fn config_dir() -> PathBuf {
-    PathBuf::from(env!("CONFIG_DIR"))
+    PathBuf::from(env!("ORBIT_CONFIG_DIR"))
 }
 
 fn ledger_path() -> PathBuf {

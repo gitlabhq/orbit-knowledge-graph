@@ -6,7 +6,8 @@ use crate::scope::{LedgerScope, MigrationScope, sdlc_entity_names};
 
 pub const LEDGER_FILE: &str = "schema-migrations.yaml";
 
-const EMBEDDED_LEDGER: &str = include_str!(concat!(env!("CONFIG_DIR"), "/schema-migrations.yaml"));
+const EMBEDDED_LEDGER: &str =
+    include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/schema-migrations.yaml"));
 
 const LEDGER_HEADER: &str = "\
 # yaml-language-server: $schema=schemas/schema-migrations.schema.json
