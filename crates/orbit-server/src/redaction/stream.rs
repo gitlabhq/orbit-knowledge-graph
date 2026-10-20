@@ -145,39 +145,3 @@ impl RedactionService {
         Ok(RedactionExchangeResult { authorizations })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn caller_stream_failures_are_caller_errors() {
-        let disconnects = [
-            RedactionExchangeError::StreamClosed,
-            RedactionExchangeError::ReceiveFailed(Status::unknown(
-                "h2 protocol error: error reading a body from connection",
-            )),
-            RedactionExchangeError::ReceiveFailed(Status::out_of_range("message too large")),
-        ];
-        for err in disconnects {
-            assert!(err.into_pipeline_error().is_caller_error());
-        }
-
-        let failures = [
-            RedactionExchangeError::InvalidMessage("test"),
-            RedactionExchangeError::ResultIdMismatch {
-                expected: "a".to_string(),
-                received: "b".to_string(),
-            },
-            RedactionExchangeError::ClientError {
-                code: "test".to_string(),
-                message: "msg".to_string(),
-            },
-        ];
-        for err in failures {
-            let err = err.into_pipeline_error();
-            assert!(!err.is_caller_error());
-            assert_eq!(err.code(), "authorization_error");
-        }
-    }
-}

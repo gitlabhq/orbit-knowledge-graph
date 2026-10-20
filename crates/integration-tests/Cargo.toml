@@ -14,7 +14,6 @@ compiler = { path = "../query-engine/compiler" }
 orbit-analytics = { path = "../orbit-analytics" }
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }
-orbit-observability = { workspace = true }
 orbit-server = { path = "../orbit-server", features = ["testkit"] }
 orbit-server-config = { path = "../orbit-server-config" }
 orbit-utils = { path = "../utils" }

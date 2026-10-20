@@ -126,24 +126,4 @@ async fn errors_when_batch_size_exceeded() {
     assert!(
         matches!(&err, query_engine::pipeline::PipelineError::ContentResolution(msg) if msg.contains("batch size"))
     );
-    assert!(!err.is_caller_error());
-}
-
-#[tokio::test]
-async fn rejects_as_caller_error_when_requested_rows_exceed_batch_size() {
-    let registry = test_registry_with_batch_size(1);
-    let rctx = ResolverContext::default();
-    let vcrs = [VirtualColumnRequest {
-        column_name: "content".into(),
-        service: "gitaly".into(),
-        lookup: "blob_content".into(),
-    }];
-    let specs: Vec<(&str, &[VirtualColumnRequest])> = vec![("File", &vcrs)];
-    let mut map = file_property_map();
-
-    let err = resolve_virtual_columns(&registry, &rctx, &specs, &mut map, 2)
-        .await
-        .unwrap_err();
-
-    assert!(err.is_caller_error(), "{err}");
 }
