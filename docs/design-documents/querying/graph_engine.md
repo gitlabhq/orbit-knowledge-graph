@@ -183,7 +183,7 @@ policy provenance.
 | 8 | `response_policy` | Applies transport-size policy to result projections |
 | 9 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
 | 10 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
-| 11 | `cursor` | Applies keyset pagination (stable order, probe limit, seek predicate, and readback columns) |
+| 11 | `cursor` | Applies keyset pagination (stable order, probe limit, seek predicate, and readback columns) and binds the cursor token's hash to the ordered keys, so a token from a planner with another key order is rejected |
 | 12 | `check` | Verifies every namespaced graph-table path column carries a valid role-scoped `startsWith` predicate or a fail-closed false predicate ([Security](../security.md)) |
 | 13 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (FK shapes, sort and group targets) need no second query |
 | 14 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |

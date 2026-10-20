@@ -516,7 +516,8 @@ fn cursor_pagination_validation() {
     }"#;
     let result = compile(json, Frontend::JsonDsl, &ontology, &ctx);
     assert!(result.is_ok(), "valid cursor should compile: {result:?}");
-    let rendered = result.unwrap().base.render();
+    let first = result.unwrap();
+    let rendered = first.base.render();
     assert!(
         rendered.contains("LIMIT 21"),
         "cursor fetches page_size + 1 probe row: {rendered}"
@@ -526,7 +527,7 @@ fn cursor_pagination_validation() {
         "cursor queries select hidden key readback columns: {rendered}"
     );
 
-    let hash = canonical_hash(&serde_json::from_str(json).unwrap());
+    let hash = first.pagination.query_hash;
     let paged: serde_json::Value = {
         let mut v: serde_json::Value = serde_json::from_str(json).unwrap();
         v["cursor"]["after"] = encode(hash, &[Some("7".into())]).into();
@@ -544,11 +545,12 @@ fn cursor_pagination_validation() {
     );
 
     let mut foreign: serde_json::Value = serde_json::from_str(json).unwrap();
-    foreign["cursor"]["after"] = encode(hash ^ 1, &[Some("7".into())]).into();
+    let text_only = canonical_hash(&serde_json::from_str(json).unwrap());
+    foreign["cursor"]["after"] = encode(text_only, &[Some("7".into())]).into();
     let err = compile(&foreign.to_string(), Frontend::JsonDsl, &ontology, &ctx).unwrap_err();
     assert!(
         matches!(err, QueryError::PaginationError(_)),
-        "token minted for a different query should be a pagination error, got: {err}"
+        "token minted before the keys were bound should be a pagination error, got: {err}"
     );
 
     let mut garbled: serde_json::Value = serde_json::from_str(json).unwrap();

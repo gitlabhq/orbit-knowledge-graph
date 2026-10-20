@@ -1,5 +1,5 @@
-# Token snapshot: encode(canonical_hash(query), ["'); DROP TABLE gl_user; --", "0"])
-# If cursor encoding changes, regenerate with the Rust encode() function.
+# Token snapshot: encode(<query hash bound to the ordered keys>, ["'); DROP TABLE gl_user; --", "0"]).
+# Regenerate from compiled.pagination.query_hash with the Rust encode() function when the keys or the hash change.
 description: SQL injection payload in a well-formed cursor token is parameterized away
 
 query:
@@ -10,10 +10,10 @@ query:
                  "columns": ["username"]}],
       "order_by": "-u.username",
       "cursor": {"page_size": 2,
-                 "after": "eyJoIjoiNDUzMzNmMDg3NWU5NzJjYSIsImsiOlsiJyk7IERST1AgVEFCTEUgZ2xfdXNlcjsgLS0iLCIwIl19"}
+                 "after": "eyJoIjoiMjQ2NmY4NzQ4NDM0MmNiMCIsImsiOlsiJyk7IERST1AgVEFCTEUgZ2xfdXNlcjsgLS0iLCIwIl19"}
     }
   gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.username DESC PAGE 2 AFTER 'eyJoIjoiMDA0ZDhkYzZjYzc1NmEwMSIsImsiOlsiJyk7IERST1AgVEFCTEUgZ2xfdXNlcjsgLS0iLCIwIl19'
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.username DESC PAGE 2 AFTER 'eyJoIjoiNzAzMDRkMjE5NTZlZGJhNSIsImsiOlsiJyk7IERST1AgVEFCTEUgZ2xfdXNlcjsgLS0iLCIwIl19'
 
 expect:
   node_count: 0

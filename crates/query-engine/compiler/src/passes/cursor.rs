@@ -1,7 +1,7 @@
 //! Keyset pagination pass. Runs after enforce/security so the final
-//! ORDER BY is known: appends hidden `_orbit_cursor_N` readback columns for each
-//! sort key, lowers the decoded `after` token into a lexicographic seek
-//! predicate, and records the key count for the output stage.
+//! ORDER BY is known: binds the cursor hash to the ordered keys, appends hidden
+//! `_orbit_cursor_N` readback columns for each sort key, lowers the decoded `after`
+//! token into a lexicographic seek predicate, and records the key count.
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -11,6 +11,7 @@ use crate::ast::*;
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, Input, QueryType};
+use crate::passes::codegen::PaginationContext;
 use crate::passes::lower::LoweredMetadata;
 use orbit_utils::query_types::SqlType;
 
@@ -46,16 +47,19 @@ pub fn decode(after: &str, query_hash: u64) -> Result<Vec<Option<String>>> {
     Ok(token.k)
 }
 
+fn fnv(mut hash: u64, bytes: &[u8]) -> u64 {
+    for b in bytes {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
 /// FNV-1a over the canonicalized (key-sorted) query JSON minus `cursor`, so a
 /// token binds to the exact query it was issued for.
 pub fn canonical_hash(query: &serde_json::Value) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
-    let mut write = |bytes: &[u8]| {
-        for b in bytes {
-            hash ^= u64::from(*b);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-    };
+    let mut write = |bytes: &[u8]| hash = fnv(hash, bytes);
     fn canonicalize(v: &serde_json::Value, skip_cursor: bool, out: &mut dyn FnMut(&[u8])) {
         match v {
             serde_json::Value::Object(map) => {
@@ -88,18 +92,23 @@ pub fn canonical_hash(query: &serde_json::Value) -> u64 {
     hash
 }
 
+/// A token also binds to the keys it was issued over, so a planner that orders them differently rejects it.
+pub fn with_order(hash: u64, order_by: &[OrderExpr]) -> u64 {
+    fnv(hash, format!("{order_by:?}").as_bytes())
+}
+
 pub fn apply(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
-    query_hash: u64,
-) -> Result<usize> {
+    pagination: &mut PaginationContext,
+) -> Result<()> {
     let Node::Query(q) = node else {
-        return Ok(0);
+        return Ok(());
     };
     q.limit = Some(input.fetch_limit());
     let Some(cursor) = &input.cursor else {
-        return Ok(0);
+        return Ok(());
     };
     let additional: Vec<_> = metadata
         .stable_order
@@ -110,15 +119,17 @@ pub fn apply(
     q.order_by.extend(additional);
     let order_by = q.order_by.clone();
     if order_by.is_empty() {
-        return Ok(0);
+        return Ok(());
     }
+    pagination.query_hash = with_order(pagination.query_hash, &order_by);
+    pagination.key_count = order_by.len();
 
     append_readback_columns(q, &order_by);
 
     let Some(after) = &cursor.after else {
-        return Ok(order_by.len());
+        return Ok(());
     };
-    let values = decode(after, query_hash)?;
+    let values = decode(after, pagination.query_hash)?;
     if values.len() != order_by.len() {
         return Err(QueryError::PaginationError(
             "cursor.after was issued for a different query; restart pagination".into(),
@@ -135,7 +146,7 @@ pub fn apply(
     } else {
         merge_seek_into_where(q, &order_by, &values, &nullable);
     }
-    Ok(order_by.len())
+    Ok(())
 }
 
 fn append_readback_columns(q: &mut Query, order_by: &[OrderExpr]) {
@@ -317,6 +328,27 @@ mod tests {
         let keys = vec![None, Some("7".to_string())];
         let t = encode(9, &keys);
         assert_eq!(decode(&t, 9).unwrap(), keys);
+    }
+
+    #[test]
+    fn hash_binds_to_the_ordered_keys() {
+        let pipeline_first = vec![
+            OrderExpr::asc(Expr::col("p", "id")),
+            OrderExpr::asc(Expr::col("mr", "id")),
+        ];
+        let merge_request_first = vec![
+            OrderExpr::asc(Expr::col("mr", "id")),
+            OrderExpr::asc(Expr::col("p", "id")),
+        ];
+        assert_ne!(
+            with_order(7, &pipeline_first),
+            with_order(7, &merge_request_first)
+        );
+        assert_eq!(
+            with_order(7, &pipeline_first),
+            with_order(7, &pipeline_first)
+        );
+        assert_ne!(with_order(7, &pipeline_first), 7);
     }
 
     #[test]

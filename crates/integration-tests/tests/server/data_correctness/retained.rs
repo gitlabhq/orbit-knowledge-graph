@@ -16,9 +16,10 @@ pub(super) async fn cursor_after_token_with_sql_metacharacters_is_parameterized(
         "cursor": {"page_size": 2}
     }"#;
 
+    let (first_page, _) = compile_and_execute(ctx, json).await;
     let mut query: Value = serde_json::from_str(json).unwrap();
     let token = cursor::encode(
-        cursor::canonical_hash(&query),
+        first_page.pagination.query_hash,
         &[Some("'); DROP TABLE gl_user; --".into()), Some("0".into())],
     );
     query["cursor"]["after"] = token.into();

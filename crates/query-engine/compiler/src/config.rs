@@ -223,24 +223,9 @@ fn validate_relationships(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let mut input = require(ctx.take_input(), "input")?;
+    let input = require(ctx.take_input(), "input")?;
     let v = validate::Validator::new(ctx.data_model());
     v.check_shape(&input)?;
-    if let Some(c) = &mut input.cursor
-        && let Some(after) = &c.after
-    {
-        let query_hash = ctx
-            .pagination()
-            .as_ref()
-            .map_or(0, |pagination| pagination.query_hash);
-        if query_hash == 0 {
-            return Err(QueryError::PaginationError(
-                "cursor binding requires a query hash from the frontend".into(),
-            ));
-        }
-        let values = cursor::decode(after, query_hash)?;
-        c.after = Some(cursor::encode(query_hash, &values));
-    }
     v.check_references(&input)?;
     ctx.set_input(input);
     Ok(())
@@ -385,7 +370,7 @@ fn cursor(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut node = require(ctx.take_node(), "node")?;
     let metadata = require(ctx.lowered_metadata().clone(), "lowered_metadata")?;
     let mut pagination = ctx.take_pagination().unwrap_or_default();
-    pagination.key_count = cursor::apply(&mut node, &input, &metadata, pagination.query_hash)?;
+    cursor::apply(&mut node, &input, &metadata, &mut pagination)?;
     ctx.set_input(input);
     ctx.set_pagination(pagination);
     ctx.set_node(node);
