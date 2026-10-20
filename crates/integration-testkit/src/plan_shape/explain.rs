@@ -451,7 +451,7 @@ fn execution_tree(execution: &ExecutionPlan) -> Tree {
             None,
         )],
     );
-    let relations: Vec<_> = materialized.iter().copied().collect();
+    let relations: Vec<_> = usage.materialized().collect();
     if relations.is_empty() {
         source
     } else {

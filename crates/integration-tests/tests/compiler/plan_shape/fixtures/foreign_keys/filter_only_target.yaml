@@ -28,3 +28,9 @@ physical:
       expect:
         - (Filter mr.author_id IN $users.id, ... (_))
         - (Scan Table(gl_merge_request) AS mr)
+      occurrences:
+        - pattern: (CTE ? (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
+          count: 1
+      reject:
+        - (Scan Table(gl_edge) ...)
+        - (CTE $users (Project ... (Filter ... (Scan Table(gl_user) AS u))))
