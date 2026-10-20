@@ -536,6 +536,14 @@ depends = ["lint:markdown", "lint:vale", "lint:links"]
 run = "echo 'All doc linters passed'"
 description = "Run all documentation linters"
 
+[tasks."docs:serve"]
+run = "bash ./scripts/docs/site.sh serve"
+description = "Preview the user docs on the docs.gitlab.com site at http://localhost:1313/orbit/"
+
+[tasks."docs:build"]
+run = "bash ./scripts/docs/site.sh build"
+description = "Build the docs.gitlab.com site with the user docs, as the docs_hugo_build CI job does"
+
 [tasks."docs:principles:sync"]
 run = "DRY_RUN=true bash ./scripts/ci/sync-doc-principles.sh"
 description = "Rehearse the documentation-principles sync: fetch upstream and show the diff"
