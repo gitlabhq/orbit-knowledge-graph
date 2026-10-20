@@ -1313,21 +1313,6 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "pagination"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#d55181",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
               "options": "authorization"
             },
             "properties": [
@@ -1947,7 +1932,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`: parse/schema/reference/pagination/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline. Renders a flat zero baseline when no rejections occur in the window.",
+      "description": "Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`: parse/schema/reference/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline. Renders a flat zero baseline when no rejections occur in the window.",
       "fieldConfig": {
         "defaults": {
           "custom": {

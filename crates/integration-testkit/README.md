@@ -409,7 +409,7 @@ only IDs and the relationship type.
 
 | Field | Type | Description |
 |---|---|---|
-| `pages` | [`QueryExpect`] | Multi-page assertions with auto cursor chaining; the last page must exhaust the cursor |
+| `pages` | [`QueryExpect`] | Multi-page assertions; the runner advances `SKIP` by the page size, and the last page must report `has_more: false` |
 | `all_pages` | `AllPagesExpect` | Cross-page assertions |
 
 **Other:**
@@ -459,12 +459,12 @@ Row values support `{repeat: str, count: N, suffix: str}` for expansion.
 | `page_count` | N | Expected number of pages |
 | `no_duplicate_ids` | bool | Reject repeated node or group-node IDs across pages |
 | `no_duplicate_edges` | bool | Reject repeated typed edges across pages |
-| `matches_unpaginated` | bool | Compare combined typed node IDs, typed edges, group rows, and paths with the same query without a cursor |
+| `matches_unpaginated` | bool | Compare combined typed node IDs, typed edges, group rows, and paths with the same query without `SKIP` |
 
-Cursor responses must keep `has_more` and `next_cursor` consistent. The runner
-decodes each token and checks its keys against the last authorized row when one
-exists. Unpaginated comparisons use a limit of 1000 and fail if results exceed it.
-GQL comparison queries must end with `PAGE N`.
+Paginated scenarios are GQL-only and must end with `SKIP 0 LIMIT N`. The runner
+replaces `SKIP 0` with `SKIP N`, `SKIP 2N`, and so on for later pages, and checks
+that `has_more` is false only on the last page. Unpaginated comparisons use a
+limit of 1000 and fail if results exceed it.
 Node properties are checked per page because excerpt lengths depend on page size.
 
 Per-frontend error expectations must include every frontend in the scenario.

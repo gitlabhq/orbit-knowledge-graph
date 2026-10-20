@@ -137,7 +137,7 @@ pub fn compile_model(
 /// Compile a graph query into DuckDB SQL for local execution.
 ///
 /// Collapses edge tables to the local single-table layout before compiling.
-/// No security, hydration, or cursor phases — local mode trusts all data.
+/// No security or hydration phases — local mode trusts all data.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(
     raw: &str,
@@ -639,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_without_cursor_orders_only_by_depth() {
+    fn path_finding_without_skip_orders_only_by_depth() {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -656,29 +656,7 @@ mod tests {
         assert!(
             !sql.contains("toString(paths._orbit_path)")
                 && !sql.contains("toString(paths._orbit_edge_kinds)"),
-            "path array tie-break sorting should only be emitted for cursor pagination, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn path_finding_with_cursor_keeps_path_tie_break_order() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "cursor": {"page_size": 10}
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("toString(paths._orbit_path)")
-                && sql.contains("toString(paths._orbit_edge_kinds)"),
-            "cursor pagination should keep deterministic path tie-break sorting, got:\n{sql}"
+            "path array tie-break sorting should only be emitted with SKIP, got:\n{sql}"
         );
     }
 
@@ -753,27 +731,6 @@ mod tests {
         assert!(
             !sql.contains("gl_code_edge"),
             "inferred User relationship kinds should avoid scanning code edge table, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn cursor_neighbors_both_orders_by_projected_columns() {
-        let query = r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3]}],
-            "neighbors": {"direction": "both"},
-            "cursor": {"page_size": 20}
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("ORDER BY _orbit_mr_id ASC, _orbit_neighbor_id ASC"),
-            "cursor neighbors over UNION should order by projected aliases, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("ORDER BY e.source_id"),
-            "cursor neighbors over UNION must not order by the inner edge alias, got:\n{sql}"
         );
     }
 

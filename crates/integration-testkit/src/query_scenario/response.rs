@@ -165,7 +165,7 @@ pub(super) fn assert_output(
     expect: &QueryExpect,
     label: &str,
 ) -> Value {
-    assert_cursor(output, label);
+    assert_pagination(output, label);
     if frontend == Frontend::Gql {
         assert_gql_table(output, expect, label);
     }
@@ -174,7 +174,7 @@ pub(super) fn assert_output(
     response
 }
 
-pub(super) fn assert_cursor(output: &PipelineOutput, label: &str) {
+pub(super) fn assert_pagination(output: &PipelineOutput, label: &str) {
     let pagination = output
         .pagination
         .as_ref()
@@ -183,56 +183,6 @@ pub(super) fn assert_cursor(output: &PipelineOutput, label: &str) {
         pagination.truncated, pagination.has_more,
         "{label}: inconsistent truncation metadata"
     );
-    if output.compiled.input.cursor.is_none() {
-        assert!(
-            pagination.next_cursor.is_none(),
-            "{label}: cursor returned for an unpaginated query"
-        );
-        return;
-    }
-    assert_eq!(
-        pagination.has_more,
-        pagination.next_cursor.is_some(),
-        "{label}: has_more and next_cursor disagree"
-    );
-    let Some(token) = &pagination.next_cursor else {
-        return;
-    };
-    let context = &output.compiled.pagination;
-    let keys = query_engine::compiler::passes::cursor::decode(token, context.query_hash)
-        .unwrap_or_else(|error| panic!("{label}: invalid next_cursor: {error}"));
-    assert_eq!(
-        keys.len(),
-        context.key_count,
-        "{label}: cursor sort key count mismatch"
-    );
-    if let Some(anchor) = output
-        .query_result
-        .rows()
-        .iter()
-        .rev()
-        .find(|row| row.is_authorized())
-    {
-        let expected: Vec<_> = (0..context.key_count)
-            .map(|index| {
-                let column = query_engine::compiler::passes::cursor::cursor_column(index);
-                match anchor.column(&column) {
-                    Some(orbit_arrow::ColumnValue::Null) => None,
-                    Some(value) => Some(
-                        value
-                            .as_string()
-                            .expect("cursor sort key should be a string")
-                            .clone(),
-                    ),
-                    None => panic!("{label}: authorized cursor anchor missing {column}"),
-                }
-            })
-            .collect();
-        assert_eq!(
-            keys, expected,
-            "{label}: next_cursor must anchor on the last authorized row"
-        );
-    }
 }
 
 pub(super) fn repeat_count(expect: &QueryExpect, label: &str) -> usize {

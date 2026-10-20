@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v12",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v13",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -59,24 +59,6 @@
       "minimum": 1,
       "maximum": 1000,
       "default": 30
-    },
-    "cursor": {
-      "type": "object",
-      "description": "Keyset pagination. First page: omit 'after'; stop when the response has no next_cursor. NULL sort keys sort last.",
-      "required": ["page_size"],
-      "properties": {
-        "page_size": {
-          "type": "integer",
-          "description": "Max rows per page; a page may return fewer after redaction.",
-          "minimum": 1,
-          "maximum": 1000
-        },
-        "after": {
-          "type": "string",
-          "description": "pagination.next_cursor from the prior response. Changing the query invalidates it."
-        }
-      },
-      "additionalProperties": false
     },
     "order_by": {
       "type": "string",

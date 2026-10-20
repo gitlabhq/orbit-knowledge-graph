@@ -1329,13 +1329,15 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
         "MATCH (u:User) RETURN collect(u.username)",
-        "MATCH (u:User) RETURN u SKIP 1",
+        "MATCH (u:User {id: 1}) RETURN u LIMIT 1 SKIP 1",
+        "MATCH (u:User {id: 1}) RETURN u SKIP 1 SKIP 1",
+        "MATCH (u:User {id: 1}) RETURN u SKIP -1",
+        "MATCH (u:User {id: 1}) RETURN u SKIP 10001",
         "MATCH (u:User) RETURN u DEBUG DEBUG",
         "MATCH (u:User) RETURN u DEBUG LIMIT 1",
         "MATCH (u:User) RETURN u LIMIT 1 ORDER BY u.id",
-        "MATCH (u:User) RETURN u LIMIT 1 PAGE 1",
-        "MATCH (u:User) RETURN u PAGE 1 LIMIT 1",
-        "MATCH (u:User) RETURN u AFTER 'token'",
+        "MATCH (u:User {id: 1}) RETURN u PAGE 1",
+        "MATCH (u:User {id: 1}) RETURN u LIMIT 1 AFTER 'token'",
         "MATCH (u:User) RETURN u; DEBUG",
         "MATCH (u:User) RETURN count(u) AS n AS other",
         "MATCH (u:User) RETURN u ORDER BY u.id, u.username",
@@ -1782,8 +1784,8 @@ fn orbit_query_traversal_aliases_are_ignored_and_sortable() {
             "RETURN mr.iid AS number, p{.full_path} AS project ORDER BY number DESC LIMIT 5",
         ),
         (
-            "RETURN mr.iid ORDER BY mr.iid PAGE 5",
-            "RETURN mr.iid AS number ORDER BY number PAGE 5",
+            "RETURN mr.iid ORDER BY mr.iid SKIP 5 LIMIT 5",
+            "RETURN mr.iid AS number ORDER BY number SKIP 5 LIMIT 5",
         ),
     ] {
         let plain = compile(&format!("{base} {plain}"), Frontend::Gql, &ontology, &ctx).unwrap();
@@ -1857,79 +1859,6 @@ fn orbit_query_digit_string_ids_and_aggregated_identity_columns() {
 }
 
 #[test]
-fn orbit_query_page_matches_json_cursor() {
-    let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]}],"order_by":"u.id","cursor":{"page_size":5}}"#;
-    let orbit_query =
-        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 5";
-    let compiled = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
-    let rendered = compiled.base.render();
-    assert!(rendered.contains("_orbit_cursor_0"), "{rendered}");
-    assert!(rendered.contains("LIMIT 6"), "{rendered}");
-    assert_eq!(compiled.input.cursor.as_ref().map(|c| c.page_size), Some(5));
-}
-
-#[test]
-fn orbit_query_after_token_binds_to_the_statement() {
-    let first =
-        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2";
-    let page = compile(first, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
-    let hash = page.pagination.query_hash;
-    assert_ne!(hash, 0);
-    let keys = vec![Some("2".to_owned()); page.pagination.key_count];
-    let token = compiler::passes::cursor::encode(hash, &keys);
-
-    for next in [
-        format!(
-            "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 7 AFTER '{token}'"
-        ),
-        format!(
-            "\nMATCH ( u : User )\nWHERE u . id >= 1 AND u . id <= 10000\nRETURN u . username\nORDER BY u . id /* page */\nPAGE 7\nAFTER '{token}'\n// next page\n"
-        ),
-    ] {
-        let compiled = compile(&next, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
-        assert_eq!(compiled.pagination.query_hash, hash);
-        assert_eq!(compiled.input.cursor.as_ref().unwrap().page_size, 7);
-        assert!(
-            compiled.base.render().contains("u.id >"),
-            "{}",
-            compiled.base.render()
-        );
-    }
-
-    let edited = format!(
-        "MATCH (u:User) WHERE u.id >= 2 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2 AFTER '{token}'"
-    );
-    let error = compile(&edited, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap_err();
-    assert!(matches!(error, QueryError::PaginationError(_)), "{error}");
-
-    let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]}],"order_by":"u.id","cursor":{"page_size":2}}"#;
-    let json_hash = compile(json, Frontend::JsonDsl, &test_ontology(), &test_ctx())
-        .unwrap()
-        .pagination
-        .query_hash;
-    let foreign = compiler::passes::cursor::encode(json_hash, &keys);
-    let crossed = format!(
-        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2 AFTER '{foreign}'"
-    );
-    let error = compile(&crossed, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap_err();
-    assert!(matches!(error, QueryError::PaginationError(_)), "{error}");
-}
-
-#[test]
-fn orbit_query_page_size_bounds_match_json() {
-    for query in [
-        "MATCH (u:User {id: 1}) RETURN u PAGE 0",
-        "MATCH (u:User {id: 1}) RETURN u PAGE 1001",
-    ] {
-        let error = compile(query, Frontend::Gql, &test_ontology(), &test_ctx()).expect_err(query);
-        assert!(
-            matches!(&error, QueryError::Validation(m) if m.contains("cursor.page_size")),
-            "{query}: {error}"
-        );
-    }
-}
-
-#[test]
 fn orbit_query_debug_and_dynamic_properties_match_json_options() {
     let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"options":{"include_debug_sql":true}}"#;
     let compiled = compile_pair(
@@ -1971,10 +1900,11 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
 #[test]
 fn orbit_query_optional_clauses_preserve_options() {
     for order in ["", " ORDER BY u.id"] {
-        for (limit, rows, page) in [
+        for (limit, rows, skip) in [
             ("", None, None),
             (" LIMIT 7", Some(7), None),
-            (" PAGE 7", None, Some(7)),
+            (" SKIP 7", None, Some(7)),
+            (" SKIP 7 LIMIT 3", Some(3), Some(7)),
         ] {
             for debug in ["", " DEBUG"] {
                 let query = format!("MATCH (u:User {{id: 1}}) RETURN u{order}{limit}{debug}");
@@ -1987,7 +1917,7 @@ fn orbit_query_optional_clauses_preserve_options() {
                     "{query}"
                 );
                 assert_eq!(input.order_by.is_some(), !order.is_empty(), "{query}");
-                assert_eq!(input.cursor.as_ref().map(|c| c.page_size), page, "{query}");
+                assert_eq!(input.skip, skip, "{query}");
                 if let Some(rows) = rows {
                     assert_eq!(input.limit, rows, "{query}");
                 }
@@ -2021,10 +1951,10 @@ fn orbit_query_debug_in_literals_and_comments_stays_data() {
 }
 
 #[test]
-fn orbit_query_reserved_page_words_need_backticks() {
+fn orbit_query_reserved_skip_words_need_backticks() {
     assert!(
         compile(
-            "MATCH (page:User {id: 1}) RETURN page",
+            "MATCH (offset:User {id: 1}) RETURN offset",
             Frontend::Gql,
             &test_ontology(),
             &test_ctx()
@@ -2032,7 +1962,7 @@ fn orbit_query_reserved_page_words_need_backticks() {
         .is_err()
     );
     compile(
-        "MATCH (`page`:User {id: 1}) RETURN `page`",
+        "MATCH (`offset`:User {id: 1}) RETURN `offset`",
         Frontend::Gql,
         &test_ontology(),
         &test_ctx(),

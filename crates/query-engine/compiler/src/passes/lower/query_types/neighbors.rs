@@ -28,11 +28,17 @@ pub(crate) fn emit(plan: &Plan<Neighbors>, input: &Input) -> Result<Emitted> {
             OrderExpr::asc(Expr::ident(relationship_type_column())),
             OrderExpr::asc(Expr::ident(neighbor_is_outgoing_column())),
         ],
-        _ => vec![
-            OrderExpr::asc(Expr::col("e", SOURCE_ID_COLUMN)),
-            OrderExpr::asc(Expr::col("e", TARGET_ID_COLUMN)),
-            OrderExpr::asc(Expr::col("e", RELATIONSHIP_KIND_COLUMN)),
-        ],
+        _ => [
+            TRAVERSAL_PATH_COLUMN,
+            RELATIONSHIP_KIND_COLUMN,
+            SOURCE_ID_COLUMN,
+            TARGET_ID_COLUMN,
+            SOURCE_KIND_COLUMN,
+            TARGET_KIND_COLUMN,
+        ]
+        .into_iter()
+        .map(|column| OrderExpr::asc(Expr::col("e", column)))
+        .collect(),
     };
     Ok(Emitted {
         nodes: HashMap::from([(plan.operation.center.clone(), binding)]),

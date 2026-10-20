@@ -214,7 +214,7 @@ cases:
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010
           AND NOT (NOT wi.id = 4001 AND wi.state = 'closed')
-        RETURN wi.state ORDER BY wi.id PAGE 2
+        RETURN wi.state ORDER BY wi.id SKIP 0 LIMIT 2
     expect:
       all_pages:
         node_ids:

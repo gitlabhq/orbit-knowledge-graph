@@ -173,7 +173,7 @@ policy provenance.
 
 | # | Pass | Responsibility |
 |---|---|---|
-| 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas and computes the cursor query hash |
+| 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas |
 | 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
 | 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
 | 4 | `restrict` | Strips `admin_only` fields, validates user-supplied paths, and derives immutable query scope ([Security](../security.md)) |
@@ -183,7 +183,7 @@ policy provenance.
 | 8 | `response_policy` | Applies transport-size policy to result projections |
 | 9 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
 | 10 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
-| 11 | `cursor` | Applies keyset pagination (stable order, probe limit, seek predicate, and readback columns) |
+| 11 | `paginate` | Sets the probe limit and lowers `SKIP` to an `OFFSET` over a stable order |
 | 12 | `check` | Verifies every namespaced graph-table path column carries a valid role-scoped `startsWith` predicate or a fail-closed false predicate ([Security](../security.md)) |
 | 13 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (FK shapes, sort and group targets) need no second query |
 | 14 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
@@ -309,7 +309,7 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 
 ### Unified Response Format
 
-The server fetches one probe row beyond the requested window, trims it, and derives honest pagination metadata (`has_more`, `truncated`, `next_cursor`). Keyset cursors (`{ page_size, after }`) lower into seek predicates in SQL, so each page is a fresh bounded query. There is no offset slicing and no cross-page result cache. The formatting stage then transforms the trimmed `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` shape for all four query types (traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. `format_version` (semver) lets consumers detect breaking changes.
+The server fetches one probe row beyond the requested window, trims it, and derives honest pagination metadata (`has_more`, `truncated`). `SKIP` lowers to a SQL `OFFSET` over a stable order, so each page is a fresh bounded query. There is no cross-page result cache. The formatting stage then transforms the trimmed `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` shape for all four query types (traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. `format_version` (semver) lets consumers detect breaking changes.
 Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
 A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
 
