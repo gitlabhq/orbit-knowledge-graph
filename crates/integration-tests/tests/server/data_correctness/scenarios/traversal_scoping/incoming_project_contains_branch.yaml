@@ -1,4 +1,4 @@
-description: GQL rejects incoming containment from a branch to its project
+description: Rejects incoming containment from a branch to its project
 
 query:
   gql: |
