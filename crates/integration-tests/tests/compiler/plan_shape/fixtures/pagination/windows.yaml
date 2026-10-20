@@ -195,3 +195,16 @@ cases:
         emitted:
           expect:
             - (Limit 2 (Sort n.id (Project Concat(Substring(n.note, 1, 1048576), If(ByteLength(n.note) > ByteLength(Substring(n.note, 1, 1048576)), ' [truncated]', '')) AS n_note (_))))
+
+  - name: Neighbors SKIP sorts by the edge table's sort key so each arm reads in order
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(n) RETURN u, n SKIP 2 LIMIT 2
+    logical:
+      expect: ["(Limit 2 (Offset 2 (Input neighbors (...))))"]
+    physical:
+      clickhouse:
+        emitted:
+          expect:
+            - (Limit 3 (Offset 2 (Sort e.traversal_path, e.relationship_kind, e.source_id, e.target_id, e.source_kind, e.target_kind (_))))
+          reject: ["(Sort e.source_id, e.target_id, e.relationship_kind (_))"]
