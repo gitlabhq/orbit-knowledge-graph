@@ -1,0 +1,24 @@
+description: A File filter on the latest commit_sha and size_bytes returns the file once
+
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_file:
+      - { id: 9900, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: aaa, size_bytes: 10, path: src/versioned.rs, name: versioned.rs, extension: rs, language: Rust, _version: "2024-01-01 00:00:00" }
+      - { id: 9900, traversal_path: "1/100/1000/", project_id: 1000, branch: main, commit_sha: bbb, size_bytes: 20, path: src/versioned.rs, name: versioned.rs, extension: rs, language: Rust, _version: "2024-06-01 00:00:00" }
+
+query:
+  gql: |
+    MATCH (f:File) WHERE f.project_id = 1000 AND f.commit_sha = 'bbb' AND f.size_bytes = 20 RETURN f.id, f.commit_sha, f.size_bytes
+
+expect:
+  skip_requirements: ["filter:project_id"]
+  node_count: 1
+  nodes:
+    File:
+      ids: [9900]
+      filters:
+        commit_sha: bbb
+        size_bytes: 20
+      rows:
+        - { id: 9900, commit_sha: bbb, size_bytes: 20 }

@@ -1,4 +1,4 @@
-description: Elided containment counts only projects two hops away
+description: Containment over CONTAINS edges counts only projects two hops away
 
 query:
   json: |

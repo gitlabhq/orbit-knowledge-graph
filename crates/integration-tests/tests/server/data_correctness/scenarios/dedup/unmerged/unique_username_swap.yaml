@@ -1,0 +1,53 @@
+description: A unique username lookup returns the user that holds the name in its latest version
+
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      user: [9900, 9901]
+      merge_request: [9902, 9903]
+  extra_seed:
+    gl_user:
+      - { id: 9900, username: swap_x, name: First, state: active, user_type: human, _version: "2024-01-01 00:00:00" }
+      - { id: 9900, username: swap_y, name: First, state: active, user_type: human, _version: "2024-06-01 00:00:00" }
+      - { id: 9901, username: swap_z, name: Second, state: active, user_type: human, _version: "2024-01-01 00:00:00" }
+      - { id: 9901, username: swap_x, name: Second, state: active, user_type: human, _version: "2024-06-01 00:00:00" }
+    gl_merge_request:
+      - { id: 9902, iid: 902, title: by first, state: opened, project_id: 1000, author_id: 9900, traversal_path: "1/100/1000/" }
+      - { id: 9903, iid: 903, title: by second, state: opened, project_id: 1000, author_id: 9901, traversal_path: "1/100/1000/" }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 9900, source_kind: User, relationship_kind: AUTHORED, target_id: 9902, target_kind: MergeRequest, source_tags: [], target_tags: ["state:opened"] }
+      - { traversal_path: "1/100/1000/", source_id: 9901, source_kind: User, relationship_kind: AUTHORED, target_id: 9903, target_kind: MergeRequest, source_tags: [], target_tags: ["state:opened"] }
+
+cases:
+  - name: search
+    description: A single-node lookup on the swapped name returns only the current holder
+    query:
+      gql: |
+        MATCH (u:User {username: 'swap_x'}) RETURN u.username LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        User:
+          ids: [9901]
+          filters:
+            username: swap_x
+          rows:
+            - { id: 9901, username: swap_x }
+
+  - name: traversal
+    description: A traversal from the swapped name follows only the current holder
+    query:
+      gql: |
+        MATCH (u:User {username: 'swap_x'})-[:AUTHORED]->(mr:MergeRequest) RETURN u.username, mr LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        User:
+          ids: [9901]
+          filters:
+            username: swap_x
+        MergeRequest:
+          ids: [9903]
+      edges:
+        AUTHORED: [[9901, 9903]]
