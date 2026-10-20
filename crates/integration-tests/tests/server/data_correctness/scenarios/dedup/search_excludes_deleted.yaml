@@ -1,6 +1,7 @@
 description: Soft-deleted row excluded from search results
 
 config:
+  unmerged_seed: true
   extra_seed:
     gl_user:
       - { id: 9002, username: ghost, name: Ghost User, state: active, user_type: human, _version: "2024-01-01 00:00:00", _deleted: false }

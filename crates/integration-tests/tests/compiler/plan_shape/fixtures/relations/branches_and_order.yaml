@@ -89,3 +89,19 @@ cases:
           occurrences:
             - pattern: (Scan Table(gl_code_edge) ...)
               count: 2
+
+  - name: Incoming code-edge branches join on the stored endpoints of the shared node
+    missing_frontends:
+      gql: GQL normalizes incoming arrows into outgoing edges and reorders hops, so it plans a different join.
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"},{"id":"d","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","direction":"incoming"},{"type":"CALLS","from":"b","to":"c","direction":"incoming"},{"type":"CALLS","from":"a","to":"d","direction":"incoming"}]}
+    logical:
+      expect: ["(EdgeScan CALLS b->a AS e0)", "(EdgeScan CALLS c->b AS e1)", "(EdgeScan CALLS d->a AS e2)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Join ON _orbit_edge_0.source_id = _orbit_edge_1.target_id (Join ON _orbit_edge_0.target_id = _orbit_edge_2.target_id (_) (_)) (_))
+            - (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.target_id = 1, ... (_))))
+            - (Filter _orbit_edge_1.target_id IN ?.id, ... (_))

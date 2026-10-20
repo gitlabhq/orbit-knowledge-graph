@@ -1,0 +1,70 @@
+cases:
+  - name: An ID range bounds the first edge and seeds the next hop
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","id_range":{"start":1,"end":10}},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
+      gql: |
+        MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) WHERE a.id >= 1 AND a.id <= 10 RETURN a, b, c
+
+    logical:
+      expect: ["(Filter ... (NodeScan Definition AS a))"]
+
+    physical:
+      clickhouse:
+        planned:
+          bind:
+            - (CTE $first (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.source_id >= 1, _orbit_edge_0.source_id <= 10, ... (Scan Table(gl_code_edge) AS _orbit_edge_0)))))
+            - (CTE $reached (Project _id_source.target_id AS id (Bind _id_source (Scan Relation(?) AS _orbit_relation))))
+          expect:
+            - (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.source_id IN $reached.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))))
+        emitted:
+          expect:
+            - (Filter _orbit_edge_0.source_id >= 1, _orbit_edge_0.source_id <= 10, ... (_))
+            - (Filter _orbit_edge_1.source_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))
+
+  - name: A reached ID set on a later hop filters below its latest-row pick
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group"},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"},{"type":"CONTAINS","from":"g","to":"p"}]}
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) RETURN u, g, p
+
+    logical:
+      expect: ["(EdgeScan CONTAINS g->p AS e1)"]
+
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Bind _orbit_edge_1 (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.source_id IN ?.id, ... (Scan Table(gl_edge) AS _orbit_edge_1)))))
+          reject:
+            - (Filter _orbit_edge_1.source_id IN ?.id, ... (Filter _orbit_edge_1._deleted = false (_)))
+            - (Deduplicate Final (Scan Table(gl_edge) AS _orbit_edge_1))
+        emitted:
+          expect:
+            - (Deduplicate LimitBy ... (Sort ... (Project * (Filter _orbit_edge_1.source_id IN ?.id, ... (Scan Table(gl_edge) AS _orbit_edge_1)))))
+
+  - name: A convergent filter-only aggregation reads each edge table once
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","filters":{"name":"compile"}},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"c"},{"type":"CALLS","from":"b","to":"c"}],"group_by":["c.name"],"aggregations":[{"count":"a","as":"n"}]}
+      gql: |
+        MATCH (a:Definition {name: 'compile'})-[:CALLS]->(c:Definition)<-[:CALLS]-(b:Definition) RETURN c.name, count(a) AS n
+
+    logical:
+      expect: ["(EdgeScan CALLS b->c AS e1)"]
+
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Join ON _orbit_edge_0.target_id = _orbit_edge_1.target_id (_) (_))
+            - (Filter c.id IN ?.id (Scan Table(gl_definition) AS c))
+          occurrences:
+            - { pattern: "(Scan Table(gl_code_edge) ...)", count: 2 }
+            - { pattern: "(Scan Table(gl_definition) ...)", count: 2 }
+          reject:
+            - (Project ?.target_id AS id (Bind ? (Filter ... (_))))
+        emitted:
+          occurrences:
+            - { pattern: "(Scan Table(gl_code_edge) ...)", count: 2 }

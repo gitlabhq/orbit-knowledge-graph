@@ -1,0 +1,39 @@
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      user: [99316]
+      group: [99317]
+      project: [99318, 99319]
+  extra_seed:
+    gl_user:
+      - { id: 99316, username: second_hop_user }
+    gl_group:
+      - { id: 99317, traversal_path: "1/100/99317/", name: second_hop_group }
+    gl_project:
+      - { id: 99318, traversal_path: "1/100/99317/99318/", name: dropped_project }
+      - { id: 99319, traversal_path: "1/100/99317/99319/", name: live_project }
+    gl_edge:
+      - { traversal_path: "1/100/99317/", source_id: 99316, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99317, target_kind: Group, _version: "2026-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/99317/99318/", source_id: 99317, source_kind: Group, relationship_kind: CONTAINS, target_id: 99318, target_kind: Project, _version: "2026-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/99317/99318/", source_id: 99317, source_kind: Group, relationship_kind: CONTAINS, target_id: 99318, target_kind: Project, _version: "2026-01-02 00:00:00", _deleted: true }
+      - { traversal_path: "1/100/99317/99319/", source_id: 99317, source_kind: Group, relationship_kind: CONTAINS, target_id: 99319, target_kind: Project, _version: "2026-01-01 00:00:00", _deleted: false }
+
+cases:
+  - name: tombstoned_second_hop_has_no_path
+    description: Shortest path finds nothing when the second hop's latest edge version is a tombstone
+    query:
+      gql: |
+        MATCH path = ANY SHORTEST (u:User {id: 99316})-[:MEMBER_OF|CONTAINS*1..3]->(p:Project {id: 99318}) RETURN path
+    expect:
+      path_count: 0
+
+  - name: live_second_hop_path_order
+    description: Shortest path through a live second hop returns its two edges in step order
+    query:
+      gql: |
+        MATCH path = ANY SHORTEST (u:User {id: 99316})-[:MEMBER_OF|CONTAINS*1..3]->(p:Project {id: 99319}) RETURN path
+    expect:
+      path_count: 1
+      path_edges:
+        - [{ from: User, from_id: 99316, type: MEMBER_OF, to: Group, to_id: 99317, step: 0 }, { from: Group, from_id: 99317, type: CONTAINS, to: Project, to_id: 99319, step: 1 }]

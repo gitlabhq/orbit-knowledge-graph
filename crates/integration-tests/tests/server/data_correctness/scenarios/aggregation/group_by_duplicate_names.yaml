@@ -1,0 +1,30 @@
+description: Grouping by a node keeps two projects with the same name apart
+
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      group: [100]
+      project: [9760, 9761]
+  extra_seed:
+    gl_project:
+      - { id: 9760, name: dup, full_path: "public-group/dup-a", visibility_level: public, traversal_path: "1/100/9760/" }
+      - { id: 9761, name: dup, full_path: "public-group/dup-b", visibility_level: public, traversal_path: "1/100/9761/" }
+    gl_edge:
+      - { traversal_path: "1/100/9760/", source_id: 100, source_kind: Group, relationship_kind: CONTAINS, target_id: 9760, target_kind: Project, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/9761/", source_id: 100, source_kind: Group, relationship_kind: CONTAINS, target_id: 9761, target_kind: Project, source_tags: [], target_tags: [] }
+
+query:
+  gql: |
+    MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project {name: 'dup'}) RETURN p, count(g) AS n LIMIT 10
+
+expect:
+  skip_requirements: ["node_ids", "filter:name"]
+  groups:
+    p:
+      entity: Project
+      count: 2
+      ids: [9760, 9761]
+      rows:
+        - { entity: Project, id: 9760, values: { n: 1 } }
+        - { entity: Project, id: 9761, values: { n: 1 } }

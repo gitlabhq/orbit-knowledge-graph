@@ -1,0 +1,38 @@
+cases:
+  - name: A unique-column point lookup is recomputed inline at each use
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"}},{"id":"mr","entity":"MergeRequest"},{"id":"mr2","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"APPROVED","from":"u","to":"mr2"}]}
+      gql: |
+        MATCH (u:User {username: 'alice'})-[:AUTHORED]->(mr:MergeRequest), (u)-[:APPROVED]->(mr2:MergeRequest)
+        RETURN u, mr, mr2
+    logical:
+      expect: ["(Filter u.username = 'alice' (NodeScan User AS u))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Bind u (Filter u.username = 'alice', ... (Deduplicate LimitBy u.id (_))))
+          occurrences:
+            - { pattern: "(Deduplicate LimitBy u.id (_))", count: 2 }
+          reject:
+            - (CTE ? (Filter u.username = 'alice', ... (Deduplicate LimitBy u.id (_))))
+
+  - name: A non-unique selective lookup is materialized once and reused
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"name":"Alice"}},{"id":"mr","entity":"MergeRequest"},{"id":"mr2","entity":"MergeRequest"}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"APPROVED","from":"u","to":"mr2"}]}
+      gql: |
+        MATCH (u:User {name: 'Alice'})-[:AUTHORED]->(mr:MergeRequest), (u)-[:APPROVED]->(mr2:MergeRequest)
+        RETURN u, mr, mr2
+    logical:
+      expect: ["(Filter u.name = 'Alice' (NodeScan User AS u))"]
+    physical:
+      clickhouse:
+        planned:
+          bind:
+            - (CTE $users (Filter u.name = 'Alice', ... (Deduplicate LimitBy u.id (_))))
+          occurrences:
+            - { pattern: "(Deduplicate LimitBy u.id (_))", count: 1 }
+          reject:
+            - (Bind u (Filter u.name = 'Alice', ... (Deduplicate LimitBy u.id (_))))

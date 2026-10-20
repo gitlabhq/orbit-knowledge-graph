@@ -1,0 +1,40 @@
+description: A two-hop walk constrains the relationship kind on both edges, so decoy edges of the other hop's kind between the same ids are ignored
+
+config:
+  redaction:
+    allow:
+      user: [99350]
+      group: [99351, 99352]
+      project: [99353, 99354, 99355]
+  extra_seed:
+    gl_user:
+      - { id: 99350, username: kind_walker, name: Kind Walker, state: active }
+    gl_group:
+      - { id: 99351, name: Kind Group, full_path: public-group/kind, visibility_level: public, traversal_path: "1/100/99351/" }
+      - { id: 99352, name: Decoy Group, full_path: public-group/decoy, visibility_level: public, traversal_path: "1/100/99352/" }
+    gl_project:
+      - { id: 99353, name: Decoy Member Project, full_path: public-group/kind/decoy-member, visibility_level: public, traversal_path: "1/100/99351/99353/" }
+      - { id: 99354, name: Decoy Contained Project, full_path: public-group/decoy/contained, visibility_level: public, traversal_path: "1/100/99352/99354/" }
+      - { id: 99355, name: Kind Project, full_path: public-group/kind/project, visibility_level: public, traversal_path: "1/100/99351/99355/" }
+    gl_edge:
+      - { traversal_path: "1/100/99351/", source_id: 99350, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99351, target_kind: Group, source_tags: ["state:active"], target_tags: [] }
+      - { traversal_path: "1/100/99351/99355/", source_id: 99351, source_kind: Group, relationship_kind: CONTAINS, target_id: 99355, target_kind: Project, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/99351/99353/", source_id: 99351, source_kind: Group, relationship_kind: MEMBER_OF, target_id: 99353, target_kind: Project, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/99352/", source_id: 99350, source_kind: User, relationship_kind: CONTAINS, target_id: 99352, target_kind: Group, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/99352/99354/", source_id: 99352, source_kind: Group, relationship_kind: CONTAINS, target_id: 99354, target_kind: Project, source_tags: [], target_tags: [] }
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[99350]},{"id":"g","entity":"Group"},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"},{"type":"CONTAINS","from":"g","to":"p"}],"limit":10}
+  gql: |
+    MATCH (u:User {id: 99350})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) RETURN u, g, p LIMIT 10
+
+expect:
+  node_count: 3
+  nodes:
+    User: { ids: [99350] }
+    Group: { ids: [99351], absent: [99352] }
+    Project: { ids: [99355], absent: [99353, 99354] }
+  edges:
+    MEMBER_OF: [[99350, 99351]]
+    CONTAINS: [[99351, 99355]]

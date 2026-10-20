@@ -1,0 +1,41 @@
+description: A negated filter over a mutable column ignores an older version that matched
+
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      merge_request: [9850, 9851]
+  extra_seed:
+    gl_merge_request:
+      - { id: 9850, iid: 850, title: was open, state: opened, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 9850, iid: 850, title: was open, state: closed, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00" }
+      - { id: 9851, iid: 851, title: now open, state: closed, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 9851, iid: 851, title: now open, state: opened, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00" }
+
+cases:
+  - name: not_equal
+    description: NOT state closed keeps only the merge request whose latest version is open
+    query:
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id IN [9850, 9851] AND NOT mr.state = 'closed' RETURN mr.title, mr.state LIMIT 10
+    expect:
+      skip_requirements: ["filter:state"]
+      node_count: 1
+      nodes:
+        MergeRequest:
+          ids: [9851]
+          rows:
+            - { id: 9851, state: opened }
+
+  - name: negated_or
+    description: The NOT form of state opened OR title zz keeps only the merge request whose latest version is open
+    query:
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id IN [9850, 9851] AND NOT (NOT mr.state = 'opened' AND NOT mr.title = 'zz') RETURN mr.title, mr.state LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        MergeRequest:
+          ids: [9851]
+          rows:
+            - { id: 9851, state: opened }

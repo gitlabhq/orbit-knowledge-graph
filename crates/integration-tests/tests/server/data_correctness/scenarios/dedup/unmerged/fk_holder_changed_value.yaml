@@ -1,0 +1,25 @@
+description: An FK relationship uses the latest FK value of the holder row, not an older one
+
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      ci_pipeline: [99040, 99041, 99042]
+  extra_seed:
+    gl_pipeline:
+      - { id: 99040, iid: 40, sha: sha40, ref: main, status: canceled, project_id: 1000, auto_canceled_by_id: 99041, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 99040, iid: 40, sha: sha40, ref: main, status: success, project_id: 1000, auto_canceled_by_id: null, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00" }
+      - { id: 99041, iid: 41, sha: sha41, ref: main, status: success, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 99042, iid: 42, sha: sha42, ref: main, status: canceled, project_id: 1000, auto_canceled_by_id: 99041, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+
+query:
+  gql: |
+    MATCH (a:Pipeline)-[:AUTO_CANCELED_BY]->(b:Pipeline {id: 99041}) RETURN a, b LIMIT 10
+
+expect:
+  node_count: 2
+  nodes:
+    Pipeline:
+      ids: [99041, 99042]
+  edges:
+    AUTO_CANCELED_BY: [[99042, 99041]]

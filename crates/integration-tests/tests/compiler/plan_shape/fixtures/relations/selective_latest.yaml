@@ -28,7 +28,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter j._deleted = false (Deduplicate LimitBy j.traversal_path, j.id (Filter j.name = 'build' (Scan Table(gl_job) AS j))))
+            - (Filter j._deleted = false (Deduplicate LimitBy j.traversal_path, j.id (Filter j.name = 'build' OR j._deleted = true (Scan Table(gl_job) AS j))))
           reject:
             - (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate Final (Scan Table(gl_job) AS j))
@@ -75,7 +75,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter j._deleted = false (Deduplicate LimitBy j.traversal_path, j.id (Filter j.created_at >= '2026-10-10' (Scan Table(gl_job) AS j))))
+            - (Filter j._deleted = false (Deduplicate LimitBy j.traversal_path, j.id (Filter j.created_at >= '2026-10-10' OR j._deleted = true (Scan Table(gl_job) AS j))))
           reject:
             - (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate Final (Scan Table(gl_job) AS j))
@@ -141,7 +141,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.id (Filter contains(f.new_path, 'app/services'), f.project_id = 1000 (Scan Table(gl_merge_request_diff_file) AS f))))
+            - (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.id (Filter contains(f.new_path, 'app/services') OR f._deleted = true, f.project_id = 1000 OR f._deleted = true (Scan Table(gl_merge_request_diff_file) AS f))))
           reject:
             - (Filter (f.traversal_path, f.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate Final (Scan Table(gl_merge_request_diff_file) AS f))

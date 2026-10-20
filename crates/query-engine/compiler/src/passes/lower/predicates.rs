@@ -55,6 +55,14 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             Expr::binary(Op::Le, column(value), Expr::int(*end)),
         ),
         Predicate::Live { alias } => sql::deleted_false(alias),
+        Predicate::OrTombstone(inner, alias) => Expr::binary(
+            Op::Or,
+            predicate(inner),
+            Expr::eq(
+                Expr::col(alias, ontology::constants::DELETED_COLUMN),
+                Expr::param(SqlType::Bool, true),
+            ),
+        ),
         Predicate::EntityKind {
             column: value,
             entity,

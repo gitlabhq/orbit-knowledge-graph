@@ -1,4 +1,4 @@
-description: Container-elision star aggregation counts direct-project MRs per user and excludes subgroup projects
+description: A star aggregation from a group through CONTAINS counts direct-project MRs per user and excludes subgroup projects
 
 config:
   extra_seed:

@@ -225,6 +225,9 @@ pub struct NodeExpect {
     /// Assert these properties are absent on every node of this entity.
     #[serde(default)]
     pub prop_absent: Vec<String>,
+    /// Assert every node of this entity carries no properties at all.
+    #[serde(default)]
+    pub no_properties: bool,
     #[serde(default)]
     pub rows: Vec<BTreeMap<String, serde_json::Value>>,
 }

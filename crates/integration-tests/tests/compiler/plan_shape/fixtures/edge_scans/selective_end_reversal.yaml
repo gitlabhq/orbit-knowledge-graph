@@ -1,0 +1,25 @@
+name: A pinned final endpoint anchors the chain at its last edge
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition"},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition","node_ids":[7]}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
+  gql: |
+    MATCH (a:Definition)-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition {id: 7}) RETURN a, b, c
+
+logical:
+  expect: ["(EdgeScan CALLS a->b AS e0)"]
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Join ON _orbit_edge_1.source_id = _orbit_edge_0.target_id (_) (_))
+        - (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.target_id = 7, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))))
+        - (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.target_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))))
+      reject: ["(Scan Table(gl_definition) ...)"]
+    emitted:
+      expect:
+        - (Join ON _orbit_edge_1.source_id = _orbit_edge_0.target_id (_) (_))
+        - (Filter _orbit_edge_1.target_id = 7, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))
+        - (Filter _orbit_edge_0.target_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))
+      reject: ["(Scan Table(gl_definition) ...)"]
