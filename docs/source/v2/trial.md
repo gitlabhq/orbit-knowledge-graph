@@ -36,7 +36,7 @@ Prerequisites:
 
 - The Owner role for the top-level group.
 - The group has a Premium or Ultimate subscription, and does not have the GitLab Orbit add-on.
-- The group is eligible for a trial. If it is not, the **Orbit** settings page shows an alert that the group is not eligible for a free Orbit trial, and **Contact sales**.
+- The group is eligible for a trial. If it is not, the **Orbit** settings page says that the group is not eligible and shows **Contact sales**.
   To buy the add-on, [contact sales](https://about.gitlab.com/sales/).
 
 <!-- vale orbit.StandaloneProductName = NO -->

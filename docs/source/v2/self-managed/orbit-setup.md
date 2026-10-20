@@ -43,7 +43,7 @@ GitLab Orbit requires its own graph database and three users:
 | `gkg_reader` | `gkg_reader_app` | Read the graph database |
 | `gkg_siphon_reader` | `gkg_siphon_reader_app` | Read the data lake |
 
-The GitLab Orbit image ships the idempotent statements that create them, so they always match the version
+The GitLab Orbit image includes the idempotent statements that create them, so they always match the version
 you run. GitLab Orbit does not create the graph database at startup, and the dispatcher runs schema
 migrations only against a database that already exists.
 

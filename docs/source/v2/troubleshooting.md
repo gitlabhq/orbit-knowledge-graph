@@ -19,7 +19,7 @@ title: Troubleshooting GitLab Orbit
   - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
   - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
   - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
-  - [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+  - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
 - Local graph:
   - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an experiment.
   - [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to beta in GitLab 19.1.
@@ -31,7 +31,7 @@ title: Troubleshooting GitLab Orbit
 
 ### `glab orbit` is not recognized
 
-`glab` shows an unknown command error for `orbit`, because your `glab` version is earlier than 1.117.
+`glab` shows an unknown command error for `orbit` or one of its commands, because your `glab` version is earlier than 1.115.
 [Update `glab`](https://docs.gitlab.com/cli/), then run `glab orbit --install`.
 
 ### Error: `unrecognized subcommand`
@@ -92,7 +92,7 @@ To see what setup configured, run `glab orbit setup --dry-run`.
 
 {{< /details >}}
 
-### Exit codes 2 to 5
+### `glab orbit` exits with code 2, 3, 4, or 5
 
 | Exit code | Message | Cause | Resolution |
 |-----------|---------|-------|------------|
@@ -201,7 +201,7 @@ An agent in a custom flow does not call GitLab Orbit, and might say that it has 
 
 The flow configuration does not list the GitLab Orbit tools, or the user who triggered the flow
 cleared **Other Foundational Agents** in the **GitLab Orbit** section of their preferences.
-[Add the tools to the flow](agents/duo.md#add-the-tools-to-the-flow), and ask the user to select the option again.
+[Add the tools to the flow](agents/duo.md#use-gitlab-orbit-in-a-custom-flow), and ask the user to select the option again.
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
