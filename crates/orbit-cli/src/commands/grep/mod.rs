@@ -152,20 +152,6 @@ async fn search(
     }
     let remote_only = route.local.is_empty();
     let (mut found, mut printed) = (false, false);
-    for target in route.local {
-        if printed {
-            println!();
-        }
-        found |= local(
-            query.clone(),
-            target.repo,
-            db.clone(),
-            target.paths,
-            filter.clone(),
-            options.clone(),
-        )?;
-        printed = true;
-    }
     for (explicit, task) in pending {
         match task
             .await
@@ -186,6 +172,20 @@ async fn search(
             Outcome::Failed(reason) => eprintln!("orbit: GitLab search failed: {reason}"),
             Outcome::Empty | Outcome::Skipped(_) => {}
         }
+    }
+    for target in route.local {
+        if printed {
+            println!();
+        }
+        found |= local(
+            query.clone(),
+            target.repo,
+            db.clone(),
+            target.paths,
+            filter.clone(),
+            options.clone(),
+        )?;
+        printed = true;
     }
     match found {
         true => Ok(()),

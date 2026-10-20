@@ -244,15 +244,21 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         .unwrap_or_else(|| scope.1.clone());
     let shown = format!("{api_host}/{shown}");
     let mut found = Vec::new();
-    if !responses.is_empty()
-        && let Outcome::Found(text) = render(
+    let (rendered, winner) = match responses.is_empty() {
+        true => (Outcome::Empty, None),
+        false => render(
             &shown,
             &query,
             &request.keywords,
             &responses,
             home_project.as_deref(),
-        )
-    {
+            any_word,
+        ),
+    };
+    if let Outcome::Found(mut text) = rendered {
+        if let Some(winner) = winner {
+            text.push_str(&inline(&client, &winner, home_project.as_deref()).await);
+        }
         if any_word {
             found.push(format!(
                 "» no GitLab result has every word of {query:?}; results with any of them:\n{text}"
@@ -306,18 +312,77 @@ fn top_level_group(project: &str) -> &str {
 
 /// Renders results; `origin` is the checkout's project, whose code the local search already covers
 /// and whose references are written short.
+/// The one merge request or issue a search clearly points at, whose context is shown inline so
+/// reading it does not take another call.
+#[derive(Debug, PartialEq, Eq)]
+struct Winner {
+    token: String,
+    readable: String,
+}
+
+fn words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect()
+}
+
+/// How many of `terms` start a word of `title`.
+fn title_score(title: &str, terms: &[String]) -> usize {
+    let words = words(title);
+    terms
+        .iter()
+        .filter(|term| {
+            words.iter().any(|word| match term.len() >= 3 {
+                true => word.starts_with(term.as_str()),
+                false => word == *term,
+            })
+        })
+        .count()
+}
+
+async fn inline(client: &OrbitClient, winner: &Winner, home: Option<&str>) -> String {
+    let launcher = crate::commands::setup::spec::launcher();
+    let next = format!("next: {launcher} context {}\n", winner.readable);
+    let Ok(body) = super::context::fetch(client.clone(), std::slice::from_ref(&winner.token)).await
+    else {
+        return next;
+    };
+    let text = super::context::tidy(&String::from_utf8_lossy(&body), false);
+    let text = match home {
+        Some(home) => super::context::shorten(&text, home),
+        None => text,
+    };
+    if !text.contains(" found=true") {
+        return next;
+    }
+    let (text, trimmed) = super::context::compact(&text);
+    let mut out = format!("\n{launcher} context {}:\n{text}", winner.readable);
+    if trimmed {
+        let _ = writeln!(
+            out,
+            "  (trimmed; `{launcher} context {}` shows all)",
+            winner.readable
+        );
+    }
+    out
+}
+
 fn render(
     project: &str,
     query: &str,
     keywords: &[String],
     responses: &[Response],
     origin: Option<&str>,
-) -> Outcome {
+    any_word: bool,
+) -> (Outcome, Option<Winner>) {
     let terms: Vec<String> = keywords
         .iter()
         .flat_map(|keyword| keyword.split_whitespace())
         .map(str::to_lowercase)
         .collect();
+    let mut title_terms: Vec<String> = keywords.iter().flat_map(|keyword| words(keyword)).collect();
+    title_terms.dedup();
     let home = origin.or_else(|| {
         responses
             .iter()
@@ -326,7 +391,7 @@ fn render(
             .map(|target| target.full_path.as_str())
     });
     let mut seen = std::collections::HashSet::new();
-    let mut rows: Vec<(usize, String, Option<String>)> = Vec::new();
+    let mut rows: Vec<Row> = Vec::new();
     let mut files: Vec<(String, std::collections::BTreeMap<u64, String>)> = Vec::new();
     for entry in responses.iter().flat_map(|response| &response.results) {
         if entry.scope == "blobs" {
@@ -365,14 +430,29 @@ fn render(
             if !entry.text.is_empty() {
                 let _ = write!(row, "  {}", entry.text);
             }
-            rows.push((scope_order(&entry.scope), row, readable));
+            rows.push(Row {
+                order: scope_order(&entry.scope),
+                score: title_score(&entry.text, &title_terms),
+                full: keywords.iter().any(|keyword| {
+                    let words = words(keyword);
+                    words.len() >= 2 && title_score(&entry.text, &words) == words.len()
+                }),
+                text: row,
+                token: entity_token(entry),
+                readable,
+            });
         }
     }
-    if rows.is_empty() && files.is_empty() {
-        return Outcome::Empty;
+    if any_word {
+        let best = rows.iter().map(|row| row.score).max().unwrap_or_default();
+        rows.retain(|row| row.score * 2 >= best);
     }
-    rows.sort_by_key(|(order, _, _)| *order);
-    let next = rows.iter().find_map(|(_, _, readable)| readable.clone());
+    if rows.is_empty() && files.is_empty() {
+        return (Outcome::Empty, None);
+    }
+    rows.sort_by_key(|row| (row.order, std::cmp::Reverse(row.score)));
+    let winner = winner(&rows);
+    let next = rows.iter().find_map(|row| row.readable.clone());
     let statuses = responses.iter().flat_map(|response| &response.scopes);
     let truncated = responses.iter().any(|response| response.truncated);
     let mut failed: Vec<String> = Vec::new();
@@ -392,8 +472,8 @@ fn render(
         "GitLab {query:?} in {project}{}:\n",
         if truncated { ", truncated" } else { "" }
     );
-    for (_, row, _) in &rows {
-        let _ = writeln!(out, "{row}");
+    for row in &rows {
+        let _ = writeln!(out, "{}", row.text);
     }
     for (heading, lines) in &files {
         let _ = writeln!(out, "{heading}");
@@ -414,14 +494,52 @@ fn render(
     if !failed.is_empty() {
         let _ = writeln!(out, "unavailable: {}", failed.join(", "));
     }
-    if let Some(token) = next {
+    if let (Some(token), None) = (next, &winner) {
         let _ = writeln!(
             out,
             "next: {} context {token}",
             crate::commands::setup::spec::launcher()
         );
     }
-    Outcome::Found(out)
+    (Outcome::Found(out), winner)
+}
+
+struct Row {
+    order: usize,
+    /// Query terms in the title.
+    score: usize,
+    /// The title has every word of one multi-word alternative.
+    full: bool,
+    text: String,
+    token: Option<String>,
+    readable: Option<String>,
+}
+
+/// A merge request or issue whose title has every word of an alternative and more query terms
+/// than any other merge request or issue.
+fn winner(rows: &[Row]) -> Option<Winner> {
+    let candidates = rows.iter().filter(|row| row.token.is_some());
+    let best = candidates.clone().max_by_key(|row| row.score)?;
+    let tied = candidates.filter(|row| row.score == best.score).count() > 1;
+    (best.full && !tied).then(|| Winner {
+        token: best.token.clone().expect("candidates have tokens"),
+        readable: best
+            .readable
+            .clone()
+            .expect("merge requests and issues are readable"),
+    })
+}
+
+/// The context endpoint's reference for a merge request or issue result.
+fn entity_token(entry: &Entry) -> Option<String> {
+    let sigil = match entry.scope.as_str() {
+        "merge_requests" => '!',
+        "work_items" => '#',
+        _ => return None,
+    };
+    let path = entry.reference.get("project_path")?.as_str()?;
+    let iid = entry.reference.get("iid")?.as_i64()?;
+    Some(format!("{path}{sigil}{iid}"))
 }
 
 fn blob_heading(entry: &Entry) -> String {
@@ -525,12 +643,13 @@ mod tests {
                "truncated":true}"#,
         );
         let keywords = ["grep".to_string(), "search".to_string()];
-        let Outcome::Found(text) = render(
+        let (Outcome::Found(text), None) = render(
             "gitlab.com/group/project",
             "grep|search",
             &keywords,
             &[first, second],
             None,
+            false,
         ) else {
             panic!("expected results");
         };
@@ -552,5 +671,60 @@ mod tests {
                 crate::commands::setup::spec::launcher()
             )
         );
+    }
+
+    #[test]
+    fn any_word_results_rank_by_title_terms_and_a_clear_winner_is_inlined() {
+        let found = response(
+            r#"{"target":{"type":"Project","full_path":"g/vscode"},"results":[
+                {"scope":"work_items","type":"WorkItem","token":"WorkItem[27]","reference":{"id":27,"iid":27,"project_path":"g/vscode"},"state":"opened","text":"Copilot Chat OTel: emit auto_mode when Auto model selection is used"},
+                {"scope":"work_items","type":"WorkItem","token":"WorkItem[1]","reference":{"id":1,"iid":1,"project_path":"g/vscode"},"state":"opened","text":"Feature to disable auto-expanding on sub-folders."},
+                {"scope":"work_items","type":"WorkItem","token":"WorkItem[2]","reference":{"id":2,"iid":2,"project_path":"g/vscode"},"state":"opened","text":"File nesting expand: false not respected in folders with a single child file nest"}]}"#,
+        );
+        let keywords = ["auto expand single child folder".to_string()];
+        let (Outcome::Found(text), winner) = render(
+            "gitlab.test/g/vscode",
+            "issue:auto expand single child folder",
+            &keywords,
+            &[found],
+            Some("g/vscode"),
+            true,
+        ) else {
+            panic!("expected results");
+        };
+        assert_eq!(
+            text,
+            "GitLab \"issue:auto expand single child folder\" in gitlab.test/g/vscode:\n\
+             issue:2 opened  File nesting expand: false not respected in folders with a single child file nest\n\
+             issue:1 opened  Feature to disable auto-expanding on sub-folders.\n\
+             next: orbit context issue:2\n"
+                .replace("orbit", crate::commands::setup::spec::launcher())
+        );
+        assert_eq!(winner, None);
+
+        let found = response(
+            r#"{"results":[
+                {"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[5]","reference":{"id":5,"iid":1,"project_path":"g/gitaly"},"state":"merged","text":"Limit concurrent unauthenticated pack-objects processes"},
+                {"scope":"work_items","type":"WorkItem","token":"WorkItem[3]","reference":{"id":3,"iid":3,"project_path":"g/gitaly"},"state":"opened","text":"pack-objects cache misses"}]}"#,
+        );
+        let keywords = ["unauthenticated pack-objects".to_string()];
+        let (Outcome::Found(text), Some(winner)) = render(
+            "gitlab.test/g/gitaly",
+            "mr:unauthenticated pack-objects",
+            &keywords,
+            &[found],
+            Some("g/gitaly"),
+            false,
+        ) else {
+            panic!("expected a winner");
+        };
+        assert_eq!(
+            winner,
+            Winner {
+                token: "g/gitaly!1".into(),
+                readable: "mr:1".into()
+            }
+        );
+        assert!(!text.contains("next:"));
     }
 }

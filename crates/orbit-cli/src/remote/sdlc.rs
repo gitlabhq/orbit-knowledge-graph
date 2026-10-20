@@ -202,7 +202,7 @@ pub(crate) async fn read(
             if let Ok(body) = super::context::fetch(client.clone(), &[format!("Job[{id}]")]).await {
                 let text = String::from_utf8_lossy(&body);
                 if text.contains(" found=true") {
-                    return Ok(Found::Text(text.into_owned()));
+                    return Ok(Found::Text(super::context::tidy(&text, false)));
                 }
             }
             Ok(Found::Text(job_text(client, &encoded, *id).await?))
@@ -339,18 +339,17 @@ async fn pipeline_text(
         &[("scope[]", "failed".into()), ("per_page", "100".into())],
     )
     .await?;
-    let jobs: Vec<Value> = jobs
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
+    let mut jobs: Vec<Value> = jobs.as_array().cloned().unwrap_or_default();
+    jobs.sort_by_key(|job| job["allow_failure"].as_bool().unwrap_or(false));
     if jobs.is_empty() {
         return Ok(out);
     }
     let _ = writeln!(out, "failed_jobs[{}]:", jobs.len());
-    for job in &jobs {
+    for (index, job) in jobs.iter().enumerate() {
         let _ = writeln!(out, "  {}", job_line(job));
+        if index >= TRACED_JOBS {
+            continue;
+        }
         if let Some(id) = job["id"].as_i64() {
             for line in failure_excerpt(&trace(client, project, id).await) {
                 let _ = writeln!(out, "    | {line}");
@@ -489,24 +488,84 @@ static FAILURE: LazyLock<regex::Regex> = LazyLock::new(|| {
     .expect("valid pattern")
 });
 
-/// The lines around each failure a job log reports, then its last lines. Test runners print the
-/// failing test far above the end of the log, so the tail alone rarely names it.
+/// A compiler, linter, or test diagnostic that names a file and line, such as
+/// `client.go:127:10: string has 3 occurrences (goconst)`.
+static DIAGNOSTIC: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?:^|[\s(])[\w./@+-]*\w\.[A-Za-z][A-Za-z0-9]{0,7}:\d+(?::\d+)?\b")
+        .expect("valid pattern")
+});
+
+/// Diagnostics in dependencies and runtimes, which stack traces list below the failing line.
+static DEPENDENCY: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"node_modules/|node:internal|site-packages/|/go/pkg/mod/|/usr/lib/")
+        .expect("valid pattern")
+});
+
+/// What the runner prints after the job's script: artifact and cache uploads, cleanup, and the
+/// exit status.
+pub(crate) static EPILOGUE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+        r"^(Uploading artifacts|Cleaning up project directory|Saving cache|Creating cache|Uploading cache|Not uploading cache|ERROR: Job failed|WARNING: .*artifact|\$ exit \d+|\S+: found \d+ matching artifact files and directories)",
+    )
+    .expect("valid pattern")
+});
+
+const EXCERPT_LINES: usize = 80;
+const LINE_CHARS: usize = 240;
+const TRACED_JOBS: usize = 3;
+
+fn is_failure(line: &str) -> bool {
+    FAILURE.is_match(line) || (DIAGNOSTIC.is_match(line) && !DEPENDENCY.is_match(line))
+}
+
+fn clip(line: &str) -> String {
+    match line.char_indices().nth(LINE_CHARS) {
+        Some((end, _)) => format!("{}…", &line[..end]),
+        None => line.to_string(),
+    }
+}
+
+/// The lines around each failure a job log reports, then the last lines of the job's script and
+/// the runner's exit status. Test runners print the failing test far above the end of the log,
+/// so the tail alone rarely names it.
 fn failure_excerpt(lines: &[String]) -> Vec<String> {
-    let tail = lines.len().saturating_sub(20);
+    let end = lines.len()
+        - lines
+            .iter()
+            .rev()
+            .take_while(|line| EPILOGUE.is_match(line))
+            .count();
+    let tail = end.saturating_sub(20);
     let mut wanted = std::collections::BTreeSet::new();
     for (index, line) in lines[..tail].iter().enumerate() {
-        if FAILURE.is_match(line) {
+        if is_failure(line) {
             wanted.extend(index.saturating_sub(3)..(index + 4).min(tail));
         }
     }
-    wanted.extend(tail..lines.len());
+    let skipped = wanted.len().saturating_sub(EXCERPT_LINES);
+    let mut wanted: Vec<usize> = wanted.into_iter().take(EXCERPT_LINES).collect();
+    wanted.extend(tail..end);
+    wanted.extend(
+        lines[end..]
+            .iter()
+            .position(|line| line.starts_with("ERROR: Job failed"))
+            .map(|offset| end + offset),
+    );
     let mut out = Vec::new();
     let mut last = None;
     for index in wanted {
         if last.is_some_and(|last| index > last + 1) || (last.is_none() && index > 0) {
-            out.push("...".to_string());
+            out.push(
+                match (
+                    skipped,
+                    last.is_some_and(|last| last < tail && index >= tail),
+                ) {
+                    (1.., true) => format!("... {skipped} more lines near failures"),
+                    _ => "...".to_string(),
+                },
+            );
         }
-        out.push(format!("{}: {}", index + 1, lines[index]));
+        out.push(format!("{}: {}", index + 1, clip(&lines[index])));
         last = Some(index);
     }
     out
@@ -545,5 +604,32 @@ mod tests {
         );
         assert_eq!(excerpt[4], "...");
         assert_eq!(excerpt.last().unwrap(), "31: step 29");
+    }
+
+    #[test]
+    fn job_logs_keep_file_diagnostics_and_drop_the_runner_epilogue() {
+        let mut log = vec!["$ golangci-lint run".to_string()];
+        log.push("client.go:127:10: string `".to_string());
+        log.extend((0..30).map(|n| format!("  query line {n}")));
+        log.push("` has 3 occurrences, make it a constant (goconst)".to_string());
+        log.extend(
+            [
+                "Uploading artifacts for failed job",
+                "report.json: found 1 matching artifact files and directories",
+                "Cleaning up project directory and file based variables",
+                "ERROR: Job failed: exit code 1",
+                "$ exit 1",
+                "Cleaning up project directory and file based variables",
+                "ERROR: Job failed: command terminated with exit code 1",
+            ]
+            .map(str::to_string),
+        );
+        let excerpt = failure_excerpt(&log);
+        assert!(excerpt.contains(&"2: client.go:127:10: string `".to_string()));
+        assert_eq!(
+            excerpt.last().unwrap(),
+            "37: ERROR: Job failed: exit code 1"
+        );
+        assert!(!excerpt.iter().any(|line| line.contains("Uploading")));
     }
 }

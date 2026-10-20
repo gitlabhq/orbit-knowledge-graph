@@ -239,10 +239,17 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
         return Ok(());
     };
     let bytes = pending.await??;
+    let bytes = crate::remote::context::tidy(
+        &String::from_utf8_lossy(&bytes),
+        sdlc_notes.contains("failed_jobs["),
+    )
+    .into_bytes();
     gitlab_text.push_str(&String::from_utf8_lossy(&bytes));
     let home = repo.or_else(|| crate::remote::origin::project(&dir).map(|(_, project)| project));
     let mut bytes = match home {
-        Some(home) => shorten(&String::from_utf8_lossy(&bytes), &home).into_bytes(),
+        Some(home) => {
+            crate::remote::context::shorten(&String::from_utf8_lossy(&bytes), &home).into_bytes()
+        }
         None => bytes,
     };
     if !bytes.ends_with(b"\n") {
@@ -268,11 +275,17 @@ fn print_anchored(repo: Option<std::path::PathBuf>, db: Option<std::path::PathBu
     let Ok(files) = super::anchors::indexed_files(&client, &git) else {
         return;
     };
-    let found = super::anchors::extract(text, &git.repo_path, &files);
+    let launcher = crate::commands::setup::spec::launcher();
+    let hint = format!("`{launcher} ");
+    let text: String = text
+        .lines()
+        .filter(|line| !line.contains(&hint))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let found = super::anchors::extract(&text, &git.repo_path, &files);
     if let Ok(code) = super::anchors::render(&client, &git, &found)
         && !code.trim().is_empty()
     {
-        let launcher = crate::commands::setup::spec::launcher();
         println!(
             "\ncode this refers to (read one with `{launcher} context <path>:<lines>`):\n{}",
             code.trim_end()
@@ -371,11 +384,6 @@ fn is_current_ci(target: &str) -> bool {
             | "pipeline:current"
             | "pipeline:head"
     )
-}
-
-fn shorten(text: &str, project: &str) -> String {
-    text.replace(&format!("mr:{project}!"), "mr:")
-        .replace(&format!("issue:{project}#"), "issue:")
 }
 
 fn gitlab_project(
