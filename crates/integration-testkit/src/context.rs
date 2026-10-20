@@ -74,7 +74,6 @@ impl TestContext {
             .exec(write)
             .await
             .expect("failed to write ClickHouse config override");
-        // The reload applies even when its own response trips the new limit.
         let _ = self.create_client().execute("SYSTEM RELOAD CONFIG").await;
     }
 

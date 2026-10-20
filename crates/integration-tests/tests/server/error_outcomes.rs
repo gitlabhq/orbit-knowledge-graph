@@ -61,7 +61,6 @@ async fn schema_call_is_a_success() {
         .await
         .unwrap();
 
-    // Schema calls emit no analytics event, so only the metric is checked.
     server.meter_provider.force_flush().unwrap();
     let metrics = server.metrics.get_finished_metrics().unwrap();
     assert_eq!(
@@ -341,8 +340,6 @@ async fn content_with_a_large_limit_but_few_rows_succeeds() {
     server.assert_recorded("ok", "success", None).await;
 }
 
-// Hydration resolves every pinned node_id regardless of limit, so 4 rows reach the resolver.
-// The caller asked for no more than the cap, so the overflow is ours and stays a server error.
 #[tokio::test]
 async fn content_batch_over_the_cap_with_limit_at_the_cap_is_a_server_error() {
     let mut server = Server::start().await;
