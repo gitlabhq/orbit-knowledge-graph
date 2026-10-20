@@ -769,3 +769,71 @@ fn exporting_deeply_nested_definitions_grows_linearly() {
         "exporting 16x the nesting went from {small:.0} ms to {large:.0} ms"
     );
 }
+
+#[test]
+fn exporting_some_trees_matches_the_full_export_of_those_files() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(
+        repo.path(),
+        &[("utils.py", UTILS.as_bytes()), ("main.py", MAIN.as_bytes())],
+    );
+    let env = Env::with_limits(SupportLang::Python, Limits::UNLIMITED).unwrap();
+    let ontology = Ontology::load_embedded().unwrap();
+    let plan = code_graph_incremental::export::ExportPlan::from_config(
+        &env.export_config,
+        &ontology,
+        &env.lang,
+    )
+    .unwrap();
+    let state = templates::index(Context::new(&env, common::walk(repo.path())))
+        .unwrap()
+        .then(Display)
+        .unwrap()
+        .into_value()
+        .state;
+    let main = state
+        .trees
+        .iter()
+        .position(|tree| tree.label == "main.py")
+        .unwrap() as u32;
+    let export = |only: Option<&rustc_hash::FxHashSet<u32>>| Exported {
+        state: code_graph_incremental::pipeline::State::new(&env),
+        tables: code_graph_incremental::export::export_trees(
+            &state.trees,
+            &state.edges,
+            &env.lang,
+            &plan,
+            &envelope(),
+            false,
+            &|_| true,
+            only,
+            &code_graph_incremental::Sentinel::disabled(),
+        )
+        .unwrap(),
+    };
+    let full = export(None);
+    let partial = export(Some(&std::iter::once(main).collect()));
+
+    let definition = ["id", "file_path", "fqn", "start_line"];
+    let in_main = |rows: Vec<Vec<String>>, at: usize| -> Vec<Vec<String>> {
+        rows.into_iter()
+            .filter(|row| row[at] == "main.py")
+            .collect()
+    };
+    assert_eq!(
+        rows(table(&partial, "gl_definition"), &definition),
+        in_main(rows(table(&full, "gl_definition"), &definition), 1)
+    );
+    assert!(!rows(table(&partial, "gl_definition"), &definition).is_empty());
+    let mut ids: Vec<String> = Vec::new();
+    for name in ["gl_definition", "gl_file", "gl_imported_symbol"] {
+        ids.extend(column(table(&partial, name), "id"));
+    }
+    let edge = ["source_id", "relationship_kind", "target_id"];
+    let touching: Vec<Vec<String>> = rows(table(&full, "gl_edge"), &edge)
+        .into_iter()
+        .filter(|row| ids.contains(&row[0]) || ids.contains(&row[2]))
+        .collect();
+    assert_eq!(rows(table(&partial, "gl_edge"), &edge), touching);
+    assert!(touching.iter().any(|row| row[1] == "CALLS"));
+}
