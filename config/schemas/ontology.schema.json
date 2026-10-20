@@ -179,12 +179,12 @@
             },
             "unique": {
               "type": "boolean",
-              "description": "One live row per value in its namespace; equality on it is a point lookup.",
+              "description": "At most one live row per value across the graph. The planner recomputes an equality on it inline instead of storing it.",
               "default": false
             },
             "mutable": {
               "type": "boolean",
-              "description": "Whether this field can change after creation. Fields that never change (IDs, paths, timestamps) should be marked false.",
+              "description": "Whether this field can change after creation. Mark false only when every live version of a row carries the same value; the planner then filters on it before the latest-row pick.",
               "default": true
             },
             "terminal_values": {
