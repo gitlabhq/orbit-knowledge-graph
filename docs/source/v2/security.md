@@ -9,7 +9,6 @@ title: GitLab Orbit security
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -19,12 +18,11 @@ title: GitLab Orbit security
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
-- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Generally available in GitLab 19.5.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
 
 {{< /history >}}
 
-A query returns only the data that your role lets you see in GitLab, also when an agent sends it.
+A query returns only the data that your role lets you see in GitLab, even when an agent sends it.
 
 The [local graph](local/_index.md) has no authorization layer. Anyone who can read the graph file can read all of it.
 For more information, see [storage and privacy](local/_index.md#storage-and-privacy).
@@ -42,7 +40,7 @@ Turning on GitLab Orbit does not change existing access.
 
 Security data is vulnerabilities, security findings, security scans, scanners, and CVE and CWE identifiers.
 It needs the Security Manager role, because GitLab cannot filter aggregate results after the query runs.
-For a user with the Reporter role, the response leaves out security entities, also from aggregate counts.
+For a user with the Reporter role, the response leaves out security entities, even from aggregate counts.
 
 Queries from administrators and auditors return data from each group where GitLab Orbit is on, not only their own groups.
 

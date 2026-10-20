@@ -9,7 +9,6 @@ title: How GitLab Orbit works
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -19,8 +18,7 @@ title: How GitLab Orbit works
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
-- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Generally available in GitLab 19.5.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
 
 {{< /history >}}
 
@@ -96,22 +94,11 @@ After 30 days, GitLab deletes all graph data of the group.
 The GitLab Orbit CLI also indexes repositories on your machine into a local graph of code only, with no authorization layer.
 For more information, see [GitLab Orbit Local](local/_index.md).
 
-## Known issues
-
-- GitLab Orbit indexes code on the default branch only.
-  An answer about code on another branch reflects the default branch.
-  For code that you have not merged, use the [local graph](local/_index.md).
-- GitLab Orbit resolves imports and calls in one repository.
-  It matches dependencies between repositories by name only.
-- GitLab Orbit does not run on a GitLab Geo secondary site.
-  After a failover, GitLab Orbit indexes the data again.
-- GitLab Orbit is not available on GitLab Dedicated for Government.
-
 ## Billing
 
 <!-- TODO(GA): confirm with Pricing what the add-on includes, and how GitLab Self-Managed and GitLab Dedicated are billed. -->
 The GitLab Orbit add-on includes GitLab Credits for GitLab Orbit queries.
-On GitLab.com, queries consume GitLab Credits on every access path, including Agent Platform.
+On GitLab.com, queries consume GitLab Credits with every access method, including Agent Platform.
 For the rates, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
 For billing on GitLab Self-Managed and GitLab Dedicated, contact your GitLab account team.
 
@@ -122,11 +109,22 @@ For billing on GitLab Self-Managed and GitLab Dedicated, contact your GitLab acc
 | MCP endpoint | `invoke_command` calls that run `query_graph` | `list_commands`, `get_graph_schema`, `get_query_dsl`, `get_response_format` |
 | GitLab Duo Agent Platform | Queries that the agent makes for you | None |
 
-- A query that succeeds consumes GitLab Credits, also when it returns no rows. A failed query and `CALL db.schema()` do not.
+- A query that succeeds consumes GitLab Credits, even when it returns no rows. A failed query and `CALL db.schema()` do not.
 - GitLab Orbit bills each query to one top-level group.
 - When the group has no GitLab Credits left, or its [free trial](trial.md) ends, queries fail.
   See [troubleshooting](troubleshooting.md#error-gitlab-credits-exhausted).
 - The local graph never consumes GitLab Credits.
+
+## Known issues
+
+- GitLab Orbit indexes code on the default branch only.
+  An answer about code on another branch reflects the default branch.
+  For code that you have not merged, use the [local graph](local/_index.md).
+- GitLab Orbit resolves imports and calls in one repository.
+  It matches dependencies between repositories by name only.
+- GitLab Orbit does not run on a GitLab Geo secondary site.
+  After a failover, GitLab Orbit indexes the data again.
+- GitLab Orbit is not available on GitLab Dedicated for Government.
 
 ## Related topics
 
