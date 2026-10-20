@@ -23,12 +23,12 @@ config:
           float32, float64, int, int8, int16, int32, int64, rune, string, uint,
           uint8, uint16, uint32, uint64, uintptr
         ]
-      - module: fmt
+      - module: fmt/*
         precedence: runtime
         symbols: [Append, Appendf, Appendln, Errorf, Fprint, Fprintf, Fprintln,
           Fscan, Fscanf, Fscanln, Print, Printf, Println, Scan, Scanf, Scanln,
           Sprint, Sprintf, Sprintln, Sscan, Sscanf, Sscanln]
-      - module: errors
+      - module: errors/*
         precedence: runtime
         symbols: [As, Is, Join, New, Unwrap]
 
@@ -347,7 +347,7 @@ display:
         tag:
           entity: ImportedSymbol
           file_path: '@$ROOT|ancestor_tag("file_path")'
-          source_path: '@$ROOT|child_sym("__source_path")'
+          source_path: '@$ROOT|child_sym("__source")'
       - match: '(__name (__alias))'
         tag:
           import_type: AliasedImport
