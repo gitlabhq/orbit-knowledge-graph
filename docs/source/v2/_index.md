@@ -53,7 +53,7 @@ Ask your agent:
 Using GitLab Orbit, which projects in <my-group> have the most failed pipelines?
 ```
 
-The agent runs one graph query in place of many API calls:
+The agent runs one graph query:
 
 ```gql orbit-query
 MATCH (pl:Pipeline)-[:IN_PROJECT]->(p:Project)

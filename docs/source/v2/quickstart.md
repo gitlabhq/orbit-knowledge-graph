@@ -37,7 +37,7 @@ To use GitLab Orbit only in GitLab Duo, complete step 1, then see [GitLab Orbit 
 
 <!-- vale orbit.StandaloneProductName = NO -->
 
-To check whether GitLab Orbit is on, select **Search or go to** > **Your work** > **GitLab Orbit**.
+To check whether GitLab Orbit is on, in the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
 If the page shows **Orbit is not turned on for your groups yet**, ask an Owner of the group to turn it on.
 
 ## Step 1: Turn on GitLab Orbit for your group
@@ -48,8 +48,7 @@ To turn on GitLab Orbit:
 1. In the left sidebar, select **Settings** > **Orbit**.
 1. If the page shows that the group is not eligible for a free Orbit trial, select **Contact sales**.
    Otherwise, turn on the **Turn on Orbit** toggle.
-1. If the group starts a free trial, a dialog shows what the trial includes. Select **Turn on Orbit**.
-   For what the trial includes, see [start a GitLab Orbit trial](trial.md).
+1. If the group starts a free trial, a dialog shows [what the trial includes](trial.md#what-the-trial-includes). Select **Turn on Orbit**.
 
 The page shows **Orbit is indexing**, then **Orbit is ready**. The first index can take up to a few hours.
 Continue with the next steps while it runs.

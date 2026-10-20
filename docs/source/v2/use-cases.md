@@ -50,7 +50,7 @@ LIMIT 30
 
 ## Find the blast radius of a change
 
-Find out what breaks before you change it.
+Find out what breaks before you change shared code.
 
 ```plaintext
 Using GitLab Orbit, map the blast radius of <shared-payments-lib>.
@@ -148,7 +148,7 @@ ORDER BY v.severity DESC
 LIMIT 50
 ```
 
-## Read the source
+## Read source code without a checkout
 
 Get the code into the conversation without a checkout.
 

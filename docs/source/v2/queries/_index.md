@@ -38,7 +38,7 @@ Queries use the [Cypher query language](cypher.md).
 Pass the query text to the [GitLab Orbit CLI](../cli.md):
 
 ```shell
-glab orbit query "MATCH (p:Project {full_path: 'gitlab-org/orbit/knowledge-graph'}) RETURN p.name, p.full_path LIMIT 1"
+glab orbit query "MATCH (p:Project {full_path: '<my-group/my-project>'}) RETURN p.name, p.full_path LIMIT 1"
 ```
 
 The CLI prints compact [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text. For JSON, add `--response-format raw`.
@@ -52,7 +52,7 @@ send the same text with the `query_graph` command.
 | Fetch nodes of one type | `MATCH (n:Label {property: value}) RETURN n` |
 | Follow relationships between node types | `MATCH (a:Label)-[:RELATIONSHIP]->(b:Label) RETURN a, b` |
 | Count, sum, or average results by group | `RETURN key, count(n) AS total ORDER BY total DESC` |
-| Find a path between two bounded nodes | `MATCH path = ANY SHORTEST (a)-[:RELATIONSHIP*1..3]->(b) RETURN path` |
+| Find a path between two bounded nodes | `MATCH path = ANY SHORTEST (a:Label {id: 1})-[:RELATIONSHIP*1..3]->(b:Label {id: 2}) RETURN path` |
 | Find what is connected to one bounded node | `MATCH (a:Label {id: 1})--(n) RETURN n` |
 
 To search, filter one node type with `WHERE`, for example with `CONTAINS` or `all_tokens`.

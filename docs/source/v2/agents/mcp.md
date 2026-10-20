@@ -40,7 +40,7 @@ On GitLab Self-Managed and GitLab Dedicated, replace `gitlab.com` with the hostn
 Prerequisites:
 
 - GitLab Orbit is [turned on](../quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) for a group that you can access.
-- Your client signs in with OAuth. The first tool call opens your browser.
+- Your client signs in with OAuth.
   A client that connects over native HTTP must request the `mcp_orbit` scope.
   You can also use a personal access token with the `read_api` scope,
   or a [fine-grained personal access token](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens/).
@@ -207,6 +207,7 @@ The server has no URL, so clients that need a URL cannot connect to it.
 Prerequisites:
 
 - The [GitLab Orbit CLI](../cli.md) is installed.
+- `glab` can run the binary without a prompt. Run `glab config set orbit_cli_auto_run true`. `glab orbit setup` sets this option for you.
 
 `glab orbit setup --mcp` registers the server for Claude Code, Codex, and OpenCode.
 For more information, see [set up your agents](_index.md#set-up-your-agents).
@@ -214,8 +215,7 @@ For more information, see [set up your agents](_index.md#set-up-your-agents).
 ### Connect a client to the local server
 
 The examples use the server name `orbit` and the command `glab orbit mcp serve`, as `glab orbit setup` does.
-`glab` must run the binary without a prompt, so first run `glab config set orbit_cli_auto_run true`.
-`glab orbit setup` sets this option for you. If you installed the standalone binary, use `orbit mcp serve`.
+If you installed the standalone binary, use `orbit mcp serve`.
 
 {{< tabs >}}
 

@@ -21,7 +21,7 @@ title: GitLab Orbit CLI
   - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
   - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
   - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
-  - [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+  - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
 - Generally available in GitLab 19.5.
 
 {{< /history >}}
@@ -137,7 +137,7 @@ Local commands use the [local graph](local/_index.md) on your machine. They need
 | `dsl` | Show the JSON Schema of the deprecated JSON query domain-specific language (DSL). | Remote |
 | `tools` | Show the MCP tool manifest. | Remote |
 | `graph-status` | Show the indexing progress of a group or project. | Remote |
-| `skills` | List and print the [agent skill](agents/_index.md#gitlab-orbit-skill) files. | Remote through `glab orbit`, otherwise the built-in copy |
+| `skills` | List and print the [agent skill](agents/_index.md#gitlab-orbit-skill) files. | Remote when a GitLab credential is available, otherwise the built-in copy |
 | `index` | Index a repository, or a directory of repositories. | Local |
 | `grep` | Search every line of code, tests, configuration, and documentation, with the enclosing definitions. | Local |
 | `context` | Show source, callers, and callees. | Local |
@@ -217,7 +217,7 @@ Telemetry is on by default, and it is the only saved setting. To turn it off, ru
 | `GITLAB_TOKEN`, `GITLAB_URL` | Token and instance for remote commands without `glab`. Default URL: `https://gitlab.com`. |
 | `ORBIT_TELEMETRY_ENABLED` | `false` or `true`. Overrides the saved setting, for example in CI. |
 | `ORBIT_TELEMETRY_COLLECTOR_URL` | A different event collector, for testing. |
-| `AI_AGENT` | The name of the agent, for telemetry, when the CLI cannot detect it. |
+| `AI_AGENT` | The name of the agent, for telemetry. Overrides the agent that the CLI detects. |
 
 ## Exit codes
 
