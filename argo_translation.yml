@@ -13,6 +13,7 @@ components:
         target: 'docs-locale/{{language}}/source/'
     ignored_paths:
       - 'docs/.*/**'
+      - 'docs/source/v2/**'
       - 'docs/source/schema.md'
       - 'docs/source/queries/query_language.md'
       - 'docs/source/queries/mcp_tools.md'
