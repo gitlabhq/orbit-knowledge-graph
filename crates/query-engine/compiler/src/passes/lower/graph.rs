@@ -12,7 +12,7 @@ use crate::passes::plan::predicates::Column;
 pub(super) fn execute(plan: &ExecutionPlan, root_columns: &[Column]) -> EmitOutput {
     let usage = plan.graph.usage(plan.root);
     let materialized: HashSet<RelationId> = usage.materialized().collect();
-    let required = super::columns::required_columns(plan, &materialized, root_columns);
+    let required = super::columns::required_columns(plan, &usage, root_columns);
     let source = emit_ref(
         &RelationRef::from(plan.root),
         &plan.graph,

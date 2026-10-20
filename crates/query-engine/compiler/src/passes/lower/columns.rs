@@ -3,63 +3,60 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use ontology::constants::VERSION_COLUMN;
-
+use super::graph::exposed_alias;
+use super::predicates::{column, predicate, projections};
+use super::sql::latest_row_dedup;
+use crate::ast::Expr;
+use crate::ast::visit::visit_expressions;
 use crate::passes::plan::graph::{ExecutionPlan, RelationId, RelationNode};
 use crate::passes::plan::predicates::{Column, Predicate};
+use crate::passes::plan::reuse::RelationUsage;
 
 type Consumer = (Option<RelationId>, Option<String>);
 
 /// An empty set means the relation must keep every column.
 pub(super) fn required_columns(
     plan: &ExecutionPlan,
-    materialized: &HashSet<RelationId>,
-    root_columns: &[Column],
+    usage: &RelationUsage,
+    root: &[Column],
 ) -> HashMap<RelationId, BTreeSet<String>> {
     let graph = &plan.graph;
     let mut consumers: HashMap<RelationId, Vec<Consumer>> = HashMap::new();
-    let mut key_needs: HashMap<RelationId, BTreeSet<String>> = HashMap::new();
+    let mut keys: HashMap<RelationId, BTreeSet<String>> = HashMap::new();
     consumers.entry(plan.root).or_default().push((None, None));
-    let mut seen = HashSet::new();
-    let mut stack = vec![plan.root];
-    while let Some(id) = stack.pop() {
-        if !seen.insert(id) {
-            continue;
-        }
-        let node = graph.get(id);
+    for (id, node) in graph.iter().filter(|(id, _)| usage.references(*id) > 0) {
         for input in node.inputs() {
             consumers
                 .entry(input.id)
                 .or_default()
                 .push((Some(id), input.alias.clone()));
-            stack.push(input.id);
         }
         for leaf in node.predicates().iter().flat_map(Predicate::leaves) {
-            if let Predicate::Membership { relation, keys, .. } = leaf {
-                key_needs
-                    .entry(*relation)
+            if let Predicate::Membership {
+                relation,
+                keys: wanted,
+                ..
+            } = leaf
+            {
+                keys.entry(*relation)
                     .or_default()
-                    .extend(keys.iter().cloned());
-                stack.push(*relation);
+                    .extend(wanted.iter().cloned());
             }
         }
     }
-
-    let mut output_columns = root_columns.to_vec();
-    for projection in &plan.outputs {
-        projection.value.columns(&mut output_columns);
+    let mut root_columns = root.to_vec();
+    for select in projections(&plan.outputs) {
+        referenced(&select.expr, &mut root_columns);
     }
     for binding in &plan.bindings {
-        output_columns.push(Column::new(&binding.alias, &binding.column));
-        output_columns.extend(binding.traversal_path.clone());
+        root_columns.push(Column::new(&binding.alias, &binding.column));
+        root_columns.extend(binding.traversal_path.clone());
     }
-
-    materialized
-        .iter()
-        .map(|&id| {
-            let mut aliases: HashSet<String> =
-                super::graph::exposed_alias(id, graph).into_iter().collect();
-            let mut referenced = Vec::new();
+    usage
+        .materialized()
+        .map(|id| {
+            let mut aliases: HashSet<String> = exposed_alias(id, graph).into_iter().collect();
+            let mut columns = Vec::new();
             let mut visited = HashSet::new();
             let mut queue = vec![id];
             while let Some(current) = queue.pop() {
@@ -69,51 +66,59 @@ pub(super) fn required_columns(
                 for (parent, alias) in consumers.get(&current).into_iter().flatten() {
                     aliases.extend(alias.clone());
                     let Some(parent) = parent else {
-                        referenced.extend(output_columns.iter().cloned());
+                        columns.extend(root_columns.iter().cloned());
                         continue;
                     };
                     let node = graph.get(*parent);
                     if matches!(node, RelationNode::UnionAll { .. }) {
                         return (id, BTreeSet::new());
                     }
-                    aliases.extend(super::graph::exposed_alias(*parent, graph));
-                    node_columns(node, &mut referenced);
+                    aliases.extend(exposed_alias(*parent, graph));
+                    for expr in node_expressions(node) {
+                        referenced(&expr, &mut columns);
+                    }
                     if !matches!(node, RelationNode::Project { .. }) {
                         queue.push(*parent);
                     }
                 }
             }
-            let mut columns: BTreeSet<String> = referenced
+            let mut needed: BTreeSet<String> = columns
                 .into_iter()
                 .filter(|column| aliases.contains(&column.source))
                 .map(|column| column.name)
                 .collect();
-            columns.extend(key_needs.get(&id).into_iter().flatten().cloned());
-            (id, columns)
+            needed.extend(keys.get(&id).into_iter().flatten().cloned());
+            (id, needed)
         })
         .collect()
 }
 
-fn node_columns(node: &RelationNode, out: &mut Vec<Column>) {
-    for predicate in node.predicates() {
-        predicate.columns(out);
-    }
+pub(super) fn referenced(expr: &Expr, out: &mut Vec<Column>) {
+    let _ = visit_expressions(expr, &mut |expr| {
+        if let Expr::Column { table, column } = expr {
+            out.push(Column::new(table, column));
+        }
+        Ok(())
+    });
+}
+
+fn node_expressions(node: &RelationNode) -> Vec<Expr> {
+    let mut exprs: Vec<Expr> = node.predicates().iter().map(predicate).collect();
     match node {
         RelationNode::Join { endpoints, .. } => {
-            out.push(endpoints.0.clone());
-            out.push(endpoints.1.clone());
+            exprs.extend([column(&endpoints.0), column(&endpoints.1)]);
         }
         RelationNode::Latest {
             alias, sort_key, ..
         } => {
-            out.extend(sort_key.iter().map(|key| Column::new(alias, key)));
-            out.push(Column::new(alias, VERSION_COLUMN));
+            let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
+            exprs.extend(order_by.into_iter().map(|order| order.expr));
+            exprs.extend(limit_by.into_iter().flat_map(|(_, keys)| keys));
         }
         RelationNode::Project { outputs, .. } => {
-            for projection in outputs {
-                projection.value.columns(out);
-            }
+            exprs.extend(projections(outputs).into_iter().map(|select| select.expr));
         }
         _ => {}
     }
+    exprs
 }

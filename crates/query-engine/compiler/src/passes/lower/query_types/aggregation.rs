@@ -10,8 +10,8 @@ use crate::passes::plan::{Aggregation, Plan};
 pub(crate) fn emit(plan: &Plan<Aggregation>, input: &Input) -> Result<Emitted> {
     let result = &plan.operation.result;
     let mut read = super::super::redaction_columns(plan, &plan.operation.execution);
-    for predicate in &result.condition {
-        predicate.columns(&mut read);
+    for condition in &result.condition {
+        super::super::columns::referenced(&predicate(condition), &mut read);
     }
     read.extend(result.groups.iter().map(|group| group.column.clone()));
     read.extend(
