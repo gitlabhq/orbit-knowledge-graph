@@ -6,6 +6,13 @@ description: Connect MCP clients to GitLab Orbit with the GitLab MCP endpoint, o
 title: GitLab Orbit MCP servers
 ---
 
+{{< details >}}
+
+- Tier: Free, Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
+
+{{< /details >}}
+
 GitLab Orbit has two [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) servers:
 
 | Server | Gives your agent |
@@ -152,9 +159,8 @@ Use GitLab Orbit to list the 5 most recently updated projects in my group.
 The first call opens your browser to sign in. Until you sign in, the client shows `Needs authentication`.
 Then the agent returns project names and paths.
 
-If the browser does not open, sign in again from your client.
+If the browser does not open, sign in again from your client, for example by removing the `gitlab-orbit` server and adding it again.
 Your client uses its own OAuth sign-in, not your `glab` session.
-For example, remove the `gitlab-orbit` server from your client and add it again to restart the sign-in.
 For other errors, see [troubleshooting](../troubleshooting.md).
 
 ### Endpoint tools

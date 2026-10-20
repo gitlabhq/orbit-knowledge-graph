@@ -30,7 +30,7 @@ The GitLab Orbit CLI (`orbit`) queries GitLab Orbit on your GitLab instance from
 Your agent runs the same commands for you.
 The CLI also indexes the code on your machine into a [local graph](local/_index.md).
 
-## Install the CLI
+## Install the GitLab Orbit CLI
 
 Prerequisites:
 
@@ -168,7 +168,7 @@ Then run `glab orbit` in a clone from that host, or run `glab config set --globa
 Without `glab`, the binary reads `GITLAB_TOKEN`, or uses `glab auth credential-helper`.
 For an instance other than GitLab.com, also set `GITLAB_URL=https://<host>`.
 
-To run a query, pass the text in the [GitLab Orbit query language](queries/query-language.md). This query returns five projects:
+To run a query, pass the text in the [Cypher query language](queries/cypher.md). This query returns five projects in a group. Replace `my-group` with the full path of your group:
 
 ```shell
 glab orbit query "MATCH (p:Project) WHERE p.full_path STARTS WITH 'my-group/' RETURN p.full_path LIMIT 5"

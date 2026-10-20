@@ -47,7 +47,7 @@ To choose which agents use GitLab Orbit:
 
 1. In the upper-right corner, select your avatar.
 1. Select **Preferences**.
-1. In the **GitLab Orbit** section, select or clear the checkboxes. All of them are selected by default.
+1. On the **AI assistance** tab, in the **GitLab Orbit** section, select or clear the checkboxes. All of them are selected by default.
 
    | Option | Gives the GitLab Orbit tools to |
    |--------|---------------------------------|

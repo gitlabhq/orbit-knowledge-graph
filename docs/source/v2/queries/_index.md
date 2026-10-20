@@ -61,7 +61,9 @@ For the syntax, see the [query language](query-language.md).
 The examples use numeric IDs. To find the ID of a merge request or a project, see
 [anchor at least one node](query-language.md#anchor-at-least-one-node).
 
-## Example: fetch a merge request diff
+## Examples
+
+### Fetch a merge request diff
 
 The `diff` property of `MergeRequest` returns the full unified diff.
 GitLab Orbit fetches it from the repository when the query asks for it.
@@ -73,7 +75,7 @@ RETURN mr.iid, mr.title, mr.state, mr.diff
 LIMIT 1
 ```
 
-## Example: fetch the changed files of a merge request
+### Fetch the changed files of a merge request
 
 `HAS_LATEST_DIFF` goes from a merge request to its current diff version.
 `HAS_FILE` goes from a diff version to its files.
@@ -86,7 +88,7 @@ LIMIT 20
 
 When `too_large` is `true`, `diff` is `null`.
 
-## Example: fetch source file content
+### Fetch source file content
 
 This query finds indexed files by path and returns the file text.
 
