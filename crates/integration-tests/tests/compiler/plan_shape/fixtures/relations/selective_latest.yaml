@@ -111,6 +111,22 @@ cases:
             - (Filter mr.project_id = 1000, contains(mr.title, 'migration'), ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
           reject: ["(Filter (mr.traversal_path, mr.id) IN ?.(traversal_path, id) (_))"]
 
+  - name: A text match beside a key range still finds then checks
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"filters":{"username":{"starts_with":"ALI"}},"columns":["username"]}],"limit":10}
+      gql: |
+        MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 AND u.username STARTS WITH 'ALI' RETURN u.username LIMIT 10
+    logical:
+      expect: ["(Filter u.id >= 1, u.id <= 10000, starts_with(u.username, 'ALI') (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Project u.id AS id (Filter u.id >= 1, u.id <= 10000, starts_with(u.username, 'ALI'), ... (Scan Table(gl_user) AS u)))
+            - (Deduplicate LimitBy u.id (Filter u.id >= 1, u.id <= 10000, u.id IN ?.id (Scan Table(gl_user) AS u)))
+          reject: ["(Deduplicate Final (Scan Table(gl_user) AS u))"]
+
   - name: Text indexes on an unchanging column apply before the latest-row pick
     query:
       json: |

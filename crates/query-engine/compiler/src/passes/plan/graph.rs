@@ -284,7 +284,7 @@ impl RelationGraph {
         let read = self.read(table, alias, false);
         let current = self.owned(read, owner.clone(), alias);
         let mut current = self.filter(current, identity);
-        if rest.iter().any(bounds_scan) {
+        if rest.iter().any(Predicate::is_selective) {
             let candidate_read = self.read(table, alias, false);
             let candidate = self.owned(candidate_read, owner, alias);
             let candidate = self.filter(candidate, predicates);
