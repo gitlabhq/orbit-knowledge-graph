@@ -264,6 +264,8 @@ A log line is expanded when one of these conditions is true:
 
 A line outside any span is never expanded. Debug lines are written only when they are expanded. The message text is always written, so it is fixed text and values go in fields.
 
+The [`orbit-log-fields`](../../crates/orbit-log-fields) crate names every field, and its log macros name fields with `safe(NAME)` and `expanded(NAME)`. Its `safe` module is the allowlist of the policy, so a new safe field needs approval from the Orbit team.
+
 The server also turns off the log targets of the rust-analyzer crates (`ra_ap`) and ignores configured `ra_ap` directives. Their messages contain crate names and paths of the parsed repository. A panic is logged as an error line with the panic text in an expanded field, not printed to stderr.
 
 ## Logging Structure and Format

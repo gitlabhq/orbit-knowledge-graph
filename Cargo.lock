@@ -5680,6 +5680,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "orbit-log-fields"
+version = "0.1.0"
+dependencies = [
+ "labkit-fields",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "orbit-migrations"
 version = "0.1.0"
 dependencies = [
@@ -5773,6 +5782,7 @@ dependencies = [
  "orbit-analytics",
  "orbit-arrow",
  "orbit-billing",
+ "orbit-log-fields",
  "orbit-migrations",
  "orbit-observability",
  "orbit-prompts",
