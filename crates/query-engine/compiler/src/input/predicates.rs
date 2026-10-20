@@ -129,6 +129,10 @@ impl FilterOp {
         matches!(self, Self::TokenMatch | Self::AllTokens | Self::AnyTokens)
     }
 
+    pub fn is_text(self) -> bool {
+        self.is_like() || self.is_token()
+    }
+
     pub fn is_ordering(self) -> bool {
         matches!(self, Self::Gt | Self::Gte | Self::Lt | Self::Lte)
     }

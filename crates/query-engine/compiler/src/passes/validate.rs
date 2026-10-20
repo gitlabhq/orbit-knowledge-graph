@@ -1501,16 +1501,7 @@ fn check_filter_entries(property: &str, predicates: &[InputFilter]) -> Result<()
                 "IN requires 1-{MAX_IN_VALUES} values"
             )));
         }
-        if matches!(
-            op,
-            FilterOp::Contains
-                | FilterOp::StartsWith
-                | FilterOp::EndsWith
-                | FilterOp::TokenMatch
-                | FilterOp::AllTokens
-                | FilterOp::AnyTokens
-        ) && !value.is_string()
-        {
+        if op.is_text() && !value.is_string() {
             return Err(QueryError::Validation(
                 "text predicates require a string".into(),
             ));
