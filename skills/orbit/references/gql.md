@@ -140,8 +140,8 @@ incomplete. Do not report the returned rows as a complete list.
 ## Not supported
 
 Mutations, multiple statements, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`,
-subqueries, `OR`, `XOR`, `DISTINCT`, `count(*)`, arbitrary expressions,
-and offset pagination all reject. Syntax errors report a line and column.
+subqueries, `OR`, `XOR`, `DISTINCT`, `count(*)`, and arbitrary expressions
+all reject. Syntax errors report a line and column.
 Other function calls, such as `collect(x)`, reject with an error that names
 the function.
 
