@@ -254,32 +254,14 @@ fn print_anchored(repo: Option<std::path::PathBuf>, db: Option<std::path::PathBu
         return;
     };
     let found = super::anchors::extract(text, &git.repo_path, &files);
-    let launcher = crate::commands::setup::spec::launcher();
-    let mut anchored = String::new();
     if let Ok(code) = super::anchors::render(&client, &git, &found)
         && !code.trim().is_empty()
     {
+        let launcher = crate::commands::setup::spec::launcher();
         println!(
             "\ncode this refers to (read one with `{launcher} context <path>:<lines>`):\n{}",
             code.trim_end()
         );
-        anchored = code;
-    }
-    if let Ok(code) = super::anchors::likely(&client, &git, text, 8) {
-        let fresh: Vec<&str> = code
-            .split_inclusive('\n')
-            .collect::<Vec<_>>()
-            .chunk_by(|_, line| line.starts_with("  "))
-            .filter(|block| !anchored.contains(block[0]))
-            .flatten()
-            .copied()
-            .collect();
-        if !fresh.is_empty() {
-            println!(
-                "\ncode it likely touches, by the words it shares with definition names:\n{}",
-                fresh.concat().trim_end()
-            );
-        }
     }
 }
 

@@ -196,111 +196,11 @@ fn listed(label: &str, names: Vec<String>) -> Option<String> {
     (!names.is_empty()).then(|| format!("  {label}: {}", names.join(", ")))
 }
 
+/// A compact view of the code GitLab text points at: per definition its header, signature, the
+/// lines around a cited line, and its callers and callees by name. The agent reads the one it needs.
 pub(crate) fn render(client: &GraphReader, git: &GitInfo, anchors: &Anchors) -> Result<String> {
-    render_found(client, git, resolve(client, git, anchors)?)
-}
-
-fn subwords(word: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let chars: Vec<char> = word.chars().collect();
-    for (i, &c) in chars.iter().enumerate() {
-        let boundary = !c.is_alphanumeric()
-            || (c.is_uppercase()
-                && i > 0
-                && (chars[i - 1].is_lowercase()
-                    || chars.get(i + 1).is_some_and(|next| next.is_lowercase())));
-        if boundary && !current.is_empty() {
-            parts.push(std::mem::take(&mut current));
-        }
-        if c.is_alphanumeric() {
-            current.extend(c.to_lowercase());
-        }
-    }
-    if !current.is_empty() {
-        parts.push(current);
-    }
-    parts
-        .into_iter()
-        .filter(|part| part.chars().any(char::is_alphabetic))
-        .map(
-            |part| match part.len() > 3 && part.ends_with('s') && !part.ends_with("ss") {
-                true => part[..part.len() - 1].to_string(),
-                false => part,
-            },
-        )
-        .collect()
-}
-
-fn terms(text: &str) -> BTreeSet<String> {
-    let word = Regex::new(r"[A-Za-z][A-Za-z0-9_]*").expect("valid pattern");
-    word.find_iter(text)
-        .flat_map(|found| subwords(found.as_str()))
-        .collect()
-}
-
-/// Definitions whose names share the rarest words with `text`, best first. A word counts by how few
-/// definition names use it, so words every file uses, and prose that names nothing, weigh little.
-fn rank(names: &[&str], text: &str) -> Vec<(usize, f64)> {
-    let wanted = terms(text);
-    let parts: Vec<BTreeSet<String>> = names
-        .iter()
-        .map(|name| {
-            subwords(name)
-                .into_iter()
-                .filter(|part| wanted.contains(part))
-                .collect()
-        })
-        .collect();
-    let mut frequency: std::collections::HashMap<&str, usize> = Default::default();
-    for set in &parts {
-        for part in set {
-            *frequency.entry(part.as_str()).or_default() += 1;
-        }
-    }
-    let total = names.len().max(1) as f64;
-    let mut scored: Vec<(usize, usize, f64)> = parts
-        .iter()
-        .enumerate()
-        .filter(|(_, set)| set.len() > 1)
-        .map(|(index, set)| {
-            let weight = set
-                .iter()
-                .map(|part| (total / frequency[part.as_str()] as f64).ln())
-                .sum();
-            (index, set.len(), weight)
-        })
-        .collect();
-    scored.sort_by(|a, b| b.2.total_cmp(&a.2).then(b.1.cmp(&a.1)));
-    scored
-        .into_iter()
-        .map(|(index, _, weight)| (index, weight))
-        .collect()
-}
-
-/// Definitions an issue or MR most likely concerns, by the words its text shares with their names.
-pub(crate) fn likely(
-    client: &GraphReader,
-    git: &GitInfo,
-    text: &str,
-    shown: usize,
-) -> Result<String> {
-    let all = definitions(client, git, "TRUE", Vec::new())?;
-    let names: Vec<&str> = all
-        .iter()
-        .map(|def| def.fqn.rsplit(['.', ':', '#']).next().unwrap_or(&def.fqn))
-        .collect();
-    let picked = rank(&names, text)
-        .into_iter()
-        .take(shown)
-        .map(|(index, _)| all[index].clone())
-        .collect();
-    render_found(client, git, picked)
-}
-
-fn render_found(client: &GraphReader, git: &GitInfo, found: Vec<Found>) -> Result<String> {
     let mut out = String::new();
-    for def in found {
+    for def in resolve(client, git, anchors)? {
         let content = std::fs::read_to_string(git.repo_path.join(&def.path)).unwrap_or_default();
         let lines: Vec<&str> = content.lines().collect();
         let show = |out: &mut String, number: i64| {
@@ -352,33 +252,6 @@ WHERE e.relationship_kind = 'CALLS' AND e.target_kind = 'Definition' AND e.sourc
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn ranks_definitions_by_the_rarest_words_they_share_with_the_text() {
-        let names = [
-            "describeNodeResource",
-            "getPodsTotalRequestsAndLimits",
-            "printNode",
-            "describeNode",
-            "newResourceList",
-            "percentOf",
-            "getNode",
-        ];
-        let ranked: Vec<&str> = rank(
-            &names,
-            "kubectl describe node shows negative percentages for the node resource requests",
-        )
-        .into_iter()
-        .map(|(index, _)| names[index])
-        .collect();
-        assert_eq!(ranked[0], "describeNodeResource");
-        assert!(ranked.contains(&"describeNode"));
-        assert!(!ranked.contains(&"percentOf"));
-        assert_eq!(
-            subwords("HTTPServerError_codes"),
-            ["http", "server", "error", "code"]
-        );
-    }
 
     #[test]
     fn finds_lines_and_names_in_gitlab_text() {
