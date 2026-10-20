@@ -1,0 +1,103 @@
+name: "Go: calls link into other packages through go.mod module paths"
+
+fixtures:
+  - path: go.mod
+    content: |
+      module example.com/m
+
+      go 1.22
+
+  - path: internal/cmdutils/cmdutils.go
+    content: |
+      package cmdutils
+
+      func Parse() {}
+
+  - path: internal/a/list/list.go
+    content: |
+      package list
+
+      func Run() {}
+
+  - path: internal/b/list/list.go
+    content: |
+      package list
+
+      func Run() {}
+
+  - path: internal/text/text.go
+    content: |
+      package text
+
+      func Pad() {}
+
+  - path: internal/text/truncate.go
+    content: |
+      package text
+
+      func Truncate() { Pad() }
+
+  - path: staging/api/go.mod
+    content: |
+      module k8s.io/api
+
+      go 1.22
+
+  - path: staging/api/v1/types.go
+    content: |
+      package v1
+
+      func NewPod() {}
+
+  - path: cmd/main.go
+    content: |
+      package main
+
+      import (
+      	"example.com/m/internal/cmdutils"
+      	lst "example.com/m/internal/a/list"
+      	"k8s.io/api/v1"
+      )
+
+      func main() {
+      	cmdutils.Parse()
+      	lst.Run()
+      	v1.NewPod()
+      }
+
+tests:
+  - name: "imports resolve through the root and nested go.mod module paths"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'main'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: Parse, file: internal/cmdutils/cmdutils.go } }
+      - { row: { callee: Run, file: internal/a/list/list.go } }
+      - { row: { callee: NewPod, file: staging/api/v1/types.go } }
+
+  - name: "an aliased import picks its package directory, not a same-named package"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'main' AND callee.file_path = 'internal/b/list/list.go'
+      RETURN callee.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: "resolved package calls emit no imported-symbol fallback"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name = 'main'
+      RETURN sym.import_path AS path
+    assert:
+      - { empty: true }
+
+  - name: "files in one package call each other"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'Truncate'
+      RETURN callee.name AS callee, callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: Pad, file: internal/text/text.go } }
