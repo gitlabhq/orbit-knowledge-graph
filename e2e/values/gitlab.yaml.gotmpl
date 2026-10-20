@@ -1,4 +1,7 @@
 {{ $v := fromYaml (readFile "../config/versions.yaml") }}
+{{ $gitlab := $v.gitlab }}
+{{ with env "E2E_GITLAB_LANE" }}{{ $gitlab = index $v.gitlab_lanes . }}{{ end }}
+{{ $imageTag := $gitlab | get "image_tag" "master" }}
 global:
   edition: ee
   gatewayApi:
@@ -149,11 +152,11 @@ gitlab:
         memory: 2Gi
   webservice:
     # Pin image to the digest resolved by scripts/bump-gitlab-pins.sh. Docker
-    # treats "name:tag@digest" as authoritative-by-digest; the "master" prefix
+    # treats "name:tag@digest" as authoritative-by-digest; the tag prefix
     # just satisfies the chart helper that expects a non-empty tag. Every pod
     # in this deployment pulls the exact same image.
     image:
-      tag: "master@{{ $v.gitlab.images.webservice.digest }}"
+      tag: "{{ $imageTag }}@{{ $gitlab.images.webservice.digest }}"
     # The e2e cluster is IPv4-only (pods have no ::1); IPv6 binds crash-loop puma with EADDRNOTAVAIL.
     puma:
       bindIp6: false
@@ -174,7 +177,7 @@ gitlab:
       # payload into an empty Authorization header and 502s every query.
       # Schema note: webservice uses nested `image.tag`, but the workhorse
       # block uses flat `tag` (chart template `coalesce .workhorse.tag …`).
-      tag: "master@{{ $v.gitlab.images.workhorse.digest }}"
+      tag: "{{ $imageTag }}@{{ $gitlab.images.workhorse.digest }}"
       resources:
         requests:
           cpu: 100m
@@ -184,7 +187,7 @@ gitlab:
           memory: 512Mi
   sidekiq:
     image:
-      tag: "master@{{ $v.gitlab.images.sidekiq.digest }}"
+      tag: "{{ $imageTag }}@{{ $gitlab.images.sidekiq.digest }}"
     minReplicas: 1
     maxReplicas: 1
     resources:
@@ -196,7 +199,7 @@ gitlab:
         memory: 4Gi
   toolbox:
     image:
-      tag: "master@{{ $v.gitlab.images.toolbox.digest }}"
+      tag: "{{ $imageTag }}@{{ $gitlab.images.toolbox.digest }}"
     replicas: 1
     resources:
       requests:
@@ -220,7 +223,7 @@ gitlab:
     enabled: false
   migrations:
     image:
-      tag: "master@{{ $v.gitlab.images.toolbox.digest }}"
+      tag: "{{ $imageTag }}@{{ $gitlab.images.toolbox.digest }}"
     # Don't run post-deployment migrations in the migrations job at all. PDMs
     # are async-background cleanup that's free on an empty DB, and skipping
     # them is the biggest single saving on migration job duration. Paired with

@@ -20,6 +20,7 @@ log() { printf '==> %s\n' "$*" >&2; }
 
 log "Bumping pins"
 bash e2e/scripts/bump-gitlab-pins.sh
+E2E_GITLAB_LANE=19-5 bash e2e/scripts/bump-gitlab-pins.sh
 bash e2e/scripts/bump-siphon-pins.sh
 bash e2e/scripts/bump-orbit-pins.sh
 
@@ -68,7 +69,7 @@ fi
 body="$(cat <<EOF
 ### What does this MR do and why?
 
-Automated bump of the e2e harness pins (siphon chart + image, GitLab devel chart + ref + CNG image digests, gkg image) to the latest upstream builds, opened by the scheduled \`e2e-pin-bump\` pipeline. Keeping these current stops the e2e stack from drifting behind the versions we ship against.
+Automated bump of the e2e harness pins (siphon chart + image, GitLab devel chart + ref + CNG image digests, the same for the GitLab 19.5 lane, gkg image) to the latest upstream builds, opened by the scheduled \`e2e-pin-bump\` pipeline. Keeping these current stops the e2e stack from drifting behind the versions we ship against.
 
 ### Related Issues
 

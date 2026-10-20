@@ -35,6 +35,24 @@ gitlab:
       digest: "sha256:764e3e5634a0567b7c1ac880c639951a8fd12931b5798ffec21826ed6b119fec"
     toolbox:
       digest: "sha256:1309483072230d05b15ac89dde7ee6218950e47ed958635c74814f41089204c7"
+# GitLab stable-branch lanes, selected with E2E_GITLAB_LANE. Same keys as
+# `gitlab:`, from the release chart repo and the CNG `<lane>-stable` builds.
+# Bump with `E2E_GITLAB_LANE=<lane> scripts/bump-gitlab-pins.sh`.
+gitlab_lanes:
+  "19-5":
+    chart_repo: gitlab-stable
+    image_tag: 19-5-stable
+    chart: "10.5.0"
+    ref: "688b043e4884dc7139f6462107a224aec0a9bb29"
+    images:
+      webservice:
+        digest: "sha256:d084b67aad101510770eadb7ccbd0c1dc3e927ca210f33a53e03a847fac49b00"
+      workhorse:
+        digest: "sha256:0956da437f82c1fcdd27c97d0b4c3a5b9ec883b652667edc4b75f9d5451dcd8c"
+      sidekiq:
+        digest: "sha256:c1e99cd86c4539939e05a4cde14b1861dca30c9df0e78c2d4e11053ce147c726"
+      toolbox:
+        digest: "sha256:5868c2cff27524bd339672899edf618c2f100567f3795ed5d33ded14983ae78b"
 gkg:
   chart: "4.1.0"
   image:

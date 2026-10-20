@@ -1568,3 +1568,19 @@ e2e-ha:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
+
+# Same suite against GitLab 19.5 (19-5-stable-ee), which gets Orbit backports.
+e2e-gitlab-19-5:
+  extends: e2e
+  variables:
+    E2E_GITLAB_LANE: "19-5"
+    E2E_SUFFIX: "-gl19-5"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "e2e-gitlab-19-5"
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == 'automation/e2e-pin-bump'
+      allow_failure: true
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true

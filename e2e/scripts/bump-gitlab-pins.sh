@@ -15,8 +15,12 @@
 # shape on master; an unpinned :master workhorse against a pinned webservice
 # silently drops the Authorization header and 502s every query.
 #
+# With E2E_GITLAB_LANE=19-5, bumps .gitlab_lanes."19-5" instead: the newest
+# 19.5 release chart, the 19-5-stable-ee head, and the CNG `19-5-stable` build.
+#
 # Usage:
 #   e2e/scripts/bump-gitlab-pins.sh
+#   E2E_GITLAB_LANE=19-5 e2e/scripts/bump-gitlab-pins.sh
 #   git diff -- e2e/config/versions.yaml
 #   git commit -am 'chore(e2e): bump gitlab pins'
 
@@ -27,32 +31,44 @@ VERSIONS="$E2E_DIR/config/versions.yaml"
 REGISTRY="registry.gitlab.com"
 REPO_BASE="gitlab-org/build/cng"
 
+if [[ -n "$E2E_GITLAB_LANE" ]]; then
+  CHART_INDEX="https://charts.gitlab.io/index.yaml"
+  export CHART_APP_VERSION_RE="^v${E2E_GITLAB_LANE/-/\\.}\\."
+  GITLAB_BRANCH="${E2E_GITLAB_LANE}-stable-ee"
+  CNG_TAG="${E2E_GITLAB_LANE}-stable"
+else
+  CHART_INDEX="https://gitlab.com/api/v4/projects/3828396/packages/helm/devel/index.yaml"
+  export CHART_APP_VERSION_RE=""
+  GITLAB_BRANCH="master"
+  CNG_TAG="master"
+fi
+
 command -v yq >/dev/null 2>&1 || { echo "yq (mikefarah v4+) required"; exit 1; }
 
-# --- Latest devel chart version ------------------------------------------
+# --- Latest chart version ------------------------------------------------
 # The devel repo publishes a fresh chart every few hours tagged with the
 # source pipeline ID. We pick the one with the newest `created` timestamp.
-log "Finding latest devel chart version"
-CHART_VERSION=$(curl -sSL --fail \
-  "https://gitlab.com/api/v4/projects/3828396/packages/helm/devel/index.yaml" \
-  | yq '.entries.gitlab | sort_by(.created) | reverse | .[0].version')
+log "Finding latest chart version in $CHART_INDEX"
+CHART_VERSION=$(curl -sSL --fail "$CHART_INDEX" \
+  | yq '.entries.gitlab | map(select(.appVersion | test(strenv(CHART_APP_VERSION_RE))))
+      | sort_by(.created) | reverse | .[0].version')
 [[ -z "$CHART_VERSION" || "$CHART_VERSION" == "null" ]] \
-  && { echo "Failed to resolve latest devel chart version"; exit 1; }
+  && { echo "Failed to resolve latest chart version"; exit 1; }
 log "  chart: $CHART_VERSION"
-yq -i ".gitlab.chart = \"$CHART_VERSION\"" "$VERSIONS"
+yq -i "$GITLAB_PINS.chart = \"$CHART_VERSION\"" "$VERSIONS"
 
-# --- Pin gitlab-org/gitlab ref to current master HEAD --------------------
-log "Resolving gitlab-org/gitlab master -> commit SHA"
+# --- Pin gitlab-org/gitlab ref to the current branch HEAD ----------------
+log "Resolving gitlab-org/gitlab $GITLAB_BRANCH -> commit SHA"
 GITLAB_SHA=$(curl -sSL --fail \
-  "https://gitlab.com/api/v4/projects/gitlab-org%2Fgitlab/repository/branches/master" \
+  "https://gitlab.com/api/v4/projects/gitlab-org%2Fgitlab/repository/branches/$GITLAB_BRANCH" \
   | python3 -c 'import json,sys;print(json.load(sys.stdin)["commit"]["id"])')
-[[ -z "$GITLAB_SHA" ]] && { echo "Failed to resolve gitlab master SHA"; exit 1; }
+[[ -z "$GITLAB_SHA" ]] && { echo "Failed to resolve gitlab $GITLAB_BRANCH SHA"; exit 1; }
 log "  gitlab ref: $GITLAB_SHA"
-yq -i ".gitlab.ref = \"$GITLAB_SHA\"" "$VERSIONS"
+yq -i "$GITLAB_PINS.ref = \"$GITLAB_SHA\"" "$VERSIONS"
 
 "$E2E_DIR/scripts/publish-siphon-tables.sh"
 
-# --- Resolve :master manifest digests for CNG Rails images ---------------
+# --- Resolve the CNG Rails image digests ----------------------------------
 fetch_digest() {
   local image="$1"
   local token
@@ -64,7 +80,7 @@ fetch_digest() {
     -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
     -H "Accept: application/vnd.oci.image.index.v1+json" \
     -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-    "https://$REGISTRY/v2/${REPO_BASE}/${image}/manifests/master" \
+    "https://$REGISTRY/v2/${REPO_BASE}/${image}/manifests/${CNG_TAG}" \
     | awk 'BEGIN{IGNORECASE=1} /^docker-content-digest:/ {print $2}' \
     | tr -d '\r\n'
 }
@@ -74,24 +90,24 @@ resolve() {
   local digest
   digest=$(fetch_digest "$image")
   if [[ -z "$digest" || "$digest" != sha256:* ]]; then
-    echo "Failed to resolve :master digest for $image" >&2
+    echo "Failed to resolve :$CNG_TAG digest for $image" >&2
     exit 1
   fi
   echo "==>   $image: $digest" >&2
   printf '%s' "$digest"
 }
 
-log "Resolving CNG image :master digests"
+log "Resolving CNG image :$CNG_TAG digests"
 WEBSERVICE=$(resolve gitlab-webservice-ee)
 WORKHORSE=$(resolve gitlab-workhorse-ee)
 SIDEKIQ=$(resolve gitlab-sidekiq-ee)
 TOOLBOX=$(resolve gitlab-toolbox-ee)
 
 yq -i "
-  .gitlab.images.webservice.digest = \"$WEBSERVICE\" |
-  .gitlab.images.workhorse.digest  = \"$WORKHORSE\"  |
-  .gitlab.images.sidekiq.digest    = \"$SIDEKIQ\" |
-  .gitlab.images.toolbox.digest    = \"$TOOLBOX\"
+  $GITLAB_PINS.images.webservice.digest = \"$WEBSERVICE\" |
+  $GITLAB_PINS.images.workhorse.digest  = \"$WORKHORSE\"  |
+  $GITLAB_PINS.images.sidekiq.digest    = \"$SIDEKIQ\" |
+  $GITLAB_PINS.images.toolbox.digest    = \"$TOOLBOX\"
 " "$VERSIONS"
 
 log "Updated $VERSIONS"

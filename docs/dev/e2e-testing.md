@@ -6,12 +6,12 @@ For the purpose and scope of e2e tests, see [Testing strategy](../design-documen
 ## Architecture
 
 Each run gets five namespaces: `e2e-<sha>-{gkg,nats,clickhouse,gitlab,siphon}`.
-The `e2e-ha` job adds `-ha` to the SHA.
+The `e2e-ha` job adds `-ha` to the SHA, and the `e2e-gitlab-19-5` job adds `-gl19-5`.
 
 `e2e/helmfile.yaml.gotmpl` deploys these releases:
 
 - `bootstrap` (local chart `e2e-bootstrap`): the namespaces and the per-run secrets.
-- `gitlab`: GitLab from the devel chart. The migrations include the ClickHouse migrations.
+- `gitlab`: GitLab from the devel chart, or from the release chart for a [GitLab lane](#gitlab-195-variant). The migrations include the ClickHouse migrations.
 - `postgresql` and `redis`: standalone Bitnami releases in the GitLab namespace.
 - `nats`: the NATS JetStream broker.
 - `clickhouse` (local chart): the datalake and graph database. Helmfile skips it when you set `E2E_CH_HOST`.
@@ -90,11 +90,27 @@ The `e2e-ha` job extends `e2e` and runs the same suites on a ClickHouse cluster 
 - A daily schedule runs the job. On MRs it is manual with `allow_failure: true`. It does not run on `main` pushes.
 - The timeout is 90 minutes.
 
+### GitLab 19.5 variant
+
+The `e2e-gitlab-19-5` job extends `e2e` and runs the same suites against GitLab 19.5, to test the Orbit changes backported to `19-5-stable-ee`.
+
+- The job sets `E2E_GITLAB_LANE=19-5`. The scripts and templates then read the GitLab pins from `gitlab_lanes."19-5"` in `versions.yaml`, not from `gitlab`.
+- The lane deploys the newest 19.5 release chart from `charts.gitlab.io` and the CNG images that the `19-5-stable` tag pointed to at the last bump.
+- A schedule with `SCHEDULE_ONLY=e2e-gitlab-19-5` runs the job. On MRs it is manual with `allow_failure: true`. On the pin-bump MR it runs automatically and does not block the merge.
+
+To run the lane locally, set `E2E_GITLAB_LANE` for every script:
+
+```shell
+E2E_GITLAB_LANE=19-5 E2E_SHA=abc1234 e2e/scripts/setup.sh
+E2E_GITLAB_LANE=19-5 E2E_SHA=abc1234 e2e/scripts/test.sh
+```
+
 ### Pin bump
 
 The `e2e-pin-bump` job runs on a daily schedule. It runs these scripts:
 
 - `bump-gitlab-pins.sh`: the newest devel chart, the `gitlab-org/gitlab` ref, and the four CNG image digests.
+  With `E2E_GITLAB_LANE=19-5`, the same pins for the 19.5 lane: the newest 19.5 release chart, the `19-5-stable-ee` head, and the `19-5-stable` image digests.
 - `bump-siphon-pins.sh`: the newest Siphon chart in the `stable` channel and the newest `0.0.N-beta` image.
 - `bump-orbit-pins.sh`: the latest Orbit release tag. You change the chart pin manually.
 

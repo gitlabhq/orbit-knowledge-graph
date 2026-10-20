@@ -1,6 +1,8 @@
 {{ $sha := requiredEnv "E2E_SHA" }}
 {{ $kctx := env "KCTX" | default "gke_gl-knowledgegraph-prj-f2eec59d_us-central1-a_e2e-harness" }}
 {{ $v := fromYaml (readFile "config/versions.yaml") }}
+{{ $gitlab := $v.gitlab }}
+{{ with env "E2E_GITLAB_LANE" }}{{ $gitlab = index $v.gitlab_lanes . }}{{ end }}
 
 helmDefaults:
   wait: true
@@ -10,6 +12,8 @@ helmDefaults:
 repositories:
   - name: gitlab-devel
     url: https://gitlab.com/api/v4/projects/3828396/packages/helm/devel
+  - name: gitlab-stable
+    url: https://charts.gitlab.io
   - name: nats
     url: https://nats-io.github.io/k8s/helm/charts
   - name: siphon
@@ -91,8 +95,8 @@ releases:
   - name: gitlab
     namespace: e2e-{{ $sha }}-gitlab
     createNamespace: true
-    chart: gitlab-devel/gitlab
-    version: {{ $v.gitlab.chart }}
+    chart: {{ $gitlab | get "chart_repo" "gitlab-devel" }}/gitlab
+    version: {{ $gitlab.chart }}
     labels:
       phase: infra
       component: gitlab
