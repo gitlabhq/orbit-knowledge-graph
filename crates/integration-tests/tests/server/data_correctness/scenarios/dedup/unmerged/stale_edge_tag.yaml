@@ -41,3 +41,23 @@ cases:
       edge_exists:
         MEMBER_OF:
           - { from: User, from_id: 9020, to: Group, to_id: 100 }
+
+  - name: stale_tag_not_counted
+    description: The old blocked tag adds nothing to the blocked member count
+    query:
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'blocked' RETURN count(u) AS n
+    expect:
+      skip_requirements: ["node_ids", "filter:state"]
+      row_count: 1
+      row_values: [{ n: 0 }]
+
+  - name: latest_tag_counted
+    description: The latest active tag counts the user once with the other active members
+    query:
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) WHERE u.state = 'active' RETURN count(u) AS n
+    expect:
+      skip_requirements: ["node_ids", "filter:state"]
+      row_count: 1
+      row_values: [{ n: 4 }]
