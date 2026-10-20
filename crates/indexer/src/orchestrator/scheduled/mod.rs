@@ -103,7 +103,11 @@ pub async fn run_loop(
     let mut panicked = 0usize;
     while let Some(result) = handles.join_next().await {
         if let Err(error) = result {
-            warn!(expanded(ERROR_MESSAGE) = %error, "task loop panicked");
+            warn!(
+                safe(ERROR_TYPE) = "panic",
+                expanded(ERROR_MESSAGE) = %error,
+                "task loop panicked"
+            );
             panicked += 1;
         }
     }
@@ -142,6 +146,7 @@ async fn run_task_loop(
             Err(error) => {
                 warn!(
                     safe(TASK) = task_name.as_str(),
+                    safe(ERROR_TYPE) = <&str>::from(&error),
                     expanded(ERROR_MESSAGE) = %error,
                     "cadence lock check failed"
                 );
@@ -156,6 +161,7 @@ async fn run_task_loop(
             Err(error) => {
                 warn!(
                     safe(TASK) = task_name.as_str(),
+                    safe(ERROR_TYPE) = "task_failed",
                     expanded(ERROR_MESSAGE) = %error,
                     "task failed"
                 );

@@ -259,11 +259,11 @@ The server writes logs through the labkit expanded logs policy. Each field is sa
 
 A log line is expanded when one of these conditions is true:
 
-1. `metrics.expanded_logs.global_override` is on. It is on by default, so a deployment keeps its full logs until it turns the override off. Before you turn it off, log a fixed `error_type` next to every `error_message`. Without it, an error line that is not expanded shows no cause.
+1. `metrics.expanded_logs.global_override` is on. It is on by default, so a deployment keeps its full logs until it turns the override off.
 2. The line is inside a span whose `gl_root_namespace_id`, or the root namespace in its `traversal_path`, is in `metrics.expanded_logs.root_namespace_ids`. Each field comes from the nearest span that has it. When a line has both, the nearest `gl_root_namespace_id` and the nearest `traversal_path` must both be in the list. For a gRPC request, the root namespace is the one that all traversal paths of the JWT are under. A request with no paths, with paths under several root namespaces, or from an admin has none.
 3. The line is inside a gRPC request for which Rails sends the `verbose_gkg_logs` token in the `x-gitlab-enabled-feature-flags` header. Rails sends it on every GitLab.com request when its `gkg_verbose_logs` feature flag is on.
 
-A line outside any span is never expanded. Debug lines are written only when they are expanded. The message text is always written, so it is fixed text and values go in fields.
+A line outside any span is never expanded. Debug lines are written only when they are expanded. The message text is always written, so it is fixed text and values go in fields. Every `error_message` has a fixed `error_type` next to it, so an error line that is not expanded still shows its cause.
 
 The [`orbit-log-fields`](../../crates/orbit-log-fields) crate names every field, and its log macros name fields with `safe(NAME)` and `expanded(NAME)`. Its `safe` module is the allowlist of the policy, so a new safe field needs approval from the Orbit team. The `log-safety-check` CI job runs the ast-grep rules in [`scripts/linting/logs`](../../scripts/linting/logs) on every merge request (`mise run lint:logs`).
 

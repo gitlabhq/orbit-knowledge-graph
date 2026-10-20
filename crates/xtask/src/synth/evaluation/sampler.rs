@@ -233,6 +233,7 @@ impl ParameterSampler {
             if let Err(e) = self.sample_ids(&node.name, ontology).await {
                 orbit_log_fields::warn!(
                     safe(ENTITY) = node.name.as_str(),
+                    safe(ERROR_TYPE) = "sample_ids",
                     expanded(ERROR_MESSAGE) = %e,
                     "failed to sample IDs"
                 );

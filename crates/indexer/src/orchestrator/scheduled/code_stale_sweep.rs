@@ -100,6 +100,7 @@ impl CodeStaleSweep {
                 if let Err(error) = self.sweep_namespace(path).await {
                     failed += 1;
                     warn!(
+                        safe(ERROR_TYPE) = "stale_sweep",
                         expanded(ERROR_MESSAGE) = %error,
                         "post-backfill stale sweep failed, retrying on a later tick"
                     );

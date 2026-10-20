@@ -1,6 +1,7 @@
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum AuthError {
     #[error("missing authorization header")]
     MissingHeader,

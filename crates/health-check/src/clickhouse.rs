@@ -35,6 +35,7 @@ impl ClickHouseChecker {
             Err(e) => {
                 warn!(
                     safe(COMPONENT) = instance.name.as_str(),
+                    safe(ERROR_TYPE) = <&str>::from(&e),
                     expanded(ERROR_MESSAGE) = %e,
                     "ClickHouse health check failed"
                 );

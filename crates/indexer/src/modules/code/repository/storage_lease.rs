@@ -20,7 +20,8 @@ const TENANT_KEY_SEGMENT: &str = "tenant";
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const POLL_JITTER_MS: u64 = 250;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum LeaseError {
     #[error("no archive lease for storage {storage} within {waited:?}")]
     Timeout { storage: String, waited: Duration },
@@ -157,6 +158,7 @@ impl ArchiveLeases {
                     Err(error) if guard.time_left().is_zero() => {
                         warn!(
                             safe(GITALY_STORAGE) = scope,
+                            safe(ERROR_TYPE) = <&str>::from(&error),
                             expanded(ERROR_MESSAGE) = %error,
                             "archive lease expired while renewals failed"
                         );
@@ -165,6 +167,7 @@ impl ArchiveLeases {
                     Err(error) => {
                         warn!(
                             safe(GITALY_STORAGE) = scope,
+                            safe(ERROR_TYPE) = <&str>::from(&error),
                             expanded(ERROR_MESSAGE) = %error,
                             "archive lease renewal failed transiently; retrying on the next tick"
                         );
@@ -202,6 +205,7 @@ impl HeldSlot {
         if let Err(error) = guard.release().await {
             warn!(
                 safe(GITALY_STORAGE) = scope,
+                safe(ERROR_TYPE) = <&str>::from(&error),
                 expanded(ERROR_MESSAGE) = %error,
                 "archive lease release failed; its TTL will free the slot"
             );

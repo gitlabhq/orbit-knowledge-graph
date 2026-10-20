@@ -97,6 +97,7 @@ impl DatalakeChangeDetector {
     ) -> Result<Vec<RecordBatch>, TaskError> {
         if !combined_err.is_unknown_table() {
             warn!(
+                safe(ERROR_TYPE) = <&str>::from(combined_err),
                 expanded(ERROR_MESSAGE) = %combined_err,
                 "combined change detection query failed; retrying one branch per source table"
             );
@@ -134,6 +135,7 @@ impl DatalakeChangeDetector {
                     error!(
                         safe(TABLE) = branch.table.as_str(),
                         safe(ENTITY) = branch.target.as_str(),
+                        safe(ERROR_TYPE) = <&str>::from(&err),
                         expanded(ERROR_MESSAGE) = %err,
                         "change detection branch failed; skipping it until the next full sweep"
                     );

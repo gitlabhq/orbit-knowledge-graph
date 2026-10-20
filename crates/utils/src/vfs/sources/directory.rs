@@ -42,6 +42,7 @@ impl Source for Directory<'_> {
                                 .is_some_and(|io| io.kind() == ErrorKind::NotFound) =>
                         {
                             warn!(
+                                safe(ERROR_TYPE) = "entry_not_found",
                                 expanded(ERROR_MESSAGE) = %e,
                                 "skipping an entry deleted during the walk"
                             );

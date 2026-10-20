@@ -224,6 +224,7 @@ impl CodeIndexingTaskHandler {
             checkpoint.complete_empty_repository(request.task_id);
             if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
                 warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&e),
                     expanded(ERROR_MESSAGE) = %e,
                     "failed to write deleted-project checkpoint; dispatcher may republish"
                 );
@@ -307,6 +308,7 @@ impl CodeIndexingTaskHandler {
             Ok(info) => info.repository_storage,
             Err(error) => {
                 warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&error),
                     expanded(ERROR_MESSAGE) = %error,
                     "repository storage lookup failed; using the tenant-wide archive budget"
                 );
@@ -319,6 +321,7 @@ impl CodeIndexingTaskHandler {
         checkpoint.refund_attempt();
         if let Err(e) = self.checkpoint_store.save(checkpoint).await {
             warn!(
+                safe(ERROR_TYPE) = <&str>::from(&e),
                 expanded(ERROR_MESSAGE) = %e,
                 "failed to refund the attempt"
             );
@@ -469,11 +472,13 @@ impl CodeIndexingTaskHandler {
             match guard.renew(self.lock_ttl).await {
                 Ok(()) => self.refund_attempt(&mut checkpoint).await,
                 Err(error @ LockError::Lost) => warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&error),
                     expanded(ERROR_MESSAGE) = %error,
                     "lock not held at the end of the run; the attempt stays counted"
                 ),
                 Err(error) => {
                     warn!(
+                        safe(ERROR_TYPE) = <&str>::from(&error),
                         expanded(ERROR_MESSAGE) = %error,
                         "lock renew failed transiently at the end of the run; refunding the attempt"
                     );

@@ -1,0 +1,16 @@
+id: error-message-has-type
+valid:
+  - 'warn!(safe(ERROR_TYPE) = <&str>::from(&e), expanded(ERROR_MESSAGE) = %e, "failed");'
+  - 'orbit_log_fields::error!(expanded(ERROR_MESSAGE) = %e, safe(ERROR_TYPE) = "panic", "failed");'
+  - 'warn!(safe(ERROR_TYPE) = "lock_lost", "lock lost");'
+  - 'info!(expanded(FILE_PATH) = path, "parsed");'
+  - |
+    #[cfg(test)]
+    mod tests {
+        fn t() { warn!(expanded(ERROR_MESSAGE) = %e, "failed"); }
+    }
+invalid:
+  - 'warn!(expanded(ERROR_MESSAGE) = %e, "failed");'
+  - 'orbit_log_fields::error!(safe(GL_PROJECT_ID) = id, expanded(ERROR_MESSAGE) = %e, "failed");'
+  - 'debug!(target: "orbit", expanded(ERROR_MESSAGE) = ?e, "failed");'
+  - 'warn!(safe(KIND) = "x", expanded(ERROR_MESSAGE) = %e, "failed");'

@@ -127,6 +127,7 @@ impl StaleEdgeReconciliation {
                         safe(TABLE) = group.edge_table.as_str(),
                         safe(DURATION_S) = elapsed.as_secs_f64(),
                         safe(OUTCOME) = "error",
+                        safe(ERROR_TYPE) = "reconcile",
                         expanded(ERROR_MESSAGE) = %error,
                         "reconcile completed",
                     );

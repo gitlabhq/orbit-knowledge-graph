@@ -97,7 +97,11 @@ pub async fn send_invalid_request_error(
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
     message: String,
 ) {
-    warn!(expanded(ERROR_MESSAGE) = %message, "Rejecting invalid query request");
+    warn!(
+        safe(ERROR_TYPE) = "invalid_request",
+        expanded(ERROR_MESSAGE) = %message,
+        "Rejecting invalid query request"
+    );
     let _ = tx
         .send(Ok(ExecuteQueryMessage {
             content: Some(execute_query_message::Content::Error(ExecuteQueryError {
@@ -115,7 +119,11 @@ pub async fn receive_query_request(
     let first_msg = match stream.next().await {
         Some(Ok(msg)) => msg,
         Some(Err(e)) => {
-            error!(expanded(ERROR_MESSAGE) = %e, "Failed to receive initial message");
+            error!(
+                safe(ERROR_TYPE) = labkit::grpc::grpc_code_name(e.code().into()),
+                expanded(ERROR_MESSAGE) = %e,
+                "Failed to receive initial message"
+            );
             let _ = tx.send(Err(e)).await;
             return None;
         }
