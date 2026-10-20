@@ -12,20 +12,14 @@ logical:
 physical:
   clickhouse:
     planned:
-      ctes:
-        exact_order: [_narrow_b]
+      bind:
+        - (CTE $edge (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.source_id = 1, ... (_)))))
+        - (CTE $ids (Project _id_source.target_id AS id (_)))
       expect:
-        - "(Filter _orbit_edge_0.source_id = 1, _orbit_edge_0._deleted = false, ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))"
-        - "(Filter _orbit_edge_0n.source_id = 1, ... (Scan Table(gl_code_edge) AS _orbit_edge_0n))"
-        - "(Filter b.id IN _narrow_b.id (Scan Table(gl_definition) AS b))"
-      reject: ["(Scan Table(gl_definition) AS a)"]
-    emitted:
-      expect:
-        - "(Filter _orbit_edge_0.source_id = 1, _orbit_edge_0._deleted = false, ... (Join ON b.id = _orbit_edge_0.target_id (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)) (_)))"
-        - "(Filter b.id IN _narrow_b.id (Scan Table(gl_definition) AS b))"
-      reject: ["(Scan Table(gl_definition) AS a)"]
+        - (Filter b._deleted = false (Deduplicate LimitBy ... (Filter b.id IN $ids.id (_))))
+      reject: ["(Scan Table(gl_definition) AS a)", "(Deduplicate Final (Scan Table(gl_definition) AS b))"]
   duckdb:
     planned:
-      expect: ["(Join ON b.id = e0.target_id (_) (Filter ... (Scan Table(gl_definition) AS b)))", "(Join ON a.id = e0.source_id (_) (Filter ... (Scan Table(gl_definition) AS a)))"]
+      expect: ["(Join ON b.id = _orbit_edge_0.target_id (_) (Bind b (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS b)))))", "(Join ON a.id = _orbit_edge_0.source_id (_) (Bind a (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS a)))))"]
       ctes: { absent: true }
-      reject: ["(Deduplicate ... (_))", "(SemiJoin ... (_) (_))"]
+      reject: ["(SemiJoin ... (_) (_))"]

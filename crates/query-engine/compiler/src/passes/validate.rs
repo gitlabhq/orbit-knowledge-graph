@@ -155,7 +155,7 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
 
 /// Maximum span for id_range before it stops counting as selective.
 /// Ranges wider than this are effectively unfiltered full-table scans.
-const MAX_ID_RANGE_SPAN: i64 = 100_000;
+pub(crate) const MAX_ID_RANGE_SPAN: i64 = 100_000;
 
 /// Tighter id_range cap for path_finding endpoints. The frontier BFS is
 /// O(anchors × E^depth), so we bound anchor cardinality to match
@@ -1501,16 +1501,7 @@ fn check_filter_entries(property: &str, predicates: &[InputFilter]) -> Result<()
                 "IN requires 1-{MAX_IN_VALUES} values"
             )));
         }
-        if matches!(
-            op,
-            FilterOp::Contains
-                | FilterOp::StartsWith
-                | FilterOp::EndsWith
-                | FilterOp::TokenMatch
-                | FilterOp::AllTokens
-                | FilterOp::AnyTokens
-        ) && !value.is_string()
-        {
+        if op.is_text() && !value.is_string() {
             return Err(QueryError::Validation(
                 "text predicates require a string".into(),
             ));

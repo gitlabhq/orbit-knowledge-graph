@@ -518,6 +518,14 @@ impl Direction {
             Direction::Incoming => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN),
         }
     }
+
+    /// Orders a relationship's from/to pair as the edge row stores it: source first, then target.
+    pub fn stored_order<T>(self, from: T, to: T) -> (T, T) {
+        match self {
+            Direction::Outgoing | Direction::Both => (from, to),
+            Direction::Incoming => (to, from),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

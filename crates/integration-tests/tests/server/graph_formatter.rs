@@ -135,21 +135,21 @@ async fn seed(ctx: &TestContext) {
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {} (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
-         (2000, 1, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
-         (2001, 2, 'Fix bug B', 'merged', 'fix-b', 'main', '1/101/1001/'),
-         (2002, 3, 'Update C', 'closed', 'update-c', 'main', '1/102/1002/')",
+        "INSERT INTO {} (id, iid, title, state, source_branch, target_branch, author_id, traversal_path) VALUES
+         (2000, 1, 'Add feature A', 'opened', 'feature-a', 'main', 1, '1/100/1000/'),
+         (2001, 2, 'Fix bug B', 'merged', 'fix-b', 'main', 2, '1/101/1001/'),
+         (2002, 3, 'Update C', 'closed', 'update-c', 'main', 3, '1/102/1002/')",
         t("gl_merge_request")
     ))
     .await;
 
     let giant = "A".repeat(10_000);
     ctx.execute(&format!(
-        "INSERT INTO {} (id, note, noteable_type, noteable_id, traversal_path, internal, confidential) VALUES
-         (3000, 'Normal note', 'MergeRequest', 2000, '1/100/1000/', true, true),
-         (3001, '{giant}', 'MergeRequest', 2001, '1/101/1001/', false, NULL),
-         (3002, 'SQL injection attempt: \\'; DROP TABLE gl_user; --', 'MergeRequest', 2000, '1/100/1000/', false, NULL),
-         (3003, 'Backslash\\\\quote\\\"newline\\n\\ttab', 'MergeRequest', 2000, '1/100/1000/', false, NULL)",
+        "INSERT INTO {} (id, note, noteable_type, noteable_id, author_id, traversal_path, internal, confidential) VALUES
+         (3000, 'Normal note', 'MergeRequest', 2000, 1, '1/100/1000/', true, true),
+         (3001, '{giant}', 'MergeRequest', 2001, 2, '1/101/1001/', false, NULL),
+         (3002, 'SQL injection attempt: \\'; DROP TABLE gl_user; --', 'MergeRequest', 2000, 1, '1/100/1000/', false, NULL),
+         (3003, 'Backslash\\\\quote\\\"newline\\n\\ttab', 'MergeRequest', 2000, 1, '1/100/1000/', false, NULL)",
         t("gl_note")
     ))
     .await;
@@ -1517,7 +1517,6 @@ async fn traversal_shared_target_node(ctx: &TestContext) {
 
     ctx.execute(&format!(
         "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1000/', 1, 'User', 'AUTHORED', 3000, 'Note'),
          ('1/100/1000/', 1000, 'Project', 'CONTAINS', 3000, 'Note')",
         t("gl_edge")
     ))

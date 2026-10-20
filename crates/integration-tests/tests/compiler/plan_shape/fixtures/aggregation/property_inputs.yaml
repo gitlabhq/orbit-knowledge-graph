@@ -22,7 +22,8 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Project (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS d))))
+        - (Deduplicate LimitBy ... (_))
+        - (Scan Table(gl_definition) AS d)
         - (Aggregate group d.name, d.name AS d_name, COUNT() AS n (_))
     emitted:
       expect:
@@ -30,7 +31,7 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Project (Filter ... (Scan Table(gl_definition) AS d)))
+        - (Project (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS d))))
         - (Aggregate group d.name, d.name AS d_name, COUNT() AS n (_))
     emitted:
       expect:

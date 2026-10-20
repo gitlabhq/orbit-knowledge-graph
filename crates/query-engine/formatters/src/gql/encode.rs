@@ -84,7 +84,14 @@ fn relationship_cell(
         .edges()
         .iter()
         .find(|edge| edge.relationship == column.relationship)
-        .and_then(|edge| row.get_column_string(&edge.type_column))
+        .and_then(|edge| {
+            row.get_column_string(&edge.type_column).or_else(|| {
+                let [kind] = edge.rel_types.as_slice() else {
+                    return None;
+                };
+                Some(kind.clone())
+            })
+        })
         .map_or_else(null, |kind| match column.kind {
             RelationshipColumnKind::Type => quote_escaped(&kind),
             RelationshipColumnKind::Relationship => format!("[:{kind}]"),

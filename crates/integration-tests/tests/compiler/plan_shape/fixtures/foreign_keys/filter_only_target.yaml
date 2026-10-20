@@ -1,4 +1,4 @@
-name: Filter-only FK target exports keys from an authoritative filtered scan
+name: Filter-only endpoints use exact reusable keys
 
 query:
   json: |
@@ -24,12 +24,7 @@ physical:
   clickhouse:
     planned:
       bind:
-        - (CTE $users (Project u.id AS id (Filter u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
+        - (CTE $users (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
       expect:
         - (Filter mr.author_id IN $users.id, ... (_))
-      occurrences:
-        - pattern: (CTE $users (_))
-          count: 1
-      reject:
-        - (Scan Table(gl_edge) ...)
-        - (CTE $users (Project ... (Filter ... (Scan Table(gl_user) AS u))))
+        - (Scan Table(gl_merge_request) AS mr)

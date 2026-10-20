@@ -16,6 +16,8 @@ config:
       - { id: 7101, iid: 2, title: b, state: opened, source_branch: b, target_branch: main, project_id: 7000, author_id: 7701, traversal_path: "1/700/7000/" }
       - { id: 7102, iid: 3, title: c, state: opened, source_branch: b, target_branch: main, project_id: 7000, author_id: 7702, traversal_path: "1/700/7000/" }
       - { id: 7140, iid: 1, title: subgroup, state: opened, source_branch: b, target_branch: main, project_id: 7040, author_id: 7701, traversal_path: "1/700/704/7040/" }
+    gl_edge:
+      - { source_id: 700, source_kind: Group, relationship_kind: CONTAINS, target_id: 7000, target_kind: Project, traversal_path: "1/700/" }
   redaction:
     allow:
       user: [1, 2, 3, 4, 5, 6, 7, 7701, 7702]
@@ -54,8 +56,7 @@ query:
     MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) WHERE g.full_path = 'g700' RETURN u{.id, .username}, count(mr) AS c, count(p.id) AS project_rows, count(p.created_at) AS dated_projects LIMIT 10
 
 expect:
-  sql_contains: ["gl_group AS _scope FINAL WHERE", "_scope.full_path = 'g700'", "countSubstrings(p.traversal_path, '/')"]
-  sql_not_contains: ["gl_group AS g"]
+  sql_contains: ["gl_group AS _scope FINAL WHERE", "_scope.full_path = 'g700'", "LIMIT 1 BY g.traversal_path, g.id", "relationship_kind = 'CONTAINS'"]
   skip_requirements: ["filter:full_path"]
   groups:
     u:

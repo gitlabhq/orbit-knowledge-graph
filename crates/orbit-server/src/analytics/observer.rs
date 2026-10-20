@@ -209,6 +209,7 @@ mod tests {
         );
         obs.set_compiled(&CompiledQueryContext {
             query_type: query_engine::compiler::input::QueryType::Traversal,
+            ast: query_engine::compiler::ast::Node::Query(Box::default()),
             base: query_engine::compiler::passes::codegen::ParameterizedQuery {
                 sql: String::new(),
                 params: Default::default(),
