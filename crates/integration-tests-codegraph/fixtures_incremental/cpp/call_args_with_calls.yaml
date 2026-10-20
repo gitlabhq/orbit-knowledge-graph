@@ -1,0 +1,60 @@
+name: "C++: a call keeps its CALLS edge when an argument is qualified or a field access"
+
+fixtures:
+  - path: calls.cpp
+    content: |
+      namespace std {
+      template <class T>
+      T move(T &x) { return x; }
+      }
+
+      struct Wrap {
+          int value;
+      };
+
+      int foo(int x) { return x; }
+
+      namespace ns {
+      int target(int x) { return x; }
+      }
+
+      void call_with_qualified_arg() {
+          int x = 1;
+          foo(std::move(x));
+      }
+
+      void call_with_field_arg(Wrap *a) {
+          foo(a->value);
+      }
+
+      void qualified_call_with_field_arg(Wrap *a) {
+          ns::target(a->value);
+      }
+
+tests:
+  - name: "the outer call links when an argument is a qualified call"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "call_with_qualified_arg" AND callee.name IN ["foo", "move"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: call_with_qualified_arg, callee: foo } }
+      - { row: { caller: call_with_qualified_arg, callee: move } }
+
+  - name: "the outer call links when an argument is a field access"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "call_with_field_arg" AND callee.name = "foo"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "a qualified call links when an argument is a field access"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "qualified_call_with_field_arg" AND callee.name = "target"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }

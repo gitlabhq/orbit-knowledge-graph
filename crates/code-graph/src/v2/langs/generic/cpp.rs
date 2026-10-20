@@ -65,20 +65,23 @@ impl DslLanguage for CppDsl {
     }
 
     fn refs() -> Vec<ReferenceRule> {
+        // Guards test the callee node only: `has_descendant` would also scan
+        // the argument list, so any `ns::x` or `a->b` argument hijacked the
+        // rule and dropped the call's ref.
         vec![
             // Must precede the direct-call rule: both match call_expression,
             // but qualified needs field("function").field("name") to extract
             // the bare name, not "Ns::func".
             reference("call_expression")
                 .name_from(field("function").field("name"))
-                .when(has_descendant("qualified_identifier")),
+                .when(field_kind("function", &["qualified_identifier"])),
             reference("call_expression")
                 .name_from(field("function").field("field"))
-                .when(has_descendant("field_expression"))
+                .when(field_kind("function", &["field_expression"]))
                 .receiver_via(field("function").field("argument")),
             reference("call_expression")
                 .name_from(field("function"))
-                .when(!has_descendant("field_expression")),
+                .when(!field_kind("function", &["field_expression"])),
         ]
     }
 
@@ -204,6 +207,23 @@ mod tests {
             .map_err(|e| crate::v2::pipeline::PipelineError::parse("test.cpp", format!("{e:?}")))
     }
 
+    fn parse_refs(code: &str) -> Vec<crate::v2::dsl::engine::CollectedRef> {
+        CppDsl::spec()
+            .parse_full_collect(
+                code.as_bytes(),
+                "test.cpp",
+                Language::Cpp,
+                &Tracer::new(false),
+                Default::default(),
+            )
+            .unwrap()
+            .refs
+    }
+
+    fn ref_names(refs: &[crate::v2::dsl::engine::CollectedRef]) -> Vec<&str> {
+        refs.iter().map(|r| r.name.as_str()).collect()
+    }
+
     #[test]
     fn function_definitions() {
         let result = parse("int add(int a, int b) { return a + b; }\nvoid greet() {}\n").unwrap();
@@ -262,6 +282,54 @@ mod tests {
         assert!(
             ref_names.contains(&"target"),
             "should extract 'target' from ns::target(), got: {ref_names:?}"
+        );
+    }
+
+    #[test]
+    fn call_ref_with_qualified_arg() {
+        let refs = parse_refs("void f() { foo(std::move(x)); }\n");
+        let names = ref_names(&refs);
+        assert!(
+            names.contains(&"foo"),
+            "should extract 'foo' when an argument is qualified, got: {names:?}"
+        );
+        assert!(
+            names.contains(&"move"),
+            "should extract the nested qualified call 'move', got: {names:?}"
+        );
+    }
+
+    #[test]
+    fn call_ref_with_field_arg() {
+        let refs = parse_refs("void f() { foo(a->b); }\n");
+        let names = ref_names(&refs);
+        assert!(
+            names.contains(&"foo"),
+            "should extract 'foo' when an argument is a field access, got: {names:?}"
+        );
+    }
+
+    #[test]
+    fn qualified_call_ref_with_field_arg() {
+        let refs = parse_refs("void f() { ns::target(a->b); }\n");
+        let names = ref_names(&refs);
+        assert!(
+            names.contains(&"target"),
+            "should extract 'target' from ns::target(a->b), got: {names:?}"
+        );
+    }
+
+    #[test]
+    fn member_call_ref_with_qualified_arg() {
+        let refs = parse_refs("void f() { obj.method(ns::x); }\n");
+        let method = refs
+            .iter()
+            .find(|r| r.name == "method")
+            .expect("should extract 'method' from obj.method(ns::x)");
+        assert!(
+            method.chain.is_some(),
+            "obj.method(...) should carry a receiver chain, got: {:?}",
+            method.chain
         );
     }
 

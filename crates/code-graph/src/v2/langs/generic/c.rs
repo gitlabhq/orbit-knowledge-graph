@@ -56,13 +56,16 @@ impl DslLanguage for CDsl {
     }
 
     fn refs() -> Vec<ReferenceRule> {
+        // Guard on the callee node only: `has_descendant` would also scan
+        // the argument list, so any `a->b` argument hijacked the rule and
+        // dropped the call's ref.
         vec![
             reference("call_expression")
                 .name_from(field("function"))
-                .when(!has_descendant("field_expression")),
+                .when(!field_kind("function", &["field_expression"])),
             reference("call_expression")
                 .name_from(field("function").field("field"))
-                .when(has_descendant("field_expression"))
+                .when(field_kind("function", &["field_expression"]))
                 .receiver_via(field("function").field("argument")),
         ]
     }
@@ -172,6 +175,7 @@ impl HasRules for CRules {
 mod tests {
     use super::*;
     use crate::v2::trace::Tracer;
+    use crate::v2::types::ExpressionStep;
 
     fn parse(
         code: &str,
@@ -189,6 +193,23 @@ mod tests {
                 imports: r.imports,
             })
             .map_err(|e| crate::v2::pipeline::PipelineError::parse("test.c", format!("{e:?}")))
+    }
+
+    fn parse_refs(code: &str) -> Vec<crate::v2::dsl::engine::CollectedRef> {
+        CDsl::spec()
+            .parse_full_collect(
+                code.as_bytes(),
+                "test.c",
+                Language::C,
+                &Tracer::new(false),
+                Default::default(),
+            )
+            .unwrap()
+            .refs
+    }
+
+    fn ref_names(refs: &[crate::v2::dsl::engine::CollectedRef]) -> Vec<&str> {
+        refs.iter().map(|r| r.name.as_str()).collect()
     }
 
     #[test]
@@ -231,6 +252,77 @@ mod tests {
             result.imports.len() >= 2,
             "should find at least 2 includes, got {}",
             result.imports.len()
+        );
+    }
+
+    #[test]
+    fn call_ref_with_call_and_field_args() {
+        let refs = parse_refs("void f() { g(h(x), &s->m, 0); }\n");
+        let names = ref_names(&refs);
+        assert!(
+            names.contains(&"g"),
+            "should extract 'g' when an argument is a call and another is a field access, got: {names:?}"
+        );
+        assert!(
+            names.contains(&"h"),
+            "should extract the nested call 'h', got: {names:?}"
+        );
+    }
+
+    #[test]
+    fn call_ref_with_multiline_args() {
+        let refs = parse_refs("void f() {\n    g(h(x),\n      &s->m,\n      0);\n}\n");
+        let names = ref_names(&refs);
+        assert!(
+            names.contains(&"g"),
+            "multi-line arguments should not drop the outer call 'g', got: {names:?}"
+        );
+        assert!(
+            names.contains(&"h"),
+            "multi-line arguments should keep the nested call 'h', got: {names:?}"
+        );
+    }
+
+    #[test]
+    fn call_ref_on_receiver_with_field_arg() {
+        let refs = parse_refs("void f() { a->cb(b->c); }\n");
+        let cb = refs
+            .iter()
+            .find(|r| r.name == "cb")
+            .expect("should extract 'cb' from a->cb(b->c)");
+        let chain = cb.chain.as_ref().expect("a->cb(...) should carry a chain");
+        assert!(
+            matches!(chain.first(), Some(ExpressionStep::Ident(base)) if base == "a"),
+            "chain should start at Ident(\"a\"), got: {chain:?}"
+        );
+    }
+
+    #[test]
+    fn call_ref_regression_refs_resolve_ref_unsafe() {
+        // The shape from the issue: a call whose arguments contain both a
+        // nested call and a field access (`wt->head_oid`) kept its ref only
+        // for the inner call.
+        let refs = parse_refs(
+            "void add_head_info() { target = refs_resolve_ref_unsafe(get_worktree_ref_store(wt), \"HEAD\", 0, &wt->head_oid, &flags); }\n",
+        );
+        let names = ref_names(&refs);
+        assert!(
+            names.contains(&"refs_resolve_ref_unsafe"),
+            "should keep the outer call, got: {names:?}"
+        );
+        assert!(
+            names.contains(&"get_worktree_ref_store"),
+            "should keep the inner call, got: {names:?}"
+        );
+    }
+
+    #[test]
+    fn call_ref_plain_args() {
+        let refs = parse_refs("void f() { g(a, 0, &x); }\n");
+        let names = ref_names(&refs);
+        assert!(
+            names.contains(&"g"),
+            "should extract 'g' for a plain call, got: {names:?}"
         );
     }
 }

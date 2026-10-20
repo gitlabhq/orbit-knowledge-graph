@@ -1,0 +1,61 @@
+name: "C: a call keeps its CALLS edge when an argument is a call or a field access"
+
+fixtures:
+  - path: refs.c
+    content: |
+      struct ref_store {
+          int dummy;
+      };
+
+      struct worktree {
+          struct ref_store *refs;
+          int head_oid;
+      };
+
+      struct ref_store *get_worktree_ref_store(struct worktree *wt) {
+          return wt->refs;
+      }
+
+      const char *refs_resolve_ref_unsafe(struct ref_store *refs,
+                                          const char *refname,
+                                          int flags,
+                                          int *oid,
+                                          int *out_flags) {
+          return refname;
+      }
+
+      const char *add_head_info(struct worktree *wt) {
+          int flags = 0;
+          /* The regression shape from the issue: a nested call and a
+             `wt->head_oid` argument used to drop the outer call's edge. */
+          return refs_resolve_ref_unsafe(get_worktree_ref_store(wt),
+                                         "HEAD",
+                                         0,
+                                         &wt->head_oid,
+                                         &flags);
+      }
+
+      const char *plain_args(struct worktree *wt) {
+          int flags = 0;
+          return refs_resolve_ref_unsafe(wt->refs, "HEAD", 0, 0, &flags);
+      }
+
+tests:
+  - name: "the outer call links when arguments contain a call and a field access"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "add_head_info" AND callee.name IN ["refs_resolve_ref_unsafe", "get_worktree_ref_store"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: add_head_info, callee: get_worktree_ref_store } }
+      - { row: { caller: add_head_info, callee: refs_resolve_ref_unsafe } }
+
+  - name: "the control call with plain arguments still links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "plain_args" AND callee.name = "refs_resolve_ref_unsafe"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
