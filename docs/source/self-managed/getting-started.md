@@ -9,7 +9,6 @@ title: Get started with GitLab Orbit on GitLab Self-Managed
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab Self-Managed
 
 {{< /details >}}
@@ -27,6 +26,7 @@ GitLab Orbit does not install ClickHouse, Kubernetes, or NATS. They must exist a
 
 <!-- TODO(GA): confirm the minimum GitLab version at GA. -->
 - GitLab 19.2.2 or later.
+- A Premium or Ultimate subscription with the GitLab Orbit add-on.
 - Administrator access to the GitLab instance and to its PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.
 - ClickHouse 26.2 or later, set up for GitLab.

@@ -82,7 +82,7 @@ resulting DuckDB graph with SQL:
 
 Revision graphs and a separate manifest are written under `~/.gitlab/orbit/local/`. `orbit schema` lists every
 table and column in it. Orbit Local is queried with DuckDB SQL only; the JSON
-query DSL documented under `docs/source/queries/` applies to Orbit Remote.
+query DSL documented in `skills/orbit/references/query_language.md` applies to Orbit Remote.
 
 ## Run tests without infrastructure
 

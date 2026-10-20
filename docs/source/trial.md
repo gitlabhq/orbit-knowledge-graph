@@ -21,13 +21,12 @@ title: Start a GitLab Orbit trial
 {{< /history >}}
 
 On GitLab.com, you can start a free GitLab Orbit trial yourself in an eligible top-level group that does not have the GitLab Orbit add-on.
-If the group is not eligible, the settings page shows a **Contact sales** button.
 On GitLab Self-Managed and GitLab Dedicated, contact your GitLab account team.
 
 ## What the trial includes
 
 - GitLab Orbit for one top-level group, its subgroups, and projects, through every
-  [access path](agents/_index.md), including GitLab Duo.
+  [access method](agents/_index.md), including GitLab Duo.
 - A fixed amount of GitLab Credits for a limited number of days.
   The GitLab Orbit settings page of the group shows both before you start.
 
@@ -37,7 +36,7 @@ Prerequisites:
 
 - The Owner role for the top-level group.
 - The group has a Premium or Ultimate subscription, and does not have the GitLab Orbit add-on.
-- The group is eligible for a trial. If it is not, the **Orbit** settings page shows an alert that the group is not eligible for a free Orbit trial, and a **Contact sales** button.
+- The group is eligible for a trial. If it is not, the **Orbit** settings page shows an alert that the group is not eligible for a free Orbit trial, and **Contact sales**.
   To buy the add-on, [contact sales](https://about.gitlab.com/sales/).
 
 <!-- vale orbit.StandaloneProductName = NO -->
@@ -47,12 +46,15 @@ To start a trial:
 1. In the top bar, select **Search or go to** and find your top-level group.
 1. In the left sidebar, select **Settings** > **Orbit**.
 1. Turn on the **Turn on Orbit** toggle.
-1. In the **Start a free Orbit trial?** dialog, select **Start free trial**.
+1. In the dialog that shows the trial, select **Turn on Orbit**.
 
 The page shows **Orbit is indexing**, then **Orbit is ready**.
 
-If none of your groups has GitLab Orbit turned on, you can also go to **Your work** > **GitLab Orbit**.
-On the **Try Orbit for free** page, select your groups, select **Turn on Orbit**, then confirm.
+If none of your groups has GitLab Orbit turned on, you can also start the trial from **Your work**:
+
+1. In the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
+1. On the **Try Orbit for free** page, select your groups.
+1. Select **Turn on Orbit**, then confirm.
 
 <!-- vale orbit.StandaloneProductName = YES -->
 

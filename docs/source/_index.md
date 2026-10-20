@@ -9,7 +9,6 @@ title: GitLab Orbit
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -20,8 +19,7 @@ title: GitLab Orbit
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) for GitLab Self-Managed in GitLab 19.2.2.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
-- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Generally available in GitLab 19.5.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
 
 {{< /history >}}
 
@@ -73,18 +71,6 @@ Then it answers from the rows. The answer is similar to:
 3. my-group/auth-service: 12 failed pipelines
 ```
 
-## Before you start
-
-<!-- TODO(GA): confirm with Pricing what the add-on includes. -->
-- GitLab Orbit is a paid add-on for top-level groups with a Premium or Ultimate subscription.
-  On GitLab.com, an Owner can [start a free trial](trial.md).
-- An Owner turns on GitLab Orbit for a top-level group. On GitLab Self-Managed and GitLab Dedicated,
-  an administrator can also turn it on. GitLab Orbit then indexes the group, its subgroups, and projects.
-  On GitLab Dedicated, GitLab runs GitLab Orbit for you.
-- On GitLab Self-Managed, an administrator [sets up GitLab Orbit](self-managed/_index.md) first.
-- To query the graph, you need the Reporter, Security Manager, Developer, Maintainer, or Owner role. Security data needs the Security Manager role.
-  For more information, see [roles](security.md#roles).
-
 ## Connect your agent
 
 | Connect with | Use it when |
@@ -98,10 +84,6 @@ Then it answers from the rows. The answer is similar to:
 
 The GitLab Orbit CLI also indexes repositories on your machine, so your agent can search code that you have not pushed,
 offline and with no GitLab account. For more information, see [GitLab Orbit Local](local/_index.md).
-
-## Billing
-
-For which calls consume GitLab Credits on each offering, see [billing](how-it-works.md#billing).
 
 ## Reference
 

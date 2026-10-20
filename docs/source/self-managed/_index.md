@@ -9,7 +9,6 @@ title: GitLab Orbit on GitLab Self-Managed
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab Self-Managed
 
 {{< /details >}}

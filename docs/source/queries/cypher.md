@@ -9,7 +9,6 @@ title: GitLab Orbit Cypher query language
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -22,7 +21,7 @@ title: GitLab Orbit Cypher query language
 {{< /history >}}
 
 GitLab Orbit accepts a read-only subset of [openCypher 9](https://opencypher.org/), which agents already know.
-It replaces the deprecated JSON query DSL. To send a query, see [run a query](_index.md#run-a-query).
+It replaces the deprecated JSON query domain-specific language (DSL). To send a query, see [run a query](_index.md#run-a-query).
 Code examples in this documentation carry the label `gql`, the internal name of this query language.
 
 ## Discover the schema
@@ -78,7 +77,9 @@ On GitLab.com, this query returns `482908721` and `278964`, the IDs that the exa
 
 ## Filters
 
-`WHERE` combines predicates with `AND`. These forms are supported:
+`WHERE` combines predicates with `AND` and `NOT`.
+To exclude values, write `NOT x.state IN [...]`, not `x.state NOT IN [...]`.
+These forms are supported:
 
 - Comparisons: `=`, `<>` or `!=`, `<`, `<=`, `>`, `>=`. You can compare a property with a literal or with another property.
 - Lists: `x.state IN ['opened', 'merged']`, with up to 100 values.
@@ -197,7 +198,7 @@ When `pagination.truncated` is `true`, the result is incomplete.
 
 These forms are not supported and are rejected:
 write clauses, more than one statement, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`, `YIELD`, subqueries,
-`OR`, general `NOT`, `DISTINCT`, `count(*)`, arbitrary expressions, and `SKIP` or other offset pagination.
+`OR`, `x NOT IN [...]`, `DISTINCT`, `count(*)`, arbitrary expressions, and `SKIP` or other offset pagination.
 `type(r)` returns the type of a one-hop relationship variable in `WHERE`, `RETURN`, and `ORDER BY`, but not as an aggregation group key. Other functions, such as `collect(x)`, are rejected with an error that names the function.
 
 Syntax errors report a line and column.

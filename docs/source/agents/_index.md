@@ -3,7 +3,7 @@ stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Connect your agent to GitLab Orbit with the GitLab Orbit CLI and the GitLab Orbit skill.
-title: Connect your agent
+title: Connect your agent to GitLab Orbit
 ---
 
 {{< details >}}
@@ -84,6 +84,13 @@ By default, setup writes to your user configuration, so the changes affect only 
   Teams usually commit files such as `CLAUDE.md`, `AGENTS.md`, and `.mcp.json`, so the change can reach your teammates.
 
 ## GitLab Orbit skill
+
+{{< details >}}
+
+- Tier: Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
+
+{{< /details >}}
 
 The GitLab Orbit skill gives your agent query recipes, the reference for the query language of your instance,
 and troubleshooting steps. It covers your GitLab data and the local graph.
