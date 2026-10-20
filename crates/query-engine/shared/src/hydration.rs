@@ -333,34 +333,11 @@ pub fn hydrate_static(
     Ok((nodes, total_ids))
 }
 
-/// For PathFinding queries where no static nodes have TP columns, returns an
-/// empty vec — the caller can fall back to security context TPs.
-pub fn collect_dynamic_traversal_paths(
-    result: &QueryResult,
-    static_nodes: &[compiler::RedactionNode],
-) -> Vec<TraversalPath> {
-    let mut paths: Vec<TraversalPath> = Vec::new();
-    for node in static_nodes {
-        let tp_col = traversal_path_column(&node.alias);
-        for row in result.authorized_rows() {
-            if let Some(tp) = row.get_column_string(&tp_col)
-                && !tp.is_empty()
-            {
-                paths.push(TraversalPath::new_unchecked(tp));
-            }
-        }
-    }
-    paths.sort_unstable();
-    paths.dedup();
-    paths
-}
-
 /// Uses pre-resolved column specs from the compilation plan; no ontology
 /// lookups at runtime.
 ///
-/// `traversal_paths` narrows hydration scans for entities that have
-/// `traversal_path` in their table. Pass TPs collected from static nodes
-/// or the security context.
+/// `traversal_paths` is the authorized scope; `ref_paths` narrows an entity type to the paths
+/// its own rows carry. A neighbor can sit above the center node, so the center path is no fallback.
 pub fn hydrate_dynamic(
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<i64>>,
