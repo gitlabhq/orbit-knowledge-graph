@@ -31,7 +31,7 @@ fn compile(
 }
 
 #[test]
-fn every_named_query_compiles_identically_in_every_language() {
+fn every_named_query_compiles_in_every_language() {
     let queries = NamedQueries::load_embedded().unwrap();
     for query in queries.iter() {
         let params = query.example_parameters();

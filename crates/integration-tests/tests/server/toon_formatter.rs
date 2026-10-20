@@ -53,8 +53,8 @@ async fn seed(ctx: &TestContext) {
     ctx.optimize_all().await;
 }
 
-async fn run_pipeline(ctx: &TestContext, json: &str) -> PipelineOutput {
-    super::graph_formatter::pipeline_output(ctx, json, &allow_all(), test_security_context()).await
+async fn run_pipeline(ctx: &TestContext, gql: &str) -> PipelineOutput {
+    super::graph_formatter::pipeline_output(ctx, gql, &allow_all(), test_security_context()).await
 }
 
 fn allow_all() -> MockRedactionService {
