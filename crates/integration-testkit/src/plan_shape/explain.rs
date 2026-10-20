@@ -1,8 +1,10 @@
 use compiler::ast::{Expr, Node, Op, Query, SelectExpr, TableRef};
 use compiler::input::{ColumnSelection, FilterOp, Input, InputFilter, OrderDirection};
 use compiler::passes::plan::QueryPlan;
-use compiler::passes::plan::physical::{ExecutionPlan, PhysicalPlan, PhysicalSource};
-use compiler::passes::plan::requirements::{Column, OutputValue, Predicate, Projection};
+use compiler::passes::plan::graph::{
+    ExecutionPlan, RelationGraph, RelationId, RelationNode, RelationRef,
+};
+use compiler::passes::plan::predicates::{Column, OutputValue, Predicate, Projection};
 use query_engine::compiler;
 use std::collections::HashMap;
 
@@ -218,7 +220,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
         QueryPlan::Traversal(plan) => execution_tree(&plan.operation.execution),
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
-            let group = |value: &compiler::passes::plan::aggregation::Group| {
+            let group = |value: &compiler::passes::plan::query_types::aggregation::Group| {
                 let column = planned_column(&value.column);
                 value.truncate.map_or_else(
                     || column.clone(),
@@ -265,9 +267,9 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             let tree = Tree::node(
                 Operator::Aggregate,
                 items,
-                vec![execution_source(&plan.operation.execution)],
+                vec![execution_tree(&plan.operation.execution)],
             );
-            let tree = sort(
+            sort(
                 tree,
                 result.order.iter().map(|order| {
                     (
@@ -275,8 +277,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                         order.direction == OrderDirection::Desc,
                     )
                 }),
-            );
-            definitions(&plan.operation.execution, tree)
+            )
         }
         QueryPlan::Neighbors(plan) => {
             let operation = &plan.operation;
@@ -356,7 +357,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                 .nodes
                 .iter()
                 .map(|node| {
-                    use compiler::passes::plan::hydration::HydrationPathFilter;
+                    use compiler::passes::plan::query_types::hydration::HydrationPathFilter;
                     let mut predicates = Vec::new();
                     if !node.node_ids.is_empty() {
                         predicates.push(format!(
@@ -419,7 +420,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
 
 fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
     filter(
-        compiler::passes::plan::requirements::node_predicates(node)
+        node.conditions()
             .iter()
             .flat_map(planned_predicate)
             .collect(),
@@ -435,72 +436,114 @@ fn planned_node(node: &compiler::passes::plan::NodePlan) -> Tree {
 }
 
 fn execution_tree(execution: &ExecutionPlan) -> Tree {
-    definitions(execution, execution_source(execution))
-}
-
-fn execution_source(execution: &ExecutionPlan) -> Tree {
-    Tree::node(
+    let usage = execution.graph.usage(execution.root);
+    let materialized: std::collections::HashSet<_> = usage.materialized().collect();
+    let source = Tree::node(
         Operator::Project,
         planned_projections(&execution.outputs),
-        vec![physical_source(&execution.source)],
-    )
-}
-
-fn definitions(execution: &ExecutionPlan, source: Tree) -> Tree {
-    if execution.definitions.is_empty() {
+        vec![relation_node(
+            execution.root,
+            &execution.graph,
+            &materialized,
+            None,
+        )],
+    );
+    let relations: Vec<_> = materialized.iter().copied().collect();
+    if relations.is_empty() {
         source
     } else {
         Tree::node(
             Operator::With,
             "",
-            execution
-                .definitions
-                .iter()
-                .map(|(name, keys)| Tree::node(Operator::Cte, name, vec![physical_tree(keys)]))
+            relations
+                .into_iter()
+                .map(|id| {
+                    Tree::node(
+                        Operator::Cte,
+                        format!("_orbit_relation_{}", id.0),
+                        vec![relation_node(id, &execution.graph, &materialized, Some(id))],
+                    )
+                })
                 .chain([source])
                 .collect(),
         )
     }
 }
 
-fn physical_tree(plan: &PhysicalPlan) -> Tree {
-    Tree::node(
-        Operator::Project,
-        planned_projections(&plan.outputs),
-        vec![physical_source(&plan.source)],
-    )
+fn relation_ref(
+    reference: &RelationRef,
+    graph: &RelationGraph,
+    materialized: &std::collections::HashSet<RelationId>,
+    current: Option<RelationId>,
+) -> Tree {
+    if materialized.contains(&reference.id) && current != Some(reference.id) {
+        return leaf(
+            Operator::Scan,
+            format!(
+                "Relation({}) AS {}",
+                reference.id.0,
+                reference.alias.as_deref().unwrap_or("_orbit_relation")
+            ),
+        );
+    }
+    let tree = relation_node(reference.id, graph, materialized, current);
+    match (reference.alias.as_ref(), graph.get(reference.id)) {
+        (Some(alias), RelationNode::Read { alias: source, .. }) if alias == source => tree,
+        (Some(alias), RelationNode::Owned { alias: source, .. }) if alias == source => tree,
+        (Some(alias), _) => Tree::node(Operator::Bind, alias, vec![tree]),
+        (None, _) => tree,
+    }
 }
 
-fn physical_source(plan: &PhysicalSource) -> Tree {
-    match plan {
-        PhysicalSource::Union { alias, arms, .. } => Tree::node(
+fn relation_node(
+    id: RelationId,
+    graph: &RelationGraph,
+    materialized: &std::collections::HashSet<RelationId>,
+    current: Option<RelationId>,
+) -> Tree {
+    match graph.get(id) {
+        RelationNode::UnionAll { alias, inputs, .. } => Tree::node(
             Operator::Union,
             format!("ALL AS {alias}"),
-            arms.iter().map(physical_tree).collect(),
+            inputs
+                .iter()
+                .map(|input| relation_ref(input, graph, materialized, current))
+                .collect(),
         ),
-        PhysicalSource::Scan {
+        RelationNode::Read {
             table,
             alias,
             final_,
-            ..
         } => scan(table, alias, *final_),
-        PhysicalSource::Filter { predicates, input } => filter(
+        RelationNode::Owned { input, alias, .. } => match graph.get(input.id) {
+            RelationNode::Read { alias: source, .. } if source == alias => {
+                relation_node(input.id, graph, materialized, current)
+            }
+            _ => Tree::node(
+                Operator::Bind,
+                alias,
+                vec![relation_ref(input, graph, materialized, current)],
+            ),
+        },
+        RelationNode::Filter { predicates, input } => filter(
             predicates.iter().flat_map(planned_predicate).collect(),
-            physical_source(input),
+            relation_ref(input, graph, materialized, current),
         ),
-        PhysicalSource::KeyFilter { value, keys, input } => Tree::node(
-            Operator::SemiJoin,
-            format!("{} IN subquery", planned_column(value)),
-            vec![physical_source(input), physical_tree(keys)],
+        RelationNode::Project { outputs, input } => Tree::node(
+            Operator::Project,
+            planned_projections(outputs),
+            vec![relation_ref(input, graph, materialized, current)],
         ),
-        PhysicalSource::Scope { alias, input } => {
-            Tree::node(Operator::Bind, alias, vec![physical_source(input)])
-        }
-        PhysicalSource::Latest {
+        RelationNode::Bind { alias, input } => Tree::node(
+            Operator::Bind,
+            alias,
+            vec![relation_ref(input, graph, materialized, current)],
+        ),
+        RelationNode::Latest {
             alias,
             sort_key,
             input,
-            aggregate_condition,
+            condition,
         } => Tree::node(
             Operator::Deduplicate,
             format!(
@@ -512,14 +555,11 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
                     .join(", ")
             ),
             vec![filter(
-                aggregate_condition
-                    .iter()
-                    .flat_map(planned_predicate)
-                    .collect(),
-                physical_source(input),
+                condition.iter().flat_map(planned_predicate).collect(),
+                relation_ref(input, graph, materialized, current),
             )],
         ),
-        PhysicalSource::Join {
+        RelationNode::Join {
             endpoints,
             predicates,
             left,
@@ -527,7 +567,10 @@ fn physical_source(plan: &PhysicalSource) -> Tree {
         } => Tree::node(
             Operator::Join,
             planned_join(endpoints, predicates),
-            vec![physical_source(left), physical_source(right)],
+            vec![
+                relation_ref(left, graph, materialized, current),
+                relation_ref(right, graph, materialized, current),
+            ],
         ),
     }
 }
@@ -573,10 +616,6 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             format!("{} >= {start}", planned_column(column)),
             format!("{} <= {end}", planned_column(column)),
         ],
-        Predicate::ColumnsEqual { left, right } => vec![format!(
-            "{}.{} = {}.{}",
-            left.source, left.name, right.source, right.name
-        )],
         Predicate::Live { alias } => vec![format!("{alias}._deleted = false")],
         Predicate::EntityKind { column, entity } => vec![format!(
             "{} = {}",
@@ -602,10 +641,31 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
                 .join(", ")
         )],
         Predicate::Membership {
-            column,
-            definition,
-            key,
-        } => vec![format!("{} IN {definition}.{key}", planned_column(column))],
+            columns,
+            relation,
+            keys,
+        } => vec![format!(
+            "{} IN _orbit_relation_{}.{}",
+            membership_columns(columns),
+            relation.0,
+            membership_keys(keys)
+        )],
+        Predicate::Scope { alias, .. } => vec![format!("scope({alias})")],
+    }
+}
+
+fn membership_columns(columns: &[Column]) -> String {
+    let columns: Vec<_> = columns.iter().map(planned_column).collect();
+    match columns.as_slice() {
+        [column] => column.clone(),
+        _ => format!("({})", columns.join(", ")),
+    }
+}
+
+fn membership_keys(keys: &[String]) -> String {
+    match keys {
+        [key] => key.clone(),
+        _ => format!("({})", keys.join(", ")),
     }
 }
 
@@ -645,6 +705,18 @@ fn planned_projections(values: &[Projection]) -> String {
                         ))
                         .collect::<Vec<_>>()
                         .join(", ")
+                ),
+                OutputValue::PathAppend { path, id, kind } => format!(
+                    "append({}, ({}, {}))",
+                    planned_column(path),
+                    planned_column(id),
+                    planned_column(kind)
+                ),
+                OutputValue::PathPrepend { path, id, kind } => format!(
+                    "prepend(({}, {}), {})",
+                    planned_column(id),
+                    planned_column(kind),
+                    planned_column(path)
                 ),
             };
             format!("{value} AS {}", projection.name)
@@ -746,8 +818,12 @@ fn expression(value: &Expr) -> String {
         Expr::InSubquery {
             expr,
             cte_name,
-            column,
-        } => format!("{} IN {cte_name}.{column}", expression(expr)),
+            columns,
+        } => format!(
+            "{} IN {cte_name}.{}",
+            expression(expr),
+            membership_keys(columns)
+        ),
         Expr::InSelect { expr, .. } => format!("{} IN subquery", expression(expr)),
         Expr::Scalar(_) => "scalar(subquery)".into(),
         Expr::Star => "*".into(),
@@ -910,24 +986,20 @@ fn exact_assertions_preserve_nested_filter_order() {
             values: vec![2],
         },
     ];
-    let source = predicates.iter().fold(
-        PhysicalSource::Scan {
-            table: "gl_project".into(),
-            alias: "p".into(),
-            final_: false,
-            relationship: None,
-        },
-        |input, predicate| PhysicalSource::Filter {
-            predicates: vec![predicate.clone()],
-            input: Box::new(input),
-        },
-    );
+    let mut graph = RelationGraph::default();
+    let read = graph.read("gl_project", "p", false);
+    let source = predicates.iter().fold(read, |relation, predicate| {
+        graph.filter(relation, vec![predicate.clone()])
+    });
     let assertions: super::Assertions = orbit_utils::yaml::from_str(
         "exact: (Filter p.id = 1, p.star_count = 2 (Scan Table(gl_project) AS p))",
     )
     .unwrap();
     assertions
-        .check(&physical_source(&source), "planned")
+        .check(
+            &relation_node(source, &graph, &Default::default(), None),
+            "planned",
+        )
         .unwrap();
     let emitted = query_filter(
         &Expr::conjoin(vec![

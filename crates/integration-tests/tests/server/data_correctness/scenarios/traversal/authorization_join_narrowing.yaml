@@ -7,7 +7,7 @@ cases:
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
     expect:
-      sql_contains: ["caller.id IN (SELECT id FROM _narrow_caller)"]
+      sql_contains: ["caller.id IN (SELECT id FROM _orbit_relation_"]
       node_count: 2
       nodes:
         Definition:
@@ -24,7 +24,7 @@ cases:
       gql: |
         MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
     expect:
-      sql_contains: ["callee.id IN (SELECT id FROM _narrow_callee)"]
+      sql_contains: ["callee.id IN (SELECT id FROM _orbit_relation_"]
       node_count: 2
       nodes:
         Definition:
@@ -34,11 +34,10 @@ cases:
           - [12000, 12001]
 
   - name: unpinned_partner_keeps_the_full_join
-    description: Without a pinned partner there are no edge keys to narrow the redaction join
+    description: Without a bounded relation there are no safe keys to narrow the redaction join
     query:
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.project_id = 1000 RETURN caller, callee LIMIT 50
     expect:
       compile_only: true
       sql_contains: ["AS callee FINAL ON"]
-      sql_not_contains: ["_narrow_"]

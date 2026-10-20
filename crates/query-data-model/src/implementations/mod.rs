@@ -11,6 +11,8 @@ pub(super) struct PropertyBackendFacts {
     realization: Option<PropertyRealization>,
     selectivity: ontology::FieldSelectivity,
     has_text_index: bool,
+    unique: bool,
+    mutable: bool,
 }
 
 #[derive(Debug)]
@@ -66,6 +68,8 @@ pub(crate) fn entity_facts(ontology: &ontology::Ontology, local: bool) -> Vec<En
                                 selectivity: field.selectivity,
                                 has_text_index: !local
                                     && text_indexed.contains(&field.name.as_str()),
+                                unique: field.unique,
+                                mutable: field.mutable,
                             },
                         )
                     })
@@ -84,6 +88,8 @@ fn derive_property_backend_facts(
             realization: None,
             selectivity: ontology::FieldSelectivity::High,
             has_text_index: false,
+            unique: false,
+            mutable: true,
         };
         graph.properties().count()
     ];

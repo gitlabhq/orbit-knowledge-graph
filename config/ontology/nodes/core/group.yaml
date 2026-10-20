@@ -32,6 +32,7 @@ properties:
     type: string
     source: full_path
     nullable: false
+    unique: true
     description: "Full path (e.g. gitlab-org/quality)."
     traversal_path_lookup:
       kind: full_path

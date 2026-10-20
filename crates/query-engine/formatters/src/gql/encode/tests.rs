@@ -43,6 +43,7 @@ fn output(
         raw_query_strings: vec![],
         compiled: Arc::new(CompiledQueryContext {
             query_type: input.query_type,
+            ast: compiler::ast::Node::Query(Box::default()),
             base: ParameterizedQuery {
                 sql: String::new(),
                 params: HashMap::new(),

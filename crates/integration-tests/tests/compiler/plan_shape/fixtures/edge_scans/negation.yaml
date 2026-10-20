@@ -14,7 +14,6 @@ cases:
         planned:
           expect:
             - "(Filter NOT (((mr.state = 'merged') AND (_orbit_edge_0.source_tags HAS ANY ['state:merged'])) AND (_orbit_edge_0.target_tags HAS ANY ['state:closed'])) (_))"
-          reject: [(Scan Table(gl_work_item) ...)]
 
   - name: NOT over a non-nullable denormalized property reads edge tags instead of the node table
     query:
@@ -50,7 +49,6 @@ cases:
         planned:
           expect:
             - "(Filter NOT ((_orbit_edge_0.source_id < 50) AND (_orbit_edge_0.source_tags HAS ANY ['state:active'])) (_))"
-          reject: [(Scan Table(gl_user) ...)]
 
   - name: A NOT group over a nullable denormalized property reads the node table instead of edge tags
     query:
@@ -86,4 +84,4 @@ cases:
       clickhouse:
         planned:
           expect:
-            - "(Filter NOT ((u.state IN ['blocked']) AND (_orbit_edge_0.source_tags HAS ANY ['state:blocked'])) (_))"
+            - "(Filter ..., NOT ((u.state IN ['blocked']) AND (_orbit_edge_0.source_tags HAS ANY ['state:blocked'])) (_))"

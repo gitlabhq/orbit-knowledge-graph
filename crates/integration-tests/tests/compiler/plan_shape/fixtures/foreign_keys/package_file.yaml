@@ -1,4 +1,4 @@
-name: Package files use their stored package foreign key
+name: Package files use their FK edge relation
 
 missing_frontends:
   json: The JSON query form is being deprecated.
@@ -14,6 +14,11 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Join ON p.id = f.package_id (Bind f (_)) (Bind p (_)))
+        - (Filter f.package_id = 8001, ... (_))
+        - (Project p.id AS id (Filter p._deleted = false (Deduplicate LimitBy ... (Filter p.id = 8001 (_)))))
+        - (Project f.package_id AS e0_src, ... (_))
+        - (Deduplicate LimitBy f.traversal_path, f.id (Filter (f.traversal_path, f.id) IN ?.(traversal_path, id) (Scan Table(gl_package_file) AS f)))
       reject:
+        - (Deduplicate Final (Scan Table(gl_package_file) AS f))
         - (Scan Table(gl_edge) ...)
+        - (Project f.id AS e0_src, f.package_id AS e0_dst, ... (_))

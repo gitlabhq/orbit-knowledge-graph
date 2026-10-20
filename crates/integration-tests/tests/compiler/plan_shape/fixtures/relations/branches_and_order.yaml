@@ -1,0 +1,91 @@
+cases:
+  - name: A branch joins edge relations through the shared occurrence
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000],"columns":["title"]},{"id":"p","entity":"Project","columns":["name"]},{"id":"pipe","entity":"Pipeline","columns":["status"]},{"id":"j","entity":"Job","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project),
+          (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job)
+        RETURN mr.title, p.name, pipe.status, j.name
+    logical:
+      expect: ["(EdgeScan IN_PROJECT mr->p AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Join ON j.pipeline_id = mr.head_pipeline_id (_) (_))
+            - (Scan Table(gl_merge_request) AS mr)
+            - (Scan Table(gl_job) AS j)
+
+  - name: Node-backed relations reuse their shared source row
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000],"columns":["title"]},{"id":"p","entity":"Project","columns":["id"]},{"id":"pipe","entity":"Pipeline","columns":["id"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"}]}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project),
+          (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
+        RETURN mr.title, p.id, pipe.id
+    logical:
+      expect: ["(EdgeScan IN_PROJECT mr->p AS e0)", "(EdgeScan HAS_HEAD_PIPELINE mr->pipe AS e1)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Project mr.project_id AS e0_dst, mr.head_pipeline_id AS e1_dst, ... (_))
+          occurrences:
+            - pattern: (Scan Table(gl_merge_request) AS mr)
+              count: 1
+
+  - name: A mixed table branch keeps one edge relation per relationship
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","columns":["name"]},{"id":"pipe","entity":"Pipeline","columns":["status"]}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"}]}
+      gql: |
+        MATCH (u:User {id: 1})-[:APPROVED]->(mr:MergeRequest),
+          (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
+        RETURN u.username, mr.title, p.name, pipe.status
+    logical:
+      expect: ["(EdgeScan APPROVED u->mr AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Join ON mr.id = _orbit_edge_0.target_id (_) (_))
+            - (Scan Table(gl_edge) AS _orbit_edge_0)
+            - (Scan Table(gl_merge_request) AS mr)
+
+  - name: Connected relationships linearize by occurrence connectivity only
+    missing_frontends:
+      gql: GQL MATCH order is already connected in the equivalent pattern.
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"},{"id":"d","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"c","to":"d"},{"type":"CALLS","from":"b","to":"c"}]}
+    logical:
+      expect: ["(EdgeScan CALLS a->b AS e0)", "(EdgeScan CALLS c->d AS e1)", "(EdgeScan CALLS b->c AS e2)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Join ON _orbit_edge_2.target_id = _orbit_edge_1.source_id (Join ON _orbit_edge_0.target_id = _orbit_edge_2.source_id (_) (_)) (_))
+
+  - name: Convergent stored relations keep selective reads inline
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","node_ids":[2]},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"c"},{"type":"CALLS","from":"b","to":"c"}]}
+      gql: |
+        MATCH (a:Definition {id: 1})-[:CALLS]->(c:Definition)<-[:CALLS]-(b:Definition {id: 2})
+        RETURN a.id, b.id, c.id
+    logical:
+      expect: ["(EdgeScan CALLS a->c AS e0)", "(EdgeScan CALLS b->c AS e1)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Join ON _orbit_edge_0.target_id = _orbit_edge_1.target_id (_) (_))
+            - (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.source_id = 1, ... (_))))
+            - (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.source_id = 2, ... (_))))
+          reject:
+            - (CTE ? (Deduplicate Final (Scan Table(gl_code_edge) ...)))
+          occurrences:
+            - pattern: (Scan Table(gl_code_edge) ...)
+              count: 2

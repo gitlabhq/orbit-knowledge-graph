@@ -15,9 +15,8 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Scan Table(gl_edge) AS _orbit_edge_0)
-            - (Scan Table(gl_ci_edge) AS _orbit_edge_1)
-            - (Scan Table(gl_ci_edge) AS _orbit_edge_2)
+            - (Scan Table(gl_merge_request) AS mr)
+            - (Scan Table(gl_pipeline) AS pipeline)
             - (Scan Table(gl_code_edge) AS _orbit_edge_3)
 
   - name: Merge request diff branch chain composes default diff and code tables
@@ -36,9 +35,8 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Scan Table(gl_edge) AS _orbit_edge_0)
-            - (Scan Table(gl_diff_edge) AS _orbit_edge_1)
-            - (Scan Table(gl_diff_edge) AS _orbit_edge_2)
+            - (Scan Table(gl_merge_request) AS mr)
+            - (Scan Table(gl_merge_request_diff) AS diff)
             - (Scan Table(gl_code_edge) AS _orbit_edge_3)
 
   - name: Security scan project branch chain composes security and code tables
@@ -56,7 +54,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Scan Table(gl_sec_edge) AS _orbit_edge_0)
+            - (Scan Table(gl_security_scan) AS scan)
             - (Scan Table(gl_code_edge) AS _orbit_edge_1)
             - (Scan Table(gl_code_edge) AS _orbit_edge_2)
 

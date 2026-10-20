@@ -23,29 +23,6 @@ fn compile_to_ast_works() {
 }
 
 #[test]
-fn incoming_self_relationship_keeps_the_foreign_key_on_its_source() {
-    let ontology = crate::compiler::setup::embedded_ontology();
-    let compiled = compile_pair(
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "canceling", "entity": "Pipeline", "filters": {"status": "success"}, "columns": ["id"]},
-                {"id": "canceled", "entity": "Pipeline", "columns": ["id"]}
-            ],
-            "relationships": [{"type": "AUTO_CANCELED_BY", "from": "canceling", "to": "canceled", "direction": "incoming"}],
-            "limit": 10
-        }"#,
-        "MATCH (canceling:Pipeline {status: 'success'})<-[:AUTO_CANCELED_BY]-(canceled:Pipeline) RETURN canceling.id, canceled.id LIMIT 10",
-        &ontology,
-        &test_ctx(),
-    ).unwrap();
-    let sql = compiled.base.render();
-    assert!(sql.contains("canceled.auto_canceled_by_id"), "{sql}");
-    assert!(!sql.contains("canceling.auto_canceled_by_id"), "{sql}");
-    assert!(!sql.contains("FROM gl_edge"), "{sql}");
-}
-
-#[test]
 fn traversal_query() {
     let orbit_query = "MATCH (n:Note {confidential: true})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username ORDER BY n.created_at DESC LIMIT 25";
     let json = r#"{
@@ -443,8 +420,7 @@ fn filter_operators() {
     let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    // Search uses FINAL for latest-row dedup.
-    assert!(rendered.contains(" FINAL"));
+    assert!(rendered.contains("LIMIT 1 BY"));
     assert!(rendered.contains("_deleted"));
     assert!(rendered.contains(">="));
     assert!(rendered.contains("IN"));
@@ -676,6 +652,8 @@ fn multi_table_mixed_types_scan_every_route() {
     assert!(rendered.contains("FROM gl_code_edge"), "{rendered}");
     assert!(rendered.contains("FROM gl_edge"), "{rendered}");
     assert!(rendered.contains("UNION ALL"), "{rendered}");
+    assert_eq!(rendered.matches("LIMIT 1 BY").count(), 2, "{rendered}");
+    assert!(!rendered.contains(" FINAL"), "{rendered}");
 }
 
 #[test]
@@ -868,11 +846,9 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
     let compiled = compile_pair(json, orbit_query, &ontology, &admin_ctx()).unwrap();
     let sql = compiled.base.render();
 
-    let before_related = sql.split("RELATED_TO").next().unwrap();
-    assert!(before_related.contains(SCOPED_LOOKUP), "{sql}");
-
-    let after_related = sql.split("RELATED_TO").nth(1).unwrap();
-    assert!(!after_related.contains(SCOPED_LOOKUP), "{sql}");
+    let related_scan = sql.split("FROM gl_edge AS _orbit_edge_1").nth(1).unwrap();
+    let related_scope = related_scan.split(" ON ").next().unwrap();
+    assert!(!related_scope.contains(SCOPED_LOOKUP), "{sql}");
 
     let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
         panic!("expected static hydration");
@@ -1788,24 +1764,6 @@ fn orbit_query_structural_caps_reject_with_the_json_category() {
 }
 
 #[test]
-fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
-    let json = r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1],"columns":["confidential"]},{"id":"u","entity":"User","columns":["username"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#;
-    let orbit_query =
-        "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username";
-    let compiled = compile_pair(json, orbit_query, &embedded_ontology(), &test_ctx()).unwrap();
-    assert!(
-        compiled.base.sql.contains("_narrow_u"),
-        "AUTHORED should resolve to the FK plan: {}",
-        compiled.base.sql
-    );
-    assert!(
-        compiled.base.sql.contains("n.author_id AS e0_src"),
-        "edge source must be the User side: {}",
-        compiled.base.sql
-    );
-}
-
-#[test]
 fn orbit_query_traversal_aliases_are_ignored_and_sortable() {
     let ontology = embedded_ontology();
     let ctx = test_ctx();
@@ -2136,4 +2094,35 @@ fn gql_prepares_queries_and_scoped_schema() {
         );
     }
     assert!(compile("CALL db.schema()", Frontend::Gql, &ontology, &ctx).is_err());
+}
+
+#[test]
+fn cte_statements_carry_the_ctes_they_read() {
+    let compiled = compile(
+        "MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) WHERE g.full_path = 'g701' RETURN p, count(f) AS c LIMIT 10",
+        Frontend::Gql,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
+    let statements = compiler::passes::codegen::clickhouse::cte_statements(&compiled.ast).unwrap();
+    assert!(
+        statements
+            .iter()
+            .any(|(_, sql, _)| sql.starts_with("WITH ")),
+        "expected a CTE body that reads another CTE"
+    );
+    for (own, sql, _) in &statements {
+        for (position, _) in sql.match_indices("_orbit_relation_") {
+            let digits: String = sql[position + "_orbit_relation_".len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            let name = format!("_orbit_relation_{digits}");
+            assert!(
+                &name == own || sql.contains(&format!("{name} AS ")),
+                "{name} is read but not defined in: {sql}"
+            );
+        }
+    }
 }

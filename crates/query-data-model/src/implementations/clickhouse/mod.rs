@@ -131,11 +131,19 @@ impl ClickHouseBindings {
 }
 
 impl RelationalMapping for ClickHouseBindings {
+    fn supports_selective_latest_rows(&self) -> bool {
+        true
+    }
+
     fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
         self.variant_route(variant)
     }
-    fn equivalent_layouts(&self, _table: &str) -> Vec<&str> {
-        Vec::new()
+    fn equivalent_layouts(&self, table: &str) -> Vec<&str> {
+        self.reordered_layouts
+            .iter()
+            .filter(|copy| copy.source == table)
+            .map(|copy| copy.table.as_str())
+            .collect()
     }
     fn materialized_joins(&self) -> &[MaterializedJoin] {
         &self.materialized_joins
@@ -180,6 +188,18 @@ impl RelationalMapping for ClickHouseBindings {
         self.property_facts
             .get(property.index())
             .is_some_and(|facts| facts.has_text_index)
+    }
+
+    fn property_unique(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_some_and(|facts| facts.unique)
+    }
+
+    fn property_mutable(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_none_or(|facts| facts.mutable)
     }
 
     fn table_path_scopable(&self, table: &str) -> bool {

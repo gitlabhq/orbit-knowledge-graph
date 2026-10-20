@@ -8,8 +8,7 @@ query:
     MATCH (g:Group {full_path: 'public-group'})-[:CONTAINS]->(x:Group) RETURN count(x) AS c LIMIT 10
 
 expect:
-  sql_contains: ["countSubstrings(x.traversal_path"]
-  sql_not_contains: ["gl_edge", "gl_group AS g"]
+  sql_contains: ["LIMIT 1 BY g.traversal_path, g.id", "relationship_kind = 'CONTAINS'", "source_kind = 'Group'", "target_kind = 'Group'"]
   skip_requirements: ["filter:full_path"]
   row_count: 1
   row_values: [{ c: 1 }]

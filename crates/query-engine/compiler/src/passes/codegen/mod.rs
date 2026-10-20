@@ -7,6 +7,7 @@ pub mod duckdb;
 
 use orbit_server_config::QueryConfig;
 
+use crate::ast::Node;
 use crate::input::{Input, QueryType};
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
@@ -50,6 +51,7 @@ pub struct ParameterizedQuery {
 #[derive(Debug, Clone)]
 pub struct CompiledQueryContext {
     pub query_type: QueryType,
+    pub ast: Node,
     pub base: ParameterizedQuery,
     pub hydration: HydrationPlan,
     pub input: Input,

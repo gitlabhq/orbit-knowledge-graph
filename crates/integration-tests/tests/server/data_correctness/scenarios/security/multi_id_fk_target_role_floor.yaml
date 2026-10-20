@@ -31,5 +31,5 @@ query:
 expect:
   row_count: 1
   row_values: [{ n: 0 }]
-  sql_contains: ["HAS_FINDING", "gl_vulnerability_occurrence AS _role_f FINAL", "false"]
+  sql_contains: ["_role_f.id IN (SELECT", "LIMIT 1 BY _role_f.traversal_path, _role_f.id", "false"]
   skip_requirements: [node_ids]
