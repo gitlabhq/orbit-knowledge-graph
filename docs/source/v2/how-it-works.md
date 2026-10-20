@@ -43,7 +43,7 @@ flowchart LR
 ## What the graph contains
 
 Each entity, such as a project, a user, or a function, is a node.
-Each relationship, such as a user who authored a merge request, is a directed edge. The graph has two connected layers:
+Each relationship, such as `AUTHORED` from a user to a merge request, is a directed edge. The graph has two connected layers:
 
 - The software development lifecycle (SDLC) layer holds GitLab objects, such as groups, projects, merge requests, pipelines, and work items.
 - The code layer holds files, directories, definitions, and imports.

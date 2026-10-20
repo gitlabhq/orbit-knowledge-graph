@@ -15,7 +15,7 @@ title: GitLab Orbit Cypher query language
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1258) in GitLab 19.4 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `orbit_gql_queries`. Disabled by default.
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/256465) in GitLab 19.4 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `orbit_gql_queries`. Disabled by default.
 - Generally available in GitLab 19.5.
 
 {{< /history >}}
@@ -74,7 +74,7 @@ LIMIT 1
 ```
 
 On GitLab.com, this query returns `482908721` and `278964`, the IDs that the examples use.
-It returns them only if you have a role in the `gitlab-org` group.
+It returns them only if you have at least the Reporter role in the `gitlab-org` group.
 Otherwise, this query and the examples that use `gitlab-org/gitlab` or these IDs return no rows.
 To run the examples, query with the full path of one of your projects, and use the IDs that it returns.
 
@@ -169,6 +169,9 @@ These properties have a text index:
 - The aggregate functions are `count`, `sum`, `avg`, `min`, and `max`.
   The other items in `RETURN` become group keys.
   To sort by an aggregate, give it an alias: `RETURN mr.state, count(mr) AS mrs ORDER BY mrs DESC`.
+  `sum` and `avg` need a numeric property. `min` and `max` need a number, boolean, enum, date, or timestamp property.
+  In an aggregation, a text match or a `<`, `<=`, `>`, or `>=` comparison on a free-text property, such as `mr.title`,
+  needs that node in a group key. `Project`, `Group`, and code nodes are exempt.
 - To group by a time period, use `date_trunc('<unit>', <property>)` as a group key on a date property.
   The units are `minute`, `hour`, `day`, `week`, `month`, `quarter`, and `year`.
   `minute` and `hour` also need a filter on the same property. Weeks start on Sunday.

@@ -26,7 +26,7 @@ On GitLab Self-Managed, you run GitLab Orbit next to your instance. A deployment
 - GitLab Orbit, which turns that copy into a queryable graph.
 
 GitLab Orbit is distributed only as a Helm chart for Kubernetes. The Linux package does not include it.
-Some component names use the earlier product name, GitLab Knowledge Graph, for example the `gkg` chart and the `gkg_*` ClickHouse users.
+Some component names use the earlier product name, GitLab Knowledge Graph, for example the `gkg` image and the `gkg_*` ClickHouse users.
 Install the chart on the cluster that runs GitLab, or on a separate cluster next to your instance.
 
 | Page | Description |
@@ -92,6 +92,6 @@ which is in process at the NIST Cryptographic Module Validation Program.
 All TLS connections (gRPC from GitLab, ClickHouse, and NATS) and JWT verification run inside it.
 The server does not start when the module is not in FIPS mode.
 Every published image tag carries the module, so there is no separate FIPS image.
-The `orbit` command line tool for local indexing does not link the module.
+The GitLab Orbit CLI (`orbit`) does not link the module.
 
 For support, see the [Statement of Support](https://about.gitlab.com/support/statement-of-support/).

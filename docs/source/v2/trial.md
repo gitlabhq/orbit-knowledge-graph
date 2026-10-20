@@ -15,7 +15,7 @@ title: Start a GitLab Orbit trial
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/19) in GitLab 19.5 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `orbit_trial`. Disabled by default.
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/258545) in GitLab 19.5 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `orbit_trial`. Disabled by default.
 - Generally available in GitLab 19.5.
 
 {{< /history >}}
@@ -66,8 +66,7 @@ The trial ends when its days end or its GitLab Credits run out, whichever comes 
 GitLab Orbit then pauses for the group, and queries fail.
 To keep using GitLab Orbit, [contact sales](https://about.gitlab.com/sales/) to buy the add-on or more GitLab Credits.
 
-GitLab keeps the indexed data for 30 days. If GitLab Orbit is on again in that time, indexing continues
-from where it stopped. For more information, see [data retention and deletion](how-it-works.md#data-retention-and-deletion).
+GitLab keeps the indexed data for a limited time. For more information, see [data retention and deletion](how-it-works.md#data-retention-and-deletion).
 
 ## Related topics
 
