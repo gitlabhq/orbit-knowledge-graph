@@ -34,7 +34,7 @@ expect:
       ids: [2000]
     WorkItem:
       ids: [4002]
-      prop_absent: [iid, title, state]
+      no_properties: true
   edges:
     CLOSES:
       - [2000, 4002]

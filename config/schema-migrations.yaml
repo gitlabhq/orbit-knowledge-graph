@@ -16,6 +16,9 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 111
+  scope: "*"
+  note: "Adds a minmax skip index on _deleted to every versioned table so a pre-pick filter can carry OR _deleted and still prune tombstone-free granules. Drops the unique marks on Label.title and Milestone.title (titles repeat across projects) and the mutable: false marks on code-graph commit_sha and File.size_bytes (ids do not include the commit). Full rebuild so the index files exist for every part."
 - version: 110
   scope: none
   note: >-

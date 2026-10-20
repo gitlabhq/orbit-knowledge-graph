@@ -1,4 +1,4 @@
-description: Elided containment counts only direct projects
+description: Containment over CONTAINS edges counts only direct projects
 
 query:
   json: |

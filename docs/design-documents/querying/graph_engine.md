@@ -216,11 +216,13 @@ Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between backg
 `FINAL` is the default. A selective current-row read can use a two-step form instead:
 
 1. Read matching candidate rows without `FINAL`, then project and deduplicate the complete replacement key.
-2. Read all versions for those keys, keep the greatest `_version` with `LIMIT 1 BY`, then apply the filters and `_deleted = false` again.
+2. Read all versions for those keys. Sort-key and unchanging-column filters run first, the latter as `(filter) OR _deleted`. Keep the greatest `_version` with `LIMIT 1 BY`, then apply the remaining filters and `_deleted = false`.
 
-The second filter application preserves latest-state semantics. An old version can find a candidate key, but it cannot make the current version match. Tuple membership keeps composite replacement keys intact. Routed edge reads apply this process to each physical table before `UNION ALL`.
+The second filter application preserves latest-state semantics. An old version can find a candidate key, but it cannot make the current version match. The tombstone guard keeps a deleted row from resurfacing through an unchanging-column filter. Tuple membership keeps composite replacement keys intact. Routed edge reads apply this process to each physical table before `UNION ALL`.
 
-The planner uses this form for exact IDs, bounded ID ranges, relation frontiers, and positive filters marked as high selectivity in the ontology. Text searches, negated filters, `!=`, `IS NOT NULL`, namespace-anchor-only filters, wide ID ranges, and low-selectivity fields keep `FINAL`. Backends must opt in; DuckDB does not use this ClickHouse strategy.
+The planner uses this form for exact IDs, bounded ID ranges, relation frontiers, and positive filters marked as high selectivity in the ontology. Text searches on changing columns, negated filters, `!=`, `IS NOT NULL`, namespace-anchor-only filters, wide ID ranges, and low-selectivity fields keep `FINAL`. Backends must opt in; DuckDB does not use this ClickHouse strategy.
+
+A relation referenced more than once is stored as a materialized CTE. The exception is a relation whose selective predicates are all point lookups (one ID, or equality on a `unique` property); those are recomputed inline.
 
 | Scan type | Strategy | Rationale |
 |---|---|---|
@@ -230,11 +232,12 @@ The planner uses this form for exact IDs, bounded ID ranges, relation frontiers,
 | Hydration (UNION ALL arms) | Non-`FINAL` scan with `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`, outer `_deleted = false` | Hydration reads a tiny pinned `id IN (...)` set; dropping `FINAL` lets column pruning and projections apply (`FINAL` reconstructs full rows, defeating both). Dedup identity is the table's full sort key, matching `FINAL`'s per-ORDER-BY-key semantics. Falls back to `FINAL` when a table has no sort key. |
 | Main query node scans and joins | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Keeps traversal, aggregation, and single-node lookup semantics consistent. |
 | Fixed and variable stored-edge scans | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Prevents a newer edge tombstone from exposing an older live edge. |
-| Single-relation aggregation | Non-`FINAL` scan with `LIMIT 1 BY <replacement key> ORDER BY <replacement key>, _version DESC` | Resolves current edge rows before evaluating the aggregate condition. |
+| Single-relation aggregation | Non-`FINAL` scan with sort-key and unchanging filters before `LIMIT 1 BY <replacement key> ORDER BY <replacement key>, _version DESC`; `FINAL` per table when the relationship spans several edge tables | Resolves current edge rows before evaluating the aggregate condition. |
 
 Filter placement rules for current-row reads:
 
 - **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are emitted on the current-row read so ClickHouse can still use primary-key pruning where supported.
+- **Immutable non-key filters** (`created_at`, `author_id`) also run before the pick, as `(filter OR _deleted)`. A tombstone holds column defaults, and the guard lets it reach the pick and win.
 - **Mutable filters** (`state`, `status`, `draft`) evaluate after latest-row resolution, preventing stale row versions from matching. The selective form also uses them to find candidate keys.
 - **`_deleted = false`** is always applied after latest-row resolution, either on the `FINAL` scan or outside a wrapping subquery.
 - **Exact edge metadata** can enforce a node filter only when every selected relationship variant carries the current value.

@@ -1,4 +1,4 @@
-description: Elided containment excludes the anchor and deeper groups
+description: Containment over CONTAINS edges excludes the anchor and deeper groups
 
 query:
   json: |

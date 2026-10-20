@@ -36,17 +36,27 @@ These diverge for any **reversible** column. Proof on prod (`gl_job`
 does not. ClickHouse refuses to auto-push a `WHERE` below `FINAL` for exactly
 this reason. A column is **version-stable** when its value is identical across
 every version-row. For such a column, filter-first equals latest-state.
-Version-stable columns are sort-key columns (`traversal_path`, `id`), immutable
-attributes (`created_at`, `*_id`), and absorbing enum values. Verified:
+Sort-key columns (`traversal_path`, `id`) are version-stable. Immutable
+attributes (`created_at`, `*_id`) are stable across live versions but not across
+tombstones. Absorbing enum values are stable too. Verified:
 `MergeRequest.state=merged` has 0/652127 un-merges; `Job.status` reverses on
 retry so is never stable.
+
+A tombstone is the exception. The indexer writes it with the sort key and
+defaults in every other column. An immutable filter such as `created_at >= X`
+rejects it, and the pick then resurrects the older live row. So a filter on a
+non-key column runs before the pick only as `(filter OR _deleted)`. The
+`minmax` skip index on `_deleted` keeps that disjunction to the granules that
+hold a tombstone.
 
 ## Selective current-row reads
 
 The planner can avoid a broad `FINAL` read when a positive predicate has a
 small expected result. It first finds candidate replacement keys without
-`FINAL`. It then reads every version for those keys, keeps the greatest
-`_version` with `LIMIT 1 BY`, and checks the predicates and tombstone again.
+`FINAL`. It then reads every version for those keys. Sort-key and
+unchanging-column filters run first, with the tombstone guard. The read keeps
+the greatest `_version` with `LIMIT 1 BY`, then checks the remaining filters
+and the tombstone.
 
 This form is latest-correct for mutable fields because candidate discovery does
 not decide the result. It only bounds the keys checked in the second read. The

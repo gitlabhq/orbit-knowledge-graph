@@ -1,0 +1,45 @@
+description: A node shared by two branches applies its mutable filter to the latest version in both
+
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      project: [9700]
+      merge_request: [9711, 9712]
+      note: [9721, 9722]
+  extra_seed:
+    gl_project:
+      - { id: 9700, name: shared, full_path: "root/shared", star_count: 1, traversal_path: "1/100/9700/", _version: "2024-01-01 00:00:00" }
+      - { id: 9700, name: shared, full_path: "root/shared", star_count: 2, traversal_path: "1/100/9700/", _version: "2024-06-01 00:00:00" }
+    gl_merge_request:
+      - { id: 9711, iid: 711, title: m1, state: opened, project_id: 9700, traversal_path: "1/100/9700/" }
+      - { id: 9712, iid: 712, title: m2, state: opened, project_id: 9700, traversal_path: "1/100/9700/" }
+    gl_note:
+      - { id: 9721, note: n1, noteable_type: MergeRequest, noteable_id: 9711, project_id: 9700, traversal_path: "1/100/9700/" }
+      - { id: 9722, note: n2, noteable_type: MergeRequest, noteable_id: 9712, project_id: 9700, traversal_path: "1/100/9700/" }
+    gl_edge:
+      - { traversal_path: "1/100/9700/", source_id: 9711, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 9700, target_kind: Project, source_tags: ["state:opened"], target_tags: [] }
+      - { traversal_path: "1/100/9700/", source_id: 9712, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 9700, target_kind: Project, source_tags: ["state:opened"], target_tags: [] }
+      - { traversal_path: "1/100/9700/", source_id: 9721, source_kind: Note, relationship_kind: IN_PROJECT, target_id: 9700, target_kind: Project, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/9700/", source_id: 9722, source_kind: Note, relationship_kind: IN_PROJECT, target_id: 9700, target_kind: Project, source_tags: [], target_tags: [] }
+
+cases:
+  - name: stale_match_excluded
+    description: The old star_count matches neither branch, so nothing is counted
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {star_count: 1}), (n:Note)-[:IN_PROJECT]->(p) RETURN count(n) AS c
+    expect:
+      skip_requirements: ["filter:star_count"]
+      row_count: 1
+      row_values: [{ c: 0 }]
+
+  - name: latest_match_counted
+    description: The latest star_count matches both branches and counts every merge request and note pair
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {star_count: 2}), (n:Note)-[:IN_PROJECT]->(p) RETURN count(n) AS c
+    expect:
+      skip_requirements: ["filter:star_count"]
+      row_count: 1
+      row_values: [{ c: 4 }]

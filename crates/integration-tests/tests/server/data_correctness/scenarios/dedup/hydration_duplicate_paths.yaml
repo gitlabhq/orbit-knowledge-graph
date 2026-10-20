@@ -1,6 +1,7 @@
 description: Hydration returns every requested entity when an earlier ID exists at two paths
 
 config:
+  unmerged_seed: true
   security: { org_id: 1, paths: ["1/"] }
   redaction:
     allow:

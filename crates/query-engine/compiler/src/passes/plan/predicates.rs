@@ -68,6 +68,7 @@ pub enum Predicate {
         relation: RelationId,
         keys: Vec<String>,
     },
+    OrTombstone(Box<Predicate>, String),
     Scope {
         alias: String,
         proof: crate::scope::ScopeProof,
@@ -83,6 +84,7 @@ impl Predicate {
                 &|_| false,
             ),
             Self::Property { selective, .. } => *selective,
+            Self::OrTombstone(predicate, _) => predicate.is_selective(),
             Self::Ids { .. } | Self::Membership { .. } => true,
             Self::IdRange { start, end, .. } => {
                 end.saturating_sub(*start) <= crate::passes::validate::MAX_ID_RANGE_SPAN
@@ -118,11 +120,11 @@ impl Predicate {
         }
     }
 
-    pub fn filters_sort_key(&self, sort_key: &[String]) -> bool {
+    pub fn filters_sort_key(&self, sort_key: &[String], immutable_ok: bool) -> bool {
         let in_key = |column: &str| sort_key.iter().any(|key| key == column);
         match self {
             Self::Boolean(expression) => expression.fold(
-                &|predicate| predicate.filters_sort_key(sort_key),
+                &|predicate| predicate.filters_sort_key(sort_key, immutable_ok),
                 &|children| children.into_iter().all(|filters| filters),
                 &|filters| filters,
             ),
@@ -131,7 +133,9 @@ impl Predicate {
                 filter,
                 immutable,
                 ..
-            } => filter.rhs_column.is_none() && (*immutable || in_key(&column.name)),
+            } => {
+                filter.rhs_column.is_none() && (*immutable && immutable_ok || in_key(&column.name))
+            }
             Self::Ids { column, .. }
             | Self::IdRange { column, .. }
             | Self::EntityKind { column, .. } => in_key(&column.name),
@@ -139,6 +143,14 @@ impl Predicate {
             Self::RelationshipKinds { .. } => in_key(RELATIONSHIP_KIND_COLUMN),
             Self::Scope { .. } => in_key(TRAVERSAL_PATH_COLUMN),
             _ => false,
+        }
+    }
+
+    pub fn guard_tombstones(self, sort_key: &[String], alias: &str) -> Self {
+        if self.filters_sort_key(sort_key, false) {
+            self
+        } else {
+            Self::OrTombstone(Box::new(self), alias.to_string())
         }
     }
 }

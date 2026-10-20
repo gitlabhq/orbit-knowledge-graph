@@ -128,5 +128,6 @@ storage:
     - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: contacted_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
   indexes:
+    - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_runner_type, column: runner_type, type: "set(4)", granularity: 2}
     - {name: idx_name, column: name, type: text, granularity: 1}

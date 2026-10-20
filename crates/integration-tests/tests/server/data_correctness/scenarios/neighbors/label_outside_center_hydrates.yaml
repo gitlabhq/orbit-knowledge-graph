@@ -1,0 +1,37 @@
+cases:
+  - name: label_in_another_group_hydrates
+    description: Outgoing HAS_LABEL neighbors hydrate a label stored under another group than the work item
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4001]}],"neighbors":{"direction":"outgoing","rel_types":["HAS_LABEL"]},"options":{"dynamic_columns":"*"}}
+      gql: |
+        MATCH (w:WorkItem {id: 4001})-[:HAS_LABEL]->(n) RETURN w, properties(n)
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem: { ids: [4001] }
+        Label:
+          ids: [7002]
+          rows:
+            - { id: 7002, title: urgent }
+      edges:
+        HAS_LABEL: [[4001, 7002]]
+
+  - name: scope_fallback_stays_in_caller_paths
+    description: A caller limited to the work item's group gets no properties for a label stored outside its paths
+    config:
+      security: { org_id: 1, paths: ["1/100/"] }
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4001]}],"neighbors":{"direction":"outgoing","rel_types":["HAS_LABEL"]},"options":{"dynamic_columns":"*"}}
+      gql: |
+        MATCH (w:WorkItem {id: 4001})-[:HAS_LABEL]->(n) RETURN w, properties(n)
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem: { ids: [4001] }
+        Label:
+          ids: [7002]
+          no_properties: true
+      edges:
+        HAS_LABEL: [[4001, 7002]]

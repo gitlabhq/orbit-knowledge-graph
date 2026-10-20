@@ -1,0 +1,38 @@
+description: Variable-depth traversal across both edge tables skips edges whose latest version is a tombstone in either table
+
+config:
+  ontology_overlay: variant_routes
+  unmerged_seed: true
+  extra_seed:
+    gl_file:
+      - { id: 11000, path: "crates/compiler/src/lib.rs", project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+    gl_definition:
+      - { id: 99341, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: live_callee, fqn: live_callee }
+      - { id: 99342, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: dropped_callee, fqn: dropped_callee }
+    gl_edge:
+      - { source_id: 11000, source_kind: File, target_id: 12000, target_kind: Definition, relationship_kind: CALLS, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00", _deleted: false }
+      - { source_id: 11000, source_kind: File, target_id: 12000, target_kind: Definition, relationship_kind: CALLS, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: true }
+      - { source_id: 11000, source_kind: File, target_id: 99341, target_kind: Definition, relationship_kind: CALLS, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00", _deleted: false }
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99341, source_kind: Definition, relationship_kind: CALLS, target_id: 99342, target_kind: Definition, _version: "2024-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99341, source_kind: Definition, relationship_kind: CALLS, target_id: 99342, target_kind: Definition, _version: "2024-06-01 00:00:00", _deleted: true }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99341, source_kind: Definition, relationship_kind: CALLS, target_id: 12002, target_kind: Definition, _version: "2024-01-01 00:00:00", _deleted: false }
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"file","entity":"File","node_ids":[11000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"file","to":"callee","hops":[1,2]}],"limit":10}
+  gql: |
+    MATCH (file:File {id: 11000})-[:CALLS*1..2]->(callee:Definition) RETURN file, callee LIMIT 10
+
+expect:
+  sql_contains: ["gl_edge", "gl_code_edge"]
+  node_count: 3
+  nodes:
+    File:
+      ids: [11000]
+    Definition:
+      ids: [99341, 12002]
+      absent: [12000, 12001, 99342]
+  edges:
+    CALLS: [[11000, 99341], [11000, 12002]]
+  referential_integrity: true

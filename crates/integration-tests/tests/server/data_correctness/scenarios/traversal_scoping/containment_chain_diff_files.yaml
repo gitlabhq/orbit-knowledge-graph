@@ -1,4 +1,4 @@
-description: Container-elision 4-hop FK chain counts diff files per project
+description: A four-hop chain from a group through CONTAINS counts diff files per project
 
 config:
   extra_seed:

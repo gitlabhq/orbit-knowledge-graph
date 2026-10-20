@@ -53,6 +53,9 @@ cases:
             - (CTE $users (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
           expect:
             - (Filter _orbit_edge_0.source_id IN $users.id, ... (_))
+          occurrences:
+            - pattern: (CTE ? (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
+              count: 1
 
   - name: Repeated low-cardinality row filters stay inline
     query:

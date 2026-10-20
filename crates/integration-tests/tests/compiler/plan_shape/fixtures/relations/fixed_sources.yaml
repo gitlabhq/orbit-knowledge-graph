@@ -37,6 +37,8 @@ cases:
             - (Join ON j.pipeline_id = mr.head_pipeline_id (_) (_))
             - (Scan Table(gl_merge_request) AS mr)
             - (Scan Table(gl_job) AS j)
+            - (Project mr.author_id AS e0_src, mr.id AS e0_dst, mr.id AS e1_src, mr.head_pipeline_id AS e1_dst, j.pipeline_id AS e2_src, j.id AS e2_dst, ... (_))
+          reject: ["(Scan Table(gl_edge) ...)", "(Scan Table(gl_ci_edge) ...)"]
 
   - name: Stored relationship families compose through shared endpoints
     query:

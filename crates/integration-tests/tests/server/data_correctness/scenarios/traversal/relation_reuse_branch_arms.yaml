@@ -1,0 +1,34 @@
+description: One reached merge request set narrows both branch arms and both arms return the live rows, including the head pipeline set on the latest MR row
+
+config:
+  redaction:
+    allow:
+      user: [2]
+      merge_request: [2000]
+      project: [1000]
+      ci_pipeline: [99360]
+  extra_seed:
+    gl_pipeline:
+      - { id: 99360, iid: 1, ref: feature-a, status: success, source: merge_request_event, project_id: 1000, merge_request_id: 2000, traversal_path: "1/100/1000/" }
+    gl_merge_request:
+      - { id: 2000, iid: 1, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, project_id: 1000, author_id: 1, head_pipeline_id: 99360, traversal_path: "1/100/1000/" }
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[2]},{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project"},{"id":"pipe","entity":"Pipeline"}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"}],"limit":10}
+  gql: |
+    MATCH (u:User {id: 2})-[:APPROVED]->(mr:MergeRequest),
+      (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)
+    RETURN u, mr, p, pipe LIMIT 10
+
+expect:
+  node_count: 4
+  nodes:
+    User: { ids: [2] }
+    MergeRequest: { ids: [2000] }
+    Project: { ids: [1000] }
+    Pipeline: { ids: [99360] }
+  edges:
+    APPROVED: [[2, 2000]]
+    IN_PROJECT: [[2000, 1000]]
+    HAS_HEAD_PIPELINE: [[2000, 99360]]
