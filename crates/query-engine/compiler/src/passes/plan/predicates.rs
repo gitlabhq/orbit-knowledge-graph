@@ -68,7 +68,6 @@ pub enum Predicate {
         relation: RelationId,
         keys: Vec<String>,
     },
-    /// A tombstone keeps only its sort key, so a pre-pick filter on other columns must let it through.
     OrTombstone {
         predicates: Vec<Predicate>,
         alias: String,
@@ -125,31 +124,24 @@ impl Predicate {
     }
 
     pub fn filters_sort_key(&self, sort_key: &[String]) -> bool {
-        match self {
-            Self::Boolean(expression) => expression.fold(
-                &|predicate| predicate.filters_sort_key(sort_key),
-                &|children| children.into_iter().all(|filters| filters),
-                &|filters| filters,
-            ),
-            Self::Property {
-                filter,
-                immutable: true,
-                ..
-            } => filter.rhs_column.is_none(),
-            _ => self.on_sort_key(sort_key),
-        }
+        self.stable(sort_key, true)
     }
 
-    pub fn on_sort_key(&self, sort_key: &[String]) -> bool {
+    fn stable(&self, sort_key: &[String], immutable_ok: bool) -> bool {
         let in_key = |column: &str| sort_key.iter().any(|key| key == column);
         match self {
             Self::Boolean(expression) => expression.fold(
-                &|predicate| predicate.on_sort_key(sort_key),
-                &|children| children.into_iter().all(|on_key| on_key),
-                &|on_key| on_key,
+                &|predicate| predicate.stable(sort_key, immutable_ok),
+                &|children| children.into_iter().all(|stable| stable),
+                &|stable| stable,
             ),
-            Self::Property { column, filter, .. } => {
-                filter.rhs_column.is_none() && in_key(&column.name)
+            Self::Property {
+                column,
+                filter,
+                immutable,
+                ..
+            } => {
+                filter.rhs_column.is_none() && (*immutable && immutable_ok || in_key(&column.name))
             }
             Self::Ids { column, .. }
             | Self::IdRange { column, .. }
@@ -168,7 +160,7 @@ impl Predicate {
     ) -> Vec<Predicate> {
         let (mut keyed, guarded): (Vec<_>, Vec<_>) = predicates
             .into_iter()
-            .partition(|predicate| predicate.on_sort_key(sort_key));
+            .partition(|predicate| predicate.stable(sort_key, false));
         if !guarded.is_empty() {
             keyed.push(Self::OrTombstone {
                 predicates: guarded,
