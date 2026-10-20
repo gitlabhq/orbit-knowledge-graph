@@ -1,0 +1,84 @@
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      user: [99320]
+      group: [99321, 99322]
+  extra_seed:
+    gl_user:
+      - { id: 99320, username: versioned_neighbor, name: Versioned Neighbor, state: active, _version: "2024-01-01 00:00:00" }
+    gl_group:
+      - { id: 99321, name: Live Group, full_path: public-group/live, visibility_level: public, traversal_path: "1/100/99321/", _version: "2024-01-01 00:00:00" }
+      - { id: 99322, name: Deleted Group, full_path: public-group/deleted, visibility_level: public, traversal_path: "1/100/99322/", _version: "2024-01-01 00:00:00" }
+      - { id: 99322, name: Deleted Group, full_path: public-group/deleted, visibility_level: public, traversal_path: "1/100/99322/", _version: "2024-06-01 00:00:00", _deleted: true }
+    gl_edge:
+      - { traversal_path: "1/100/99321/", source_id: 99320, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99321, target_kind: Group, source_tags: ["state:active"], target_tags: [], _version: "2024-01-01 00:00:00" }
+      - { traversal_path: "1/100/99321/", source_id: 99320, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99321, target_kind: Group, source_tags: ["state:active"], target_tags: ["visibility:public"], _version: "2024-06-01 00:00:00" }
+      - { traversal_path: "1/100/99322/", source_id: 99320, source_kind: User, relationship_kind: MEMBER_OF, target_id: 99322, target_kind: Group, source_tags: ["state:active"], target_tags: [], _version: "2024-01-01 00:00:00" }
+
+cases:
+  - name: outgoing
+    description: Outgoing neighbors return one edge per versioned edge and keep a tombstoned neighbor as a bare node through its live edge, which the indexer tombstones with the node
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[99320]}],"neighbors":{"direction":"outgoing","rel_types":["MEMBER_OF"]}}
+      gql: |
+        MATCH (u:User {id: 99320})-[:MEMBER_OF]->(n) RETURN u, n
+    expect:
+      node_count: 3
+      nodes:
+        User: { ids: [99320] }
+        Group:
+          ids: [99321, 99322]
+          rows:
+            - { id: 99321, name: Live Group }
+      total_edge_count: 2
+      edges:
+        MEMBER_OF: [[99320, 99321], [99320, 99322]]
+
+  - name: incoming
+    description: Incoming neighbors of a group return one edge even though the edge has two versions
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[99321]}],"neighbors":{"direction":"incoming","rel_types":["MEMBER_OF"]}}
+      gql: |
+        MATCH (g:Group {id: 99321})<-[:MEMBER_OF]-(n) RETURN g, n
+    expect:
+      node_count: 2
+      nodes:
+        Group: { ids: [99321] }
+        User:
+          ids: [99320]
+          rows:
+            - { id: 99320, username: versioned_neighbor }
+      total_edge_count: 1
+      edges:
+        MEMBER_OF: [[99320, 99321]]
+
+  - name: both
+    description: Neighbors in both directions return one edge per versioned edge and keep the tombstoned neighbor through its live edge
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[99320]}],"neighbors":{"direction":"both","rel_types":["MEMBER_OF"]}}
+      gql: |
+        MATCH (u:User {id: 99320})-[:MEMBER_OF]-(n) RETURN u, n
+    expect:
+      node_count: 3
+      nodes:
+        User: { ids: [99320] }
+        Group:
+          ids: [99321, 99322]
+      total_edge_count: 2
+      edges:
+        MEMBER_OF: [[99320, 99321], [99320, 99322]]
+
+  - name: incoming_to_tombstoned_center
+    description: Incoming neighbors of a group whose latest row is a tombstone return nothing
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[99322]}],"neighbors":{"direction":"incoming","rel_types":["MEMBER_OF"]}}
+      gql: |
+        MATCH (g:Group {id: 99322})<-[:MEMBER_OF]-(n) RETURN g, n
+    expect:
+      skip_requirements: [node_ids, neighbors, "relationship:MEMBER_OF"]
+      node_count: 0

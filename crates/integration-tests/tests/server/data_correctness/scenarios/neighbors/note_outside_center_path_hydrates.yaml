@@ -1,0 +1,30 @@
+description: HAS_NOTE neighbors hydrate a note stored under another project path than the merge request
+
+config:
+  redaction:
+    allow:
+      merge_request: [2000]
+      note: [3000, 3002, 3003, 99370]
+  extra_seed:
+    gl_note:
+      - { id: 99370, note: Note under another project, noteable_type: MergeRequest, noteable_id: 2000, confidential: false, internal: false, traversal_path: "1/102/1004/" }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 99370, target_kind: Note, source_tags: ["state:opened"], target_tags: [] }
+
+query:
+  json: |
+    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"neighbors":{"direction":"outgoing","rel_types":["HAS_NOTE"]},"options":{"dynamic_columns":"*"}}
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n) RETURN mr, properties(n)
+
+expect:
+  node_count: 5
+  nodes:
+    MergeRequest: { ids: [2000] }
+    Note:
+      ids: [3000, 3002, 3003, 99370]
+      rows:
+        - { id: 99370, note: Note under another project }
+        - { id: 3000, note: Normal note on feature A }
+  edges:
+    HAS_NOTE: [[2000, 3000], [2000, 3002], [2000, 3003], [2000, 99370]]

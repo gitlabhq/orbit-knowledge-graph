@@ -1,0 +1,80 @@
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_definition:
+      - { id: 99310, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: start, fqn: start }
+      - { id: 99311, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: middle, fqn: middle }
+      - { id: 99312, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: end, fqn: end }
+      - { id: 99313, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: live_start, fqn: live_start }
+      - { id: 99314, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: live_middle, fqn: live_middle }
+      - { id: 99315, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: live_end, fqn: live_end }
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99310, source_kind: Definition, relationship_kind: CALLS, target_id: 99311, target_kind: Definition, _version: "2026-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99311, source_kind: Definition, relationship_kind: CALLS, target_id: 99312, target_kind: Definition, _version: "2026-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99311, source_kind: Definition, relationship_kind: CALLS, target_id: 99312, target_kind: Definition, _version: "2026-01-02 00:00:00", _deleted: true }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99313, source_kind: Definition, relationship_kind: CALLS, target_id: 99314, target_kind: Definition, _version: "2026-01-01 00:00:00", _deleted: false }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 99314, source_kind: Definition, relationship_kind: CALLS, target_id: 99315, target_kind: Definition, _version: "2026-01-01 00:00:00", _deleted: false }
+
+cases:
+  - name: fixed_two_hops_stop_at_tombstone
+    description: A two-hop walk does not cross an edge whose latest version is a tombstone at hop two
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[99310]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","hops":[2,2]}],"limit":10}
+      gql: |
+        MATCH (a:Definition {id: 99310})-[:CALLS*2]->(b:Definition) RETURN a, b LIMIT 10
+    expect:
+      skip_requirements: [node_ids, "relationship:CALLS"]
+      node_count: 0
+
+  - name: range_to_pinned_target_stops_at_tombstone
+    description: A one-to-two-hop walk to a pinned target finds no path when the only hop into it is tombstoned
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[99310]},{"id":"b","entity":"Definition","node_ids":[99312]}],"relationships":[{"type":"CALLS","from":"a","to":"b","hops":[1,2]}],"limit":10}
+      gql: |
+        MATCH (a:Definition {id: 99310})-[:CALLS*1..2]->(b:Definition {id: 99312}) RETURN a, b LIMIT 10
+    expect:
+      skip_requirements: [node_ids, "relationship:CALLS"]
+      node_count: 0
+
+  - name: reverse_walk_stops_at_tombstone
+    description: A walk back from a pinned target does not cross a tombstoned edge into it
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition"},{"id":"b","entity":"Definition","node_ids":[99312]}],"relationships":[{"type":"CALLS","from":"a","to":"b","hops":[1,2]}],"limit":10}
+      gql: |
+        MATCH (a:Definition)-[:CALLS*1..2]->(b:Definition {id: 99312}) RETURN a, b LIMIT 10
+    expect:
+      skip_requirements: [node_ids, "relationship:CALLS"]
+      node_count: 0
+
+  - name: live_chain_forward_control
+    description: The same forward walk over a live chain reaches both hops
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[99313]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","hops":[1,2]}],"limit":10}
+      gql: |
+        MATCH (a:Definition {id: 99313})-[:CALLS*1..2]->(b:Definition) RETURN a, b LIMIT 10
+    expect:
+      node_count: 3
+      nodes:
+        Definition:
+          ids: [99313, 99314, 99315]
+      edges:
+        CALLS: [[99313, 99314], [99313, 99315]]
+
+  - name: live_chain_reverse_control
+    description: The same reverse walk over a live chain reaches both callers of the pinned target
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition"},{"id":"b","entity":"Definition","node_ids":[99315]}],"relationships":[{"type":"CALLS","from":"a","to":"b","hops":[1,2]}],"limit":10}
+      gql: |
+        MATCH (a:Definition)-[:CALLS*1..2]->(b:Definition {id: 99315}) RETURN a, b LIMIT 10
+    expect:
+      node_count: 3
+      nodes:
+        Definition:
+          ids: [99313, 99314, 99315]
+      edges:
+        CALLS: [[99313, 99315], [99314, 99315]]

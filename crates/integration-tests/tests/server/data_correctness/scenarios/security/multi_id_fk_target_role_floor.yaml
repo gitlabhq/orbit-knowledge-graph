@@ -1,11 +1,11 @@
-description: A multi-ID FK target retains its elevated-role scan in an ungrouped aggregation
-
 config:
-  security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
   extra_seed:
+    gl_vulnerability:
+      - { id: 8000, title: SQLi in login, state: detected, severity: critical, report_type: sast, resolved_on_default_branch: false, present_on_default_branch: true, project_id: 1000, finding_id: 90000, traversal_path: "1/100/1000/" }
+    gl_vulnerability_occurrence:
+      - { id: 90000, uuid: role-floor-occurrence, name: Role Floor Occurrence, severity: critical, report_type: sast, project_id: 1000, traversal_path: "1/100/1000/" }
     gl_edge:
       - { traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: HAS_NOTE, target_id: 3000, target_kind: Note, source_tags: [], target_tags: [] }
-      - { traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: HAS_FINDING, target_id: 90000, target_kind: VulnerabilityOccurrence, source_tags: [], target_tags: [] }
 
 query:
   json: |
@@ -28,8 +28,22 @@ query:
     WHERE f.id IN [90000, 90001]
     RETURN count(v) AS n
 
-expect:
-  row_count: 1
-  row_values: [{ n: 0 }]
-  sql_contains: ["_role_f.id IN (SELECT", "LIMIT 1 BY _role_f.traversal_path, _role_f.id", "false"]
-  skip_requirements: [node_ids]
+cases:
+  - name: reporter_counts_nothing
+    description: A multi-ID FK target retains its elevated-role scan in an ungrouped aggregation
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
+    expect:
+      row_count: 1
+      row_values: [{ n: 0 }]
+      sql_contains: ["_role_f.id IN (SELECT", "LIMIT 1 BY _role_f.traversal_path, _role_f.id", "false"]
+      skip_requirements: [node_ids]
+
+  - name: developer_counts_the_finding
+    description: The same aggregation counts the vulnerability once the caller meets the role floor
+    config:
+      security: { org_id: 1, paths: ["1/100/"], access_level: 30 }
+    expect:
+      row_count: 1
+      row_values: [{ n: 1 }]
+      skip_requirements: [node_ids]
