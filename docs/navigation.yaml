@@ -1,10 +1,8 @@
-# The GitLab Orbit sections of the docs.gitlab.com global navigation.
+# The GitLab Orbit section of the docs.gitlab.com global navigation.
 # Source of truth until it merges in docs-gitlab-com data/en-us/navigation.yaml.
 # scripts/docs/site.sh replaces the GitLab Orbit section of the docs-gitlab-com
 # checkout with this file, so `mise docs:serve` and `docs_hugo_build` show these pages.
-# During the docs v2 review, the first section is the live navigation and the
-# second lists the docs/source/v2 pages. At cutover, drop the first section and
-# the v2/ prefix.
+# Until cutover, the first section is live and the second lists docs/source/v2.
 
 - title: GitLab Orbit
   url: 'orbit/'
