@@ -1,7 +1,7 @@
 use futures::StreamExt;
+use orbit_log_fields::{error, info, warn};
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
-use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::proto::{
@@ -75,9 +75,9 @@ impl RedactionService {
             .collect();
 
         info!(
-            result_id = %result_id,
-            resource_count = proto_resources.len(),
-            "Requesting redaction authorization"
+            safe(RESULT_ID) = result_id.as_str(),
+            safe(COUNT) = proto_resources.len(),
+            "Requesting redaction authorization for resources"
         );
 
         let redaction_required = RedactionExchange {
@@ -92,7 +92,7 @@ impl RedactionService {
         let redaction_msg = match stream.next().await {
             Some(Ok(msg)) => msg,
             Some(Err(e)) => {
-                error!(error = %e, "Failed to receive redaction response");
+                error!(expanded(ERROR_MESSAGE) = %e, "Failed to receive redaction response");
                 return Err(RedactionExchangeError::ReceiveFailed(e));
             }
             None => {

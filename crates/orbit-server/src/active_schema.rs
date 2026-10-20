@@ -10,6 +10,7 @@ use ontology::Ontology;
 use ontology::archive::OntologyArchive;
 use ontology::introspection::{IntrospectionScope, build_relationship_patterns};
 use opentelemetry::KeyValue;
+use orbit_log_fields::{info, warn};
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::schema::GraphSchema;
 use orbit_migrations::version::{read_active_version, table_prefix, version_tables_complete};
@@ -18,7 +19,6 @@ use query_engine::compiler::{validate_normalize, validate_normalize_gql};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
-use tracing::{info, warn};
 
 #[derive(Default)]
 pub struct ActiveSchema {
@@ -68,7 +68,10 @@ impl ActiveSchema {
             tokio::select! {
                 _ = shutdown.cancelled() => return,
                 Err(error) = self.follow_active_version(&loader, retry_backoff) => {
-                    warn!(%error, "active version watch lost; reopening");
+                    warn!(
+                        expanded(ERROR_MESSAGE) = %error,
+                        "active version watch lost; reopening"
+                    );
                 }
             }
             tokio::select! {
@@ -87,7 +90,10 @@ impl ActiveSchema {
         let mut target = match loader.active_version().await {
             Ok(version) => version,
             Err(error) => {
-                warn!(%error, "active version unknown; keeping the last installed snapshot");
+                warn!(
+                    expanded(ERROR_MESSAGE) = %error,
+                    "active version unknown; keeping the last installed snapshot"
+                );
                 self.installed().map(|snapshot| snapshot.migration_version)
             }
         };
@@ -95,7 +101,10 @@ impl ActiveSchema {
             let next_change = match self.install_version(loader, target).await {
                 Ok(()) => changes.try_next().await?,
                 Err(error) => {
-                    warn!(error = %format_args!("{error:#}"), "active schema unavailable; retrying");
+                    warn!(
+                        expanded(ERROR_MESSAGE) = %format_args!("{error:#}"),
+                        "active schema unavailable; retrying"
+                    );
                     tokio::select! {
                         change = changes.try_next() => change?,
                         _ = sleep(retry_backoff) => continue,
@@ -146,7 +155,10 @@ impl ActiveSchema {
         let previous_version = slot.as_ref().map(|snapshot| snapshot.migration_version);
         *slot = snapshot;
         if next_version != previous_version {
-            info!(migration_version = next_version, "active schema changed");
+            info!(
+                safe(MIGRATION_VERSION) = next_version,
+                "active schema changed"
+            );
         }
     }
 }
@@ -167,9 +179,9 @@ impl SchemaSnapshot {
             Ok(()) => true,
             Err(error) => {
                 warn!(
-                    migration_version,
-                    query = %query.name,
-                    error,
+                    safe(MIGRATION_VERSION) = migration_version,
+                    safe(QUERY_NAME) = query.name.as_str(),
+                    expanded(ERROR_MESSAGE) = %error,
                     "named query unavailable in active schema"
                 );
                 false

@@ -183,7 +183,7 @@ nats stream purge GKG_DEAD_LETTERS \
 4. Check indexer logs for the project:
 
    ```shell
-   kubectl logs -n gkg deployment/gkg-indexer -f | grep 'project_id=<id>'
+   kubectl logs -n gkg deployment/gkg-indexer -f | grep '"gl_project_id":<id>'
    ```
 
 ### Lock stuck (worker crashed mid-indexing)

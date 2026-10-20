@@ -231,7 +231,11 @@ impl ParameterSampler {
     pub async fn warm_cache(&mut self, ontology: &Ontology) -> Result<()> {
         for node in ontology.nodes() {
             if let Err(e) = self.sample_ids(&node.name, ontology).await {
-                tracing::warn!("Failed to sample IDs for {}: {}", node.name, e);
+                orbit_log_fields::warn!(
+                    safe(ENTITY) = node.name.as_str(),
+                    expanded(ERROR_MESSAGE) = %e,
+                    "failed to sample IDs"
+                );
             }
         }
         Ok(())

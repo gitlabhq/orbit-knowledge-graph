@@ -106,8 +106,8 @@ pub fn analyze_files(
             ) && !Path::new(root_path).exists()
             {
                 if !root_gone.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                    tracing::warn!(
-                        root_path,
+                    orbit_log_fields::warn!(
+                        expanded(LOCAL_PATH) = root_path,
                         "js: repository tree removed mid-analysis, dropping remaining files"
                     );
                 }

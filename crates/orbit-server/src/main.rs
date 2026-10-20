@@ -9,6 +9,7 @@ use clickhouse_client::ClickHouseConfigurationExt;
 use indexer::schema;
 use indexer::{DispatcherConfig, IndexerConfig};
 use orbit_billing::{QuotaService, SnowplowBillingTracker};
+use orbit_log_fields::{info, warn};
 use orbit_migrations::version::SCHEMA_VERSION;
 use orbit_server::active_schema::ActiveSchema;
 use orbit_server::analytics::SnowplowAnalyticsTracker;
@@ -24,7 +25,6 @@ use orbit_server_config::AppConfig;
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -80,7 +80,11 @@ async fn main() -> anyhow::Result<()> {
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     ontology::constants::validate_ontology_constants(&ontology);
 
-    info!(mode = ?args.mode, aws_lc_fips = aws_lc_version, "starting");
+    info!(
+        safe(SERVER_MODE) = args.mode.service_name(),
+        safe(AWS_LC_VERSION) = aws_lc_version,
+        "starting"
+    );
 
     let shutdown = CancellationToken::new();
     let signal_task = tokio::spawn(shutdown::wait_for_signal(shutdown.clone()));
@@ -130,8 +134,8 @@ async fn main() -> anyhow::Result<()> {
 
     signal_task.abort();
     if let Err(error) = &result {
-        tracing::error!(
-            error_message = %format_args!("{error:#}"),
+        orbit_log_fields::error!(
+            expanded(ERROR_MESSAGE) = %format_args!("{error:#}"),
             "server stopped with an error"
         );
     }
@@ -151,7 +155,7 @@ async fn run_webserver(
 ) -> anyhow::Result<()> {
     orbit_billing::enforcement::validate(&config.billing)?;
     info!(
-        billing_enforced = orbit_billing::enforcement::ENFORCED,
+        safe(ENABLED) = orbit_billing::enforcement::ENFORCED,
         "billing enforcement"
     );
 
@@ -207,7 +211,11 @@ async fn run_webserver(
     );
 
     let grpc_listener = tokio::net::TcpListener::bind(config.grpc_bind_address).await?;
-    info!(addr = %config.grpc_bind_address, "gRPC server bound");
+    info!(
+        // ast-grep-ignore: log-safe-field-is-plain -- a socket address from the Orbit config
+        safe(TCP_ADDRESS) = config.grpc_bind_address.to_string(),
+        "gRPC server bound"
+    );
 
     let tls_config = orbit_server::tls::load_tls_config(&config.tls).await?;
 
@@ -232,8 +240,8 @@ async fn run_webserver(
             ));
         }
         info!(
-            collector_url = %config.billing.collector_url,
-            app_id = orbit_billing::constants::APP_ID,
+            expanded(URL) = %config.billing.collector_url,
+            safe(SNOWPLOW_APP_ID) = orbit_billing::constants::APP_ID,
             "initializing billing event tracker"
         );
         let cc_token_cache = Some(Arc::new(gitlab_client::CloudConnectorTokenCache::new(
@@ -252,8 +260,8 @@ async fn run_webserver(
     if config.billing.quota.enabled {
         config.billing.quota.validate()?;
         info!(
-            customers_dot_url = %config.billing.quota.customers_dot_url,
-            auth_mode = ?config.billing.quota.auth_mode,
+            expanded(URL) = %config.billing.quota.customers_dot_url,
+            safe(AUTH_MODE) = <&str>::from(config.billing.quota.auth_mode),
             "initializing usage quota gate"
         );
         let quota = QuotaService::from_config(&config.billing)
@@ -269,9 +277,9 @@ async fn run_webserver(
             ));
         }
         info!(
-            collector_url = %config.analytics.collector_url,
-            deployment = ?config.analytics.deployment.kind,
-            environment = ?config.analytics.deployment.environment,
+            expanded(URL) = %config.analytics.collector_url,
+            safe(DEPLOYMENT_TYPE) = <&str>::from(config.analytics.deployment.kind),
+            safe(DEPLOYMENT_ENVIRONMENT) = <&str>::from(config.analytics.deployment.environment),
             "initializing analytics event tracker"
         );
         let tracker = SnowplowAnalyticsTracker::from_config(&config.analytics)
@@ -280,7 +288,11 @@ async fn run_webserver(
         analytics_tracker = Some(tracker);
     }
 
-    info!(addr = %config.grpc_bind_address, "gRPC server starting");
+    info!(
+        // ast-grep-ignore: log-safe-field-is-plain -- a socket address from the Orbit config
+        safe(TCP_ADDRESS) = config.grpc_bind_address.to_string(),
+        "gRPC server starting"
+    );
     serving.store(true, Ordering::Relaxed);
 
     let result = tokio::select! {

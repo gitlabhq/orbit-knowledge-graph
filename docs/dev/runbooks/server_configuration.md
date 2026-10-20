@@ -741,7 +741,7 @@ kubectl -n gkg logs deployment/gkg-indexer -f
 kubectl -n gkg logs deployment/gkg-dispatcher -f
 
 # Filter logs for a specific project
-kubectl -n gkg logs deployment/gkg-indexer -f | grep 'project_id=<id>'
+kubectl -n gkg logs deployment/gkg-indexer -f | grep '"gl_project_id":<id>'
 ```
 
 ### Inspect running configuration

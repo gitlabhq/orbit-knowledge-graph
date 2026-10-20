@@ -10,5 +10,5 @@ workspace = true
 [dependencies]
 circuit-breaker = { workspace = true }
 opentelemetry = { workspace = true }
+orbit-log-fields = { workspace = true }
 serde = { workspace = true }
-tracing = { workspace = true }

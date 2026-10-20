@@ -28,6 +28,24 @@ pub enum MigrationScope {
 }
 
 impl MigrationScope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Code => "code",
+            Self::Sdlc(_) => "sdlc",
+            Self::None => "none",
+        }
+    }
+
+    pub fn sdlc_entities(&self) -> Option<String> {
+        match self {
+            Self::Sdlc(entities) if !entities.is_empty() => {
+                Some(entities.iter().cloned().collect::<Vec<_>>().join(","))
+            }
+            _ => None,
+        }
+    }
+
     #[must_use]
     pub fn includes(&self, other: &Self) -> bool {
         match (self, other) {
@@ -213,8 +231,8 @@ pub fn find_invalidated_pipelines(
     let descriptors = ontology.pipeline_descriptors();
 
     for entity in orphaned_sdlc_entities(ontology, &invalidated, &descriptors) {
-        tracing::warn!(
-            entity = %entity,
+        orbit_log_fields::warn!(
+            safe(ENTITY) = entity.as_str(),
             "invalidated SDLC entity is emitted by no pipeline — orphan, excluded from seeding and gating"
         );
     }

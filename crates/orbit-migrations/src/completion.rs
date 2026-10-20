@@ -117,8 +117,14 @@ pub async fn fetch_enabled_top_level_namespaces(
     );
 
     if !split.skipped.is_empty() {
-        tracing::warn!(
-            skipped = ?split.skipped,
+        let paths: Vec<&str> = split
+            .skipped
+            .iter()
+            .map(|(_, path)| path.as_str())
+            .collect();
+        orbit_log_fields::warn!(
+            safe(COUNT) = paths.len(),
+            safe(TRAVERSAL_PATHS) = paths.join(","),
             "excluding non-top-level namespace paths from completion gate"
         );
     }

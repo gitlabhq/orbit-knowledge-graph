@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use orbit_log_fields::info;
 use sysinfo::{MemoryRefreshKind, ProcessRefreshKind, ProcessesToUpdate, System, get_current_pid};
-use tracing::info;
 
 use crate::engine::{EngineConfiguration, IndexerModule};
 
@@ -68,16 +68,22 @@ impl EngineConfiguration {
             let workers = resources.derive_worker_budget();
             self.max_concurrent_workers = Some(workers);
             info!(
-                available_parallelism = resources.available_parallelism,
-                memory_limit_bytes = resources.memory_limit_bytes,
-                value = workers,
+                safe(CPU_COUNT) = resources.available_parallelism,
+                safe(MEMORY_LIMIT_BYTES) = resources.memory_limit_bytes,
+                safe(CONCURRENCY) = workers,
                 "derived engine.max_concurrent_workers"
             );
         }
 
         if self.concurrency_groups.is_empty() {
             let groups = derive_concurrency_groups(&self.modules, self.max_concurrent_workers());
-            info!(?groups, "derived engine.concurrency_groups");
+            for (group, limit) in &groups {
+                info!(
+                    safe(WORKER_GROUP) = group.as_str(),
+                    safe(CONCURRENCY) = *limit,
+                    "derived engine.concurrency_groups"
+                );
+            }
             self.concurrency_groups = groups;
         }
 

@@ -8,9 +8,9 @@ use std::time::Duration;
 
 use base64::Engine;
 use code_graph::v2::CancellationToken;
+use orbit_log_fields::{debug, warn};
 use rand::RngExt;
 use tokio::time::Instant;
-use tracing::{debug, warn};
 
 use crate::locking::{LockError, LockGuard, LockService};
 use crate::modules::code::metrics::CodeMetrics;
@@ -118,7 +118,11 @@ impl ArchiveLeases {
                     .await
                     .map_err(|e| LeaseError::Backend(e.to_string()))?;
                 if let Ok(guard) = acquired {
-                    debug!(storage = scope, key, "archive lease acquired");
+                    debug!(
+                        safe(GITALY_STORAGE) = scope,
+                        expanded(KV_KEY) = key,
+                        "archive lease acquired"
+                    );
                     return Ok(guard);
                 }
             }
@@ -151,11 +155,19 @@ impl ArchiveLeases {
                     Err(LockError::Lost) => return LeaseError::Lost(scope.to_string()),
                     // An expired lease may already be another pod's slot, so fence even without a Lost reply.
                     Err(error) if guard.time_left().is_zero() => {
-                        warn!(storage = scope, %error, "archive lease expired while renewals failed");
+                        warn!(
+                            safe(GITALY_STORAGE) = scope,
+                            expanded(ERROR_MESSAGE) = %error,
+                            "archive lease expired while renewals failed"
+                        );
                         return LeaseError::Lost(scope.to_string());
                     }
                     Err(error) => {
-                        warn!(storage = scope, %error, "archive lease renewal failed transiently; retrying on the next tick");
+                        warn!(
+                            safe(GITALY_STORAGE) = scope,
+                            expanded(ERROR_MESSAGE) = %error,
+                            "archive lease renewal failed transiently; retrying on the next tick"
+                        );
                     }
                 }
             }
@@ -188,7 +200,11 @@ impl HeldSlot {
             return;
         };
         if let Err(error) = guard.release().await {
-            warn!(storage = scope, %error, "archive lease release failed; its TTL will free the slot");
+            warn!(
+                safe(GITALY_STORAGE) = scope,
+                expanded(ERROR_MESSAGE) = %error,
+                "archive lease release failed; its TTL will free the slot"
+            );
         }
     }
 

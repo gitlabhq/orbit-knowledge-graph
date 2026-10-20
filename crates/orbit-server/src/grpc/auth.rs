@@ -14,7 +14,7 @@ pub fn extract_request_context<T>(
         .ok_or_else(|| Status::unauthenticated("Missing or invalid authorization header"))?;
 
     let claims = validator.validate(token).map_err(|e| {
-        tracing::warn!(error = %e, "JWT validation failed");
+        orbit_log_fields::warn!(expanded(ERROR_MESSAGE) = %e, "JWT validation failed");
         Status::unauthenticated(format!("JWT validation failed: {e}"))
     })?;
 
@@ -28,21 +28,13 @@ pub fn extract_request_context<T>(
     ctx.record_in_current_span();
 
     let claims = &ctx.claims;
-    tracing::info!(
-        user_id = claims.user_id,
-        source_type = <&str>::from(claims.source_type),
-        realm = claims.realm.as_deref().unwrap_or(""),
-        deployment_type = claims.deployment_type.as_deref().unwrap_or(""),
-        root_namespace_id = claims.root_namespace_id.unwrap_or_default(),
-        organization_id = claims.organization_id.unwrap_or_default(),
-        instance_id = claims.instance_id.as_deref().unwrap_or(""),
-        unique_instance_id = claims.unique_instance_id.as_deref().unwrap_or(""),
-        instance_version = claims.instance_version.as_deref().unwrap_or(""),
-        global_user_id = claims.global_user_id.as_deref().unwrap_or(""),
-        license_checksum_present = claims.license_checksum.is_some(),
-        correlation_id = %labkit::correlation::current()
-            .as_deref()
-            .unwrap_or_default(),
+    orbit_log_fields::info!(
+        safe(DEPLOYMENT_TYPE) = claims.deployment_type.as_deref(),
+        safe(INSTANCE_ID) = claims.instance_id.as_deref(),
+        safe(UNIQUE_INSTANCE_ID) = claims.unique_instance_id.as_deref(),
+        safe(INSTANCE_VERSION) = claims.instance_version.as_deref(),
+        safe(LICENSE_CHECKSUM_PRESENT) = claims.license_checksum.is_some(),
+        expanded(GLOBAL_USER_ID) = claims.global_user_id.as_deref(),
         "JWT claims received"
     );
 

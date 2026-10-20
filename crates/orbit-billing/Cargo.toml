@@ -25,10 +25,11 @@ reqwest = { workspace = true }
 secrecy = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+strum = { workspace = true }
 thiserror = { workspace = true }
 tonic = { workspace = true }
 tonic-types = { workspace = true }
-tracing = { workspace = true }
+orbit-log-fields = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
