@@ -1590,7 +1590,7 @@ func (x *GetQueryDslRequest) GetLanguage() QueryLanguage {
 
 type GetQueryDslResponse struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
-	Version string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"` // semver string for the query DSL grammar, e.g. "1.0.0"
+	Version string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"` // Unused since the JSON Query DSL was removed
 	// Types that are valid to be assigned to Content:
 	//
 	//	*GetQueryDslResponse_RawJsonSchema
@@ -1681,7 +1681,7 @@ func (*GetQueryDslResponse_FormattedText) isGetQueryDslResponse_Content() {}
 // Request for the embedded skill catalog.
 type ListSkillsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Language      QueryLanguage          `protobuf:"varint,1,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"` // Query language of the caller; both modes serve the GQL skills
+	Language      QueryLanguage          `protobuf:"varint,1,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"` // Query language the served skills teach; QUERY_LANGUAGE_JSON rejects with INVALID_ARGUMENT
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1849,7 +1849,7 @@ type GetSkillRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	MetadataOnly  bool                   `protobuf:"varint,2,opt,name=metadata_only,json=metadataOnly,proto3" json:"metadata_only,omitempty"` // true omits files for a cheap cache revalidation
-	Language      QueryLanguage          `protobuf:"varint,3,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"` // Query language of the caller; both modes serve the GQL skill
+	Language      QueryLanguage          `protobuf:"varint,3,opt,name=language,proto3,enum=orbit.v1.QueryLanguage" json:"language,omitempty"` // Query language the served skill teaches; QUERY_LANGUAGE_JSON rejects with INVALID_ARGUMENT
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

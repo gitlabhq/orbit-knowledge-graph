@@ -181,32 +181,31 @@ async fn seed(ctx: &TestContext) {
     ctx.optimize_all().await;
 }
 
-async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService) -> Value {
-    run_pipeline_with_security(ctx, json, svc, test_security_context()).await
+async fn run_pipeline(ctx: &TestContext, gql: &str, svc: &MockRedactionService) -> Value {
+    run_pipeline_with_security(ctx, gql, svc, test_security_context()).await
 }
 
 async fn run_pipeline_with_security(
     ctx: &TestContext,
-    json: &str,
+    gql: &str,
     svc: &MockRedactionService,
     security_ctx: SecurityContext,
 ) -> Value {
-    let value = GraphFormatter.format(&pipeline_output(ctx, json, svc, security_ctx).await);
+    let value = GraphFormatter.format(&pipeline_output(ctx, gql, svc, security_ctx).await);
     assert_valid(&value);
     value
 }
 
 pub(super) async fn pipeline_output(
     ctx: &TestContext,
-    json: &str,
+    gql: &str,
     svc: &MockRedactionService,
     security_ctx: SecurityContext,
 ) -> PipelineOutput {
     let ontology = load_ontology();
     let data_model = derive_clickhouse_data_model(&ontology);
     let client = Arc::new(ctx.create_client());
-    let compiled =
-        Arc::new(compile_model(json, Frontend::Gql, &data_model, &security_ctx).unwrap());
+    let compiled = Arc::new(compile_model(gql, Frontend::Gql, &data_model, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
