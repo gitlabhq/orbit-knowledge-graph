@@ -33,8 +33,8 @@ The remaining setup steps require all three systems to exist and be reachable.
 - GitLab 19.2.2 or later.
 - Administrator access to the GitLab instance and to its PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.
-- ClickHouse 26.4 to 26.6, set up for GitLab.
-- Kubernetes 1.24 or later. Siphon has a higher requirement. For more information, see [Kubernetes](#kubernetes).
+- ClickHouse, set up for GitLab. For the supported releases, see [ClickHouse](#clickhouse).
+- Kubernetes 1.24 or later. For the Siphon table image, see [Kubernetes](#kubernetes).
 - NATS with JetStream turned on.
 - A GitLab Orbit release that supports your GitLab version. For more information, see
   [Version compatibility](#version-compatibility).
@@ -45,8 +45,11 @@ GitLab does not check the GitLab Orbit version. A release that is too old fails 
 
 | GitLab version | Minimum GitLab Orbit version |
 |----------------|------------------------------|
-| 19.2 to 19.4   | 0.128.0, the oldest release that the `orbit` chart 4.x installs |
+| 19.2 to 19.4   | 0.128.0 |
 | 19.5           | 0.131.0 |
+
+0.128.0 is the oldest release that the `orbit` chart 4.x installs. GitLab 19.3 and 19.4 also need 0.100.0
+or later, and GitLab 19.5 calls services that 0.131.0 added.
 
 For a later GitLab version, use the latest GitLab Orbit release.
 
@@ -126,7 +129,7 @@ builds.
 
 Provision at least as much ClickHouse storage as the size of the GitLab PostgreSQL database.
 
-ClickHouse spills a large sort or `GROUP BY` to disk when it uses half of the memory limit. To set a fixed
+ClickHouse spills a large sort or `GROUP BY` to disk at half of the query memory limit. To set a fixed
 memory ceiling and fixed thresholds, put them in the `default` profile. The following file suits a 32 GiB
 instance, with 8 GiB for each threshold and 20 GiB for the memory ceiling.
 
@@ -148,7 +151,7 @@ profile in `config.d/` and reports no error.
 ### System log retention
 
 The stock ClickHouse configuration keeps `query_log`, `text_log`, `trace_log`, and the other system log tables
-with no time limit. On one installation, these tables used most of the ClickHouse disk. To delete old rows, add
+with no time limit, so they can fill the disk. To delete old rows, add
 a `ttl` for each log to a file in `/etc/clickhouse-server/config.d/`, for example
 `config.d/system_log_ttl.xml`:
 
@@ -163,7 +166,7 @@ a `ttl` for each log to a file in `/etc/clickhouse-server/config.d/`, for exampl
 </clickhouse>
 ```
 
-After the restart, ClickHouse renames each old table, for example to `system.query_log_0`, and keeps its rows.
+Restart ClickHouse to apply the file. After the restart, ClickHouse renames each old table, for example to `system.query_log_0`, and keeps its rows.
 Drop the renamed tables to free the disk.
 
 ## Kubernetes
@@ -176,12 +179,12 @@ volumes need `containerd` 2.1 or later, or CRI-O 1.31 or later, and the `ImageVo
 
 | Kubernetes version | `ImageVolume` feature gate |
 |--------------------|----------------------------|
-| 1.33 and 1.34      | Off by default. Managed services, such as Amazon EKS, do not let you turn it on. |
+| 1.33 and 1.34      | Off by default. Some managed services, such as Amazon EKS, do not let you turn it on. |
 | 1.35               | On by default. |
 | 1.36 and later     | Generally available. |
 
-When the gate is off, Kubernetes drops the image volume with no error, and the Siphon pods fail with
-`no such file` errors under `/etc/tables`. If your cluster cannot use image volumes, set
+When the gate is off, Kubernetes drops the image volume with no error. If your cluster cannot use image
+volumes, set
 `splitTables.volumeMode: initCopy` in `siphon-values.yaml`. Init containers then copy the table definitions
 into the pod. For more information, see
 [Split mode without ImageVolume](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts#split-mode-without-imagevolume).
@@ -207,6 +210,7 @@ config:
       pvc:
         size: <volume_size>
   merge:
+    # Keep the << >> marks. The chart then writes 64MB without quotes.
     max_payload: << 64MB >>
 ```
 
@@ -224,8 +228,8 @@ ephemeral storage requests.
 ## Shared configuration values
 
 Choose each of these values once, and use the same value in every component that reads it. No component
-validates these values against the others. If they do not match, the affected component starts with no
-error, but some or all data does not arrive.
+validates these values against the others. If they do not match, the affected component starts, but some or
+all data does not arrive.
 
 | Value | Used by | Example |
 |-------|---------|---------|
@@ -243,3 +247,4 @@ GitLab Orbit expects the stream name `siphon_stream_main_db` by default. To use 
 ## Next step
 
 - [Set up data replication](data-replication.md)
+- [Troubleshooting](troubleshooting.md)

@@ -52,7 +52,8 @@ find them, see:
 - [Siphon releases](https://gitlab.com/gitlab-org/analytics-section/siphon/-/releases)
 - [Siphon Helm chart releases](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts/-/releases)
 
-Use Siphon 0.0.130-beta or later. Earlier releases fail on the CNG table definitions.
+Use Siphon 0.0.130-beta or later. Earlier releases stop with `Stream.Target ... required` on the CNG table
+definitions.
 
 Set up replication in this order:
 
@@ -283,8 +284,8 @@ means that Siphon's table list matches your GitLab version without manual update
 The image is `registry.gitlab.com/gitlab-org/build/cng/gitlab-siphon-tables`. It is not part of the Siphon
 project. `global.gitlabVersion` selects its tag and pins the replicated table set to your GitLab version.
 The chart converts the version to the CNG tag format, `vX.Y.Z`, so `19.5.0`, `v19.5.0`, and `v19.5.0-ee`
-all select the `v19.5.0` tag. CNG publishes the image for GitLab 19.5.0 and later, and for
-GitLab 19.3.5. Before you install, confirm the tag exists in the
+all select the `v19.5.0` tag. CNG publishes the image for GitLab 19.5.0 and
+19.3.5. Before you install, confirm the tag exists in the
 [`gitlab-siphon-tables` container registry](https://gitlab.com/gitlab-org/build/CNG/container_registry/11611957).
 A missing tag prevents pods from starting.
 
@@ -502,3 +503,4 @@ the first copy is complete.
 ## Next step
 
 - [Set up GitLab Orbit](orbit-setup.md)
+- [Troubleshooting](troubleshooting.md)
