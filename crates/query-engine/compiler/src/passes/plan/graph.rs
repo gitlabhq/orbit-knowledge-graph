@@ -131,6 +131,27 @@ pub enum RelationNode {
 }
 
 impl RelationNode {
+    pub fn inputs(&self) -> Vec<&RelationRef> {
+        match self {
+            Self::Read { .. } => vec![],
+            Self::Owned { input, .. }
+            | Self::Filter { input, .. }
+            | Self::Project { input, .. }
+            | Self::Bind { input, .. }
+            | Self::Latest { input, .. } => vec![input],
+            Self::UnionAll { inputs, .. } => inputs.iter().collect(),
+            Self::Join { left, right, .. } => vec![left, right],
+        }
+    }
+
+    pub fn predicates(&self) -> &[Predicate] {
+        match self {
+            Self::Filter { predicates, .. } | Self::Join { predicates, .. } => predicates,
+            Self::Latest { condition, .. } => condition,
+            _ => &[],
+        }
+    }
+
     fn replace_input(&mut self, target: RelationId, replacement: RelationId) {
         let replace = |reference: &mut RelationRef| {
             if reference.id == target {

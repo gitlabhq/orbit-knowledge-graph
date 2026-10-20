@@ -35,52 +35,14 @@ impl RelationUsage {
             }
             return;
         }
-        match graph.get(id) {
-            RelationNode::Read { .. } => {}
-            RelationNode::Owned { input, .. }
-            | RelationNode::Project { input, .. }
-            | RelationNode::Bind { input, .. } => self.visit(input.id, graph),
-            RelationNode::Filter { input, predicates } => {
-                self.visit(input.id, graph);
-                self.visit_predicates(predicates, graph);
-            }
-            RelationNode::Latest {
-                input, condition, ..
-            } => {
-                self.visit(input.id, graph);
-                self.visit_predicates(condition, graph);
-            }
-            RelationNode::UnionAll { inputs, .. } => {
-                for input in inputs {
-                    self.visit(input.id, graph);
-                }
-            }
-            RelationNode::Join {
-                left,
-                right,
-                predicates,
-                ..
-            } => {
-                self.visit(left.id, graph);
-                self.visit(right.id, graph);
-                self.visit_predicates(predicates, graph);
-            }
+        let node = graph.get(id);
+        for input in node.inputs() {
+            self.visit(input.id, graph);
         }
-    }
-
-    fn visit_predicates(&mut self, predicates: &[Predicate], graph: &RelationGraph) {
-        for predicate in predicates {
-            match predicate {
-                Predicate::Boolean(expression) => {
-                    for predicate in expression.leaves() {
-                        self.visit_predicates(std::slice::from_ref(predicate), graph);
-                    }
-                }
-                Predicate::Membership { relation, .. } => {
-                    self.materialize(*relation);
-                    self.visit(*relation, graph);
-                }
-                _ => {}
+        for leaf in node.predicates().iter().flat_map(Predicate::leaves) {
+            if let Predicate::Membership { relation, .. } = leaf {
+                self.materialize(*relation);
+                self.visit(*relation, graph);
             }
         }
     }

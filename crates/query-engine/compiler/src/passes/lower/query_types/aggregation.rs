@@ -8,7 +8,19 @@ use crate::passes::plan::query_types::aggregation::{AggregationPlan, Group};
 use crate::passes::plan::{Aggregation, Plan};
 
 pub(crate) fn emit(plan: &Plan<Aggregation>, input: &Input) -> Result<Emitted> {
-    let mut output = graph::execute(&plan.operation.execution);
+    let result = &plan.operation.result;
+    let mut read = super::super::redaction_columns(plan, &plan.operation.execution);
+    for predicate in &result.condition {
+        predicate.columns(&mut read);
+    }
+    read.extend(result.groups.iter().map(|group| group.column.clone()));
+    read.extend(
+        result
+            .measures
+            .iter()
+            .filter_map(|measure| measure.argument.clone()),
+    );
+    let mut output = graph::execute(&plan.operation.execution, &read);
     let nodes = output.take_bindings(plan, input)?;
     let query = aggregation(&plan.operation.result, output, input.limit);
     let stable_order = query.group_by.iter().cloned().map(OrderExpr::asc).collect();

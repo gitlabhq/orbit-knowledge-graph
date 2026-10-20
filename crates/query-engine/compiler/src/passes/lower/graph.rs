@@ -7,10 +7,12 @@ use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
 use crate::passes::plan::graph::{
     ExecutionPlan, RelationGraph, RelationId, RelationNode, RelationRef,
 };
+use crate::passes::plan::predicates::Column;
 
-pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
+pub(super) fn execute(plan: &ExecutionPlan, root_columns: &[Column]) -> EmitOutput {
     let usage = plan.graph.usage(plan.root);
     let materialized: HashSet<RelationId> = usage.materialized().collect();
+    let required = super::columns::required_columns(plan, &materialized, root_columns);
     let source = emit_ref(
         &RelationRef::from(plan.root),
         &plan.graph,
@@ -24,9 +26,16 @@ pub(super) fn execute(plan: &ExecutionPlan) -> EmitOutput {
         ctes: usage
             .materialized()
             .map(|id| {
+                let select = match (required.get(&id), exposed_alias(id, &plan.graph)) {
+                    (Some(columns), Some(alias)) if !columns.is_empty() => columns
+                        .iter()
+                        .map(|column| SelectExpr::new(Expr::col(&alias, column), column))
+                        .collect(),
+                    _ => star(),
+                };
                 let mut cte = Cte::new(
                     relation_name(id),
-                    emit_node(id, &plan.graph, &materialized, Some(id)).query(star()),
+                    emit_node(id, &plan.graph, &materialized, Some(id)).query(select),
                 );
                 cte.materialized = usage.references(id) > 1;
                 cte
@@ -114,7 +123,7 @@ fn emit_ref(
 }
 
 /// A materialized reference must expose the alias its inline form would, or predicates and join conditions dangle.
-fn exposed_alias(id: RelationId, graph: &RelationGraph) -> Option<String> {
+pub(super) fn exposed_alias(id: RelationId, graph: &RelationGraph) -> Option<String> {
     match graph.get(id) {
         RelationNode::Read { alias, .. }
         | RelationNode::Owned { alias, .. }

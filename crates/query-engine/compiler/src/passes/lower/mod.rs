@@ -1,5 +1,6 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
+mod columns;
 mod graph;
 mod predicates;
 pub mod query_types;
@@ -10,6 +11,8 @@ use crate::error::{QueryError, Result};
 use crate::input::*;
 use std::collections::HashMap;
 
+use super::plan::graph::ExecutionPlan;
+use super::plan::predicates::Column;
 use super::plan::{Plan, QueryPlan};
 
 #[derive(Clone, Default)]
@@ -153,6 +156,18 @@ impl EmitOutput {
             ..Default::default()
         }
     }
+}
+
+fn redaction_columns<T>(plan: &Plan<T>, execution: &ExecutionPlan) -> Vec<Column> {
+    execution
+        .bindings
+        .iter()
+        .filter_map(|binding| {
+            let source = binding.property_source.as_deref()?;
+            let node = plan.nodes.get(&binding.node)?;
+            Some(Column::new(source, &node.redaction_id_column))
+        })
+        .collect()
 }
 
 pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {

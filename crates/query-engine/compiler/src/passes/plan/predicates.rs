@@ -108,6 +108,44 @@ impl Predicate {
         }
     }
 
+    pub fn leaves(&self) -> Vec<&Predicate> {
+        match self {
+            Self::Boolean(expression) => expression
+                .leaves()
+                .flat_map(|predicate| predicate.leaves())
+                .collect(),
+            predicate => vec![predicate],
+        }
+    }
+
+    pub fn columns(&self, out: &mut Vec<Column>) {
+        for leaf in self.leaves() {
+            match leaf {
+                Self::Boolean(_) => {}
+                Self::Property { column, filter, .. } => {
+                    out.push(column.clone());
+                    if let Some((alias, property)) = &filter.rhs_column {
+                        out.push(Column::new(alias, property));
+                    }
+                }
+                Self::Ids { column, .. }
+                | Self::IdRange { column, .. }
+                | Self::EntityKind { column, .. }
+                | Self::Tags { column, .. } => out.push(column.clone()),
+                Self::ColumnEq { left, right } => {
+                    out.push(left.clone());
+                    out.push(right.clone());
+                }
+                Self::Membership { columns, .. } => out.extend(columns.iter().cloned()),
+                Self::Live { alias } => out.push(Column::new(alias, DELETED_COLUMN)),
+                Self::RelationshipKinds { alias, .. } => {
+                    out.push(Column::new(alias, RELATIONSHIP_KIND_COLUMN))
+                }
+                Self::Scope { alias, .. } => out.push(Column::new(alias, TRAVERSAL_PATH_COLUMN)),
+            }
+        }
+    }
+
     pub fn filters_sort_key(&self, sort_key: &[String]) -> bool {
         let in_key = |column: &str| sort_key.iter().any(|key| key == column);
         match self {
@@ -149,6 +187,24 @@ pub enum OutputValue {
         id: Column,
         kind: Column,
     },
+}
+
+impl OutputValue {
+    pub fn columns(&self, out: &mut Vec<Column>) {
+        match self {
+            Self::Column(column) => out.push(column.clone()),
+            Self::Text(_) | Self::Depth(_) => {}
+            Self::Path(steps) => {
+                for (id, kind) in steps {
+                    out.push(id.clone());
+                    out.push(kind.clone());
+                }
+            }
+            Self::PathAppend { path, id, kind } | Self::PathPrepend { path, id, kind } => {
+                out.extend([path.clone(), id.clone(), kind.clone()]);
+            }
+        }
+    }
 }
 
 #[derive(Clone)]

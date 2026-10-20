@@ -8,7 +8,14 @@ use crate::passes::plan::{EdgeRelation, Plan, Traversal};
 
 pub(crate) fn emit(plan: &Plan<Traversal>, input: &Input) -> Result<Emitted> {
     let execution = &plan.operation.execution;
-    let mut output = graph::execute(execution);
+    let mut read = super::super::redaction_columns(plan, execution);
+    read.extend(
+        input
+            .order_by
+            .iter()
+            .map(|order| execution.property(&order.node, &order.property)),
+    );
+    let mut output = graph::execute(execution, &read);
     let nodes = output.take_bindings(plan, input)?;
     let mut query = output.into_query(vec![], vec![], vec![], input.limit);
     query.order_by = match (&input.order_by, &input.relationship_return.sort) {
