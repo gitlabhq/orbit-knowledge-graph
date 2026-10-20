@@ -239,11 +239,12 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
         return Ok(());
     };
     let bytes = pending.await??;
-    let bytes = crate::remote::context::tidy(
-        &String::from_utf8_lossy(&bytes),
-        sdlc_notes.contains("failed_jobs["),
-    )
-    .into_bytes();
+    let text = String::from_utf8_lossy(&bytes);
+    let jobs_shown = sdlc_notes.contains("failed_jobs[")
+        || [&sdlc_notes, text.as_ref()]
+            .iter()
+            .any(|found| found.lines().any(|line| line.starts_with("- job:")));
+    let bytes = crate::remote::context::tidy(&text, jobs_shown).into_bytes();
     gitlab_text.push_str(&String::from_utf8_lossy(&bytes));
     let home = repo.or_else(|| crate::remote::origin::project(&dir).map(|(_, project)| project));
     let mut bytes = match home {

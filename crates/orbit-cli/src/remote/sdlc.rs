@@ -510,6 +510,10 @@ pub(crate) static EPILOGUE: LazyLock<regex::Regex> = LazyLock::new(|| {
     .expect("valid pattern")
 });
 
+/// Bracketed worker, browser, and time prefixes that make repeated log lines look distinct.
+static LINE_PREFIX: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^(\s*\[[^\]]*\])*\s*").expect("valid pattern"));
+
 const EXCERPT_LINES: usize = 80;
 const LINE_CHARS: usize = 240;
 const TRACED_JOBS: usize = 3;
@@ -542,8 +546,13 @@ fn failure_excerpt(lines: &[String]) -> Vec<String> {
             wanted.extend(index.saturating_sub(3)..(index + 4).min(tail));
         }
     }
-    let skipped = wanted.len().saturating_sub(EXCERPT_LINES);
-    let mut wanted: Vec<usize> = wanted.into_iter().take(EXCERPT_LINES).collect();
+    let mut seen = std::collections::HashSet::new();
+    let distinct: Vec<usize> = wanted
+        .into_iter()
+        .filter(|index| seen.insert(LINE_PREFIX.replace(&lines[*index], "")))
+        .collect();
+    let skipped = distinct.len().saturating_sub(EXCERPT_LINES);
+    let mut wanted: Vec<usize> = distinct.into_iter().take(EXCERPT_LINES).collect();
     wanted.extend(tail..end);
     wanted.extend(
         lines[end..]
@@ -631,5 +640,16 @@ mod tests {
             "37: ERROR: Job failed: exit code 1"
         );
         assert!(!excerpt.iter().any(|line| line.contains("Uploading")));
+    }
+
+    #[test]
+    fn job_logs_show_a_repeated_failure_once() {
+        let mut log: Vec<String> = ["[0-0] Error: Timeout", "[0-1] Error: Timeout"]
+            .map(str::to_string)
+            .to_vec();
+        log.extend((0..30).map(|n| format!("step {n}")));
+        let excerpt = failure_excerpt(&log);
+        assert_eq!(excerpt[0], "1: [0-0] Error: Timeout");
+        assert!(!excerpt.iter().any(|line| line.contains("[0-1]")));
     }
 }

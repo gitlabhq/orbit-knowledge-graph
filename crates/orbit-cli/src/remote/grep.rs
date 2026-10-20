@@ -253,6 +253,7 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
             &responses,
             home_project.as_deref(),
             any_word,
+            !request.scopes.is_empty(),
         ),
     };
     if let Outcome::Found(mut text) = rendered {
@@ -375,6 +376,7 @@ fn render(
     responses: &[Response],
     origin: Option<&str>,
     any_word: bool,
+    scoped: bool,
 ) -> (Outcome, Option<Winner>) {
     let terms: Vec<String> = keywords
         .iter()
@@ -451,7 +453,7 @@ fn render(
         return (Outcome::Empty, None);
     }
     rows.sort_by_key(|row| (row.order, std::cmp::Reverse(row.score)));
-    let winner = winner(&rows);
+    let winner = winner(&rows, scoped);
     let next = rows.iter().find_map(|row| row.readable.clone());
     let statuses = responses.iter().flat_map(|response| &response.scopes);
     let truncated = responses.iter().any(|response| response.truncated);
@@ -516,12 +518,15 @@ struct Row {
 }
 
 /// A merge request or issue whose title has every word of an alternative and more query terms
-/// than any other merge request or issue.
-fn winner(rows: &[Row]) -> Option<Winner> {
+/// than any other merge request or issue. A search that finds only one is clear too, when it asked
+/// for merge requests or issues or the title shares two query terms.
+fn winner(rows: &[Row], scoped: bool) -> Option<Winner> {
     let candidates = rows.iter().filter(|row| row.token.is_some());
     let best = candidates.clone().max_by_key(|row| row.score)?;
+    let count = candidates.clone().count();
     let tied = candidates.filter(|row| row.score == best.score).count() > 1;
-    (best.full && !tied).then(|| Winner {
+    let only = count == 1 && (scoped || best.score >= 2);
+    ((best.full && !tied) || only).then(|| Winner {
         token: best.token.clone().expect("candidates have tokens"),
         readable: best
             .readable
@@ -650,6 +655,7 @@ mod tests {
             &[first, second],
             None,
             false,
+            false,
         ) else {
             panic!("expected results");
         };
@@ -689,6 +695,7 @@ mod tests {
             &[found],
             Some("g/vscode"),
             true,
+            true,
         ) else {
             panic!("expected results");
         };
@@ -715,6 +722,7 @@ mod tests {
             &[found],
             Some("g/gitaly"),
             false,
+            true,
         ) else {
             panic!("expected a winner");
         };
