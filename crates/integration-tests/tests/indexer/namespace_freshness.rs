@@ -1,3 +1,10 @@
+use std::sync::Arc;
+
+use chrono::{TimeDelta, Utc};
+use indexer::checkpoint::{
+    Checkpoint, CheckpointStore, ClickHouseCheckpointStore, namespace_position_key,
+};
+use indexer::durability::WriteDurability;
 use indexer::orchestrator::scheduled::{NamespaceFreshness, ScheduledTask};
 use indexer::schema::version::{
     SCHEMA_VERSION, ensure_version_table, mark_version_active, mark_version_migrating,
@@ -77,13 +84,11 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     }
     clickhouse
         .execute(&format!(
-            "INSERT INTO work_items (id, traversal_path, _siphon_replicated_at, _siphon_watermark) VALUES \
-             (1, '1/{IN_SYNC}/7/', now64(6) - INTERVAL 20 MINUTE, now64(6) - INTERVAL 20 MINUTE), \
-             (2, '1/{PENDING}/7/', now64(6) - INTERVAL 8 MINUTE, now64(6) - INTERVAL 8 MINUTE), \
-             (2, '1/{PENDING}/7/', now64(6) - INTERVAL 3 MINUTE, now64(6) - INTERVAL 3 MINUTE)"
+            "INSERT INTO work_items (id, traversal_path, _siphon_watermark) VALUES \
+             (1, '1/{IN_SYNC}/7/', now64(6) - INTERVAL 20 MINUTE), \
+             (2, '1/{PENDING}/7/', now64(6) - INTERVAL 3 MINUTE)"
         ))
         .await;
-    clickhouse.execute("OPTIMIZE TABLE work_items FINAL").await;
 
     let ontology = ontology::Ontology::load_embedded().unwrap();
     let plans: Vec<String> = ontology
@@ -92,21 +97,11 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
         .filter(|plan| plan.scope == EtlScope::Namespaced)
         .map(|plan| plan.name)
         .collect();
-    let mut served = Vec::new();
-    let mut migrating = Vec::new();
     for plan in &plans {
         for (id, synced_minutes_ago) in [(IN_SYNC, 0), (PENDING, 10), (STALE, 180)] {
-            served.push(completed(id, plan, synced_minutes_ago));
+            complete(&graph, *SCHEMA_VERSION, id, plan, synced_minutes_ago).await;
         }
-        migrating.push(completed(NEVER_SYNCED, plan, 0));
-    }
-    for (table, rows) in [(&served_table, served), (&migrating_table, migrating)] {
-        clickhouse
-            .execute(&format!(
-                "INSERT INTO {table} (key, watermark, attempts, indexed_at) VALUES {}",
-                rows.join(", ")
-            ))
-            .await;
+        complete(&graph, *SCHEMA_VERSION + 1, NEVER_SYNCED, plan, 0).await;
     }
 
     let config = AppConfig::embedded_defaults().schedule.tasks;
@@ -124,8 +119,7 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     assert_eq!(
         lag_buckets(&metrics, "WorkItem"),
         [1, 0, 1, 0, 0, 1, 1, 0, 0, 0],
-        "in sync, pending since the sync 10m ago even after the merge kept only the newest edit, \
-         never synced since enabled 90m ago, synced 3h ago"
+        "in sync, pending since the sync 10m ago, never synced since enabled 90m ago, synced 3h ago"
     );
     assert_eq!(
         lag_buckets(&metrics, "MergeRequest"),
@@ -139,10 +133,24 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     assert_eq!(observations, 4 * plans.len() as u64);
 }
 
-fn completed(namespace: i64, plan: &str, synced_minutes_ago: i64) -> String {
-    format!(
-        "('ns.{namespace}.{plan}', now64(6) - INTERVAL {synced_minutes_ago} MINUTE, 0, now64(6))"
-    )
+async fn complete(
+    graph: &clickhouse_client::ArrowClickHouseClient,
+    version: u32,
+    namespace: i64,
+    plan: &str,
+    synced_minutes_ago: i64,
+) {
+    let synced = Utc::now() - TimeDelta::minutes(synced_minutes_ago);
+    let mut checkpoint = Checkpoint::new(synced);
+    checkpoint.complete(synced);
+    ClickHouseCheckpointStore::for_version(Arc::new(graph.clone()), version)
+        .save(
+            &format!("{}.{plan}", namespace_position_key(namespace)),
+            &checkpoint,
+            WriteDurability::Durable,
+        )
+        .await
+        .unwrap();
 }
 
 fn lag_buckets(metrics: &[ResourceMetrics], entity: &str) -> Vec<u64> {
