@@ -165,7 +165,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [input, pagination, scope_proofs, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [validate_conditions, restrict, plan_clickhouse, apply_scope, lower, response_policy, enforce, security, settings, codegen]
+            phases: [validate_conditions, restrict, plan_clickhouse, apply_scope, lower, response_policy, enforce, security, check, settings, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
