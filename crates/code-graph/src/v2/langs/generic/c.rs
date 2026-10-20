@@ -56,9 +56,6 @@ impl DslLanguage for CDsl {
     }
 
     fn refs() -> Vec<ReferenceRule> {
-        // Guard on the callee node only: `has_descendant` would also scan
-        // the argument list, so any `a->b` argument hijacked the rule and
-        // dropped the call's ref.
         vec![
             reference("call_expression")
                 .name_from(field("function"))
@@ -299,9 +296,6 @@ mod tests {
 
     #[test]
     fn call_ref_regression_refs_resolve_ref_unsafe() {
-        // The shape from the issue: a call whose arguments contain both a
-        // nested call and a field access (`wt->head_oid`) kept its ref only
-        // for the inner call.
         let refs = parse_refs(
             "void add_head_info() { target = refs_resolve_ref_unsafe(get_worktree_ref_store(wt), \"HEAD\", 0, &wt->head_oid, &flags); }\n",
         );

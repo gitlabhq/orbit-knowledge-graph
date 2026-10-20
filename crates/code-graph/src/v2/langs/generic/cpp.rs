@@ -65,9 +65,6 @@ impl DslLanguage for CppDsl {
     }
 
     fn refs() -> Vec<ReferenceRule> {
-        // Guards test the callee node only: `has_descendant` would also scan
-        // the argument list, so any `ns::x` or `a->b` argument hijacked the
-        // rule and dropped the call's ref.
         vec![
             // Must precede the direct-call rule: both match call_expression,
             // but qualified needs field("function").field("name") to extract
