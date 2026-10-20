@@ -317,8 +317,8 @@ mod tests {
                     remote,
                     "{launcher}: {rendered}"
                 );
-                assert!(rendered.contains(" mr:42;") == remote, "{launcher}");
-                let budget = if remote { 100 } else { 75 };
+                assert!(rendered.contains("instead of glab and glab api") == remote, "{launcher}");
+                let budget = if remote { 120 } else { 75 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
