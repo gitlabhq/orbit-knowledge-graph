@@ -69,6 +69,10 @@ pub(crate) async fn run(
     mut paths: Vec<String>,
     mut options: Options,
 ) -> Result<()> {
+    let query = match options.fixed {
+        true => query,
+        false => query.map(|query| or_word(&query)),
+    };
     let sections = qualifier::apply(query, &mut options, &mut paths);
     let mut found = false;
     for section in sections {
@@ -308,15 +312,25 @@ fn local(
                         .filter(|(_, matched)| matched.len() == most)
                         .map(|(file, _)| file.to_string())
                         .collect();
-                    notes.push(format!(
-                        "{NOTE}0 lines contain {:?}; showing files with {most} of its {} words",
-                        alternatives.join("|"),
-                        words.len()
-                    ));
                     hits = any
                         .into_iter()
                         .filter(|hit| keep.contains(&hit.file))
                         .collect();
+                    let shown = hits.iter().filter(|hit| !hit.context).count();
+                    if options.before == 0 && options.after == 0 {
+                        hits = most_words(hits, &words);
+                    }
+                    let cut = match shown.saturating_sub(hits.len()) {
+                        0 => String::new(),
+                        cut => format!(
+                            ", up to {FALLBACK_LINES} lines each with the most of them ({cut} more lines)"
+                        ),
+                    };
+                    notes.push(format!(
+                        "{NOTE}0 lines contain {:?}; showing files with {most} of its {} words{cut}",
+                        alternatives.join("|"),
+                        words.len()
+                    ));
                     terms = words;
                 }
             }
@@ -392,6 +406,44 @@ fn local(
 }
 
 const NOTE: &str = "» ";
+
+/// Lines per file shown when a multi-word query falls back to files with its words. Each line
+/// may hold one word, so files can match hundreds of lines where rg would match none.
+const FALLBACK_LINES: usize = 8;
+
+/// Each file's lines with the most query words, up to `FALLBACK_LINES`, in line order.
+fn most_words(hits: Vec<scan::Hit>, words: &[term::Term]) -> Vec<scan::Hit> {
+    let mut by_file: std::collections::BTreeMap<String, Vec<(usize, scan::Hit)>> =
+        Default::default();
+    for hit in hits {
+        let count = words.iter().filter(|word| word.mentions(&hit.text)).count();
+        by_file
+            .entry(hit.file.clone())
+            .or_default()
+            .push((count, hit));
+    }
+    let mut kept = Vec::new();
+    for (_, mut lines) in by_file {
+        lines.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.line.cmp(&b.1.line)));
+        let mut lines: Vec<scan::Hit> = lines
+            .into_iter()
+            .take(FALLBACK_LINES)
+            .map(|(_, hit)| hit)
+            .collect();
+        lines.sort_by_key(|hit| hit.line);
+        kept.extend(lines);
+    }
+    kept
+}
+
+static OR_WORD: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"\s+OR\s+").expect("valid pattern"));
+
+/// `a OR b` as `a|b`: agents write OR the way search engines take it, and a literal `OR` matches
+/// every line with the word.
+fn or_word(query: &str) -> String {
+    OR_WORD.replace_all(query, "|").into_owned()
+}
 
 /// The parent directories of a scope, deduplicated, or the whole repository (an empty scope)
 /// once every path is at the top. None after the whole repository.
@@ -607,6 +659,46 @@ mod tests {
                 "» audit/request.go not found; searched staging/apiserver/pkg/audit/request.go, pkg/probe/request.go",
             ]
         );
+    }
+
+    #[test]
+    fn an_uppercase_or_between_words_is_alternation() {
+        assert_eq!(
+            or_word("exit 127 OR command_exit_code"),
+            "exit 127|command_exit_code"
+        );
+        assert_eq!(or_word("def:a OR def:b"), "def:a|def:b");
+        assert_eq!(or_word("ORDER or OR"), "ORDER or OR");
+    }
+
+    #[test]
+    fn fallback_keeps_each_files_lines_with_the_most_words() {
+        let words: Vec<term::Term> = ["cleanup", "setup", "hook"]
+            .iter()
+            .map(|word| term::Term::parse(word))
+            .collect();
+        let mut hits: Vec<scan::Hit> = (1..=20)
+            .map(|line| scan::Hit {
+                file: "a.ts".into(),
+                line,
+                text: "cleanup".into(),
+                def: None,
+                imports: Vec::new(),
+                context: false,
+            })
+            .collect();
+        hits.push(scan::Hit {
+            file: "a.ts".into(),
+            line: 30,
+            text: "setup hook cleanup".into(),
+            def: None,
+            imports: Vec::new(),
+            context: false,
+        });
+        let kept = most_words(hits, &words);
+        assert_eq!(kept.len(), FALLBACK_LINES);
+        assert_eq!(kept.last().unwrap().line, 30);
+        assert_eq!(kept[0].line, 1);
     }
 
     #[test]
