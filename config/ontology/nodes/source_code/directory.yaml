@@ -55,7 +55,6 @@ properties:
     type: string
     source: commit_sha
     nullable: false
-    mutable: false
     description: "Indexed commit SHA."
 
   path:

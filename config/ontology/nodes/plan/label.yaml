@@ -28,7 +28,6 @@ properties:
     type: string
     source: title
     nullable: false
-    unique: true
     description: "Label title."
 
   description:

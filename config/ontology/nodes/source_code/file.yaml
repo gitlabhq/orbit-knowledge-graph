@@ -55,7 +55,6 @@ properties:
     type: string
     source: commit_sha
     nullable: false
-    mutable: false
     description: "Indexed commit SHA."
 
   path:
@@ -92,7 +91,6 @@ properties:
     type: int64
     source: size_bytes
     nullable: false
-    mutable: false
     description: "Uncompressed file size in bytes, measured at index time."
 
   content:
