@@ -273,7 +273,7 @@ For setup, debugging, and the list of key files, see [E2E testing harness](../de
 
 ### Indexing benchmarks
 
-[`code-indexing-benchmark.yaml`](../../code-indexing-benchmark.yaml) lists real repositories, grouped by language. When an MR changes an indexing crate, CI uses [`gitlab-xtasks`](https://gitlab.com/gitlab-org/rust/gitlab-xtasks) and hyperfine to time `orbit index` on them. Then it posts the results as an MR comment. A slower result does not fail the MR.
+[`code-indexing-benchmark.yaml`](../../code-indexing-benchmark.yaml) lists real repositories, grouped by language. When an MR changes an indexing crate, two CI jobs use [`gitlab-xtasks`](https://gitlab.com/gitlab-org/rust/gitlab-xtasks) with hyperfine to measure the same repository corpus. One job runs `code-graph`; the other runs `code-graph-incremental`. One analyzer job then posts both result sets as an MR comment. A slower result does not fail the MR.
 
 ### Synthetic query load
 

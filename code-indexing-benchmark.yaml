@@ -216,8 +216,15 @@ repos:
 
 scenarios:
   hyperfine:
-    - id: v2
-      command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 8 --stats
+    - id: code-graph
+      command_per_repo: ORBIT_DATA_DIR=$PWD/.tmp/benchmark-code-graph ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 8 --stats
+      description: Current code-graph engine
+      warmup: 1
+      min_runs: 3
+      max_runs: 3
+    - id: code-graph-incremental
+      command_per_repo: ./target/release/examples/index ${REPOS_DIR}/${REPO_NAME}
+      description: Incremental code-graph engine
       warmup: 1
       min_runs: 3
       max_runs: 3
