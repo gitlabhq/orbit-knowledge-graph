@@ -291,12 +291,33 @@ fn local(
                 && !hits.iter().any(|hit| !hit.context)
             {
                 let any = scan::scan(&root, &scope, &term::matcher(&words, &options)?, &options)?;
-                if any.iter().any(|hit| !hit.context) {
+                let mut found: std::collections::HashMap<&str, std::collections::BTreeSet<usize>> =
+                    Default::default();
+                for hit in any.iter().filter(|hit| !hit.context) {
+                    let matched = found.entry(hit.file.as_str()).or_default();
+                    matched.extend((0..words.len()).filter(|&w| words[w].mentions(&hit.text)));
+                }
+                let most = found
+                    .values()
+                    .map(|matched| matched.len())
+                    .max()
+                    .unwrap_or(0);
+                if most > 1 {
+                    let keep: std::collections::HashSet<String> = found
+                        .iter()
+                        .filter(|(_, matched)| matched.len() == most)
+                        .map(|(file, _)| file.to_string())
+                        .collect();
                     notes.push(format!(
-                        "{NOTE}0 lines contain {:?}; showing lines with any of its words, files with the most of them first",
-                        alternatives.join("|")
+                        "{NOTE}0 lines contain {:?}; showing files with {most} of its {} words",
+                        alternatives.join("|"),
+                        words.len()
                     ));
-                    (hits, terms) = (any, words);
+                    hits = any
+                        .into_iter()
+                        .filter(|hit| keep.contains(&hit.file))
+                        .collect();
+                    terms = words;
                 }
             }
             let mut files: Vec<&str> = hits.iter().map(|h| h.file.as_str()).collect();

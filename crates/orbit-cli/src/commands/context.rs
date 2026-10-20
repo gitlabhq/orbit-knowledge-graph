@@ -53,7 +53,22 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
     let mut repo: Option<String> = None;
     let (mut targets, mut sdlc_targets, mut code_targets) = (Vec::new(), Vec::new(), Vec::new());
     let mut current_ci = false;
+    let mut joined: Vec<String> = Vec::new();
     for target in &args.target {
+        let range = target.split_once('-').is_some_and(|(from, to)| {
+            !from.is_empty()
+                && !to.is_empty()
+                && from.bytes().chain(to.bytes()).all(|b| b.is_ascii_digit())
+        });
+        match joined.last_mut() {
+            Some(path) if range && !path.contains(':') && path.contains('.') => {
+                path.push(':');
+                path.push_str(target);
+            }
+            _ => joined.push(target.clone()),
+        }
+    }
+    for target in &joined {
         if is_current_ci(target) {
             current_ci = true;
             continue;

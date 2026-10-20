@@ -317,7 +317,10 @@ mod tests {
                     remote,
                     "{launcher}: {rendered}"
                 );
-                assert!(rendered.contains("instead of glab and glab api") == remote, "{launcher}");
+                assert!(
+                    rendered.contains("instead of glab and glab api") == remote,
+                    "{launcher}"
+                );
                 let budget = if remote { 120 } else { 75 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
