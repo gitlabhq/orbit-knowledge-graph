@@ -961,6 +961,7 @@ code-indexing-benchmark-build:
     - cargo build --release -p orbit-cli --bin orbit --features duckdb-client/bundled -p code-graph-incremental --example index
     # The CLI ships without the FIPS module; a workspace-level build would pull it in.
     - '! nm --defined-only target/release/orbit | grep -q " _\?aws_lc_fips_"'
+    - sccache --show-stats || true
   artifacts:
     paths:
       - target/release/orbit
@@ -1039,19 +1040,14 @@ code-indexing-benchmark-analyze:
     - |
       mise exec -- gitlab-xtasks benchmark analyze \
         --pattern "gkg-benchmark-*.json" \
-        --output-format markdown \
-        --pipeline-url "$CI_PIPELINE_URL" \
-        --job-url "$CI_JOB_URL" \
-        --branch "$CI_COMMIT_REF_NAME" \
-        --output-file gkg-benchmark-results.md
-
-      mise exec -- gitlab-xtasks benchmark analyze \
-        --pattern "gkg-benchmark-*.json" \
         --output-format json \
         --pipeline-url "$CI_PIPELINE_URL" \
         --job-url "$CI_JOB_URL" \
         --branch "$CI_COMMIT_REF_NAME" \
         --output-file gkg-benchmark-results.json
+
+      ./scripts/ci/code-indexing-benchmark-report.sh \
+        gkg-benchmark-results.json > gkg-benchmark-results.md
 
       if [[ -n "$CI_MERGE_REQUEST_IID" && -n "$BENCHMARK_GITLAB_TOKEN" ]]; then
         mise exec -- gitlab-xtasks comment post \
