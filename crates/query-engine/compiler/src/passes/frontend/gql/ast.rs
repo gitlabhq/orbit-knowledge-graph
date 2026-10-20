@@ -15,17 +15,9 @@ pub(super) struct Query<'i> {
     pub predicates: Vec<BooleanExpression<Predicate<'i>>>,
     pub projections: Projections<'i>,
     pub order: Option<Sort<'i>>,
-    pub limit: Option<Limit<'i>>,
+    pub skip: Option<u32>,
+    pub limit: Option<u32>,
     pub debug: bool,
-}
-
-pub(super) enum Limit<'i> {
-    Rows(u32),
-    Page {
-        span: Span<'i>,
-        size: u32,
-        after: Option<String>,
-    },
 }
 
 pub(super) struct Name<'i> {

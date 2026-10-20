@@ -173,6 +173,9 @@ pub fn logical(input: &Input) -> Tree {
             vec![tree],
         );
     }
+    if let Some(skip) = input.skip {
+        tree = Tree::node(Operator::Offset, skip.to_string(), vec![tree]);
+    }
     Tree::node(Operator::Limit, input.limit.to_string(), vec![tree])
 }
 
@@ -926,6 +929,15 @@ fn query(value: &Query) -> Tree {
     if value.distinct {
         tree = Tree::node(Operator::Distinct, "", vec![tree]);
     }
+    if !value.union_all.is_empty() {
+        tree = Tree::node(
+            Operator::Union,
+            "ALL",
+            std::iter::once(tree)
+                .chain(value.union_all.iter().map(query))
+                .collect(),
+        );
+    }
     tree = sort(
         tree,
         value
@@ -943,14 +955,8 @@ fn query(value: &Query) -> Tree {
             vec![tree],
         );
     }
-    if !value.union_all.is_empty() {
-        tree = Tree::node(
-            Operator::Union,
-            "ALL",
-            std::iter::once(tree)
-                .chain(value.union_all.iter().map(query))
-                .collect(),
-        );
+    if let Some(offset) = value.offset {
+        tree = Tree::node(Operator::Offset, offset.to_string(), vec![tree]);
     }
     if let Some(limit) = value.limit {
         tree = Tree::node(Operator::Limit, limit.to_string(), vec![tree]);

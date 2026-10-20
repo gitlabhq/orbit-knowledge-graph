@@ -27,7 +27,7 @@ physical:
         - (Aggregate group d.name, d.name AS d_name, COUNT() AS n (_))
     emitted:
       expect:
-        - (Aggregate group d.name, d.name AS d_name, COUNT() AS n (_))
+        - (Aggregate group d.name, Concat(Substring(d.name, 1, 349525), If(ByteLength(d.name) > ByteLength(Substring(d.name, 1, 349525)), ' [truncated]', '')) AS d_name, COUNT() AS n (_))
   duckdb:
     planned:
       expect:
