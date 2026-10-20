@@ -9,9 +9,7 @@ use serde_json::{Map, Value};
 
 pub use query::{BindingValues, NamedQuery, RenderedQuery};
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Deserialize, serde::Serialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
     Gql,
