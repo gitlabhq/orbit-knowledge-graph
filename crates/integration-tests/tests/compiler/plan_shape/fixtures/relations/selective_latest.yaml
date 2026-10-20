@@ -141,7 +141,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.id (Filter (contains(f.new_path, 'app/services') AND f.project_id = 1000) OR f._deleted = true (Scan Table(gl_merge_request_diff_file) AS f))))
+            - (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.id (Filter contains(f.new_path, 'app/services') OR f._deleted = true, f.project_id = 1000 OR f._deleted = true (Scan Table(gl_merge_request_diff_file) AS f))))
           reject:
             - (Filter (f.traversal_path, f.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate Final (Scan Table(gl_merge_request_diff_file) AS f))

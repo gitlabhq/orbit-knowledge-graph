@@ -127,12 +127,11 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             let key = sort_key(pattern.model, table)?;
             let identity = predicates
                 .iter()
-                .filter(|predicate| predicate.filters_sort_key(key))
+                .filter(|predicate| predicate.filters_sort_key(key, true))
                 .cloned()
+                .map(|predicate| predicate.guard_tombstones(key, alias))
                 .collect();
-            let rows = self
-                .graph
-                .filter(rows, Predicate::guard_tombstones(identity, key, alias));
+            let rows = self.graph.filter(rows, identity);
             return Ok(self.graph.latest(rows, alias, key.to_vec(), predicates));
         }
         if relation.single_edge_table().is_some()

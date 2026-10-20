@@ -291,7 +291,7 @@ impl RelationGraph {
     ) -> RelationId {
         let bounds_scan = |predicate: &Predicate| {
             predicate.is_selective()
-                && (!predicate.is_text_match() || predicate.filters_sort_key(key))
+                && (!predicate.is_text_match() || predicate.filters_sort_key(key, true))
         };
         if !selective_latest || !predicates.iter().any(bounds_scan) {
             let read = self.read(table, alias, true);
@@ -301,8 +301,11 @@ impl RelationGraph {
         let (identity, rest): (Vec<_>, Vec<_>) = predicates
             .iter()
             .cloned()
-            .partition(|predicate| predicate.filters_sort_key(key));
-        let identity = Predicate::guard_tombstones(identity, key, alias);
+            .partition(|predicate| predicate.filters_sort_key(key, true));
+        let identity = identity
+            .into_iter()
+            .map(|predicate| predicate.guard_tombstones(key, alias))
+            .collect();
         let read = self.read(table, alias, false);
         let current = self.owned(read, owner.clone(), alias);
         let mut current = self.filter(current, identity);

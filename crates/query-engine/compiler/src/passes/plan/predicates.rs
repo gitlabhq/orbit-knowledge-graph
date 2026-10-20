@@ -68,10 +68,7 @@ pub enum Predicate {
         relation: RelationId,
         keys: Vec<String>,
     },
-    OrTombstone {
-        predicates: Vec<Predicate>,
-        alias: String,
-    },
+    OrTombstone(Box<Predicate>, String),
     Scope {
         alias: String,
         proof: crate::scope::ScopeProof,
@@ -87,7 +84,7 @@ impl Predicate {
                 &|_| false,
             ),
             Self::Property { selective, .. } => *selective,
-            Self::OrTombstone { predicates, .. } => predicates.iter().any(Predicate::is_selective),
+            Self::OrTombstone(predicate, _) => predicate.is_selective(),
             Self::Ids { .. } | Self::Membership { .. } => true,
             Self::IdRange { start, end, .. } => {
                 end.saturating_sub(*start) <= crate::passes::validate::MAX_ID_RANGE_SPAN
@@ -123,17 +120,13 @@ impl Predicate {
         }
     }
 
-    pub fn filters_sort_key(&self, sort_key: &[String]) -> bool {
-        self.stable(sort_key, true)
-    }
-
-    fn stable(&self, sort_key: &[String], immutable_ok: bool) -> bool {
+    pub fn filters_sort_key(&self, sort_key: &[String], immutable_ok: bool) -> bool {
         let in_key = |column: &str| sort_key.iter().any(|key| key == column);
         match self {
             Self::Boolean(expression) => expression.fold(
-                &|predicate| predicate.stable(sort_key, immutable_ok),
-                &|children| children.into_iter().all(|stable| stable),
-                &|stable| stable,
+                &|predicate| predicate.filters_sort_key(sort_key, immutable_ok),
+                &|children| children.into_iter().all(|filters| filters),
+                &|filters| filters,
             ),
             Self::Property {
                 column,
@@ -153,21 +146,12 @@ impl Predicate {
         }
     }
 
-    pub fn guard_tombstones(
-        predicates: Vec<Predicate>,
-        sort_key: &[String],
-        alias: &str,
-    ) -> Vec<Predicate> {
-        let (mut keyed, guarded): (Vec<_>, Vec<_>) = predicates
-            .into_iter()
-            .partition(|predicate| predicate.stable(sort_key, false));
-        if !guarded.is_empty() {
-            keyed.push(Self::OrTombstone {
-                predicates: guarded,
-                alias: alias.to_string(),
-            });
+    pub fn guard_tombstones(self, sort_key: &[String], alias: &str) -> Self {
+        if self.filters_sort_key(sort_key, false) {
+            self
+        } else {
+            Self::OrTombstone(Box::new(self), alias.to_string())
         }
-        keyed
     }
 }
 

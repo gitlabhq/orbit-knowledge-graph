@@ -55,10 +55,9 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             Expr::binary(Op::Le, column(value), Expr::int(*end)),
         ),
         Predicate::Live { alias } => sql::deleted_false(alias),
-        Predicate::OrTombstone { predicates, alias } => Expr::binary(
+        Predicate::OrTombstone(inner, alias) => Expr::binary(
             Op::Or,
-            Expr::conjoin(predicates.iter().map(predicate).collect())
-                .expect("tombstone guard wraps at least one predicate"),
+            predicate(inner),
             Expr::eq(
                 Expr::col(alias, ontology::constants::DELETED_COLUMN),
                 Expr::param(SqlType::Bool, true),
