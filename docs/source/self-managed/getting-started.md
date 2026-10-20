@@ -17,6 +17,7 @@ title: Get started with GitLab Orbit on GitLab Self-Managed
 {{< history >}}
 
 - [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.2.2.
+- [Minimum GitLab version raised](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/2818) to 19.6 when the JSON Query DSL was removed.
 
 {{< /history >}}
 
@@ -30,7 +31,8 @@ The remaining setup steps require all three systems to exist and be reachable.
 
 ## Prerequisites
 
-- GitLab 19.2.2 or later.
+- GitLab 19.6 or later. GitLab Orbit accepts only GQL queries. Earlier GitLab versions send queries in
+  the removed JSON Query DSL, so every query and MCP tool call fails.
 - Administrator access to the GitLab instance and to its PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.
 - ClickHouse 26.4 or later, set up for GitLab.

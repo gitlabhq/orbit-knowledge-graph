@@ -112,12 +112,12 @@ async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)
+    let gql = r#"MATCH (u:User)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
@@ -140,12 +140,12 @@ async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext)
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)
+    let gql = r#"MATCH (u:User)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
@@ -178,12 +178,12 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)
+    let gql = r#"MATCH (u:User)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
@@ -249,12 +249,12 @@ async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+    let gql = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u, g
         LIMIT 20"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -310,12 +310,12 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &T
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+    let gql = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u, g
         LIMIT 20"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -349,12 +349,12 @@ async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+    let gql = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
         WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000
         RETURN u, g, p
         LIMIT 30"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -408,12 +408,12 @@ async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContex
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+    let gql = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
         WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000
         RETURN u, g, p
         LIMIT 30"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -463,12 +463,12 @@ async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (g:Group)-[:CONTAINS]->(p:Project)
+    let gql = r#"MATCH (g:Group)-[:CONTAINS]->(p:Project)
         WHERE g.id >= 1 AND g.id <= 10000
         RETURN g, p
         LIMIT 20"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -516,12 +516,12 @@ async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (p:Project)
+    let gql = r#"MATCH (p:Project)
         WHERE p.id >= 1 AND p.id <= 10000
         RETURN p
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let p = result.ctx().get("p").unwrap().clone();
@@ -552,12 +552,12 @@ async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+    let gql = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
         WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000
         RETURN u, g, p
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     for col in [
         "_orbit_u_id",
@@ -593,11 +593,11 @@ async fn empty_query_result_stays_empty(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User {username: 'nonexistent'})
+    let gql = r#"MATCH (u:User {username: 'nonexistent'})
         RETURN u
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -616,12 +616,12 @@ async fn all_authorized_preserves_all_data(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (g:Group)-[:CONTAINS]->(p:Project)
+    let gql = r#"MATCH (g:Group)-[:CONTAINS]->(p:Project)
         WHERE g.id >= 1 AND g.id <= 10000
         RETURN g, p
         LIMIT 20"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -644,12 +644,12 @@ async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (g:Group)-[:CONTAINS]->(p:Project)
+    let gql = r#"MATCH (g:Group)-[:CONTAINS]->(p:Project)
         WHERE g.id >= 1 AND g.id <= 10000
         RETURN g, p
         LIMIT 20"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -745,12 +745,12 @@ async fn all_columns_preserved_on_three_hop_traversal(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+    let gql = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
         WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000
         RETURN u, g, p
         LIMIT 30"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -781,12 +781,12 @@ async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)
+    let gql = r#"MATCH (u:User)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
@@ -897,10 +897,10 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+    let gql = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
         RETURN p"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -938,10 +938,10 @@ async fn path_finding_no_authorization_returns_nothing(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+    let gql = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
         RETURN p"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -959,11 +959,11 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
+    let gql = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
         WHERE `end`.id IN [1000, 1002, 1004]
         RETURN p"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1023,11 +1023,11 @@ async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH p = ANY SHORTEST (start:User)-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
+    let gql = r#"MATCH p = ANY SHORTEST (start:User)-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
         WHERE start.id IN [1, 2] AND `end`.id IN [1000, 1002]
         RETURN p"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1064,10 +1064,10 @@ async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+    let gql = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
         RETURN p"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1088,11 +1088,11 @@ async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
+    let gql = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
         WHERE `end`.id IN [1000, 1002]
         RETURN p"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1120,11 +1120,11 @@ async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
+    let gql = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
         WHERE `end`.id IN [1000, 1002]
         RETURN p"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1158,11 +1158,11 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH p = ANY SHORTEST (start:User)-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+    let gql = r#"MATCH p = ANY SHORTEST (start:User)-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
         WHERE start.id IN [1, 2]
         RETURN p"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1193,11 +1193,11 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
+    let gql = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
         WHERE `end`.id IN [1000, 1002, 1004]
         RETURN p"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1242,10 +1242,10 @@ async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
+    let gql = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project {id: 1000})
         RETURN p"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1269,11 +1269,11 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
+    let gql = r#"MATCH p = ANY SHORTEST (start:User {id: 1})-[:CONTAINS|MEMBER_OF*1..3]->(`end`:Project)
         WHERE `end`.id IN [1000, 1002, 1004]
         RETURN p"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1361,13 +1361,13 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)
+    let gql = r#"MATCH (u:User)
         WHERE u.state = 'active' AND u.username IN ['alice', 'bob', 'charlie', 'diana']
         RETURN u
         ORDER BY u.username
         LIMIT 100"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(
         !query.base.sql.contains("JOIN"),
@@ -1407,13 +1407,13 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (p:Project)
+    let gql = r#"MATCH (p:Project)
         WHERE p.visibility_level IN ['public', 'internal']
         RETURN p
         ORDER BY p.id
         LIMIT 50"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let p = result.ctx().get("p").unwrap().clone();
@@ -1443,12 +1443,12 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (g:Group)
+    let gql = r#"MATCH (g:Group)
         WHERE g.id IN [100, 101, 102]
         RETURN g
         LIMIT 100"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -1478,12 +1478,12 @@ async fn search_with_id_range_filter(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)
+    let gql = r#"MATCH (u:User)
         WHERE u.id >= 2 AND u.id <= 4
         RETURN u
         LIMIT 100"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
@@ -1507,12 +1507,12 @@ async fn search_with_specific_node_ids(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (p:Project)
+    let gql = r#"MATCH (p:Project)
         WHERE p.id IN [1000, 1003]
         RETURN p
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let p = result.ctx().get("p").unwrap().clone();
@@ -1542,12 +1542,12 @@ async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)
+    let gql = r#"MATCH (u:User)
         WHERE u.username = 'definitely_does_not_exist_12345'
         RETURN u
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1565,12 +1565,12 @@ async fn search_fail_closed_no_authorization(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (g:Group)
+    let gql = r#"MATCH (g:Group)
         WHERE g.id >= 1 AND g.id <= 10000
         RETURN g
         LIMIT 100"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1592,11 +1592,11 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User {state: 'active'})
+    let gql = r#"MATCH (u:User {state: 'active'})
         RETURN u
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -1683,12 +1683,12 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)
+    let gql = r#"MATCH (u:User)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u{.username, .state}
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -1740,12 +1740,12 @@ async fn column_selection_wildcard_returns_listed_columns_plus_mandatory(ctx: &T
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (g:Group)
+    let gql = r#"MATCH (g:Group)
         WHERE g.id >= 1 AND g.id <= 10000
         RETURN properties(g)
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_g_id"),
@@ -1798,12 +1798,12 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)
+    let gql = r#"MATCH (u:User)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -1844,12 +1844,12 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+    let gql = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
         WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000
         RETURN u{.username}, g{.name}, p{.name, .visibility_level}
         LIMIT 30"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -1917,12 +1917,12 @@ async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContex
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+    let gql = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u{.username, .state}, g{.name}
         LIMIT 20"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -1961,12 +1961,12 @@ async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+    let gql = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
         WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000
         RETURN u{.username}, g{.name}, p{.name}
         LIMIT 50"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -1993,13 +1993,13 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)
+    let gql = r#"MATCH (u:User)
         WHERE u.id >= 1 AND u.id <= 10000 AND u.username IN ['alice', 'bob']
         RETURN u{.username, .name, .state}
         ORDER BY u.username
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
@@ -2028,12 +2028,12 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (p:Project)
+    let gql = r#"MATCH (p:Project)
         WHERE p.id >= 1 AND p.id <= 10000
         RETURN p{.id, .name, .visibility_level}
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_p_id"),
@@ -2095,12 +2095,12 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+    let gql = r#"MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u{.username}, count(mr) AS mr_count
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -2180,12 +2180,12 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
+    let gql = r#"MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN properties(u), count(mr) AS mr_count
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -2237,12 +2237,12 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (g:Group)-[:CONTAINS]->(p:Project)
+    let gql = r#"MATCH (g:Group)-[:CONTAINS]->(p:Project)
         WHERE g.id >= 1 AND g.id <= 10000
         RETURN g{.name, .visibility_level}, p{.name, .visibility_level}
         LIMIT 20"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let g = result.ctx().get("g").unwrap().clone();
@@ -2288,12 +2288,12 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User {state: 'active'})
+    let gql = r#"MATCH (u:User {state: 'active'})
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u{.username}
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(query.base.sql.contains("_orbit_u_id"));
     assert!(query.base.sql.contains("_orbit_u_type"));
@@ -2326,12 +2326,12 @@ async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)
+    let gql = r#"MATCH (u:User)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u{.username, .name, .state}
         LIMIT 10"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -2349,10 +2349,10 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User {id: 1})-->(neighbor)
+    let gql = r#"MATCH (u:User {id: 1})-->(neighbor)
         RETURN u, neighbor"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(
         query.base.sql.contains("_orbit_u_id"),
@@ -2468,10 +2468,10 @@ async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User {id: 1})-->(neighbor)
+    let gql = r#"MATCH (u:User {id: 1})-->(neighbor)
         RETURN u, neighbor"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -2491,11 +2491,11 @@ async fn neighbors_query_multiple_center_nodes_mixed_authorization(ctx: &TestCon
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-->(neighbor)
+    let gql = r#"MATCH (u:User)-->(neighbor)
         WHERE u.id IN [1, 3]
         RETURN u, neighbor"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
     let u = result.ctx().get("u").unwrap().clone();
@@ -2528,10 +2528,10 @@ async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(neighbor)
+    let gql = r#"MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(neighbor)
         RETURN g, neighbor"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -2623,10 +2623,10 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (f:File {id: 3000})-[:DEFINES]->(neighbor)
+    let gql = r#"MATCH (f:File {id: 3000})-[:DEFINES]->(neighbor)
         RETURN f, neighbor"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -2762,11 +2762,11 @@ async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestConte
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH p = ANY SHORTEST (start:File {id: 3000})-[:DEFINES*1..2]->(`end`:Definition)
+    let gql = r#"MATCH p = ANY SHORTEST (start:File {id: 3000})-[:DEFINES*1..2]->(`end`:Definition)
         WHERE `end`.id IN [5000, 5001]
         RETURN p"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -2800,11 +2800,11 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (f:File)-[:DEFINES]->(neighbor)
+    let gql = r#"MATCH (f:File)-[:DEFINES]->(neighbor)
         WHERE f.id IN [3000, 3002]
         RETURN f, neighbor"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -2846,12 +2846,12 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
+    let gql = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)
         WHERE u.id >= 1 AND u.id <= 10000
         RETURN u, g
         LIMIT 20"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(
         query.base.sql.contains("e0_type"),
@@ -2995,12 +2995,12 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
+    let gql = r#"MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project)
         WHERE u.id >= 1 AND u.id <= 10000 AND p.id >= 1 AND p.id <= 10000
         RETURN u, g, p
         LIMIT 30"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     assert!(
         query.base.sql.contains("e0_type"),
@@ -3115,10 +3115,10 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    let json = r#"MATCH (u:User {id: 1})-->(neighbor)
+    let gql = r#"MATCH (u:User {id: 1})-->(neighbor)
         RETURN u, neighbor"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
 
     // Note: the entity type 'User' is passed as a parameter, not embedded in SQL
     assert!(
@@ -3183,10 +3183,10 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     let security_ctx = test_security_context();
 
     // User.user_type is int-based: 0=human, 6=project_bot, 11=service_account.
-    let json = r#"MATCH (u:User {user_type: 0})
+    let gql = r#"MATCH (u:User {user_type: 0})
         RETURN u{.user_type}"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3211,10 +3211,10 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         );
     }
 
-    let json = r#"MATCH (u:User {user_type: 6})
+    let gql = r#"MATCH (u:User {user_type: 6})
         RETURN u{.user_type}"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3225,10 +3225,10 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     );
 
     // MergeRequest.state is int-based: 1=opened, 2=closed, 3=merged, 4=locked.
-    let json = r#"MATCH (mr:MergeRequest {state: 1})
+    let gql = r#"MATCH (mr:MergeRequest {state: 1})
         RETURN mr{.state}"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3249,10 +3249,10 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         assert_eq!(state, Some("opened"), "MR state should be 'opened' string");
     }
 
-    let json = r#"MATCH (mr:MergeRequest {state: 3})
+    let gql = r#"MATCH (mr:MergeRequest {state: 3})
         RETURN mr{.state}"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3262,11 +3262,11 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "should find 1 merged MR when filtering by int 3"
     );
 
-    let json = r#"MATCH (mr:MergeRequest)
+    let gql = r#"MATCH (mr:MergeRequest)
         WHERE mr.state IN [1, 2]
         RETURN mr"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3276,10 +3276,10 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "should find 3 MRs with IN filter on int-based enum [1, 2]"
     );
 
-    let json = r#"MATCH (u:User {state: 'active'})
+    let gql = r#"MATCH (u:User {state: 'active'})
         RETURN u{.state}"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3300,10 +3300,10 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         assert_eq!(state, Some("active"), "state should be 'active' string");
     }
 
-    let json = r#"MATCH (u:User {state: 'blocked'})
+    let gql = r#"MATCH (u:User {state: 'blocked'})
         RETURN u"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 
@@ -3313,11 +3313,11 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
         "should find 1 blocked user with string enum filter"
     );
 
-    let json = r#"MATCH (u:User)
+    let gql = r#"MATCH (u:User)
         WHERE u.state IN ['active', 'blocked']
         RETURN u"#;
 
-    let query = compile(json, Frontend::Gql, &ontology, &security_ctx).unwrap();
+    let query = compile(gql, Frontend::Gql, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
 

@@ -18,7 +18,7 @@ rectangle "**Orbit Module**\n//Deploys as a single Rust binary//" as module #E8F
 
   component "**Code Indexer**\nparser-core + OXC\n+ tree-sitter" as code_idx #CCE5CC
 
-  component "**Graph Query Engine**\nJSON DSL -> ClickHouse SQL\n13-phase compiler, 4 query types" as query_eng #CCE5CC
+  component "**Graph Query Engine**\nGQL -> ClickHouse SQL\n13-phase compiler, 4 query types" as query_eng #CCE5CC
 
   component "**gRPC Server**\nTonic, JWT auth" as http_srv #CCE5CC
 

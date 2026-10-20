@@ -60,8 +60,9 @@ service OrbitService {
   // Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
   rpc GetGraphSchema(GetGraphSchemaRequest) returns (GetGraphSchemaResponse);
 
-  // Removed with the JSON Query DSL. Always returns NOT_FOUND and points to
-  // CALL db.schema(); kept so existing clients get a clear error.
+  // Removed with the JSON Query DSL. Returns NOT_FOUND for QUERY_LANGUAGE_GQL and
+  // points to CALL db.schema(). QUERY_LANGUAGE_JSON rejects with INVALID_ARGUMENT.
+  // Kept so existing clients get a clear error.
   rpc GetQueryDsl(GetQueryDslRequest) returns (GetQueryDslResponse);
 
   // Lists the standalone Orbit Remote skills embedded in this deployment.
@@ -235,7 +236,7 @@ message SchemaNodeStyle {
 }
 
 // ---------------------------------------------------------------------------
-// GetQueryDsl — removed with the JSON Query DSL; always NOT_FOUND
+// GetQueryDsl — removed with the JSON Query DSL; NOT_FOUND or INVALID_ARGUMENT
 // ---------------------------------------------------------------------------
 
 message GetQueryDslRequest {
@@ -244,7 +245,7 @@ message GetQueryDslRequest {
 }
 
 message GetQueryDslResponse {
-  string version = 3;  // semver string for the query DSL grammar, e.g. "1.0.0"
+  string version = 3;  // Unused since the JSON Query DSL was removed
   oneof content {
     string raw_json_schema = 1;  // format = RAW: full JSON Schema as a JSON string
     string formatted_text = 2;   // format = LLM: condensed TOON
@@ -257,7 +258,7 @@ message GetQueryDslResponse {
 
 // Request for the embedded skill catalog.
 message ListSkillsRequest {
-  QueryLanguage language = 1;  // Selects the query mode the served skills teach
+  QueryLanguage language = 1;  // Query language the served skills teach; QUERY_LANGUAGE_JSON rejects with INVALID_ARGUMENT
 }
 
 // Response listing every skill embedded in the deployed server.
@@ -279,7 +280,7 @@ message SkillSummary {
 message GetSkillRequest {
   string name = 1;
   bool metadata_only = 2;  // true omits files for a cheap cache revalidation
-  QueryLanguage language = 3;  // Selects the query mode the served skill teaches
+  QueryLanguage language = 3;  // Query language the served skill teaches; QUERY_LANGUAGE_JSON rejects with INVALID_ARGUMENT
 }
 
 message GetSkillResponse {

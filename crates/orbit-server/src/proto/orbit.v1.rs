@@ -222,7 +222,7 @@ pub struct GetQueryDslRequest {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetQueryDslResponse {
-    /// semver string for the query DSL grammar, e.g. "1.0.0"
+    /// Unused since the JSON Query DSL was removed
     #[prost(string, tag = "3")]
     pub version: ::prost::alloc::string::String,
     #[prost(oneof = "get_query_dsl_response::Content", tags = "1, 2")]
@@ -243,7 +243,7 @@ pub mod get_query_dsl_response {
 /// Request for the embedded skill catalog.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListSkillsRequest {
-    /// Selects the query mode the served skills teach
+    /// Query language the served skills teach; QUERY_LANGUAGE_JSON rejects with INVALID_ARGUMENT
     #[prost(enumeration = "QueryLanguage", tag = "1")]
     pub language: i32,
 }
@@ -275,7 +275,7 @@ pub struct GetSkillRequest {
     /// true omits files for a cheap cache revalidation
     #[prost(bool, tag = "2")]
     pub metadata_only: bool,
-    /// Selects the query mode the served skill teaches
+    /// Query language the served skill teaches; QUERY_LANGUAGE_JSON rejects with INVALID_ARGUMENT
     #[prost(enumeration = "QueryLanguage", tag = "3")]
     pub language: i32,
 }
@@ -1193,8 +1193,9 @@ pub mod orbit_service_client {
                 .insert(GrpcMethod::new("orbit.v1.OrbitService", "GetGraphSchema"));
             self.inner.unary(req, path, codec).await
         }
-        /// Removed with the JSON Query DSL. Always returns NOT_FOUND and points to
-        /// CALL db.schema(); kept so existing clients get a clear error.
+        /// Removed with the JSON Query DSL. Returns NOT_FOUND for QUERY_LANGUAGE_GQL and
+        /// points to CALL db.schema(). QUERY_LANGUAGE_JSON rejects with INVALID_ARGUMENT.
+        /// Kept so existing clients get a clear error.
         pub async fn get_query_dsl(
             &mut self,
             request: impl tonic::IntoRequest<super::GetQueryDslRequest>,
@@ -1494,8 +1495,9 @@ pub mod orbit_service_server {
             tonic::Response<super::GetGraphSchemaResponse>,
             tonic::Status,
         >;
-        /// Removed with the JSON Query DSL. Always returns NOT_FOUND and points to
-        /// CALL db.schema(); kept so existing clients get a clear error.
+        /// Removed with the JSON Query DSL. Returns NOT_FOUND for QUERY_LANGUAGE_GQL and
+        /// points to CALL db.schema(). QUERY_LANGUAGE_JSON rejects with INVALID_ARGUMENT.
+        /// Kept so existing clients get a clear error.
         async fn get_query_dsl(
             &self,
             request: tonic::Request<super::GetQueryDslRequest>,

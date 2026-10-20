@@ -15,7 +15,7 @@ DAP, Orbit, ClickHouse, and the Rails redaction service.  This chain
              block the Puma thread
 
 **The problem:** A search request holds a Puma thread from the moment Rails
-receives it until Orbit finishes: DSL compilation (the 13-phase compiler
+receives it until Orbit finishes: GQL compilation (the 13-phase compiler
 pipeline), the ClickHouse query, and N ``RedactionRequired`` round-trips over
 the gRPC stream back to Rails for ``Ability.allowed?`` permission filtering.
 (Traversal-path filtering adds no round-trip --- the allowed paths ride in the
@@ -52,12 +52,13 @@ client, stub-cached):
    * - ``InvokeAgentCommand``
      - Invoke a named agent command
    * - ``ExecuteQuery``
-     - Execute a graph query (JSON DSL); **bidirectional streaming** ---
+     - Execute a graph query (GQL); **bidirectional streaming** ---
        carries the redaction callback (see below)
    * - ``GetGraphSchema``
      - Return the graph schema (for progressive disclosure)
    * - ``GetQueryDsl``
-     - Return the query DSL definition
+     - Removed with the JSON Query DSL; kept for wire compatibility and
+       returns an error
    * - ``GetResponseFormat``
      - Return the response format/version
    * - ``ListSkills``
@@ -88,14 +89,11 @@ proxying to the gRPC service):
      - What it does
      - Backing RPC
    * - ``POST /api/v4/orbit/query``
-     - Execute a graph query (JSON DSL)
+     - Execute a graph query (GQL)
      - ``ExecuteQuery``
    * - ``GET /api/v4/orbit/schema``
      - Return the graph schema
      - ``GetGraphSchema``
-   * - ``GET /api/v4/orbit/dsl``
-     - Return the query DSL definition
-     - ``GetQueryDsl``
    * - ``GET /api/v4/orbit/status``
      - Graph / indexing status
      - ``GetGraphStatus``
@@ -125,7 +123,7 @@ DAP / AI Gateway):
    * - Tool
      - What it does
    * - ``query_graph``
-     - Execute a JSON DSL query against the graph.  Agents construct their own
+     - Execute a GQL query against the graph.  Agents construct their own
        queries against the schema (progressive disclosure keeps token usage
        around 3k).
    * - ``get_graph_schema``
@@ -242,7 +240,7 @@ Bulk Data Flows
 Graph Query Engine --- Four Query Types
 ----------------------------------------
 
-The JSON DSL supports four query types, all compiled to parameterized
+GQL queries compile to four query types, all as parameterized
 ClickHouse SQL through the 13-phase compiler pipeline:
 
 .. list-table::

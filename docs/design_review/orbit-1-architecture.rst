@@ -5,7 +5,7 @@
 
 Orbit (the cloud-deployed graph service) unifies SDLC metadata and
 source code into a single property graph stored in ClickHouse, queryable
-through a compiled DSL, and accessible to LLM agents, the Orbit dashboard,
+through compiled GQL (a read-only openCypher subset), and accessible to LLM agents, the Orbit dashboard,
 and the GitLab Web IDE.
 
 .. uml:: puml/orbit_architecture_simplified.puml
@@ -40,7 +40,7 @@ Components Inside the Module
        shared ontology.
    * - **Graph Query Engine**
      - Rust (13-phase compiler)
-     - Compiles untrusted JSON DSL into parameterized ClickHouse SQL.
+     - Compiles untrusted GQL into parameterized ClickHouse SQL.
        Four query types: multi-hop traversal, aggregation, pathfinding, and
        nearest neighbors (full-text search is a mode of traversal, not a
        separate type).  Auth via traversal_path filter injection.  Semi-Join

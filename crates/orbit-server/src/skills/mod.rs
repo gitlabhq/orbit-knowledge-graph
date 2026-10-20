@@ -183,34 +183,32 @@ mod tests {
             "references/troubleshooting.md",
             "scripts/remote_repo_map.py",
         ];
-        {
-            let files = get_skill("orbit", false).unwrap().files.unwrap();
+        let files = get_skill("orbit", false).unwrap().files.unwrap();
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            paths
+        );
+        let remote = tempfile::tempdir().unwrap();
+        for file in files {
             assert_eq!(
-                files
-                    .iter()
-                    .map(|file| file.path.as_str())
-                    .collect::<Vec<_>>(),
-                paths
+                file.sha256,
+                sha256_hex(file.content.as_bytes()),
+                "{}",
+                file.path
             );
-            let remote = tempfile::tempdir().unwrap();
-            for file in files {
-                assert_eq!(
-                    file.sha256,
-                    sha256_hex(file.content.as_bytes()),
-                    "{}",
-                    file.path
-                );
-                let path = remote.path().join(file.path);
-                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-                std::fs::write(path, file.content).unwrap();
-            }
-            orbit_prompts::validate_skill_pair(
-                remote.path(),
-                std::path::Path::new(env!("SKILLS_DIR")).join("orbit-cli"),
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../orbit-cli/src/main.rs"),
-            )
-            .unwrap_or_else(|error| panic!("{error}"));
+            let path = remote.path().join(file.path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, file.content).unwrap();
         }
+        orbit_prompts::validate_skill_pair(
+            remote.path(),
+            std::path::Path::new(env!("SKILLS_DIR")).join("orbit-cli"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../orbit-cli/src/main.rs"),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
     }
 
     #[test]

@@ -33,7 +33,7 @@ their SDLC context (projects, MRs, branches) through the shared ontology.
 Graph Query Engine
 ------------------
 
-Compiles untrusted JSON DSL into parameterized ClickHouse SQL through a
+Compiles untrusted GQL into parameterized ClickHouse SQL through a
 13-phase pipeline (validate, normalize, restrict, plan, lower, enforce,
 security, partition, cursor, check, hydrate_plan, settings, codegen).
 Supports four query types: traversal, aggregation, pathfinding, and neighbors
@@ -52,7 +52,7 @@ stack (org isolation, traversal ID filtering from JWT-supplied
 ``group_traversal_ids`` claims, and Rails redaction via ``Ability.allowed?``
 over the gRPC stream), JWT authentication, the gRPC client (11 RPC methods with
 stub caching), the Rails-hosted MCP endpoint (JSON-RPC 2.0), the REST API under
-``/api/v4/orbit/*`` (query, schema, dsl, status, tools) proxying to gRPC,
+``/api/v4/orbit/*`` (query, schema, status, tools) proxying to gRPC,
 internal API for Gitaly access, Siphon ClickHouse tables for CDC replication,
 and the Orbit dashboard controller.
 
@@ -73,7 +73,7 @@ Integrates Orbit into the Duo Agent Platform as the default context layer for
 agent tool calls.  Orbit exposes agent tools --- ``query_graph`` and
 ``get_graph_schema``, plus a ``list_commands`` / ``invoke_command`` fallback
 pattern for named agent commands --- that replace dozens of individual REST API
-calls.  Agents construct their own DSL queries against the graph schema, which
+calls.  Agents construct their own GQL queries against the graph schema, which
 uses progressive disclosure to keep token usage around 3k.  Integration requires wiring through
 AI Gateway, creating a custom agent for evals, and resolving billing
 discernment (standalone vs. within-DAP sessions).

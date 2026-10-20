@@ -249,7 +249,8 @@ For more information, see [TLS and network requirements](#tls-and-network-requir
      existingSecret: orbit-webserver-tls
    ```
 
-1. Install the chart:
+1. Install the chart. Upgrade GitLab to 19.6 or later first. Earlier GitLab versions send queries in the
+   removed JSON Query DSL, and GitLab Orbit rejects them.
 
    ```shell
    helm upgrade --install orbit \

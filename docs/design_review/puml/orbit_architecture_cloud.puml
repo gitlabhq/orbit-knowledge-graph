@@ -15,7 +15,7 @@ rectangle "Orbit Module Boundary" as module #E8F4FD {
   }
 
   rectangle "Query & Serving" as serve #B3D9FF {
-    component "Graph Query Engine\n(JSON DSL -> ClickHouse SQL)\n13-phase compiler" as qe
+    component "Graph Query Engine\n(GQL -> ClickHouse SQL)\n13-phase compiler" as qe
     component "gRPC Server (tonic)\n(11 RPCs)\n+ probe server /-/liveness, /-/readiness" as http
     component "JWT Auth\nMiddleware" as jwt
   }
@@ -56,7 +56,7 @@ gitaly --> code : streaming archive\ndownload
 code --> ch : write code\ngraph tables
 
 ' Query flows
-http --> qe : JSON DSL
+http --> qe : GQL
 qe --> ch : parameterized SQL
 qe --> auth : traversal_path\nfilter injection
 jwt --> auth : traversal paths\n(JWT claims from Rails)

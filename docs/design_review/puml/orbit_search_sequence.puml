@@ -10,7 +10,7 @@ participant "Developer /\nLLM Agent" as user
 participant "GitLab Workhorse" as rails #FFB3B3
 participant "DAP" as dap #FFE0B2
 participant "Orbit gkg-server\n(gRPC)" as orbit #B3D9FF
-participant "Query Engine\n(DSL compiler)" as qe #B3D9FF
+participant "Query Engine\n(GQL compiler)" as qe #B3D9FF
 participant "ClickHouse\nCloud" as ch #CCE5CC
 participant "Rails Redaction\n(Ability.allowed?)" as redact #FFB3B3
 
@@ -24,7 +24,7 @@ dap -> orbit : gRPC + JWT\n(JWT carries traversal paths)
 activate orbit
 orbit -> orbit : JWT validation\n(read Claims.group_traversal_ids)
 
-orbit -> qe : JSON DSL query
+orbit -> qe : GQL query
 activate qe
 qe -> qe : 13-phase compile\n(validate, normalize, ... ,\nsecurity, enforce, ... , codegen)
 qe -> qe : Inject traversal_path filter\n(from JWT claims) into SQL
