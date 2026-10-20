@@ -556,6 +556,7 @@ fn render_local(
     for (path, start, end) in &targets.ranges {
         let (start, end) = snap_to_definitions(&client, &git, path, *start, *end)?;
         render_range(&mut out, &git, path, start, end)?;
+        out.push_str(&callers(&client, &git, path, start, end)?);
     }
     let mut shown: Vec<String> = targets
         .ranges
@@ -909,6 +910,117 @@ fn render_range(
     writeln!(out, "{path}:{start}-{end}")?;
     write_lines(out, &lines, start, end)?;
     Ok(())
+}
+
+const CALLERS_SHOWN: usize = 5;
+const CALLER_LINES: usize = 12;
+
+/// One line per definition in a line range naming the indexed calls into it from outside the
+/// range, so reading code also shows who uses it. A range inside one definition reports that
+/// definition. Test callers are counted rather than named. The graph misses calls it cannot
+/// resolve, such as through interfaces, so a definition without indexed callers gets no line.
+fn callers(
+    client: &duckdb_client::DuckDbClient,
+    git: &workspace::GitInfo,
+    path: &str,
+    start: usize,
+    end: usize,
+) -> Result<String> {
+    let test = duckdb_client::search::excluded_path_predicate("c.file_path");
+    let batches = client.query_arrow_json(
+        &format!(
+            "WITH defs AS (
+  SELECT id, name, start_line FROM gl_definition
+  WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
+    AND definition_type NOT IN ('Variable', 'Field', 'Property')
+    AND ((start_line >= ?4 AND end_line <= ?5)
+      OR (start_line = (SELECT max(start_line) FROM gl_definition
+                        WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
+                          AND definition_type NOT IN ('Variable', 'Field', 'Property')
+                          AND start_line <= ?4 AND end_line >= ?5)
+          AND NOT EXISTS (SELECT 1 FROM gl_definition
+                          WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
+                            AND definition_type NOT IN ('Variable', 'Field', 'Property')
+                            AND start_line >= ?4 AND end_line <= ?5)
+          AND start_line <= ?4 AND end_line >= ?5))
+)
+SELECT d.id AS target, d.name AS target_name, d.start_line AS target_start,
+       COALESCE(c.name, '') AS caller, COALESCE(c.file_path, '') AS caller_path,
+       COALESCE(c.start_line, 0) AS caller_line, COALESCE({test}, FALSE) AS test
+FROM defs d
+LEFT JOIN gl_edge e ON e.target_id = d.id AND e.relationship_kind = 'CALLS'
+LEFT JOIN gl_definition c ON c.id = e.source_id AND c.project_id = ?1 AND c.commit_sha = ?2
+  AND NOT (c.file_path = ?3 AND c.start_line >= ?4 AND c.end_line <= ?5)
+ORDER BY d.start_line, d.id, test, caller_path, caller_line"
+        ),
+        &[
+            git.project_id.into(),
+            git.commit_sha.clone().into(),
+            path.to_string().into(),
+            (start as i64).into(),
+            (end as i64).into(),
+        ],
+    )?;
+    let targets = i64_column(&batches, "target");
+    let names = string_column(&batches, "target_name");
+    let callers = string_column(&batches, "caller");
+    let paths = string_column(&batches, "caller_path");
+    let lines = i64_column(&batches, "caller_line");
+    let tests = duckdb_client::bool_column(&batches, "test");
+    let mut defs: Vec<(i64, String, Vec<(String, String, i64)>, usize)> = Vec::new();
+    for i in 0..targets.len() {
+        if defs.last().is_none_or(|(id, ..)| *id != targets[i]) {
+            defs.push((targets[i], names[i].clone(), Vec::new(), 0));
+        }
+        let def = defs.last_mut().expect("pushed above");
+        match (callers[i].is_empty(), tests[i]) {
+            (true, _) => {}
+            (false, true) => def.3 += 1,
+            (false, false) => {
+                let caller = (callers[i].clone(), paths[i].clone(), lines[i]);
+                if !def.2.contains(&caller) {
+                    def.2.push(caller);
+                }
+            }
+        }
+    }
+    let mut out = String::new();
+    let mut shown = 0;
+    let mut more = 0;
+    for (_, name, found, tests) in &defs {
+        if found.is_empty() && *tests == 0 {
+            continue;
+        }
+        if shown == CALLER_LINES {
+            more += 1;
+            continue;
+        }
+        shown += 1;
+        let mut previous = "";
+        let mut named: Vec<String> = found
+            .iter()
+            .take(CALLERS_SHOWN)
+            .map(|(caller, file, line)| {
+                let at = match file == previous {
+                    true => format!(":{line}"),
+                    false => format!("{file}:{line}"),
+                };
+                previous = file;
+                format!("{caller} ({at})")
+            })
+            .collect();
+        if found.len() > CALLERS_SHOWN {
+            named.push(format!("+{} more", found.len() - CALLERS_SHOWN));
+        }
+        if *tests > 0 {
+            named.push(format!("{tests} in tests"));
+        }
+        let _ = writeln!(out, "» indexed callers of {name}: {}", named.join(", "));
+    }
+    if more > 0 {
+        let _ = writeln!(out, "» +{more} more definitions with callers");
+    }
+    Ok(out)
 }
 
 fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
