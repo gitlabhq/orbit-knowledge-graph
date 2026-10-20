@@ -308,7 +308,7 @@ mod tests {
                     " grep` must be used for search",
                     "Ignores case, `_`, `-`",
                     "`a|b` OR",
-                    " context` reads code in one call",
+                    "all you need in one call plus independent searches",
                 ] {
                     assert!(rendered.contains(phrase), "{launcher}: {phrase}");
                 }
@@ -317,8 +317,8 @@ mod tests {
                     remote,
                     "{launcher}: {rendered}"
                 );
-                assert!(rendered.contains("`mr:42 job:9`") == remote, "{launcher}");
-                let budget = if remote { 90 } else { 60 };
+                assert!(rendered.contains(" mr:42;") == remote, "{launcher}");
+                let budget = if remote { 100 } else { 75 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }

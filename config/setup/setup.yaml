@@ -10,11 +10,12 @@ instructions: |
   ## Orbit
 
   - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg{{remote_grep}}. Ignores case, `_`, `-`; `a|b` OR; narrow with paths, `def:words`, or `file:x`.
-  - `{{orbit}} context` reads code in one call: `a.rs:10-40 b.rs:88-120`, or a name for its connections{{remote_context}}. Edit from its output without rereading.
+  - MANDATORY: `{{orbit}} context` must be used to read code, all you need in one call plus independent searches: `{{orbit}} context a.rs:10-40 Name{{remote_context_example}}; {{orbit}} grep 'x'`. Names show connections{{remote_context}}. Reuse shown code; edit from it without rereading.
 
 remote:
-  remote_grep: ", and instead of glab: `mr:words` or `issue:words` searches GitLab"
-  remote_context: "; `mr:42 job:9` reads GitLab, bare `{{orbit}} context` the branch's MR and CI failures, `repo:group/project symbol:Name` a sibling project"
+  remote_grep: ", and for GitLab instead of glab: `mr:words`, `issue:words`"
+  remote_context_example: " mr:42"
+  remote_context: "; bare `{{orbit}} context` reads the branch's MR and CI failures, `repo:group/project symbol:Name` a sibling project"
 
 nudge_gitlab: |
   MANDATORY: `{{orbit}}` must be used for GitLab instead of glab. `{{orbit}} grep 'mr:words'` searches MRs, and `issue:`, `branch:`, `commit:`, `comment:` the rest. `{{orbit}} context mr:42 issue:7 branch:x pipeline:9 job:9` reads them; bare `{{orbit}} context` reads the current branch's MR and CI; `{{orbit}} context repo:group/project symbol:Name file:path` reads a sibling project's code.
