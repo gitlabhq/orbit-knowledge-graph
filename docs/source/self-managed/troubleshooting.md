@@ -26,16 +26,17 @@ To resolve this issue, upgrade GitLab Orbit. For the minimum release, see
 
 ## GitLab cannot connect, and the log shows an ALPN error
 
-A load balancer or proxy between GitLab and the webserver does not keep HTTP/2. For example, an AWS Classic
-Load Balancer, or a proxy that terminates TLS and forwards HTTP/1.1.
+A load balancer or proxy between GitLab and the webserver does not keep HTTP/2. Examples are an AWS Classic
+Load Balancer that terminates TLS, and a proxy that forwards HTTP/1.1.
 
 To resolve this issue, forward TCP to the webserver and terminate TLS on the webserver. For more
 information, see [TLS and network requirements](orbit-setup.md#tls-and-network-requirements).
 
 ## Connections time out after the webserver pod moves
 
-On AWS, cross-zone load balancing is off on the Network Load Balancer. The load balancer node in one zone
-cannot reach a pod in a different zone.
+On AWS, GitLab connects to one fixed IP address of the Network Load Balancer, for example from `/etc/hosts`,
+and cross-zone load balancing is off. The load balancer node in that zone cannot reach a pod in a different
+zone.
 
 To resolve this issue, turn on cross-zone load balancing. For more information, see
 [TLS and network requirements](orbit-setup.md#tls-and-network-requirements).
@@ -47,8 +48,15 @@ the Linux package when a tool replaces `/etc/gitlab/gitlab-secrets.json`.
 
 To resolve this issue:
 
-1. Set `gitlab_rails['orbit_secret']` in `/etc/gitlab/gitlab.rb` to one key, and reconfigure GitLab.
-1. Put the same key in the `gitlab-jwt-verifying-key` and `gitlab-jwt-signing-key` entries of the Secret.
+1. Read the current key:
+
+   ```shell
+   sudo cat /var/opt/gitlab/gitlab-rails/etc/gitlab_knowledge_graph_secret
+   ```
+
+1. Set `gitlab_rails['orbit_secret']` in `/etc/gitlab/gitlab.rb` to that key, then reconfigure GitLab.
+1. Put the same key in the `gitlab-jwt-verifying-key` and `gitlab-jwt-signing-key` entries of the
+   `gkg-secrets` Secret.
 1. Restart the GitLab Orbit pods:
 
    ```shell
@@ -82,8 +90,9 @@ To resolve this issue, set `registry['database']['host'] = '/var/opt/gitlab/post
 
 ## The dispatcher stops with `ontology archive vNN is missing`
 
-The graph database was created by a GitLab Orbit release earlier than 0.107.0. Later releases cannot
-upgrade it in place.
+A GitLab Orbit release earlier than 0.107.0 created the graph database. The full message asks you to seed
+the catalog from the deployed release. The GitLab Orbit image includes the catalog only from 0.107.0, so
+later releases cannot upgrade this database in place.
 
 To resolve this issue, create an empty graph database, point GitLab Orbit at it, and index again. For more
 information, see [Upgrade GitLab Orbit](orbit-setup.md#upgrade-gitlab-orbit).
@@ -95,10 +104,10 @@ The ClickHouse system log tables, such as `query_log` and `text_log`, have no ti
 To resolve this issue, add a TTL to each log. For more information, see
 [System log retention](getting-started.md#system-log-retention).
 
-## A user gets no results for a project they are a member of
+## A project member gets no results for the project
 
-GitLab Orbit grants access through group membership only. A role that is assigned only on a project does
-not give access to GitLab Orbit.
+GitLab Orbit grants access through group membership only. A role on a project alone does not give access to
+GitLab Orbit.
 
 To resolve this issue, give the user the Reporter role or higher on the group. For more information, see
 [Roles required to query GitLab Orbit](../remote/security.md#roles-required-to-query-gitlab-orbit).
