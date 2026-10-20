@@ -39,6 +39,7 @@ review-docs-deploy:
   - .review-docs
   variables:
     DOCS_BRANCH: michaelangeloio/orbit-docs-v2
+  needs: []
   when: on_success
   environment:
     name: review/mr-${CI_MERGE_REQUEST_IID}
