@@ -9,7 +9,6 @@ title: GitLab Orbit in GitLab Duo
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -19,9 +18,8 @@ title: GitLab Orbit in GitLab Duo
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
-- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
 - GitLab Orbit in GitLab Duo [turned on by default](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/261361) in GitLab 19.6.
-- Generally available in GitLab 19.5.
 
 {{< /history >}}
 
@@ -49,7 +47,7 @@ To choose which agents use GitLab Orbit:
 
 1. In the upper-right corner, select your avatar.
 1. Select **Preferences**.
-1. Under **Orbit in GitLab Duo**, select or clear these checkboxes. All of them are selected by default.
+1. In the **GitLab Orbit** section, select or clear the checkboxes. All of them are selected by default.
 
    | Option | Gives the GitLab Orbit tools to |
    |--------|---------------------------------|
@@ -117,7 +115,7 @@ To edit the flow in VS Code, see
 
 ## Example prompts
 
-Ask these questions in any agent or flow above:
+Ask these questions in any agent or flow that uses GitLab Orbit:
 
 ```plaintext
 Which projects import the payments-service library?
@@ -128,16 +126,16 @@ What work items are blocking this epic?
 
 For more prompts, see [use cases](../use-cases.md).
 
+## Billing
+
+GitLab Orbit queries from GitLab Duo agents consume GitLab Credits, in addition to the GitLab Credits for
+Agent Platform. For more information, see [billing](../how-it-works.md#billing).
+
 ## Known issues
 
 - GitLab Orbit answers only about groups that have it turned on and that you can access.
 - A complex question might need a follow-up question to narrow the scope.
 - For large results, the answer might leave out source code. To get it, ask the agent to show the source.
-
-## Billing
-
-GitLab Orbit queries from GitLab Duo agents consume GitLab Credits, in addition to the GitLab Credits for
-Agent Platform. For more information, see [billing](../how-it-works.md#billing).
 
 ## Related topics
 

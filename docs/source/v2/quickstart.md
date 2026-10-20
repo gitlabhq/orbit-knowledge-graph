@@ -9,7 +9,6 @@ title: GitLab Orbit quickstart
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -20,8 +19,7 @@ title: GitLab Orbit quickstart
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) for GitLab Self-Managed in GitLab 19.2.2.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
-- [Feature flag `knowledge_graph` removed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Generally available in GitLab 19.5.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
 
 {{< /history >}}
 
@@ -48,9 +46,9 @@ To turn on GitLab Orbit:
 
 1. In the top bar, select **Search or go to** and find your top-level group.
 1. In the left sidebar, select **Settings** > **Orbit**.
-1. Turn on the **Turn on Orbit** toggle.
-1. If your group does not have the GitLab Orbit add-on and is eligible for a trial, select **Start free trial** in the dialog.
-   If the group is not eligible, select **Contact sales**.
+1. If the page shows that the group is not eligible for a free Orbit trial, select **Contact sales**.
+   Otherwise, turn on the **Turn on Orbit** toggle.
+1. If the group starts a free trial, a dialog shows what the trial includes. Select **Turn on Orbit**.
    For what the trial includes, see [start a GitLab Orbit trial](trial.md).
 
 The page shows **Orbit is indexing**, then **Orbit is ready**. The first index can take up to a few hours.
@@ -58,7 +56,6 @@ Continue with the next steps while it runs.
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
-These steps work on every offering.
 On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on indexing in the **Admin** area.
 For more information, see [turn on indexing for a group](self-managed/orbit-setup.md#turn-on-indexing-for-a-group).
 

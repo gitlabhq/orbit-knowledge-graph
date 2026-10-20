@@ -168,8 +168,8 @@ The CLI keeps the local graph in `~/.gitlab/orbit/local/`: one DuckDB file for e
   Index your other repositories again after you update.
 
 The local graph has no authorization layer. Anyone who can read its files can read all data in them.
-Index and query commands send no request off your machine. The CLI uses the network only to install and update
-the binary, fetch the GitLab Orbit skill, and send [telemetry](../cli.md#settings-and-telemetry).
+Index and query commands send no code, file paths, or query text off your machine. Each command sends one
+[telemetry](../cli.md#settings-and-telemetry) event unless you turn telemetry off. The CLI also uses the network to install and update the binary, and to fetch the GitLab Orbit skill.
 
 ## Billing
 

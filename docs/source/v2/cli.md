@@ -134,7 +134,7 @@ Local commands use the [local graph](local/_index.md) on your machine. They need
 | `query` | Run a query and stream the response. | Remote |
 | `status` | Show the health of the service. | Remote |
 | `ontology` | Show the node types, properties, and relationships. | Remote |
-| `dsl` | Show the JSON Schema of the deprecated JSON query DSL. | Remote |
+| `dsl` | Show the JSON Schema of the deprecated JSON query domain-specific language (DSL). | Remote |
 | `tools` | Show the MCP tool manifest. | Remote |
 | `graph-status` | Show the indexing progress of a group or project. | Remote |
 | `skills` | List and print the [agent skill](agents/_index.md#gitlab-orbit-skill) files. | Remote through `glab orbit`, otherwise the built-in copy |
@@ -158,14 +158,13 @@ To index, search, and run SQL on the local graph, see [GitLab Orbit Local](local
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
 
 Sign in with `glab auth login`.
-On GitLab Self-Managed and GitLab Dedicated, sign in with `glab auth login --hostname <host>`,
-and run `glab orbit` in a clone from that host.
+On GitLab Self-Managed and GitLab Dedicated, sign in with `glab auth login --hostname <host>`.
+Then run `glab orbit` in a clone from that host, or run `glab config set --global host <host>` to use the instance in any directory.
 Without `glab`, the binary reads `GITLAB_TOKEN`, or uses `glab auth credential-helper`.
 For an instance other than GitLab.com, also set `GITLAB_URL=https://<host>`.
 
@@ -186,7 +185,10 @@ A request body is a JSON object, such as `{"query": "MATCH ...", "response_forma
 - `gql`: a text table.
 
 To list the properties of node types, run `glab orbit ontology MergeRequest Project`.
-For indexing progress, run `graph-status`. `status` shows only the health of the service.
+
+### Check indexing progress
+
+To check indexing progress, run `graph-status`. `status` shows only the health of the service.
 
 ```shell
 glab orbit graph-status --full-path my-group/my-project
@@ -229,14 +231,11 @@ Telemetry is on by default, and it is the only saved setting. To turn it off, ru
 | `5` | HTTP `429`. Rate limited. Wait for `Retry-After`. |
 | `130` | You canceled a prompt or indexing. |
 
-## Billing
-
-For which commands consume GitLab Credits, see [billing](how-it-works.md#billing).
-
 ## Related topics
 
 - [`glab orbit` reference](https://docs.gitlab.com/cli/orbit/)
 - [Connect your agent](agents/_index.md)
 - [GitLab Orbit Local](local/_index.md)
 - [Cypher query language](queries/cypher.md)
+- [Billing](how-it-works.md#billing)
 - [Troubleshooting](troubleshooting.md)
