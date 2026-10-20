@@ -52,12 +52,7 @@ struct Root {
     enabled_at: DateTime<Utc>,
 }
 
-struct Change {
-    earliest: DateTime<Utc>,
-    latest: DateTime<Utc>,
-}
-
-type Changes = HashMap<String, HashMap<String, Vec<Change>>>;
+type LatestChanges = HashMap<String, HashMap<String, DateTime<Utc>>>;
 
 impl NamespaceFreshness {
     pub fn new(
@@ -101,12 +96,12 @@ impl NamespaceFreshness {
             .collect())
     }
 
-    async fn changes(
+    async fn latest_changes(
         &self,
         ontology: &ontology::Ontology,
         from: DateTime<Utc>,
         to: DateTime<Utc>,
-    ) -> Result<Changes, TaskError> {
+    ) -> Result<LatestChanges, TaskError> {
         let batches = self
             .datalake
             .query(&render_freshness_query(&ontology.reindex_sources()))
@@ -117,19 +112,11 @@ impl NamespaceFreshness {
             .map_err(TaskError::new)?;
         let paths = String::extract_column(&batches, 0).map_err(TaskError::new)?;
         let targets = String::extract_column(&batches, 1).map_err(TaskError::new)?;
-        let earliest = DateTime::<Utc>::extract_column(&batches, 2).map_err(TaskError::new)?;
-        let latest = DateTime::<Utc>::extract_column(&batches, 3).map_err(TaskError::new)?;
+        let latest = DateTime::<Utc>::extract_column(&batches, 2).map_err(TaskError::new)?;
 
-        let mut changes = Changes::new();
-        for (((path, target), earliest), latest) in
-            paths.into_iter().zip(targets).zip(earliest).zip(latest)
-        {
-            changes
-                .entry(path)
-                .or_default()
-                .entry(target)
-                .or_default()
-                .push(Change { earliest, latest });
+        let mut changes = LatestChanges::new();
+        for ((path, target), latest) in paths.into_iter().zip(targets).zip(latest) {
+            changes.entry(path).or_default().insert(target, latest);
         }
         Ok(changes)
     }
@@ -171,7 +158,7 @@ impl ScheduledTask for NamespaceFreshness {
                     .map_err(TaskError::new)
             },
             self.enabled_roots(),
-            self.changes(&ontology, scanned_from, now),
+            self.latest_changes(&ontology, scanned_from, now),
         )?;
         let checkpoints: HashMap<String, Checkpoint> = checkpoints.into_iter().collect();
 
@@ -184,12 +171,11 @@ impl ScheduledTask for NamespaceFreshness {
             for root in &roots {
                 let key = format!("{}.{}", namespace_position_key(root.id), plan.name);
                 let synced = checkpoints.get(&key).and_then(Checkpoint::synced_until);
-                let plan_changes = changes
+                let latest_change = changes
                     .get(&root.path)
                     .and_then(|targets| targets.get(&plan.entity))
-                    .map(Vec::as_slice)
-                    .unwrap_or_default();
-                let lag = lag(now, scanned_from, root.enabled_at, synced, plan_changes);
+                    .copied();
+                let lag = lag(now, scanned_from, root.enabled_at, synced, latest_change);
                 self.lag.record(lag.as_seconds_f64(), &labels);
             }
         }
@@ -197,87 +183,21 @@ impl ScheduledTask for NamespaceFreshness {
     }
 }
 
-/// How long the oldest change not yet indexed has waited; zero when indexed data matches the datalake.
+/// An upper bound on how far indexed data trails the datalake: merges keep only the newest version
+/// of a row, so the first unindexed change is lost and a pending entity counts from its last sync.
 fn lag(
     now: DateTime<Utc>,
     scanned_from: DateTime<Utc>,
     enabled_at: DateTime<Utc>,
     synced: Option<DateTime<Utc>>,
-    changes: &[Change],
+    latest_change: Option<DateTime<Utc>>,
 ) -> TimeDelta {
     let Some(synced) = synced else {
         return now - enabled_at;
     };
-    if synced < scanned_from {
+    let pending = latest_change.is_some_and(|latest| latest > synced);
+    if synced < scanned_from || pending {
         return now - synced;
     }
-    changes
-        .iter()
-        .filter(|change| change.latest > synced)
-        .map(|change| now - change.earliest.max(synced))
-        .max()
-        .unwrap_or_default()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn at(minutes_ago: i64) -> DateTime<Utc> {
-        now() - TimeDelta::minutes(minutes_ago)
-    }
-
-    fn now() -> DateTime<Utc> {
-        "2026-10-16T12:00:00Z".parse().unwrap()
-    }
-
-    fn change(earliest_minutes_ago: i64, latest_minutes_ago: i64) -> Change {
-        Change {
-            earliest: at(earliest_minutes_ago),
-            latest: at(latest_minutes_ago),
-        }
-    }
-
-    fn lag_in_minutes(synced: Option<DateTime<Utc>>, changes: &[Change]) -> i64 {
-        lag(now(), at(75), at(600), synced, changes).num_minutes()
-    }
-
-    #[test]
-    fn never_synced_counts_from_enablement() {
-        assert_eq!(lag_in_minutes(None, &[change(5, 5)]), 600);
-    }
-
-    #[test]
-    fn synced_before_the_scan_counts_from_the_sync() {
-        assert_eq!(lag_in_minutes(Some(at(120)), &[]), 120);
-    }
-
-    #[test]
-    fn no_change_since_the_sync_is_in_sync() {
-        assert_eq!(lag_in_minutes(Some(at(50)), &[]), 0);
-    }
-
-    #[test]
-    fn changes_already_indexed_are_in_sync() {
-        assert_eq!(
-            lag_in_minutes(Some(at(10)), &[change(30, 30), change(11, 10)]),
-            0
-        );
-    }
-
-    #[test]
-    fn counts_from_the_first_change_after_the_sync() {
-        assert_eq!(
-            lag_in_minutes(
-                Some(at(40)),
-                &[change(50, 50), change(20, 19), change(5, 5)]
-            ),
-            20
-        );
-    }
-
-    #[test]
-    fn a_change_in_the_minute_of_the_sync_counts_from_the_sync() {
-        assert_eq!(lag_in_minutes(Some(at(40)), &[change(41, 39)]), 40);
-    }
+    TimeDelta::zero()
 }

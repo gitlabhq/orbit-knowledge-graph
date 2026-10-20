@@ -6745,7 +6745,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "One observation per enabled namespace and plan: seconds its oldest unindexed datalake change has waited, 0 when in sync.",
+          "description": "One observation per enabled namespace and plan: seconds since its last sync while datalake changes wait to be indexed, 0 when in sync.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -6814,7 +6814,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "One observation per enabled namespace and plan: seconds its oldest unindexed datalake change has waited, 0 when in sync.",
+          "description": "One observation per enabled namespace and plan: seconds since its last sync while datalake changes wait to be indexed, 0 when in sync.",
           "fieldConfig": {
             "defaults": {
               "custom": {

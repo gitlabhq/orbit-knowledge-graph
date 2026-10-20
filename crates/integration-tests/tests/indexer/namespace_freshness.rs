@@ -77,11 +77,13 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     }
     clickhouse
         .execute(&format!(
-            "INSERT INTO work_items (id, traversal_path, _siphon_watermark) VALUES \
-             (1, '1/{IN_SYNC}/7/', now64(6) - INTERVAL 20 MINUTE), \
-             (2, '1/{PENDING}/7/', now64(6) - INTERVAL 3 MINUTE)"
+            "INSERT INTO work_items (id, traversal_path, _siphon_replicated_at, _siphon_watermark) VALUES \
+             (1, '1/{IN_SYNC}/7/', now64(6) - INTERVAL 20 MINUTE, now64(6) - INTERVAL 20 MINUTE), \
+             (2, '1/{PENDING}/7/', now64(6) - INTERVAL 8 MINUTE, now64(6) - INTERVAL 8 MINUTE), \
+             (2, '1/{PENDING}/7/', now64(6) - INTERVAL 3 MINUTE, now64(6) - INTERVAL 3 MINUTE)"
         ))
         .await;
+    clickhouse.execute("OPTIMIZE TABLE work_items FINAL").await;
 
     let ontology = ontology::Ontology::load_embedded().unwrap();
     let plans: Vec<String> = ontology
@@ -121,8 +123,9 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
 
     assert_eq!(
         lag_buckets(&metrics, "WorkItem"),
-        [1, 1, 0, 0, 0, 1, 1, 0, 0, 0],
-        "in sync, pending 3m, never synced since enabled 90m ago, synced 3h ago"
+        [1, 0, 1, 0, 0, 1, 1, 0, 0, 0],
+        "in sync, pending since the sync 10m ago even after the merge kept only the newest edit, \
+         never synced since enabled 90m ago, synced 3h ago"
     );
     assert_eq!(
         lag_buckets(&metrics, "MergeRequest"),

@@ -35,10 +35,10 @@ const FRESHNESS_QUERY_SQL: &str = r#"WITH
   changed AS (
 {{branches}}
   )
-SELECT root_path, target, min(watermark) AS earliest, max(watermark) AS latest
+SELECT root_path, target, max(watermark) AS latest
 FROM changed
 WHERE root_path IN (SELECT traversal_path FROM enabled)
-GROUP BY root_path, target, toStartOfMinute(watermark)"#;
+GROUP BY root_path, target"#;
 
 const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path, '{{target}}' AS target, {{watermark_column}} AS watermark
     FROM {{table}}
