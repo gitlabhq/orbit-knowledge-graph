@@ -54,6 +54,18 @@ pub(super) fn split(
         }
     }
     let owner = owner.or_else(|| families.values().next().map(|(family, _)| *family));
+    for (family, paths) in families.values_mut() {
+        if Some(*family) == owner {
+            continue;
+        }
+        let names = manifests(*family);
+        paths.extend(
+            unparsed
+                .iter()
+                .filter(|path| names.iter().any(|name| file_name(path) == name))
+                .cloned(),
+        );
+    }
     if let Some(owner) = owner.filter(|_| !unparsed.is_empty()) {
         families
             .entry(owner.family())
@@ -62,6 +74,26 @@ pub(super) fn split(
             .append(&mut unparsed);
     }
     families
+}
+
+/// The manifests a family's rules read for module roots and import aliases, such as `go.mod`
+/// or `tsconfig.json`. Unparsed files otherwise go only to the owner family, so another family's
+/// manifests would never reach it.
+fn manifests(family: SupportLang) -> Vec<String> {
+    code_graph_incremental::Env::for_lang(family)
+        .map(|env| {
+            env.resolve
+                .config
+                .parse_files
+                .iter()
+                .map(|file| file.name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn file_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
 }
 
 pub(super) fn split_removed(
@@ -79,4 +111,25 @@ pub(super) fn split_removed(
 
 fn parsed_language(path: &str) -> Option<SupportLang> {
     SupportLang::from_path(path).filter(|language| language.has_rules())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_family_gets_the_manifests_its_rules_read() {
+        let repo = tempfile::tempdir().unwrap();
+        for (path, content) in [
+            ("build.sh", "echo hi\n"),
+            ("main.go", "package main\n"),
+            ("go.mod", "module example.com/m\n"),
+        ] {
+            std::fs::write(repo.path().join(path), content).unwrap();
+        }
+        let families = split(&directory(repo.path()).unwrap(), None);
+        let paths = |family: &str| families[family].1.clone();
+        assert_eq!(paths("bash"), ["build.sh", "go.mod"]);
+        assert_eq!(paths("go"), ["main.go", "go.mod"]);
+    }
 }
