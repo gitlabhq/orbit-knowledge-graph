@@ -94,7 +94,7 @@ cases:
           expect: ["(Filter j.project_id = 1000, j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
           reject: ["(Deduplicate LimitBy ... (_))"]
 
-  - name: Text indexes on a changing column bound anchor-scoped reads
+  - name: A text match on a changing column keeps FINAL instead of a keyed re-read
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"project_id":1000,"title":{"contains":"migration"}},"columns":["title"]}],"limit":10}
@@ -108,9 +108,8 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Project mr.traversal_path AS traversal_path, mr.id AS id (Filter contains(mr.title, 'migration'), ... (Scan Table(gl_merge_request) AS mr)))
-            - (Deduplicate LimitBy mr.traversal_path, mr.id (Filter mr.project_id = 1000, (mr.traversal_path, mr.id) IN ?.(traversal_path, id) (Scan Table(gl_merge_request) AS mr)))
-          reject: ["(Deduplicate Final (Scan Table(gl_merge_request) AS mr))"]
+            - (Filter mr.project_id = 1000, contains(mr.title, 'migration'), ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
+          reject: ["(Filter (mr.traversal_path, mr.id) IN ?.(traversal_path, id) (_))"]
 
   - name: Text indexes on an unchanging column apply before the latest-row pick
     query:

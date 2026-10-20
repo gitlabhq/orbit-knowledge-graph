@@ -268,7 +268,11 @@ impl RelationGraph {
         predicates: Vec<Predicate>,
         selective_latest: bool,
     ) -> RelationId {
-        if !selective_latest || !predicates.iter().any(Predicate::is_selective) {
+        let bounds_scan = |predicate: &Predicate| {
+            predicate.is_selective()
+                && (!predicate.is_text_match() || predicate.filters_sort_key(key))
+        };
+        if !selective_latest || !predicates.iter().any(bounds_scan) {
             let read = self.read(table, alias, true);
             let owned = self.owned(read, owner, alias);
             return self.filter(owned, predicates);
@@ -280,7 +284,7 @@ impl RelationGraph {
         let read = self.read(table, alias, false);
         let current = self.owned(read, owner.clone(), alias);
         let mut current = self.filter(current, identity);
-        if rest.iter().any(Predicate::is_selective) {
+        if rest.iter().any(bounds_scan) {
             let candidate_read = self.read(table, alias, false);
             let candidate = self.owned(candidate_read, owner, alias);
             let candidate = self.filter(candidate, predicates);
