@@ -34,7 +34,9 @@ def run():
 
 fn write_all(root: &Path, files: &[(&str, &str)]) {
     for (path, content) in files {
-        std::fs::write(root.join(path), content).unwrap();
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
     }
 }
 
@@ -481,5 +483,47 @@ fn a_join_chain_resolves_in_work_linear_in_its_reaching_pairs() {
     assert!(
         large < 128.0 * small.max(5.0),
         "resolving 8x the joins went from {small:.0} ms to {large:.0} ms"
+    );
+}
+
+#[test]
+fn go_calls_link_through_module_paths_and_package_directories() {
+    let repo = tempfile::tempdir().unwrap();
+    write_all(
+        repo.path(),
+        &[
+            ("go.mod", "module example.com/m\n"),
+            (
+                "internal/cmdutils/cmdutils.go",
+                "package cmdutils\nfunc Parse() {}\n",
+            ),
+            ("internal/a/list/list.go", "package list\nfunc Run() {}\n"),
+            ("internal/b/list/list.go", "package list\nfunc Run() {}\n"),
+            ("internal/text/text.go", "package text\nfunc Pad() {}\n"),
+            (
+                "internal/text/truncate.go",
+                "package text\nfunc Truncate() { Pad() }\n",
+            ),
+            ("staging/api/go.mod", "module k8s.io/api\n"),
+            ("staging/api/v1/types.go", "package v1\nfunc NewPod() {}\n"),
+            (
+                "cmd/main.go",
+                "package main\nimport (\n\"example.com/m/internal/cmdutils\"\nlst \"example.com/m/internal/a/list\"\n\"k8s.io/api/v1\"\n)\nfunc main() { cmdutils.Parse(); lst.Run(); v1.NewPod() }\n",
+            ),
+        ],
+    );
+    let env = Env::for_lang(SupportLang::Go).unwrap();
+    let (resolved, _) = resolve_repo(&env, repo.path());
+    assert_eq!(
+        cross_file(&env, &resolved.state, EdgeKind::Calls),
+        [
+            pair("cmd/main.go:main", "internal/a/list/list.go:Run"),
+            pair("cmd/main.go:main", "internal/cmdutils/cmdutils.go:Parse"),
+            pair("cmd/main.go:main", "staging/api/v1/types.go:NewPod"),
+            pair(
+                "internal/text/truncate.go:Truncate",
+                "internal/text/text.go:Pad"
+            ),
+        ]
     );
 }
