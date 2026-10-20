@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use orbit_arrow::ColumnValue;
 use pipeline::PipelineError;
 
-use compiler::VirtualColumnRequest;
+use compiler::{QueryError, VirtualColumnRequest};
 
 pub type PropertyRow = HashMap<String, ColumnValue>;
 
@@ -75,6 +75,7 @@ pub async fn resolve_virtual_columns(
     resolver_ctx: &ResolverContext,
     entity_virtual_columns: &[EntityVirtualColumns<'_>],
     property_map: &mut PropertyMap,
+    requested_rows: usize,
 ) -> Result<(), PipelineError> {
     let has_work = entity_virtual_columns.iter().any(|(_, vc)| !vc.is_empty());
     if !has_work {
@@ -92,6 +93,14 @@ pub async fn resolve_virtual_columns(
 
         if valid_keys.is_empty() {
             continue;
+        }
+
+        if valid_keys.len() > max_batch && requested_rows > max_batch {
+            return Err(QueryError::LimitExceeded(format!(
+                "virtual columns are resolved for at most {max_batch} rows per entity type; \
+                 set limit or cursor.page_size to {max_batch} or less"
+            ))
+            .into());
         }
 
         if valid_keys.len() > max_batch {

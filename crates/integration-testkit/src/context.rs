@@ -7,7 +7,7 @@ use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use orbit_server_config::{AppConfig, ClickHouseConfiguration};
 use query_engine::compiler::ParameterizedQuery;
-use testcontainers::core::{ContainerPort, ImageExt};
+use testcontainers::core::{CmdWaitFor, ContainerPort, ExecCommand, ImageExt};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage};
 
@@ -55,6 +55,27 @@ impl TestContext {
         Self::wait_for_ready(&url).await;
         Self::run_schema_in(&url, TEST_DATABASE, schema_sqls).await;
         Self::from_database(Some(container), url, TEST_DATABASE.to_string(), schema_sqls)
+    }
+
+    /// Writes a ClickHouse server or users config override (e.g. `config.d/limits.xml`) and reloads it.
+    /// Only for a `dedicated()` context, because the override applies to the whole server.
+    pub async fn apply_server_config(&self, file: &str, xml: &str) {
+        let write = ExecCommand::new([
+            "sh",
+            "-c",
+            "printf %s \"$0\" > /etc/clickhouse-server/$1",
+            xml,
+            file,
+        ])
+        .with_cmd_ready_condition(CmdWaitFor::exit_code(0));
+        self._container
+            .as_ref()
+            .expect("server config overrides need a dedicated ClickHouse container")
+            .exec(write)
+            .await
+            .expect("failed to write ClickHouse config override");
+        // The reload applies even when its own response trips the new limit.
+        let _ = self.create_client().execute("SYSTEM RELOAD CONFIG").await;
     }
 
     pub async fn query(&self, sql: &str) -> Vec<RecordBatch> {

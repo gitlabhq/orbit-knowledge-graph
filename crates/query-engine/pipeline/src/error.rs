@@ -61,13 +61,23 @@ impl PipelineError {
     }
 
     pub fn is_caller_error(&self) -> bool {
-        matches!(
-            self,
-            Self::Compile {
-                client_safe: true,
-                ..
-            } | Self::NoEnabledNamespaces
-        )
+        match self {
+            Self::Compile { client_safe, .. } => *client_safe,
+            Self::NoEnabledNamespaces | Self::Streaming(_) => true,
+            Self::Execution(message) => matches!(
+                ClickHouseLimit::from_message(message),
+                Some(ClickHouseLimit::BadQueryParameter)
+            ),
+            _ => false,
+        }
+    }
+
+    pub fn outcome(&self) -> &'static str {
+        if self.is_caller_error() {
+            "caller_error"
+        } else {
+            "server_error"
+        }
     }
 
     pub fn failure_reason(&self) -> FailureReason {
@@ -136,6 +146,7 @@ pub enum ClickHouseLimit {
     TooManyRows,
     SetSizeLimit,
     TypeMismatch,
+    BadQueryParameter,
 }
 
 impl ClickHouseLimit {
@@ -147,6 +158,7 @@ impl ClickHouseLimit {
             158 => Some(Self::TooManyRows),
             191 => Some(Self::SetSizeLimit),
             53 => Some(Self::TypeMismatch),
+            41 | 457 => Some(Self::BadQueryParameter),
             _ => None,
         }
     }
@@ -179,6 +191,14 @@ mod tests {
                 Some(ClickHouseLimit::MemoryLimit),
             ),
             (
+                "Code: 457. DB::Exception: Value 2026-09-30T00:00:00+00:00 cannot be parsed as DateTime64(6, 'UTC') for query parameter 'p0' because it isn't parsed completely. (BAD_QUERY_PARAMETER)",
+                Some(ClickHouseLimit::BadQueryParameter),
+            ),
+            (
+                "Code: 41. DB::Exception: Cannot parse DateTime: value garbage cannot be parsed as DateTime64(6, 'UTC') for query parameter 'p0'. (CANNOT_PARSE_DATETIME)",
+                Some(ClickHouseLimit::BadQueryParameter),
+            ),
+            (
                 "Code: 158. DB::Exception: Limit for rows (controlled by 'max_rows_to_read' setting) exceeded",
                 Some(ClickHouseLimit::TooManyRows),
             ),
@@ -206,6 +226,54 @@ mod tests {
                 expected,
                 "{message}"
             );
+        }
+    }
+
+    fn clickhouse_error(message: &str) -> PipelineError {
+        PipelineError::Execution(format!(
+            "query error: bad response: {message} (version 26.4.1.2336 (official build))"
+        ))
+    }
+
+    #[test]
+    fn caller_errors_are_failures_the_caller_can_fix() {
+        let caller = [
+            PipelineError::client_closed(),
+            PipelineError::NoEnabledNamespaces,
+            clickhouse_error(
+                "Code: 457. DB::Exception: Value garbage cannot be parsed. (BAD_QUERY_PARAMETER)",
+            ),
+        ];
+        for error in caller {
+            assert_eq!(error.outcome(), "caller_error", "{error}");
+        }
+    }
+
+    #[test]
+    fn server_errors_include_resource_limits_and_internal_failures() {
+        let server = [
+            clickhouse_error(
+                "Code: 53. DB::Exception: Cannot convert string 'abc' to type UInt64. (TYPE_MISMATCH)",
+            ),
+            clickhouse_error(
+                "Code: 159. DB::Exception: Timeout exceeded: elapsed 30001 ms. (TIMEOUT_EXCEEDED)",
+            ),
+            clickhouse_error(
+                "Code: 241. DB::Exception: Query memory limit exceeded: would use 9.31 GiB",
+            ),
+            clickhouse_error("Code: 47. DB::Exception: Unknown expression identifier `p.id`"),
+            PipelineError::ContentResolution("batch size 101 exceeds limit 100".into()),
+            PipelineError::Authorization("ClientError { code: 500 }".into()),
+            PipelineError::Timeout,
+            PipelineError::custom("boom"),
+            PipelineError::Compile {
+                message: "lowering error".into(),
+                client_safe: false,
+                reason: RejectionReason::Lowering,
+            },
+        ];
+        for error in server {
+            assert_eq!(error.outcome(), "server_error", "{error}");
         }
     }
 }
