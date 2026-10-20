@@ -23,7 +23,7 @@ The new Rust implementation remains under the repository's license.
 
 The grammar restricts identifiers and arrows to ASCII. Escaped identifiers must still pass the compiler's identifier rules.
 Keywords are case insensitive; identifiers are case sensitive. Strings support M23 escape forms, and comments count as whitespace.
-`PAGE`, `AFTER`, `DEBUG`, `ANY`, and `SHORTEST` are reserved in addition to the openCypher reserved words, so a variable with one of those names needs backticks.
+`OFFSET`, `DEBUG`, `ANY`, and `SHORTEST` are reserved in addition to the openCypher reserved words, so a variable with one of those names needs backticks.
 
 ## Compiler boundary
 
@@ -41,7 +41,7 @@ flowchart LR
 ```
 
 Each query language is one module under `crates/query-engine/compiler/src/passes/frontend/` and lowers graph queries to the language-neutral Input.
-`json_dsl_parse` runs the JSON schema check, the ontology-derived schema check, and cursor hashing, then deserializes; JSON is query-only.
+`json_dsl_parse` runs the JSON schema check and the ontology-derived schema check, then deserializes; JSON is query-only.
 The GQL frontend uses one anchored `Statement` grammar root for queries and schema calls. Query lowering runs in two steps and never serializes a JSON query.
 `syntax.rs` converts Pest pairs into the typed syntax tree with `pest_consume` methods.
 Fixed child shapes use `match_nodes!`; optional query clauses and relationship fields are consumed by rule without enumerating their combinations.
@@ -53,7 +53,7 @@ Scalar values use the same value type as the compiler's filters.
 
 The `clickhouse_json_dsl` and `clickhouse_gql` presets start with `json_dsl_parse` and `gql_parse`, then share the complete `validate` through `codegen` phases. GQL presets add `validate_relationships` after `validate`.
 The `gql_parse` phase parses raw query text when supplied. Preparation supplies a `ParsedQuery` instead, so the wrapper leaves it unchanged without parsing twice.
-A `ParsedQuery` holds the lowered Input and its statement hash. `ParsedQuery::load` sets both the Input and the pagination hash on either path, so `PAGE ... AFTER` cursors bind to the same hash.
+A `ParsedQuery` holds the lowered Input, and `ParsedQuery::load` sets it on either path.
 Schema preparation, result types, and resolution belong only to the GQL frontend. Shared compiler contexts have no schema request, response, or introspection scope.
 
 `compiler::gql::route` parses once and returns a `ParsedQuery` or resolved schema metadata. `compiler::gql::prepare` uses that result to compile MATCH or return CALL metadata.
@@ -137,7 +137,8 @@ MATCH pattern [WHERE predicates]
 [MATCH pattern [WHERE predicates] ...]
 RETURN projections
 [ORDER BY key [ASC | DESC]]
-[LIMIT rows | PAGE rows [AFTER 'token']]
+[SKIP rows]
+[LIMIT rows]
 [DEBUG]
 ```
 
@@ -191,7 +192,7 @@ ORDER BY notes DESC
 LIMIT 10
 ```
 
-The implementation adds node projections, `date_trunc`, token predicates, `PAGE ... AFTER`, and `DEBUG` to the selected EBNF productions.
+The implementation adds node projections, `date_trunc`, token predicates, `OFFSET` as a synonym for `SKIP`, and `DEBUG` to the selected EBNF productions.
 These are implementation extensions, not changes to the official grammar.
 Shortest paths use the ISO GQL path search prefix, `p = ANY SHORTEST (a)-[*1..3]->(b)` or `p = SHORTEST 1 ...`, because openCypher 9 has no shortest-path syntax.
 The other GQL selectors (`ALL SHORTEST`, `SHORTEST k` for k above one, `SHORTEST k GROUP`) are rejected: the compiler returns one path per endpoint pair.
@@ -212,7 +213,7 @@ ID forms preserve the compiler's distinct selector and filter representations:
 ## Rejections and bounds
 
 The frontend rejects mutations, multiple statements, disconnected patterns, cycles between pattern variables, WITH, OPTIONAL MATCH, UNION, UNWIND, and subqueries.
-It also rejects OR, general NOT, DISTINCT, count(*), arbitrary expressions, and offset pagination. Both `<>` and `!=` express not-equal.
+It also rejects OR, general NOT, DISTINCT, count(*), and arbitrary expressions. Both `<>` and `!=` express not-equal.
 Unsupported syntax or lowering returns a client-safe error rather than dropping the unsupported part.
 Syntax errors report line, column, and expected tokens without echoing query text; lowering errors name the offending identifier.
 
@@ -226,20 +227,19 @@ Custom ID-property spellings remain outside the frontend.
 
 ## Pagination and presentation
 
-`PAGE rows` replaces `LIMIT` and requests keyset pagination. It lowers to the compiler's cursor with that page size, so the response carries `next_cursor` while more rows remain.
-`PAGE rows AFTER 'token'` continues from the previous page's `next_cursor`. Both clauses reuse the JSON DSL's cursor and the shared validation, decoding, seek, and readback passes.
+`SKIP rows` and `LIMIT rows` page as they do in openCypher, and `OFFSET` is a synonym for `SKIP`. `SKIP` comes before `LIMIT`.
+`SKIP` accepts 0 to 10,000 rows and lowers to a SQL `OFFSET`. `LIMIT` accepts 1 to 1,000 rows and defaults to 30.
+The server fetches one row past the window and reports `has_more` when that row exists. Pages carry no token, so nothing is kept between requests.
 
-A cursor token binds to the statement's lexical tokens, excluding the whole `PAGE` clause, whitespace, and comments.
-Changing the page size or formatting keeps the cursor valid, including changes to whitespace around `PAGE`.
-String literals and escaped identifiers retain their exact text. Changes inside them, including whitespace, reject the cursor with the "issued for a different query" error.
-Other token edits, such as keyword case changes, also reject the cursor. This is not the JSON DSL's structural comparison.
-JSON and text tokens never validate against each other because their hash sources differ.
+When `SKIP` is present, the compiler extends the sort with tie-breakers, so consecutive windows of one statement neither overlap nor drop rows. Traversals break ties on node identities, aggregations on group keys, neighbors on the projected neighbor columns, and path finding on the path arrays.
+`SKIP 0` adds the same sort without an `OFFSET`, so the first page orders rows like the later ones.
+`SKIP` counts rows that redaction removes afterward, so a page can return fewer rows than `LIMIT`, or none, while `has_more` is true. Callers stop when `has_more` is false.
 
 `DEBUG` sets the compiler's `include_debug_sql` presentation option and keeps its existing authorization rules.
 
 ## Integration tests
 
-YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` are the canonical test surface for data correctness. Each scenario declares its query once per frontend under `query:`, keyed `json` and `gql`, and every frontend present is checked against the same result expectations. The runner parses each key into a `Frontend` and passes it to `compiler::compile`. A scenario whose query has no text spelling carries only the `json` key. Paginated scenarios end their text query with the `PAGE` clause, and the runner appends `AFTER` with each `next_cursor`. See the [integration-testkit README](../../../crates/integration-testkit/README.md) for the full `QueryScenario` format reference.
+YAML query scenarios under `crates/integration-tests/tests/server/data_correctness/scenarios/` are the canonical test surface for data correctness. Each scenario declares its query once per frontend under `query:`, keyed `json` and `gql`, and every frontend present is checked against the same result expectations. The runner parses each key into a `Frontend` and passes it to `compiler::compile`. A scenario whose query has no text spelling carries only the `json` key. Paginated scenarios end their text query with `SKIP 0 LIMIT N`, and the runner advances `SKIP` by the page size. See the [integration-testkit README](../../../crates/integration-testkit/README.md) for the full `QueryScenario` format reference.
 
 Handwritten text queries sit beside JSON fixtures in `crates/integration-tests/tests/compiler/dialects/clickhouse.rs` for compiler-level parity (SQL output, parameters, hydration plans). These are separate from the data correctness scenarios.
 

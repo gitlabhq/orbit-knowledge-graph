@@ -23,7 +23,7 @@ physical:
             (Deduplicate Final (Scan Table(gl_file) AS f))))
     emitted:
       exact: |
-        (Limit 10
+        (Limit 11
           (Project f.id AS f_id, f.path AS f_path
             (Filter f.language = 'rust', f._deleted = false
               (Bind f (Project * (Deduplicate Final (Scan Table(gl_file) AS f)))))))

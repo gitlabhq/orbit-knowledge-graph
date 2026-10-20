@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use crate::config::{self, CompilerCtx};
 use crate::metrics::CountErr;
-use crate::passes::codegen::PaginationContext;
 use crate::{CompiledQueryContext, Input, Ontology, QueryError, Result, SecurityContext};
 use errors::{invalid, parse_failure, syntax_error};
 use ontology::introspection::{
@@ -45,16 +44,11 @@ const MAX_NESTING: usize = crate::query_limits::MAX_PREDICATE_DEPTH;
 #[derive(Debug, Clone)]
 pub struct ParsedQuery {
     pub input: Input,
-    pub query_hash: u64,
 }
 
 impl ParsedQuery {
     pub(crate) fn load(self, ctx: &mut impl CompilerCtx) {
         ctx.set_input(self.input);
-        ctx.set_pagination(PaginationContext {
-            query_hash: self.query_hash,
-            ..Default::default()
-        });
     }
 }
 
@@ -86,7 +80,7 @@ pub fn prepare(
 
 pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Result<RoutedStatement> {
     match parse_statement(raw).count_err()? {
-        ast::Statement::Query(query) => lower::lower(raw, *query)
+        ast::Statement::Query(query) => lower::lower(*query)
             .count_err()
             .map(Box::new)
             .map(RoutedStatement::Query),
@@ -97,12 +91,12 @@ pub fn route(raw: &str, ontology: &Ontology, scope: IntrospectionScope) -> Resul
 }
 
 pub fn parse(raw: &str) -> Result<Input> {
-    parse_with_hash(raw).map(|query| query.input)
+    parse_query(raw).map(|query| query.input)
 }
 
-pub fn parse_with_hash(raw: &str) -> Result<ParsedQuery> {
+pub fn parse_query(raw: &str) -> Result<ParsedQuery> {
     match parse_statement(raw)? {
-        ast::Statement::Query(query) => lower::lower(raw, *query),
+        ast::Statement::Query(query) => lower::lower(*query),
         ast::Statement::SchemaCall { .. } => Err(QueryError::Validation(
             "schema calls are not graph queries; use gql::prepare instead".into(),
         )),

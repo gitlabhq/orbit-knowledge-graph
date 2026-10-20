@@ -238,7 +238,7 @@ local glance = [
     [o.target('sum by (failure_reason) (increase(%s{%s, failure_reason!~"%s"}[$__interval])) > 0' % [compilerRejected, SEL, COMPILER_FAULT], '{{failure_reason}}', DS, 'A')],
     [
       ['schema', '#3987e5'], ['parse', '#d95926'], ['ontology', '#199e70'], ['reference', '#c98500'],
-      ['pagination', '#d55181'], ['authorization', '#9085e9'], ['restrict', '#008300'],
+      ['authorization', '#9085e9'], ['restrict', '#008300'],
     ],
   ),
 ];
@@ -322,7 +322,7 @@ local reliability = [
   ),
   o.timeseries(
     'Server: compiler rejections by reason (1h windows)',
-    'Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`: parse/schema/reference/pagination/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline. Renders a flat zero baseline when no rejections occur in the window.',
+    'Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`: parse/schema/reference/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline. Renders a flat zero baseline when no rejections occur in the window.',
     [
       o.target(
         'sum by (failure_reason) (increase(%s{%s}[1h]))' % [compilerRejected, SEL],

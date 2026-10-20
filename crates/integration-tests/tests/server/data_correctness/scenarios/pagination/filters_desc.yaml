@@ -1,21 +1,8 @@
 description: Filtered DESC pagination returns exact matches per page
 
 query:
-  json: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
-        {"id": "wi", "entity": "WorkItem", "columns": ["work_item_type", "weight"],
-         "filters": {"work_item_type": {"in": ["issue", "task", "epic"]},
-                     "weight": {"gte": 3}}}
-      ],
-      "relationships": [{"type": "AUTHORED", "from": "u", "to": "wi"}],
-      "order_by": "-wi.id",
-      "cursor": {"page_size": 1}
-    }
   gql: |
-    MATCH (u:User)-[:AUTHORED]->(wi:WorkItem) WHERE u.id >= 1 AND u.id <= 10000 AND wi.work_item_type IN ['issue', 'task', 'epic'] AND wi.weight >= 3 RETURN u, wi.work_item_type, wi.weight ORDER BY wi.id DESC PAGE 1
+    MATCH (u:User)-[:AUTHORED]->(wi:WorkItem) WHERE u.id >= 1 AND u.id <= 10000 AND wi.work_item_type IN ['issue', 'task', 'epic'] AND wi.weight >= 3 RETURN u, wi.work_item_type, wi.weight ORDER BY wi.id DESC SKIP 0 LIMIT 1
 
 expect:
   all_pages:

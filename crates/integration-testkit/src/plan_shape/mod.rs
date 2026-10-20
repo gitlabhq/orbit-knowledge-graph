@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use compiler::input::Input;
-use compiler::passes::{frontend, lower, normalize, plan};
+use compiler::passes::{frontend, lower, normalize, page, plan, response_policy};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
 use serde::Deserialize;
 
@@ -241,7 +241,7 @@ fn check<M: OrbitQueryModel>(
             scenario.name
         );
         let input = match language.as_str() {
-            "json" => frontend::json_dsl::parse(raw, model).map(|(input, _)| input),
+            "json" => frontend::json_dsl::parse(raw, model),
             "gql" => frontend::gql::parse(raw),
             _ => {
                 failures.push(format!("{label}: unknown frontend"));
@@ -289,13 +289,19 @@ fn check<M: OrbitQueryModel>(
                 continue;
             }
         };
-        let lowered = match lower::emit(&plan, &input) {
+        let mut lowered = match lower::emit(&plan, &input) {
             Ok(lowered) => lowered,
             Err(error) => {
                 failures.push(format!("{label}: {error}"));
                 continue;
             }
         };
+        if backend == "clickhouse" {
+            response_policy::apply_text_excerpts(&mut lowered.ast, &input, model);
+        }
+        if scenario.hydration.is_none() {
+            page::apply(&mut lowered.ast, &input, &lowered.metadata);
+        }
         let (planned, emitted) = explain::physical(&plan, &lowered.ast);
         let assertions = &scenario.physical[backend];
         if assertions.planned.is_none() && assertions.emitted.is_none() {

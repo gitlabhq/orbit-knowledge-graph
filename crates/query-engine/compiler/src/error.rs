@@ -18,9 +18,6 @@ pub enum QueryError {
     #[error("reference error: {0}")]
     ReferenceError(String),
 
-    #[error("pagination error: {0}")]
-    PaginationError(String),
-
     #[error("allowlist rejected: {0}")]
     AllowlistRejected(String),
 
@@ -64,7 +61,6 @@ impl QueryError {
             Self::Parse(_)
                 | Self::Validation(_)
                 | Self::ReferenceError(_)
-                | Self::PaginationError(_)
                 | Self::AllowlistRejected(_)
                 | Self::Authorization(_)
                 | Self::Restrict(_)
@@ -78,7 +74,6 @@ impl QueryError {
             Self::Parse(_) => RejectionReason::Parse,
             Self::Validation(_) => RejectionReason::Schema,
             Self::ReferenceError(_) => RejectionReason::Reference,
-            Self::PaginationError(_) => RejectionReason::Pagination,
             Self::AllowlistRejected(_) => RejectionReason::Ontology,
             Self::Authorization(_) => RejectionReason::Authorization,
             Self::Restrict(_) => RejectionReason::Restrict,
@@ -100,7 +95,6 @@ pub enum RejectionReason {
     Parse,
     Schema,
     Reference,
-    Pagination,
     Ontology,
     Authorization,
     Restrict,
@@ -132,7 +126,6 @@ mod tests {
             ),
             (QueryError::Validation("bad".into()), true),
             (QueryError::ReferenceError("bad".into()), true),
-            (QueryError::PaginationError("bad".into()), true),
             (QueryError::DepthExceeded("bad".into()), true),
             (QueryError::LimitExceeded("bad".into()), true),
             (QueryError::AllowlistRejected("bad".into()), true),

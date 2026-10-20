@@ -3,10 +3,10 @@ mod schema_contract;
 
 use crate::error::Result;
 use crate::input::Input;
-use crate::passes::{cursor, validate};
+use crate::passes::validate;
 use query_data_model::OrbitQueryModel;
 
-pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<(Input, u64)> {
+pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<Input> {
     let value: serde_json::Value = serde_json::from_str(json)?;
     validate::collect_schema_errors(validate::base_validator(), &value)?;
     let schema = derive_json_schema(model)?;
@@ -19,11 +19,10 @@ pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<(Input, u64)> {
         }
         other => other,
     })?;
-    let query_hash = cursor::canonical_hash(&value);
     let mut input: Input = serde_json::from_value(value)?;
     input.lift_negated_filters()?;
     input.promote_id_filters()?;
-    Ok((input, query_hash))
+    Ok(input)
 }
 
 fn derive_json_schema(model: &impl OrbitQueryModel) -> Result<serde_json::Value> {

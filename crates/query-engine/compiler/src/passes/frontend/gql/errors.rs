@@ -56,9 +56,8 @@ fn rule_label(rule: &Rule) -> String {
         Rule::Where => "WHERE",
         Rule::Return => "RETURN",
         Rule::Order => "ORDER BY",
+        Rule::Skip => "SKIP",
         Rule::Limit => "LIMIT",
-        Rule::Page => "PAGE",
-        Rule::After => "AFTER",
         Rule::Debug => "DEBUG",
         Rule::SchemaCall => "CALL db.schema()",
         Rule::Pattern | Rule::PatternElement | Rule::NodePattern => {

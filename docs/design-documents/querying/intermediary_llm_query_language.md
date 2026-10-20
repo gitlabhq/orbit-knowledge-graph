@@ -63,7 +63,6 @@ The JSON query schema supports four query types through a single unified structu
 | `limit` | `integer` | Max results (1-1000, default: 30) |
 | `order_by` | `string` | Result ordering: `"node.property"` (asc) or `"-node.property"` (desc). |
 | `aggregation_sort` | `string` | Aggregation row ordering: `"column"` (asc) or `"-column"` (desc), referencing an output column alias. |
-| `cursor` | `object` | Keyset pagination cursor `{ page_size, after? }`. `after` is the previous response's `pagination.next_cursor`. |
 | `options` | `object` | Consumer-level preferences that affect result presentation, not query semantics. See [Query Options](#query-options). |
 
 ## Node Selectors

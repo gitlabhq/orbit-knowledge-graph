@@ -4,6 +4,11 @@ Run `mise test:plan-shape`. The runner discovers YAML files recursively under
 `fixtures/`. Each fixture checks normalized input, selected requirements, and/or
 the emitted SQL AST. Most fixtures run through both JSON and GQL.
 
+The emitted AST includes the ClickHouse text-excerpt pass and the row window
+pass, so `Limit` shows the fetched rows (the page plus one probe row) and
+`Offset` shows the lowered SKIP. In the logical tree, `Limit` and `Offset` show
+the requested LIMIT and SKIP.
+
 Set `ontology_overlay: denorm_approved` to load `config/seeds/overlays/denorm_approved/`
 for one fixture. Other fixtures keep the default ontology.
 
@@ -51,6 +56,7 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
 | Path-finding frontiers and scope | `path_finding/` |
 | Hydration projections and path filters | `hydration/` |
 | Filters and result projections | `filters/`, `projections/` |
+| SKIP/LIMIT windows, tie-breakers, and text budgets | `pagination/` |
 
 ## Coverage boundaries
 
@@ -61,8 +67,8 @@ Omitting `ctes` leaves definitions unchecked. Empty blocks, empty orders,
   The YAML fixture independently covers the large dynamic mode.
 - The explain view flattens associative OR expressions. Static prefix fixtures
   verify predicate content, but do not assert the internal balanced-tree depth.
-- Scope enforcement, role scans, virtual-property hydration, cursor handling,
-  and backend code-generation optimizations are outside this harness.
+- Scope enforcement, role scans, virtual-property hydration, and backend
+  code-generation optimizations are outside this harness.
 
 ## Keep in Rust
 
@@ -76,9 +82,9 @@ not ignored tests or missing fixture migrations.
 | `lower::hydration::tests::{dynamic,static}_tp_filter_precedes_id_filter` | Checks serialized predicate order; partial YAML item matching is unordered |
 | `plan_shape::hydration_planning_selects_paths_before_sql_rendering` | Exercises the 256/257 boundary and budget-driven mode selection together |
 | `compiler::ontology::hydration_widens_paths_to_segment_budget` | Checks bound path arrays, shared parameters, and ancestor coverage across generated paths |
-| Compiler cursor, scope, role, settings, virtual-property, and telemetry tests | Exercise phases or observable outputs outside plan-shape assertions |
+| Compiler scope, role, settings, virtual-property, and telemetry tests | Exercise phases or observable outputs outside plan-shape assertions |
 | Compiler dialect and parameter-rendering tests | Check final backend SQL or parameter bindings, rather than the shared SQL AST |
-| Input deserialization, normalization, schema-limit, validation-error, GQL hashing, cursor-token, hydration-metadata, and DDL tests | Check contracts that a valid query through the harness does not reach |
+| Input deserialization, normalization, schema-limit, validation-error, GQL hashing, hydration-metadata, and DDL tests | Check contracts that a valid query through the harness does not reach |
 
 Keep a Rust test until a fixture checks every one of its assertions. For the
 plan-shape layer and its limits, see

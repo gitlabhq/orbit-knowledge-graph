@@ -542,26 +542,22 @@ it is indexed too.
 
 ## Pagination
 
-Add a `cursor` with a `page_size` (max 1000). The first page needs no token.
+The JSON DSL does not paginate. Page with GQL `SKIP` and `LIMIT` instead.
+Start at `SKIP 0` and add the page size to `SKIP` for each next page:
 
-```json orbit-query
-{
-  "query": {
-    "query_type": "traversal",
-    "nodes": [{
-      "id": "p",
-      "entity": "Project",
-      "filters": {"full_path": {"starts_with": "gitlab-org/"}}
-    }],
-    "cursor": {"page_size": 50}
-  }
-}
+```gql orbit-query
+MATCH (p:Project) WHERE p.full_path STARTS WITH 'gitlab-org/'
+RETURN p.full_path
+ORDER BY p.id
+SKIP 0 LIMIT 50
 ```
 
-Pass `pagination.next_cursor` from each response as `cursor.after` on the next
-request until `next_cursor` is absent. The token is bound to the exact query
-that issued it. Every response carries `pagination.truncated`; when true, the
-result window is incomplete and any aggregate computed over it is too.
+Repeat with `SKIP 50 LIMIT 50`, `SKIP 100 LIMIT 50`, and so on, until
+`pagination.has_more` is false. `SKIP` accepts up to 10000. Past that, keep
+`ORDER BY p.id`, drop `SKIP`, and add `p.id > <last id from the previous page>`
+to the `WHERE` clause. Every response carries `pagination.truncated`;
+when true, the result window is incomplete and any aggregate computed over it
+is too.
 
 ## Troubleshooting
 
@@ -600,7 +596,6 @@ The query did not match the DSL JSON Schema. Common causes:
 - Multi-node `traversal` without at least two nodes and one relationship.
 - `aggregation` without any `aggregations` entries.
 - `hops` upper bound or `max_depth` above 3, the server-enforced ceiling.
-- `cursor.after` reused after the query changed. The token is bound to the exact query that issued it.
 - `allowlist rejected` or `not valid under 'oneOf'` on a `columns` entry. The column is not in the entity's allowlist. Run `glab orbit ontology <Entity>` for the valid list.
 
 Fix: validate against the live schema from `glab orbit dsl`. Full field reference in [`query_language.md`](query_language.md).
