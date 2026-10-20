@@ -51,8 +51,7 @@ impl HydrationStage {
         let resolver_ctx = ResolverContext {
             security_context: Some(ctx.security_context()?.clone()),
         };
-        let input = &ctx.compiled()?.input;
-        let requested_rows = input.cursor.as_ref().map_or(input.limit, |c| c.page_size) as usize;
+        let requested_rows = ctx.compiled()?.input.limit as usize;
 
         resolve_virtual_columns(
             registry,

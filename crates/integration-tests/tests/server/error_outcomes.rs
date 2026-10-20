@@ -305,25 +305,22 @@ async fn dropping_the_call_during_redaction_is_a_caller_error() {
 async fn content_for_more_rows_than_the_resolver_cap_is_a_caller_error() {
     let mut server = Server::start().await;
 
-    let over_cap = RESOLVER_CAP + 1;
-    for paging in [
-        json!({"limit": over_cap}),
-        json!({"cursor": {"page_size": over_cap}}),
-    ] {
-        let error = server.run(file_content_query(paging)).await.unwrap_err();
+    let error = server
+        .run(file_content_query(json!({"limit": RESOLVER_CAP + 1})))
+        .await
+        .unwrap_err();
 
-        assert_eq!(error.code, "compile_error");
-        assert!(
-            error
-                .message
-                .contains(&format!("at most {RESOLVER_CAP} rows")),
-            "{}",
-            error.message
-        );
-        server
-            .assert_recorded("compile_error", "caller_error", Some("limit"))
-            .await;
-    }
+    assert_eq!(error.code, "compile_error");
+    assert!(
+        error
+            .message
+            .contains(&format!("at most {RESOLVER_CAP} rows")),
+        "{}",
+        error.message
+    );
+    server
+        .assert_recorded("compile_error", "caller_error", Some("limit"))
+        .await;
 }
 
 #[tokio::test]

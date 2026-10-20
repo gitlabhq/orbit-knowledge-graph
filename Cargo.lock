@@ -11685,3 +11685,15 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "labkit"
+version = "0.8.0"
+
+[[patch.unused]]
+name = "labkit-events"
+version = "0.8.0"
+
+[[patch.unused]]
+name = "labkit-fields"
+version = "0.8.0"

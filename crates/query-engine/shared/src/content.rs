@@ -98,7 +98,7 @@ pub async fn resolve_virtual_columns(
         if valid_keys.len() > max_batch && requested_rows > max_batch {
             return Err(QueryError::LimitExceeded(format!(
                 "virtual columns are resolved for at most {max_batch} rows per entity type; \
-                 set limit or cursor.page_size to {max_batch} or less"
+                 set limit to {max_batch} or less"
             ))
             .into());
         }
