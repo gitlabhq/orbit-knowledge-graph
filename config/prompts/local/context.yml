@@ -1,5 +1,5 @@
 name: context
-version: 1.11.0
+version: 1.12.0
 short: Expand local code context and GitLab entities
 description: >-
   Expand local code context and GitLab entities.
@@ -18,7 +18,7 @@ description: >-
   logs; commits show their message, changed files, and merge requests.
   With no targets at all it reads the current branch. Files return compact definition maps with every followable
   ID and up to ten connections per section, with omitted counts. Line ranges
-  return those numbered lines; directories list
+  return those numbered lines, widened so no definition is cut in half; directories list
   indexed files with definition counts. Choose a Definition ID for complete source and its indexed
   connections. Test connections appear in their own section. Reuse source; never
   truncate output. Raw reads are only for non-code or source Orbit cannot provide.

@@ -64,15 +64,6 @@ struct IndexArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
-struct RefreshArgs {
-    repo: PathBuf,
-    #[arg(long, value_name = "PATH")]
-    db: Option<PathBuf>,
-    #[arg(last = true)]
-    files: Vec<String>,
-}
-
-#[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("reindex"), long_about = descriptions::long("reindex"))]
 struct ReindexArgs {
     /// Repository path, or a directory that holds repositories (default: current directory).
@@ -557,8 +548,6 @@ enum Commands {
     Version,
     Index(IndexArgs),
     Reindex(ReindexArgs),
-    #[command(hide = true)]
-    Refresh(RefreshArgs),
     Grep(Box<GrepArgs>),
     Context(ContextArgs),
     Sql(SqlArgs),
@@ -866,9 +855,6 @@ async fn dispatch(
                 budget_seconds: budget,
             },
         )?),
-        Commands::Refresh(RefreshArgs { repo, db, files }) => {
-            commands::index::incremental::refresh_now(repo, db, files)
-        }
         Commands::Reindex(ReindexArgs {
             path,
             stats,

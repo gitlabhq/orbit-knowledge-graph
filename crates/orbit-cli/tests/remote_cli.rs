@@ -684,7 +684,7 @@ fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
 }
 
 #[test]
-fn grep_refreshes_an_edited_file_into_the_incremental_graph_in_the_background() {
+fn grep_refreshes_an_edited_file_into_the_incremental_graph() {
     let repo = tempfile::tempdir().expect("tempdir");
     std::fs::write(repo.path().join("util.py"), "def helper():\n    return 1\n").unwrap();
     std::fs::write(
@@ -722,15 +722,8 @@ fn grep_refreshes_an_edited_file_into_the_incremental_graph_in_the_background() 
     )
     .unwrap();
 
-    let first = orbit(edited.path(), &["grep", "added"]);
-    assert!(first.contains("edited since index"), "{first}");
-    let found = (0..60)
-        .map(|_| {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            orbit(edited.path(), &["grep", "added"])
-        })
-        .find(|found| found.contains("Function added"))
-        .expect("a background refresh brings the edit into the graph");
+    let found = orbit(edited.path(), &["grep", "added"]);
+    assert!(found.contains("Function added"), "{found}");
     assert!(!found.contains("edited since index"), "{found}");
 
     orbit(fresh.path(), &["index", "."]);
@@ -741,4 +734,33 @@ fn grep_refreshes_an_edited_file_into_the_incremental_graph_in_the_background() 
         orbit(edited.path(), &["sql", "--format", "json", graph]),
         orbit(fresh.path(), &["sql", "--format", "json", graph])
     );
+}
+
+#[test]
+fn grep_falls_back_to_any_word_when_gitlab_has_no_result_for_the_phrase() {
+    const EMPTY: &str = r#"{"version":"1.0.0","target":{"type":"group","id":1,"full_path":"my-group"},"scopes":[],"results":[],"result_count":0,"truncated":false}"#;
+    const ISSUE: &str = r#"{"version":"1.0.0","target":{"type":"group","id":1,"full_path":"my-group"},"scopes":[{"name":"work_items","status":"ok","backend":"basic","result_count":1}],"results":[{"scope":"work_items","type":"WorkItem","id":7,"token":"WorkItem[7]","reference":{"id":7},"text":"Describe shows negative percentages"}],"result_count":1,"truncated":false}"#;
+    let (base_url, handle) = serve_routes(vec![
+        ("search=describe&", ISSUE),
+        ("search=percent&", EMPTY),
+        ("search=describe", EMPTY),
+    ]);
+    let base_url = base_url.replace("127.0.0.1", "localhost");
+    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
+    let data = tempfile::tempdir().expect("tempdir");
+
+    let output = run_orbit_with_data(
+        clone.path(),
+        data.path(),
+        &base_url,
+        &["grep", "issue:describe percent"],
+    );
+    handle.join().expect("join mock");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("no GitLab result has every word"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("negative percentages"), "{stdout}");
 }

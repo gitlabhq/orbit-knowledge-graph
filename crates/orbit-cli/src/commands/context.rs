@@ -504,12 +504,13 @@ fn run_local(
     targets: &[String],
 ) -> Result<String> {
     use crate::commands::index::incremental::{Freshness, refresh};
-    let (out, git, shown) = render_local(repo, db.clone(), targets)?;
+    let (out, git, shown) = render_local(repo.clone(), db.clone(), targets)?;
     let mut files: Vec<&str> = shown.iter().map(String::as_str).collect();
     files.sort_unstable();
     files.dedup();
-    let edited = match refresh(&git.repo_path, db, &files) {
+    let edited = match refresh(&git.repo_path, db.clone(), &files) {
         Ok(Freshness::Fresh) => Default::default(),
+        Ok(Freshness::Refreshed) => return Ok(render_local(repo, db, targets)?.0),
         Ok(Freshness::Stale(changed)) => changed.into_iter().collect(),
         _ => workspace::edited_since_index(&git.repo_path, &files),
     };
@@ -529,7 +530,8 @@ fn render_local(
         render_dir(&mut out, &client, &git, dir)?;
     }
     for (path, start, end) in &targets.ranges {
-        render_range(&mut out, &git, path, *start, *end)?;
+        let (start, end) = snap_to_definitions(&client, &git, path, *start, *end)?;
+        render_range(&mut out, &git, path, start, end)?;
     }
     let mut shown: Vec<String> = targets
         .ranges
@@ -820,6 +822,45 @@ fn render_dir(
         )?;
     }
     Ok(())
+}
+
+fn snap_to_definitions(
+    client: &duckdb_client::DuckDbClient,
+    git: &workspace::GitInfo,
+    path: &str,
+    start: usize,
+    end: usize,
+) -> Result<(usize, usize)> {
+    let batches = client.query_arrow_json(
+        "SELECT start_line, end_line FROM gl_definition
+         WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
+         AND start_line <= ?5 AND end_line >= ?4",
+        &[
+            git.project_id.into(),
+            git.commit_sha.clone().into(),
+            path.to_string().into(),
+            (start as i64).into(),
+            (end as i64).into(),
+        ],
+    )?;
+    let spans: Vec<(usize, usize)> = i64_column(&batches, "start_line")
+        .into_iter()
+        .zip(i64_column(&batches, "end_line"))
+        .map(|(from, to)| (from as usize, to as usize))
+        .collect();
+    let snapped_start = spans
+        .iter()
+        .filter(|&&(from, to)| from < start && start <= to && to < end)
+        .map(|&(from, _)| from)
+        .max()
+        .unwrap_or(start);
+    let snapped_end = spans
+        .iter()
+        .filter(|&&(from, to)| start < from && from <= end && end < to)
+        .map(|&(_, to)| to)
+        .min()
+        .unwrap_or(end);
+    Ok((snapped_start, snapped_end))
 }
 
 fn render_range(

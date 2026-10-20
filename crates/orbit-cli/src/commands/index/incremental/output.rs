@@ -176,7 +176,14 @@ pub(super) fn replacement(
         .map(|node| node.destination_table.as_str());
     let mut rows = Vec::new();
     let mut edges = Vec::new();
-    for (table, batch) in code_graph_incremental::export::export(
+    let only: FxHashSet<u32> = state
+        .trees
+        .iter()
+        .enumerate()
+        .filter(|(_, tree)| files.contains(tree.label.as_str()))
+        .map(|(index, _)| index as u32)
+        .collect();
+    for (table, batch) in code_graph_incremental::export::export_trees(
         &state.trees,
         &state.edges,
         &env.lang,
@@ -184,6 +191,7 @@ pub(super) fn replacement(
         &envelope,
         false,
         &|_| true,
+        Some(&only),
         &code_graph_incremental::Sentinel::disabled(),
     )? {
         if table == edge_table {

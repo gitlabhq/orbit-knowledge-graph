@@ -110,6 +110,7 @@ fn run(path: PathBuf, options: Options, mode: Mode) -> Result<Vec<Vec<FamilyOutp
 pub(crate) enum Freshness {
     NotIncremental,
     Fresh,
+    Refreshed,
     Stale(Vec<String>),
 }
 
@@ -123,48 +124,14 @@ pub(crate) fn refresh(
     let workspace = workspace::Workspace::open_default()?;
     let manifest_path = std::path::absolute(workspace.manifest_path())?;
     let git = workspace::git_info(repo)?;
-    if manifest::load_incremental_state(&manifest_path, git.project_id)?.is_none() {
+    let Some(saved) = manifest::load_incremental_state(&manifest_path, git.project_id)? else {
         return Ok(Freshness::NotIncremental);
-    }
+    };
     let state_dir = workspace.var_dir(git.project_id);
     let changed = state::changed_since_snapshot(&git.repo_path, &state_dir, files);
     if changed.is_empty() {
         return Ok(Freshness::Fresh);
     }
-    if !state_dir.join(REFRESHING).exists() {
-        spawn_refresh(&git.repo_path, db.as_deref(), &changed);
-    }
-    Ok(Freshness::Stale(changed))
-}
-
-fn spawn_refresh(repo: &std::path::Path, db: Option<&std::path::Path>, files: &[String]) {
-    let Ok(orbit) = std::env::current_exe() else {
-        return;
-    };
-    let mut command = std::process::Command::new(orbit);
-    command.arg("refresh").arg(repo);
-    if let Some(db) = db {
-        command.arg("--db").arg(db);
-    }
-    command
-        .arg("--")
-        .args(files)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    let _ = command.spawn();
-}
-
-pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>) -> Result<()> {
-    let workspace = workspace::Workspace::open_default()?;
-    let manifest_path = std::path::absolute(workspace.manifest_path())?;
-    let git = workspace::git_info(&repo)?;
-    let Some(saved) = manifest::load_incremental_state(&manifest_path, git.project_id)? else {
-        return Ok(());
-    };
-    let state_dir = workspace.var_dir(git.project_id);
     let marker = state_dir.join(REFRESHING);
     if std::fs::OpenOptions::new()
         .write(true)
@@ -172,18 +139,14 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
         .open(&marker)
         .is_err()
     {
-        return Ok(());
+        return Ok(Freshness::Stale(changed));
     }
-    let files: Vec<&str> = files.iter().map(String::as_str).collect();
-    let changed = state::changed_since_snapshot(&git.repo_path, &state_dir, &files);
     let outcome = (|| -> Result<()> {
-        if changed.is_empty() {
-            return Ok(());
-        }
         let _state_lock = lock_incremental_state(&state_dir)?;
         let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
         let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
-        let replacements = state::refresh_families(&git, &ontology, &state_dir, owner, changed)?;
+        let replacements =
+            state::refresh_families(&git, &ontology, &state_dir, owner, changed.clone())?;
         let writer = GraphWriter::open(&workspace::resolve_db_path(db, &git)?, &git)?;
         for replacement in &replacements {
             output::apply(&writer, replacement)?;
@@ -191,5 +154,8 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
         Ok(())
     })();
     std::fs::remove_file(&marker)?;
-    outcome
+    match outcome {
+        Ok(()) => Ok(Freshness::Refreshed),
+        Err(_) => Ok(Freshness::Stale(changed)),
+    }
 }

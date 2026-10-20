@@ -304,7 +304,7 @@ fn local(
             files.dedup();
             use crate::commands::index::incremental::{Freshness, refresh};
             let edited = match refresh(&root, db.clone(), &files) {
-                Ok(Freshness::Fresh) => Default::default(),
+                Ok(Freshness::Fresh | Freshness::Refreshed) => Default::default(),
                 Ok(Freshness::Stale(changed)) => changed.into_iter().collect(),
                 _ => crate::workspace::edited_since_index(&root, &files),
             };

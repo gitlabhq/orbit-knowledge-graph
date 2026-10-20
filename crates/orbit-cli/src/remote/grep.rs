@@ -190,27 +190,51 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         true => &[][..],
         false => &request.keywords[..],
     };
-    let tasks: Vec<_> = keywords
-        .iter()
-        .map(|keywords| {
-            let client = client.clone();
-            let mut params = vec![("search", keywords.clone()), scope.clone()];
-            if !api_scopes.is_empty() {
-                params.push(("scopes", api_scopes.join(",")));
+    let fetch = |keywords: Vec<String>| {
+        let tasks: Vec<_> = keywords
+            .into_iter()
+            .map(|keywords| {
+                let client = client.clone();
+                let mut params = vec![("search", keywords), scope.clone()];
+                if !api_scopes.is_empty() {
+                    params.push(("scopes", api_scopes.join(",")));
+                }
+                tokio::spawn(async move { client.get_grep(&params).await })
+            })
+            .collect::<Vec<_>>();
+        async {
+            let mut responses = Vec::new();
+            for task in tasks {
+                let body = match task.await {
+                    Ok(Ok(body)) => body,
+                    Ok(Err(error)) => return Err(outcome_for(&request.target, &error)),
+                    Err(error) => return Err(Outcome::Failed(error.to_string())),
+                };
+                match serde_json::from_slice::<Response>(&body) {
+                    Ok(response) => responses.push(response),
+                    Err(error) => {
+                        return Err(Outcome::Failed(format!("unreadable response: {error}")));
+                    }
+                }
             }
-            tokio::spawn(async move { client.get_grep(&params).await })
-        })
+            Ok(responses)
+        }
+    };
+    let mut responses = match fetch(keywords.to_vec()).await {
+        Ok(responses) => responses,
+        Err(outcome) => return outcome,
+    };
+    let words: Vec<String> = keywords
+        .iter()
+        .flat_map(|keyword| keyword.split_whitespace().map(str::to_string))
         .collect();
-    let mut responses = Vec::new();
-    for task in tasks {
-        let body = match task.await {
-            Ok(Ok(body)) => body,
-            Ok(Err(error)) => return outcome_for(&request.target, &error),
-            Err(error) => return Outcome::Failed(error.to_string()),
-        };
-        match serde_json::from_slice::<Response>(&body) {
-            Ok(response) => responses.push(response),
-            Err(error) => return Outcome::Failed(format!("unreadable response: {error}")),
+    let mut any_word = false;
+    if words.len() > keywords.len() && responses.iter().all(|response| response.results.is_empty())
+    {
+        if let Ok(wider) = fetch(words).await
+            && wider.iter().any(|response| !response.results.is_empty())
+        {
+            (responses, any_word) = (wider, true);
         }
     }
     let shown = responses
@@ -229,7 +253,13 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
             home_project.as_deref(),
         )
     {
-        found.push(text);
+        if any_word {
+            found.push(format!(
+                "» no GitLab result has every word of {query:?}; results with any of them:\n{text}"
+            ));
+        } else {
+            found.push(text);
+        }
     }
     if request.scopes.contains(&BRANCHES) {
         let project = match &home_project {
