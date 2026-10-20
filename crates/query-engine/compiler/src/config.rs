@@ -5,7 +5,7 @@
 use orbit_server_config::QueryConfig;
 
 /// Pathfinding hard ceilings. Config can tighten but never exceed these.
-/// Kept in sync with config/default.yaml `path_finding:` block.
+/// Kept in sync with the `query.overrides.path_finding` block in config/dev.yaml.
 const PATHFINDING_MAX_EXECUTION_TIME: u64 = 15;
 const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
 const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 1_000_000;

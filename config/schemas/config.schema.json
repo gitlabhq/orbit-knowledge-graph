@@ -1201,19 +1201,25 @@
       "additionalProperties": false
     },
     "QuerySettings": {
-      "description": "Top-level query settings loaded from YAML. Contains a `default` config\nand optional per-query-type overrides keyed by snake_case query type\nname (e.g. `traversal`, `aggregation`, `search`).\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n    use_query_cache: true\n    query_cache_ttl: 10\n  aggregation:\n    max_execution_time: 60\n```",
+      "description": "Top-level query settings loaded from YAML. Contains a `default` config\nand optional per-query-type overrides keyed by snake_case query type\nname (e.g. `traversal`, `aggregation`, `search`).\n\n```yaml\nquery:\n  default:\n    max_execution_time: 30\n    use_query_cache: true\n    query_cache_ttl: 10\n  overrides:\n    aggregation:\n      max_execution_time: 60\n```",
       "type": "object",
       "properties": {
         "default": {
           "$ref": "#/$defs/QueryConfig"
+        },
+        "overrides": {
+          "description": "Per-query-type overrides. Keys must match `QueryType` variant names\nin snake_case. Validated at startup by the server.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/QueryConfig"
+          },
+          "default": {}
         }
       },
+      "additionalProperties": false,
       "required": [
         "default"
-      ],
-      "additionalProperties": {
-        "$ref": "#/$defs/QueryConfig"
-      }
+      ]
     },
     "QueryConfig": {
       "description": "Query execution settings. All fields map to ClickHouse query-level\nsettings. The closed set of fields prevents arbitrary user input from\nreaching the SETTINGS clause (CWE-89).\n\n`None` means \"not specified at this layer\" -- the merge logic in\n[`QuerySettings::resolve`] fills in from the default. The derived\n`Default` is therefore all-`None`: nothing specified, nothing emitted.",

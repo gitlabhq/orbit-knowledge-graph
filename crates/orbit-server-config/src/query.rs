@@ -213,16 +213,18 @@ impl QueryConfig {
 ///     max_execution_time: 30
 ///     use_query_cache: true
 ///     query_cache_ttl: 10
-///   aggregation:
-///     max_execution_time: 60
+///   overrides:
+///     aggregation:
+///       max_execution_time: 60
 /// ```
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct QuerySettings {
     pub default: QueryConfig,
 
     /// Per-query-type overrides. Keys must match `QueryType` variant names
     /// in snake_case. Validated at startup by the server.
-    #[serde(flatten)]
+    #[serde(default)]
     pub overrides: HashMap<String, QueryConfig>,
 }
 
@@ -428,8 +430,9 @@ default:
   max_execution_time: 30
   use_query_cache: false
   query_cache_ttl: 60
-aggregation:
-  max_execution_time: 120
+overrides:
+  aggregation:
+    max_execution_time: 120
 "#;
         let settings: QuerySettings = orbit_utils::yaml::from_str(yaml).unwrap();
         assert_eq!(settings.default.max_execution_time, Some(30));

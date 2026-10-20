@@ -474,7 +474,7 @@ Enabling `tls.internal` changes what clients must send:
 
 ### Query settings
 
-Supports default settings and per-query-type overrides (e.g. `aggregation`, `traversal`, `search`):
+Supports default settings and per-query-type overrides under `query.overrides`, keyed by query type (e.g. `aggregation`, `traversal`, `search`):
 
 ```yaml
 query:
@@ -483,8 +483,9 @@ query:
     max_memory_usage: 1073741824
     use_query_cache: true
     query_cache_ttl: 10
-  aggregation:
-    max_execution_time: 60
+  overrides:
+    aggregation:
+      max_execution_time: 60
 ```
 
 | Config path | Default | Description |
