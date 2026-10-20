@@ -3,7 +3,7 @@ xtask = "run --package xtask --"
 synth = "run --profile synth --package xtask -- synth"
 
 [env]
-CONFIG_DIR = { value = "config", relative = true }
+ORBIT_CONFIG_DIR = { value = "config", relative = true }
 VERSIONS_FILE = { value = "config/versions.yaml", relative = true }
 LOCKFILE = { value = "Cargo.lock", relative = true }
 FIXTURES_DIR = { value = "fixtures", relative = true }

@@ -9,7 +9,7 @@ fn main() {
 
     println!(
         "cargo:rerun-if-changed={}",
-        std::path::Path::new(env!("CONFIG_DIR"))
+        std::path::Path::new(env!("ORBIT_CONFIG_DIR"))
             .join("setup")
             .display()
     );

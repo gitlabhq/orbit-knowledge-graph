@@ -9,7 +9,7 @@ use ontology::Ontology;
 use super::{lock_database, schema};
 use crate::workspace::GitInfo;
 
-const GRAPH_SCHEMA: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+const GRAPH_SCHEMA: &str = include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/graph_local.sql"));
 
 pub struct GraphWriter {
     client: DuckDbClient,

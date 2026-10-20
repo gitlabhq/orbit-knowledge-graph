@@ -29,7 +29,8 @@ pub const SECRET_FILE_DIR: &str = "/etc/secrets";
 pub const OVERLAY_CONFIG_FILE: &str = "config/config";
 
 /// `config/default.yaml`, compiled in as the lowest configuration layer.
-pub const EMBEDDED_DEFAULTS: &str = include_str!(concat!(env!("CONFIG_DIR"), "/default.yaml"));
+pub const EMBEDDED_DEFAULTS: &str =
+    include_str!(concat!(env!("ORBIT_CONFIG_DIR"), "/default.yaml"));
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
