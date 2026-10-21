@@ -78,7 +78,7 @@ cases:
     physical:
       clickhouse:
         emitted:
-          expect: ["(Limit 3 (Offset 4 (Sort mr.author_id, mr.id (_))))"]
+          expect: ["(Limit 3 (Offset 4 (Sort u.id, mr.id (_))))"]
 
   - name: Multi-type relationship SKIP adds the edge type to the tie-breakers
     query:

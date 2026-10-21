@@ -33,9 +33,10 @@ physical:
     planned:
       expect:
         - (Join ON mr.id = pl.merge_request_id (_) (_))
-        - (Join ON f.merge_request_diff_id = mr.latest_merge_request_diff_id (_) (_))
+        - (Join ON d.id = mr.latest_merge_request_diff_id (_) (_))
+        - (Join ON f.merge_request_diff_id = d.id (_) (_))
         - (Filter pl.source = 'merge_request_event', pl.status = 'failed', ... (Deduplicate Final (Scan Table(gl_pipeline) AS pl)))
-        - (Filter d.id IN ?.id (Scan Table(gl_merge_request_diff) AS d))
+        - (Filter d._deleted = false (Deduplicate Final (Scan Table(gl_merge_request_diff) AS d)))
       reject:
         - (Scan Table(gl_edge) ...)
         - (Scan Table(gl_ci_edge) ...)

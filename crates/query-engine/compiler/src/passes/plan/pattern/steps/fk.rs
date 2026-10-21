@@ -25,16 +25,22 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         let endpoint = relation.other_end(&key.node);
         let key_column = Column::new(alias, &key.column);
         let mut predicates = pattern.nodes[endpoint].id_predicates(key_column.clone());
+        let mut join_endpoint = false;
         if self.binding(endpoint).is_none() {
             let reached = if pattern.endpoint_is_selective(endpoint) {
                 None
             } else {
                 self.ids_through_holder(&key.node, &key.column)
             };
+            let unconstrained = reached.is_none()
+                && !pattern.nodes[endpoint].is_pinned()
+                && !pattern.has_uncovered_filter(&pattern.nodes[endpoint]);
             if let Some(reached) = reached.clone()
                 && pattern.nodes[endpoint].joined
             {
                 self.set_ids(endpoint, reached);
+            } else if unconstrained {
+                join_endpoint = true;
             } else {
                 let mut node = pattern.nodes[endpoint].clone();
                 node.columns = Some(ColumnSelection::List(vec![]));
@@ -62,6 +68,9 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             self.root = Some(self.graph.filter(root, predicates));
         }
         self.push_fk_outputs(relation, key, alias);
+        if join_endpoint {
+            self.ensure_node(endpoint)?;
+        }
         Ok(())
     }
 

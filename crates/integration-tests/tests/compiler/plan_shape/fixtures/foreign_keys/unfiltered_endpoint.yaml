@@ -1,0 +1,55 @@
+cases:
+  - name: An unfiltered grouped FK endpoint joins its rows without an id set
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "u", "entity": "User", "columns": ["id", "username"]},
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}
+          ],
+          "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+          "group_by": ["u"],
+          "aggregations": [{"count": "mr", "as": "mr_count"}]
+        }
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
+        RETURN u{.id, .username}, count(mr) AS mr_count
+    logical:
+      expect: ["(Aggregate group u AS u, COUNT(mr) AS mr_count (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Join ON u.id = mr.author_id (_) (_))
+            - (Filter u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))
+          ctes:
+            absent: true
+          reject:
+            - (Project u.id AS id (_))
+
+  - name: An unfiltered deferred FK endpoint joins its rows without an id set
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "columns": ["id", "username"]},
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}, "columns": ["id", "title", "merged_at"]}
+          ],
+          "relationships": [{"type": "MERGED", "from": "u", "to": "mr"}]
+        }
+      gql: |
+        MATCH (u:User)-[:MERGED]->(mr:MergeRequest {state: 'merged'})
+        RETURN u.id, u.username, mr.id, mr.title, mr.merged_at
+    logical:
+      expect: ["(Filter mr.state = 'merged' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Join ON u.id = mr.merge_user_id (_) (_))
+          ctes:
+            absent: true
+          reject:
+            - (Project u.id AS id (_))

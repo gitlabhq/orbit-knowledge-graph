@@ -46,9 +46,10 @@ cases:
         planned:
           expect:
             - (Filter mr.state = 'merged', mr._deleted = false, ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
-            - (Project p.id AS id (Filter p._deleted = false (Deduplicate Final (Scan Table(gl_project) AS p))))
+            - (Join ON p.id = mr.project_id (_) (_))
           reject:
             - (Scan Table(gl_edge) ...)
+            - (Project p.id AS id (_))
 
   - name: Uncovered numeric filters join current node rows
     query:

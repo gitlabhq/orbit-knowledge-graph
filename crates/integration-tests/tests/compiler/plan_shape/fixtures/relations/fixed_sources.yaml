@@ -34,7 +34,8 @@ cases:
         planned:
           expect:
             - (Join ON u.id = mr.author_id (_) (_))
-            - (Join ON j.pipeline_id = mr.head_pipeline_id (_) (_))
+            - (Join ON pipe.id = mr.head_pipeline_id (_) (_))
+            - (Join ON j.pipeline_id = pipe.id (_) (_))
             - (Scan Table(gl_merge_request) AS mr)
             - (Scan Table(gl_job) AS j)
             - (Project mr.author_id AS e0_src, mr.id AS e0_dst, mr.id AS e1_src, mr.head_pipeline_id AS e1_dst, j.pipeline_id AS e2_src, j.id AS e2_dst, ... (_))
