@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.33.15+gql
+version: 0.34.0+gql
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
 metadata:
@@ -67,6 +67,9 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - To find MRs that ever touched a file, use `HAS_DIFF`; see [file history](references/gql.md#merge-requests-that-touched-a-file). Use `HAS_LATEST_DIFF` for one MR's current revision.
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
 - There is no `OR`, `XOR`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`.
+- Package and container questions use `Package`, `PackageFile`, `Dependency`, and `ContainerRepository`. This is the free-tier Package Registry and Container Registry. Artifact Registry data is not in Orbit. See [the recipes](references/gql.md#package-registry-and-container-registry).
+- A missing `HAS_VULNERABILITY` link is not proof a package is safe. The link comes from SBOM data, matched by package name and version.
+- `ContainerRepository` has no tags. Read tags from the Container Registry API.
 
 ## Iteration budget
 
@@ -102,6 +105,7 @@ Skip the confirmation prompts for good with `glab config set orbit_cli_auto_run 
 |---|---|
 | First-run setup, exit codes, service health, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
 | openCypher 9-based syntax and paste-ready queries | [`references/gql.md`](references/gql.md) |
+| Package registry and container registry | [`references/gql.md`](references/gql.md#package-registry-and-container-registry) |
 | Empty results and query validation errors | [`references/gql.md`](references/gql.md#troubleshooting) |
 | Reporting results and coverage caveats | [`references/reporting.md`](references/reporting.md) |
 | Local repository map command (`glab orbit repo-map`) | [`references/local_repo_map.md`](references/local_repo_map.md) |

@@ -271,6 +271,119 @@ RETURN path
 
 It returns one outgoing path per endpoint pair.
 
+### Package registry and container registry
+
+These recipes cover the free-tier Package Registry and Container Registry.
+Artifact Registry data is not in Orbit, so do not report these results as
+Artifact Registry packages.
+
+`Package` holds one row per package version. `HAS_PACKAGE_FILE` links a
+version to its stored files. `BUILT_BY` links a package or file to the CI/CD
+pipeline that published it. `DECLARES_DEPENDENCY` links a package to the
+dependencies it declares. `HAS_VULNERABILITY` links a package to a known
+vulnerability.
+
+To scope to a group, join through `IN_PROJECT` and filter the project path.
+Do not walk `Group` and `CONTAINS` edges, because a fixed depth misses
+deeper subgroups.
+
+#### Packages in a project, by type
+
+```gql orbit-query
+MATCH (p:Package)-[:IN_PROJECT]->(pr:Project {full_path: 'gitlab-org/editor-extensions/gitlab-lsp'})
+RETURN p.package_type, count(p) AS packages
+ORDER BY packages DESC
+LIMIT 10
+```
+
+#### Projects in a group that publish the most packages
+
+```gql orbit-query
+MATCH (p:Package {package_type: 'npm'})-[:IN_PROJECT]->(pr:Project)
+WHERE pr.full_path STARTS WITH 'gitlab-org/'
+RETURN pr.full_path, count(p) AS packages
+ORDER BY packages DESC
+LIMIT 10
+```
+
+#### Packages that declare a dependency
+
+These are declared dependencies, not proof the dependency is used at run
+time. Count them with one aggregate query rather than a sample.
+
+```gql orbit-query
+MATCH (p:Package)-[:DECLARES_DEPENDENCY]->(d:Dependency {name: 'lodash'}), (p)-[:IN_PROJECT]->(pr:Project)
+WHERE pr.full_path STARTS WITH 'gitlab-org/'
+RETURN pr.full_path, count(p) AS dependents
+ORDER BY dependents DESC
+LIMIT 10
+```
+
+#### Pipeline that built a package
+
+```gql orbit-query
+MATCH (p:Package {name: 'com/gitlab/javafuzz/javafuzz', version: '1.26'})-[:BUILT_BY]->(pl:Pipeline)
+RETURN pl.id, pl.status, pl.ref
+LIMIT 10
+```
+
+For one file of the package, match `PackageFile` on its `package_id`:
+
+```gql orbit-query
+MATCH (f:PackageFile {package_id: 4092779})-[:BUILT_BY]->(pl:Pipeline)
+RETURN f.file_name, pl.id
+LIMIT 10
+```
+
+#### Files of a package version
+
+These are the stored package files, such as a `.tgz` or `.jar`. They are not
+the files inside the archive.
+
+```gql orbit-query
+MATCH (p:Package {name: '@gitlab-org/duo-workflow-service', version: '0.1.2'})-[:HAS_PACKAGE_FILE]->(f:PackageFile)
+RETURN f.file_name, f.size
+LIMIT 50
+```
+
+#### Packages with known vulnerabilities
+
+The link comes from SBOM data, matched by package name and version. A missing
+link is not proof that a package is safe. Say so with every result.
+
+```gql orbit-query
+MATCH (p:Package)-[:HAS_VULNERABILITY]->(v:Vulnerability), (p)-[:IN_PROJECT]->(pr:Project)
+WHERE pr.full_path STARTS WITH 'gitlab-org/'
+RETURN p.name, p.version, count(v) AS vulnerabilities
+ORDER BY vulnerabilities DESC
+LIMIT 20
+```
+
+Severity for one package version:
+
+```gql orbit-query
+MATCH (p:Package {name: 'commons-io/commons-io', version: '2.3'})-[:HAS_VULNERABILITY]->(v:Vulnerability)
+RETURN v.severity, count(v) AS vulnerabilities
+ORDER BY vulnerabilities DESC
+LIMIT 10
+```
+
+#### Container repositories in a project
+
+```gql orbit-query
+MATCH (c:ContainerRepository)-[:IN_PROJECT]->(pr:Project {full_path: 'gitlab-org/gitlab'})
+RETURN count(c) AS repositories
+```
+
+`ContainerRepository` has no tags. Read tags from the Container Registry API
+with the repository `id`. Pass the path without an `/api/v4/` prefix, because
+`glab api` adds it:
+
+```shell
+glab api "registry/repositories/<repository-id>?tags_count=true"
+glab api "projects/<project-id>/registry/repositories/<repository-id>/tags"
+```
+
 ## Troubleshooting
 
 ### Empty result body
