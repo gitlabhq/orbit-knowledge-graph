@@ -917,6 +917,8 @@ fn render_range(
     Ok(())
 }
 
+type Caller = (String, String, i64);
+
 const CALLERS_SHOWN: usize = 5;
 const CALLER_LINES: usize = 12;
 
@@ -972,7 +974,7 @@ ORDER BY d.start_line, d.id, test, caller_path, caller_line"
     let paths = string_column(&batches, "caller_path");
     let lines = i64_column(&batches, "caller_line");
     let tests = duckdb_client::bool_column(&batches, "test");
-    let mut defs: Vec<(i64, String, Vec<(String, String, i64)>, usize)> = Vec::new();
+    let mut defs: Vec<(i64, String, Vec<Caller>, usize)> = Vec::new();
     for i in 0..targets.len() {
         if defs.last().is_none_or(|(id, ..)| *id != targets[i]) {
             defs.push((targets[i], names[i].clone(), Vec::new(), 0));

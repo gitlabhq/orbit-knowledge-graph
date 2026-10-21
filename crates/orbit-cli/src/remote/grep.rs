@@ -229,13 +229,12 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         .flat_map(|keyword| keyword.split_whitespace().map(str::to_string))
         .collect();
     let mut any_word = false;
-    if words.len() > keywords.len() && responses.iter().all(|response| response.results.is_empty())
+    if words.len() > keywords.len()
+        && responses.iter().all(|response| response.results.is_empty())
+        && let Ok(wider) = fetch(words).await
+        && wider.iter().any(|response| !response.results.is_empty())
     {
-        if let Ok(wider) = fetch(words).await
-            && wider.iter().any(|response| !response.results.is_empty())
-        {
-            (responses, any_word) = (wider, true);
-        }
+        (responses, any_word) = (wider, true);
     }
     let shown = responses
         .iter()
