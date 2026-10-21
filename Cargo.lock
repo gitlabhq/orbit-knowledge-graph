@@ -2766,7 +2766,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow",
- "code-graph",
  "duckdb",
  "ontology",
  "orbit-arrow",

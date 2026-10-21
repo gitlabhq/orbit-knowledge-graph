@@ -3,7 +3,6 @@ use ontology::Ontology;
 
 use super::Output;
 
-/// `--kind` resolved against the ontology: definition kinds narrow matches, `File` and
 /// `Directory` list where matches are, and hosted nodes such as `MergeRequest` are reported.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Kinds {
@@ -34,6 +33,52 @@ const DEFINITIONS: &[&str] = &[
     "symbols",
 ];
 const VALUE_KINDS: &[&str] = &["Variable", "Var", "Constant", "Const", "Static", "Local"];
+const LANGUAGES: &[(&str, &str)] = &[
+    ("python", "py"),
+    ("typescript", "ts"),
+    ("javascript", "js"),
+    ("golang", "go"),
+    ("rb", "ruby"),
+    ("rs", "rust"),
+    ("kt", "kotlin"),
+    ("cs", "csharp"),
+    ("c++", "cpp"),
+    ("shell", "sh"),
+    ("bash", "sh"),
+];
+
+pub(super) fn languages(requested: &mut Vec<String>) -> Vec<String> {
+    let mut builder = ignore::types::TypesBuilder::new();
+    builder.add_defaults();
+    let known: std::collections::HashSet<String> = builder
+        .definitions()
+        .into_iter()
+        .map(|def| def.name().to_string())
+        .collect();
+    let mut types = Vec::new();
+    requested.retain(|name| {
+        let lower = name.to_lowercase();
+        let keyword = [EVERYTHING, FILES, DIRECTORIES, DEFINITIONS]
+            .iter()
+            .chain(FAMILIES.iter())
+            .any(|list| list.contains(&lower.as_str()));
+        let language = LANGUAGES
+            .iter()
+            .find(|(alias, _)| *alias == lower)
+            .map(|(_, ty)| ty.to_string())
+            .or_else(|| known.contains(&lower).then(|| lower.clone()));
+        match (keyword, language) {
+            (false, Some(ty)) => {
+                types.push(ty);
+                false
+            }
+            _ => true,
+        }
+    });
+    types.sort();
+    types.dedup();
+    types
+}
 
 /// Agent spellings for definition families, matched to kinds by `family_of`.
 const FAMILIES: &[&[&str]] = &[
@@ -46,15 +91,7 @@ const FAMILIES: &[&[&str]] = &[
         "methods",
         "callable",
     ],
-    &[
-        "type",
-        "types",
-        "class",
-        "classes",
-        "struct",
-        "structs",
-        "interface",
-    ],
+    &["class", "classes", "struct", "structs", "interface"],
     &[
         "var",
         "vars",
@@ -65,6 +102,10 @@ const FAMILIES: &[&[&str]] = &[
         "property",
     ],
 ];
+
+pub(super) fn is_family(name: &str) -> bool {
+    FAMILIES.iter().any(|aliases| aliases.contains(&name))
+}
 
 /// The family of a definition kind: the shared repo-map lists first, then the name, so
 /// labels such as `DecoratedClass` or a new language's kinds still land somewhere.

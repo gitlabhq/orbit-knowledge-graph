@@ -2,7 +2,7 @@ use arrow::record_batch::RecordBatch;
 use ontology::{DataType as OntDataType, Ontology};
 use orbit_arrow::{AsRecordBatch, ColumnSpec, ColumnType};
 
-use crate::error::Result;
+use anyhow::Result;
 
 pub struct LocalGraphData {
     pub tables: Vec<(String, RecordBatch)>,
