@@ -33,6 +33,7 @@ pub(super) struct Exporter<'a> {
     writer: &'a GraphWriter,
     ontology: &'a ontology::Ontology,
     directories: FxHashSet<i64>,
+    files: FxHashSet<i64>,
     containment: FxHashSet<(i64, i64)>,
 }
 
@@ -47,6 +48,7 @@ impl<'a> Exporter<'a> {
             writer,
             ontology,
             directories: FxHashSet::default(),
+            files: FxHashSet::default(),
             containment: FxHashSet::default(),
         }
     }
@@ -98,13 +100,19 @@ impl<'a> Exporter<'a> {
                     .map(|row| self.directories.insert(ids.value(row)))
                     .collect()
             }
+            "gl_file" => {
+                let ids = int_column(batch, "id")?;
+                (0..batch.num_rows())
+                    .map(|row| self.files.insert(ids.value(row)))
+                    .collect()
+            }
             "gl_edge" => {
                 let sources = int_column(batch, "source_id")?;
                 let targets = int_column(batch, "target_id")?;
                 let kinds = string_column(batch, "target_kind")?;
                 (0..batch.num_rows())
                     .map(|row| {
-                        kinds.value(row) != "Directory"
+                        !matches!(kinds.value(row), "Directory" | "File")
                             || self
                                 .containment
                                 .insert((sources.value(row), targets.value(row)))
