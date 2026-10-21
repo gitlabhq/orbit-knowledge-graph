@@ -903,7 +903,7 @@
     {
       "otel_name": "gkg.indexer.sdlc.freshness.lag",
       "prom_name": "gkg_indexer_sdlc_freshness_lag_seconds",
-      "description": "One observation per enabled namespace and plan: seconds since it was last fully in sync with the datalake, 0 when in sync.",
+      "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
       "kind": "histogram_f64",
       "unit": "s",
       "labels": [

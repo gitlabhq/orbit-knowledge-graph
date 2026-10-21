@@ -12,7 +12,7 @@ use orbit_migrations::version::read_active_version;
 use orbit_observability::indexer::sdlc;
 use orbit_server_config::{NamespaceFreshnessConfig, ScheduleConfiguration};
 
-use super::datalake::render_freshness_query;
+use super::datalake::render_change_query;
 use crate::checkpoint::{
     Checkpoint, CheckpointStore, ClickHouseCheckpointStore, NAMESPACE_KEY_PREFIX,
     namespace_position_key,
@@ -25,6 +25,11 @@ use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
 
 // The last sweep syncs idle entities; the margin keeps a late or slow sweep inside the scan.
 const SWEEP_MARGIN: TimeDelta = TimeDelta::minutes(15);
+
+const FRESHNESS_QUERY_SQL: &str = r#"SELECT root_path, target, max(watermark) AS latest
+FROM changed
+WHERE root_path IN (SELECT traversal_path FROM enabled)
+GROUP BY root_path, target"#;
 
 static ENABLED_ROOTS_SQL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -47,7 +52,7 @@ pub struct NamespaceFreshness {
 }
 
 struct Root {
-    id: i64,
+    checkpoint_prefix: String,
     path: String,
     enabled_at: DateTime<Utc>,
 }
@@ -89,7 +94,7 @@ impl NamespaceFreshness {
             .zip(paths)
             .zip(enabled_ats)
             .map(|((id, path), enabled_at)| Root {
-                id,
+                checkpoint_prefix: namespace_position_key(id),
                 path,
                 enabled_at,
             })
@@ -104,7 +109,10 @@ impl NamespaceFreshness {
     ) -> Result<LatestChanges, TaskError> {
         let batches = self
             .datalake
-            .query(&render_freshness_query(&ontology.reindex_sources()))
+            .query(&render_change_query(
+                FRESHNESS_QUERY_SQL,
+                &ontology.reindex_sources(),
+            ))
             .param("lower", from.format(TIMESTAMP_FORMAT).to_string())
             .param("upper", to.format(TIMESTAMP_FORMAT).to_string())
             .fetch_arrow()
@@ -169,14 +177,14 @@ impl ScheduledTask for NamespaceFreshness {
         for plan in plans {
             let labels = [KeyValue::new(sdlc::labels::ENTITY, plan.name.clone())];
             for root in &roots {
-                let key = format!("{}.{}", namespace_position_key(root.id), plan.name);
+                let key = format!("{}.{}", root.checkpoint_prefix, plan.name);
                 let synced = checkpoints.get(&key).and_then(Checkpoint::synced_until);
                 let latest_change = changes
                     .get(&root.path)
                     .and_then(|targets| targets.get(&plan.entity))
                     .copied();
-                let lag = lag(now, scanned_from, root.enabled_at, synced, latest_change);
-                self.lag.record(lag.as_seconds_f64(), &labels);
+                let behind = lag(now, scanned_from, root.enabled_at, synced, latest_change);
+                self.lag.record(behind.as_seconds_f64(), &labels);
             }
         }
         Ok(())

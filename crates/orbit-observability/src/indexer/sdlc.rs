@@ -81,7 +81,7 @@ pub const WATERMARK_LAG: MetricSpec = MetricSpec::gauge(
 
 pub const FRESHNESS_LAG: MetricSpec = MetricSpec::histogram_f64(
     "gkg.indexer.sdlc.freshness.lag",
-    "One observation per enabled namespace and plan: seconds since it was last fully in sync with the datalake, 0 when in sync.",
+    "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
     Some("s"),
     &[labels::ENTITY],
     FRESHNESS,

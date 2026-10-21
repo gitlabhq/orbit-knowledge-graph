@@ -7,8 +7,7 @@ use indexer::checkpoint::{
 use indexer::durability::WriteDurability;
 use indexer::orchestrator::scheduled::{NamespaceFreshness, ScheduledTask};
 use indexer::schema::version::{
-    SCHEMA_VERSION, ensure_version_table, mark_version_active, mark_version_migrating,
-    prefixed_table_name,
+    SCHEMA_VERSION, ensure_version_table, mark_version_active, prefixed_table_name,
 };
 use ontology::EtlScope;
 use ontology::archive::OntologyArchive;
@@ -19,8 +18,8 @@ use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_server_config::{AppConfig, NatsConfiguration};
 
-use super::common::start_nats;
-use super::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};
+use super::common::siphon::create_namespace;
+use super::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, start_nats};
 
 const IN_SYNC: i64 = 100;
 const PENDING: i64 = 200;
@@ -46,21 +45,22 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     let catalog = OntologyCatalog::open(services.nats_client.clone())
         .await
         .unwrap();
+    // A served version that differs from this binary's proves the task reads what users query.
+    let served = *SCHEMA_VERSION - 1;
     catalog
-        .publish(&OntologyArchive::from_sources(*SCHEMA_VERSION, &embedded_sources()).unwrap())
+        .publish(&OntologyArchive::from_sources(served, &embedded_sources()).unwrap())
         .await
         .unwrap();
 
     let graph = clickhouse.create_client();
-    let served_table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
-    let migrating_table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION + 1);
     ensure_version_table(&graph).await.unwrap();
-    mark_version_active(&graph, *SCHEMA_VERSION).await.unwrap();
-    mark_version_migrating(&graph, *SCHEMA_VERSION + 1)
-        .await
-        .unwrap();
+    mark_version_active(&graph, served).await.unwrap();
     clickhouse
-        .execute(&format!("CREATE TABLE {migrating_table} AS {served_table}"))
+        .execute(&format!(
+            "CREATE TABLE {} AS {}",
+            prefixed_table_name(CHECKPOINT_TABLE, served),
+            prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION)
+        ))
         .await;
 
     for (id, enabled_minutes_ago) in [
@@ -76,11 +76,7 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
                  VALUES ({id}, {id}, '1/{id}/', now() - INTERVAL {enabled_minutes_ago} MINUTE, now())"
             ))
             .await;
-        clickhouse
-            .execute(&format!(
-                "INSERT INTO namespace_traversal_paths (id, traversal_path) VALUES ({id}, '1/{id}/')"
-            ))
-            .await;
+        create_namespace(&clickhouse, id, None, 20, &format!("1/{id}/")).await;
     }
     clickhouse
         .execute(&format!(
@@ -97,11 +93,13 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
         .filter(|plan| plan.scope == EtlScope::Namespaced)
         .map(|plan| plan.name)
         .collect();
+    let served_store = ClickHouseCheckpointStore::for_version(Arc::new(graph.clone()), served);
+    let unserved_store = ClickHouseCheckpointStore::new(Arc::new(graph.clone()));
     for plan in &plans {
         for (id, synced_minutes_ago) in [(IN_SYNC, 0), (PENDING, 10), (STALE, 180)] {
-            complete(&graph, *SCHEMA_VERSION, id, plan, synced_minutes_ago).await;
+            complete(&served_store, id, plan, synced_minutes_ago).await;
         }
-        complete(&graph, *SCHEMA_VERSION + 1, NEVER_SYNCED, plan, 0).await;
+        complete(&unserved_store, NEVER_SYNCED, plan, 0).await;
     }
 
     let config = AppConfig::embedded_defaults().schedule.tasks;
@@ -134,8 +132,7 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
 }
 
 async fn complete(
-    graph: &clickhouse_client::ArrowClickHouseClient,
-    version: u32,
+    store: &ClickHouseCheckpointStore,
     namespace: i64,
     plan: &str,
     synced_minutes_ago: i64,
@@ -143,7 +140,7 @@ async fn complete(
     let synced = Utc::now() - TimeDelta::minutes(synced_minutes_ago);
     let mut checkpoint = Checkpoint::new(synced);
     checkpoint.complete(synced);
-    ClickHouseCheckpointStore::for_version(Arc::new(graph.clone()), version)
+    store
         .save(
             &format!("{}.{plan}", namespace_position_key(namespace)),
             &checkpoint,
@@ -167,7 +164,7 @@ fn lag_buckets(metrics: &[ResourceMetrics], entity: &str) -> Vec<u64> {
                         .attributes()
                         .any(|kv| kv.key.as_str() == "entity" && kv.value.as_str() == entity)
                 })
-                .flat_map(|point| point.bucket_counts().collect::<Vec<_>>())
+                .flat_map(|point| point.bucket_counts())
                 .collect::<Vec<_>>(),
             _ => panic!("freshness lag is not an f64 histogram"),
         })

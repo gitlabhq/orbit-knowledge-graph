@@ -17,28 +17,18 @@ use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
 
 const BRANCH_FALLBACK_CONCURRENCY: usize = 4;
 
-const CHANGE_QUERY_SQL: &str = r#"WITH
+const CHANGES_CTE_SQL: &str = r#"WITH
   enabled AS (
     {{enabled_namespaces}}
   ),
   changed AS (
 {{branches}}
   )
-SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
+"#;
+
+const CHANGE_QUERY_SQL: &str = r#"SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
 FROM changed
 INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#;
-
-const FRESHNESS_QUERY_SQL: &str = r#"WITH
-  enabled AS (
-    {{enabled_namespaces}}
-  ),
-  changed AS (
-{{branches}}
-  )
-SELECT root_path, target, max(watermark) AS latest
-FROM changed
-WHERE root_path IN (SELECT traversal_path FROM enabled)
-GROUP BY root_path, target"#;
 
 const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path, '{{target}}' AS target, {{watermark_column}} AS watermark
     FROM {{table}}
@@ -237,26 +227,19 @@ impl NamespaceChangeQuery {
             .map(|source| BranchQuery {
                 table: source.table.clone(),
                 target: source.target.clone(),
-                sql: render_change_query(&BTreeSet::from([source.clone()])),
+                sql: render_change_query(CHANGE_QUERY_SQL, &BTreeSet::from([source.clone()])),
             })
             .collect();
         Self {
-            combined_sql: render_change_query(&sources),
+            combined_sql: render_change_query(CHANGE_QUERY_SQL, &sources),
             branches,
         }
     }
 }
 
-fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
-    render_with_change_branches(CHANGE_QUERY_SQL, reindex_sources)
-}
-
-pub(super) fn render_freshness_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
-    render_with_change_branches(FRESHNESS_QUERY_SQL, reindex_sources)
-}
-
-fn render_with_change_branches(
-    template: &str,
+/// Renders `select` over the changed rows of every source, as `changed`, and the enabled roots, as `enabled`.
+pub(super) fn render_change_query(
+    select: &str,
     reindex_sources: &BTreeSet<ReindexSource>,
 ) -> String {
     let branches = reindex_sources
@@ -265,7 +248,7 @@ fn render_with_change_branches(
         .collect::<Vec<_>>()
         .join("\nUNION ALL\n");
 
-    template
+    format!("{CHANGES_CTE_SQL}{select}")
         .replace("{{enabled_namespaces}}", resolved_enabled_namespaces_sql())
         .replace("{{branches}}", &branches)
 }

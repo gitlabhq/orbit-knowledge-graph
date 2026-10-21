@@ -6745,7 +6745,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "One observation per enabled namespace and plan: seconds since it was last fully in sync with the datalake, 0 when in sync.",
+          "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -6814,7 +6814,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "One observation per enabled namespace and plan: seconds since it was last fully in sync with the datalake, 0 when in sync.",
+          "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
           "fieldConfig": {
             "defaults": {
               "custom": {
