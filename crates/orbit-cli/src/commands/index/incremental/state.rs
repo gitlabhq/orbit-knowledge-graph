@@ -99,6 +99,7 @@ impl Project<'_> {
         for (family, work) in work {
             families.push(family.family().to_string());
             let snapshot = self.snapshot_path(family);
+            let read_at = std::time::SystemTime::now();
             let mut env;
             let (report, state) = match work {
                 Work::Index(paths) => {
@@ -140,7 +141,7 @@ impl Project<'_> {
                     continue;
                 }
             };
-            state.save(&env, &snapshot)?;
+            save_snapshot(&env, &state, &snapshot, read_at)?;
             outputs.push(exporter.write(family, &env, &state, &report, self.stats)?);
         }
         self.save_state(&families, owner)?;
@@ -181,6 +182,22 @@ fn snapshot_file(state_dir: &std::path::Path, family: SupportLang) -> PathBuf {
     state_dir.join(format!("graph.{}.bin", family.family()))
 }
 
+/// Dates the snapshot to when its sources were read, so a file saved while
+/// they were indexed still reads as edited.
+fn save_snapshot(
+    env: &Env,
+    state: &State,
+    snapshot: &std::path::Path,
+    read_at: std::time::SystemTime,
+) -> Result<()> {
+    state.save(env, snapshot)?;
+    std::fs::File::options()
+        .write(true)
+        .open(snapshot)?
+        .set_modified(read_at)?;
+    Ok(())
+}
+
 pub(super) fn changed_since_snapshot(
     repo: &std::path::Path,
     state_dir: &std::path::Path,
@@ -214,6 +231,7 @@ pub(super) fn refresh_families(
     owner: Option<SupportLang>,
     changed: Vec<String>,
 ) -> Result<Vec<super::output::Replacement>> {
+    let read_at = std::time::SystemTime::now();
     let repository = input::paths(&git.repo_path, changed)?;
     let mut replacements = Vec::new();
     for (family, paths) in input::split(&repository, owner).into_values() {
@@ -235,7 +253,7 @@ pub(super) fn refresh_families(
                 .filter_map(|index| state.trees.get(index as usize))
                 .map(|tree| tree.label.to_string()),
         );
-        state.save(&env, &snapshot)?;
+        save_snapshot(&env, &state, &snapshot, read_at)?;
         replacements.push(super::output::replacement(
             git, ontology, &env, &state, &files,
         )?);

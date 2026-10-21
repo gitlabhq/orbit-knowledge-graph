@@ -628,6 +628,15 @@ enum Commands {
         #[arg(long, value_name = "MS")]
         duration_ms: u64,
     },
+    /// Refreshes edited files into the incremental graph; `grep` and `context` run it detached.
+    #[command(hide = true)]
+    Refresh {
+        repo: PathBuf,
+        #[arg(long, value_name = "PATH")]
+        db: Option<PathBuf>,
+        #[arg(last = true)]
+        files: Vec<String>,
+    },
     /// POST a query to the remote Orbit API and stream the response.
     #[command(group(clap::ArgGroup::new("input").required(true).args(["query", "file"])))]
     Query {
@@ -742,6 +751,13 @@ async fn main() -> Result<()> {
         } => {
             send_event(command, Duration::from_millis(*duration_ms)).await;
             return Ok(());
+        }
+        Commands::Refresh { repo, db, files } => {
+            return commands::index::incremental::refresh_now(
+                repo.clone(),
+                db.clone(),
+                files.clone(),
+            );
         }
         _ => {}
     }
@@ -980,7 +996,7 @@ async fn dispatch(
             commands::hook_guard::run(kind, gitlab);
             Ok(())
         }
-        Commands::SendEvent { .. } => Ok(()),
+        Commands::SendEvent { .. } | Commands::Refresh { .. } => Ok(()),
         Commands::Query {
             query,
             file,

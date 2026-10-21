@@ -391,16 +391,22 @@ fn run_orbit_with_data(
     base_url: &str,
     args: &[&str],
 ) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_orbit"))
+    orbit_command(dir, data, base_url, args)
+        .output()
+        .expect("run orbit binary")
+}
+
+fn orbit_command(dir: &Path, data: &Path, base_url: &str, args: &[&str]) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_orbit"));
+    command
         .current_dir(dir)
         .args(args)
         .env("ORBIT_API_BASE_URL", base_url)
         .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
         .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
         .env("ORBIT_DATA_DIR", data)
-        .env_remove("GITLAB_TOKEN")
-        .output()
-        .expect("run orbit binary")
+        .env_remove("GITLAB_TOKEN");
+    command
 }
 
 const GREP_RESPONSE: &str = r#"{"version":"1.0.0","target":{"type":"project","id":1,"full_path":"my-group/my-project"},"scopes":[{"name":"merge_requests","status":"ok","backend":"basic","result_count":1}],"results":[{"scope":"merge_requests","type":"MergeRequest","id":42,"token":"MergeRequest[42]","reference":{"id":42},"text":"Add runner"}],"result_count":1,"truncated":false}"#;
@@ -684,7 +690,7 @@ fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
 }
 
 #[test]
-fn grep_refreshes_an_edited_file_into_the_incremental_graph() {
+fn grep_refreshes_an_edited_file_inline_or_detached() {
     let repo = tempfile::tempdir().expect("tempdir");
     std::fs::write(repo.path().join("util.py"), "def helper():\n    return 1\n").unwrap();
     std::fs::write(
@@ -724,6 +730,35 @@ fn grep_refreshes_an_edited_file_into_the_incremental_graph() {
 
     let found = orbit(edited.path(), &["grep", "added"]);
     assert!(found.contains("Function added"), "{found}");
+    assert!(!found.contains("edited since index"), "{found}");
+
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(
+        repo.path().join("util.py"),
+        "def helper():\n    return 1\n\ndef later():\n    return 2\n",
+    )
+    .unwrap();
+    let detached = || {
+        let output = orbit_command(
+            repo.path(),
+            edited.path(),
+            "http://localhost:1",
+            &["grep", "later"],
+        )
+        .env("ORBIT_REFRESH_WAIT_MS", "0")
+        .output()
+        .expect("run orbit binary");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let first = detached();
+    assert!(first.contains("edited since index"), "{first}");
+    let found = (0..60)
+        .map(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            detached()
+        })
+        .find(|found| found.contains("Function later"))
+        .expect("a detached refresh lands the edit");
     assert!(!found.contains("edited since index"), "{found}");
 
     orbit(fresh.path(), &["index", "."]);
