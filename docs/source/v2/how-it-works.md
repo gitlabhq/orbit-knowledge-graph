@@ -3,7 +3,7 @@ stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Learn how GitLab Orbit indexes your GitLab data and code, answers queries with your permissions, and keeps the graph current.
-title: How GitLab Orbit works
+title: GitLab Orbit architecture
 ---
 
 {{< details >}}
@@ -49,7 +49,7 @@ Each relationship, such as a user who authored a merge request, is a directed ed
 - The code layer holds files, directories, definitions, and imports.
   A project contains branches, and a branch contains the files of the code layer.
 
-For the full list of node types and relationships, see [What GitLab Orbit indexes](schema.md).
+For the full list of node types and relationships, see [indexed data](schema.md).
 
 ## How GitLab Orbit indexes your data
 
@@ -68,7 +68,7 @@ To check the progress, run `glab orbit graph-status --full-path <my-group>`.
 
 ## How a query runs
 
-Queries use the [Cypher query language](queries/cypher.md).
+Queries use [GQL](queries/query-language.md), the GitLab Orbit query language.
 Every query follows the same path:
 
 1. GitLab receives the query from the CLI, the REST API, the MCP endpoint, or GitLab Duo Agent Platform.
@@ -92,28 +92,7 @@ After 30 days, GitLab deletes all graph data of the group.
 ## The local graph
 
 The GitLab Orbit CLI also indexes repositories on your machine into a local graph of code only, with no authorization layer.
-For more information, see [GitLab Orbit Local](local/_index.md).
-
-## Billing
-
-<!-- TODO(GA): confirm with Pricing what the add-on includes, and how GitLab Self-Managed and GitLab Dedicated are billed. -->
-The GitLab Orbit add-on includes GitLab Credits for GitLab Orbit queries.
-On GitLab.com, queries consume GitLab Credits with every access method, including Agent Platform.
-For the rates, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
-For billing on GitLab Self-Managed and GitLab Dedicated, contact your GitLab account team.
-
-| Access method | Calls that consume GitLab Credits | Calls that do not consume GitLab Credits |
-|---------------|-----------------------------------|------------------------------------------|
-| CLI | `query` | `status`, `ontology`, `dsl`, `tools`, `graph-status` |
-| REST API | `POST /api/v4/orbit/query`, `POST /api/v4/orbit/query/:name`, `POST /api/v4/orbit/agent/commands/query_graph` | All other endpoints |
-| MCP endpoint | `invoke_command` calls that run `query_graph` | `list_commands`, `get_graph_schema`, `get_query_dsl`, `get_response_format` |
-| GitLab Duo Agent Platform | Queries that the agent makes for you | None |
-
-- A query that succeeds consumes GitLab Credits, even when it returns no rows. A failed query and `CALL db.schema()` do not.
-- GitLab Orbit bills each query to one top-level group.
-- When the group has no GitLab Credits left, or its [free trial](trial.md) ends, queries fail.
-  See [troubleshooting](troubleshooting.md#error-gitlab-credits-exhausted).
-- The local graph never consumes GitLab Credits.
+For more information, see [the local graph](local/_index.md).
 
 ## Known issues
 
@@ -128,8 +107,9 @@ For billing on GitLab Self-Managed and GitLab Dedicated, contact your GitLab acc
 
 ## Related topics
 
-- [What GitLab Orbit indexes](schema.md)
+- [Indexed data](schema.md)
 - [Security](security.md)
-- [Cypher query language](queries/cypher.md)
-- [GitLab Orbit Local](local/_index.md)
+- [Query language](queries/query-language.md)
+- [Local graph](local/_index.md)
+- [Billing and credit usage](billing.md)
 - [Troubleshooting](troubleshooting.md)

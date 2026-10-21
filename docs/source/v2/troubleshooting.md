@@ -118,7 +118,7 @@ For all exit codes, see [exit codes](cli.md#exit-codes).
 Orbit API error (HTTP 400): {"code":"compile_error","message":"schema violation: Orbit query syntax at line 1, column 1: expected Statement ..."}
 ```
 
-The query uses the deprecated JSON query domain-specific language (DSL). Rewrite it in the [Cypher query language](queries/cypher.md), for example:
+The query uses the deprecated JSON query domain-specific language (DSL). Rewrite it in [GQL](queries/query-language.md), for example:
 
 ```gql orbit-query
 MATCH (p:Project {full_path: 'gitlab-org/gitlab'})
@@ -167,22 +167,34 @@ These errors come from the REST API and the MCP endpoint. The CLI reports every 
 The token has none of the `mcp_orbit`, `mcp`, `read_api`, `api`, or `ai_workflows` scopes.
 Create a token with the `mcp_orbit` or `read_api` scope, or sign in again to grant the `mcp_orbit` scope.
 
-### Error: `403 Forbidden - No Orbit enabled namespaces available`
+### Error: `403 Forbidden` for a service account
 
-The service account does not have the Reporter, Security Manager, Developer, Maintainer, or Owner role for a group where GitLab Orbit is on.
-Add the account to such a group with one of these roles.
+A query from a service account might fail with `403 Forbidden - No Orbit enabled namespaces available`.
+
+This issue occurs when the account does not have the Reporter role or higher in a group where
+GitLab Orbit is turned on.
+
+To resolve this issue, add the account to a group where GitLab Orbit is turned on,
+with the Reporter role or higher.
 For more information, see [service accounts](security.md#service-accounts).
 
 ### Error: `403 Forbidden` with no message
 
-No group of the service account has the GitLab Orbit add-on or an active trial.
-Add the account to a group where GitLab Orbit is on.
+A query from a service account might fail with `403 Forbidden` and no other message.
+
+This issue occurs when no group of the service account has GitLab Orbit available.
+
+To resolve this issue, add the account to a group where GitLab Orbit is turned on.
 If you added the account recently, wait a few minutes, then send the query again.
 
 ### Results have no security data
 
-The service account has the Reporter role, so GitLab removes security entities from results and aggregate counts.
-Give the account the Security Manager role for the group.
+Results from a service account might not include security entities.
+
+This issue occurs when the account has the Reporter role. GitLab removes security entities from results
+and aggregate counts.
+
+To resolve this issue, give the account the Security Manager role for the group.
 
 ## GitLab Duo
 
@@ -207,7 +219,7 @@ cleared **Other Foundational Agents** in the **GitLab Orbit** section of their p
 
 ## Local graph
 
-These issues affect [GitLab Orbit Local](local/_index.md).
+These issues affect the [local graph](local/_index.md).
 
 ### Error: `no local graph found`
 
@@ -264,7 +276,7 @@ Index your repositories again.
 ## Related topics
 
 - [CLI](cli.md)
-- [GitLab Orbit Local](local/_index.md)
+- [Local graph](local/_index.md)
 - [Security](security.md)
-- [How GitLab Orbit works](how-it-works.md)
+- [GitLab Orbit architecture](how-it-works.md)
 - [MCP](agents/mcp.md)

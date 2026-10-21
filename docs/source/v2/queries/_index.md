@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query the GitLab Orbit graph with Cypher to find GitLab data, code, and relationships from scripts and custom tools.
+description: Query the GitLab Orbit graph with GQL to find GitLab data, code, and relationships from scripts and custom tools.
 title: GitLab Orbit queries
 ---
 
@@ -24,11 +24,11 @@ title: GitLab Orbit queries
 
 A query asks the graph one exact question and returns exact rows, with only the data that you can access.
 Your agent writes queries for you. Write them yourself for scripts, scheduled reports, and custom tools.
-Queries use the [Cypher query language](cypher.md).
+Queries use the GitLab Orbit [query language](query-language.md).
 
 {{< cards >}}
 
-- [Cypher query language](cypher.md)
+- [Query language](query-language.md)
 - [REST API](api.md)
 
 {{< /cards >}}
@@ -56,10 +56,10 @@ send the same text with the `query_graph` command.
 | Find what is connected to one bounded node | `MATCH (a:Label {id: 1})--(n) RETURN n` |
 
 To search, filter one node type with `WHERE`, for example with `CONTAINS` or `all_tokens`.
-For the syntax, see the [Cypher query language](cypher.md).
+For the syntax, see the [query language](query-language.md).
 
 The examples use numeric IDs. To find the ID of a merge request or a project, see
-[anchor at least one node](cypher.md#anchor-at-least-one-node).
+[anchor at least one node](query-language.md#anchor-at-least-one-node).
 
 ## Example: fetch a merge request diff
 
@@ -99,7 +99,7 @@ LIMIT 5
 
 ## Related topics
 
-- [Cypher query language](cypher.md)
+- [Query language](query-language.md)
 - [REST API](api.md)
-- [Use cases](../use-cases.md)
-- [What GitLab Orbit indexes](../schema.md)
+- [Prompt examples](../prompt-examples.md)
+- [Indexed data](../schema.md)

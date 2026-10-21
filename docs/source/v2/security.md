@@ -66,6 +66,8 @@ Results include only what the token owner can see in GitLab.
 | Access method | Authentication |
 |---------------|----------------|
 | [REST API](queries/api.md) | A personal access token with the `read_api` scope, or a fine-grained personal access token, sent as a Bearer token |
+| [GitLab Orbit CLI](cli.md) | Your `glab auth login` credential, or a personal access token with the `read_api` scope in `GITLAB_TOKEN` |
+| [Local graph](local/_index.md) | No authentication. The local graph works offline and has no authorization layer. |
 | [MCP endpoint](agents/mcp.md) | GitLab OAuth, or a personal access token with the `mcp_orbit` or `read_api` scope. Native HTTP clients request the `mcp_orbit` scope. |
 | [GitLab Duo Agent Platform](agents/duo.md) | No token to configure |
 | [Service account](#service-accounts) | A personal access token of a bot user, scoped to the groups where the account is a member |
@@ -109,7 +111,7 @@ To set up a service account:
 
 Verify the scope after you set up the account, and each time you change its memberships:
 
-1. Save this request in a file named `request.json`. The query uses the [Cypher query language](queries/cypher.md).
+1. Save this request in a file named `request.json`. The query uses the [GitLab Orbit query language](queries/query-language.md).
 
    ```json
    {
@@ -132,7 +134,7 @@ Verify the scope after you set up the account, and each time you change its memb
 
 ## Related topics
 
-- [How GitLab Orbit works](how-it-works.md)
+- [GitLab Orbit architecture](how-it-works.md)
 - [REST API](queries/api.md)
 - [MCP](agents/mcp.md)
 - [Troubleshooting](troubleshooting.md)

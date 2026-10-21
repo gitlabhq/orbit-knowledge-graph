@@ -3,7 +3,7 @@ stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Learn which GitLab data and source code GitLab Orbit indexes, and which node types and relationships the graph contains.
-title: What GitLab Orbit indexes
+title: GitLab Orbit indexed data
 ---
 
 {{< details >}}
@@ -60,7 +60,7 @@ Most languages also get imports and cross-file calls.
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, `.json` |
 | Kotlin | `.kt`, `.kts` |
 | Lua | `.lua` |
-| PHP | `.php`, `.phtml` |
+| PHP | `.php`, `.phtml`, `.php3`, `.php4`, `.php5`, `.php7`, `.phps` |
 | Python | `.py` |
 | Ruby | `.rb`, `.rbw`, `.rake`, `.gemspec` |
 | Rust | `.rs` |
@@ -271,8 +271,8 @@ Use these properties to read code without a separate call to the GitLab API.
 
 ## Related topics
 
-- [How GitLab Orbit works](how-it-works.md)
-- [Cypher query language](queries/cypher.md)
-- [GitLab Orbit Local](local/_index.md)
+- [GitLab Orbit architecture](how-it-works.md)
+- [Query language](queries/query-language.md)
+- [Local graph](local/_index.md)
 - [CLI](cli.md)
-- [Use cases](use-cases.md)
+- [Prompt examples](prompt-examples.md)
