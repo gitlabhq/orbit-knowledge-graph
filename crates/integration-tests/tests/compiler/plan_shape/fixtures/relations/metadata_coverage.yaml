@@ -50,7 +50,7 @@ cases:
             - (Filter p.id IN ?.id (_))
           reject:
             - (Scan Table(gl_edge) ...)
-            - (Project p.id AS id (_))
+            - (Deduplicate Final (Scan Table(gl_project) AS p))
 
   - name: Uncovered numeric filters join current node rows
     query:
