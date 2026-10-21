@@ -569,16 +569,7 @@ fn scoped_traversal_injects_tight_prefix() {
 #[test]
 fn scoped_authorization_join_injects_tight_prefix() {
     let orbit_query = "MATCH (c:Definition)-[:CALLS]->(d:Definition) WHERE d.project_id = 5 AND d.name = 'compile' RETURN c.fqn, d.fqn LIMIT 100";
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "c", "entity": "Definition", "columns": ["fqn"]},
-            {"id": "d", "entity": "Definition", "columns": ["fqn"], "filters": {"project_id": {"eq": 5}, "name": {"eq": "compile"}}}
-        ],
-        "relationships": [{"type": "CALLS", "from": "c", "to": "d"}],
-        "limit": 100
-    }"#;
-    let sql = render_scoped(json, orbit_query);
+    let sql = render_scoped(orbit_query);
     assert!(
         sql.contains("startsWith(c.traversal_path, (SELECT")
             && sql.contains("(_orbit_scope.id = 5)"),

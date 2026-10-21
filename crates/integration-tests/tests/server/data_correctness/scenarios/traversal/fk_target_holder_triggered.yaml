@@ -13,8 +13,6 @@ cases:
   - name: pinned_pipelines_find_their_merge_requests
     description: TRIGGERED reads the merge request id from the pipeline and skips a pipeline with no merge request
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Pipeline","node_ids":[99380,99381,99382]}],"relationships":[{"type":"TRIGGERED","from":"mr","to":"p"}],"limit":10}
       gql: |
         MATCH (mr:MergeRequest)-[:TRIGGERED]->(p:Pipeline) WHERE p.id IN [99380, 99381, 99382] RETURN mr, p LIMIT 10
     expect:
@@ -28,8 +26,6 @@ cases:
   - name: pinned_merge_request_finds_its_pipeline
     description: TRIGGERED from one merge request returns only the pipeline that holds its id
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000]},{"id":"p","entity":"Pipeline"}],"relationships":[{"type":"TRIGGERED","from":"mr","to":"p"}],"limit":10}
       gql: |
         MATCH (mr:MergeRequest {id: 2000})-[:TRIGGERED]->(p:Pipeline) RETURN mr, p LIMIT 10
     expect:

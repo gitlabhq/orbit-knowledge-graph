@@ -24,8 +24,6 @@ config:
       - { traversal_path: "1/100/99352/99354/", source_id: 99352, source_kind: Group, relationship_kind: CONTAINS, target_id: 99354, target_kind: Project, source_tags: [], target_tags: [] }
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[99350]},{"id":"g","entity":"Group"},{"id":"p","entity":"Project"}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"},{"type":"CONTAINS","from":"g","to":"p"}],"limit":10}
   gql: |
     MATCH (u:User {id: 99350})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project) RETURN u, g, p LIMIT 10
 
