@@ -191,7 +191,6 @@ properties:
     type: int64
     source: user_id
     nullable: true
-    mutable: false
     description: "Triggering user ID."
 
   merge_request_id:

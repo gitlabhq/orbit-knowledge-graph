@@ -145,7 +145,6 @@ properties:
     type: int64
     source: scanner_id
     nullable: false
-    mutable: false
     description: "Detecting scanner ID."
 
   vulnerability_id:

@@ -133,7 +133,6 @@ properties:
     type: int64
     source: merged_commit_id
     nullable: true
-    mutable: false
     description: "Synthetic Commit id the MR was merged at. NULL until merged, then immutable."
 
   latest_build_started_at:
@@ -242,7 +241,6 @@ properties:
     type: int64
     source: author_id
     nullable: true
-    mutable: false
     description: "Author user ID."
 
   merge_user_id:
@@ -279,7 +277,6 @@ properties:
     type: int64
     source: source_project_id
     nullable: true
-    mutable: false
     description: "Source project ID (may differ from target for cross-project MRs)."
 
   head_pipeline_id:
