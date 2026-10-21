@@ -27,21 +27,22 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         let mut predicates = pattern.nodes[endpoint].id_predicates(key_column.clone());
         if self.binding(endpoint).is_none() {
             let selective = pattern.endpoint_is_selective(endpoint);
+            let unfiltered = !selective && !pattern.has_uncovered_filter(&pattern.nodes[endpoint]);
             let mut reached = if selective {
                 None
             } else {
                 self.ids_through_holder(&key.node, &key.column)
             };
             if reached.is_none()
-                && !selective
+                && unfiltered
                 && let Some(read) = self.nodes.get(&key.node).and_then(|state| state.read)
             {
                 reached = Some(self.ids_reached_by(read, &key.column));
             }
             let read_later = pattern.nodes[endpoint].joined || pattern.holds_fk(endpoint);
             match reached {
-                Some(reached) if read_later => self.set_ids(endpoint, reached),
-                None if read_later && !selective => {}
+                Some(reached) if read_later && unfiltered => self.set_ids(endpoint, reached),
+                None if read_later && unfiltered => {}
                 reached if self.ids(endpoint).is_none() => {
                     let mut node = pattern.nodes[endpoint].clone();
                     node.columns = Some(ColumnSelection::List(vec![]));

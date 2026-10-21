@@ -241,8 +241,13 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             neighbor_path(edge_alias, neighbor_type, arm_neighbor_paths),
             neighbor_traversal_path_column(),
         ));
-        let (mut from, edge_live) =
-            latest_edge_scan(arm_tables, edge_sort_keys, edge_alias, arm_where);
+        let (mut from, edge_live) = latest_edge_scan(
+            arm_tables,
+            edge_sort_keys,
+            edge_alias,
+            arm_where,
+            Some(input.fetch_limit() + input.skip.unwrap_or(0)),
+        );
         where_parts.push(edge_live);
         let needs_center_table = !center_uses_default_pk;
 
@@ -290,6 +295,13 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
                     ),
                 );
                 where_parts.push(deleted_false(&center_id));
+                if !center_node_ids.is_empty() {
+                    where_parts.push(id_list_predicate(
+                        &center_id,
+                        DEFAULT_PRIMARY_KEY,
+                        &center_node_ids,
+                    ));
+                }
             }
             select.push(SelectExpr::new(
                 Expr::col(&center_id, &center_redaction_col),
@@ -332,6 +344,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             table,
             edge_sort_keys,
             edge_alias,
+            Some(input.fetch_limit() + input.skip.unwrap_or(0)),
         );
         q.order_by = order_by;
         q.limit = Some(input.limit);
@@ -407,6 +420,7 @@ fn build_fused_both_arm(
     edge_table: &String,
     edge_sort_keys: &HashMap<String, Vec<String>>,
     edge_alias: &str,
+    arm_limit: Option<u32>,
 ) -> Query {
     let side_key = |kind_col: &str, id_col: &str| -> Vec<Expr> {
         let mut parts = vec![Expr::eq(
@@ -526,6 +540,7 @@ fn build_fused_both_arm(
             }
             scan_where
         },
+        arm_limit,
     );
 
     let inner = Query {
