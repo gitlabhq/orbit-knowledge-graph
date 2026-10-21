@@ -543,8 +543,6 @@ enum Commands {
     Version,
     #[command(about = descriptions::short("index"))]
     Index(IndexArgs),
-    #[command(about = descriptions::short("reindex"), long_about = descriptions::long("reindex"))]
-    Reindex(IndexArgs),
     Grep(Box<GrepArgs>),
     Context(ContextArgs),
     Sql(SqlArgs),
@@ -856,10 +854,6 @@ async fn dispatch(
         Commands::Index(args) => {
             let (path, options) = args.into_parts();
             print_outputs(commands::index::incremental::index(path, options)?)
-        }
-        Commands::Reindex(args) => {
-            let (path, options) = args.into_parts();
-            print_outputs(commands::index::incremental::reindex(path, options)?)
         }
         Commands::Grep(args) => run_grep(*args).await,
         Commands::Context(args) => commands::context::run(args).await,

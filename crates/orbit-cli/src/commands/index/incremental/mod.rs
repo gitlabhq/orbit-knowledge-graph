@@ -25,20 +25,6 @@ pub(crate) struct Options {
 }
 
 pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<Vec<FamilyOutput>>> {
-    run(path, options, Mode::Full)
-}
-
-pub(crate) fn reindex(path: PathBuf, options: Options) -> Result<Vec<Vec<FamilyOutput>>> {
-    run(path, options, Mode::Changed)
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Mode {
-    Full,
-    Changed,
-}
-
-fn run(path: PathBuf, options: Options, mode: Mode) -> Result<Vec<Vec<FamilyOutput>>> {
     super::install_tracing(options.verbose, false);
     let workspace = workspace::Workspace::open_default()?;
     let manifest_path = std::path::absolute(workspace.manifest_path())?;
@@ -59,6 +45,9 @@ fn run(path: PathBuf, options: Options, mode: Mode) -> Result<Vec<Vec<FamilyOutp
         let state_dir = workspace.var_dir(git.project_id);
         let _state_lock = lock_incremental_state(&state_dir)?;
         let db_path = workspace::resolve_db_path(options.db.clone(), &git)?;
+        let snapshot = options.db.is_none()
+            && db_path.exists()
+            && manifest::load_incremental_state(&manifest_path, git.project_id)?.is_some();
         let writer = GraphWriter::open(&db_path, &git)?;
         manifest::record_status(
             &manifest_path,
@@ -78,9 +67,9 @@ fn run(path: PathBuf, options: Options, mode: Mode) -> Result<Vec<Vec<FamilyOutp
                 .map_or(u64::MAX, |seconds| seconds.saturating_mul(1000)),
             stats: options.stats,
         };
-        let output = match mode {
-            Mode::Full => project.index_all(),
-            Mode::Changed => project.index_changed(),
+        let output = match snapshot {
+            true => project.index_changed().or_else(|_| project.index_all()),
+            false => project.index_all(),
         }
         .and_then(|output| writer.complete(&git.commit_sha).map(|()| output));
         let output = match output {
@@ -217,9 +206,6 @@ pub(crate) fn refresh(
     })
 }
 
-/// One refresh runs at a time and at most one waits behind it. The waiting
-/// one refreshes every uncommitted edit, so edits made during a long refresh
-/// land together in the next one.
 pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>) -> Result<()> {
     let Some(Incremental {
         git,
