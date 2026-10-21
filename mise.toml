@@ -273,37 +273,13 @@ arg "<repo_path>"
 arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
 
-[tasks."bench:download-repos"]
-run = "gitlab-xtasks benchmark download-repos --config code-indexing-benchmark.yaml --output-dir temp"
-description = "Download benchmark repositories"
-
 [task_templates."bench:engine"]
-env = { BENCH_ACTION = "run" }
+vars = { action = "run" }
 usage = '''
 flag "--cg" help="Run code-graph"
 flag "--cgi" help="Run code-graph-incremental (currently a no-op)"
 '''
-run = '''
-if [ "${usage_cg:-false}" = "${usage_cgi:-false}" ]; then
-  echo "Pass exactly one of --cg or --cgi." >&2
-  exit 2
-fi
-if [ "${usage_cgi:-false}" = "true" ]; then
-  echo "code-graph-incremental is not wired yet; skipping."
-  exit 0
-fi
-mise run bench:download-repos
-cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled
-if [ "$BENCH_ACTION" = "run" ]; then
-  gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local --scenario cg
-  exit 0
-fi
-for repo in temp/*/; do
-  name=$(basename "$repo")
-  echo "=== Indexing $name with code-graph ==="
-  ./target/release/orbit index "$repo" --stats
-done
-'''
+run = 'uv run scripts/dev/code-indexing-benchmark.py {{ vars.action }}{% if usage.cg %} --cg{% endif %}{% if usage.cgi %} --cgi{% endif %}'
 
 [tasks."bench:run"]
 extends = "bench:engine"
@@ -311,16 +287,8 @@ description = "Run a measured code indexing benchmark"
 
 [tasks."bench:smoke"]
 extends = "bench:engine"
-env = { BENCH_ACTION = "smoke" }
+vars = { action = "smoke" }
 description = "Run one code indexing pass against each benchmark repository"
-
-[tasks."bench:list-repos"]
-run = "gitlab-xtasks benchmark list-repos --config code-indexing-benchmark.yaml"
-description = "List benchmark repositories"
-
-[tasks."bench:list-groups"]
-run = "gitlab-xtasks benchmark list-groups --config code-indexing-benchmark.yaml"
-description = "List benchmark repo groups"
 
 [tasks."proto:go"]
 run = "scripts/dev/proto-go.sh generate"
