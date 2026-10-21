@@ -24,6 +24,7 @@ const SKILLS_PATH: &str = "/api/v4/orbit/skills";
 const GREP_PATH: &str = "/api/v4/orbit/grep";
 const CONTEXT_PATH: &str = "/api/v4/orbit/context";
 const SHORT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const GREP_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) struct SkillHttpResponse {
     pub(crate) status: u16,
@@ -175,7 +176,7 @@ impl OrbitClient {
                 self.http
                     .get(self.url(GREP_PATH))
                     .query(params)
-                    .timeout(SHORT_REQUEST_TIMEOUT),
+                    .timeout(GREP_REQUEST_TIMEOUT),
             )
             .await?;
         read_body(response).await
