@@ -41,13 +41,12 @@ struct Cli {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = descriptions::short("index"))]
 struct IndexArgs {
     /// Repository path, a folder inside one, or a directory that holds repositories (default: current directory).
     #[arg(value_name = "PATH", default_value = ".")]
     path: PathBuf,
 
-    /// Include detailed statistics in output
+    /// Include detailed statistics, with the slowest files per phase
     #[arg(short, long)]
     stats: bool,
 
@@ -55,7 +54,7 @@ struct IndexArgs {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Write this revision to a specific DuckDB file.
+    /// DuckDB file to write (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 
@@ -64,28 +63,16 @@ struct IndexArgs {
     budget: Option<u64>,
 }
 
-#[derive(Args, Debug, PartialEq)]
-#[command(about = descriptions::short("reindex"), long_about = descriptions::long("reindex"))]
-struct ReindexArgs {
-    /// Repository path, or a directory that holds repositories (default: current directory).
-    #[arg(value_name = "PATH", default_value = ".")]
-    path: PathBuf,
-
-    /// Include the slowest files per phase in the output
-    #[arg(short, long)]
-    stats: bool,
-
-    /// Verbose logging to stderr
-    #[arg(short, long)]
-    verbose: bool,
-
-    /// Override the DuckDB path (default: ~/.gitlab/orbit/graph.duckdb).
-    #[arg(long, value_name = "PATH")]
-    db: Option<PathBuf>,
-
-    /// Seconds a language family may take before the run stops (default: no limit).
-    #[arg(long, value_name = "SECONDS")]
-    budget: Option<u64>,
+impl IndexArgs {
+    fn into_parts(self) -> (PathBuf, commands::index::incremental::Options) {
+        let options = commands::index::incremental::Options {
+            stats: self.stats,
+            verbose: self.verbose,
+            db: self.db,
+            budget_seconds: self.budget,
+        };
+        (self.path, options)
+    }
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -554,8 +541,10 @@ impl SetupFlags {
 enum Commands {
     /// Print the version string and exit.
     Version,
+    #[command(about = descriptions::short("index"))]
     Index(IndexArgs),
-    Reindex(ReindexArgs),
+    #[command(about = descriptions::short("reindex"), long_about = descriptions::long("reindex"))]
+    Reindex(IndexArgs),
     Grep(Box<GrepArgs>),
     Context(ContextArgs),
     Sql(SqlArgs),
@@ -864,36 +853,14 @@ async fn dispatch(
             println!("{}", env!("ORBIT_VERSION"));
             Ok(())
         }
-        Commands::Index(IndexArgs {
-            path,
-            stats,
-            verbose,
-            db,
-            budget,
-        }) => print_outputs(commands::index::incremental::index(
-            path,
-            commands::index::incremental::Options {
-                stats,
-                verbose,
-                db,
-                budget_seconds: budget,
-            },
-        )?),
-        Commands::Reindex(ReindexArgs {
-            path,
-            stats,
-            verbose,
-            db,
-            budget,
-        }) => print_outputs(commands::index::incremental::reindex(
-            path,
-            commands::index::incremental::Options {
-                stats,
-                verbose,
-                db,
-                budget_seconds: budget,
-            },
-        )?),
+        Commands::Index(args) => {
+            let (path, options) = args.into_parts();
+            print_outputs(commands::index::incremental::index(path, options)?)
+        }
+        Commands::Reindex(args) => {
+            let (path, options) = args.into_parts();
+            print_outputs(commands::index::incremental::reindex(path, options)?)
+        }
         Commands::Grep(args) => run_grep(*args).await,
         Commands::Context(args) => commands::context::run(args).await,
         Commands::Sql(SqlArgs {

@@ -172,18 +172,35 @@ fn finished_within(mut child: Child, wait: Duration) -> bool {
     }
 }
 
+struct Incremental {
+    git: workspace::GitInfo,
+    saved: manifest::IncrementalState,
+    state_dir: PathBuf,
+}
+
+fn incremental(repo: &Path) -> Result<Option<Incremental>> {
+    let workspace = workspace::Workspace::open_default()?;
+    let manifest_path = std::path::absolute(workspace.manifest_path())?;
+    let git = workspace::git_info(repo)?;
+    let Some(saved) = manifest::load_incremental_state(&manifest_path, git.project_id)? else {
+        return Ok(None);
+    };
+    let state_dir = workspace.var_dir(git.project_id);
+    Ok(Some(Incremental {
+        git,
+        saved,
+        state_dir,
+    }))
+}
+
 pub(crate) fn refresh(
     repo: &std::path::Path,
     db: Option<PathBuf>,
     files: &[&str],
 ) -> Result<Freshness> {
-    let workspace = workspace::Workspace::open_default()?;
-    let manifest_path = std::path::absolute(workspace.manifest_path())?;
-    let git = workspace::git_info(repo)?;
-    if manifest::load_incremental_state(&manifest_path, git.project_id)?.is_none() {
+    let Some(Incremental { git, state_dir, .. }) = incremental(repo)? else {
         return Ok(Freshness::NotIncremental);
-    }
-    let state_dir = workspace.var_dir(git.project_id);
+    };
     let changed = state::changed_since_snapshot(&git.repo_path, &state_dir, files);
     if changed.is_empty() {
         return Ok(Freshness::Fresh);
@@ -204,13 +221,14 @@ pub(crate) fn refresh(
 /// one refreshes every uncommitted edit, so edits made during a long refresh
 /// land together in the next one.
 pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>) -> Result<()> {
-    let workspace = workspace::Workspace::open_default()?;
-    let manifest_path = std::path::absolute(workspace.manifest_path())?;
-    let git = workspace::git_info(&repo)?;
-    let Some(saved) = manifest::load_incremental_state(&manifest_path, git.project_id)? else {
+    let Some(Incremental {
+        git,
+        saved,
+        state_dir,
+    }) = incremental(&repo)?
+    else {
         return Ok(());
     };
-    let state_dir = workspace.var_dir(git.project_id);
     let Some(queued) = try_lock(&state_dir, QUEUED)? else {
         return Ok(());
     };

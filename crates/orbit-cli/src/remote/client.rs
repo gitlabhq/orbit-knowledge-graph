@@ -183,22 +183,18 @@ impl OrbitClient {
     }
 
     pub(crate) async fn post_context(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
-        let response = self
-            .send(
-                self.http
-                    .post(self.url(CONTEXT_PATH))
-                    .header(reqwest::header::CONTENT_TYPE, "application/json")
-                    .body(body),
-            )
-            .await?;
-        read_body(response).await
+        self.post_json(CONTEXT_PATH, body).await
     }
 
     pub(crate) async fn query_raw(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+        self.post_json(QUERY_PATH, body).await
+    }
+
+    async fn post_json(&self, path: &str, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
         let response = self
             .send(
                 self.http
-                    .post(self.url(QUERY_PATH))
+                    .post(self.url(path))
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
                     .body(body),
             )

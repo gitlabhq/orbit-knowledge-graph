@@ -148,7 +148,7 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
         match crate::remote::code::read(found_client, &project, &code).await {
             Ok(text) => sdlc_notes.push_str(&text),
             Err(error) => {
-                let message = error.message.lines().next().unwrap_or_default().to_string();
+                let message = crate::remote::grep::first_line(&error.message);
                 sdlc_notes.push_str(&format!("{what} in {project}: {message}\n"));
             }
         }
@@ -165,7 +165,7 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
             }
             Ok(crate::remote::sdlc::Found::Text(text)) => sdlc_notes.push_str(&text),
             Err(error) => {
-                let message = error.message.lines().next().unwrap_or_default().to_string();
+                let message = crate::remote::grep::first_line(&error.message);
                 sdlc_notes.push_str(&format!("{target}: {message}\n"));
             }
         }
@@ -871,6 +871,21 @@ fn render_dir(
     Ok(())
 }
 
+fn range_params(
+    git: &workspace::GitInfo,
+    path: &str,
+    start: usize,
+    end: usize,
+) -> [serde_json::Value; 5] {
+    [
+        git.project_id.into(),
+        git.commit_sha.clone().into(),
+        path.to_string().into(),
+        (start as i64).into(),
+        (end as i64).into(),
+    ]
+}
+
 fn snap_to_definitions(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
@@ -882,13 +897,7 @@ fn snap_to_definitions(
         "SELECT start_line, end_line FROM gl_definition
          WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
          AND start_line <= ?5 AND end_line >= ?4",
-        &[
-            git.project_id.into(),
-            git.commit_sha.clone().into(),
-            path.to_string().into(),
-            (start as i64).into(),
-            (end as i64).into(),
-        ],
+        &range_params(git, path, start, end),
     )?;
     let spans: Vec<(usize, usize)> = i64_column(&batches, "start_line")
         .into_iter()
@@ -977,13 +986,7 @@ LEFT JOIN gl_definition c ON c.id = e.source_id AND c.project_id = ?1 AND c.comm
   AND NOT (c.file_path = ?3 AND c.start_line >= ?4 AND c.end_line <= ?5)
 ORDER BY d.start_line, d.id, test, caller_path, caller_line"
         ),
-        &[
-            git.project_id.into(),
-            git.commit_sha.clone().into(),
-            path.to_string().into(),
-            (start as i64).into(),
-            (end as i64).into(),
-        ],
+        &range_params(git, path, start, end),
     )?;
     let targets = i64_column(&batches, "target");
     let names = string_column(&batches, "target_name");

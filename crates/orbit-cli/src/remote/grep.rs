@@ -317,7 +317,7 @@ fn outcome_for(target: &Target, error: &RemoteError) -> Outcome {
     }
 }
 
-fn first_line(message: &str) -> String {
+pub(crate) fn first_line(message: &str) -> String {
     message.lines().next().unwrap_or_default().to_string()
 }
 
