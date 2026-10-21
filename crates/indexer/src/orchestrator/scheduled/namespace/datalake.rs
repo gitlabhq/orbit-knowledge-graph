@@ -28,11 +28,12 @@ SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.targe
 FROM changed
 INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#;
 
-const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path, '{{target}}' AS target
+// PREWHERE filters on the indexed watermark before the path is computed for each row.
+const CHANGE_BRANCH_SQL: &str = r#"    SELECT extract({{path}}, '{{root_namespace_path_pattern}}') AS root_path, {{target}} AS target
     FROM {{table}}
-    WHERE {{watermark_column}} > {lower:String}
+    PREWHERE {{watermark_column}} > {lower:String}
       AND {{watermark_column}} <= {upper:String}
-      AND match({{path}}, '{{root_namespace_path_pattern}}')"#;
+    WHERE root_path != ''"#;
 
 #[async_trait]
 pub(super) trait NamespaceChangeDetector: Send + Sync {
@@ -236,9 +237,16 @@ impl NamespaceChangeQuery {
 }
 
 fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
-    let branches = reindex_sources
-        .iter()
-        .map(render_change_branch)
+    let mut targets_by_scan = BTreeMap::<(&str, &PathResolution), Vec<&str>>::new();
+    for source in reindex_sources {
+        targets_by_scan
+            .entry((&source.table, &source.traversal_path))
+            .or_default()
+            .push(&source.target);
+    }
+    let branches = targets_by_scan
+        .into_iter()
+        .map(|((table, path), targets)| render_change_branch(table, path, &targets))
         .collect::<Vec<_>>()
         .join("\nUNION ALL\n");
 
@@ -247,15 +255,18 @@ fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
         .replace("{{branches}}", &branches)
 }
 
-fn render_change_branch(source_table: &ReindexSource) -> String {
-    let path = path_expression(&source_table.traversal_path);
+fn render_change_branch(table: &str, path: &PathResolution, targets: &[&str]) -> String {
+    let quoted: Vec<String> = targets.iter().map(|target| format!("'{target}'")).collect();
+    let target = match quoted.as_slice() {
+        [single] => single.clone(),
+        _ => format!("arrayJoin([{}])", quoted.join(", ")),
+    };
 
     CHANGE_BRANCH_SQL
-        .replace("{{root_path}}", &root_path_expression(&path))
-        .replace("{{target}}", &source_table.target)
-        .replace("{{table}}", &source_table.table)
+        .replace("{{target}}", &target)
+        .replace("{{table}}", table)
         .replace("{{watermark_column}}", ontology::siphon_watermark_column())
-        .replace("{{path}}", &path)
+        .replace("{{path}}", &path_expression(path))
         .replace("{{root_namespace_path_pattern}}", TOP_LEVEL_PREFIX_REGEX)
 }
 
@@ -269,10 +280,6 @@ fn path_expression(resolution: &PathResolution) -> String {
             "dictGetOrDefault('{dictionary}', 'traversal_path', toUInt64({key_column}), '0/')"
         ),
     }
-}
-
-fn root_path_expression(path: &str) -> String {
-    format!("concat(splitByChar('/', {path})[1], '/', splitByChar('/', {path})[2], '/')")
 }
 
 #[async_trait]
@@ -481,22 +488,6 @@ mod tests {
     }
 
     #[test]
-    fn change_query_extracts_root_path() {
-        let query = NamespaceChangeQuery::new([column_source("work_items")]);
-        assert!(
-            query
-                .combined_sql
-                .contains("splitByChar('/', traversal_path)[1]")
-        );
-        assert!(
-            query
-                .combined_sql
-                .contains("splitByChar('/', traversal_path)[2]")
-        );
-        assert!(query.combined_sql.contains(TOP_LEVEL_PREFIX_REGEX));
-    }
-
-    #[test]
     fn change_query_renders_expected_sql_shape() {
         let query = NamespaceChangeQuery::new([column_source("work_items")]);
 
@@ -506,11 +497,11 @@ mod tests {
     {enabled}
   ),
   changed AS (
-    SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path, 'WorkItem' AS target
+    SELECT extract(traversal_path, '^[0-9]+/[0-9]+/') AS root_path, 'WorkItem' AS target
     FROM work_items
-    WHERE _siphon_watermark > {{lower:String}}
+    PREWHERE _siphon_watermark > {{lower:String}}
       AND _siphon_watermark <= {{upper:String}}
-      AND match(traversal_path, '^[0-9]+/[0-9]+/')
+    WHERE root_path != ''
   )
 SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
 FROM changed
