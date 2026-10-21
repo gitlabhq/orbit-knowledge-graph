@@ -16,10 +16,12 @@ physical:
         - (Join ON _orbit_edge_1.source_id = _orbit_edge_0.target_id (_) (_))
         - (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.target_id = 7, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))))
         - (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.target_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))))
-      reject: ["(Scan Table(gl_definition) ...)"]
+        - (Filter c._deleted = false (Deduplicate LimitBy ... (Filter c.id = 7 (_))))
+      reject: ["(Scan Table(gl_definition) AS a)", "(Scan Table(gl_definition) AS b)"]
     emitted:
       expect:
         - (Join ON _orbit_edge_1.source_id = _orbit_edge_0.target_id (_) (_))
         - (Filter _orbit_edge_1.target_id = 7, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))
         - (Filter _orbit_edge_0.target_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))
-      reject: ["(Scan Table(gl_definition) ...)"]
+        - (Filter c.id = 7 (Scan Table(gl_definition) AS c))
+      reject: ["(Scan Table(gl_definition) AS a)", "(Scan Table(gl_definition) AS b)"]
