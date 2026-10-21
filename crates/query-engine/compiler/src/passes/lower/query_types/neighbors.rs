@@ -139,8 +139,6 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         None => vec![],
     };
 
-    let arm_limit = input.skip.is_none().then(|| input.fetch_limit());
-
     let build_arm = |dir: Direction| -> Query {
         let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing, arm_kinds) =
             match dir {
@@ -325,7 +323,6 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             select,
             from,
             where_clause: Expr::conjoin(where_parts),
-            limit: arm_limit,
             ..Default::default()
         }
     };
@@ -342,7 +339,6 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             table,
             edge_sort_keys,
             edge_alias,
-            arm_limit,
         );
         q.order_by = order_by;
         q.limit = Some(input.limit);
@@ -418,7 +414,6 @@ fn build_fused_both_arm(
     edge_table: &String,
     edge_sort_keys: &HashMap<String, Vec<String>>,
     edge_alias: &str,
-    arm_limit: Option<u32>,
 ) -> Query {
     let side_key = |kind_col: &str, id_col: &str| -> Vec<Expr> {
         let mut parts = vec![Expr::eq(
@@ -547,7 +542,6 @@ fn build_fused_both_arm(
             Expr::binary(Op::Or, source_arm, target_arm),
             edge_live,
         ]),
-        limit: arm_limit,
         ..Default::default()
     };
 
