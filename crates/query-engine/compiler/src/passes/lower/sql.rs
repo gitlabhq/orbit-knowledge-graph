@@ -355,7 +355,6 @@ pub fn latest_edge_scan(
     sort_keys: &HashMap<String, Vec<String>>,
     alias: &str,
     scan_where: impl Fn(&str) -> Vec<Expr>,
-    limit: Option<u32>,
 ) -> (TableRef, Expr) {
     let pick = |table: &String, scan_alias: &str, select: Vec<SelectExpr>| {
         let (order_by, limit_by) = latest_row_dedup(scan_alias, &sort_keys[table]);
@@ -365,7 +364,6 @@ pub fn latest_edge_scan(
             where_clause: Expr::conjoin(scan_where(scan_alias)),
             order_by,
             limit_by,
-            limit,
             ..Default::default()
         }
     };

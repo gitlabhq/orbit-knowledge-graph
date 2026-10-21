@@ -139,6 +139,8 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         None => vec![],
     };
 
+    let arm_limit = input.skip.is_none().then(|| input.fetch_limit());
+
     let build_arm = |dir: Direction| -> Query {
         let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing, arm_kinds) =
             match dir {
@@ -241,13 +243,8 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             neighbor_path(edge_alias, neighbor_type, arm_neighbor_paths),
             neighbor_traversal_path_column(),
         ));
-        let (mut from, edge_live) = latest_edge_scan(
-            arm_tables,
-            edge_sort_keys,
-            edge_alias,
-            arm_where,
-            Some(input.fetch_limit() + input.skip.unwrap_or(0)),
-        );
+        let (mut from, edge_live) =
+            latest_edge_scan(arm_tables, edge_sort_keys, edge_alias, arm_where);
         where_parts.push(edge_live);
         let needs_center_table = !center_uses_default_pk;
 
@@ -328,6 +325,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             select,
             from,
             where_clause: Expr::conjoin(where_parts),
+            limit: arm_limit,
             ..Default::default()
         }
     };
@@ -344,7 +342,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             table,
             edge_sort_keys,
             edge_alias,
-            Some(input.fetch_limit() + input.skip.unwrap_or(0)),
+            arm_limit,
         );
         q.order_by = order_by;
         q.limit = Some(input.limit);
@@ -540,7 +538,6 @@ fn build_fused_both_arm(
             }
             scan_where
         },
-        arm_limit,
     );
 
     let inner = Query {
@@ -550,6 +547,7 @@ fn build_fused_both_arm(
             Expr::binary(Op::Or, source_arm, target_arm),
             edge_live,
         ]),
+        limit: arm_limit,
         ..Default::default()
     };
 
