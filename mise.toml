@@ -49,7 +49,6 @@ lefthook = "2.1.3"
 protoc = "34.1"
 jq = "1.7"
 yq = "4.52.5"
-hyperfine = "1.20.0"
 "aqua:gitleaks/gitleaks" = "8.30.1"
 "github:google/go-jsonnet" = "0.22.0"
 # aws-lc-fips-sys compiles the AWS-LC FIPS module from source and needs cmake and go.
@@ -279,7 +278,7 @@ usage = '''
 flag "--cg" help="Run code-graph"
 flag "--cgi" help="Run code-graph-incremental (currently a no-op)"
 '''
-run = 'uv run scripts/dev/code-indexing-benchmark.py {{ vars.action }}{% if usage.cg %} --cg{% endif %}{% if usage.cgi %} --cgi{% endif %}'
+run = 'cargo xtask code-indexing-benchmark {{ vars.action }}{% if usage.cg %} --cg{% endif %}{% if usage.cgi %} --cgi{% endif %}'
 
 [tasks."bench:run"]
 extends = "bench:engine"

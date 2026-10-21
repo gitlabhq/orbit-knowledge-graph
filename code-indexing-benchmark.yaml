@@ -1,8 +1,3 @@
-project:
-  name: gkg
-
-repos_dir: temp
-
 repos:
   # GitLab (Ruby + TypeScript)
   - name: gitlab
@@ -213,11 +208,3 @@ repos:
     version: "0.16.0"
     commit_sha: 494486203c3a48927f2383aa3d5ce5fca112186d
     groups: [zig]
-
-scenarios:
-  hyperfine:
-    - id: cg
-      command_per_repo: orbit index "${REPOS_DIR}/${REPO_NAME}" --threads 8 --stats
-      warmup: 1
-      min_runs: 3
-      max_runs: 3

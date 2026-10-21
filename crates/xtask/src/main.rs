@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod code_indexing_benchmark;
 mod dashboards;
 mod ddl;
 mod integration_lanes;
@@ -24,6 +25,26 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    #[command(about = "Run code-indexing benchmarks on pinned repositories")]
+    CodeIndexingBenchmark {
+        #[arg(value_enum)]
+        action: code_indexing_benchmark::Action,
+        /// Run the current code-graph engine.
+        #[arg(long, conflicts_with = "cgi", required_unless_present = "cgi")]
+        cg: bool,
+        /// Skip successfully until code-graph-incremental is connected.
+        #[arg(long, conflicts_with = "cg")]
+        cgi: bool,
+        /// Cache root for repositories, builds, index data, and results.
+        #[arg(long, env = "ORBIT_BENCH_ROOT")]
+        root: Option<std::path::PathBuf>,
+        /// Repository corpus configuration.
+        #[arg(
+            long,
+            default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/../../code-indexing-benchmark.yaml")
+        )]
+        config: std::path::PathBuf,
+    },
     /// Synthetic graph data pipeline (generate, load, evaluate).
     Synth {
         #[command(subcommand)]
@@ -300,6 +321,25 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::CodeIndexingBenchmark {
+            action,
+            cg: _,
+            cgi,
+            root,
+            config,
+        } => {
+            code_indexing_benchmark::run(code_indexing_benchmark::Options {
+                action,
+                engine: if cgi {
+                    code_indexing_benchmark::Engine::CodeGraphIncremental
+                } else {
+                    code_indexing_benchmark::Engine::CodeGraph
+                },
+                root,
+                config,
+            })
+            .await
+        }
         Command::Synth { command } => match command {
             SynthCommand::Generate {
                 config,

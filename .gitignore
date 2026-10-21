@@ -9,7 +9,6 @@ node_modules
 profile.json.gz
 output/
 temp/
-.gitlab-xtasks/
 *.cdx.xml
 *.cdx.json
 
