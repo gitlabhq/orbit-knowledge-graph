@@ -277,7 +277,7 @@ These recipes cover the free-tier Package Registry and Container Registry.
 Artifact Registry data is not in Orbit, so do not report these results as
 Artifact Registry packages.
 
-`Package` holds one row per package version. `HAS_PACKAGE_FILE` links a
+`Package` holds one row per package version. GitLab lists packages with status `default`, `error`, or `deprecated`. Filter on those to match the package list. Rows that are `processing` or `pending_destruction` are not ready yet or are being deleted. `HAS_PACKAGE_FILE` links a
 version to its stored files. `BUILT_BY` links a package or file to the CI/CD
 pipeline that built it. `DECLARES_DEPENDENCY` links a package to the
 dependencies it declares. `HAS_VULNERABILITY` links a package to a known
