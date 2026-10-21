@@ -20,8 +20,6 @@ cases:
   - name: outgoing
     description: Outgoing neighbors return one edge per versioned edge and keep a tombstoned neighbor as a bare node through its live edge, which the indexer tombstones with the node
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[99320]}],"neighbors":{"direction":"outgoing","rel_types":["MEMBER_OF"]}}
       gql: |
         MATCH (u:User {id: 99320})-[:MEMBER_OF]->(n) RETURN u, n
     expect:
@@ -39,8 +37,6 @@ cases:
   - name: incoming
     description: Incoming neighbors of a group return one edge even though the edge has two versions
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[99321]}],"neighbors":{"direction":"incoming","rel_types":["MEMBER_OF"]}}
       gql: |
         MATCH (g:Group {id: 99321})<-[:MEMBER_OF]-(n) RETURN g, n
     expect:
@@ -58,8 +54,6 @@ cases:
   - name: both
     description: Neighbors in both directions return one edge per versioned edge and keep the tombstoned neighbor through its live edge
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"u","entity":"User","node_ids":[99320]}],"neighbors":{"direction":"both","rel_types":["MEMBER_OF"]}}
       gql: |
         MATCH (u:User {id: 99320})-[:MEMBER_OF]-(n) RETURN u, n
     expect:
@@ -75,8 +69,6 @@ cases:
   - name: incoming_to_tombstoned_center
     description: Incoming neighbors of a group whose latest row is a tombstone return nothing
     query:
-      json: |
-        {"query_type":"neighbors","nodes":[{"id":"g","entity":"Group","node_ids":[99322]}],"neighbors":{"direction":"incoming","rel_types":["MEMBER_OF"]}}
       gql: |
         MATCH (g:Group {id: 99322})<-[:MEMBER_OF]-(n) RETURN g, n
     expect:
