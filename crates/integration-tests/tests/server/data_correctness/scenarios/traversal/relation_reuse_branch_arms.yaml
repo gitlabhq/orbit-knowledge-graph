@@ -14,8 +14,6 @@ config:
       - { id: 2000, iid: 1, title: Add feature A, state: opened, source_branch: feature-a, target_branch: main, project_id: 1000, author_id: 1, head_pipeline_id: 99360, traversal_path: "1/100/1000/" }
 
 query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[2]},{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project"},{"id":"pipe","entity":"Pipeline"}],"relationships":[{"type":"APPROVED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"}],"limit":10}
   gql: |
     MATCH (u:User {id: 2})-[:APPROVED]->(mr:MergeRequest),
       (mr)-[:IN_PROJECT]->(p:Project), (mr)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)

@@ -12,8 +12,6 @@ config:
       - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 99370, target_kind: Note, source_tags: ["state:opened"], target_tags: [] }
 
 query:
-  json: |
-    {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"neighbors":{"direction":"outgoing","rel_types":["HAS_NOTE"]},"options":{"dynamic_columns":"*"}}
   gql: |
     MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n) RETURN mr, properties(n)
 

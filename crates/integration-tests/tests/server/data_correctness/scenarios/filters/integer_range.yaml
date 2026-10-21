@@ -2,8 +2,6 @@ cases:
   - name: above_maximum_rejected
     description: An integer above the signed 64-bit maximum is rejected
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 9223372036854775808}}]}
       gql: |
         MATCH (n:Note) WHERE n.noteable_id = 9223372036854775808 RETURN n
     expect:
@@ -36,8 +34,6 @@ cases:
   - name: list_element_above_maximum_rejected
     description: Every IN element must fit in a signed 64-bit integer
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": {"in": [2000, 18446744073709551615]}}}]}
       gql: |
         MATCH (n:Note) WHERE n.noteable_id IN [2000, 18446744073709551615] RETURN n
     expect:
@@ -54,8 +50,6 @@ cases:
   - name: enum_key_above_maximum_rejected
     description: An enum key above the signed 64-bit maximum is rejected
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": 18446744073709551615}}]}
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state = 18446744073709551615 RETURN mr
     expect:
@@ -64,8 +58,6 @@ cases:
   - name: range_bounds_execute
     description: The signed 64-bit maximum and minimum are accepted and match nothing
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": {"in": [-9223372036854775808, 9223372036854775807]}}}]}
       gql: |
         MATCH (n:Note) WHERE n.noteable_id IN [-0x8000000000000000, 0x7FFFFFFFFFFFFFFF] RETURN n
     expect:
@@ -79,8 +71,6 @@ cases:
   - name: in_range_value_matches
     description: An in-range integer filter returns the matching rows
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "id_range": {"start": 3000, "end": 3003}, "filters": {"noteable_id": 2001}}]}
       gql: |
         MATCH (n:Note) WHERE n.id >= 3000 AND n.id <= 3003 AND n.noteable_id = 2001 RETURN n
     expect:
