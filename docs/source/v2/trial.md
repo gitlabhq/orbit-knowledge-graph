@@ -46,9 +46,9 @@ To start a trial:
 1. In the top bar, select **Search or go to** and find your top-level group.
 1. In the left sidebar, select **Settings** > **Orbit**.
 1. Turn on the **Turn on Orbit** toggle.
-1. In the dialog that shows the trial, select **Turn on Orbit**.
+1. In the **Start a free Orbit trial?** dialog, select **Start free trial**.
 
-The page shows **Orbit is indexing**, then **Orbit is ready**.
+The page shows **Orbit is indexing `<my-group>`**, then **Orbit is ready for `<my-group>`**.
 
 If none of your groups has GitLab Orbit turned on, you can also start the trial from **Your work**:
 
@@ -72,5 +72,5 @@ from where it stopped. For more information, see [data retention and deletion](h
 ## Related topics
 
 - [GitLab Orbit quickstart](quickstart.md)
-- [Billing](how-it-works.md#billing)
+- [Billing and credit usage](billing.md)
 - [Troubleshooting](troubleshooting.md)
