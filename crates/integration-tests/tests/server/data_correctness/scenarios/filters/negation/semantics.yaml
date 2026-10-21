@@ -32,9 +32,8 @@ cases:
       row_values:
         - { items: 4 }
 
-  - name: anchor_rewrite_keeps_relationship
-    description: |
-      The aggregation group-anchor rewrite removes the CONTAINS hop, and a NOT group on the IN_PROJECT relationship still reads IN_PROJECT. Every IN_PROJECT edge has source_kind MergeRequest, so the group is false and both merge requests with valid authors count. Reading the AUTHORED edge instead would drop the opened merge requests.
+  - name: not_group_on_middle_relationship_binds_its_edge_scan
+    description: A NOT group on IN_PROJECT binds to the IN_PROJECT edge scan after the CONTAINS scan; no IN_PROJECT edge has source_kind User, so both merge requests with a live author count.
     query:
       gql: |
         MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)<-[a:AUTHORED]-(u:User)
@@ -53,9 +52,8 @@ cases:
               id: 1000
               values: { mrs: 2 }
 
-  - name: anchor_rewrite_last_relationship
-    description: |
-      When the group-anchor rewrite removes the first relationship, a NOT group on the remaining IN_PROJECT relationship still binds to its edge scan and counts every merge request in the project.
+  - name: not_group_on_last_relationship_binds_its_edge_scan
+    description: A NOT group on the final IN_PROJECT relationship binds to its edge scan after the CONTAINS scan and counts every merge request in the project.
     query:
       gql: |
         MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)
