@@ -61,13 +61,23 @@ impl PipelineError {
     }
 
     pub fn is_caller_error(&self) -> bool {
-        matches!(
-            self,
-            Self::Compile {
-                client_safe: true,
-                ..
-            } | Self::NoEnabledNamespaces
-        )
+        match self {
+            Self::Compile { client_safe, .. } => *client_safe,
+            Self::NoEnabledNamespaces | Self::Streaming(_) => true,
+            Self::Execution(message) => matches!(
+                ClickHouseLimit::from_message(message),
+                Some(ClickHouseLimit::BadQueryParameter)
+            ),
+            _ => false,
+        }
+    }
+
+    pub fn outcome(&self) -> &'static str {
+        if self.is_caller_error() {
+            "caller_error"
+        } else {
+            "server_error"
+        }
     }
 
     pub fn failure_reason(&self) -> FailureReason {
@@ -136,6 +146,7 @@ pub enum ClickHouseLimit {
     TooManyRows,
     SetSizeLimit,
     TypeMismatch,
+    BadQueryParameter,
 }
 
 impl ClickHouseLimit {
@@ -147,6 +158,7 @@ impl ClickHouseLimit {
             158 => Some(Self::TooManyRows),
             191 => Some(Self::SetSizeLimit),
             53 => Some(Self::TypeMismatch),
+            41 | 457 => Some(Self::BadQueryParameter),
             _ => None,
         }
     }

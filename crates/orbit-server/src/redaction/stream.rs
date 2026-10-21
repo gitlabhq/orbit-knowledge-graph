@@ -1,5 +1,6 @@
 use futures::StreamExt;
 use orbit_log_fields::{error, info, warn};
+use query_engine::pipeline::PipelineError;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 use uuid::Uuid;
@@ -18,6 +19,18 @@ pub enum RedactionExchangeError {
     InvalidMessage(&'static str),
     ResultIdMismatch { expected: String, received: String },
     ClientError { code: String, message: String },
+}
+
+impl RedactionExchangeError {
+    /// A closed or broken request stream is on the caller's side of the exchange.
+    pub fn into_pipeline_error(self) -> PipelineError {
+        match self {
+            Self::StreamClosed | Self::ReceiveFailed(_) => {
+                PipelineError::Streaming(format!("{self:?}"))
+            }
+            other => PipelineError::Authorization(format!("{other:?}")),
+        }
+    }
 }
 
 pub struct RedactionExchangeResult {
