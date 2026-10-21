@@ -69,6 +69,7 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - There is no `OR`, `XOR`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`.
 - Package and container questions use `Package`, `PackageFile`, `Dependency`, and `ContainerRepository`. This is the free-tier Package Registry and Container Registry. Artifact Registry data is not in Orbit. See [the recipes](references/gql.md#package-registry-and-container-registry).
 - A missing `HAS_VULNERABILITY` link is not proof a package is safe. The link comes from SBOM data, matched by package name and version.
+- Vulnerabilities in a package's project are not that package's vulnerabilities. Only a `HAS_VULNERABILITY` link ties a vulnerability to a package version.
 - `ContainerRepository` has no tags. Read the tag count from the Container Registry API with the repository `id`, and no `/api/v4/` prefix: `glab api "registry/repositories/<id>?tags_count=true"`.
 - To scope packages to a group, join to the project and filter its path: `MATCH (p:Package)-[:IN_PROJECT]->(pr:Project) WHERE pr.full_path STARTS WITH 'gitlab-org/'`. Walking `Group` and `CONTAINS` to a fixed depth misses deeper subgroups.
 - To count packages the way GitLab lists them, filter `p.status IN ['default', 'error', 'deprecated']`. Without it, counts include packages still `processing` and packages `pending_destruction`.

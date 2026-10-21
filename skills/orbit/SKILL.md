@@ -98,6 +98,7 @@ Read the recipes before you construct a query. The same question often has one c
 - Issues, epics, tasks, and incidents are the `WorkItem` entity. There is no `Issue` node. See [the recipe](references/recipes.md#work-items-in-a-project).
 - Package and container questions use `Package`, `PackageFile`, `Dependency`, and `ContainerRepository`. This is the free-tier Package Registry and Container Registry. Artifact Registry data is not in Orbit. See [the recipes](references/recipes.md#package-registry-and-container-registry).
 - A missing `HAS_VULNERABILITY` link is not proof a package is safe. The link comes from SBOM data, matched by package name and version.
+- Vulnerabilities in a package's project are not that package's vulnerabilities. Only a `HAS_VULNERABILITY` link ties a vulnerability to a package version.
 - `ContainerRepository` has no tags. Read the tag count from the Container Registry API with the repository `id`, and no `/api/v4/` prefix: `glab api "registry/repositories/<id>?tags_count=true"`.
 - To scope packages to a group, relate `Package` to `Project` with `IN_PROJECT` and filter `full_path` with `starts_with`. Walking `Group` and `CONTAINS` to a fixed depth misses deeper subgroups.
 - To count packages the way GitLab lists them, filter `"status": {"in": ["default", "error", "deprecated"]}`. Without it, counts include packages still `processing` and packages `pending_destruction`.
