@@ -76,16 +76,7 @@ fn apply_to_query(
         let security_conds = aliased_tables.iter().map(|(alias, table)| {
             let min_role = model.table_minimum_access_level(table);
             let eligible = ctx.paths_at_least(min_role);
-            let broad = build_path_filter(alias, &eligible);
-            match ctx
-                .scope_proofs
-                .get(alias.strip_prefix("_role_").unwrap_or(alias))
-            {
-                Some(scope) if model.table_path_scopable(table) => {
-                    Expr::and(broad, crate::scope::scope_predicate(scope, alias))
-                }
-                _ => broad,
-            }
+            build_path_filter(alias, &eligible)
         });
         q.where_clause = Expr::and_all(
             security_conds
@@ -178,7 +169,6 @@ mod tests {
     use crate::AuthorizedPath;
     use crate::ast::visit::{visit_expressions, visit_queries};
     use crate::ast::{JoinType, Op, SelectExpr};
-    use crate::scope::ScopeProof;
     use ontology::constants::EDGE_TABLE;
     use orbit_utils::traversal_path::TraversalPath;
     use serde_json::Value;
@@ -680,109 +670,6 @@ mod tests {
             got,
             vec!["1/6543/".to_string(), "1/9970/".to_string()],
             "multi-path authz must be the OR of real prefixes with no redundant broad LCP, got:\n{got:?}"
-        );
-    }
-
-    #[test]
-    fn scope_proof_narrows_scoped_alias_beside_broad_filter() {
-        let mut proofs = std::collections::HashMap::new();
-        proofs.insert("p".to_string(), ScopeProof::literal("1/24/23/"));
-        let mut ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        ctx.scope_proofs = proofs;
-
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("p", "id"),
-                alias: None,
-            }],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan("gl_project", "p"),
-                TableRef::scan("gl_work_item", "wi"),
-                Expr::eq(Expr::col("p", "id"), Expr::col("wi", "project_id")),
-            ),
-            limit: Some(10),
-            ..Default::default()
-        }));
-
-        let ontology = Ontology::new().with_path_scopable_nodes(["Project", "WorkItem"]);
-        apply(&mut node, &ctx, &ontology).unwrap();
-
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
-        let where_clause = q.where_clause.as_ref().unwrap();
-        assert_eq!(
-            starts_with_paths_for_alias(where_clause, "p"),
-            vec!["1/".to_string(), "1/24/23/".to_string()],
-            "scoped alias keeps the broad authz filter and gains the tight prefix"
-        );
-        assert_eq!(
-            starts_with_paths_for_alias(where_clause, "wi"),
-            vec!["1/".to_string()],
-            "unscoped alias gets the broad authz set"
-        );
-    }
-
-    #[test]
-    fn scope_proof_below_role_floor_keeps_broad() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let mut proofs = std::collections::HashMap::new();
-        proofs.insert("v".to_string(), ScopeProof::literal("1/100/200/"));
-        let mut ctx =
-            SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/100/", 20)]).unwrap();
-        ctx.scope_proofs = proofs;
-
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("v", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("gl_vulnerability", "v"),
-            limit: Some(10),
-            ..Default::default()
-        }));
-        apply(&mut node, &ctx, &ontology).unwrap();
-
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
-        let where_sql = format!("{:?}", q.where_clause);
-        assert!(
-            where_sql.contains("Bool") && where_sql.contains("false"),
-            "a prefix below the entity role floor must keep the role-filtered (dead) broad filter: {where_sql}"
-        );
-    }
-
-    #[test]
-    fn scope_proof_dropped_on_non_path_scopable_alias() {
-        let mut proofs = std::collections::HashMap::new();
-        proofs.insert("g".to_string(), ScopeProof::literal("1/24/23/"));
-        let mut ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        ctx.scope_proofs = proofs;
-
-        let ontology = Ontology::new().with_nodes(["Global"]);
-
-        let mut node = Node::Query(Box::new(Query {
-            select: vec![SelectExpr {
-                expr: Expr::col("g", "id"),
-                alias: None,
-            }],
-            from: TableRef::scan("gl_global", "g"),
-            limit: Some(10),
-            ..Default::default()
-        }));
-
-        apply(&mut node, &ctx, &ontology).unwrap();
-
-        let Node::Query(q) = &node else {
-            unreachable!()
-        };
-        let where_clause = q.where_clause.as_ref().unwrap();
-        assert_eq!(
-            starts_with_paths_for_alias(where_clause, "g"),
-            vec!["1/".to_string()],
-            "non-path-scopable alias must drop the scope proof and keep broad authz only"
         );
     }
 
