@@ -1,0 +1,404 @@
+syntax = "proto3";
+package orbit.config.v1;
+
+import "buf/validate/validate.proto";
+
+// Schema for the Orbit server configuration. config/default.yaml declares a
+// deployment default for every field here, and the loader merges the overlay
+// and secret files over it before decoding.
+//
+// Not a wire format. These messages are only ever decoded from a merged
+// configuration document, so the field numbers carry no compatibility
+// guarantee.
+
+message Config {
+  string grpc_bind_address = 1 [(buf.validate.field).string.min_len = 1];
+  uint64 jwt_clock_skew_secs = 2;
+  optional string health_check_url = 3;
+  ProbeServer probe_server = 4;
+  Nats nats = 5;
+  ClickHouse datalake = 6;
+  ClickHouse graph = 7;
+  ClickHouseSetup clickhouse_setup = 8;
+  Engine engine = 9;
+  Gitlab gitlab = 10;
+  Schedule schedule = 11;
+  HealthCheck health_check = 12;
+  Metrics metrics = 13;
+  Tls tls = 14;
+  QuerySettings query = 15;
+  Grpc grpc = 16;
+  Schema schema = 17;
+  Analytics analytics = 18;
+  Billing billing = 19;
+  map<string, FeatureScope> features = 20;
+  ObjectStorage object_storage = 21;
+}
+
+message ProbeServer {
+  optional string bind_address = 1;
+}
+
+message Nats {
+  string url = 1 [(buf.validate.field).string.min_len = 1];
+  optional string username = 2;
+  optional string password = 3;
+  optional string tls_ca_cert_path = 4;
+  optional string tls_cert_path = 5;
+  optional string tls_key_path = 6;
+  uint64 connection_timeout_secs = 7;
+  uint64 request_timeout_secs = 8;
+  uint64 ack_wait_secs = 9;
+  optional uint32 max_deliver = 10;
+  uint64 subscription_buffer_size = 11;
+  optional string consumer_name = 12;
+  uint64 batch_size = 13;
+  bool auto_create_streams = 14;
+  uint64 stream_replicas = 15;
+  optional uint64 stream_max_age_secs = 16;
+  optional int64 stream_max_bytes = 17;
+  optional int64 stream_max_messages = 18;
+  uint64 fetch_expires_secs = 19;
+  uint64 consumer_inactive_threshold_secs = 20 [(buf.validate.field).uint64.gte = 60];
+  uint64 release_gc_idle_threshold_secs = 21 [(buf.validate.field).uint64.gte = 600];
+}
+
+message ClickHouse {
+  string url = 1 [(buf.validate.field).string.min_len = 1];
+  string database = 2 [(buf.validate.field).string.min_len = 1];
+  string username = 3 [(buf.validate.field).string.min_len = 1];
+  optional string password = 4;
+  bool replicated = 5;
+  map<string, string> session_settings = 6;
+  map<string, string> insert_settings = 7;
+  Profiling profiling = 8;
+}
+
+message Profiling {
+  bool enabled = 1;
+  bool explain = 2;
+  bool query_log = 3;
+  bool processors = 4;
+  bool instance_health = 5;
+}
+
+message Gitlab {
+  optional string base_url = 1;
+  optional string resolve_host = 2;
+  Jwt jwt = 3;
+}
+
+message Jwt {
+  optional string signing_key = 1;
+  optional string verifying_key = 2;
+}
+
+message Tls {
+  optional string cert_path = 1;
+  optional string key_path = 2;
+  ListenerTls internal = 3;
+}
+
+message ListenerTls {
+  bool enabled = 1;
+  optional string cert_path = 2;
+  optional string key_path = 3;
+}
+
+message ClickHouseSetup {
+  string admin_username = 1;
+  optional string admin_password = 2;
+  optional string writer_password = 3;
+  optional string reader_password = 4;
+  optional string siphon_reader_password = 5;
+}
+
+enum IndexerModule {
+  sdlc = 0;
+  code = 1;
+  namespace_deletion = 2;
+}
+
+message SubscriptionConfig {
+  optional string concurrency_group = 1;
+  optional uint32 max_attempts = 2;
+  optional uint64 retry_interval_secs = 3;
+  optional bool dead_letter_on_exhaustion = 4;
+  optional uint32 max_ack_pending = 5;
+}
+
+message DatalakeRetry {
+  uint64 halving_initial_block_size = 1;
+  uint64 halving_min_block_size = 2;
+}
+
+message EntityHandler {
+  optional uint64 datalake_batch_size = 1;
+  uint64 system_notes_resolve_lookup_batch_size = 2;
+  map<string, uint64> batch_size_overrides = 3;
+}
+
+message CodeIndexingPipeline {
+  uint64 max_file_size_bytes = 1;
+  uint64 max_files = 2;
+  uint64 max_total_bytes = 3;
+  uint64 max_repository_files = 4;
+  uint64 source_memory_budget_bytes = 5;
+  bool source_compress_spill = 6;
+  uint64 worker_threads = 7;
+  uint64 max_concurrent_languages = 8;
+  uint64 per_file_timeout_ms = 9;
+  uint64 per_file_parse_timeout_ms = 10;
+  uint64 per_file_walk_timeout_ms = 11;
+  uint64 per_file_ssa_timeout_ms = 12;
+  uint64 cross_file_resolve_timeout_ms = 13;
+  uint64 max_tree_depth = 14;
+  uint64 max_cross_file_names = 15;
+  uint64 max_manifest_bytes = 16;
+  uint64 max_file_edges = 17;
+  uint64 job_timeout_secs = 18;
+  uint64 fetch_concurrency = 19;
+  uint64 archive_storage_budget = 20;
+  uint64 archive_tenant_budget = 21;
+  uint64 archive_lease_ttl_secs = 22;
+  uint64 archive_lease_max_wait_secs = 23;
+  uint64 write_slice_rows = 24;
+  uint64 write_max_concurrent = 25;
+  uint64 small_repo_max_files = 26;
+  optional uint64 small_indexing_slots = 27;
+  optional uint64 big_indexing_slots = 28;
+}
+
+message CodeIndexingTaskHandler {
+  CodeIndexingPipeline pipeline = 1;
+}
+
+// `#[serde(rename_all = "kebab-case")]` on the Rust struct. Protobuf field names
+// cannot contain hyphens, so the YAML key is carried by json_name.
+message Handlers {
+  EntityHandler entity_handler = 1 [json_name = "entity-handler"];
+  CodeIndexingTaskHandler code_indexing_task = 2 [json_name = "code-indexing-task"];
+}
+
+message Engine {
+  optional uint64 max_concurrent_workers = 1;
+  map<string, uint64> concurrency_groups = 2;
+  map<string, SubscriptionConfig> topics = 3;
+  Handlers handlers = 4;
+  DatalakeRetry datalake_retry = 5;
+  repeated IndexerModule modules = 6;
+}
+
+// Each task in the Rust code is a struct with `#[serde(flatten)] schedule:
+// ScheduleConfiguration`, whose only field is `cron`. Inlining `cron` here
+// reproduces the YAML shape exactly, so flatten of a single-field struct costs
+// nothing.
+message GlobalDispatcher {
+  string cron = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message NamespaceDispatcher {
+  string cron = 1 [(buf.validate.field).string.min_len = 1];
+  uint64 sweep_interval_secs = 2;
+}
+
+message SiphonRouter {
+  string events_stream_name = 1;
+  uint64 batch_size = 2;
+}
+
+message CodeBackfillSweep {
+  string cron = 1 [(buf.validate.field).string.min_len = 1];
+  uint64 publish_window = 2;
+  uint64 stale_sweeps_per_tick = 3;
+}
+
+message TableCleanup {
+  string cron = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message NamespaceDeletionScheduler {
+  string cron = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message MigrationCompletion {
+  string cron = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message StaleEdgeReconciliation {
+  string cron = 1 [(buf.validate.field).string.min_len = 1];
+  uint64 lookback_secs = 2;
+}
+
+message ScheduledTasks {
+  GlobalDispatcher global = 1;
+  NamespaceDispatcher namespace = 2;
+  SiphonRouter siphon = 3;
+  CodeBackfillSweep code_backfill = 4 [json_name = "code-backfill"];
+  TableCleanup table_cleanup = 5 [json_name = "table-cleanup"];
+  NamespaceDeletionScheduler namespace_deletion = 6 [json_name = "namespace-deletion"];
+  MigrationCompletion migration_completion = 7 [json_name = "migration-completion"];
+  StaleEdgeReconciliation stale_edge_reconciliation = 8 [json_name = "stale-edge-reconciliation"];
+}
+
+message Schedule {
+  ScheduledTasks tasks = 1;
+}
+
+message NamespaceTarget {
+  string namespace = 1;
+  repeated string deployments = 2;
+  repeated string stateful_sets = 3 [json_name = "statefulSets"];
+}
+
+message HealthCheck {
+  string bind_address = 1;
+  repeated NamespaceTarget targets = 2;
+}
+
+message Grpc {
+  uint64 keepalive_interval_secs = 1;
+  uint64 keepalive_timeout_secs = 2;
+  uint64 tcp_keepalive_secs = 3;
+  uint32 connection_window_size = 4;
+  uint32 stream_window_size = 5;
+  uint64 concurrency_limit = 6;
+  uint64 max_connection_age_secs = 7;
+  uint64 max_connection_age_grace_secs = 8;
+  uint64 stream_timeout_secs = 9;
+  uint32 max_header_list_size_bytes = 10;
+  uint64 result_chunk_bytes = 11 [(buf.validate.field).uint64 = {gte: 65536, lte: 4194304}];
+  uint64 max_result_bytes = 12 [(buf.validate.field).uint64.gte = 1048576];
+}
+
+message QueryConfig {
+  optional uint64 max_execution_time = 1;
+  optional uint64 max_memory_usage = 2;
+  optional uint64 max_bytes_to_read = 3;
+  optional uint64 max_rows_to_read = 4;
+  optional uint64 max_rows_in_set = 5;
+  optional uint64 max_ast_elements = 6;
+  optional uint64 max_expanded_ast_elements = 7;
+  optional uint64 max_ast_depth = 8;
+  optional bool use_query_cache = 9;
+  optional uint32 query_cache_ttl = 10;
+}
+
+// The Rust type flattens a `HashMap<String, QueryConfig>` of per-query-type
+// overrides next to `default`. Protobuf has no catch-all, so the overrides move
+// under an explicit key. This is the one breaking YAML change in the file.
+message QuerySettings {
+  QueryConfig default = 1;
+  map<string, QueryConfig> overrides = 2;
+}
+
+message ExpandedLogs {
+  bool global_override = 1;
+  repeated uint64 root_namespace_ids = 2;
+}
+
+message Otel {
+  bool enabled = 1;
+  string endpoint = 2;
+}
+
+message Prometheus {
+  bool enabled = 1;
+  optional uint32 port = 2;
+}
+
+message Metrics {
+  optional string log_level = 1;
+  ExpandedLogs expanded_logs = 2;
+  Otel otel = 3;
+  Prometheus prometheus = 4;
+}
+
+message Schema {
+  uint32 max_retained_versions = 1 [(buf.validate.field).uint32.gte = 2];
+  uint64 version_poll_interval_secs = 2 [(buf.validate.field).uint64.gte = 1];
+  uint64 indexer_schema_wait_timeout_secs = 3 [(buf.validate.field).uint64.gte = 1];
+}
+
+enum DeploymentKind {
+  self_managed = 0;
+  com = 1;
+  dedicated = 2;
+}
+
+enum DeploymentEnvironment {
+  development = 0;
+  staging = 1;
+  production = 2;
+}
+
+message Deployment {
+  DeploymentKind type = 1;
+  DeploymentEnvironment environment = 2;
+}
+
+message Analytics {
+  bool enabled = 1;
+  string collector_url = 2;
+  Deployment deployment = 3;
+}
+
+enum BillingAuthMode {
+  oidc = 0;
+  cloud_connector = 1;
+}
+
+enum QuotaAuthMode {
+  admin_token = 0;
+  license_checksum = 1;
+}
+
+message Quota {
+  bool enabled = 1;
+  string customers_dot_url = 2;
+  QuotaAuthMode auth_mode = 3;
+  optional string api_user = 4;
+  optional string api_token = 5;
+  uint64 request_timeout_ms = 6;
+  uint64 fallback_cache_ttl_secs = 7;
+}
+
+message Billing {
+  bool enabled = 1;
+  string collector_url = 2;
+  BillingAuthMode auth_mode = 3;
+  Quota quota = 4;
+}
+
+message FeatureScope {
+  bool enabled = 1;
+  repeated int64 namespaces = 2;
+}
+
+enum ObjectStorageProvider {
+  s3 = 0;
+  gcs = 1;
+  local = 2;
+}
+
+enum ObjectStorageAuth {
+  identity = 0;
+  static = 1;
+}
+
+message ObjectStorage {
+  bool enabled = 1;
+  ObjectStorageProvider provider = 2;
+  string bucket = 3;
+  string prefix = 4;
+  ObjectStorageAuth auth = 5;
+  optional string region = 6;
+  optional string endpoint = 7;
+  bool path_style = 8;
+  bool allow_http = 9;
+  optional string ca_cert_path = 10;
+  optional string access_key_id = 11;
+  optional string secret_access_key = 12;
+  optional string session_token = 13;
+  optional string service_account_key = 14;
+}

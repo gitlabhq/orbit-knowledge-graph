@@ -302,6 +302,10 @@ description = "List benchmark repositories"
 run = "gitlab-xtasks benchmark list-groups --config code-indexing-benchmark.yaml"
 description = "List benchmark repo groups"
 
+[tasks."proto:config"]
+run = "cargo xtask proto-config"
+description = "Regenerate the config prost types and descriptor set"
+
 [tasks."proto:go"]
 run = "scripts/dev/proto-go.sh generate"
 description = "Generate Go protobuf/gRPC stubs for Workhorse integration"

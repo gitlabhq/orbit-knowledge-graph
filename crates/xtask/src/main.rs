@@ -7,6 +7,7 @@ mod integration_lanes;
 mod loadtest;
 mod metrics_catalog;
 mod migration_ledger;
+mod proto;
 mod query_docs;
 mod schema;
 mod synth;
@@ -29,6 +30,9 @@ enum Command {
         #[command(subcommand)]
         command: SynthCommand,
     },
+    /// Regenerate the prost types and descriptor set for the server
+    /// configuration schema.
+    ProtoConfig,
     /// Generate JSON Schema for the server configuration.
     Schema {
         /// Write schema to a file instead of stdout.
@@ -352,6 +356,7 @@ async fn main() -> Result<()> {
                 ddl::run_local(ontology)
             }
         },
+        Command::ProtoConfig => proto::run(),
         Command::Schema { output } => schema::run(output),
         Command::MigrationLedger { command } => match command {
             MigrationLedgerCommand::Bump {

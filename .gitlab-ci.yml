@@ -349,6 +349,17 @@ generate-config-schema:
       - config/schemas/config.schema.json
     expire_in: 24 hours
 
+generate-config-proto:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run proto:config
+    - git diff --exit-code crates/orbit-server-config/src/proto || (echo "crates/orbit-server-config/src/proto is out of date. Run 'mise proto:config' and commit." && exit 1)
+
 rust-toolchain-sync-check:
   stage: lint
   extends:
