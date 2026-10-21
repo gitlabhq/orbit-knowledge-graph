@@ -164,7 +164,7 @@ The endpoint has two tools. `list_commands` lists the GitLab Orbit commands with
 
 | Command | Description |
 |---------|-------------|
-| `query_graph` | Runs a query in the [Cypher query language](../queries/cypher.md). |
+| `query_graph` | Runs a query in the [query language](../queries/query-language.md). |
 | `get_graph_schema` | Returns the node types and relationship types, and the properties of the node types that you pass in `expand_nodes`. |
 | `get_response_format` | Returns the response JSON Schema of `query_graph` and its version. |
 
@@ -305,9 +305,9 @@ If the agent does not recover, ask it for fewer results.
 ## Related topics
 
 - [Connect your agent](_index.md)
-- [GitLab Orbit Local](../local/_index.md)
+- [Local graph](../local/_index.md)
 - [GitLab Orbit in GitLab Duo](duo.md)
 - [GitLab Orbit CLI](../cli.md)
 - [Queries](../queries/_index.md)
-- [Billing](../how-it-works.md#billing)
+- [Billing and credit usage](../billing.md)
 - [Troubleshooting](../troubleshooting.md)

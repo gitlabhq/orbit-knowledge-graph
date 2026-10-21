@@ -151,7 +151,7 @@ Local commands use the [local graph](local/_index.md) on your machine. They need
 | `version` | Print the version. | None |
 
 For all flags, run `glab orbit <command> --help`.
-To index, search, and run SQL on the local graph, see [GitLab Orbit Local](local/_index.md).
+To index, search, and run SQL on your machine, see [the local graph](local/_index.md).
 
 ## Query the remote graph
 
@@ -168,7 +168,7 @@ Then run `glab orbit` in a clone from that host, or run `glab config set --globa
 Without `glab`, the binary reads `GITLAB_TOKEN`, or uses `glab auth credential-helper`.
 For an instance other than GitLab.com, also set `GITLAB_URL=https://<host>`.
 
-To run a query, pass the text in the [Cypher query language](queries/cypher.md). This query returns five projects:
+To run a query, pass the text in the [GitLab Orbit query language](queries/query-language.md). This query returns five projects:
 
 ```shell
 glab orbit query "MATCH (p:Project) WHERE p.full_path STARTS WITH 'my-group/' RETURN p.full_path LIMIT 5"
@@ -235,7 +235,7 @@ Telemetry is on by default, and it is the only saved setting. To turn it off, ru
 
 - [`glab orbit` reference](https://docs.gitlab.com/cli/orbit/)
 - [Connect your agent](agents/_index.md)
-- [GitLab Orbit Local](local/_index.md)
-- [Cypher query language](queries/cypher.md)
-- [Billing](how-it-works.md#billing)
+- [Local graph](local/_index.md)
+- [Query language](queries/query-language.md)
+- [Billing and credit usage](billing.md)
 - [Troubleshooting](troubleshooting.md)
