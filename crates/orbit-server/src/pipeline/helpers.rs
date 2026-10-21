@@ -235,7 +235,7 @@ fn classify_execution_error(msg: &str) -> String {
              is not selective enough. Try: add more specific filters, use \
              node_ids for direct ID selection, or scope by project_id."
         }
-        Some(ClickHouseLimit::TypeMismatch) => {
+        Some(ClickHouseLimit::TypeMismatch | ClickHouseLimit::BadQueryParameter) => {
             "Query has a type mismatch in a filter or aggregation. Check \
              that filter values match the column type (e.g. use integers \
              for ID fields, strings for text fields, DateTime format for \
