@@ -1,7 +1,3 @@
-//! Reads another project's code from the graph: `symbol:` returns indexed definitions with their
-//! source, `file:` returns a file's content, optionally a line range. Content comes from Gitaly
-//! through the graph, so no checkout is needed.
-
 use std::fmt::Write as _;
 
 use serde_json::{Value, json};
@@ -52,8 +48,6 @@ impl std::fmt::Display for Code {
     }
 }
 
-/// Splits `group/project/dir/file` into its project and file path by asking GitLab which prefix is a
-/// project, shortest first. This is the form `orbit grep` prints for sibling projects' code.
 pub(crate) async fn split_project_path(
     client: &OrbitClient,
     path: &str,

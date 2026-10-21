@@ -47,8 +47,6 @@ impl Workspace {
             .join(format!("{}.duckdb", git.commit_sha))
     }
 
-    /// Where a project keeps state between runs, such as incremental
-    /// snapshots: `~/.gitlab/orbit/var/<project_id>/`.
     pub fn var_dir(&self, project_id: i64) -> PathBuf {
         self.root.join("var").join(project_id.to_string())
     }
@@ -140,7 +138,6 @@ pub struct IndexedRepo {
     pub client: GraphReader,
 }
 
-/// The checkout's graph when its commit is already indexed; never starts indexing.
 pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Option<IndexedRepo> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
     let git = git_info(&git_toplevel(&repo_path).ok()?).ok()?;
@@ -176,8 +173,6 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
 
 /// The repo-relative `files` whose working-tree contents differ from the indexed commit:
 /// modified, added, renamed, or untracked. The graph describes the commit, so its definitions
-/// and line spans do not fit these files. Empty when git cannot answer. Only `files` are checked,
-/// so the cost follows the output rather than the size of the repository.
 pub fn edited_since_index(repo: &Path, files: &[&str]) -> std::collections::BTreeSet<String> {
     let mut edited = std::collections::BTreeSet::new();
     if files.is_empty() {
@@ -364,8 +359,6 @@ pub fn git_toplevel(path: &Path) -> Result<PathBuf> {
     dunce::canonicalize(&top).with_context(|| format!("failed to canonicalize {top}"))
 }
 
-/// Paths whose content differs between two trees. Renames count as a
-/// removal plus a change.
 #[derive(Default)]
 pub struct GitChanges {
     pub changed: Vec<String>,
@@ -373,7 +366,6 @@ pub struct GitChanges {
 }
 
 impl GitChanges {
-    /// Every path named, changed or removed.
     pub fn paths(&self) -> impl Iterator<Item = &String> {
         self.changed.iter().chain(&self.removed)
     }
@@ -388,8 +380,6 @@ impl GitChanges {
     }
 }
 
-/// Committed changes since `base_sha`, plus whatever the working tree adds
-/// on top of HEAD.
 pub fn git_changes(repo_path: &Path, base_sha: &str) -> Result<GitChanges> {
     let committed = git_stdout(
         repo_path,
@@ -401,8 +391,6 @@ pub fn git_changes(repo_path: &Path, base_sha: &str) -> Result<GitChanges> {
     Ok(changes.settled())
 }
 
-/// Uncommitted and untracked changes: what an index of the working tree
-/// holds beyond HEAD.
 pub fn git_working_changes(repo_path: &Path) -> Result<GitChanges> {
     let mut changes = GitChanges::default();
     parse_porcelain(&git_status(repo_path)?, &mut changes);
@@ -416,7 +404,6 @@ fn git_status(repo_path: &Path) -> Result<String> {
     )
 }
 
-/// `git diff --name-status -z`: `M\0path\0`, or `R100\0old\0new\0`.
 fn parse_name_status(output: &str, changes: &mut GitChanges) {
     let mut fields = output.split('\0').filter(|f| !f.is_empty());
     while let Some(status) = fields.next() {
@@ -434,7 +421,6 @@ fn parse_name_status(output: &str, changes: &mut GitChanges) {
     }
 }
 
-/// `git status --porcelain -z`: `XY path\0`, or `R  new\0old\0`.
 fn parse_porcelain(output: &str, changes: &mut GitChanges) {
     let mut fields = output.split('\0').filter(|f| !f.is_empty());
     while let Some(entry) = fields.next() {

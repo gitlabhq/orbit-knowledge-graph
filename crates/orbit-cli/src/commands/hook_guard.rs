@@ -102,7 +102,6 @@ fn respond(kind: Kind, call: &Value, gitlab: bool) -> Option<Value> {
     should_nudge(call).then(|| nudge(spec::search_nudge_text()))
 }
 
-/// Whether a Bash call runs a glab command that Orbit's GitLab search or context answers.
 fn calls_glab(call: &Value) -> bool {
     let tool_input = call.get("tool_input").unwrap_or(call);
     let command = tool_input

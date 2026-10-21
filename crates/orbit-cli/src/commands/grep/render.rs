@@ -11,7 +11,6 @@ use super::rank::{is_code, is_test, names, ranked};
 use super::scan::Hit;
 use super::term::{Term, matcher};
 
-/// Graph context rides on rg's context-line form (`N-`), marked so it reads as a label.
 const NOTE: &str = "» ";
 /// A query that names a definition gets that definition's source first, so `head` keeps it.
 const LOOKUP_MAX_DEFINITIONS: usize = 3;
@@ -19,8 +18,6 @@ const LOOKUP_LINES: usize = 80;
 const EDITED_MARK: &str = " (edited since index)";
 const FILE_INDEX_MIN: usize = 20;
 const FILE_INDEX_DIRECTORIES: usize = 30;
-/// Marks code matches that no indexed definition encloses, such as Rust `#[cfg(test)]`
-/// modules, so they do not read as part of the definition above.
 const OUTSIDE: &str = "outside indexed definitions";
 
 #[derive(PartialEq)]
@@ -131,11 +128,6 @@ pub(super) fn render(
     if rows.len() > FILE_INDEX_MIN {
         out.push_str(&file_index(&rows, matched));
     }
-    // rg's heading layout: each file's path once, then `line:text` for matches, `line-text` for
-    // -A/-B/-C context, and `line-» Kind name:start-end ←callers →callees` before each enclosing
-    // definition, with `--` between separate groups and a blank line between files. Import lines
-    // get `line-» imports ...`, and code outside any indexed definition gets an `outside` line.
-    // Lines print in full: `head` truncates, and `-M` replaces lines wider than its limit.
     for (index, (file, list)) in rows.iter().enumerate() {
         if index > 0 {
             out.push('\n');

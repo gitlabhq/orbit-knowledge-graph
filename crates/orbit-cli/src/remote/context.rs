@@ -57,10 +57,6 @@ static GRAPH_KEY: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^(query_type|nodes|edges|pagination)\b").expect("valid pattern")
 });
 
-/// Drops what the context endpoint returns that agents do not use: the version line and the
-/// neighbor graph after each entity, whose links the entity's own fields already list. Job log
-/// lines lose runner timestamps and the runner's epilogue. `failed_jobs` blocks go too when the
-/// caller already printed the same pipeline's failures.
 pub(crate) fn tidy(text: &str, drop_failed_jobs: bool) -> String {
     let mut out = String::with_capacity(text.len());
     let (mut in_graph, mut in_failed_jobs) = (false, false);
@@ -107,8 +103,6 @@ const COMPACT_DESCRIPTION_LINES: usize = 30;
 const COMPACT_NOTES: usize = 15;
 const COMPACT_NOTE_LINES: usize = 10;
 
-/// Shortens a tidied entity for showing inline: the start of each description, and the first
-/// notes of each discussion, each cut to its first lines. Returns whether anything was cut.
 pub(crate) fn compact(text: &str) -> (String, bool) {
     #[derive(PartialEq)]
     enum Block {

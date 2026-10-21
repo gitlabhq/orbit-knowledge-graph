@@ -182,8 +182,6 @@ fn snapshot_file(state_dir: &std::path::Path, family: SupportLang) -> PathBuf {
     state_dir.join(format!("graph.{}.bin", family.family()))
 }
 
-/// Dates the snapshot to when its sources were read, so a file saved while
-/// they were indexed still reads as edited.
 fn save_snapshot(
     env: &Env,
     state: &State,

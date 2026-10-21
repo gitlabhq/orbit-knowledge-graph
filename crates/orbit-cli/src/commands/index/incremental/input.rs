@@ -76,9 +76,6 @@ pub(super) fn split(
     families
 }
 
-/// The manifests a family's rules read for module roots and import aliases, such as `go.mod`
-/// or `tsconfig.json`. Unparsed files otherwise go only to the owner family, so another family's
-/// manifests would never reach it.
 fn manifests(family: SupportLang) -> Vec<String> {
     code_graph_incremental::Env::for_lang(family)
         .map(|env| {

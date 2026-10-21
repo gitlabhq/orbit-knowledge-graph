@@ -3,7 +3,6 @@ use ontology::Ontology;
 
 use super::Output;
 
-/// Qualifier kinds resolved against the ontology: definition kinds narrow matches, `File` and
 /// `Directory` list where matches are, and hosted nodes such as `MergeRequest` are reported.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Kinds {

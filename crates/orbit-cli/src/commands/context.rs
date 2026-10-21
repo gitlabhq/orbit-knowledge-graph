@@ -266,8 +266,6 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
     Ok(())
 }
 
-/// Appends the code that GitLab text points at, from the local graph, so one `context` call on an
-/// issue, MR, branch, or job also returns the definitions it names.
 fn print_anchored(repo: Option<std::path::PathBuf>, db: Option<std::path::PathBuf>, text: &str) {
     let Some(workspace::IndexedRepo { git, client }) = workspace::open_indexed_if_present(repo, db)
     else {
@@ -308,7 +306,6 @@ enum Qualified {
     Repo(String),
     Target(String),
     Sdlc(crate::remote::sdlc::Target),
-    /// Code in another project when `repo:` names one; the original value otherwise.
     Code(crate::remote::code::Code, String),
 }
 
@@ -341,7 +338,6 @@ fn qualify(target: &str) -> Option<Qualified> {
     Some(qualified)
 }
 
-/// Whether a target names a file: it has a directory or an extension and is not a GitLab reference.
 fn looks_like_path(target: &str) -> bool {
     let path = strip_range(target);
     !path.contains(['!', '#', '[', ' '])
@@ -370,8 +366,6 @@ fn exists_locally(dir: &std::path::Path, target: &str) -> bool {
         || crate::workspace::git_toplevel(dir).is_ok_and(|root| root.join(path).exists())
 }
 
-/// Bare `pipeline`, `ci`, or `pipeline:latest`: the current branch's MR and CI, which is what agents
-/// mean by them.
 fn is_current_ci(target: &str) -> bool {
     matches!(
         target.to_ascii_lowercase().as_str(),
@@ -948,10 +942,6 @@ type Caller = (String, String, i64);
 const CALLERS_SHOWN: usize = 5;
 const CALLER_LINES: usize = 12;
 
-/// One line per definition in a line range naming the indexed calls into it from outside the
-/// range, so reading code also shows who uses it. A range inside one definition reports that
-/// definition. Test callers are counted rather than named. The graph misses calls it cannot
-/// resolve, such as through interfaces, so a definition without indexed callers gets no line.
 fn callers(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
@@ -1058,8 +1048,6 @@ ORDER BY d.start_line, d.id, test, caller_path, caller_line"
 
 const TESTS_SHOWN: usize = 3;
 
-/// Test file names that conventionally cover `path`: `x_test.go`, `x_spec.rb`, `test_x.py`,
-/// `x.test.ts`, `XTest.java`, and the like.
 fn test_names(path: &str) -> Vec<String> {
     let name = path.rsplit('/').next().unwrap_or(path);
     let Some((stem, ext)) = name.rsplit_once('.') else {
@@ -1090,8 +1078,6 @@ fn test_names(path: &str) -> Vec<String> {
     names
 }
 
-/// Directories two paths share, so `spec/lib/a/x_spec.rb` ranks above `spec/b/x_spec.rb` for
-/// `lib/a/x.rb`.
 fn shared_dirs(a: &str, b: &str) -> usize {
     let dirs = |path: &str| -> BTreeSet<String> {
         let mut parts: Vec<&str> = path.split('/').collect();
@@ -1101,8 +1087,6 @@ fn shared_dirs(a: &str, b: &str) -> usize {
     dirs(a).intersection(&dirs(b)).count()
 }
 
-/// Indexed test files for `path`: files named after it, then those that call its definitions,
-/// nearest first.
 fn tests_for(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,

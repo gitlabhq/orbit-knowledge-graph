@@ -1,7 +1,3 @@
-//! Code that GitLab text points at. An issue, MR, job log, or review thread names files, lines, and
-//! symbols; this finds them in the local graph so `context` can return the code with the GitLab
-//! context in one call.
-
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -13,9 +9,7 @@ use crate::workspace::GitInfo;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Anchors {
-    /// Repo-relative path and line, from stack traces, test output, and review anchors.
     pub(crate) lines: Vec<(String, i64)>,
-    /// Symbol names, from code spans and identifier-shaped words.
     pub(crate) names: Vec<String>,
 }
 
@@ -26,7 +20,6 @@ fn line_patterns() -> [Regex; 2] {
     ]
 }
 
-/// Paths in GitLab text may be absolute, `./`-prefixed, or a bare file name; keep those that exist.
 fn local_path(root: &Path, raw: &str, files: &BTreeSet<String>) -> Option<String> {
     let trimmed = raw
         .trim_start_matches("./")
@@ -108,7 +101,6 @@ struct Found {
     kind: String,
     start: i64,
     end: i64,
-    /// The cited line, for anchors that came from a `file:line`.
     line: Option<i64>,
 }
 
@@ -148,8 +140,6 @@ FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2 AND fqn NOT LIKE '%
         .collect())
 }
 
-/// The definition enclosing each cited line, then definitions named in code spans that are unique
-/// enough to trust: defined in exactly one place.
 fn resolve(client: &GraphReader, git: &GitInfo, anchors: &Anchors) -> Result<Vec<Found>> {
     let mut found: Vec<Found> = Vec::new();
     for (path, line) in &anchors.lines {
@@ -196,8 +186,6 @@ fn listed(label: &str, names: Vec<String>) -> Option<String> {
     (!names.is_empty()).then(|| format!("  {label}: {}", names.join(", ")))
 }
 
-/// A compact view of the code GitLab text points at: per definition its header, signature, the
-/// lines around a cited line, and its callers and callees by name. The agent reads the one it needs.
 pub(crate) fn render(client: &GraphReader, git: &GitInfo, anchors: &Anchors) -> Result<String> {
     let mut out = String::new();
     for def in resolve(client, git, anchors)? {

@@ -488,21 +488,16 @@ static FAILURE: LazyLock<regex::Regex> = LazyLock::new(|| {
     .expect("valid pattern")
 });
 
-/// A compiler, linter, or test diagnostic that names a file and line, such as
-/// `client.go:127:10: string has 3 occurrences (goconst)`.
 static DIAGNOSTIC: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(?:^|[\s(])[\w./@+-]*\w\.[A-Za-z][A-Za-z0-9]{0,7}:\d+(?::\d+)?\b")
         .expect("valid pattern")
 });
 
-/// Diagnostics in dependencies and runtimes, which stack traces list below the failing line.
 static DEPENDENCY: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"node_modules/|node:internal|site-packages/|/go/pkg/mod/|/usr/lib/")
         .expect("valid pattern")
 });
 
-/// What the runner prints after the job's script: artifact and cache uploads, cleanup, and the
-/// exit status.
 pub(crate) static EPILOGUE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(
         r"^(Uploading artifacts|Cleaning up project directory|Saving cache|Creating cache|Uploading cache|Not uploading cache|ERROR: Job failed|WARNING: .*artifact|\$ exit \d+|\S+: found \d+ matching artifact files and directories)",
@@ -510,7 +505,6 @@ pub(crate) static EPILOGUE: LazyLock<regex::Regex> = LazyLock::new(|| {
     .expect("valid pattern")
 });
 
-/// Bracketed worker, browser, and time prefixes that make repeated log lines look distinct.
 static LINE_PREFIX: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^(\s*\[[^\]]*\])*\s*").expect("valid pattern"));
 
@@ -529,9 +523,6 @@ fn clip(line: &str) -> String {
     }
 }
 
-/// The lines around each failure a job log reports, then the last lines of the job's script and
-/// the runner's exit status. Test runners print the failing test far above the end of the log,
-/// so the tail alone rarely names it.
 fn failure_excerpt(lines: &[String]) -> Vec<String> {
     let end = lines.len()
         - lines

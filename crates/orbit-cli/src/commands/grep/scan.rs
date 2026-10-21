@@ -16,7 +16,6 @@ pub(super) struct Hit {
     pub(super) line: usize,
     pub(super) text: String,
     pub(super) def: Option<Def>,
-    /// Symbols an import on this line brings in, when no definition encloses it.
     pub(super) imports: Vec<String>,
     /// A `-A`/`-B`/`-C` line around a match rather than a match.
     pub(super) context: bool,
@@ -60,8 +59,6 @@ impl Sink for Collect<'_> {
     }
 }
 
-/// Reads in flight, as `git grep` keeps by default. File reads wait on the disk rather than the
-/// CPU, so one thread per CPU leaves a one-CPU container reading files one at a time.
 const READERS: usize = 8;
 
 pub(super) fn scan(

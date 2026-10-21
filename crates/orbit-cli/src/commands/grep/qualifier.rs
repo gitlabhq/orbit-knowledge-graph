@@ -9,7 +9,6 @@ use super::Options;
 #[folder = "$CONFIG_DIR/grep"]
 struct GrepAssets;
 
-/// One search in a query: a kind qualifier such as `mr:` and the words after it, up to the next.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Section {
     pub(super) kinds: Vec<String>,
@@ -56,9 +55,6 @@ fn snake(name: &str) -> String {
     out
 }
 
-/// The kind a qualifier name selects: a node grep searches, one of its aliases, or a definition
-/// family such as `method`, each also in the plural. Other nodes stay literal, so YAML keys such
-/// as `stage:` still search as text.
 fn kind_for(name: &str) -> Option<String> {
     let lower = name.to_ascii_lowercase();
     [
@@ -172,7 +168,6 @@ pub(super) fn parse(query: &str) -> Option<Parsed> {
     Some(parsed)
 }
 
-/// Whether an argument is a qualifier such as `def:` or `repo:g/p` rather than a path.
 fn is_qualifier(word: &str) -> bool {
     word.split_once(':')
         .is_some_and(|(name, value)| match name.to_ascii_lowercase().as_str() {
@@ -181,8 +176,6 @@ fn is_qualifier(word: &str) -> bool {
         })
 }
 
-/// Agents often write `orbit grep 'words' def:`, with the qualifier outside the quotes. Such
-/// arguments join the query unless a path by that name exists.
 fn absorb_trailing(query: Option<String>, paths: &mut Vec<String>) -> Option<String> {
     let (qualifiers, rest): (Vec<String>, Vec<String>) = std::mem::take(paths)
         .into_iter()
@@ -196,8 +189,6 @@ fn absorb_trailing(query: Option<String>, paths: &mut Vec<String>) -> Option<Str
     Some(words.join(" "))
 }
 
-/// Splits the query into its searches, moving file filters and GitLab targets into `options`
-/// and `paths`, which every search shares.
 pub(super) fn apply(
     query: Option<String>,
     options: &mut Options,

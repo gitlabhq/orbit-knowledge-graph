@@ -17,7 +17,6 @@ pub(super) struct Def {
     pub(super) kind: String,
 }
 
-/// Import symbols by `(file, line)`, each as `(name, label)`.
 type ImportsByLine = HashMap<(String, usize), Vec<(String, String)>>;
 
 const DEF_FILES_PER_QUERY: usize = 500;
@@ -140,8 +139,6 @@ WHERE {project} = ?1 AND {commit} = ?2 AND {fqn} NOT LIKE '%@%' AND {file} IN ({
     Ok(())
 }
 
-/// Each import line's symbols as `(name, label)`, the label being `name (path)` with
-/// `→ file:line` when the graph resolves the import to a local definition.
 fn imports_by_line(client: &DuckDbClient, git: &GitInfo, files: &[&str]) -> Result<ImportsByLine> {
     let mut by_line = ImportsByLine::new();
     for chunk in files.chunks(DEF_FILES_PER_QUERY) {

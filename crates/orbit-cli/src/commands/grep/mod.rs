@@ -20,7 +20,6 @@ use crate::remote::grep::{Outcome, scope_for};
 use local::LocalBackend;
 
 /// What a search prints, following rg: matching lines, `-l` file names, `-c` counts, or
-/// nothing but the exit status with `-q`; `file:` and `dir:` list where
 /// the matches are with their definitions.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Output {
@@ -407,11 +406,8 @@ fn local(
 
 const NOTE: &str = "» ";
 
-/// Lines per file shown when a multi-word query falls back to files with its words. Each line
-/// may hold one word, so files can match hundreds of lines where rg would match none.
 const FALLBACK_LINES: usize = 8;
 
-/// Each file's lines with the most query words, up to `FALLBACK_LINES`, in line order.
 fn most_words(hits: Vec<scan::Hit>, words: &[term::Term]) -> Vec<scan::Hit> {
     let mut by_file: std::collections::BTreeMap<String, Vec<(usize, scan::Hit)>> =
         Default::default();
@@ -439,14 +435,10 @@ fn most_words(hits: Vec<scan::Hit>, words: &[term::Term]) -> Vec<scan::Hit> {
 static OR_WORD: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new(r"\s+OR\s+").expect("valid pattern"));
 
-/// `a OR b` as `a|b`: agents write OR the way search engines take it, and a literal `OR` matches
-/// every line with the word.
 fn or_word(query: &str) -> String {
     OR_WORD.replace_all(query, "|").into_owned()
 }
 
-/// The parent directories of a scope, deduplicated, or the whole repository (an empty scope)
-/// once every path is at the top. None after the whole repository.
 fn parents(scope: &[String]) -> Option<Vec<String>> {
     if scope.is_empty() {
         return None;
@@ -476,10 +468,6 @@ fn parents(scope: &[String]) -> Option<Vec<String>> {
 }
 const PATH_CANDIDATES: usize = 3;
 
-/// Scope paths that do not exist are replaced by tracked directories or files with the same last
-/// segment, so a guessed prefix such as `pkg/kubectl/describe` still searches
-/// `staging/src/k8s.io/kubectl/pkg/describe`. Candidates sharing more of the guessed segments come
-/// first, then non-test paths, then shorter ones. Globs and paths with no candidate stay as written.
 fn resolve_missing(root: &Path, scope: Vec<String>, notes: &mut Vec<String>) -> Vec<String> {
     let root_text = format!("{}/", root.to_string_lossy().trim_end_matches('/'));
     let scope: Vec<String> = scope

@@ -18,8 +18,6 @@ pub(crate) const SCOPES: &[(&str, &str)] = &[
     ("Branch", "branches"),
 ];
 const BRANCHES: &str = "branches";
-/// Scopes a search without a qualifier asks for; `user:`, `project:`, `group:`, and `milestone:`
-/// name the others.
 const DEFAULT_SCOPES: &[&str] = &["work_items", "merge_requests", "blobs", "commits", "notes"];
 
 pub(crate) fn scope_for(kind: &str) -> Option<&'static str> {
@@ -321,16 +319,10 @@ pub(crate) fn first_line(message: &str) -> String {
     message.lines().next().unwrap_or_default().to_string()
 }
 
-/// The group whose projects an `origin` search covers: the project's top-level group, so sibling
-/// projects' merge requests, issues, and code are found too.
 fn top_level_group(project: &str) -> &str {
     project.split('/').next().unwrap_or(project)
 }
 
-/// Renders results; `origin` is the checkout's project, whose code the local search already covers
-/// and whose references are written short.
-/// The one merge request or issue a search clearly points at, whose context is shown inline so
-/// reading it does not take another call.
 #[derive(Debug, PartialEq, Eq)]
 struct Winner {
     token: String,
@@ -344,7 +336,6 @@ fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// How many of `terms` start a word of `title`.
 fn title_score(title: &str, terms: &[String]) -> usize {
     let words = words(title);
     terms
@@ -373,8 +364,6 @@ fn unix_now() -> u64 {
         .map_or(0, |elapsed| elapsed.as_secs())
 }
 
-/// Whether a search inlined `token` within `INLINE_MEMORY` of `now`, from lines of
-/// `<unix seconds>\t<token>`.
 fn inlined_recently(record: &str, token: &str, now: u64) -> bool {
     record.lines().any(|line| {
         line.split_once('\t').is_some_and(|(at, shown)| {
@@ -580,18 +569,13 @@ fn render(
 
 struct Row {
     order: usize,
-    /// Query terms in the title.
     score: usize,
-    /// The title has every word of one multi-word alternative.
     full: bool,
     text: String,
     token: Option<String>,
     readable: Option<String>,
 }
 
-/// A merge request or issue whose title has every word of an alternative and more query terms
-/// than any other merge request or issue. A search that finds only one is clear too, when it asked
-/// for merge requests or issues or the title shares two query terms.
 fn winner(rows: &[Row], scoped: bool) -> Option<Winner> {
     let candidates = rows.iter().filter(|row| row.token.is_some());
     let best = candidates.clone().max_by_key(|row| row.score)?;
@@ -607,7 +591,6 @@ fn winner(rows: &[Row], scoped: bool) -> Option<Winner> {
     })
 }
 
-/// The context endpoint's reference for a merge request or issue result.
 fn entity_token(entry: &Entry) -> Option<String> {
     let sigil = match entry.scope.as_str() {
         "merge_requests" => '!',

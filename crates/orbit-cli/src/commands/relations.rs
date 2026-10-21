@@ -326,8 +326,6 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
 const FIELD_KINDS: &[&str] = &["Field", "Property", "Attribute"];
 const FOLDED_FIELD_NAMES: usize = 4;
 
-/// Outgoing edges to fields of one owner, one line per owner: reading a struct's fields
-/// otherwise lists each field as a call.
 fn fold_fields<'a>(rows: &[&'a Row]) -> (Vec<&'a Row>, Vec<String>) {
     let mut owners: Vec<(String, Vec<&'a Row>)> = Vec::new();
     let mut kept = Vec::new();

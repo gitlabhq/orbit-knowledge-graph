@@ -313,7 +313,6 @@ struct CredentialHelperToken {
     token: String,
 }
 
-/// Hosts that never leave the machine or a private network, where plain http is expected.
 fn is_local_host(host: &str) -> bool {
     let host = host.trim_end_matches('.');
     host == "localhost"

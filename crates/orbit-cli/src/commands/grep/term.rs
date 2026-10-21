@@ -67,7 +67,6 @@ impl Term {
         }
     }
 
-    /// Whether the term occurs anywhere in `name`, as a match on a line would.
     pub(super) fn mentions(&self, name: &str) -> bool {
         match &self.regex {
             Some((line, _)) => line.is_match(name),
