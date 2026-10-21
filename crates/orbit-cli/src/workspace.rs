@@ -367,14 +367,13 @@ impl GitChanges {
     }
 }
 
-pub fn git_changes(repo_path: &Path, base_sha: &str) -> Result<GitChanges> {
+pub fn git_committed_changes(repo_path: &Path, base_sha: &str) -> Result<GitChanges> {
     let committed = git_stdout(
         repo_path,
         &["diff", "--name-status", "-z", base_sha, "HEAD"],
     )?;
     let mut changes = GitChanges::default();
     parse_name_status(&committed, &mut changes);
-    parse_porcelain(&git_status(repo_path)?, &mut changes);
     Ok(changes.settled())
 }
 

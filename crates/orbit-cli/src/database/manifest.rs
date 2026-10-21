@@ -22,6 +22,8 @@ pub enum RepoStatus {
 pub struct IncrementalState {
     pub commit_sha: String,
     pub dirty_paths: Vec<String>,
+    #[serde(default)]
+    pub dirty_removed: Vec<String>,
     pub families: Vec<String>,
     pub owner: Option<String>,
 }

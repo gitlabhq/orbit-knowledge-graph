@@ -49,17 +49,7 @@ impl Project<'_> {
 
     pub(super) fn index_changed(&self) -> Result<Vec<FamilyOutput>> {
         let saved = self.load_state()?;
-        let mut changes = workspace::git_changes(&self.git.repo_path, &saved.commit_sha)?;
-        for path in &saved.dirty_paths {
-            match self.git.repo_path.join(path).is_file() {
-                true => changes.changed.push(path.clone()),
-                false => changes.removed.push(path.clone()),
-            }
-        }
-        let changes = changes.settled();
         let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
-        let changed = input::paths(&self.git.repo_path, changes.changed)?;
-        let mut changed = input::split(&changed, owner);
         let families = saved
             .families
             .iter()
@@ -71,6 +61,9 @@ impl Project<'_> {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        let changes = self.changes(&saved, owner, &families)?;
+        let changed = input::paths(&self.git.repo_path, changes.changed)?;
+        let mut changed = input::split(&changed, owner);
         let mut removed = input::split_removed(changes.removed, owner, &families);
         let mut work = BTreeMap::new();
         for family in families {
@@ -88,6 +81,49 @@ impl Project<'_> {
             work.insert(family.family(), (family, Work::Index(paths)));
         }
         self.run(work.into_values(), owner)
+    }
+
+    fn changes(
+        &self,
+        saved: &manifest::IncrementalState,
+        owner: Option<SupportLang>,
+        families: &[SupportLang],
+    ) -> Result<workspace::GitChanges> {
+        let repo = &self.git.repo_path;
+        let mut changes = workspace::git_committed_changes(repo, &saved.commit_sha)?;
+        let working = workspace::git_working_changes(repo)?;
+        for path in working.paths().chain(&saved.dirty_paths) {
+            match repo.join(path).is_file() {
+                true if self.edited_since_read(path, owner, families) => {
+                    changes.changed.push(path.clone())
+                }
+                true => {}
+                false if !saved.dirty_removed.contains(path) => changes.removed.push(path.clone()),
+                false => {}
+            }
+        }
+        Ok(changes.settled())
+    }
+
+    fn edited_since_read(
+        &self,
+        path: &str,
+        owner: Option<SupportLang>,
+        families: &[SupportLang],
+    ) -> bool {
+        let modified = |path: &std::path::Path| {
+            std::fs::metadata(path)
+                .and_then(|meta| meta.modified())
+                .ok()
+        };
+        let Some(edited) = modified(&self.git.repo_path.join(path)) else {
+            return true;
+        };
+        let readers = input::readers(path, owner, families);
+        readers.is_empty()
+            || readers.iter().any(|family| {
+                modified(&self.snapshot_path(*family)).is_none_or(|read| edited >= read)
+            })
     }
 
     fn run(
@@ -197,6 +233,7 @@ impl Project<'_> {
             &manifest::IncrementalState {
                 commit_sha: self.git.commit_sha.clone(),
                 dirty_paths: dirty.paths().cloned().collect(),
+                dirty_removed: dirty.removed,
                 families: families.to_vec(),
                 owner: owner.map(|lang| lang.family().to_string()),
             },

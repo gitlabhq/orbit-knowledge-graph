@@ -93,6 +93,26 @@ fn file_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
+pub(super) fn readers(
+    path: &str,
+    owner: Option<SupportLang>,
+    families: &[SupportLang],
+) -> Vec<SupportLang> {
+    if let Some(language) = parsed_language(path) {
+        return vec![language.family_members()[0]];
+    }
+    families
+        .iter()
+        .copied()
+        .filter(|family| {
+            Some(*family) == owner
+                || manifests(*family)
+                    .iter()
+                    .any(|name| file_name(path) == name)
+        })
+        .collect()
+}
+
 pub(super) fn split_removed(
     paths: Vec<String>,
     owner: Option<SupportLang>,
