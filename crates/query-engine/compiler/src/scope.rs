@@ -62,7 +62,7 @@ fn relationship_proof(
 use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
-use crate::ast::{Expr, Function, Op, Query, SelectExpr, SqlType, TableRef};
+use crate::ast::{Expr, Function, Query, SelectExpr, SqlType, TableRef};
 use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
 
 const LOOKUP_ALIAS: &str = "_scope";
@@ -72,7 +72,6 @@ const MAX_LOOKUPS_PER_ALIAS: usize = 8;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScopeProof {
     sources: Vec<ScopeSource>,
-    depth: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,52 +90,22 @@ impl ScopeProof {
     }
 
     fn from_sources(sources: Vec<ScopeSource>) -> Self {
-        Self {
-            sources,
-            depth: None,
-        }
-    }
-
-    pub fn is_single_source(&self) -> bool {
-        self.sources.len() == 1
-    }
-
-    #[must_use]
-    pub fn with_depth(mut self, min: u32, max: u32) -> Self {
-        self.depth = Some((min, max));
-        self
+        Self { sources }
     }
 }
 
 pub fn scope_predicate(proof: &ScopeProof, alias: &str) -> Expr {
     let values: Vec<Expr> = proof.sources.iter().map(scope_value_expr).collect();
     let matches = values.iter().map(|path| {
-        let column = Expr::col(alias, TRAVERSAL_PATH_COLUMN);
-        Some(match proof.depth {
-            Some((0, 0)) => Expr::eq(column, path.clone()),
-            Some((min, max)) => Expr::and(
-                Expr::func(Function::StartsWith, vec![column.clone(), path.clone()]),
-                depth_between(column, path, min, max),
-            ),
-            None => Expr::func(Function::StartsWith, vec![column, path.clone()]),
-        })
+        Some(Expr::func(
+            Function::StartsWith,
+            vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path.clone()],
+        ))
     });
     let unresolved = values
         .iter()
         .map(|path| Some(Expr::eq(path.clone(), Expr::string(UNRESOLVED_PATH))));
     Expr::or_all(matches.chain(unresolved)).expect("scope proof has at least one source")
-}
-
-fn depth_between(column: Expr, path: &Expr, min: u32, max: u32) -> Expr {
-    let segments =
-        |expr: Expr| Expr::func(Function::CountSubstrings, vec![expr, Expr::string("/")]);
-    let depth = segments(column);
-    let base = segments(path.clone());
-    let bound = |hops: u32| Expr::binary(Op::Add, base.clone(), Expr::int(i64::from(hops)));
-    Expr::and(
-        Expr::binary(Op::Ge, depth.clone(), bound(min)),
-        Expr::binary(Op::Le, depth, bound(max)),
-    )
 }
 
 fn scope_value_expr(source: &ScopeSource) -> Expr {
@@ -340,14 +309,6 @@ pub fn scope_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> Vec<PathReso
         }
     }
     keys
-}
-pub fn is_scope_only(node: &InputNode) -> bool {
-    if scope_keys(node, &[]).len() != 1 || node.id_range.is_some() || node.node_ids.len() > 1 {
-        return false;
-    }
-    let anchor_filters = single_full_path(node).is_some() as usize
-        + (node.node_ids.is_empty() && single_id(node).is_some()) as usize;
-    node.filters.len() == anchor_filters
 }
 
 fn single_id(node: &InputNode) -> Option<i64> {
