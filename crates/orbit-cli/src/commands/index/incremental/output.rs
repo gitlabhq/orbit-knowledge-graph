@@ -15,7 +15,7 @@ use crate::workspace::GitInfo;
 pub(crate) struct FamilyOutput {
     family: String,
     files: usize,
-    skipped_files: usize,
+    pub(super) skipped_files: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     slowest_files: Vec<SlowFile>,
 }

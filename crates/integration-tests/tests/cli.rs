@@ -1740,7 +1740,7 @@ fn file_context_bounds_connections_and_keeps_full_definition_followups() {
     assert!(out.lines().count() < 110, "{out}");
     let (body, err, ok) = run_cmd(&["context", "src.models.entry_0", "--repo", repo_arg], dd);
     assert!(ok && body.contains("return 0"), "{err}\n{body}");
-    assert_eq!(body.matches("<-- ").count(), 50, "{body}");
+    assert_eq!(body.matches("[calls]").count(), 50, "{body}");
     assert!(!body.contains("connections omitted"), "{body}");
     for path in ["src/callers.py", "tests/callers.py"] {
         let (out, err, ok) = run_cmd(&["context", path, "--repo", repo_arg], dd);

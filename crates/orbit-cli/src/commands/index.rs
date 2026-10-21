@@ -25,7 +25,7 @@ pub(crate) fn collect(
     path: PathBuf,
     stats: bool,
     db: Option<PathBuf>,
-) -> Result<Vec<Vec<incremental::FamilyOutput>>> {
+) -> Result<Vec<incremental::IndexOutput>> {
     incremental::index(
         path,
         incremental::Options {
@@ -37,10 +37,7 @@ pub(crate) fn collect(
     )
 }
 
-fn index_quietly(
-    path: PathBuf,
-    db: Option<PathBuf>,
-) -> Result<Vec<Vec<incremental::FamilyOutput>>> {
+fn index_quietly(path: PathBuf, db: Option<PathBuf>) -> Result<Vec<incremental::IndexOutput>> {
     collect(path, false, db)
 }
 
@@ -113,5 +110,5 @@ fn install_tracing(verbose: bool, person_is_watching: bool) {
         .with_span_events(span_events)
         .with_writer(std::io::stderr)
         .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    let _ = tracing::subscriber::set_global_default(subscriber);
 }

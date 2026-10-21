@@ -75,7 +75,7 @@ impl IndexArgs {
     }
 }
 
-fn print_outputs(outputs: Vec<Vec<commands::index::incremental::FamilyOutput>>) -> Result<()> {
+fn print_outputs(outputs: Vec<commands::index::incremental::IndexOutput>) -> Result<()> {
     for output in outputs {
         println!("{}", serde_json::to_string_pretty(&output)?);
     }

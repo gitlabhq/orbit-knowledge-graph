@@ -5659,7 +5659,6 @@ dependencies = [
  "rmcp",
  "rust-embed",
  "rustc-hash 2.1.3",
- "rustix 1.1.4",
  "rustls",
  "schemars 1.2.1",
  "serde",
