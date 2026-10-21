@@ -90,17 +90,12 @@ glab orbit query --file /tmp/q.json
 
 ## Common pitfalls
 
-Read the recipes before you construct a query. The same question often has one canonical shape and several wrong shapes that look correct. These traps recur:
+Read the recipes before you construct a query. The same question often has one canonical shape and several wrong shapes that look correct. Four traps recur:
 
 - Pipelines for a merge request need the `source = "merge_request_event"` filter. See [the recipe](references/recipes.md#pipelines-that-ran-for-one-merge-request).
 - Prefer a single-node query when you can bound the target entity directly. Extra anchor nodes can change the row shape and skew `aggregation` counts.
 - File history needs `HAS_DIFF`, not `HAS_LATEST_DIFF`. See [the recipe](references/recipes.md#mrs-that-touched-a-file-historical-coverage).
 - Issues, epics, tasks, and incidents are the `WorkItem` entity. There is no `Issue` node. See [the recipe](references/recipes.md#work-items-in-a-project).
-- Package and container questions use `Package`, `PackageFile`, `Dependency`, and `ContainerRepository`. This is the free-tier Package Registry and Container Registry. Artifact Registry data is not in Orbit. See [the recipes](references/recipes.md#package-registry-and-container-registry).
-- A missing `HAS_VULNERABILITY` link is not proof a package is safe. The link comes from SBOM data, matched by package name and version.
-- `ContainerRepository` has no tags. Read the tag count from the Container Registry API with the repository `id`, and no `/api/v4/` prefix: `glab api "registry/repositories/<id>?tags_count=true"`.
-- To scope packages to a group, relate `Package` to `Project` with `IN_PROJECT` and filter `full_path` with `starts_with`. Walking `Group` and `CONTAINS` to a fixed depth misses deeper subgroups.
-- `PackageFile` rows are the stored files of a package version, such as one `.tgz` or `.jar`. They are not the files inside the archive. Read them through `HAS_PACKAGE_FILE`.
 
 ## Iteration budget
 
@@ -137,7 +132,6 @@ Skip the confirmation prompts for good with `glab config set orbit_cli_auto_run 
 | Empty results and query validation errors | [`references/recipes.md`](references/recipes.md#troubleshooting) |
 | Full DSL reference | [`references/query_language.md`](references/query_language.md) |
 | Paste-ready bodies per `query_type` | [`references/recipes.md`](references/recipes.md) |
-| Package registry and container registry | [`references/recipes.md`](references/recipes.md#package-registry-and-container-registry) |
 | Reporting results and coverage caveats | [`references/reporting.md`](references/reporting.md) |
 | Local repository map command (`glab orbit repo-map`) | [`references/local_repo_map.md`](references/local_repo_map.md) |
 | Remote repository map helper | [`references/remote_repo_map.md`](references/remote_repo_map.md) |
