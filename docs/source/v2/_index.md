@@ -30,8 +30,8 @@ Your agent answers with a few graph queries in place of many file reads and API 
 {{< cards >}}
 
 - [Quickstart](quickstart.md)
-- [Use cases](use-cases.md)
-- [How GitLab Orbit works](how-it-works.md)
+- [Prompt examples](prompt-examples.md)
+- [GitLab Orbit architecture](how-it-works.md)
 
 {{< /cards >}}
 
@@ -39,11 +39,11 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 | Goal | Example prompt |
 |------|----------------|
-| [Understand a codebase](use-cases.md#understand-a-codebase) | `I'm new to <my-group/my-project>. Using GitLab Orbit, give me a tour.` |
-| [Find the blast radius of a change](use-cases.md#find-the-blast-radius-of-a-change) | `Using GitLab Orbit, what breaks if I change the public interface of <shared-payments-lib>?` |
-| [Review the history of a project](use-cases.md#review-the-history-of-a-project) | `Using GitLab Orbit, who changed <app/models/project.rb> most, and who should review my change to it?` |
-| [Keep your pipelines healthy](use-cases.md#keep-your-pipelines-healthy) | `Using GitLab Orbit, which CI/CD jobs fail most often in <my-group>?` |
-| [Trace security risk to its source](use-cases.md#trace-security-risk-to-its-source) | `Using GitLab Orbit, which projects in <my-group> have critical vulnerabilities?` |
+| [Understand a codebase](prompt-examples.md#understand-a-codebase) | `I'm new to <my-group/my-project>. Using GitLab Orbit, give me a tour.` |
+| [Assess the impact of changing a shared library](prompt-examples.md#assess-the-impact-of-changing-a-shared-library) | `Using GitLab Orbit, what breaks if I change the public interface of <shared-payments-lib>?` |
+| [Review the history of a project](prompt-examples.md#review-the-history-of-a-project) | `Using GitLab Orbit, who changed <app/models/project.rb> most, and who should review my change to it?` |
+| [Keep your pipelines healthy](prompt-examples.md#keep-your-pipelines-healthy) | `Using GitLab Orbit, which CI/CD jobs fail most often in <my-group>?` |
+| [Find where vulnerabilities come from](prompt-examples.md#find-where-vulnerabilities-come-from) | `Using GitLab Orbit, which projects in <my-group> have critical vulnerabilities?` |
 
 ## See an answer
 
@@ -83,14 +83,14 @@ Then it answers from the rows. The answer is similar to:
 ## Code on your machine
 
 The GitLab Orbit CLI also indexes repositories on your machine, so your agent can search code that you have not pushed,
-offline and with no GitLab account. For more information, see [GitLab Orbit Local](local/_index.md).
+offline and with no GitLab account. For more information, see [the local graph](local/_index.md).
 
 ## Reference
 
 {{< cards >}}
 
 - [GitLab Orbit CLI](cli.md)
-- [What GitLab Orbit indexes](schema.md)
+- [Indexed data](schema.md)
 - [Queries](queries/_index.md)
 - [Security](security.md)
 - [GitLab Self-Managed](self-managed/_index.md)
