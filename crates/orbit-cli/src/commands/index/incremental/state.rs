@@ -1,14 +1,18 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context as _, Result};
 use code_graph_incremental::pipeline::{Context, Display, Report};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Env, State, templates};
 
+use super::RepositoryBars;
 use super::input;
 use super::output::{Exporter, FamilyOutput};
 use crate::database::{GraphWriter, manifest};
+use crate::tui;
 use crate::workspace::{self, GitInfo};
 
 pub(super) struct Project<'a> {
@@ -19,6 +23,8 @@ pub(super) struct Project<'a> {
     pub state_dir: PathBuf,
     pub budget_ms: u64,
     pub stats: bool,
+    pub cancel: &'a Arc<AtomicBool>,
+    pub progress: Option<&'a Arc<RepositoryBars>>,
 }
 
 enum Work {
@@ -100,58 +106,83 @@ impl Project<'_> {
         self.writer.clear(self.ontology)?;
         let mut exporter = Exporter::new(self.git, self.writer, self.ontology);
         std::fs::create_dir_all(&self.state_dir)?;
+        if let Some(bars) = self.progress {
+            let files = |work: &Work| match work {
+                Work::Index(paths) | Work::Reindex { paths, .. } => Some(paths.len()),
+                Work::Keep => None,
+            };
+            let counts: Vec<_> = work
+                .iter()
+                .map(|(family, work)| (family.family(), files(work)))
+                .collect();
+            bars.begin(&counts);
+        }
         let mut families = Vec::new();
         let mut outputs = Vec::new();
         for (family, work) in work {
             families.push(family.family().to_string());
-            let snapshot = self.snapshot_path(family);
-            let read_at = std::time::SystemTime::now();
-            let mut env;
-            let (report, state) = match work {
-                Work::Index(paths) => {
-                    env = Env::for_lang(family)?;
-                    env.limits.total_ms = self.budget_ms;
-                    let (context, displayed) = templates::index(Context::new(
-                        &env,
-                        input::paths(&self.git.repo_path, paths)?,
-                    ))?
-                    .then(Display)?
-                    .finish();
-                    (context.report, displayed.state)
-                }
-                Work::Reindex { paths, removed } => {
-                    let (loaded, state) = State::load(&snapshot, family)
-                        .with_context(|| format!("failed to load {}", snapshot.display()))?;
-                    env = loaded;
-                    env.limits.total_ms = self.budget_ms;
-                    let (context, displayed) = templates::reindex(
-                        Context::new(&env, input::paths(&self.git.repo_path, paths)?),
-                        state,
-                        removed,
-                    )?
-                    .then(Display)?
-                    .finish();
-                    (context.report, displayed.state)
-                }
-                Work::Keep => {
-                    let (loaded, state) = State::load(&snapshot, family)
-                        .with_context(|| format!("failed to load {}", snapshot.display()))?;
-                    env = loaded;
-                    outputs.push(exporter.write(
-                        family,
-                        &env,
-                        &state,
-                        &Report::default(),
-                        self.stats,
-                    )?);
-                    continue;
-                }
-            };
-            save_snapshot(&env, &state, &snapshot, read_at)?;
-            outputs.push(exporter.write(family, &env, &state, &report, self.stats)?);
+            outputs.push(self.family(family, work, &mut exporter)?);
         }
         self.save_state(&families, owner)?;
         Ok(outputs)
+    }
+
+    fn family(
+        &self,
+        family: SupportLang,
+        work: Work,
+        exporter: &mut Exporter,
+    ) -> Result<FamilyOutput> {
+        if self.cancelled() {
+            return Err(tui::cancelled("Indexing cancelled."));
+        }
+        let snapshot = self.snapshot_path(family);
+        let read_at = std::time::SystemTime::now();
+        let mut env;
+        let (report, state) = match work {
+            Work::Index(paths) => {
+                env = Env::for_lang(family)?;
+                env.limits.total_ms = self.budget_ms;
+                let context = self.context(&env, paths)?;
+                let (context, displayed) = templates::index(context)?.then(Display)?.finish();
+                (context.report, displayed.state)
+            }
+            Work::Reindex { paths, removed } => {
+                let (loaded, state) = State::load(&snapshot, family)
+                    .with_context(|| format!("failed to load {}", snapshot.display()))?;
+                env = loaded;
+                env.limits.total_ms = self.budget_ms;
+                let context = self.context(&env, paths)?;
+                let (context, displayed) = templates::reindex(context, state, removed)?
+                    .then(Display)?
+                    .finish();
+                (context.report, displayed.state)
+            }
+            Work::Keep => {
+                let (env, state) = State::load(&snapshot, family)
+                    .with_context(|| format!("failed to load {}", snapshot.display()))?;
+                return exporter.write(family, &env, &state, &Report::default(), self.stats);
+            }
+        };
+        save_snapshot(&env, &state, &snapshot, read_at)?;
+        exporter.write(family, &env, &state, &report, self.stats)
+    }
+
+    fn context<'e>(&self, env: &'e Env, paths: Vec<String>) -> Result<Context<'e>> {
+        let files = paths.len();
+        let mut context = Context::new(env, input::paths(&self.git.repo_path, paths)?);
+        let cancel = self.cancel.clone();
+        context.run = context
+            .run
+            .with_cancellation(Arc::new(move || cancel.load(Ordering::Relaxed)));
+        Ok(match self.progress {
+            Some(bars) => context.observe(bars.family(files)),
+            None => context,
+        })
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
     }
 
     fn snapshot_path(&self, family: SupportLang) -> PathBuf {

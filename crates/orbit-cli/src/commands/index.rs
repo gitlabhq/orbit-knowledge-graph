@@ -1,6 +1,9 @@
 pub(crate) mod incremental;
 
-use std::path::PathBuf;
+use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 use arrow::array::{Array, StringArray};
@@ -9,16 +12,61 @@ use tracing_subscriber::fmt::format::FmtSpan;
 
 use super::setup::spec;
 use crate::database::GraphReader;
-use crate::workspace::GitInfo;
+use crate::tui;
+use crate::workspace::{self, GitInfo};
 
-pub(crate) fn index_and_suggest(path: PathBuf, db: Option<PathBuf>) -> Result<Option<String>> {
-    let git = crate::workspace::git_info(&crate::workspace::git_toplevel(&path)?)?;
-    index_quietly(path, db.clone())?;
-    Ok(most_referenced_definition(&git, db))
+pub(crate) fn run(path: PathBuf, options: incremental::Options) -> Result<()> {
+    let person_is_watching = std::io::stdout().is_terminal();
+    install_tracing(options.verbose, person_is_watching);
+    if !person_is_watching {
+        let options = incremental::Options {
+            cancel: cancel_on_ctrl_c(),
+            ..options
+        };
+        for output in incremental::index(path, options)? {
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        return Ok(());
+    }
+
+    tui::intro("Orbit index")?;
+    let stats = options.stats;
+    let outcome = index_showing_progress(path, options);
+    if let Err(error) = &outcome
+        && let Some(NoRepositoryFound(folder)) = error.downcast_ref()
+    {
+        return show_how_to_pick_a_repository(folder);
+    }
+    let outputs = close_screen_on_failure(outcome)?;
+    if stats {
+        for output in &outputs {
+            tui::card("Slowest files", output.slowest_files().join("\n"))?;
+        }
+    }
+    if let Some(name) = suggested_grep(&outputs) {
+        tui::card("Try it", grep_command_line(&name))?;
+    }
+    tui::outro("Done.")
+}
+
+pub(crate) fn index_with_progress(path: PathBuf, db: Option<PathBuf>) -> Result<Option<String>> {
+    let outputs = index_showing_progress(
+        path,
+        incremental::Options {
+            db,
+            ..Default::default()
+        },
+    )?;
+    Ok(suggested_grep(&outputs))
 }
 
 pub(crate) fn index_before_first_query(path: PathBuf, db: Option<PathBuf>) -> Result<()> {
-    index_quietly(path, db).map(drop)
+    if !std::io::stderr().is_terminal() {
+        return collect(path, false, db).map(drop);
+    }
+    tui::intro("Orbit index")?;
+    close_screen_on_failure(index_with_progress(path, db))?;
+    tui::outro("Indexed.")
 }
 
 pub(crate) fn collect(
@@ -30,15 +78,91 @@ pub(crate) fn collect(
         path,
         incremental::Options {
             stats,
-            verbose: false,
             db,
-            budget_seconds: None,
+            ..Default::default()
         },
     )
 }
 
-fn index_quietly(path: PathBuf, db: Option<PathBuf>) -> Result<Vec<incremental::IndexOutput>> {
-    collect(path, false, db)
+fn index_showing_progress(
+    path: PathBuf,
+    options: incremental::Options,
+) -> Result<Vec<incremental::IndexOutput>> {
+    let _control_echo_off = tui::turn_off_control_echo();
+    incremental::index(
+        path,
+        incremental::Options {
+            cancel: cancel_on_ctrl_c(),
+            progress: true,
+            ..options
+        },
+    )
+}
+
+fn close_screen_on_failure<T>(outcome: Result<T>) -> Result<T> {
+    match outcome {
+        Err(error) if !tui::is_cancelled(&error) => {
+            tui::outro_cancel(&error)?;
+            Err(error)
+        }
+        outcome => outcome,
+    }
+}
+
+fn cancel_on_ctrl_c() -> Arc<AtomicBool> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flag = cancel.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            flag.store(true, Ordering::Relaxed);
+        }
+        if tokio::signal::ctrl_c().await.is_ok() {
+            tui::restore_control_echo();
+            std::process::exit(130);
+        }
+    });
+    cancel
+}
+
+fn suggested_grep(outputs: &[incremental::IndexOutput]) -> Option<String> {
+    let output = outputs.first()?;
+    let git = workspace::git_info(Path::new(output.path())).ok()?;
+    most_referenced_definition(&git, Some(PathBuf::from(output.database_path())))
+}
+
+#[derive(Debug)]
+pub(crate) struct NoRepositoryFound(pub PathBuf);
+
+impl std::fmt::Display for NoRepositoryFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "no git repository found in {}. Pass a repository path, or a directory containing one.",
+            self.0.display()
+        )
+    }
+}
+
+impl std::error::Error for NoRepositoryFound {}
+
+fn show_how_to_pick_a_repository(folder: &Path) -> Result<()> {
+    let example = example_repository_path();
+    let steps = [
+        ("Index a repository by path:", index_command_line(example)),
+        ("Or go into it first:", format!("cd {example}")),
+        ("", index_command_line(".")),
+    ]
+    .map(|(label, command)| format!("{label:<27}  {command}"))
+    .join("\n");
+
+    tui::card(
+        "No git repository here",
+        format!(
+            "{} has no git repository in it.\n\n{steps}",
+            folder.display()
+        ),
+    )?;
+    tui::outro("Nothing indexed.")
 }
 
 pub(crate) fn grep_command_line(definition_name: &str) -> String {
@@ -110,5 +234,5 @@ fn install_tracing(verbose: bool, person_is_watching: bool) {
         .with_span_events(span_events)
         .with_writer(std::io::stderr)
         .finish();
-    let _ = tracing::subscriber::set_global_default(subscriber);
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 }

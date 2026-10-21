@@ -20,6 +20,17 @@ pub(crate) struct FamilyOutput {
     slowest_files: Vec<SlowFile>,
 }
 
+impl FamilyOutput {
+    pub(super) fn slowest_lines(&self) -> impl Iterator<Item = String> + '_ {
+        self.slowest_files.iter().map(|file| {
+            format!(
+                "{:<10} parse {:>6.0} ms  resolve {:>6.0} ms  {}",
+                file.language, file.parse_ms, file.resolve_ms, file.path
+            )
+        })
+    }
+}
+
 #[derive(serde::Serialize)]
 struct SlowFile {
     path: String,

@@ -70,16 +70,10 @@ impl IndexArgs {
             verbose: self.verbose,
             db: self.db,
             budget_seconds: self.budget,
+            ..Default::default()
         };
         (self.path, options)
     }
-}
-
-fn print_outputs(outputs: Vec<commands::index::incremental::IndexOutput>) -> Result<()> {
-    for output in outputs {
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    }
-    Ok(())
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -856,7 +850,7 @@ async fn dispatch(
         }
         Commands::Index(args) => {
             let (path, options) = args.into_parts();
-            print_outputs(commands::index::incremental::index(path, options)?)
+            commands::index::run(path, options)
         }
         Commands::Grep(args) => run_grep(*args),
         Commands::Context(args) => commands::context::run(args),
