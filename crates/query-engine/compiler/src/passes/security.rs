@@ -77,7 +77,10 @@ fn apply_to_query(
             let min_role = model.table_minimum_access_level(table);
             let eligible = ctx.paths_at_least(min_role);
             let broad = build_path_filter(alias, &eligible);
-            match ctx.scope_proofs.get(alias) {
+            match ctx
+                .scope_proofs
+                .get(alias.strip_prefix("_role_").unwrap_or(alias))
+            {
                 Some(scope) if model.table_path_scopable(table) => {
                     Expr::and(broad, crate::scope::scope_predicate(scope, alias))
                 }
