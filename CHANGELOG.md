@@ -1,3 +1,15 @@
+## [0.151.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.151.0...v0.151.1) (2026-10-21)
+
+### Fixes
+
+* **observability:** separate caller errors from server errors in query metrics ([d952d6e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d952d6e592eaa79bf2dda212e0c7a0d6762b18b2)) by Bohdan Parkhomchuk
+* **utils:** map Windows absolute symlink targets in vfs Directory ([06e6db0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/06e6db0b6bf5375ce2f8f67141cb1c9d81a28afe)) by Dmitry Gruzd
+
+### Other
+
+* **adr:** add ADR 021 for entity context expansion in the context endpoint ([0bbcabf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0bbcabf44f9ba2522d067519e7b1a7b3f1ecf45f)) by Dmitry Gruzd
+* **e2e:** run HA suite in post-merge pipeline ([2d3b0d9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2d3b0d983f7781a50daf6190e8e11d62fbab017e)) by Michael Usachenko
+
 ## [0.151.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.150.0...v0.151.0) (2026-10-21)
 
 ### Features
