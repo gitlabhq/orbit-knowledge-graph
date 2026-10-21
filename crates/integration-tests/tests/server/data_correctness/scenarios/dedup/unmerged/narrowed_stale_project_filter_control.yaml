@@ -19,9 +19,6 @@ config:
       - { source_id: 9710, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 9700, target_kind: Project, traversal_path: "1/970/9700/" }
 
 query:
-  json: |
-    {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[970]},{"id":"p","entity":"Project","filters":{"star_count":1}},{"id":"mr","entity":"MergeRequest"}],
-     "relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p.name"],"aggregations":[{"count":"mr","as":"c"}],"limit":10}
   gql: |
     MATCH (g:Group {id: 970})-[:CONTAINS]->(p:Project {star_count: 1})<-[:IN_PROJECT]-(mr:MergeRequest)
     RETURN p.name, count(mr) AS c LIMIT 10
