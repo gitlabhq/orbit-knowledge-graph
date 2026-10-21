@@ -215,14 +215,21 @@ fn repository_matches(repository: &Repository, destination: &Path) -> bool {
     {
         return true;
     }
+    remote_branch_head(destination, &repository.version)
+        .is_some_and(|remote_head| remote_head == head)
+}
+
+fn remote_branch_head(repository: &Path, branch: &str) -> Option<String> {
     git_output(
-        destination,
+        repository,
         [
-            "rev-parse",
-            &format!("refs/remotes/origin/{}", repository.version),
+            "ls-remote",
+            "--exit-code",
+            "origin",
+            &format!("refs/heads/{branch}"),
         ],
     )
-    .is_some_and(|remote_head| remote_head == head)
+    .and_then(|line| line.split_whitespace().next().map(str::to_string))
 }
 
 fn git_output<const N: usize>(directory: &Path, arguments: [&str; N]) -> Option<String> {
@@ -571,31 +578,46 @@ mod tests {
     #[test]
     fn branch_cache_requires_the_pinned_remote_head() {
         let temporary = tempfile::tempdir().unwrap();
+        let remote_path = temporary.path().join("remote.git");
+        run_git(
+            temporary.path(),
+            ["init", "--bare", "--initial-branch", "main", "remote.git"],
+        );
+
+        let source_path = temporary.path().join("source");
+        run_git(
+            temporary.path(),
+            ["clone", remote_path.to_str().unwrap(), "source"],
+        );
+        run_git(
+            &source_path,
+            ["config", "user.email", "benchmark@example.com"],
+        );
+        run_git(&source_path, ["config", "user.name", "Benchmark"]);
+        fs::write(source_path.join("README.md"), "first").unwrap();
+        run_git(&source_path, ["add", "README.md"]);
+        run_git(&source_path, ["commit", "-m", "first"]);
+        run_git(&source_path, ["push", "origin", "main"]);
+
         let repository_path = temporary.path().join("repo");
         run_git(
             temporary.path(),
-            ["init", "--initial-branch", "main", "repo"],
-        );
-        run_git(
-            &repository_path,
-            ["config", "user.email", "benchmark@example.com"],
-        );
-        run_git(&repository_path, ["config", "user.name", "Benchmark"]);
-        fs::write(repository_path.join("README.md"), "first").unwrap();
-        run_git(&repository_path, ["add", "README.md"]);
-        run_git(&repository_path, ["commit", "-m", "first"]);
-        let first = git_output(&repository_path, ["rev-parse", "HEAD"]).unwrap();
-        run_git(
-            &repository_path,
-            ["update-ref", "refs/remotes/origin/main", &first],
+            [
+                "clone",
+                "--branch",
+                "main",
+                remote_path.to_str().unwrap(),
+                "repo",
+            ],
         );
 
         let configured = repository("repo");
         assert!(repository_matches(&configured, &repository_path));
 
-        fs::write(repository_path.join("README.md"), "second").unwrap();
-        run_git(&repository_path, ["add", "README.md"]);
-        run_git(&repository_path, ["commit", "-m", "second"]);
+        fs::write(source_path.join("README.md"), "second").unwrap();
+        run_git(&source_path, ["add", "README.md"]);
+        run_git(&source_path, ["commit", "-m", "second"]);
+        run_git(&source_path, ["push", "origin", "main"]);
         assert!(!repository_matches(&configured, &repository_path));
     }
 
