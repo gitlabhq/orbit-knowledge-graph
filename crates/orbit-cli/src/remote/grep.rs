@@ -341,9 +341,62 @@ fn title_score(title: &str, terms: &[String]) -> usize {
         .count()
 }
 
+const INLINED: &str = "inlined-gitlab";
+const INLINE_MEMORY: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+fn inlined_path() -> Option<PathBuf> {
+    crate::workspace::Workspace::default_root()
+        .ok()
+        .map(|root| root.join("var").join(INLINED))
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+/// Whether a search inlined `token` within `INLINE_MEMORY` of `now`, from lines of
+/// `<unix seconds>\t<token>`.
+fn inlined_recently(record: &str, token: &str, now: u64) -> bool {
+    record.lines().any(|line| {
+        line.split_once('\t').is_some_and(|(at, shown)| {
+            shown == token
+                && at
+                    .parse::<u64>()
+                    .is_ok_and(|at| now.saturating_sub(at) < INLINE_MEMORY.as_secs())
+        })
+    })
+}
+
+fn remember_inlined(path: &std::path::Path, token: &str, now: u64) {
+    use std::io::Write as _;
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(file, "{now}\t{token}");
+    }
+}
+
 async fn inline(client: &OrbitClient, winner: &Winner, home: Option<&str>) -> String {
     let launcher = crate::commands::setup::spec::launcher();
     let next = format!("next: {launcher} context {}\n", winner.readable);
+    let record = inlined_path();
+    let now = unix_now();
+    if let Some(path) = &record
+        && std::fs::read_to_string(path)
+            .is_ok_and(|text| inlined_recently(&text, &winner.token, now))
+    {
+        return format!(
+            "next: {launcher} context {} (an earlier search showed it)\n",
+            winner.readable
+        );
+    }
     let Ok(body) = super::context::fetch(client.clone(), std::slice::from_ref(&winner.token)).await
     else {
         return next;
@@ -355,6 +408,9 @@ async fn inline(client: &OrbitClient, winner: &Winner, home: Option<&str>) -> St
     };
     if !text.contains(" found=true") {
         return next;
+    }
+    if let Some(path) = &record {
+        remember_inlined(path, &winner.token, now);
     }
     let (text, trimmed) = super::context::compact(&text);
     let mut out = format!("\n{launcher} context {}:\n{text}", winner.readable);
@@ -676,6 +732,22 @@ mod tests {
                 crate::commands::setup::spec::launcher()
             )
         );
+    }
+
+    #[test]
+    fn an_item_inlined_within_the_memory_is_not_inlined_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("var").join(INLINED);
+        let now = 10_000;
+        remember_inlined(&path, "MergeRequest[42]", now);
+        let record = std::fs::read_to_string(&path).unwrap();
+        assert!(inlined_recently(&record, "MergeRequest[42]", now + 60));
+        assert!(!inlined_recently(&record, "MergeRequest[4]", now + 60));
+        assert!(!inlined_recently(
+            &record,
+            "MergeRequest[42]",
+            now + INLINE_MEMORY.as_secs()
+        ));
     }
 
     #[test]
