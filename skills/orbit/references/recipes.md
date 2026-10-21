@@ -559,6 +559,175 @@ to the `WHERE` clause. Every response carries `pagination.truncated`;
 when true, the result window is incomplete and any aggregate computed over it
 is too.
 
+## Package registry and container registry
+
+These recipes cover the free-tier Package Registry and Container Registry.
+Artifact Registry data is not in Orbit, so do not report these results as
+Artifact Registry packages. `Package` holds one row per package version. GitLab lists packages with
+status `default`, `error`, or `deprecated`. Filter on those to match the package list.
+
+To scope to a group, join through `IN_PROJECT` and filter the project path
+with `starts_with`. Do not walk `Group` and `CONTAINS` edges, because a fixed
+depth misses deeper subgroups.
+
+Packages in a project, by type:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "p", "entity": "Package"},
+      {"id": "pr", "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/editor-extensions/gitlab-lsp"}}}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "p", "to": "pr"}
+    ],
+    "group_by": ["p.package_type"],
+    "aggregations": [
+      {"count": "p", "as": "packages"}
+    ],
+    "aggregation_sort": "-packages",
+    "limit": 10
+  }
+}
+```
+
+Projects in a group that publish the most npm packages:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "p", "entity": "Package", "filters": {"package_type": "npm"}},
+      {"id": "pr", "entity": "Project", "filters": {"full_path": {"starts_with": "gitlab-org/"}}}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "p", "to": "pr"}
+    ],
+    "group_by": ["pr"],
+    "aggregations": [
+      {"count": "p", "as": "packages"}
+    ],
+    "aggregation_sort": "-packages",
+    "limit": 10
+  }
+}
+```
+
+Packages that declare a dependency. These are declared dependencies, not proof
+the dependency is used at run time:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "p", "entity": "Package"},
+      {"id": "d", "entity": "Dependency", "filters": {"name": "lodash"}},
+      {"id": "pr", "entity": "Project", "filters": {"full_path": {"starts_with": "gitlab-org/"}}}
+    ],
+    "relationships": [
+      {"type": "DECLARES_DEPENDENCY", "from": "p", "to": "d"},
+      {"type": "IN_PROJECT", "from": "p", "to": "pr"}
+    ],
+    "group_by": ["pr"],
+    "aggregations": [
+      {"count": "p", "as": "dependents"}
+    ],
+    "aggregation_sort": "-dependents",
+    "limit": 10
+  }
+}
+```
+
+Pipeline that built a package:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "p", "entity": "Package", "filters": {"name": "com/gitlab/javafuzz/javafuzz", "version": "1.26"}},
+      {"id": "pl", "entity": "Pipeline", "columns": ["id", "status", "ref"]}
+    ],
+    "relationships": [
+      {"type": "BUILT_BY", "from": "p", "to": "pl"}
+    ],
+    "limit": 10
+  }
+}
+```
+
+Files of a package version. These are the stored package files, such as a
+`.tgz` or `.jar`, not the files inside the archive:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "p", "entity": "Package", "filters": {"name": "@gitlab-org/duo-workflow-service", "version": "0.1.2"}},
+      {"id": "f", "entity": "PackageFile", "columns": ["file_name", "size"]}
+    ],
+    "relationships": [
+      {"type": "HAS_PACKAGE_FILE", "from": "p", "to": "f"}
+    ],
+    "limit": 50
+  }
+}
+```
+
+Packages with known vulnerabilities. The link comes from SBOM data, matched by
+package name and version. A missing link is not proof that a package is safe:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "p", "entity": "Package"},
+      {"id": "v", "entity": "Vulnerability"},
+      {"id": "pr", "entity": "Project", "filters": {"full_path": {"starts_with": "gitlab-org/"}}}
+    ],
+    "relationships": [
+      {"type": "HAS_VULNERABILITY", "from": "p", "to": "v"},
+      {"type": "IN_PROJECT", "from": "p", "to": "pr"}
+    ],
+    "group_by": ["p"],
+    "aggregations": [
+      {"count": "v", "as": "vulnerabilities"}
+    ],
+    "aggregation_sort": "-vulnerabilities",
+    "limit": 20
+  }
+}
+```
+
+Container repositories in a project. `ContainerRepository` has no tags. Read
+tags from the Container Registry API, with the path and no `/api/v4/` prefix:
+`glab api "registry/repositories/<repository-id>?tags_count=true"`.
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "c", "entity": "ContainerRepository"},
+      {"id": "pr", "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
+    ],
+    "relationships": [
+      {"type": "IN_PROJECT", "from": "c", "to": "pr"}
+    ],
+    "aggregations": [
+      {"count": "c", "as": "repositories"}
+    ],
+    "limit": 1
+  }
+}
+```
+
 ## Troubleshooting
 
 ### Empty result body

@@ -69,6 +69,9 @@ without a graph query.
 6. "How many MRs were merged per project in the gitlab-org group last month?"
 7. "Which projects depend on the gitlab-shell gem?"
 8. "Which MRs touched both app/models/user.rb and app/models/project.rb?"
+9. "Which packages in the gitlab-org group have known vulnerabilities?"
+10. "Which packages in gitlab-org declare a dependency on lodash?"
+11. "Which pipeline built version 1.26 of the Maven package com/gitlab/javafuzz/javafuzz?"
 
 ### Should fire glab (not orbit)
 
@@ -80,3 +83,5 @@ without a graph query.
 6. "Who are the reviewers on MR !1216?": single known entity, relationship metadata available via `glab mr view` (tie-break: glab)
 7. "What files did MR !1216 change?": single known entity, `glab mr diff` suffices (tie-break: glab)
 8. "How many open MRs are in gitlab-org/gitlab?": single-project count, `glab mr list | wc` suffices (tie-break: glab)
+9. "List the packages in project 278964": single-project list (`glab api projects/278964/packages`)
+10. "Publish my npm package to the project registry": write operation (`npm publish`)

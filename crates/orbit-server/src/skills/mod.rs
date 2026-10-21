@@ -311,7 +311,7 @@ mod tests {
             .sum();
         let encoded = serde_json::to_vec(&tree).unwrap();
         assert!(
-            source_bytes < 100_000,
+            source_bytes < 110_000,
             "source tree grew to {source_bytes} bytes"
         );
         assert!(
