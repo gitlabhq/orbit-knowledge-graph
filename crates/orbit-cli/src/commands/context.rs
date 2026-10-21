@@ -683,11 +683,16 @@ fn resolve_targets(
             }
         } else {
             match repo_relative(&git.repo_path, target) {
-                Ok(path) => {
-                    if !files.contains(&path) {
-                        files.push(path);
+                Ok(path) => match std::fs::read_to_string(git.repo_path.join(&path))
+                    .map(|content| content.lines().count())
+                {
+                    Ok(lines) if lines > 0 => ranges.push((path, 1, lines)),
+                    _ => {
+                        if !files.contains(&path) {
+                            files.push(path);
+                        }
                     }
-                }
+                },
                 Err(error) => {
                     let mut matches = hydrator.query(
                         client,
