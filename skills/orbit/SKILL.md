@@ -1,6 +1,6 @@
 ---
 name: orbit
-description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
+description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities. That includes packages, their dependencies and vulnerabilities, and the pipelines that built them. It also builds a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
 version: 0.34.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
@@ -98,7 +98,9 @@ Read the recipes before you construct a query. The same question often has one c
 - Issues, epics, tasks, and incidents are the `WorkItem` entity. There is no `Issue` node. See [the recipe](references/recipes.md#work-items-in-a-project).
 - Package and container questions use `Package`, `PackageFile`, `Dependency`, and `ContainerRepository`. This is the free-tier Package Registry and Container Registry. Artifact Registry data is not in Orbit. See [the recipes](references/recipes.md#package-registry-and-container-registry).
 - A missing `HAS_VULNERABILITY` link is not proof a package is safe. The link comes from SBOM data, matched by package name and version.
-- `ContainerRepository` has no tags. Read tags from the Container Registry API.
+- `ContainerRepository` has no tags. Read the tag count from the Container Registry API with the repository `id`, and no `/api/v4/` prefix: `glab api "registry/repositories/<id>?tags_count=true"`.
+- To scope packages to a group, relate `Package` to `Project` with `IN_PROJECT` and filter `full_path` with `starts_with`. Walking `Group` and `CONTAINS` to a fixed depth misses deeper subgroups.
+- `PackageFile` rows are the stored files of a package version, such as one `.tgz` or `.jar`. They are not the files inside the archive. Read them through `HAS_PACKAGE_FILE`.
 
 ## Iteration budget
 
