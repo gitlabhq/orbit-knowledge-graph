@@ -306,7 +306,7 @@ New changes reach the graph through replication in minutes. A sweep picks up exi
 ## Verify the installation
 
 Query the graph for a project in the group that you turned on indexing for.
-Put the request body in `request.json`. The query uses the [Cypher query language](../queries/cypher.md):
+Put the request body in `request.json`. The query uses the [GitLab Orbit query language](../queries/query-language.md):
 
 ```json
 {
@@ -333,6 +333,6 @@ and to sign in with `glab auth login --hostname <gitlab.example.com>`.
 
 ## Related topics
 
-- [What GitLab Orbit indexes](../schema.md)
-- [Use cases](../use-cases.md)
+- [Indexed data](../schema.md)
+- [Prompt examples](../prompt-examples.md)
 - [Queries](../queries/_index.md)
