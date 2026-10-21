@@ -45,7 +45,7 @@ For automation without a personal account, use a [service account](../security.m
 | `POST` | `/api/v4/orbit/query/:name` | Run a [named query](#named-queries) |
 | `GET` | `/api/v4/orbit/query/templates` | List the named queries that take no parameters |
 | `GET` | `/api/v4/orbit/schema` | Get the schema |
-| `GET` | `/api/v4/orbit/schema/dsl` | Get the JSON Schema of the deprecated JSON query domain-specific language (DSL). Returns `404` when you use Cypher. Use `CALL db.schema()` instead. |
+| `GET` | `/api/v4/orbit/schema/dsl` | Get the JSON Schema of the deprecated JSON query domain-specific language (DSL). Returns `404` when you use GQL. Use `CALL db.schema()` instead. |
 | `GET` | `/api/v4/orbit/schema/format` | Get guidance for the response formats |
 | `GET` | `/api/v4/orbit/status` | Check your access and the cluster health |
 | `GET` | `/api/v4/orbit/graph_status` | Check indexing progress for a group or project |
@@ -60,7 +60,7 @@ For automation without a personal account, use a [service account](../security.m
 
 The request body contains:
 
-- `query`: The query text in the [Cypher query language](cypher.md).
+- `query`: The query text in the [GitLab Orbit query language](query-language.md).
 - `response_format`: Optional. Use `raw` for structured JSON, `llm` for compact
   [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text for agents, or `gql` for a text table.
   Default: `raw`. The GitLab Orbit CLI sends `llm` by default.
@@ -218,6 +218,6 @@ curl --header "Authorization: Bearer <your_token>" \
 ## Related topics
 
 - [Queries](_index.md)
-- [Cypher query language](cypher.md)
+- [Query language](query-language.md)
 - [Security](../security.md)
-- [Billing](../how-it-works.md#billing)
+- [Billing and credit usage](../billing.md)
