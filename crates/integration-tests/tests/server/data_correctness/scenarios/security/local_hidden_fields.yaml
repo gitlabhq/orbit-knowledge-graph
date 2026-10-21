@@ -5,8 +5,6 @@ cases:
   - name: return_column_rejected
     description: Local and remote queries cannot return traversal_path
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [13000], "columns": ["name", "traversal_path"]}], "limit": 10}
       gql: |
         MATCH (f:File {id: 13000}) RETURN f.name, f.traversal_path
     expect:
@@ -15,8 +13,6 @@ cases:
   - name: order_by_rejected
     description: Local and remote queries cannot sort by traversal_path
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [13000]}], "order_by": "f.traversal_path", "limit": 10}
       gql: |
         MATCH (f:File {id: 13000}) RETURN f ORDER BY f.traversal_path
     expect:
@@ -25,8 +21,6 @@ cases:
   - name: group_by_rejected
     description: Local and remote aggregations cannot group by traversal_path
     query:
-      json: |
-        {"query_type": "aggregation", "nodes": [{"id": "f", "entity": "File", "node_ids": [13000]}, {"id": "d", "entity": "Definition"}], "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}], "group_by": ["f.traversal_path"], "aggregations": [{"count": "d", "as": "n"}], "limit": 10}
       gql: |
         MATCH (f:File {id: 13000})-[:DEFINES]->(d:Definition) RETURN f.traversal_path AS path, count(d) AS n
     expect:
@@ -35,8 +29,6 @@ cases:
   - name: node_filter_rejected
     description: Local and remote queries cannot filter on traversal_path
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "filters": {"traversal_path": {"starts_with": "1/100/"}}}], "limit": 10}
       gql: |
         MATCH (f:File) WHERE f.traversal_path = '1/100/1000/' RETURN f
     expect:
@@ -46,8 +38,6 @@ cases:
   - name: negated_filter_rejected
     description: Local and remote queries cannot negate a traversal_path condition
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [13000], "not": {"traversal_path": "1/100/1000/"}}], "limit": 10}
       gql: |
         MATCH (f:File {id: 13000}) WHERE NOT f.traversal_path STARTS WITH '1/100/' RETURN f
     expect:
@@ -57,8 +47,6 @@ cases:
   - name: relationship_filter_rejected
     description: Local and remote relationships cannot filter on traversal_path
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [13000]}, {"id": "d", "entity": "Definition"}], "relationships": [{"type": "DEFINES", "from": "f", "to": "d", "filters": {"traversal_path": "1/100/1000/"}}], "limit": 10}
       gql: |
         MATCH (f:File {id: 13000})-[r:DEFINES]->(d:Definition) WHERE r.traversal_path = '1/100/1000/' RETURN d
     expect:
@@ -76,8 +64,6 @@ cases:
   - name: default_columns_leave_it_out
     description: Default columns on local and remote queries leave out traversal_path
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [13000]}], "limit": 10}
       gql: |
         MATCH (f:File {id: 13000}) RETURN f
     expect:
@@ -91,8 +77,6 @@ cases:
   - name: wildcard_columns_leave_it_out
     description: Wildcard columns on local and remote queries leave out traversal_path
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "f", "entity": "File", "node_ids": [13000], "columns": "*"}], "limit": 10}
       gql: |
         MATCH (f:File {id: 13000}) RETURN properties(f)
     expect:

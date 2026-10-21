@@ -2,8 +2,6 @@ cases:
   - name: greater_than_rejected
     description: An enum has no order, so > is rejected for its integer key and its label
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": {"gt": 1}}}]}
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state > 'opened' RETURN mr
     expect:
@@ -12,8 +10,6 @@ cases:
   - name: greater_or_equal_rejected
     description: An enum has no order, so >= is rejected
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": {"gte": "merged"}}}]}
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state >= 3 RETURN mr
     expect:
@@ -22,8 +18,6 @@ cases:
   - name: less_than_rejected
     description: An enum has no order, so < is rejected
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": {"lt": "opened"}}}]}
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state < 'opened' RETURN mr
     expect:
@@ -32,8 +26,6 @@ cases:
   - name: less_or_equal_rejected
     description: An enum has no order, so <= is rejected
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": {"lte": 3}}}]}
       gql: |
         MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state <= 'merged' RETURN mr
     expect:
@@ -50,8 +42,6 @@ cases:
   - name: string_backed_enum_ordering_rejected
     description: A string-backed enum has no order either
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "filters": {"state": {"gt": "active"}}}]}
       gql: |
         MATCH (u:User {id: 1}) WHERE u.state > 'active' RETURN u
     expect:
@@ -60,8 +50,6 @@ cases:
   - name: min_rejected
     description: MIN does not apply to an enum
     query:
-      json: |
-        {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000]}, {"id": "mr", "entity": "MergeRequest"}], "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}], "group_by": ["p"], "aggregations": [{"min": "mr.state", "as": "s"}]}
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN p, min(mr.state) AS s
     expect:
@@ -70,8 +58,6 @@ cases:
   - name: max_rejected
     description: MAX does not apply to an enum
     query:
-      json: |
-        {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000]}, {"id": "mr", "entity": "MergeRequest"}], "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}], "group_by": ["p"], "aggregations": [{"max": "mr.state", "as": "s"}]}
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN p, max(mr.state) AS s
     expect:
@@ -104,8 +90,6 @@ cases:
   - name: membership_returns_matching_rows
     description: IN on an enum returns the rows whose label is in the list, for labels and integer keys
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2005}, "filters": {"state": {"in": ["merged", 4]}}}], "order_by": "mr.id"}
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.state IN ['merged', 4] RETURN mr ORDER BY mr.id
     expect:
@@ -120,8 +104,6 @@ cases:
   - name: inequality_returns_other_rows
     description: <> on an enum returns every row with a different label
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2005}, "filters": {"state": {"ne": "opened"}}}], "order_by": "mr.id"}
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.state <> 'opened' RETURN mr ORDER BY mr.id
     expect:
@@ -136,8 +118,6 @@ cases:
   - name: order_by_enum_sorts_labels
     description: ORDER BY an enum still works for display and sorts by label
     query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2001, "end": 2003}}], "order_by": "mr.state"}
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.id >= 2001 AND mr.id <= 2003 RETURN mr ORDER BY mr.state
     expect:
