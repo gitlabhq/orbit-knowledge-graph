@@ -277,22 +277,42 @@ arg "[interval]" default="0.025" help="Sampling interval in seconds"
 run = "gitlab-xtasks benchmark download-repos --config code-indexing-benchmark.yaml"
 description = "Download benchmark repositories"
 
-[tasks."bench:run"]
-depends = ["bench:download-repos"]
-run = "cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled && gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local"
-description = "Run code indexing benchmark"
-
-[tasks."bench:v2"]
-depends = ["bench:download-repos"]
-run = """
+[task_templates."bench:engine"]
+env = { BENCH_ACTION = "run" }
+usage = '''
+flag "--cg" help="Run code-graph"
+flag "--cgi" help="Run code-graph-incremental (currently a no-op)"
+'''
+run = '''
+if [ "${usage_cg:-false}" = "${usage_cgi:-false}" ]; then
+  echo "Pass exactly one of --cg or --cgi." >&2
+  exit 2
+fi
+if [ "${usage_cgi:-false}" = "true" ]; then
+  echo "code-graph-incremental is not wired yet; skipping."
+  exit 0
+fi
+mise run bench:download-repos
 cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled
+if [ "$BENCH_ACTION" = "run" ]; then
+  gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local --scenario cg
+  exit 0
+fi
 for repo in output/repos/*/; do
   name=$(basename "$repo")
-  echo "=== Indexing $name with v2 ==="
-  ./target/release/orbit index "$repo" --stats 2>&1 || echo "FAILED: $name"
+  echo "=== Indexing $name with code-graph ==="
+  ./target/release/orbit index "$repo" --stats
 done
-"""
-description = "Run v2 pipeline against all downloaded benchmark repos"
+'''
+
+[tasks."bench:run"]
+extends = "bench:engine"
+description = "Run a measured code indexing benchmark"
+
+[tasks."bench:smoke"]
+extends = "bench:engine"
+env = { BENCH_ACTION = "smoke" }
+description = "Run one code indexing pass against each benchmark repository"
 
 [tasks."bench:list-repos"]
 run = "gitlab-xtasks benchmark list-repos --config code-indexing-benchmark.yaml"
