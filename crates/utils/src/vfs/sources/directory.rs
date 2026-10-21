@@ -1,5 +1,5 @@
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -94,23 +94,40 @@ pub(super) fn put<T: Tag>(
             },
         ),
         Some(safe_fs::Entry::Symlink(target)) => {
-            into.put(path, Put::Symlink(virtual_path(&target)?))
+            into.put(path, Put::Symlink(symlink_target(&target)?))
         }
         None => Ok(()),
     }
 }
 
 pub(super) fn virtual_path(path: &Path) -> std::io::Result<String> {
+    virtual_components(path.components())
+}
+
+/// Windows `read_link` returns absolute targets with a drive, UNC or `\\?\`
+/// prefix, where Unix returns `/…`. The prefix names a host location that the
+/// catalog cannot hold, so it is dropped and the target stays root-relative.
+fn symlink_target(target: &Path) -> std::io::Result<String> {
+    virtual_components(
+        target
+            .components()
+            .filter(|component| !matches!(component, Component::Prefix(_))),
+    )
+}
+
+fn virtual_components<'a>(
+    components: impl Iterator<Item = Component<'a>>,
+) -> std::io::Result<String> {
     let mut virtual_path = Utf8UnixPathBuf::new();
-    for component in path.components() {
+    for component in components {
         let part = match component {
-            std::path::Component::Prefix(_) => {
+            Component::Prefix(_) => {
                 return Err(std::io::Error::new(
                     ErrorKind::InvalidInput,
                     "host prefix cannot name a virtual path",
                 ));
             }
-            std::path::Component::RootDir => "/",
+            Component::RootDir => "/",
             _ => component.as_os_str().to_str().ok_or_else(|| {
                 std::io::Error::new(ErrorKind::InvalidData, "source path is not UTF-8")
             })?,
