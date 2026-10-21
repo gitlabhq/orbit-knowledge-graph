@@ -152,7 +152,7 @@ To remove the GitLab Orbit skill, delete `~/.agents/skills/orbit` and the `~/.cl
 ## Related topics
 
 - [GitLab Orbit quickstart](../quickstart.md)
-- [Use cases](../use-cases.md)
+- [Prompt examples](../prompt-examples.md)
 - [GitLab Orbit in GitLab Duo](duo.md)
 - [MCP servers](mcp.md)
 - [GitLab Orbit CLI](../cli.md)
