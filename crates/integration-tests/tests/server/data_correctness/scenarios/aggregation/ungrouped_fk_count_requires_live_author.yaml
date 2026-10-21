@@ -1,4 +1,4 @@
-description: Ungrouped aggregation preserves relationship_kind filter in WHERE clause
+description: Ungrouped AUTHORED count reads mr.author_id instead of an edge table and counts only merge requests whose author is a live user
 
 config:
   security:

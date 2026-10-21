@@ -1,4 +1,4 @@
-description: FK traversal returns holder properties from the base query and hydrates the referenced endpoint
+description: FK traversal selects Note columns in the base query, checks the author id against live users, and hydrates the User columns
 
 query:
   json: |
