@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 
 use anyhow::Result;
@@ -192,31 +192,27 @@ pub(super) fn render(
 }
 
 fn file_index(rows: &[(String, Vec<&Hit>)], matched: impl Fn(&[&Hit]) -> usize) -> String {
-    let mut dirs: Vec<(&str, Vec<String>)> = Vec::new();
+    let mut dirs: Vec<(&str, Vec<(&str, usize)>)> = Vec::new();
     for (file, list) in rows {
         let (dir, name) = file.rsplit_once('/').unwrap_or(("", file.as_str()));
-        let entry = format!("{name} {}", matched(list));
         match dirs.iter_mut().find(|(d, _)| *d == dir) {
-            Some((_, names)) => names.push(entry),
-            None => dirs.push((dir, vec![entry])),
+            Some((_, names)) => names.push((name, matched(list))),
+            None => dirs.push((dir, vec![(name, matched(list))])),
         }
     }
     let mut out = format!(
         "{NOTE}{} files by directory, matching lines per file:\n",
         rows.len()
     );
-    let more = dirs.len().saturating_sub(FILE_INDEX_DIRECTORIES);
-    let rest: usize = dirs
+    let lines = index_lines(&dirs);
+    let more = lines.len().saturating_sub(FILE_INDEX_DIRECTORIES);
+    let rest: usize = lines
         .iter()
         .skip(FILE_INDEX_DIRECTORIES)
-        .map(|(_, n)| n.len())
+        .map(|(_, files)| files)
         .sum();
-    for (dir, names) in dirs.into_iter().take(FILE_INDEX_DIRECTORIES) {
-        let dir = match dir.is_empty() {
-            true => ".".to_string(),
-            false => format!("{dir}/"),
-        };
-        out.push_str(&format!("{NOTE}  {dir} {}\n", names.join(", ")));
+    for (line, _) in lines.into_iter().take(FILE_INDEX_DIRECTORIES) {
+        out.push_str(&format!("{NOTE}  {line}\n"));
     }
     if more > 0 {
         out.push_str(&format!(
@@ -224,6 +220,60 @@ fn file_index(rows: &[(String, Vec<&Hit>)], matched: impl Fn(&[&Hit]) -> usize) 
         ));
     }
     out
+}
+
+const SIBLING_MIN: usize = 3;
+
+fn index_lines(dirs: &[(&str, Vec<(&str, usize)>)]) -> Vec<(String, usize)> {
+    let parent = |dir: &str| {
+        dir.rsplit_once('/')
+            .map_or("", |(parent, _)| parent)
+            .to_string()
+    };
+    let mut siblings: BTreeMap<(String, &str), Vec<usize>> = BTreeMap::new();
+    for (dir, names) in dirs {
+        if let [(name, count)] = names.as_slice() {
+            siblings
+                .entry((parent(dir), *name))
+                .or_default()
+                .push(*count);
+        }
+    }
+    let mut shared = BTreeSet::new();
+    let mut lines = Vec::new();
+    for (dir, names) in dirs {
+        if let [(name, _)] = names.as_slice() {
+            let key = (parent(dir), *name);
+            let counts = &siblings[&key];
+            if counts.len() >= SIBLING_MIN {
+                if shared.insert(key.clone()) {
+                    let dir = match key.0.is_empty() {
+                        true => "*/".to_string(),
+                        false => format!("{}/*/", key.0),
+                    };
+                    let total: usize = counts.iter().sum();
+                    lines.push((
+                        format!(
+                            "{dir} {name} in {} directories, {total} lines",
+                            counts.len()
+                        ),
+                        counts.len(),
+                    ));
+                }
+                continue;
+            }
+        }
+        let dir = match dir.is_empty() {
+            true => ".".to_string(),
+            false => format!("{dir}/"),
+        };
+        let files: Vec<String> = names
+            .iter()
+            .map(|(name, count)| format!("{name} {count}"))
+            .collect();
+        lines.push((format!("{dir} {}", files.join(", ")), names.len()));
+    }
+    lines
 }
 
 /// The source of the one definition a single plain query term names, as rg context lines
@@ -289,6 +339,18 @@ pub(super) fn lookup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sibling_directories_with_the_same_lone_file_share_a_line() {
+        let dirs: Vec<(&str, Vec<(&str, usize)>)> = ["a/x", "a/y", "a/z"]
+            .into_iter()
+            .map(|dir| (dir, vec![("c.ts", 1)]))
+            .collect();
+        assert_eq!(
+            index_lines(&dirs),
+            vec![("a/*/ c.ts in 3 directories, 3 lines".to_string(), 3)]
+        );
+    }
 
     fn hit(file: &str, line: usize, text: &str, def: Option<(&str, usize, usize)>) -> Hit {
         let def = def.map(|(name, start, end)| Def {
