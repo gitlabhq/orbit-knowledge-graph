@@ -2,8 +2,8 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: GitLab Orbit Local indexes the code on your machine into a local graph. Your agent can search code that you have not pushed, with no GitLab account.
-title: GitLab Orbit Local
+description: The GitLab Orbit local graph holds the code on your machine. Your agent can search code that you have not pushed, with no GitLab account.
+title: GitLab Orbit local graph
 ---
 
 {{< details >}}
@@ -21,7 +21,7 @@ title: GitLab Orbit Local
 
 {{< /history >}}
 
-GitLab Orbit Local indexes the code on your machine into a local graph, so your agent can find definitions,
+The GitLab Orbit local graph holds the code on your machine, so your agent can find definitions,
 callers, and imports in code that you committed but have not pushed. It works offline and needs no GitLab account.
 For merge requests, pipelines, work items, and vulnerabilities, your agent queries the remote graph on GitLab.
 
@@ -122,6 +122,23 @@ The SQL is read-only and runs directly on the graph tables.
 - To query only the indexed commit of a checkout, use `--repo <path>`, for example `--repo .`.
 - `-F` accepts `table` (default), `json`, `ndjson`, and `csv`. `-f <file>` or `-` reads the SQL from a file or stdin.
 
+To join across repositories, run the query from any directory with `--all`, and join the node tables to
+`_orbit_manifest` on `project_id`. This query lists the symbols that one indexed repository imports from another:
+
+```shell
+glab orbit sql --all "SELECT DISTINCT im.repo_path AS importing_repo, i.identifier_name AS symbol,
+  dm.repo_path AS defining_repo, d.file_path AS defining_file, d.start_line AS defining_line
+  FROM gl_imported_symbol i
+  JOIN _orbit_manifest im ON im.project_id = i.project_id
+  JOIN gl_definition d ON d.name = i.identifier_name
+  JOIN _orbit_manifest dm ON dm.project_id = d.project_id
+  WHERE dm.repo_path <> im.repo_path
+  ORDER BY importing_repo, symbol"
+```
+
+The join matches on the symbol name. When several indexed repositories define the same name, narrow the query
+on `im.repo_path` or `i.import_path`.
+
 To list the tables and columns, run `glab orbit schema`, or `glab orbit schema gl_definition` for one table.
 To list the indexed repositories, run `glab orbit list`. A repository that failed to index has the status `error`
 and a reason in `error_message`.
@@ -137,7 +154,7 @@ Each node type has its own table. All relationships are in one edge table.
 | `gl_definition` | `Definition` |
 | `gl_imported_symbol` | `ImportedSymbol` |
 | `gl_edge` | All relationships, with `source_kind`, `relationship_kind`, and `target_kind` columns |
-| `_orbit_manifest` | One row for each indexed commit of each repository, with its branch, commit, and status |
+| `_orbit_manifest` | One row for each indexed commit of each repository, with its path (`repo_path`), branch, commit, and status |
 
 The local graph uses these relationships: `CONTAINS`, `DEFINES`, `IMPORTS`, `CALLS`, and `EXTENDS`.
 It has no `Branch`, `Project`, or other software development lifecycle (SDLC) nodes.
@@ -171,13 +188,10 @@ The local graph has no authorization layer. Anyone who can read its files can re
 Index and query commands send no code, file paths, or query text off your machine. Each command sends one
 [telemetry](../cli.md#settings-and-telemetry) event unless you turn telemetry off. The CLI also uses the network to install and update the binary, and to fetch the GitLab Orbit skill.
 
-## Billing
-
-GitLab Orbit Local does not consume GitLab Credits. All processing is on your machine.
-
 ## Related topics
 
 - [GitLab Orbit CLI](../cli.md)
 - [Connect your agent](../agents/_index.md)
-- [What GitLab Orbit indexes](../schema.md)
+- [Indexed data](../schema.md)
+- [Billing and credit usage](../billing.md)
 - [Troubleshooting the local graph](../troubleshooting.md#local-graph)

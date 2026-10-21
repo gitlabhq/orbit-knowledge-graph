@@ -52,13 +52,15 @@ To choose which agents use GitLab Orbit:
    | Option | Gives the GitLab Orbit tools to |
    |--------|---------------------------------|
    | **Agentic Chat** | GitLab Duo Agentic Chat. |
+   | **Orbit Agent** | The standalone Orbit agent in GitLab Duo. |
    | **Other Foundational Agents** | Foundational agents outside chat, for example the Security Analyst Agent. |
    | **Custom Agents** | Custom agents that users build. |
 
 1. Select **Save changes**.
+1. Open GitLab Duo Chat and confirm that the status dot next to **Orbit** in the chat header is green.
 
-In GitLab Duo Chat, the **Orbit** control in the chat header shows whether GitLab Orbit is on.
-Select it to change the same three options, labeled **Agentic chat**, **Foundational agents**, and **Custom agents**.
+Select the **Orbit** control to turn the **Agentic chat**, **Foundational agents**, and **Custom agents** toggles
+on or off without leaving the chat.
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
@@ -121,12 +123,7 @@ Show me all critical and high severity open vulnerabilities in this group.
 What work items are blocking this epic?
 ```
 
-For more prompts, see [use cases](../use-cases.md).
-
-## Billing
-
-GitLab Orbit queries from GitLab Duo agents consume GitLab Credits, in addition to the GitLab Credits for
-Agent Platform. For more information, see [billing](../how-it-works.md#billing).
+For more prompts, see [prompt examples](../prompt-examples.md).
 
 ## Known issues
 
@@ -138,4 +135,5 @@ Agent Platform. For more information, see [billing](../how-it-works.md#billing).
 
 - [Connect your agent](_index.md)
 - [MCP servers](mcp.md)
-- [Use cases](../use-cases.md)
+- [Prompt examples](../prompt-examples.md)
+- [Billing and credit usage](../billing.md)
