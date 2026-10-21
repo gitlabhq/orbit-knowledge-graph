@@ -17,18 +17,20 @@ use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
 
 const BRANCH_FALLBACK_CONCURRENCY: usize = 4;
 
-const CHANGE_QUERY_SQL: &str = r#"WITH
+const CHANGES_CTE_SQL: &str = r#"WITH
   enabled AS (
     {{enabled_namespaces}}
   ),
   changed AS (
 {{branches}}
   )
-SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
+"#;
+
+const CHANGE_QUERY_SQL: &str = r#"SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
 FROM changed
 INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#;
 
-const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path, '{{target}}' AS target
+const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path, '{{target}}' AS target, {{watermark_column}} AS watermark
     FROM {{table}}
     WHERE {{watermark_column}} > {lower:String}
       AND {{watermark_column}} <= {upper:String}
@@ -225,24 +227,28 @@ impl NamespaceChangeQuery {
             .map(|source| BranchQuery {
                 table: source.table.clone(),
                 target: source.target.clone(),
-                sql: render_change_query(&BTreeSet::from([source.clone()])),
+                sql: render_change_query(CHANGE_QUERY_SQL, &BTreeSet::from([source.clone()])),
             })
             .collect();
         Self {
-            combined_sql: render_change_query(&sources),
+            combined_sql: render_change_query(CHANGE_QUERY_SQL, &sources),
             branches,
         }
     }
 }
 
-fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
+/// Renders `select` over the changed rows of every source, as `changed`, and the enabled roots, as `enabled`.
+pub(super) fn render_change_query(
+    select: &str,
+    reindex_sources: &BTreeSet<ReindexSource>,
+) -> String {
     let branches = reindex_sources
         .iter()
         .map(render_change_branch)
         .collect::<Vec<_>>()
         .join("\nUNION ALL\n");
 
-    CHANGE_QUERY_SQL
+    format!("{CHANGES_CTE_SQL}{select}")
         .replace("{{enabled_namespaces}}", resolved_enabled_namespaces_sql())
         .replace("{{branches}}", &branches)
 }
@@ -506,7 +512,7 @@ mod tests {
     {enabled}
   ),
   changed AS (
-    SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path, 'WorkItem' AS target
+    SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path, 'WorkItem' AS target, _siphon_watermark AS watermark
     FROM work_items
     WHERE _siphon_watermark > {{lower:String}}
       AND _siphon_watermark <= {{upper:String}}

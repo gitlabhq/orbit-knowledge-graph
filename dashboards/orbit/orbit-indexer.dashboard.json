@@ -6745,7 +6745,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "Duration of a full handler invocation across all its pipelines.",
+          "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
           "fieldConfig": {
             "defaults": {
               "custom": {
@@ -6764,6 +6764,126 @@
             "y": 335
           },
           "id": 130,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "histogram_quantile(0.5, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\"}[5m])))",
+              "legendFormat": "p50 {{entity}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\"}[5m])))",
+              "legendFormat": "p95 {{entity}}",
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\"}[5m])))",
+              "legendFormat": "p99 {{entity}}",
+              "refId": "C"
+            }
+          ],
+          "title": "gkg_indexer_sdlc_freshness_lag_seconds — p50/p95/p99",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 335
+          },
+          "id": 131,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{entity}}",
+              "refId": "A"
+            }
+          ],
+          "title": "gkg_indexer_sdlc_freshness_lag_seconds — observation rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "Duration of a full handler invocation across all its pipelines.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "s"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 335
+          },
+          "id": 132,
           "options": {
             "legend": {
               "calcs": [
@@ -6829,10 +6949,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
-            "y": 335
+            "x": 0,
+            "y": 343
           },
-          "id": 131,
+          "id": 133,
           "options": {
             "legend": {
               "calcs": [
@@ -6880,10 +7000,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 335
+            "x": 8,
+            "y": 343
           },
-          "id": 132,
+          "id": 134,
           "options": {
             "legend": {
               "calcs": [
@@ -6949,10 +7069,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
+            "x": 16,
             "y": 343
           },
-          "id": 133,
+          "id": 135,
           "options": {
             "legend": {
               "calcs": [
@@ -7000,10 +7120,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
-            "y": 343
+            "x": 0,
+            "y": 351
           },
-          "id": 134,
+          "id": 136,
           "options": {
             "legend": {
               "calcs": [
@@ -7051,10 +7171,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 343
+            "x": 8,
+            "y": 351
           },
-          "id": 135,
+          "id": 137,
           "options": {
             "legend": {
               "calcs": [
@@ -7102,10 +7222,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
+            "x": 16,
             "y": 351
           },
-          "id": 136,
+          "id": 138,
           "options": {
             "legend": {
               "calcs": [
@@ -7171,10 +7291,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
-            "y": 351
+            "x": 0,
+            "y": 359
           },
-          "id": 137,
+          "id": 139,
           "options": {
             "legend": {
               "calcs": [
@@ -7222,10 +7342,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 351
+            "x": 8,
+            "y": 359
           },
-          "id": 138,
+          "id": 140,
           "options": {
             "legend": {
               "calcs": [
@@ -7263,9 +7383,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 359
+        "y": 367
       },
-      "id": 139,
+      "id": 141,
       "panels": [
         {
           "datasource": {
@@ -7288,9 +7408,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 360
+            "y": 368
           },
-          "id": 140,
+          "id": 142,
           "options": {
             "legend": {
               "calcs": [
@@ -7363,9 +7483,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 360
+            "y": 368
           },
-          "id": 141,
+          "id": 143,
           "interval": "2m",
           "options": {
             "legend": {
@@ -7422,9 +7542,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 368
+            "y": 376
           },
-          "id": 142,
+          "id": 144,
           "interval": "2m",
           "options": {
             "legend": {
@@ -7475,9 +7595,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 368
+            "y": 376
           },
-          "id": 143,
+          "id": 145,
           "options": {
             "legend": {
               "calcs": [
@@ -7550,9 +7670,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 376
+            "y": 384
           },
-          "id": 144,
+          "id": 146,
           "interval": "2m",
           "options": {
             "legend": {
@@ -7609,9 +7729,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 376
+            "y": 384
           },
-          "id": 145,
+          "id": 147,
           "interval": "2m",
           "options": {
             "legend": {
@@ -7662,9 +7782,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 384
+            "y": 392
           },
-          "id": 146,
+          "id": 148,
           "options": {
             "legend": {
               "calcs": [
@@ -7731,9 +7851,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 384
+            "y": 392
           },
-          "id": 147,
+          "id": 149,
           "options": {
             "legend": {
               "calcs": [
@@ -7782,9 +7902,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 384
+            "y": 392
           },
-          "id": 148,
+          "id": 150,
           "options": {
             "legend": {
               "calcs": [
@@ -7822,9 +7942,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 392
+        "y": 400
       },
-      "id": 149,
+      "id": 151,
       "panels": [
         {
           "datasource": {
@@ -7847,9 +7967,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 393
+            "y": 401
           },
-          "id": 150,
+          "id": 152,
           "options": {
             "legend": {
               "calcs": [
@@ -7916,9 +8036,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 393
+            "y": 401
           },
-          "id": 151,
+          "id": 153,
           "options": {
             "legend": {
               "calcs": [
@@ -7967,9 +8087,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 393
+            "y": 401
           },
-          "id": 152,
+          "id": 154,
           "options": {
             "legend": {
               "calcs": [
@@ -8018,9 +8138,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 401
+            "y": 409
           },
-          "id": 153,
+          "id": 155,
           "options": {
             "legend": {
               "calcs": [
@@ -8087,9 +8207,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 401
+            "y": 409
           },
-          "id": 154,
+          "id": 156,
           "options": {
             "legend": {
               "calcs": [
@@ -8138,9 +8258,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 401
+            "y": 409
           },
-          "id": 155,
+          "id": 157,
           "options": {
             "legend": {
               "calcs": [
@@ -8189,9 +8309,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 409
+            "y": 417
           },
-          "id": 156,
+          "id": 158,
           "options": {
             "legend": {
               "calcs": [
@@ -8240,9 +8360,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 409
+            "y": 417
           },
-          "id": 157,
+          "id": 159,
           "options": {
             "legend": {
               "calcs": [

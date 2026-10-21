@@ -28,6 +28,11 @@ pub const LATENCY_FAST_FINE: &[f64] = &[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5
 /// sub-second RPC paths.
 pub const LATENCY_FAST: &[f64] = &[0.1, 0.25, 0.5, 1.0, 2.5, 5.0];
 
+/// Data freshness buckets (1 min to 16 h).
+pub const FRESHNESS: &[f64] = &[
+    60.0, 300.0, 900.0, 1800.0, 3600.0, 7200.0, 14400.0, 28800.0, 57600.0,
+];
+
 /// Batch-size distribution from single-row through moderate bulk operations.
 pub const BATCH_SIZE: &[f64] = &[1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 500.0, 1000.0];
 
