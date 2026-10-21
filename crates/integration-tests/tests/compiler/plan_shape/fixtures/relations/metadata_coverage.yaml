@@ -46,7 +46,8 @@ cases:
         planned:
           expect:
             - (Filter mr.state = 'merged', mr._deleted = false, ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
-            - (Join ON p.id = mr.project_id (_) (_))
+            - (Project _id_source.project_id AS id (Bind _id_source (_)))
+            - (Filter p.id IN ?.id (_))
           reject:
             - (Scan Table(gl_edge) ...)
             - (Project p.id AS id (_))
