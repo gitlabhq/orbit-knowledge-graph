@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use crate::common::compile;
 use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, TestContext, compile_and_execute, load_ontology,
-    run_redaction, test_security_context,
+    resolve_owners, run_redaction, test_security_context,
 };
 use integration_testkit::{run_subtests, run_subtests_shared, t};
 use orbit_server::redaction::QueryResult;
@@ -3239,6 +3239,8 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
         );
     }
 
+    resolve_owners(ctx, &query, &mut result).await;
+
     let mut mock_service = MockRedactionService::new();
     // File and Definition both have resource_type "project", ability "read_code".
     // Authorizing only the Project ID (not the File/Definition IDs) proves auth
@@ -3275,6 +3277,8 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
         HashSet::from([5000, 5001]),
         "before deny, both Definition neighbors should be present"
     );
+
+    resolve_owners(ctx, &query, &mut result).await;
 
     let mut mock_service = MockRedactionService::new();
     mock_service.deny("project", &[1000]);
@@ -3417,6 +3421,8 @@ async fn neighbors_indirect_auth_mixed_projects(ctx: &TestContext) {
         3,
         "should have 3 total neighbors across both files"
     );
+
+    resolve_owners(ctx, &query, &mut result).await;
 
     let mut mock_service = MockRedactionService::new();
     mock_service.allow("project", &[1000]);
