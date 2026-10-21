@@ -1,5 +1,5 @@
 name: grep
-version: 2.7.0
+version: 2.8.0
 short: Search every line in local code, tests, config, and docs
 description: >-
   Search every line in local code, tests, config, and docs, like ripgrep.
@@ -27,6 +27,7 @@ description: >-
   group, URL, `Project[id]`, or `Group[id]` as a path to search it instead,
   including its code when it has no local checkout. An indexed checkout of that
   project is searched locally.
-  `mr:`, `issue:`, `commit:`, `comment:`, and `milestone:` search only GitLab.
+  `mr:`, `issue:`, `commit:`, `comment:`, and `milestone:` search only GitLab;
+  `user:`, `project:`, and `group:` add scopes a plain search skips.
   `branch:` finds branches by words from their names, with their merge requests
   and pipelines.

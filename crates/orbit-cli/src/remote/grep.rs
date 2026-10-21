@@ -18,6 +18,9 @@ pub(crate) const SCOPES: &[(&str, &str)] = &[
     ("Branch", "branches"),
 ];
 const BRANCHES: &str = "branches";
+/// Scopes a search without a qualifier asks for; `user:`, `project:`, `group:`, and `milestone:`
+/// name the others.
+const DEFAULT_SCOPES: &[&str] = &["work_items", "merge_requests", "blobs", "commits", "notes"];
 
 pub(crate) fn scope_for(kind: &str) -> Option<&'static str> {
     let lower = kind.to_ascii_lowercase();
@@ -137,6 +140,17 @@ struct Match {
     text: String,
 }
 
+fn api_scopes(requested: &[&'static str]) -> Vec<&'static str> {
+    match requested.is_empty() {
+        true => DEFAULT_SCOPES.to_vec(),
+        false => requested
+            .iter()
+            .copied()
+            .filter(|scope| *scope != BRANCHES)
+            .collect(),
+    }
+}
+
 pub(crate) async fn search(request: Request, query: String) -> Outcome {
     let origin = match &request.target {
         Target::Origin(dir) => match super::origin::project(dir) {
@@ -179,12 +193,7 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         (Target::ProjectId(id), _) => ("project_id", id.to_string()),
         (Target::GroupId(id), _) => ("namespace_id", id.to_string()),
     };
-    let api_scopes: Vec<&str> = request
-        .scopes
-        .iter()
-        .copied()
-        .filter(|scope| *scope != BRANCHES)
-        .collect();
+    let api_scopes = api_scopes(&request.scopes);
     let only_branches = !request.scopes.is_empty() && api_scopes.is_empty();
     let keywords = match only_branches {
         true => &[][..],
