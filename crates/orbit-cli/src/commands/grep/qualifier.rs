@@ -110,7 +110,9 @@ pub(super) fn parse(query: &str) -> Option<Parsed> {
     let mut parsed = Parsed::default();
     let mut sections: Vec<(Option<String>, Vec<String>)> = vec![(None, Vec::new())];
     let mut any = false;
-    for token in tokens(query) {
+    let tokens = tokens(query);
+    let last = tokens.len().saturating_sub(1);
+    for (index, token) in tokens.into_iter().enumerate() {
         let Some((name, value)) = token.split_once(':') else {
             sections.last_mut().expect("a section").1.push(token);
             continue;
@@ -122,6 +124,12 @@ pub(super) fn parse(query: &str) -> Option<Parsed> {
         match name.to_ascii_lowercase().as_str() {
             "file" | "path" if !value.is_empty() => parsed.globs.extend(globs_for(value)),
             "repo" if !value.is_empty() => parsed.targets.push(value.to_string()),
+            _ if value.is_empty()
+                && (index != last || sections.last().is_none_or(|(_, words)| words.is_empty())) =>
+            {
+                sections.last_mut().expect("a section").1.push(token);
+                continue;
+            }
             _ => match kind_for(name) {
                 Some(kind) => {
                     let words = (!value.is_empty()).then(|| value.to_string());
@@ -233,7 +241,7 @@ mod tests {
     #[test]
     fn each_kind_qualifier_starts_its_own_search() {
         assert_eq!(
-            sections("mr:test x y def: run job"),
+            sections("mr:test x y def:run job"),
             vec![
                 (strings(&["MergeRequest"]), "test x y".into()),
                 (strings(&["Definition"]), "run job".into()),
@@ -244,7 +252,7 @@ mod tests {
             vec![(strings(&["methods"]), "rate limit".into())]
         );
         assert_eq!(
-            sections("merge_requests: x"),
+            sections("merge_requests:x"),
             vec![(strings(&["MergeRequest"]), "x".into())]
         );
         let parsed = parse("issue:rate limit path:src repo:g/p").unwrap();
@@ -257,6 +265,15 @@ mod tests {
         assert_eq!(parse("type:go grep"), None);
         assert_eq!(parse("is:mr x"), None);
         assert_eq!(parse("stage: test"), None);
+        for literal in [
+            "project: [",
+            "projects: \\[",
+            "milestone: '19.6'",
+            "project: string",
+            "project:",
+        ] {
+            assert_eq!(parse(literal), None, "{literal}");
+        }
         let mut paths = strings(&["def:", "src/"]);
         assert_eq!(
             absorb_trailing(Some("x".into()), &mut paths).as_deref(),

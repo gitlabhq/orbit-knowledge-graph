@@ -229,6 +229,14 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
             Ok(responses)
         }
     };
+    let keywords: Vec<String> = keywords
+        .iter()
+        .filter(|k| k.trim().len() >= 2)
+        .cloned()
+        .collect();
+    if keywords.is_empty() && !only_branches {
+        return Outcome::Empty;
+    }
     let mut responses = match fetch(keywords.to_vec()).await {
         Ok(responses) => responses,
         Err(outcome) => return outcome,
