@@ -40,6 +40,11 @@ fixtures:
           return refs_resolve_ref_unsafe(wt->refs, "HEAD", 0, 0, &flags);
       }
 
+      const char *control_args(struct ref_store *refs) {
+          int flags = 0;
+          return refs_resolve_ref_unsafe(refs, "HEAD", 0, 0, &flags);
+      }
+
 tests:
   - name: "the outer call links when arguments contain a call and a field access"
     query: |
@@ -52,10 +57,18 @@ tests:
       - { row: { caller: add_head_info, callee: get_worktree_ref_store } }
       - { row: { caller: add_head_info, callee: refs_resolve_ref_unsafe } }
 
-  - name: "the control call with plain arguments still links"
+  - name: "the outer call links when the first argument is a field access"
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name = "plain_args" AND callee.name = "refs_resolve_ref_unsafe"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "the control call without calls or field accesses in its arguments links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "control_args" AND callee.name = "refs_resolve_ref_unsafe"
       RETURN callee.name AS callee
     assert:
       - { row_count: 1 }
