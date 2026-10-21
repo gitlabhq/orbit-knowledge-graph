@@ -549,7 +549,7 @@ fn render_local(
     let workspace::IndexedRepo { git, client } = workspace::open_indexed(repo, db)?;
     let hydrator = NodeHydrator::embedded("Definition")?;
     let targets = resolve_targets(&client, &git, &hydrator, targets)?;
-    let mut out = String::new();
+    let mut out = missing_note(&targets.missing);
     for dir in &targets.dirs {
         render_dir(&mut out, &client, &git, dir)?;
     }
@@ -626,6 +626,7 @@ struct Targets {
     ids: Vec<i64>,
     ranges: Vec<(String, usize, usize)>,
     dirs: Vec<String>,
+    missing: Vec<anyhow::Error>,
 }
 
 pub(crate) fn split_line_range(target: &str) -> Option<(&str, usize, usize)> {
@@ -653,6 +654,7 @@ fn resolve_targets(
         ids,
         ranges,
         dirs,
+        missing,
     } = &mut resolved;
     let mut seen = BTreeSet::new();
     for target in targets.iter().filter(|target| seen.insert(*target)) {
@@ -709,7 +711,8 @@ fn resolve_targets(
                         found = named(client, git, target)?;
                     }
                     if found.is_empty() {
-                        return Err(error);
+                        missing.push(error);
+                        continue;
                     }
                     for id in found {
                         if !ids.contains(&id) {
@@ -720,7 +723,19 @@ fn resolve_targets(
             }
         }
     }
+    let nothing = files.is_empty()
+        && file_ids.is_empty()
+        && ids.is_empty()
+        && ranges.is_empty()
+        && dirs.is_empty();
+    if nothing && !missing.is_empty() {
+        return Err(missing.remove(0));
+    }
     Ok(resolved)
+}
+
+fn missing_note(missing: &[anyhow::Error]) -> String {
+    missing.iter().map(|error| format!("» {error}\n")).collect()
 }
 
 const NAMED_MAX: usize = 5;
