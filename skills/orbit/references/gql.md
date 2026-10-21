@@ -279,7 +279,7 @@ Artifact Registry packages.
 
 `Package` holds one row per package version. `HAS_PACKAGE_FILE` links a
 version to its stored files. `BUILT_BY` links a package or file to the CI/CD
-pipeline that published it. `DECLARES_DEPENDENCY` links a package to the
+pipeline that built it. `DECLARES_DEPENDENCY` links a package to the
 dependencies it declares. `HAS_VULNERABILITY` links a package to a known
 vulnerability.
 
