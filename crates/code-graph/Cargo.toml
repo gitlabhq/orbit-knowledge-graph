@@ -8,6 +8,7 @@ license = "MIT"
 test-utils = []
 
 [dependencies]
+orbit-log-fields = { workspace = true }
 treesitter-visit = { path = "treesitter-visit", features = ["builtin-parser"] }
 orbit-utils = { path = "../utils" }
 orbit-arrow = { path = "../utils/arrow" }
@@ -62,6 +63,7 @@ oxc_resolver = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 # This crate opts into the workspace lints AND additionally denies bare `#[allow(..)]`
 # attributes. A crate-local `[lints.clippy]` table replaces (does not merge with) the

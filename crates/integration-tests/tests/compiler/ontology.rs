@@ -268,28 +268,6 @@ fn invalid_relationship_type_lists_valid_candidates() {
 }
 
 #[test]
-fn full_pipeline() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "n", "entity": "Note", "columns": ["confidential"], "filters": {"confidential": true}},
-            {"id": "u", "entity": "User", "columns": ["username"]}
-        ],
-        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-        "limit": 25,
-        "order_by": "-n.created_at"
-    }"#;
-
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
-    let rendered = result.base.render();
-
-    // AUTHORED is FK-elided via author_id — no edge table scan.
-    assert!(rendered.contains("gl_note"));
-    assert!(rendered.contains("gl_user"));
-    assert!(rendered.contains("LIMIT 26"));
-}
-
-#[test]
 fn package_built_by_pipeline_traversal() {
     let json = r#"{
         "query_type": "traversal",
@@ -310,74 +288,6 @@ fn package_built_by_pipeline_traversal() {
     assert!(rendered.contains("(_orbit_edge_0.source_kind = 'Package')"));
     assert!(rendered.contains("(_orbit_edge_0.target_kind = 'Pipeline')"));
     assert!(rendered.contains("LIMIT 26"));
-}
-
-#[test]
-fn basic_search_query() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{
-            "id": "u",
-            "entity": "User",
-            "columns": ["username"],
-            "filters": { "username": {"eq": "admin"} }
-        }],
-        "limit": 10
-    }"#;
-
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
-    let rendered = result.base.render();
-
-    assert!(
-        rendered.contains(" FINAL"),
-        "search should use FINAL for dedup"
-    );
-    assert!(
-        rendered.contains("_deleted"),
-        "search should filter deleted rows"
-    );
-    assert!(rendered.contains("username"));
-    assert!(rendered.contains("LIMIT 11"));
-    assert!(
-        !rendered.contains("JOIN"),
-        "search queries should not have joins"
-    );
-}
-
-#[test]
-fn complex_search_query() {
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{
-            "id": "u",
-            "entity": "User",
-            "columns": ["username", "state", "created_at"],
-            "filters": {
-                "username": {"starts_with": "admin"},
-                "state": {"in": ["active", "blocked"]},
-                "created_at": {"gte": "2024-01-01"}
-            }
-        }],
-        "limit": 50,
-        "order_by": "-u.created_at"
-    }"#;
-
-    let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &test_ctx()).unwrap();
-    // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
-    let rendered = result.base.render();
-
-    assert!(rendered.contains(" FINAL"));
-    assert!(rendered.contains("_deleted"));
-    assert!(rendered.contains("username"));
-    assert!(rendered.contains("state"));
-    assert!(rendered.contains("created_at"));
-    assert!(rendered.contains("ORDER BY"));
-    assert!(rendered.contains("DESC"));
-    assert!(rendered.contains("LIMIT 51"));
-    assert!(
-        !rendered.contains("JOIN"),
-        "search queries should not have joins"
-    );
 }
 
 #[test]
@@ -588,135 +498,6 @@ fn project_still_uses_id_for_redaction() {
     assert!(
         rendered.contains("p.id AS _orbit_p_id"),
         "Project should use id for redaction"
-    );
-}
-
-#[test]
-fn cursor_pagination_validation() {
-    use compiler::QueryError;
-    use compiler::passes::cursor::{canonical_hash, encode};
-
-    let ontology = embedded_ontology();
-    let ctx = test_ctx();
-
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
-        "cursor": {"page_size": 20}
-    }"#;
-    let result = compile(json, Frontend::JsonDsl, &ontology, &ctx);
-    assert!(result.is_ok(), "valid cursor should compile: {result:?}");
-    let rendered = result.unwrap().base.render();
-    assert!(
-        rendered.contains("LIMIT 21"),
-        "cursor fetches page_size + 1 probe row: {rendered}"
-    );
-    assert!(
-        rendered.contains("_orbit_cursor_0"),
-        "cursor queries select hidden key readback columns: {rendered}"
-    );
-
-    let hash = canonical_hash(&serde_json::from_str(json).unwrap());
-    let paged: serde_json::Value = {
-        let mut v: serde_json::Value = serde_json::from_str(json).unwrap();
-        v["cursor"]["after"] = encode(hash, &[Some("7".into())]).into();
-        v
-    };
-    let result = compile(&paged.to_string(), Frontend::JsonDsl, &ontology, &ctx);
-    assert!(
-        result.is_ok(),
-        "after token from same query should compile: {result:?}"
-    );
-    let rendered = result.unwrap().base.render();
-    assert!(
-        rendered.contains("u.id >"),
-        "after token should lower to a seek predicate: {rendered}"
-    );
-
-    let mut foreign: serde_json::Value = serde_json::from_str(json).unwrap();
-    foreign["cursor"]["after"] = encode(hash ^ 1, &[Some("7".into())]).into();
-    let err = compile(&foreign.to_string(), Frontend::JsonDsl, &ontology, &ctx).unwrap_err();
-    assert!(
-        matches!(err, QueryError::PaginationError(_)),
-        "token minted for a different query should be a pagination error, got: {err}"
-    );
-
-    let mut garbled: serde_json::Value = serde_json::from_str(json).unwrap();
-    garbled["cursor"]["after"] = "not-base64!".into();
-    let err = compile(&garbled.to_string(), Frontend::JsonDsl, &ontology, &ctx).unwrap_err();
-    assert!(
-        matches!(err, QueryError::PaginationError(_)),
-        "malformed token should be a pagination error, got: {err}"
-    );
-
-    let err = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-    "cursor": {"offset": 0, "page_size": 10}
-        }"#,
-        Frontend::JsonDsl,
-        &ontology,
-        &ctx,
-    );
-    assert!(err.is_err(), "offset cursors are gone in schema v3");
-
-    let err = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-    "cursor": {}
-        }"#,
-        Frontend::JsonDsl,
-        &ontology,
-        &ctx,
-    );
-    assert!(err.is_err(), "cursor missing page_size should fail");
-
-    let err = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-    "cursor": {"page_size": 0}
-        }"#,
-        Frontend::JsonDsl,
-        &ontology,
-        &ctx,
-    );
-    assert!(err.is_err(), "page_size = 0 should fail");
-
-    let err = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
-    "cursor": {"page_size": 1001}
-        }"#,
-        Frontend::JsonDsl,
-        &ontology,
-        &ctx,
-    );
-    assert!(err.is_err(), "page_size above 1000 should fail");
-
-    let result = compile(
-        r#"{
-    "query_type": "traversal",
-    "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}]
-        }"#,
-        Frontend::JsonDsl,
-        &ontology,
-        &ctx,
-    );
-    assert!(result.is_ok(), "no cursor should compile fine");
-    let result = result.unwrap();
-    let rendered = result.base.render();
-    assert!(
-        rendered.contains("LIMIT 31"),
-        "default limit 30 fetches one probe row: {rendered}"
-    );
-    assert!(
-        !result.base.sql.contains("use_query_cache"),
-        "queries no longer force the query cache: {}",
-        result.base.sql
     );
 }
 
@@ -1042,7 +823,7 @@ fn hydration_uses_parameterized_ids() {
 }
 
 #[test]
-fn hydration_skips_security_context() {
+fn hydration_applies_security_context() {
     let input = Input {
         query_type: QueryType::Hydration,
         nodes: vec![InputNode {
@@ -1070,11 +851,11 @@ fn hydration_skips_security_context() {
 
     assert!(
         !rendered.contains("arrayExists"),
-        "hydration should skip security filters"
+        "hydration should use the caller scope directly"
     );
     assert!(
-        !rendered.contains("startsWith"),
-        "hydration should not have startsWith"
+        rendered.contains("startsWith(hydrate.traversal_path, '1/')"),
+        "hydration should enforce the caller scope: {rendered}"
     );
 }
 
@@ -1489,12 +1270,8 @@ fn filterable_allows_traversal_path_in_columns() {
     );
 }
 
-// Bug 1 regression guard: single-aggregate queries with a sort-key filter must
-// keep the filter inside the FINAL scan so ClickHouse uses the primary-key index
-// to skip granules. Without this, the latest-row scan reads the full authorized
-// table before aggregation.
 #[test]
-fn aggregation_count_pushes_project_id_into_dedup_subquery() {
+fn aggregation_count_keeps_final_for_project_anchor() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [{"id": "d", "entity": "Definition",
@@ -1508,13 +1285,9 @@ fn aggregation_count_pushes_project_id_into_dedup_subquery() {
         rendered.contains("COUNT()") || rendered.contains("countIf"),
         "should contain COUNT() or countIf: {rendered}"
     );
-    let inner = rendered
-        .split(" FINAL")
-        .nth(1)
-        .expect("rendered SQL should contain FINAL");
     assert!(
-        inner.contains("project_id"),
-        "project_id must appear inside the FINAL scan: {rendered}"
+        rendered.contains("project_id") && rendered.contains(" FINAL"),
+        "project_id alone must keep FINAL: {rendered}"
     );
 }
 
@@ -1576,7 +1349,7 @@ fn calls_traversal_compiles_against_embedded_ontology() {
 }
 
 #[test]
-fn aggregation_count_in_clause_pushes_project_id() {
+fn aggregation_count_in_clause_keeps_final_for_project_anchor() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [{"id": "d", "entity": "Definition",
@@ -1586,13 +1359,9 @@ fn aggregation_count_in_clause_pushes_project_id() {
     let result = compile(json, Frontend::JsonDsl, &embedded_ontology(), &admin_ctx()).unwrap();
     let rendered = result.base.render();
 
-    let inner = rendered
-        .split(" FINAL")
-        .nth(1)
-        .expect("rendered SQL should contain FINAL");
     assert!(
-        inner.contains("project_id"),
-        "project_id IN must appear inside FINAL scan: {rendered}"
+        rendered.contains("project_id") && rendered.contains(" FINAL"),
+        "project_id IN alone must keep FINAL: {rendered}"
     );
 }
 

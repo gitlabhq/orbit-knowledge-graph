@@ -28,8 +28,8 @@ use service::ProfilerPipelineService;
     about = "Profile GKG queries against ClickHouse"
 )]
 struct Cli {
-    /// JSON query string or @filepath (single query or named query collection);
-    /// with --gql, one GQL statement or @filepath to one statement
+    /// Query string or @filepath. Named JSON objects map names to JSON queries,
+    /// or to GQL strings when used with --gql.
     query: String,
 
     /// Read the query as one GQL statement instead of Orbit query JSON
@@ -294,34 +294,32 @@ fn run_compile_only(
     show: &CompileShow,
     cli: &Cli,
 ) -> Result<()> {
-    let parsed: serde_json::Value = if cli.gql {
-        serde_json::Value::Null
-    } else {
-        serde_json::from_str(query_json).context("failed to parse query JSON")?
-    };
+    let entries = query_entries(query_json, cli)?;
 
-    let is_single =
-        cli.gql || matches!(parsed.get("query_type"), Some(serde_json::Value::String(_)));
-
-    let entries: Vec<(String, String)> = if is_single {
-        vec![("query".to_string(), query_json.to_string())]
-    } else {
-        let obj = parsed
-            .as_object()
-            .context("multi-query file must be a JSON object")?;
-        let mut entries: Vec<_> = obj
-            .iter()
-            .map(|(k, v)| (k.clone(), serde_json::to_string(v).unwrap()))
-            .collect();
-        if let Some(ref f) = cli.filter {
-            let re = regex::Regex::new(f)?;
-            entries.retain(|(k, _)| re.is_match(k));
+    if entries.len() > 1 || cli.output.is_some() {
+        let mut report = BTreeMap::new();
+        for (name, query) in entries {
+            let value = match compile_one(&query, frontend(cli), ontology, security_ctx) {
+                Ok(compiled) => {
+                    let mut value = serde_json::json!({ "query": query });
+                    if matches!(show, CompileShow::Base | CompileShow::Both) {
+                        value["base_sql"] = serde_json::Value::String(compiled.base.render());
+                    }
+                    if matches!(show, CompileShow::Hydration | CompileShow::Both) {
+                        value["hydration"] =
+                            serde_json::Value::String(format_hydration(&compiled.hydration));
+                    }
+                    value
+                }
+                Err(error) => serde_json::json!({ "query": query, "error": format!("{error:#}") }),
+            };
+            report.insert(name, value);
         }
-        entries
-    };
+        return emit_output(&cli.format, &report, cli.output.as_ref());
+    }
 
-    for (name, json) in &entries {
-        let compiled = compile_one(json, frontend(cli), ontology, security_ctx)?;
+    for (name, query) in &entries {
+        let compiled = compile_one(query, frontend(cli), ontology, security_ctx)?;
         if entries.len() > 1 {
             eprintln!("--- {} ---", name);
         }
@@ -345,6 +343,51 @@ fn run_compile_only(
         }
     }
     Ok(())
+}
+
+fn query_entries(raw: &str, cli: &Cli) -> Result<Vec<(String, String)>> {
+    let parsed = serde_json::from_str::<serde_json::Value>(raw);
+    let single_json = parsed.as_ref().ok().is_some_and(|value| {
+        value
+            .get("query_type")
+            .is_some_and(serde_json::Value::is_string)
+    });
+    if (!cli.gql && single_json) || (cli.gql && parsed.is_err()) {
+        return Ok(vec![("query".to_string(), raw.to_string())]);
+    }
+
+    let parsed = parsed.context(if cli.gql {
+        "GQL query files must contain one statement or a JSON object of named statements"
+    } else {
+        "failed to parse query JSON"
+    })?;
+    let queries = parsed
+        .as_object()
+        .context("multi-query file must be a JSON object")?;
+    let mut entries = queries
+        .iter()
+        .map(|(name, query)| {
+            let query = if cli.gql {
+                query
+                    .as_str()
+                    .map(str::to_string)
+                    .with_context(|| format!("named GQL query '{name}' must be a string"))?
+            } else {
+                serde_json::to_string(query).context("failed to serialize query value")?
+            };
+            Ok((name.clone(), query))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if let Some(filter) = &cli.filter {
+        let regex = regex::Regex::new(filter)?;
+        entries.retain(|(name, _)| regex.is_match(name));
+    }
+    anyhow::ensure!(
+        !entries.is_empty(),
+        "no queries matched filter {:?}",
+        cli.filter.as_deref().unwrap_or("")
+    );
+    Ok(entries)
 }
 
 #[tokio::main]
@@ -424,20 +467,13 @@ async fn main() -> Result<()> {
         return run_raw_sql(&client, &query_json, &cli, &profiling_config).await;
     }
 
-    let parsed: serde_json::Value = if cli.gql {
-        serde_json::Value::Null
-    } else {
-        serde_json::from_str(&query_json).context("failed to parse query JSON")?
-    };
-
-    let is_single_query =
-        cli.gql || matches!(parsed.get("query_type"), Some(serde_json::Value::String(_)));
+    let entries = query_entries(&query_json, &cli)?;
 
     let instance_health = if profiling_config.instance_health {
         match client.fetch_instance_health().await {
             Ok(health) => Some(serde_json::to_value(&health).unwrap_or_default()),
             Err(e) => {
-                tracing::warn!("failed to fetch instance health: {e}");
+                orbit_log_fields::warn!(expanded(ERROR_MESSAGE) = %e, "failed to fetch instance health");
                 None
             }
         }
@@ -457,47 +493,22 @@ async fn main() -> Result<()> {
         frontend: frontend(&cli),
     };
 
-    if is_single_query {
+    if entries.len() == 1 && cli.output.is_none() {
         if cli.filter.is_some() {
             eprintln!("warning: --filter is ignored for single-query input");
         }
 
-        let profiler_output = run_single(&run_ctx, &query_json, instance_health).await?;
+        let profiler_output = run_single(&run_ctx, &entries[0].1, instance_health).await?;
 
         emit_output(&cli.format, &profiler_output, cli.output.as_ref())?;
     } else {
-        let queries = parsed.as_object().context(if parsed.is_array() {
-            "input is a JSON array; expected a single query object or a named query collection"
-        } else {
-            "multi-query file must be a JSON object with named queries"
-        })?;
-
-        let entries: Vec<_> = match &cli.filter {
-            Some(f) => {
-                let re =
-                    regex::Regex::new(f).with_context(|| format!("invalid filter regex: {f}"))?;
-                queries.iter().filter(|(k, _)| re.is_match(k)).collect()
-            }
-            None => queries.iter().collect(),
-        };
-
-        if entries.is_empty() {
-            anyhow::bail!(
-                "no queries matched filter {:?}",
-                cli.filter.as_deref().unwrap_or("")
-            );
-        }
-
         let total = entries.len();
         let mut results: BTreeMap<String, serde_json::Value> = BTreeMap::new();
 
-        for (i, (name, query_value)) in entries.into_iter().enumerate() {
+        for (i, (name, query)) in entries.into_iter().enumerate() {
             eprintln!("[{}/{}] {}...", i + 1, total, name);
 
-            let single_json =
-                serde_json::to_string(query_value).context("failed to serialize query value")?;
-
-            match run_single(&run_ctx, &single_json, instance_health.clone()).await {
+            match run_single(&run_ctx, &query, instance_health.clone()).await {
                 Ok(output) => {
                     let value = serde_json::to_value(&output)
                         .context("failed to serialize profiler output")?;

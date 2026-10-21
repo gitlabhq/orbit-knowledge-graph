@@ -489,7 +489,7 @@ group_fullpath_wi_by_state:
     DEBUG
 
 proj_id_mr_orderby_limit_page:
-  desc: "Traversal of MRs in a project by id, ordered by created_at DESC with a first-page keyset cursor. Verifies ORDER BY + tie-breakers produce a stable, deterministic top-N under PK pruning. Pairs with the next case (larger page) for containment checks."
+  desc: "Traversal of MRs in a project by id, ordered by created_at DESC with a 20-row limit. Verifies order_by produces a stable top-N under PK pruning. Pairs with the next case (larger limit) for containment checks."
   category: traversal
   suite: scoping
   query: |
@@ -497,11 +497,11 @@ proj_id_mr_orderby_limit_page:
     WHERE mr.state IN ['opened', 'closed', 'merged']
     RETURN mr{.id, .iid, .title, .state, .created_at}, p
     ORDER BY mr.created_at DESC
-    PAGE 20
+    LIMIT 20
     DEBUG
 
 proj_id_mr_orderby_limit_page2:
-  desc: "Same scoped+ordered query with a larger first page (40). The 20-row page must be a prefix of this 40-row page under the deterministic order."
+  desc: "Same scoped+ordered query with a larger limit (40). The 20-row result must be a prefix of this 40-row result under the same order."
   category: traversal
   suite: scoping
   query: |
@@ -509,7 +509,7 @@ proj_id_mr_orderby_limit_page2:
     WHERE mr.state IN ['opened', 'closed', 'merged']
     RETURN mr{.id, .iid, .title, .state, .created_at}, p
     ORDER BY mr.created_at DESC
-    PAGE 40
+    LIMIT 40
     DEBUG
 
 aggpaging_namespace_id_project_gap:

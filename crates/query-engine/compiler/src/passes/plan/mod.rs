@@ -1,60 +1,52 @@
-pub mod aggregation;
-mod clickhouse;
-mod conditions;
-mod context;
-mod duckdb;
-pub mod edge_chain;
-pub(crate) mod edge_predicates;
-pub mod fk;
-mod flat;
-pub(crate) mod helpers;
-mod hops;
-pub mod hydration;
-pub mod neighbors;
-pub mod pathfinding;
-pub mod physical;
-pub mod requirements;
+//! Planning turns a validated query into a `QueryPlan`: the backend-neutral reads, joins, and
+//! outputs that lowering renders as SQL.
+//!
+//! `query_types/` picks the planner for the query type. Traversal and aggregation build a `pattern`
+//! (nodes, relations, conditions) whose steps assemble a `graph::RelationGraph`; `reuse` decides which
+//! relations lowering materializes; `filters` and `predicates` are the shared condition vocabulary.
+//! Neighbors, path finding, and hydration keep their own hand-written shapes.
+
+pub(crate) mod filters;
+pub mod graph;
+mod pattern;
+pub mod predicates;
+pub mod query_types;
+pub mod reuse;
 
 use std::collections::HashMap;
+
+use query_data_model::OrbitQueryModel;
+pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-pub use clickhouse::plan as plan_clickhouse;
-pub use duckdb::plan as plan_duckdb;
-pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity};
-pub use hydration::{HydrationCompileOptions, HydrationNodePlan};
-use query_data_model::OrbitQueryModel;
-pub use query_data_model::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
-
-#[derive(Clone)]
-pub struct BoundFilter {
-    pub filter: InputFilter,
-    pub property: Option<query_data_model::PropertyId>,
-    pub data_type: Option<ontology::DataType>,
-    pub selectivity: ontology::FieldSelectivity,
-    pub in_sort_key: bool,
-    pub text_indexed: bool,
-}
-
-impl BoundFilter {
-    pub fn at(&self, column: requirements::Column) -> requirements::Predicate {
-        requirements::Predicate::Property {
-            column,
-            filter: self.filter.clone(),
-            data_type: self.data_type,
-            in_sort_key: self.in_sort_key,
-            text_indexed: self.text_indexed,
-        }
-    }
-}
+pub use filters::BoundFilter;
+pub use pattern::{EdgeRelation, NodePlan};
+pub use query_types::{
+    EdgeTableConfig, aggregation::Aggregation, hydration::Hydration,
+    hydration::HydrationCompileOptions, hydration::HydrationNodePlan, neighbors::Neighbors,
+    pathfinding::PathFinding, traversal::Traversal,
+};
 
 pub struct Plan<T> {
     pub nodes: HashMap<String, NodePlan>,
-    pub hops: Vec<Hop>,
+    pub relations: Vec<EdgeRelation>,
     pub node_edge_mappings: HashMap<String, (String, String)>,
     pub denormalized: HashMap<DenormalizedKey, DenormalizedProperty>,
     pub operation: T,
+}
+
+impl<T> Plan<T> {
+    fn new(operation: T) -> Self {
+        Self {
+            nodes: HashMap::new(),
+            relations: Vec::new(),
+            node_edge_mappings: HashMap::new(),
+            denormalized: HashMap::new(),
+            operation,
+        }
+    }
 }
 
 pub enum QueryPlan {
@@ -66,160 +58,81 @@ pub enum QueryPlan {
 }
 
 impl QueryPlan {
-    pub fn hops(&self) -> &[Hop] {
+    pub fn relations(&self) -> &[EdgeRelation] {
         match self {
-            Self::Traversal(plan) => &plan.hops,
-            Self::Aggregation(plan) => &plan.hops,
+            Self::Traversal(plan) => &plan.relations,
+            Self::Aggregation(plan) => &plan.relations,
             _ => &[],
         }
     }
 
     pub fn is_point_lookup(&self) -> bool {
-        let nodes = match self {
-            Self::Traversal(Plan { nodes, .. }) | Self::Aggregation(Plan { nodes, .. }) => nodes,
+        let (nodes, relations) = match self {
+            Self::Traversal(Plan {
+                nodes, relations, ..
+            })
+            | Self::Aggregation(Plan {
+                nodes, relations, ..
+            }) => (nodes, relations),
             _ => return false,
         };
         !nodes.is_empty()
-            && nodes
-                .values()
-                .all(|node| node.selectivity == Selectivity::Pinned)
-            && self.hops().iter().all(|hop| hop.max_hops == 1)
+            && nodes.values().all(NodePlan::is_id_pinned_only)
+            && relations.iter().all(|relation| relation.max_hops == 1)
     }
 }
 
-pub fn denormalized_facts(
-    input: &Input,
-    model: &(impl OrbitQueryModel + ?Sized),
-) -> HashMap<DenormalizedKey, DenormalizedProperty> {
-    input
-        .nodes
-        .iter()
-        .filter_map(|node| Some((model.graph().entity_id(node.entity.as_deref()?)?, node)))
-        .flat_map(|(entity, node)| {
-            [DenormalizedDirection::Source, DenormalizedDirection::Target]
-                .into_iter()
-                .flat_map(move |direction| {
-                    node.filters
-                        .keys()
-                        .map(String::as_str)
-                        .chain(
-                            input
-                                .conditions()
-                                .filter(|condition| {
-                                    condition.target == PredicateTarget::Node(node.id.clone())
-                                })
-                                .map(|condition| condition.property.as_str()),
-                        )
-                        .filter_map(move |property| {
-                            let property = model.graph().property_id(entity, property)?;
-                            let key = DenormalizedKey {
-                                property,
-                                direction,
-                            };
-                            model
-                                .denormalized()
-                                .property(key)
-                                .cloned()
-                                .map(|facts| (key, facts))
-                        })
-                })
+pub(crate) fn sort_key<'m>(
+    model: &'m (impl OrbitQueryModel + ?Sized),
+    table: &str,
+) -> Result<&'m [String]> {
+    model
+        .table_sort_key(table)
+        .filter(|key| !key.is_empty())
+        .ok_or_else(|| {
+            QueryError::Lowering(format!(
+                "table '{table}' has no sort key for latest-row resolution"
+            ))
         })
-        .collect()
 }
 
-pub struct Traversal {
-    pub execution: physical::ExecutionPlan,
+pub fn plan_clickhouse(
+    input: &Input,
+    model: &query_data_model::ClickHouseDataModel,
+    hydration_options: HydrationCompileOptions,
+) -> Result<QueryPlan> {
+    plan(input, model, hydration_options)
 }
 
-pub struct Aggregation {
-    pub execution: physical::ExecutionPlan,
-    pub result: aggregation::AggregationPlan,
+pub fn plan_duckdb(
+    input: &Input,
+    model: &query_data_model::DuckDbDataModel,
+    hydration_options: HydrationCompileOptions,
+) -> Result<QueryPlan> {
+    plan(input, model, hydration_options)
 }
 
-pub struct Neighbors {
-    pub center: String,
-    pub direction: Direction,
-    pub edge: EdgeTableConfig,
-    pub has_non_denorm: bool,
-    pub fused_table: Option<String>,
-    pub outgoing_kinds: Vec<String>,
-    pub incoming_kinds: Vec<String>,
-    pub incoming_scope_preserving: Vec<String>,
-    pub incoming_cross_scope: Vec<String>,
-    pub outgoing_neighbor_paths: Vec<(String, String)>,
-    pub incoming_neighbor_paths: Vec<(String, String)>,
-}
-
-pub struct Hydration {
-    pub nodes: Vec<HydrationNodePlan>,
-}
-
-pub struct PathFinding {
-    pub start: String,
-    pub end: String,
-    pub max_depth: u32,
-    pub forward_depth: u32,
-    pub backward_depth: u32,
-    pub edge: EdgeTableConfig,
-    pub forward_first_hop_filter: Option<Vec<String>>,
-    pub backward_first_hop_filter: Option<Vec<String>>,
-    pub scoped_by_tp: bool,
-}
-
-pub struct EdgeTableConfig {
-    pub tables: Vec<String>,
-    pub rel_type_filter: Option<Vec<String>>,
-    /// Valid source entity kinds for the rel_types (union across all types).
-    /// Empty when rel_types is unset. Used by pathfinding to add kind
-    /// predicates on intermediate hops for granule pruning.
-    pub source_kinds: Vec<String>,
-    pub target_kinds: Vec<String>,
-    /// Physical tables a neighbors arm must scan per direction (a center is the
-    /// edge source when outgoing, the target when incoming). Defaults to all
-    /// `tables`; `plan_neighbors` narrows them so empty arms aren't scanned.
-    pub outgoing_tables: Vec<String>,
-    pub incoming_tables: Vec<String>,
-}
-
-impl EdgeTableConfig {
-    pub fn from_model(model: &(impl OrbitQueryModel + ?Sized), rel_types: &[String]) -> Self {
-        use std::collections::BTreeSet;
-        let mut source_kinds = BTreeSet::new();
-        let mut target_kinds = BTreeSet::new();
-        for rt in rel_types {
-            for route in model.relationship_routes(rt) {
-                source_kinds.extend(
-                    route
-                        .source_entities()
-                        .map(|entity| model.graph().entity(entity).name.clone()),
-                );
-                target_kinds.extend(
-                    route
-                        .target_entities()
-                        .map(|entity| model.graph().entity(entity).name.clone()),
-                );
-            }
+fn plan<M>(
+    input: &Input,
+    model: &M,
+    hydration_options: HydrationCompileOptions,
+) -> Result<QueryPlan>
+where
+    M: OrbitQueryModel + ?Sized,
+{
+    Ok(match input.query_type {
+        QueryType::Traversal => QueryPlan::Traversal(query_types::traversal::plan(input, model)?),
+        QueryType::Aggregation => {
+            QueryPlan::Aggregation(query_types::aggregation::plan(input, model)?)
         }
-        let tables = model.relationship_tables(rel_types);
-        Self {
-            rel_type_filter: if rel_types.is_empty() {
-                None
-            } else {
-                Some(rel_types.to_vec())
-            },
-            source_kinds: source_kinds.into_iter().collect(),
-            target_kinds: target_kinds.into_iter().collect(),
-            outgoing_tables: tables.clone(),
-            incoming_tables: tables.clone(),
-            tables,
+        QueryType::Neighbors => QueryPlan::Neighbors(query_types::neighbors::plan(input, model)?),
+        QueryType::PathFinding => {
+            QueryPlan::PathFinding(query_types::pathfinding::plan(input, model)?)
         }
-    }
-}
-
-pub fn find_node<'a>(input: &'a Input, alias: &str) -> Result<&'a InputNode> {
-    input
-        .nodes
-        .iter()
-        .find(|n| n.id == alias)
-        .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
+        QueryType::Hydration => QueryPlan::Hydration(query_types::hydration::plan(
+            input,
+            model,
+            hydration_options,
+        )?),
+    })
 }

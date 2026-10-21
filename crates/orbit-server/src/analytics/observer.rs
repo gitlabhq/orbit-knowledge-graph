@@ -94,7 +94,10 @@ impl AnalyticsObserver {
         let common = match build_common(&self.config, &self.claims, &self.schema_version) {
             Ok(c) => c,
             Err(e) => {
-                tracing::warn!(error = %e, "failed to build orbit_common context, skipping analytics event");
+                orbit_log_fields::warn!(
+                    expanded(ERROR_MESSAGE) = %e,
+                    "failed to build orbit_common context, skipping analytics event"
+                );
                 return;
             }
         };
@@ -109,7 +112,10 @@ impl AnalyticsObserver {
         ) {
             Ok(q) => q,
             Err(e) => {
-                tracing::warn!(error = %e, "failed to build orbit_query context, skipping analytics event");
+                orbit_log_fields::warn!(
+                    expanded(ERROR_MESSAGE) = %e,
+                    "failed to build orbit_query context, skipping analytics event"
+                );
                 return;
             }
         };
@@ -123,7 +129,10 @@ impl AnalyticsObserver {
             .build()
         {
             Ok(event) => tracker.track(event),
-            Err(e) => tracing::warn!(error = %e, "failed to build analytics event"),
+            Err(e) => orbit_log_fields::warn!(
+                expanded(ERROR_MESSAGE) = %e,
+                "failed to build analytics event"
+            ),
         }
     }
 }
@@ -200,6 +209,7 @@ mod tests {
         );
         obs.set_compiled(&CompiledQueryContext {
             query_type: query_engine::compiler::input::QueryType::Traversal,
+            ast: query_engine::compiler::ast::Node::Query(Box::default()),
             base: query_engine::compiler::passes::codegen::ParameterizedQuery {
                 sql: String::new(),
                 params: Default::default(),
@@ -215,7 +225,6 @@ mod tests {
                 }],
                 ..Default::default()
             },
-            pagination: Default::default(),
             has_virtual_columns: false,
         });
         obs.compiled(Duration::from_millis(5));

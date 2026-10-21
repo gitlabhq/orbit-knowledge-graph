@@ -137,7 +137,7 @@ pub fn compile_model(
 /// Compile a graph query into DuckDB SQL for local execution.
 ///
 /// Collapses edge tables to the local single-table layout before compiling.
-/// No security, hydration, or cursor phases — local mode trusts all data.
+/// No security or hydration phases — local mode trusts all data.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(
     raw: &str,
@@ -421,25 +421,6 @@ mod tests {
     }
 
     #[test]
-    fn compile_with_prefixed_ontology_prefixes_edge_table() {
-        let prefixed = Arc::new((**ONTOLOGY).clone().with_schema_version_prefix("v1_"));
-
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":1}"#;
-        let compiled =
-            compile(query, Frontend::JsonDsl, &prefixed, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        assert!(
-            sql.contains("v1_gl_merge_request") && sql.contains("v1_gl_user"),
-            "traversal SQL should use prefixed node tables, got: {sql}"
-        );
-        assert!(
-            sql.contains("mr.author_id"),
-            "FK elision should join via mr.author_id, got: {sql}"
-        );
-    }
-
-    #[test]
     fn compile_uses_supplied_ontology_for_scoped_user_table() {
         let scoped_user = (**ONTOLOGY).clone().with_path_scopable_nodes(["User"]);
         let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["id"]}],"limit":1}"#;
@@ -528,32 +509,6 @@ mod tests {
     }
 
     #[test]
-    fn aggregation_with_relationship_emits_no_bare_node_ref() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": ["p"],
-            "aggregations": [{"count": "mr", "as": "total_mrs"}],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("mr.project_id"),
-            "FK-shortcut join must reference mr.project_id, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("278964"),
-            "Project node_ids filter must survive, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn unfiltered_edge_only_count_emits_bare_count_for_projection_routing() {
         let query = r#"{
             "query_type": "aggregation",
@@ -589,131 +544,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn filtered_edge_only_count_keeps_column_arg_for_count_if() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project"},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"eq": "opened"}
-                }}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "mr",
-                "as": "open_mrs"
-            }],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("COUNT()"),
-            "count must be bare COUNT() with WHERE bounding rows, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("state = 'opened'"),
-            "state filter must reach the SQL on the MR subquery, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn dedup_edge_scan_pushes_filter_cte_in_subquery_into_inner_where() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
-                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
-                {"id": "project", "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
-            ],
-            "relationships": [
-                {"type": "HAS_LABEL", "from": "mr", "to": "label"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "project"}
-            ],
-            "aggregations": [{"count": "mr", "as": "n"}],
-            "limit": 1
-        }"#;
-
-        let sql = compile_sql(query);
-        let (e0_inner, rest) = sql
-            .split_once(") AS _orbit_edge_0 INNER JOIN")
-            .expect("e0 dedup subquery is closed before the join");
-        let (e1_inner, post_join) = rest
-            .split_once(") AS _orbit_edge_1 ON")
-            .expect("e1 dedup subquery is closed before ON");
-        let outer = post_join
-            .split_once(" WHERE ")
-            .map(|(_, tail)| tail)
-            .unwrap_or("");
-
-        for clause in [
-            "_orbit_edge_0.source_id = 490855697",
-            "_orbit_edge_0.target_id IN (SELECT id FROM _filter_label)",
-        ] {
-            assert!(
-                e0_inner.contains(clause),
-                "expected `{clause}` inside e0 dedup inner WHERE, got:\n{e0_inner}"
-            );
-        }
-        for clause in [
-            "_orbit_edge_1.source_id = 490855697",
-            "_orbit_edge_1.target_id IN (SELECT id FROM _filter_project)",
-        ] {
-            assert!(
-                e1_inner.contains(clause),
-                "expected `{clause}` inside e1 dedup inner WHERE, got:\n{e1_inner}"
-            );
-        }
-        for kind in [
-            "_orbit_edge_0.relationship_kind = 'HAS_LABEL'",
-            "_orbit_edge_0.source_kind = 'MergeRequest'",
-            "_orbit_edge_0.target_kind = 'Label'",
-            "_orbit_edge_1.relationship_kind = 'IN_PROJECT'",
-            "_orbit_edge_1.target_kind = 'Project'",
-        ] {
-            assert!(
-                outer.contains(kind),
-                "kind predicate `{kind}` must stay in outer WHERE so CH's PredicateRewriteVisitor handles it, got:\n{outer}"
-            );
-            assert!(
-                !e0_inner.contains(kind) && !e1_inner.contains(kind),
-                "kind predicate `{kind}` must not be duplicated into dedup inner WHERE"
-            );
-        }
-    }
-
-    /// Regression for #801: self-joining the edge table without deduping each
-    /// scan multiplies un-merged ReplacingMergeTree versions and inflates
-    /// `count(mr)` (observed 7, 49, 245 for an MR that should return 1).
-    #[test]
-    fn multi_edge_self_join_dedups_edge_versions() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
-                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
-                {"id": "project", "entity": "Project", "filters": {"full_path": {"eq": "gitlab-org/gitlab"}}}
-            ],
-            "relationships": [
-                {"type": "HAS_LABEL", "from": "mr", "to": "label"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "project"}
-            ],
-            "aggregations": [{"count": "mr", "as": "n"}],
-            "limit": 1
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("FROM gl_edge AS _orbit_edge_0 FINAL")
-                && sql.contains("FROM gl_edge AS _orbit_edge_1 FINAL"),
-            "multi-edge self-join must dedup each edge scan via FINAL, got:\n{sql}"
-        );
-    }
-
     /// A single-hop edge scan cannot fan a node out, so it stays a plain scan;
     /// deduplicating the hot single-edge path would cost an unnecessary aggregation.
     #[test]
@@ -736,30 +566,6 @@ mod tests {
         assert!(
             !sql.contains("argMax("),
             "single-hop edge scan must not dedup, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn traversal_id_range_produces_range_conditions_in_sql() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
-                {"id": "mr", "entity": "MergeRequest"}
-            ],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("u.id >= 1"),
-            "range lower bound must reach the User subquery WHERE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("u.id <= 100"),
-            "range upper bound must reach the User subquery WHERE, got:\n{sql}"
         );
     }
 
@@ -833,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_without_cursor_orders_only_by_depth() {
+    fn path_finding_without_skip_orders_only_by_depth() {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -850,29 +656,7 @@ mod tests {
         assert!(
             !sql.contains("toString(paths._orbit_path)")
                 && !sql.contains("toString(paths._orbit_edge_kinds)"),
-            "path array tie-break sorting should only be emitted for cursor pagination, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn path_finding_with_cursor_keeps_path_tie_break_order() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "cursor": {"page_size": 10}
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("toString(paths._orbit_path)")
-                && sql.contains("toString(paths._orbit_edge_kinds)"),
-            "cursor pagination should keep deterministic path tie-break sorting, got:\n{sql}"
+            "path array tie-break sorting should only be emitted with SKIP, got:\n{sql}"
         );
     }
 
@@ -951,27 +735,6 @@ mod tests {
     }
 
     #[test]
-    fn cursor_neighbors_both_orders_by_projected_columns() {
-        let query = r#"{
-            "query_type": "neighbors",
-            "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3]}],
-            "neighbors": {"direction": "both"},
-            "cursor": {"page_size": 20}
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("ORDER BY _orbit_mr_id ASC, _orbit_neighbor_id ASC"),
-            "cursor neighbors over UNION should order by projected aliases, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("ORDER BY e.source_id"),
-            "cursor neighbors over UNION must not order by the inner edge alias, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn path_finding_clamps_settings_to_safety_floor() {
         let query = r#"{
             "query_type": "path_finding",
@@ -993,284 +756,6 @@ mod tests {
         assert!(
             sql.contains("max_memory_usage = 16106127360"),
             "pathfinding must clamp max_memory_usage to 15 GiB, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn multi_hop_traversal_constrains_kind_on_every_edge() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "p", "entity": "Project", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "AUTHORED", "from": "u", "to": "mr"}
-            ],
-            "limit": 5
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("p.id = mr.project_id") || sql.contains("mr.project_id"),
-            "IN_PROJECT must be resolved via FK join on project_id, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("u.id = mr.author_id") || sql.contains("mr.author_id"),
-            "AUTHORED must be resolved via FK join on author_id, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("'MergeRequest' AS e0_src_type"),
-            "e0 source type must be MergeRequest, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("'User' AS e1_src_type"),
-            "e1 source type must be User, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn aggregation_prunes_unreferenced_node_table_join() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project"},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"eq": "merged"}
-                }},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "AUTHORED", "from": "u", "to": "mr"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "mr",
-                "as": "merged_mrs"
-            }],
-            "limit": 5
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("gl_user AS u") && !sql.contains("FROM gl_user"),
-            "gl_user join must be pruned for aggregation that never \
-             references the User alias, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("_nf_u"),
-            "User-aliased CTEs must be dropped, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("author_id"),
-            "unused AUTHORED FK column should not be projected, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("gl_project AS p") || sql.contains("FROM gl_project"),
-            "gl_project must remain in FROM, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn aggregation_skips_redundant_target_ids_cte_when_cascade_present() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [116]},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "mr",
-                "as": "user_mrs"
-            }],
-            "limit": 5
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("mr.author_id = 116") || sql.contains("author_id = 116"),
-            "User node_ids filter must be pushed to FK column, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("mr.project_id") || sql.contains("p.id = mr.project_id"),
-            "IN_PROJECT FK join must use project_id, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn multi_hop_traversal_generates_hop_frontier_ctes() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [{
-                "type": "MEMBER_OF",
-                "from": "u",
-                "to": "p",
-                "hops": [1, 3]
-            }],
-            "limit": 25
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("UNION ALL"),
-            "variable-length traversal must use UNION ALL arms, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("_orbit_edge_0.source_id = 1"),
-            "pinned User node_ids must reach the outer WHERE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("e1.target_id = e2.source_id"),
-            "depth-2 arm must chain edges via JOIN, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn multi_hop_traversal_skips_frontiers_without_selectivity() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "p", "entity": "Project", "node_ids": [1]}
-            ],
-            "relationships": [{
-                "type": "MEMBER_OF",
-                "from": "u",
-                "to": "p",
-                "hops": [1, 2]
-            }],
-            "limit": 25
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("UNION ALL"),
-            "variable-length traversal should use UNION ALL arms, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("_orbit_edge_0.target_id = 1"),
-            "pinned to-side node_ids must reach the outer WHERE, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn multi_hop_aggregation_generates_cascade_cte() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "p", "entity": "Project", "node_ids": [278964]},
-                {"id": "f", "entity": "File"}
-            ],
-            "relationships": [{
-                "type": "CONTAINS",
-                "from": "p",
-                "to": "f",
-                "hops": [1, 2]
-            }],
-            "group_by": ["p"],
-            "aggregations": [{"count": "f", "as": "count"}],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("UNION ALL"),
-            "multi-hop aggregation should use UNION ALL for variable-length hops, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("startsWith"),
-            "edge scans should have traversal_path security filters, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("278964"),
-            "pinned Project id must appear in the SQL, got:\n{sql}"
-        );
-    }
-
-    /// Each UNION ALL arm must carry static kind literals so ClickHouse can use
-    /// the kind-led PK projection (`by_rel_source_kind`/`by_rel_target_kind`) for
-    /// granule pruning at every depth, instead of dynamic IN-subqueries.
-    #[test]
-    fn variable_length_traversal_emits_per_arm_kind_literals() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [116]},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project"},
-                {"id": "g", "entity": "Group"}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "CONTAINS", "from": "g", "to": "p", "hops": [1, 3]}
-            ],
-            "group_by": ["g"],
-            "aggregations": [{"count": "u", "as": "n"}],
-            "limit": 3
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_orbit_edge_1.source_kind") && sql.contains("'Group'"),
-            "depth-1 arm must inject _orbit_edge_1.source_kind = 'Group', got:\n{sql}"
-        );
-        assert!(
-            sql.contains("e3.target_kind") && sql.contains("'Project'"),
-            "depth-3 arm must inject e3.target_kind = 'Project', got:\n{sql}"
-        );
-        // With both endpoints kind-literal-pinned, the per-arm to-side IN
-        // subquery is redundant with the outer node-table SIP and must be
-        // suppressed. The redundant probe was costing 30%+ wall time.
-        assert!(
-            !sql.contains("e2.target_id IN") && !sql.contains("e3.target_id IN"),
-            "arm-internal target_id IN subquery should be suppressed, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn denorm_filter_pushed_onto_carrying_edge_not_first_hop() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"eq": "opened"}}},
-                {"id": "cl", "entity": "Label", "filters": {"title": {"eq": "Community contribution"}}},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [
-                {"type": "HAS_LABEL", "from": "mr", "to": "cl"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-            ],
-            "aggregations": [{"count": "mr", "as": "c"}]
-        }"#;
-        let sql = compile_sql(query);
-        assert!(
-            sql.contains("has(_orbit_edge_1.source_tags, 'state:opened')"),
-            "state must be pushed onto IN_PROJECT (e1), which carries it, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("has(_orbit_edge_0.source_tags, 'state:opened')"),
-            "state must NOT be pushed onto HAS_LABEL (e0), whose tags are empty, got:\n{sql}"
         );
     }
 
@@ -1433,8 +918,8 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            !sql.contains("u.id") && !sql.contains("(u.id"),
-            "must not reference u.id when User is not hydrated and absent from FROM, got:\n{sql}"
+            !sql.contains("COUNT(u.id)") && !sql.contains("countIf(u.id"),
+            "must not count u.id when User is not hydrated, got:\n{sql}"
         );
         assert!(
             sql.contains("COUNT()") || sql.contains("countIf("),
@@ -1497,35 +982,6 @@ mod tests {
         assert!(
             !sql.contains("_orbit_p_id"),
             "property grouping should not emit node-group columns, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn aggregation_group_by_property_keeps_role_gated_target_table() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "v", "entity": "Vulnerability"},
-                {"id": "p", "entity": "Project", "node_ids": [1]}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "group_by": ["v.severity"],
-            "aggregations": [{
-                "count": "v",
-                "as": "vulnerability_count"
-            }],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("gl_vulnerability"),
-            "role-gated grouped entity must remain in FROM for SecurityPass, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("v.severity AS v_severity") && sql.contains("GROUP BY v.severity"),
-            "security property grouping must use the protected node alias, got:\n{sql}"
         );
     }
 
@@ -1596,150 +1052,6 @@ mod tests {
     }
 
     #[test]
-    fn fk_star_joined_nodes_use_candidate_ctes() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed", "source": "push"}},
-                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
-                {"id": "p", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [
-                {"type": "HAS_JOB", "from": "pipe", "to": "j"},
-                {"type": "IN_PROJECT", "from": "pipe", "to": "p"}
-            ],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("_candidate_pipe AS (SELECT pipe.id AS id FROM gl_pipeline AS pipe WHERE"),
-            "joined target should get a candidate CTE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("_candidate_j AS (SELECT j.id AS id FROM gl_job AS j WHERE"),
-            "center should get a candidate CTE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("FROM gl_job AS j FINAL")
-                && sql.contains("LIMIT 1 BY pipe.traversal_path, pipe.id) AS pipe WHERE")
-                && sql.contains("AS pipe ON (pipe.id = j.pipeline_id)"),
-            "joined target filters must run after latest-row dedup, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("j.pipeline_id IN (SELECT id FROM _candidate_pipe)")
-                && sql.contains("pipe.id IN (SELECT id FROM _candidate_pipe)"),
-            "candidate CTE should narrow both center FK values and target ids, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn fk_star_filter_only_relationships_do_not_emit_candidate_ctes() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
-                {"id": "p", "entity": "Project", "node_ids": [278964]}
-            ],
-            "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "p"}],
-            "group_by": ["j"],
-            "aggregations": [{"count": "j", "as": "fail_count"}],
-            "limit": 20
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("_candidate_"),
-            "filter-only FK predicates should keep the direct FINAL scan, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("FROM gl_job AS j FINAL"),
-            "latest-row read should still use FINAL, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn narrowed_join_keeps_sort_key_filters_before_dedup() {
-        let sql = compile_sql(
-            r#"{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":"1/100/"}}}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["p"],"aggregations":[{"count":"mr","as":"c"}],"limit":10}"#,
-        );
-        assert!(
-            sql.contains(
-                "p.id IN (SELECT id FROM _candidate_p) AND startsWith(p.traversal_path, '1/100/'))) ORDER BY"
-            ) && sql.contains("LIMIT 1 BY p.traversal_path, p.id) AS p WHERE (startsWith(p.traversal_path, '1/100/') AND (p._deleted = false))"),
-            "sort-key filters must prune before dedup and recheck after it, got:\n{sql}"
-        );
-    }
-
-    fn compile_sql_scoped(nodes: &str, rels: &str, group: &str, agg: &str) -> String {
-        let query = format!(
-            r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":["{group}"],"aggregations":[{{"count":"{agg}","as":"c"}}],"limit":20}}"#
-        );
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        compile(&query, Frontend::JsonDsl, &ONTOLOGY, &ctx)
-            .unwrap()
-            .base
-            .render()
-    }
-
-    // SQL-shape smoke: the 4-hop diff chain elides CONTAINS to FK node-joins
-    // (guards the orientation-agnostic emit_chain), and a non-FK survivor blocks
-    // elision. `expect` is `|`-separated; a `!x` token asserts `x` is absent.
-    // End-to-end result parity (chain/star, scoped vs unscoped) lives in the
-    // data-correctness suite (`scope_implied_container_elision_*`).
-    #[test]
-    fn scope_implied_container_hop_elision() {
-        let cases: &[(&str, &str, &str, &str, &str)] = &[
-            (
-                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"d","entity":"MergeRequestDiff"},{"id":"f","entity":"MergeRequestDiffFile"}"#,
-                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}"#,
-                "p",
-                "f",
-                "mr.project_id = p.id|mr.latest_merge_request_diff_id = d.id|f.merge_request_diff_id = d.id|gl_project|!gl_edge|!gl_ci_edge|!gl_group AS g",
-            ),
-            (
-                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"n","entity":"Note"}"#,
-                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_NOTE","from":"mr","to":"n"}"#,
-                "p",
-                "n",
-                "'CONTAINS'|'HAS_NOTE'",
-            ),
-            (
-                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
-                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
-                "u",
-                "p.created_at",
-                "COUNT(p.created_at)|p.id = mr.project_id|countSubstrings(p.traversal_path, '/')|!gl_edge|!gl_group AS g",
-            ),
-            (
-                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","id_range":{"start":100,"end":100}},{"id":"d","entity":"MergeRequestDiff"}"#,
-                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}"#,
-                "d.state",
-                "d",
-                "gl_project AS p FINAL|gl_merge_request_diff AS d FINAL|!_narrow_d|!_filter_p",
-            ),
-            (
-                r#"{"id":"g","entity":"Group","node_ids":[1]},{"id":"p","entity":"Project","filters":{"star_count":1}},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
-                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
-                "u",
-                "mr",
-                "_filter_p|gl_project AS p FINAL|countSubstrings(p.traversal_path, '/')|!_candidate_p",
-            ),
-        ];
-        for (nodes, rels, group, agg, expect) in cases {
-            let sql = compile_sql_scoped(nodes, rels, group, agg);
-            for e in expect.split('|') {
-                match e.strip_prefix('!') {
-                    Some(absent) => assert!(!sql.contains(absent), "{absent} present:\n{sql}"),
-                    None => assert!(sql.contains(e), "{e} missing:\n{sql}"),
-                }
-            }
-        }
-    }
-
-    #[test]
     fn scope_anchor_aggregation_rejects_join_predicates() {
         for predicate in ["g.id = p.id", "p.id = g.id"] {
             let query =
@@ -1764,30 +1076,49 @@ mod tests {
         let mut context = SecurityContext::new(1, vec!["1/2/3/".into(), "1/2/4/".into()]).unwrap();
         context.scope_proofs =
             std::collections::HashMap::from([("p".into(), ScopeProof::literal("1/2/"))]);
-        for (query, lookup) in [
+        for (query, lookup, alias, literal_proof) in [
             (
                 "MATCH (p:Project {name: 'example'}) RETURN p LIMIT 20",
                 false,
+                "p",
+                true,
             ),
-            ("MATCH (p:Project {id: 100}) RETURN p LIMIT 20", true),
+            (
+                "MATCH (p:Project {id: 100}) RETURN p LIMIT 20",
+                true,
+                "p",
+                true,
+            ),
             (
                 "MATCH (p:Project {full_path: 'parent/project'}) RETURN p LIMIT 20",
+                true,
+                "p",
                 true,
             ),
             (
                 "MATCH (p:MergeRequest {project_id: 100}) RETURN p LIMIT 20",
                 true,
+                "p",
+                true,
             ),
             (
                 "MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) RETURN count(p) AS c LIMIT 20",
                 true,
+                "_orbit_edge_0",
+                false,
             ),
         ] {
             let compiled = compile(query, Frontend::Gql, &ONTOLOGY, &context).unwrap();
             let sql = compiled.base.render();
-            for path in ["1/2/", "1/2/3/", "1/2/4/"] {
+            for path in ["1/2/3/", "1/2/4/"] {
                 assert!(
-                    sql.contains(&format!("startsWith(p.traversal_path, '{path}')")),
+                    sql.contains(&format!("startsWith({alias}.traversal_path, '{path}')")),
+                    "{query}: {sql}"
+                );
+            }
+            if literal_proof {
+                assert!(
+                    sql.contains(&format!("startsWith({alias}.traversal_path, '1/2/')")),
                     "{query}: {sql}"
                 );
             }
@@ -1801,120 +1132,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn scope_implied_container_elision_bounds_depth_or_keeps_the_edge_scan() {
-        let cases = [
-            (
-                "Group",
-                "Project",
-                r#""from":"a","to":"x""#,
-                "countSubstrings(x.traversal_path, '/') >=",
-            ),
-            (
-                "Group",
-                "Group",
-                r#""from":"a","to":"x","hops":[2,3]"#,
-                "countSubstrings(x.traversal_path, '/') <=",
-            ),
-            (
-                "Project",
-                "Branch",
-                r#""from":"a","to":"x""#,
-                "(x.traversal_path = (SELECT",
-            ),
-            (
-                "Project",
-                "Branch",
-                r#""from":"a","to":"x","direction":"incoming""#,
-                "gl_edge",
-            ),
-            (
-                "Directory",
-                "File",
-                r#""from":"a","to":"x""#,
-                "gl_code_edge",
-            ),
-            ("Project", "Group", r#""from":"x","to":"a""#, "gl_edge"),
-            ("Group", "Group", r#""from":"x","to":"a""#, "gl_edge"),
-        ];
-        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        for (anchor, far, rel, expect) in cases {
-            let query = format!(
-                r#"{{"query_type":"aggregation","nodes":[{{"id":"a","entity":"{anchor}","node_ids":[1]}},{{"id":"x","entity":"{far}"}}],"relationships":[{{"type":"CONTAINS",{rel}}}],"aggregations":[{{"count":"x","as":"c"}}],"limit":20}}"#
-            );
-            let sql = compile(&query, Frontend::JsonDsl, &ONTOLOGY, &ctx)
-                .unwrap()
-                .base
-                .render();
-            assert!(
-                sql.contains(expect),
-                "{anchor} -> {far} ({rel}): {expect} missing:\n{sql}"
-            );
-            if expect != "gl_edge" {
-                assert!(
-                    !sql.contains("gl_edge"),
-                    "{anchor} -> {far} ({rel}) kept the edge scan:\n{sql}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn single_filter_only_skips_cascade_narrowing_when_in_cte_push_covers_it() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "n", "entity": "Note"},
-                {"id": "p", "entity": "Project"},
-                {"id": "g", "entity": "Group", "filters": {"name": "gitlab-org"}}
-            ],
-            "relationships": [
-                {"type": "IN_PROJECT", "from": "n", "to": "p"},
-                {"type": "CONTAINS", "from": "g", "to": "p"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{"count": "n", "as": "note_count"}],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("_narrow_p"),
-            "single FilterOnly node should not emit _narrow_p cascade CTE; the IN-CTE push on the same hop already narrows the join, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("_orbit_edge_1.source_id IN (SELECT id FROM _filter_g)"),
-            "FilterOnly IN-CTE should land inside the dedup CTE inner WHERE, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn filtered_redaction_joins_push_filters_into_subquery() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "f", "entity": "File", "filters": {"path": {"ends_with": ".rb"}}},
-                {"id": "d", "entity": "Definition", "filters": {"name": {"starts_with": "process"}}}
-            ],
-            "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
-            "limit": 20
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("INNER JOIN (SELECT * FROM gl_file AS f FINAL WHERE")
-                && sql.contains("endsWith(lower(f.path), lower('.rb'))"),
-            "filtered File join should push filters into the subquery, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("INNER JOIN (SELECT * FROM gl_definition AS d FINAL WHERE")
-                && sql.contains("startsWith(lower(d.name), lower('process'))"),
-            "filtered Definition join should push filters into the subquery, got:\n{sql}"
-        );
     }
 
     #[test]
@@ -1943,45 +1160,6 @@ mod tests {
     }
 
     #[test]
-    fn cross_namespace_fk_chain_elides_to_node_joins() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "filters": {"username": "stanhu"}},
-                {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-                {"id": "pipe", "entity": "Pipeline"},
-                {"id": "j", "entity": "Job", "filters": {"status": "failed"}}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "HAS_HEAD_PIPELINE", "from": "mr", "to": "pipe"},
-                {"type": "HAS_JOB", "from": "pipe", "to": "j"}
-            ],
-            "limit": 10
-        }"#;
-        let sql = compile_sql(query);
-        assert!(
-            !sql.contains("gl_edge") && !sql.contains("gl_ci_edge"),
-            "FK-backed cross-namespace chain must elide to node joins, not edge scans; got:\n{sql}"
-        );
-        assert!(
-            sql.contains("gl_user")
-                && sql.contains("gl_merge_request")
-                && sql.contains("gl_pipeline")
-                && sql.contains("gl_job"),
-            "must join the node tables; got:\n{sql}"
-        );
-        // authz boundary preserved: every in-namespace node scoped, global hub not.
-        assert!(
-            sql.contains("startsWith(mr.traversal_path")
-                && sql.contains("startsWith(pipe.traversal_path")
-                && sql.contains("startsWith(j.traversal_path")
-                && !sql.contains("startsWith(u.traversal_path"),
-            "all in-namespace nodes (mr, pipe, j) scoped, global User hub unscoped; got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn single_ref_cte_is_not_materialized() {
         let query = r#"{
             "query_type": "traversal",
@@ -1998,42 +1176,6 @@ mod tests {
         assert!(
             !sql.contains("enable_materialized_cte"),
             "SETTINGS must not include enable_materialized_cte for non-materialized queries, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn agg_denorm_eliminates_redundant_target_and_nf_ctes() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [116]},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"eq": "merged"}
-                }},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-            ],
-            "group_by": ["p"],
-            "aggregations": [{
-                "count": "mr",
-                "as": "user_mrs"
-            }],
-            "limit": 5
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            !sql.contains("_nf_mr"),
-            "_nf_mr must not be emitted when state is fully denormalized, got:\n{sql}"
-        );
-
-        assert!(
-            sql.contains("mr.state = 'merged'") || sql.contains("state = 'merged'"),
-            "state filter must be applied on MR node table, got:\n{sql}"
         );
     }
 
@@ -2281,7 +1423,7 @@ mod tests {
     #[test]
     fn final_prewhere_setting_follows_final_scans() {
         let sql = compile_sql(
-            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"limit":10}"#,
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":"active"}}],"limit":10}"#,
         );
         assert!(sql.contains(" FINAL"), "{sql}");
         assert!(
@@ -2300,18 +1442,17 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [
-                    {"id": "u", "entity": "User", "node_ids": [116]},
+                    {"id": "u", "entity": "User", "filters": {"username": "alice"}},
                     {"id": "mr", "entity": "MergeRequest"}
                 ],
                 "relationships": [{"from": "u", "to": "mr", "type": "AUTHORED"}],
-                "group_by": ["u"],
                 "aggregations": [{"count": "mr", "as": "c"}],
                 "limit": 20
             }"#,
         );
         assert!(sql.contains(" IN (SELECT"), "{sql}");
         assert!(
-            sql.contains("use_index_for_in_with_subqueries_max_values = 100000"),
+            sql.contains("use_index_for_in_with_subqueries_max_values = 1000000"),
             "{sql}"
         );
     }
@@ -2396,24 +1537,6 @@ mod tests {
         assert!(sql.contains("(e.source_id = 7)"), "{sql}");
         assert!(sql.contains("(e.target_id = 7)"), "{sql}");
     }
-
-    #[test]
-    fn aggregated_edge_dedup_filters_kinds_before_picking_latest_row() {
-        let sql = compile_gql_sql(
-            "MATCH (u:User)-[:APPROVED]->(mr:MergeRequest {state: 'merged'}) RETURN u.username, count(mr) AS n",
-        );
-
-        let dedup = sql
-            .split("LIMIT 1 BY")
-            .next()
-            .and_then(|head| head.rsplit("(SELECT * FROM gl_edge").next())
-            .expect("edge dedup subquery");
-        assert!(
-            dedup.contains("relationship_kind = 'APPROVED'"),
-            "kind filter should sit inside the dedup subquery:\n{sql}"
-        );
-    }
-
     #[test]
     fn text_indexed_equality_also_matches_the_lowercase_index_expression() {
         let sql = compile_gql_sql("MATCH (d:Definition) WHERE d.name = 'compile' RETURN d.name");

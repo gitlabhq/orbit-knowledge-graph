@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::common::DummyClaims;
-use crate::indexer::common::dispatch::start_nats;
+use crate::indexer::common::start_nats;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use integration_testkit::TestContext;
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -615,14 +615,14 @@ impl Reader {
     }
 }
 
-struct QueryStream {
-    sender: mpsc::Sender<ExecuteQueryMessage>,
-    stream: Streaming<ExecuteQueryMessage>,
+pub(super) struct QueryStream {
+    pub(super) sender: mpsc::Sender<ExecuteQueryMessage>,
+    pub(super) stream: Streaming<ExecuteQueryMessage>,
     authorization_request: Option<RedactionRequired>,
 }
 
 impl QueryStream {
-    async fn open(
+    pub(super) async fn open(
         client: &mut OrbitServiceClient<Channel>,
         request: Option<ExecuteQueryRequest>,
     ) -> Self {
@@ -657,7 +657,7 @@ impl QueryStream {
             .unwrap()
     }
 
-    async fn await_authorization_request(&mut self) {
+    pub(super) async fn await_authorization_request(&mut self) {
         let message = self.next().await;
         let Content::Redaction(RedactionExchange {
             content: Some(redaction_exchange::Content::Required(required)),
@@ -668,7 +668,7 @@ impl QueryStream {
         self.authorization_request = Some(required);
     }
 
-    async fn finish(self) -> Result<Value, ExecuteQueryError> {
+    pub(super) async fn finish(self) -> Result<Value, ExecuteQueryError> {
         let (chunks, result) = self.collect().await?;
         let json = match result.content {
             Some(execute_query_result::Content::ResultJson(json)) => json,
@@ -804,7 +804,7 @@ fn webserver_config(graph: &TestContext, nats_address: &str) -> AppConfig {
     config
 }
 
-async fn serve_grpc(
+pub(super) async fn serve_grpc(
     service: OrbitServiceImpl,
     shutdown: CancellationToken,
 ) -> OrbitServiceClient<Channel> {

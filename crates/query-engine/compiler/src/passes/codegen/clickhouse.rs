@@ -50,6 +50,34 @@ pub fn codegen(
     })
 }
 
+/// A CTE's name, its body as a statement of its own with the other CTEs attached, and its parameters.
+pub type CteStatement = (String, String, HashMap<String, ParamValue>);
+
+/// Each CTE body as a statement tests can EXPLAIN.
+pub fn cte_statements(ast: &Node) -> Result<Vec<CteStatement>> {
+    let Node::Query(query) = ast else {
+        return Ok(Vec::new());
+    };
+    query
+        .ctes
+        .iter()
+        .map(|cte| {
+            let statement = Query {
+                ctes: query
+                    .ctes
+                    .iter()
+                    .filter(|other| other.name != cte.name)
+                    .cloned()
+                    .collect(),
+                ..(*cte.query).clone()
+            };
+            let mut ctx = Context::new();
+            let sql = ctx.emit_query(&statement)?;
+            Ok((cte.name.clone(), sql, ctx.params.into_map()))
+        })
+        .collect()
+}
+
 /// # Trust boundary
 ///
 /// This function bypasses the compiler security pipeline (`apply_security_context`,
@@ -184,7 +212,10 @@ impl Context {
         // unparenthesized UNION ALL, not the whole union. Wrap so they apply
         // to the combined result.
         if !q.union_all.is_empty()
-            && (q.limit.is_some() || q.limit_by.is_some() || !q.order_by.is_empty())
+            && (q.limit.is_some()
+                || q.offset.is_some()
+                || q.limit_by.is_some()
+                || !q.order_by.is_empty())
         {
             let body = std::mem::take(&mut parts).join(" ");
             parts.push(format!("SELECT * FROM ({body})"));
@@ -209,6 +240,10 @@ impl Context {
 
         if let Some(limit) = q.limit {
             parts.push(format!("LIMIT {limit}"));
+        }
+
+        if let Some(offset) = q.offset {
+            parts.push(format!("OFFSET {offset}"));
         }
 
         Ok(parts.join(" "))
@@ -325,10 +360,10 @@ impl Context {
             Expr::InSubquery {
                 expr,
                 cte_name,
-                column,
+                columns,
             } => {
                 let e = self.emit_expr(expr);
-                format!("{e} IN (SELECT {column} FROM {cte_name})")
+                format!("{e} IN (SELECT {} FROM {cte_name})", columns.join(", "))
             }
             Expr::InSelect { expr, query } => {
                 let e = self.emit_expr(expr);

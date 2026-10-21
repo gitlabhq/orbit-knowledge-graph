@@ -1,0 +1,34 @@
+description: Hydration returns every requested entity when an earlier ID exists at two paths
+
+config:
+  unmerged_seed: true
+  security: { org_id: 1, paths: ["1/"] }
+  redaction:
+    allow:
+      note: [9700, 9701]
+      merge_request: [2000]
+  extra_seed:
+    gl_note:
+      - { id: 9700, note: first old path, noteable_type: MergeRequest, noteable_id: 2000, traversal_path: "1/100/1000/" }
+      - { id: 9700, note: first new path, noteable_type: MergeRequest, noteable_id: 2000, traversal_path: "1/102/1004/" }
+      - { id: 9701, note: second note, noteable_type: MergeRequest, noteable_id: 2000, traversal_path: "1/100/1000/" }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 9700, target_kind: Note }
+      - { traversal_path: "1/100/1000/", source_id: 2000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 9701, target_kind: Note }
+
+query:
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note)
+    RETURN mr.id, n.note LIMIT 10
+
+expect:
+  hydration: static
+  node_count: 3
+  nodes:
+    MergeRequest: { ids: [2000] }
+    Note:
+      ids: [9700, 9701]
+      rows:
+        - { id: 9701, note: second note }
+  edges:
+    HAS_NOTE: [[2000, 9700], [2000, 9701]]

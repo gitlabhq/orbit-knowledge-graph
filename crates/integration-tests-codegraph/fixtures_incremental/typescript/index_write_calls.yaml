@@ -1,0 +1,31 @@
+name: "TypeScript: a call in the index of an assignment target links"
+
+fixtures:
+  - path: index_write.ts
+    content: |
+      class Item {}
+
+      function make(): Item { return new Item(); }
+
+      function slot(): number { return 0; }
+
+      function indexWrite(a: Item[]) {
+        a[slot()] = make();
+      }
+
+      function memberIndexWrite(o: { items: number[] }) {
+        o.items[slot()] += 1;
+      }
+
+tests:
+  - name: "the call in the index links next to the call on the right-hand side"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["indexWrite", "memberIndexWrite"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: indexWrite, callee: make } }
+      - { row: { caller: indexWrite, callee: slot } }
+      - { row: { caller: memberIndexWrite, callee: slot } }

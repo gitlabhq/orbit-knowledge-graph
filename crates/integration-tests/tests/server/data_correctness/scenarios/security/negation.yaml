@@ -157,7 +157,7 @@ cases:
 
   - name: negation_far_node_scan_keeps_scope
     description: |
-      A NOT on the far node of a traversal reads that node's table, narrowed to the edge keys. The table scan carries the caller's traversal_path filter, and the NOT applies to the latest row.
+      A NOT on the far node of a traversal reads the current node row. The caller's traversal_path filter runs inside the scan before the pick and the NOT runs on the picked row.
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","not":{"name":{"contains":"secret"}},"columns":["name"]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"limit":30}
@@ -168,8 +168,8 @@ cases:
     expect:
       compile_only: true
       sql_contains:
-        - "WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT id FROM _narrow_g))"
-        - "AS g WHERE ((NOT multiSearchAny(lower(g.name), [lower('secret')]))"
+        - "gl_group AS g WHERE (startsWith(g.traversal_path, '1/') AND g.id IN (SELECT id FROM _orbit_relation_"
+        - "LIMIT 1 BY g.traversal_path, g.id) AS g WHERE ((NOT multiSearchAny(lower(g.name), [lower('secret')])) AND (g._deleted = false))"
 
   - name: negation_no_existence_oracle_hidden
     description: |
@@ -214,7 +214,7 @@ cases:
         MATCH (wi:WorkItem)
         WHERE wi.id >= 4000 AND wi.id <= 4010
           AND NOT (NOT wi.id = 4001 AND wi.state = 'closed')
-        RETURN wi.state ORDER BY wi.id PAGE 2
+        RETURN wi.state ORDER BY wi.id SKIP 0 LIMIT 2
     expect:
       all_pages:
         node_ids:

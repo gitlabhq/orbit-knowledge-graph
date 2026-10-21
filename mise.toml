@@ -30,7 +30,7 @@ RUSTC_WRAPPER = "{% if env.RUSTC_WRAPPER is defined %}{{env.RUSTC_WRAPPER}}{% el
 "cargo:cargo-geiger" = "0.13.0"
 "cargo:cargo-cyclonedx" = "0.5.7"
 "cargo:cargo-zigbuild" = "0.23.4"
-"cargo:ast-grep" = "0.42.0"
+ast-grep = "0.51.0"
 "cargo:https://gitlab.com/gitlab-org/rust/gitlab-xtasks" = "tag:v1.6.1"
 "cargo:cargo-bolero" = "0.13.4"
 "cargo:cargo-shear" = "1.13.1"
@@ -55,6 +55,7 @@ hyperfine = "1.20.0"
 # aws-lc-fips-sys compiles the AWS-LC FIPS module from source and needs cmake and go.
 cmake = "4.4.3"
 go = "1.27.1"
+glab = "1.123.0"
 
 [tasks."hooks:install"]
 run = ["lefthook install --force", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
@@ -147,42 +148,42 @@ run = "cargo build -p orbit-cli && cargo nextest run --test cli --test outside_r
 description = "Run CLI integration tests — concurrency, worktrees (no Docker)"
 
 [tasks."test:integration"]
-run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0"
+run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers --test indexer_containers --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run container tests (requires the Colima `gkg` profile: `colima start gkg --memory 12`)"
 
 [tasks."test:integration:server"]
-run = "cargo nextest run --all-features --test containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(redaction_integration) | test(graph_formatter)'"
+run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(redaction_integration) | test(graph_formatter)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run server integration tests (data correctness, redaction, graph formatter)"
 
 [tasks."test:integration:overlay"]
-run = "GKG_TEST_ONTOLOGY_OVERLAY={{arg(name='overlay')}} cargo nextest run --all-features --test containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(denormalized_tables_match_their_source_join)'"
+run = "GKG_TEST_ONTOLOGY_OVERLAY={{arg(name='overlay')}} ./scripts/dev/run-container-tests.sh --all-features --test server_containers --test indexer_containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(denormalized_tables_match_their_source_join)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run data correctness against the ontology with config/seeds/overlays/<name>/ merged over it"
 
 [tasks."test:integration:data"]
-run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 --no-capture -E 'test(data_correctness)'"
+run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers --no-fail-fast --retries 0 --no-capture -E 'test(data_correctness)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run data correctness integration tests"
 
 [tasks."test:integration:corpus"]
-run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 --no-capture -E 'test(corpus_smoke)'"
+run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers --no-fail-fast --retries 0 --no-capture -E 'test(corpus_smoke)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run the query-corpus smoke test (every corpus query compiles + runs)"
 
 [tasks."test:integration:indexer"]
-run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 -E 'test(indexer::)'"
+run = "./scripts/dev/run-container-tests.sh --all-features --test indexer_containers --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run indexer integration tests (schema migration, engine, NATS, namespace deletion)"
 
 [tasks."test:integration:indexer:code"]
-run = "cargo nextest run -p integration-tests --retries 0 -E 'test(code_indexing_task)'"
+run = "./scripts/dev/run-container-tests.sh -p integration-tests --test indexer_containers --retries 0 -E 'test(code_indexing_task)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run indexer integration tests (code indexing)"
 
 [tasks."test:integration:indexer:sdlc:scenario"]
-run = "SCENARIO_FILTER='{{arg(name='filter')}}' cargo nextest run --all-features --test containers --no-fail-fast --retries 0 --no-capture -E 'test(scenario_indexing)'"
+run = "SCENARIO_FILTER='{{arg(name='filter')}}' ./scripts/dev/run-container-tests.sh --all-features --test indexer_containers --no-fail-fast --retries 0 --no-capture -E 'test(scenario_indexing)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run SDLC indexer scenarios matching a folder/name substring, e.g. `mise test:integration:indexer:sdlc:scenario ci/` or `... processes_jobs`"
 
@@ -200,6 +201,17 @@ run = [
   "cargo clippy -p duckdb-client --all-targets -- -D warnings",
 ]
 description = "Run clippy lint checks"
+
+[tasks."lint:logs"]
+run = [
+  "ast-grep test --skip-snapshot-tests",
+  """ast-grep scan crates \
+    --globs '!**/tests/**' --globs '!**/tests.rs' --globs '!**/test_helpers.rs' \
+    --globs '!**/testing.rs' --globs '!**/testkit.rs' --globs '!**/testkit/**' \
+    --globs '!**/benches/**' --globs '!**/examples/**' --globs '!**/build.rs' \
+    --globs '!crates/integration-*/**' --globs '!crates/fuzz/**'""",
+]
+description = "Check log, span and print call sites against the red data rules (scripts/linting/logs)"
 
 [tasks."lint:deps"]
 run = "cargo shear"

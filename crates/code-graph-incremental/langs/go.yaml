@@ -3,9 +3,11 @@
 # receiver methods (as __impl wrappers named after the receiver type),
 # composite literals as typed bindings, selector calls, control flow.
 #
+# Packages are directories: each file re-exports its directory (`./*`), so
+# files of one package see each other, and an import names the imported
+# package's directory, which go.mod's module path maps onto the repository.
+#
 # Known gaps (engine, not rules):
-# - Same-package cross-file resolution needs a package namespace; the
-#   resolver is import-driven, and Go files do not import siblings.
 # - The DSL cannot see a node's parent, so package-level and function-local
 #   var/const declarations get the same treatment: every var/const is a
 #   __def plus an SSA __binding.
@@ -21,12 +23,12 @@ config:
           float32, float64, int, int8, int16, int32, int64, rune, string, uint,
           uint8, uint16, uint32, uint64, uintptr
         ]
-      - module: fmt
+      - module: fmt/*
         precedence: runtime
         symbols: [Append, Appendf, Appendln, Errorf, Fprint, Fprintf, Fprintln,
           Fscan, Fscanf, Fscanln, Print, Printf, Println, Scan, Scanf, Scanln,
           Sprint, Sprintf, Sprintln, Sscan, Sscanf, Sscanln]
-      - module: errors
+      - module: errors/*
         precedence: runtime
         symbols: [As, Is, Join, New, Unwrap]
 
@@ -76,6 +78,11 @@ config:
       - { module: unique, precedence: runtime }
       - { module: unsafe, precedence: runtime }
       - { module: weak, precedence: runtime }
+  resolve:
+    parse_files:
+      - name: "go.mod"
+        format: raw
+        extract: "(?m)^(module)\\s+(\\S+)"
 
 stages:
   - name: normalize
@@ -83,7 +90,7 @@ stages:
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
       - match: '(package_clause $P:package_identifier)'
-        replace: '(go_pkg (__package @$P) (__module_export (__import (__source @$P) (__source_path @$P|regex_replace("$", "/*")) (__name "*"))))'
+        replace: '(go_pkg (__package @$P) (__module_export (__import (__source @$P) (__source_path "./*") (__name "*"))))'
       - match: '(return_statement $$$VALS)'
         replace: '(__ssa_return $$$VALS)'
 
@@ -111,29 +118,32 @@ stages:
 
   - name: retag-expressions
     rules:
+      # `(f())` carries the value of the call it wraps
+      - match: '(parenthesized_expression $V:__call)'
+        replace: '$V'
       - match: '(selector_expression operand: $O:__member field: $F)'
         replace: '(__member @$F (__object $O))'
       - match: '(selector_expression operand: $O:__call field: $F)'
         replace: '(__member @$F (__object $O))'
       - match: '(selector_expression operand: $O field: $F)'
-        replace: '(__member @$F (__object @$O))'
+        replace: '(__member @$F (__object @$O $O))'
 
       - match: '(call_expression function: $F:__member arguments: $A)'
         replace: '(__call (__callee $F) $A)'
       - match: '(call_expression function: $F arguments: $A)'
-        replace: '(__call (__callee @$F) $A)'
+        replace: '(__call (__callee @$F $F) $A)'
 
   - name: imports
     rules:
       # alias "path/pkg"
       - match: '(import_spec name: $A:package_identifier path: (interpreted_string_literal $P:interpreted_string_literal_content))'
-        replace: '(__import (__source @$P) (__source_path @$P) (__name @$P|split_last("/") (__alias @$A)))'
+        replace: '(__import (__source @$P) (__source_path @$P|regex_replace("$", "/*")) (__name @$P|split_last("/") (__alias @$A)))'
       # . "path/pkg" — every exported name of pkg enters scope
       - match: '(import_spec name: (dot) path: (interpreted_string_literal $P:interpreted_string_literal_content))'
-        replace: '(__import (__source @$P) (__source_path @$P) (__name @$P|split_last("/") (__ssa_hint "*")))'
+        replace: '(__import (__source @$P) (__source_path @$P|regex_replace("$", "/*")) (__name @$P|split_last("/") (__ssa_hint "*")))'
       # "path/pkg" and _ "path/pkg"
       - match: '(import_spec path: (interpreted_string_literal $P:interpreted_string_literal_content))'
-        replace: '(__import (__source @$P) (__source_path @$P) (__name @$P|split_last("/")))'
+        replace: '(__import (__source @$P) (__source_path @$P|regex_replace("$", "/*")) (__name @$P|split_last("/")))'
 
   - name: classify
     rules:
@@ -143,13 +153,13 @@ stages:
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R:__call))'
         replace: '(__binding @$N (__declaration) (__rhs $R))'
       - match: '(short_var_declaration left: (expression_list $N:identifier) right: (expression_list $R))'
-        replace: '(__binding @$N (__declaration) (__rhs @$R))'
+        replace: '(__binding @$N (__declaration) (__rhs @$R $R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__struct_lit))'
         replace: '(__binding @$N (__ssa_typed @$R) (__rhs $R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R:__call))'
         replace: '(__binding @$N (__rhs $R))'
       - match: '(assignment_statement left: (expression_list $N:identifier) right: (expression_list $R))'
-        replace: '(__binding @$N (__rhs @$R))'
+        replace: '(__binding @$N (__rhs @$R $R))'
 
       # var/const: a __def for the graph plus a __binding for SSA
       - match: '(var_spec name: $N:identifier type: $T:type_identifier value: (expression_list $V))'
@@ -161,7 +171,7 @@ stages:
       - match: '(var_spec name: $N:identifier value: (expression_list $V:__call))'
         replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs $V)))'
       - match: '(var_spec name: $N:identifier value: (expression_list $V))'
-        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs @$V)))'
+        replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N (__rhs @$V $V)))'
       - match: '(var_spec name: $N:identifier)'
         replace: '(var_spec (__def (__defname @$N) (__variable)) (__binding @$N))'
       - match: '(const_spec name: $N:identifier)'
@@ -176,22 +186,17 @@ stages:
         replace: '(__ssa_branch $$$CASES->__ssa_arm)'
       - match: '(select_statement $$$CASES:communication_case|default_case)'
         replace: '(__ssa_branch $$$CASES->__ssa_arm)'
-      - match: '(for_statement body: $B)'
-        replace: '(__ssa_loop $B)'
-
-      # Struct fields: named → field def; embedded → supertype
-      - match: '(field_declaration name: $N:field_identifier)'
-        replace: '(__def (__defname @$N) (__field_def))'
-      - match: '(field_declaration type: $T:type_identifier)'
-        replace: '(__supertype @$T)'
+      - match: '(for_statement $$$H body: $B)'
+        replace: '(__ssa_loop $$$H $B)'
 
       # Interface method signatures
       - match: '(method_elem name: $N parameters: $P result:? $RT:type_identifier)'
         replace: '(__def (__defname @$N) (__method) (__ssa_return_type? @$RT) $P)'
 
       # Types
-      - match: '(type_spec name: $N type: (struct_type (field_declaration_list $$$F)))'
-        replace: '(__def (__defname @$N) (__struct) $$$F)'
+      # Only a named struct type defines fields; an anonymous struct in a value does not
+      - match: '(type_spec name: $N type: (struct_type (field_declaration_list $$$F:field_declaration)))'
+        replace: '(__def (__defname @$N) (__struct) $$$F->struct_field)'
       - match: '(type_spec name: $N type: (interface_type $$$M))'
         replace: '(__def (__defname @$N) (__interface) $$$M)'
       - match: '(type_spec name: $N)'
@@ -212,10 +217,18 @@ stages:
 
   - name: ssa-cleanup
     rules:
+      # Struct fields: named → field def; embedded → supertype
+      - match: '(struct_field name: $N:field_identifier type: (func_type))'
+        replace: '(__def (__defname @$N) (__field_def))'
+        tag: { callable: "true" }
+      - match: '(struct_field name: $N:field_identifier)'
+        replace: '(__def (__defname @$N) (__field_def))'
+      - match: '(struct_field type: $T:type_identifier)'
+        replace: '(__supertype @$T)'
       - match: '(__ssa_return (expression_list $V:__struct_lit))'
         replace: '(__ssa_return (__call (__callee @$V) $V))'
       - match: '(__ssa_return (expression_list $V:identifier))'
-        replace: '(__ssa_return (__rhs @$V))'
+        replace: '(__ssa_return (__rhs @$V $V))'
 
   - name: tag-defs
     rules:
@@ -226,19 +239,29 @@ stages:
       - match: '(__def (__method))'
         tag: { callable: "true", scoped: "true" }
       - match: '(__def (__class))'
-        tag: { callable: "true", scoped: "true" }
+        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__lambda))'
         tag: { callable: "true" }
       - match: '(__def (__enum_variant))'
-        tag: { callable: "true" }
+        tag: { callable: "true", value: "true" }
       - match: '(__def (__struct))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__impl))'
         tag: { scoped: "true" }
       - match: '(__def (__trait))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
       - match: '(__def (__enum))'
-        tag: { scoped: "true" }
+        tag: { value: "true", declares_type: "true", scoped: "true" }
+      - match: '(__def (__interface))'
+        tag: { value: "true", declares_type: "true" }
+      - match: '(__def (__type_alias))'
+        tag: { value: "true", declares_type: "true" }
+      - match: '(__def (__field_def))'
+        tag: { value: "true" }
+      - match: '(__def (__variable))'
+        tag: { value: "true" }
+      - match: '(__def (__constant))'
+        tag: { value: "true" }
 
   - name: tag-file-dir
     rules:
@@ -256,7 +279,11 @@ stages:
           resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
 
 resolve:
-  stages: []
+  stages:
+    - name: modules
+      rules:
+        - match: '(__file "go.mod" (__field "module" $V:__str))'
+          replace: '(__file "go.mod" (__alias @$V|regex_replace("$", "/*") (__str @$ROOT|tree_path("/")|regex_replace("go\.mod$", "*"))))'
 
 display:
   - name: fqn
@@ -319,7 +346,7 @@ display:
         tag:
           entity: ImportedSymbol
           file_path: '@$ROOT|ancestor_tag("file_path")'
-          source_path: '@$ROOT|child_sym("__source_path")'
+          source_path: '@$ROOT|child_sym("__source")'
       - match: '(__name (__alias))'
         tag:
           import_type: AliasedImport

@@ -1,3 +1,75 @@
+## [0.151.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.151.0...v0.151.1) (2026-10-21)
+
+### Fixes
+
+* **observability:** separate caller errors from server errors in query metrics ([d952d6e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d952d6e592eaa79bf2dda212e0c7a0d6762b18b2)) by Bohdan Parkhomchuk
+* **utils:** map Windows absolute symlink targets in vfs Directory ([06e6db0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/06e6db0b6bf5375ce2f8f67141cb1c9d81a28afe)) by Dmitry Gruzd
+
+### Other
+
+* **adr:** add ADR 021 for entity context expansion in the context endpoint ([0bbcabf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0bbcabf44f9ba2522d067519e7b1a7b3f1ecf45f)) by Dmitry Gruzd
+* **e2e:** run HA suite in post-merge pipeline ([2d3b0d9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2d3b0d983f7781a50daf6190e8e11d62fbab017e)) by Michael Usachenko
+
+## [0.151.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.150.0...v0.151.0) (2026-10-21)
+
+### Features
+
+* **gql:** replace cursor pagination with openCypher SKIP/LIMIT ([3d99972](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3d9997208eae8dbda4ad18eb0477592fefb71ec3)) by Aaron Algutifan
+
+### Fixes
+
+* **code-graph-incremental:** link Go calls into other packages through go.mod ([9c5089b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9c5089ba4db864f99dd39a00a2d15aacf358008e)) by Aaron Algutifan
+* **query:** close outstanding test coverage and perf gaps left by planner changes ([5847b2f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5847b2fc5bb56d06592c1de57f9d848f732914ac)) by Michael Usachenko
+
+### Other
+
+* **deps:** bump rustls-webpki and webpki-roots for the emSign root advisories ([be410ff](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/be410ff19626330b8c6b7a0d10fb10442a651a1c)) by Michael Usachenko
+
+## [0.150.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.149.0...v0.150.0) (2026-10-20)
+
+### Features
+
+* **code-graph-incremental:** export the rows of chosen trees only ([1450229](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/14502296674340347b7328ea564ba30141619a3d)) by Aaron Algutifan
+* **observability:** log field registry with safe and expanded macros ([8303d58](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8303d583d053a45dd8c9a477f36ec9a161301042)) by Bohdan Parkhomchuk
+* **observability:** log safety rules and advisory CI job ([767be6e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/767be6e2848deb08410a58690c134c2e2d8ed9cc)) by Bohdan Parkhomchuk
+* **observability:** name every log field from the registry ([d72a528](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d72a52854ea1ad77adee7bcfd3eb3cf68cfa262e)) by Bohdan Parkhomchuk
+* **observability:** propagate spans and tenant fields to every unit of work ([3f0f9a2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3f0f9a25c3762e89a1550c17953f918b23cc619a)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **code-graph-incremental:** resolve nested member writes through their field ([1dee09d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1dee09dcf4e31d4ff1e34c932e249c43a7b138a6)) by Aaron Algutifan
+
+### Performance
+
+* **compiler:** unify traversal relation planning ([0af1f1e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0af1f1e5bf1d52351b9ebdbdf6c8ac294d89f7cd)) by Michael Usachenko
+
+### Other
+
+* **code-graph:** retire root fixture directory ([521c1af](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/521c1af52b549e47c2dfbed8785e1ceb86a7c8ad)) by Michael Usachenko
+* **self-managed:** use the CNG gitlab-siphon-tables image ([51e55d7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/51e55d79859e85b475699303073d768340caa805)) by Clemens Beck
+* type-check the orbit CLI for Windows on Rust changes ([c5b36dd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c5b36ddd78b0ada66be1414770e91cab52c913bf)) by Dmitry Gruzd
+* validate GitLab configuration before commit ([e52aa66](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e52aa662ec51db5716159b777d531c11b7421e06)) by michaelusa
+
+## [0.149.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.148.0...v0.149.0) (2026-10-19)
+
+### Features
+
+* **indexer:** ship production insert settings as Orbit defaults ([ce697aa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ce697aa0975fef16879f0fe452f4c1470cfcff6a)) by Michael Angelo Rivera
+* **indexer:** take the repository storage from the code indexing task ([6f09df1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6f09df1cb83c7b0ba7900047dc87f0f2a701e198)) by Dmitry Gruzd
+
+### Fixes
+
+* **code-graph-incremental:** link calls in expressions ([2a5e397](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2a5e39788eded88c1f84c064a741856f4deb8307)) by Michael Angelo Rivera
+* **code-graph-incremental:** link calls to the right member ([5021d86](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5021d8651c10e046824388ae35dd3985f5d61dcb)) by Michael Angelo Rivera
+* **integration-tests:** add missing repository_storage and clear narration lint ([d5211f1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d5211f1011f75a6f5f6dfce8c3b9083ef9168ca9)) by Dmitry Gruzd
+* **orbit-cli:** say 'timed out' and include the cause in request failures ([b32ce1f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b32ce1fa46d5c79f9b26038f79a5abe006d5bd82)) by Dmitry Gruzd
+* **utils:** build safe_fs and vfs scratch on Windows ([f7b238a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f7b238a6a8843ea25df344677bce4c91f5208003)) by Dmitry Gruzd
+
+### Other
+
+* **integration:** speed up test-container integration tests by up to 7.1x ([41303ed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/41303ed3eb70d526064499f71f931e1435e08b7c)) by Michael Usachenko
+* **nats:** replace fixed startup delays ([0598f11](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0598f11d6dce382180dc6b4ab50b22a0a4e15819)) by Michael Usachenko
+
 ## [0.148.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.147.0...v0.148.0) (2026-10-18)
 
 ### Features

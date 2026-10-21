@@ -22,7 +22,7 @@ MATCH pattern [WHERE predicates]
 [MATCH pattern [WHERE predicates] ...]
 RETURN projections
 [ORDER BY key [ASC | DESC]]
-[LIMIT rows | PAGE rows [AFTER 'token']]
+[SKIP rows] [LIMIT rows]
 ```
 
 - Declare each node's label, and any inline properties, where it first appears:
@@ -36,7 +36,8 @@ RETURN projections
 - Traversals are capped at three hops. `-[:CONTAINS*1..3]->` is a bounded
   variable-length hop.
 - `ORDER BY` takes one sort key.
-- `LIMIT` and `PAGE` accept 1 to 1000 rows.
+- `LIMIT` accepts 1 to 1000 rows. `SKIP` (or `OFFSET`) accepts 0 to 10000
+  rows and must come before `LIMIT`.
 
 ## Selectivity
 
@@ -109,17 +110,38 @@ LIMIT 10
 
 ## Pagination
 
-`PAGE rows` replaces `LIMIT` and returns `next_cursor` while more rows remain.
-Continue with `PAGE rows AFTER 'next_cursor'`. The cursor binds to the query
-text, so change nothing else between pages. In raw output, the token is
-`pagination.next_cursor`. Check `pagination.truncated`: when true, the result
-window is incomplete. Do not report the returned rows as a complete list.
+Page with `SKIP` and `LIMIT`, as in Cypher. Start at `SKIP 0` and add the page
+size to `SKIP` for each next page: `SKIP 0 LIMIT 20`, then `SKIP 20 LIMIT 20`.
+Keep the rest of the query the same between pages. Stop when
+`pagination.has_more` is false, or when the table says no more rows are
+available. Write `SKIP` on every page, including the first, so all pages share
+one stable order.
+
+`SKIP` accepts up to 10000. To go deeper, page by key instead: `ORDER BY` a
+unique property such as `id`, and filter past the last value from the previous
+page. Each page costs the same however deep it is:
+
+```gql orbit-query
+MATCH (u:User {username: 'root'})-[:AUTHORED]->(mr:MergeRequest)
+WHERE mr.state = 'merged' AND mr.id > 48211
+RETURN mr.id, mr.iid, mr.title
+ORDER BY mr.id
+LIMIT 1000
+```
+
+Take the last `mr.id` on each page as the next lower bound, and stop when
+`pagination.has_more` is false.
+
+A page can return fewer rows than `LIMIT` when some rows are hidden from you.
+Keep going until `has_more` is false. `SKIP` counts hidden rows too, so pages
+never overlap. Check `pagination.truncated`: when true, the result window is
+incomplete. Do not report the returned rows as a complete list.
 
 ## Not supported
 
 Mutations, multiple statements, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`,
-subqueries, `OR`, `XOR`, `DISTINCT`, `count(*)`, arbitrary expressions,
-and offset pagination all reject. Syntax errors report a line and column.
+subqueries, `OR`, `XOR`, `DISTINCT`, `count(*)`, and arbitrary expressions
+all reject. Syntax errors report a line and column.
 Other function calls, such as `collect(x)`, reject with an error that names
 the function.
 
@@ -234,7 +256,7 @@ MATCH (u:User {username: 'root'})-[:AUTHORED]->(mr:MergeRequest)
 WHERE mr.state = 'merged'
 RETURN mr.iid, mr.title
 ORDER BY mr.created_at DESC
-PAGE 20
+SKIP 0 LIMIT 20
 ```
 
 ### Shortest path between two nodes
@@ -271,6 +293,6 @@ column. Common causes:
 - A relationship type that does not connect the two labels, or points the other way. The error names the valid direction.
 - A node label repeated with a different label, or with inline properties twice.
 - Unsupported syntax: `OR`, `XOR`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, `WITH`, or a second `ORDER BY` key.
-- `PAGE ... AFTER` with a cursor from a different query. The cursor binds to the query text.
+- `LIMIT` before `SKIP`. Write `SKIP 20 LIMIT 20`, not `LIMIT 20 SKIP 20`.
 
 Fix: check node and relationship names with `CALL db.schema('Node')`.

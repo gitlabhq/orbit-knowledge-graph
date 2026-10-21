@@ -40,6 +40,9 @@ pre-commit:
     - name: comments
       run: scripts/linting/comment_check_hook.sh
       glob: "**/*.{rs,yaml,yml,toml,sh,py,js,mjs,ts,rb,css}"
+    - name: log-safety
+      run: mise run lint:logs
+      glob: "crates/**/*.rs"
     - name: prose
       run: mise exec -- uv run --quiet scripts/linting/prose_lint.py {staged_files}
       glob:
@@ -77,6 +80,11 @@ pre-commit:
     - name: prompt-version-bump
       run: bash ./scripts/checks/check-prompt-version-bump.sh
       glob: "config/prompts/**/*.yml"
+    - name: gitlab-ci
+      run: mise exec -- glab ci lint --include-jobs
+      glob:
+        - ".gitlab-ci.yml"
+        - ".gitlab/ci/**/*.yml"
     - name: ontology-schema
       run: mise run ontology:validate
       glob: "config/ontology/**/*.yaml"

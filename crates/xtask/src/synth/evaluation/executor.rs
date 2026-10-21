@@ -644,7 +644,7 @@ impl QueryExecutor {
         let mut cursor = match result {
             Ok(c) => c,
             Err(e) => {
-                tracing::debug!("fetch_bytes failed: {}", e);
+                orbit_log_fields::debug!(expanded(ERROR_MESSAGE) = %e, "fetch_bytes failed");
                 return String::new();
             }
         };
@@ -655,7 +655,7 @@ impl QueryExecutor {
                 Ok(Some(chunk)) => buffer.extend(chunk),
                 Ok(None) => break,
                 Err(e) => {
-                    tracing::debug!("fetch_bytes cursor error: {}", e);
+                    orbit_log_fields::debug!(expanded(ERROR_MESSAGE) = %e, "fetch_bytes cursor error");
                     return String::new();
                 }
             }
@@ -714,7 +714,7 @@ impl QueryExecutor {
         let mut cursor = match result {
             Ok(c) => c,
             Err(e) => {
-                tracing::debug!("fetch_bytes failed: {}", e);
+                orbit_log_fields::debug!(expanded(ERROR_MESSAGE) = %e, "fetch_bytes failed");
                 return String::new();
             }
         };
@@ -725,10 +725,10 @@ impl QueryExecutor {
                 Ok(Some(chunk)) => {
                     buffer.extend(&chunk);
                     if buffer.len() > max_bytes {
-                        tracing::debug!(
-                            "Truncating metadata sample at {} bytes (limit: {})",
-                            buffer.len(),
-                            max_bytes
+                        orbit_log_fields::debug!(
+                            safe(SIZE_BYTES) = buffer.len(),
+                            safe(LIMIT_BYTES) = max_bytes,
+                            "truncating metadata sample"
                         );
                         buffer.truncate(max_bytes);
                         break;
@@ -736,7 +736,7 @@ impl QueryExecutor {
                 }
                 Ok(None) => break,
                 Err(e) => {
-                    tracing::debug!("fetch_bytes cursor error: {}", e);
+                    orbit_log_fields::debug!(expanded(ERROR_MESSAGE) = %e, "fetch_bytes cursor error");
                     return String::new();
                 }
             }

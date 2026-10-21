@@ -216,7 +216,6 @@ impl ParameterSampler {
                     r.traversal_path.as_str(),
                 )
                 .organization_id()?;
-                // Append trailing slash for SecurityContext format
                 let path = if r.traversal_path.ends_with('/') {
                     r.traversal_path
                 } else {
@@ -232,7 +231,11 @@ impl ParameterSampler {
     pub async fn warm_cache(&mut self, ontology: &Ontology) -> Result<()> {
         for node in ontology.nodes() {
             if let Err(e) = self.sample_ids(&node.name, ontology).await {
-                tracing::warn!("Failed to sample IDs for {}: {}", node.name, e);
+                orbit_log_fields::warn!(
+                    safe(ENTITY) = node.name.as_str(),
+                    expanded(ERROR_MESSAGE) = %e,
+                    "failed to sample IDs"
+                );
             }
         }
         Ok(())

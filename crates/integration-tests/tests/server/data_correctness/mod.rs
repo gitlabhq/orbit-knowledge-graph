@@ -1,9 +1,7 @@
 mod helpers;
 mod retained;
 
-use integration_testkit::{
-    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, query_scenario, run_subtests_shared,
-};
+use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, query_scenario, run_subtests_shared};
 
 const SCENARIOS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -20,13 +18,10 @@ const PRESETS: &str = concat!(
 
 #[tokio::test]
 async fn data_correctness() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
-    query_scenario::load_yaml_seed(&ctx, PRESETS, "data_correctness").await;
-    ctx.optimize_all().await;
+    let ctx = data_correctness_context().await;
 
     run_subtests_shared!(
         &ctx,
-        retained::cursor_after_token_with_sql_metacharacters_is_parameterized,
         retained::long_node_text_is_excerpted_only_on_wide_pages,
         retained::path_finding_code_filtered_endpoints_stay_on_same_traversal_path,
     );
@@ -34,17 +29,20 @@ async fn data_correctness() {
 
 #[tokio::test]
 async fn data_correctness_scenarios() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
-    query_scenario::load_yaml_seed(&ctx, PRESETS, "data_correctness").await;
-    ctx.optimize_all().await;
+    let ctx = data_correctness_context().await;
     query_scenario::run_dir(&ctx, SCENARIOS, PRESETS).await;
 }
 
 #[tokio::test]
 async fn query_settings_scenarios() {
     super::status::fixtures::use_production_query_settings();
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
-    query_scenario::load_yaml_seed(&ctx, PRESETS, "data_correctness").await;
-    ctx.optimize_all().await;
+    let ctx = data_correctness_context().await;
     query_scenario::run_dir(&ctx, QUERY_SETTINGS, PRESETS).await;
+}
+
+async fn data_correctness_context() -> TestContext {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+    query_scenario::load_yaml_seed(&context, PRESETS, "data_correctness").await;
+    context.optimize_if_needed().await;
+    context
 }

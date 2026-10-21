@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use strum::{AsRefStr, Display, EnumIter, EnumString};
+use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 use treesitter_visit::SupportLang;
 
 /// Groups of languages that can resolve symbols across each other's
@@ -21,13 +21,19 @@ pub enum LanguageFamily {
     Standalone(Language),
 }
 
+impl LanguageFamily {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::CFamily => "c_family",
+            Self::Jvm => "jvm",
+            Self::Standalone(lang) => lang.into(),
+        }
+    }
+}
+
 impl std::fmt::Display for LanguageFamily {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::CFamily => write!(f, "c_family"),
-            Self::Jvm => write!(f, "jvm"),
-            Self::Standalone(lang) => write!(f, "{lang}"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -43,7 +49,7 @@ macro_rules! define_languages {
         #[derive(
             Debug, Clone, Copy, PartialEq, Eq, Hash,
             Serialize, Deserialize,
-            EnumIter, EnumString, AsRefStr, Display,
+            EnumIter, EnumString, AsRefStr, Display, IntoStaticStr,
         )]
         #[strum(serialize_all = "snake_case")]
         pub enum Language {

@@ -138,16 +138,21 @@ Run them with `mise test:cli`. The release jobs also install the Linux release a
 
 ## Container tests
 
-Container tests run real Orbit code against real infrastructure. The shared harness, [`integration-testkit`](../../crates/integration-testkit/README.md), does this setup:
+Container tests run real Orbit code against real infrastructure. Server and indexer tests use
+separate Rust binaries. The shared harness, [`integration-testkit`](../../crates/integration-testkit/README.md), does this setup:
 
-1. It starts a ClickHouse testcontainer.
-2. It creates the graph schema from the ontology. Tests always use the same tables that the indexer writes.
+1. The test command starts one ClickHouse container for the nextest run.
+2. The harness creates each schema once and clones it into isolated databases.
 3. It loads seed data from `config/seeds/`.
 4. It runs `OPTIMIZE TABLE ... FINAL` on every table, so reads are deterministic.
 
-Tests that only read data share one database. Tests that write data get their own copy of it. Mocks replace two systems that Orbit does not own: Rails authorization and Gitaly.
+Tests that only read data share one database. Tests that write data get a cloned database.
+Query-only suites create only the graph schema. Indexer suites also create the Siphon source
+schema. Mocks replace Rails authorization and Gitaly because Orbit does not own those systems.
 
-The mise tasks use the Docker socket of the Colima `gkg` profile. On macOS, start that profile, then pick a task. On Linux with native Docker, run `cargo nextest run --all-features --test containers`.
+The mise tasks use the Docker socket of the Colima `gkg` profile. On macOS, start that profile.
+Then pick a task. On Linux with native Docker, use the same mise task. Local mise tasks reuse
+`gkg-clickhouse-local`. Container tests require the mise runner because it configures the service.
 
 ```shell
 colima start gkg --memory 12
@@ -172,12 +177,12 @@ Query scenarios are the main test surface for query correctness. They live in [`
 
 Each scenario runs the full query pipeline: compile, execute, redact, hydrate, paginate, and format. Then it checks the response. A scenario can also check the generated SQL and the skip indexes that ClickHouse uses. Scenarios give the same query in JSON and in GQL, so both frontends must return the same result.
 
-The runner validates response schemas and cursor metadata. Repeated queries must
+The runner validates response schemas and page metadata. Repeated queries must
 preserve node order within each entity type, properties, edges, and aggregation rows. Pagination
 scenarios can compare their combined results with an unpaginated query.
 
-Four [Rust-only exceptions](../../crates/integration-tests/README.md#rust-only-data-correctness-tests)
-cover cursor encoding, excerpt length, raw path rows, and constructed compiler ASTs.
+Three [Rust-only exceptions](../../crates/integration-tests/README.md#rust-only-data-correctness-tests)
+cover excerpt length, raw path rows, and constructed compiler ASTs.
 The remaining query correctness cases use YAML.
 
 The format reference is in the [`integration-testkit` README](../../crates/integration-testkit/README.md).
@@ -259,7 +264,7 @@ The first suite makes an administrator bot, turns on feature flags, and indexes 
 
 The `e2e` job runs on every main commit and is manual on MRs. It saves diagnostics when it fails and always removes the stack. Two more jobs use the same suites:
 
-- `e2e-ha` runs the suites on a ClickHouse cluster with replicas, and kills replicas during the run. It runs on a daily schedule and is manual on MRs.
+- `e2e-ha` runs the suites on a ClickHouse cluster with replicas, and kills replicas during the run. It runs in the post-merge pipeline and on a daily schedule. It is manual on MRs.
 - `e2e-pin-bump` runs on a daily schedule. It moves the pins in `versions.yaml` to their latest versions and updates one MR. On that MR, `e2e` runs automatically and must pass before the MR can merge.
 
 For setup, debugging, and the list of key files, see [E2E testing harness](../dev/e2e-testing.md).

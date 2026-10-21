@@ -20,6 +20,7 @@ use crate::input::{
 use crate::query_limits::{
     MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTER_STRING_LEN, MAX_HOPS_CAP,
     MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_LIMIT, MAX_PREDICATE_DEPTH, MAX_PREDICATE_LEAVES,
+    MAX_SKIP,
 };
 use crate::types::SecurityContext;
 #[cfg(test)]
@@ -155,7 +156,7 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
 
 /// Maximum span for id_range before it stops counting as selective.
 /// Ranges wider than this are effectively unfiltered full-table scans.
-const MAX_ID_RANGE_SPAN: i64 = 100_000;
+pub(crate) const MAX_ID_RANGE_SPAN: i64 = 100_000;
 
 /// Tighter id_range cap for path_finding endpoints. The frontier BFS is
 /// O(anchors × E^depth), so we bound anchor cardinality to match
@@ -338,11 +339,9 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 "limit must be between 1 and {MAX_LIMIT}"
             )));
         }
-        if let Some(cursor) = &input.cursor
-            && (cursor.page_size == 0 || cursor.page_size > MAX_LIMIT)
-        {
+        if input.skip.is_some_and(|skip| skip > MAX_SKIP) {
             return Err(QueryError::Validation(format!(
-                "cursor.page_size must be between 1 and {MAX_LIMIT}"
+                "skip must be at most {MAX_SKIP}; to page deeper, ORDER BY a unique key such as id and filter past the last value from the previous page"
             )));
         }
         for node in &input.nodes {
@@ -1501,16 +1500,7 @@ fn check_filter_entries(property: &str, predicates: &[InputFilter]) -> Result<()
                 "IN requires 1-{MAX_IN_VALUES} values"
             )));
         }
-        if matches!(
-            op,
-            FilterOp::Contains
-                | FilterOp::StartsWith
-                | FilterOp::EndsWith
-                | FilterOp::TokenMatch
-                | FilterOp::AllTokens
-                | FilterOp::AnyTokens
-        ) && !value.is_string()
-        {
+        if op.is_text() && !value.is_string() {
             return Err(QueryError::Validation(
                 "text predicates require a string".into(),
             ));

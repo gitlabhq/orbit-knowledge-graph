@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use tracing::{debug, warn};
+use orbit_log_fields::{debug, info_span, safe, warn};
+use tracing::Instrument;
 use uuid::Uuid;
 
 use super::DispatchOutcome;
@@ -38,38 +39,43 @@ impl NamespaceIndexingDispatch {
 
         for namespace in namespaces {
             let traversal_path = &namespace.traversal_path;
-            if !traversal_path.is_valid() {
-                warn!(
-                    namespace_id = namespace.namespace_id,
-                    %traversal_path,
-                    "skipping namespace with invalid traversal_path"
-                );
-                continue;
-            }
-
-            let request = NamespaceIndexingRequest {
-                namespace: namespace.namespace_id,
-                traversal_path: traversal_path.clone(),
-                watermark,
-                dispatch_id: Uuid::new_v4(),
-                campaign_id: campaign_id.clone(),
-                targets: namespace.targets.clone(),
-            };
-            let subscription = request.publish_subscription();
-            let envelope = Envelope::new(&request).map_err(TaskError::new)?;
-
-            match self.nats.publish(&subscription, &envelope).await {
-                Ok(()) => {
-                    outcome.dispatched += 1;
-                    debug!(
-                        namespace_id = namespace.namespace_id,
-                        %traversal_path,
-                        "dispatched namespace indexing request"
+            let span = info_span!(
+                "dispatch_namespace",
+                safe(GL_ROOT_NAMESPACE_ID) = namespace.namespace_id,
+                safe(TRAVERSAL_PATH) = tracing::field::Empty,
+            );
+            let dispatch = async {
+                if !traversal_path.is_valid() {
+                    warn!(
+                        expanded(ADDITIONAL_DETAILS) = %traversal_path,
+                        "skipping namespace with invalid traversal_path"
                     );
+                    return Ok(());
                 }
-                Err(NatsError::PublishDuplicate) => outcome.skipped += 1,
-                Err(error) => return Err(TaskError::new(error)),
-            }
+                tracing::Span::current().record(safe::TRAVERSAL_PATH, traversal_path.as_str());
+
+                let request = NamespaceIndexingRequest {
+                    namespace: namespace.namespace_id,
+                    traversal_path: traversal_path.clone(),
+                    watermark,
+                    dispatch_id: Uuid::new_v4(),
+                    campaign_id: campaign_id.clone(),
+                    targets: namespace.targets.clone(),
+                };
+                let subscription = request.publish_subscription();
+                let envelope = Envelope::new(&request).map_err(TaskError::new)?;
+
+                match self.nats.publish(&subscription, &envelope).await {
+                    Ok(()) => {
+                        outcome.dispatched += 1;
+                        debug!("dispatched namespace indexing request");
+                    }
+                    Err(NatsError::PublishDuplicate) => outcome.skipped += 1,
+                    Err(error) => return Err(TaskError::new(error)),
+                }
+                Ok::<(), TaskError>(())
+            };
+            dispatch.instrument(span).await?;
         }
 
         Ok(outcome)

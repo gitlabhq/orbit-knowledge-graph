@@ -270,15 +270,32 @@ such as the External Secrets Operator. Do not store the plaintext elsewhere.
 ## Install Siphon
 
 If you use `configMode: split`, Siphon does not include its own table list. At pod startup, Siphon mounts the
-`gitlab-siphon-tables` image, which contains only the table definitions from the GitLab source tree. GitLab
-publishes the `gitlab-siphon-tables` image for every release. This means that Siphon's table list matches your
-GitLab version without manual updates.
+`gitlab-siphon-tables` image, which contains only the table definitions from the GitLab source tree. The
+GitLab cloud native images (CNG) build publishes the `gitlab-siphon-tables` image for every release. This
+means that Siphon's table list matches your GitLab version without manual updates.
 
-The image is `registry.gitlab.com/gitlab-org/gitlab/gitlab-siphon-tables`. It is not part of the Siphon
+The image is `registry.gitlab.com/gitlab-org/build/cng/gitlab-siphon-tables`. It is not part of the Siphon
 project. `global.gitlabVersion` selects its tag and pins the replicated table set to your GitLab version.
-Tags start at `v19.2.0-ee`. Before you install, confirm the tag exists in the
-[`gitlab-siphon-tables` container registry](https://gitlab.com/gitlab-org/gitlab/container_registry/11634641).
+The chart converts the version to the CNG tag format, `vX.Y.Z`, so `19.5.0`, `v19.5.0`, and `v19.5.0-ee`
+all select the `v19.5.0` tag. CNG publishes the image from GitLab 19.5.0, and for some earlier patch
+releases. Before you install, confirm the tag exists in the
+[`gitlab-siphon-tables` container registry](https://gitlab.com/gitlab-org/build/CNG/container_registry/11611957).
 A missing tag prevents pods from starting.
+
+If your GitLab version has no CNG tag, use the deprecated
+`registry.gitlab.com/gitlab-org/gitlab/gitlab-siphon-tables` image, which GitLab publishes with `vX.Y.Z-ee`
+tags. Add this block to the values file:
+
+```yaml
+splitTables:
+  image:
+    repository: gitlab-org/gitlab/gitlab-siphon-tables
+    tag: '{{ include "siphon.gitlabVersion" . }}-ee'
+```
+
+For more information, see
+[Using the legacy tables image](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts#using-the-legacy-tables-image).
+Switch to the CNG image after you upgrade GitLab.
 
 1. Save the following as `siphon-values.yaml` and replace the placeholders:
 
@@ -286,9 +303,9 @@ A missing tag prevents pods from starting.
    configMode: split
 
    global:
-     # Tag of registry.gitlab.com/gitlab-org/gitlab/gitlab-siphon-tables.
+     # Selects the tag of registry.gitlab.com/gitlab-org/build/cng/gitlab-siphon-tables.
      # Must match your GitLab version exactly, patch level included.
-     gitlabVersion: v19.2.2-ee
+     gitlabVersion: v19.5.0
 
    image:
      repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
@@ -392,7 +409,7 @@ A missing tag prevents pods from starting.
    helm repo update
 
    helm upgrade --install siphon siphon/siphon \
-     --version 1.22.1 \
+     --version 2.0.0 \
      --namespace siphon \
      --create-namespace \
      --values siphon-values.yaml

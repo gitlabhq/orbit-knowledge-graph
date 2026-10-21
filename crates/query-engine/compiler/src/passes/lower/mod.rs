@@ -1,20 +1,18 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
-pub mod hydration;
-pub mod neighbors;
-pub mod pathfinding;
-mod physical;
-mod requirements;
+mod columns;
+mod graph;
+mod predicates;
+pub mod query_types;
 pub(crate) mod sql;
-pub mod traversal;
 
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use ontology::constants::TRAVERSAL_PATH_COLUMN;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
-use super::plan::edge_chain::Hop;
+use super::plan::graph::ExecutionPlan;
+use super::plan::predicates::Column;
 use super::plan::{Plan, QueryPlan};
 
 #[derive(Clone, Default)]
@@ -38,11 +36,16 @@ pub enum NodeBinding {
 }
 
 impl NodeBinding {
-    fn source(alias: &str, column: &str, table_alias: Option<String>) -> Self {
+    fn source(
+        alias: &str,
+        column: &str,
+        table_alias: Option<String>,
+        traversal_path: Option<Expr>,
+    ) -> Self {
         Self::Values {
             identity: Expr::col(alias, column),
             table_alias,
-            traversal_path: Some(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
+            traversal_path,
         }
     }
 
@@ -116,21 +119,12 @@ impl EmitOutput {
                         ..
                     }),
                     _,
-                ) => NodeBinding::source(alias, &source.1, None),
+                ) => NodeBinding::source(alias, &source.1, None, None),
                 (_, [id]) => NodeBinding::Values {
                     identity: Expr::lit(*id),
                     table_alias: None,
                     traversal_path: None,
                 },
-                _ if input.query_type == QueryType::Aggregation
-                    && plan.nodes.get(&source.0).is_some_and(|holder| {
-                        holder.hydration == super::plan::HydrationStrategy::FilterOnly
-                    })
-                    && !node_group_ids(&input.aggregation.group_by)
-                        .any(|alias| alias == node.id) =>
-                {
-                    NodeBinding::Filtered
-                }
                 _ => {
                     return Err(QueryError::Lowering(format!(
                         "node '{}' has no emitted identity",
@@ -164,50 +158,31 @@ impl EmitOutput {
     }
 }
 
-fn multi_type_edge_types(node: &Node, hops: &[Hop]) -> Vec<Expr> {
-    let Node::Query(query) = node else {
-        return Vec::new();
-    };
-    hops.iter()
-        .enumerate()
-        .filter(|(_, hop)| {
-            hop.max_hops == 1
-                && (hop.rel_types.len() > 1
-                    || crate::passes::normalize::is_wildcard(&hop.rel_types))
+fn redaction_columns<T>(plan: &Plan<T>, execution: &ExecutionPlan) -> Vec<Column> {
+    execution
+        .bindings
+        .iter()
+        .filter_map(|binding| {
+            let source = binding.property_source.as_deref()?;
+            let node = plan.nodes.get(&binding.node)?;
+            Some(Column::new(source, &node.redaction_id_column))
         })
-        .filter_map(|(index, hop)| traversal::edge_type(query, hop, index))
         .collect()
 }
 
 pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
-    let mut nodes = HashMap::new();
-    let node = match plan {
-        QueryPlan::Traversal(plan) => {
-            let mut output = physical::execute(&plan.operation.execution);
-            nodes = output.take_bindings(plan, input)?;
-            traversal::emit_traversal(input, output, &plan.hops)
-        }
-        QueryPlan::Aggregation(plan) => {
-            let result = &plan.operation.result;
-            let mut output = physical::execute(&plan.operation.execution);
-            nodes = output.take_bindings(plan, input)?;
-            Ok(requirements::aggregation(result, output, input.limit))
-        }
-        QueryPlan::Neighbors(plan) => {
-            let (query, binding) = neighbors::emit_neighbors(plan, input)?;
-            nodes.insert(plan.operation.center.clone(), binding);
-            Ok(query)
-        }
-        QueryPlan::PathFinding(plan) => pathfinding::emit_pathfinding(plan, input),
-        QueryPlan::Hydration(plan) => hydration::emit_hydration(&plan.operation.nodes, input.limit),
-    }?;
-
+    let emitted = match plan {
+        QueryPlan::Traversal(plan) => query_types::traversal::emit(plan, input)?,
+        QueryPlan::Aggregation(plan) => query_types::aggregation::emit(plan, input)?,
+        QueryPlan::Neighbors(plan) => query_types::neighbors::emit(plan, input)?,
+        QueryPlan::PathFinding(plan) => query_types::pathfinding::emit(plan, input)?,
+        QueryPlan::Hydration(plan) => query_types::hydration::emit(plan)?,
+    };
     let edges = plan
-        .hops()
+        .relations()
         .iter()
-        .enumerate()
-        .map(|(index, hop)| {
-            let prefix = hop.column_prefix(index);
+        .map(|hop| {
+            let prefix = hop.column_prefix();
             LoweredEdge {
                 path_column: (hop.max_hops > 1).then(|| format!("{prefix}path_nodes")),
                 column_prefix: prefix,
@@ -216,65 +191,12 @@ pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
             }
         })
         .collect();
-    let stable_order = match plan {
-        QueryPlan::Hydration(_) => vec![],
-        QueryPlan::Aggregation(_) => match &node {
-            Node::Query(query) => query.group_by.iter().cloned().map(OrderExpr::asc).collect(),
-            Node::Insert(_) => Vec::new(),
-        },
-        QueryPlan::PathFinding(_) => vec![
-            OrderExpr::asc(Expr::func(
-                Function::ToString,
-                vec![Expr::col("paths", crate::constants::path_column())],
-            )),
-            OrderExpr::asc(Expr::func(
-                Function::ToString,
-                vec![Expr::col("paths", crate::constants::edge_kinds_column())],
-            )),
-        ],
-        QueryPlan::Neighbors(plan) => match plan.operation.direction {
-            Direction::Both => vec![
-                OrderExpr::asc(Expr::ident(crate::constants::redaction_id_column(
-                    &plan.operation.center,
-                ))),
-                OrderExpr::asc(Expr::ident(crate::constants::neighbor_id_column())),
-                OrderExpr::asc(Expr::ident(crate::constants::relationship_type_column())),
-                OrderExpr::asc(Expr::ident(crate::constants::neighbor_is_outgoing_column())),
-            ],
-            _ => vec![
-                OrderExpr::asc(Expr::col("e", ontology::constants::SOURCE_ID_COLUMN)),
-                OrderExpr::asc(Expr::col("e", ontology::constants::TARGET_ID_COLUMN)),
-                OrderExpr::asc(Expr::col(
-                    "e",
-                    ontology::constants::RELATIONSHIP_KIND_COLUMN,
-                )),
-            ],
-        },
-        QueryPlan::Traversal(_) if input.relationships.is_empty() => input
-            .nodes
-            .iter()
-            .filter_map(|node| nodes.get(&node.id))
-            .map(|binding| OrderExpr::asc(binding.identity().clone()))
-            .collect(),
-        QueryPlan::Traversal(plan) => plan
-            .node_edge_mappings
-            .iter()
-            .filter_map(|(node, source)| {
-                nodes.get(node).map(|binding| (source, binding.identity()))
-            })
-            .collect::<BTreeMap<_, _>>()
-            .into_values()
-            .cloned()
-            .chain(multi_type_edge_types(&node, &plan.hops))
-            .map(OrderExpr::asc)
-            .collect(),
-    };
     Ok(LoweredQuery {
-        ast: node,
+        ast: emitted.ast,
         metadata: LoweredMetadata {
-            nodes,
+            nodes: emitted.nodes,
             edges,
-            stable_order,
+            stable_order: emitted.stable_order,
         },
     })
 }

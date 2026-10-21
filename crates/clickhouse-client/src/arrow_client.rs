@@ -12,6 +12,7 @@ use circuit_breaker::{CircuitBreaker, CircuitConfig};
 use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use orbit_log_fields::warn;
 use orbit_observability::resilience::MetricsObserver;
 use orbit_utils::query_types::{ScalarType, SqlType};
 use serde::Serialize;
@@ -20,7 +21,7 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::SyncIoBridge;
-use tracing::warn;
+use tracing::Instrument;
 
 pub use clickhouse::QuerySummary;
 
@@ -248,7 +249,11 @@ impl ArrowClickHouseClient {
 
             for (batch_index, batch) in batches.iter().enumerate() {
                 if batch.schema() != schema {
-                    warn!(table, batch_index, "RecordBatch schema mismatch");
+                    warn!(
+                        safe(TABLE) = table,
+                        safe(BATCH_INDEX) = batch_index,
+                        "RecordBatch schema mismatch"
+                    );
                 }
 
                 writer.write(batch).map_err(ClickHouseError::ArrowEncode)?;
@@ -324,7 +329,11 @@ impl ArrowClickHouseClient {
 
         for (batch_index, batch) in batches.into_iter().enumerate() {
             if batch.schema() != schema {
-                warn!(table, batch_index, "RecordBatch schema mismatch");
+                warn!(
+                    safe(TABLE) = table,
+                    safe(BATCH_INDEX) = batch_index,
+                    "RecordBatch schema mismatch"
+                );
             }
             writer.write(&batch).map_err(ClickHouseError::ArrowEncode)?;
             drop(batch);
@@ -418,10 +427,10 @@ impl ArrowClickHouseClient {
 fn warn_on_dropped_elements(key: &str, scalar: &str, input: usize, bound: usize) {
     if bound != input {
         warn!(
-            param = key,
-            scalar,
-            input,
-            bound,
+            expanded(QUERY_PARAMETER) = key,
+            safe(CLICKHOUSE_TYPE) = scalar,
+            safe(COUNT) = input,
+            safe(SKIPPED_COUNT) = input - bound,
             "bind_param: array had elements that could not be converted, dropped values"
         );
     }
@@ -563,7 +572,9 @@ impl ArrowQuery {
         let handle = tokio::runtime::Handle::current();
         let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
 
+        let span = tracing::Span::current();
         tokio::task::spawn_blocking(move || {
+            let _entered = span.enter();
             let body = Cursor::new(first.unwrap_or_default()).chain(cursor);
             let bridge = SyncIoBridge::new_with_handle(body, handle);
             let reader = match StreamReader::try_new(bridge, None) {
@@ -601,7 +612,7 @@ impl ArrowQuery {
         let (tx, rx) = mpsc::channel::<Result<RecordBatch, ClickHouseError>>(2);
         let (summary_tx, summary_rx) = oneshot::channel();
 
-        tokio::spawn(async move {
+        let task = async move {
             let mut decoder = StreamDecoder::new();
             let mut summary_tx = Some(summary_tx);
             let mut next = Ok(first);
@@ -638,7 +649,8 @@ impl ArrowQuery {
             if let Some(summary_tx) = summary_tx.take() {
                 let _ = summary_tx.send(cursor.summary().cloned());
             }
-        });
+        };
+        tokio::spawn(task.in_current_span());
 
         Ok((ReceiverStream::new(rx).boxed(), summary_rx))
     }

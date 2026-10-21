@@ -24,6 +24,7 @@ members = [
   "crates/orbit-analytics",
   "crates/orbit-billing",
   "crates/orbit-observability",
+  "crates/orbit-log-fields",
   "crates/orbit-prompts",
   "crates/orbit-search",
   "crates/orbit-migrations",
@@ -51,7 +52,9 @@ members = [
 
 [workspace.dependencies]
 orbit-observability = { path = "crates/orbit-observability" }
+orbit-log-fields = { path = "crates/orbit-log-fields" }
 labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "f28afb0ddf507e859923f56bb5a35a3d6325663c" }
+labkit-fields = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "f28afb0ddf507e859923f56bb5a35a3d6325663c" }
 # No bundled ring provider: every binary installs its rustls provider before building a Tracker.
 labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "f28afb0ddf507e859923f56bb5a35a3d6325663c", default-features = false }
 arrow = "58.0.0"
@@ -112,7 +115,6 @@ grep-regex = "0.1.14"
 grep-searcher = "0.1.17"
 rayon = "1.11.0"
 lz4_flex = "0.11.6"
-walkdir = "2.5.0"
 circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }
 nats-client = { path = "crates/nats-client" }

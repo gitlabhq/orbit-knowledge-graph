@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use orbit_log_fields::{debug, info_span, safe, warn};
 use siphon_proto::LogicalReplicationEvents;
 use siphon_proto::replication_event::Operation;
-use tracing::{debug, warn};
+use tracing::Instrument;
 
 use crate::nats::NatsServices;
 use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
@@ -50,19 +51,34 @@ impl CodeIndexingTaskRoute {
                     continue;
                 };
                 let Some(project_id) = extractor.get_i64(event, "project_id") else {
-                    warn!("failed to extract project_id, skipping");
+                    warn!(
+                        safe(TASK_ID) = task_id,
+                        "failed to extract project_id, skipping"
+                    );
                     continue;
                 };
                 let Some(ref_name) = extractor.get_string(event, "ref") else {
-                    warn!(task_id, "failed to extract ref, skipping");
+                    warn!(
+                        safe(TASK_ID) = task_id,
+                        safe(GL_PROJECT_ID) = project_id,
+                        "failed to extract ref, skipping"
+                    );
                     continue;
                 };
                 let Some(commit_sha) = extractor.get_string(event, "commit_sha") else {
-                    warn!(task_id, "failed to extract commit_sha, skipping");
+                    warn!(
+                        safe(TASK_ID) = task_id,
+                        safe(GL_PROJECT_ID) = project_id,
+                        "failed to extract commit_sha, skipping"
+                    );
                     continue;
                 };
                 let Some(traversal_path) = extractor.get_string(event, "traversal_path") else {
-                    warn!(task_id, "failed to extract traversal_path, skipping");
+                    warn!(
+                        safe(TASK_ID) = task_id,
+                        safe(GL_PROJECT_ID) = project_id,
+                        "failed to extract traversal_path, skipping"
+                    );
                     continue;
                 };
 
@@ -81,6 +97,9 @@ impl CodeIndexingTaskRoute {
                     traversal_path: TraversalPath::new_unchecked(traversal_path),
                     dispatch_id: ctx.dispatch_id,
                     campaign_id: ctx.campaign_id.clone(),
+                    repository_storage: extractor
+                        .get_string(event, "repository_storage")
+                        .map(str::to_string),
                 };
                 latest
                     .entry(key)
@@ -112,37 +131,43 @@ impl Route for CodeIndexingTaskRoute {
         let mut outcome = RouteOutcome::default();
 
         for request in requests.into_values() {
-            let envelope = Envelope::new(&request).map_err(|error| {
-                self.metrics.record_error(METRIC_NAME, "publish");
-                TaskError::new(error)
-            })?;
-
-            match self
-                .nats
-                .publish(&request.publish_subscription(), &envelope)
-                .await
-            {
-                Ok(()) => {
-                    outcome.dispatched += 1;
-                    debug!(
-                        task_id = request.task_id,
-                        project_id = request.project_id,
-                        "dispatched code indexing task request"
-                    );
-                }
-                Err(crate::nats::NatsError::PublishDuplicate) => {
-                    outcome.skipped += 1;
-                    debug!(
-                        task_id = request.task_id,
-                        project_id = request.project_id,
-                        "skipped code indexing task request, already in-flight"
-                    );
-                }
-                Err(error) => {
-                    self.metrics.record_error(METRIC_NAME, "publish");
-                    return Err(TaskError::new(error));
-                }
+            let span = info_span!(
+                "dispatch_code_indexing_task",
+                safe(TASK_ID) = request.task_id,
+                safe(GL_PROJECT_ID) = request.project_id,
+                safe(GL_ROOT_NAMESPACE_ID) = request.traversal_path.top_level_namespace_id(),
+                safe(TRAVERSAL_PATH) = tracing::field::Empty,
+            );
+            if request.traversal_path.is_valid_any_depth() {
+                span.record(safe::TRAVERSAL_PATH, request.traversal_path.as_str());
             }
+            let dispatch = async {
+                let envelope = Envelope::new(&request).map_err(|error| {
+                    self.metrics.record_error(METRIC_NAME, "publish");
+                    TaskError::new(error)
+                })?;
+
+                match self
+                    .nats
+                    .publish(&request.publish_subscription(), &envelope)
+                    .await
+                {
+                    Ok(()) => {
+                        outcome.dispatched += 1;
+                        debug!("dispatched code indexing task request");
+                    }
+                    Err(crate::nats::NatsError::PublishDuplicate) => {
+                        outcome.skipped += 1;
+                        debug!("skipped code indexing task request, already in-flight");
+                    }
+                    Err(error) => {
+                        self.metrics.record_error(METRIC_NAME, "publish");
+                        return Err(TaskError::new(error));
+                    }
+                }
+                Ok(())
+            };
+            dispatch.instrument(span).await?;
         }
 
         if outcome.dispatched > 0 || outcome.skipped > 0 {
@@ -211,6 +236,61 @@ mod tests {
         assert_eq!(request.branch.as_deref(), Some("main"));
         assert_eq!(request.commit_sha.as_deref(), Some("abc123"));
         assert_eq!(request.traversal_path, "/org/project-123");
+    }
+
+    #[tokio::test]
+    async fn copies_repository_storage_from_the_event() {
+        let nats = Arc::new(MockNatsServices::new());
+        let payload = build_replication_events(vec![
+            code_indexing_task_columns(42, 123, "refs/heads/main", "abc123", "/org/project-123")
+                .with_string("repository_storage", "gitaly-1")
+                .build(),
+        ]);
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
+
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
+
+        let published = nats.get_published();
+        let request: CodeIndexingTaskRequest =
+            serde_json::from_slice(&published[0].1.payload).unwrap();
+        assert_eq!(request.repository_storage.as_deref(), Some("gitaly-1"));
+    }
+
+    #[tokio::test]
+    async fn dispatches_without_the_repository_storage_column() {
+        let nats = Arc::new(MockNatsServices::new());
+        let payload = build_replication_events(vec![
+            code_indexing_task_columns(42, 123, "refs/heads/main", "abc123", "/org/project-123")
+                .build(),
+        ]);
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
+
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
+
+        let published = nats.get_published();
+        assert_eq!(published.len(), 1);
+        let request: CodeIndexingTaskRequest =
+            serde_json::from_slice(&published[0].1.payload).unwrap();
+        assert_eq!(request.repository_storage, None);
+    }
+
+    #[tokio::test]
+    async fn dispatches_with_a_null_repository_storage() {
+        let nats = Arc::new(MockNatsServices::new());
+        let payload = build_replication_events(vec![
+            code_indexing_task_columns(42, 123, "refs/heads/main", "abc123", "/org/project-123")
+                .with_null("repository_storage")
+                .build(),
+        ]);
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
+
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
+
+        let published = nats.get_published();
+        assert_eq!(published.len(), 1);
+        let request: CodeIndexingTaskRequest =
+            serde_json::from_slice(&published[0].1.payload).unwrap();
+        assert_eq!(request.repository_storage, None);
     }
 
     #[tokio::test]

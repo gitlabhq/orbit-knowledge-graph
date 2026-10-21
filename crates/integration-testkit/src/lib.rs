@@ -56,7 +56,7 @@ pub fn derive_clickhouse_data_model(
         .expect("test ontology should produce a ClickHouse data model")
 }
 
-pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("FIXTURES_DIR"), "/siphon.sql"));
+pub const SIPHON_SCHEMA_SQL: &str = include_str!(concat!(env!("SEEDS_DIR"), "/siphon.sql"));
 
 /// Version 0 -> "" (empty), version N -> "vN_".
 pub static TABLE_PREFIX: std::sync::LazyLock<String> =
@@ -157,7 +157,15 @@ macro_rules! run_subtests {
                     let db = _ctx.fork(&_db_name).await;
                     let _t = std::time::Instant::now();
                     eprintln!("--- {}", _name);
-                    $test_fn(&db).await;
+                    let _outcome = futures::FutureExt::catch_unwind(
+                        std::panic::AssertUnwindSafe($test_fn(&db)),
+                    ).await;
+                    let _cleanup = futures::FutureExt::catch_unwind(
+                        std::panic::AssertUnwindSafe(_ctx.drop_fork(&_db_name)),
+                    ).await;
+                    if let Err(_failure) = _outcome.and(_cleanup) {
+                        std::panic::resume_unwind(_failure);
+                    }
                     eprintln!("    {} {:.2?}", _name, _t.elapsed());
                 });
                 _handles.push((_name.to_string(), _handle));
@@ -203,15 +211,5 @@ macro_rules! run_subtests_shared {
         )+
 
         $crate::collect_subtest_results(_handles).await;
-    }};
-}
-
-/// Run a subtest with automatic table truncation afterward.
-#[macro_export]
-macro_rules! run_subtest {
-    ($name:expr, $context:expr, $test_fn:expr) => {{
-        eprintln!("--- {}", $name);
-        $test_fn($context).await;
-        $context.truncate_all_tables().await;
     }};
 }

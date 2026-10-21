@@ -13,7 +13,8 @@ use testcontainers::ContainerAsync;
 use testcontainers_modules::nats::Nats;
 use tokio_util::sync::CancellationToken;
 
-use super::super::common::dispatch::{serving_flag, start_nats};
+use super::super::common::dispatch::serving_flag;
+use super::super::common::start_nats;
 
 const LEGACY_SCHEMA_VERSION: u32 = 93;
 

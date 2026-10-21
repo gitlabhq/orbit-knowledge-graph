@@ -1,0 +1,177 @@
+name: "Rust: a closure or an array of calls keeps its calls in a branch arm, a tuple, a return, an argument, a struct literal, a field or self assignment, an array, and a direct call"
+
+fixtures:
+  - path: main.rs
+    content: |
+      fn helper(x: i32) -> i32 {
+          x
+      }
+
+      fn other(x: i32) -> i32 {
+          x
+      }
+
+      fn plain() -> i32 {
+          1
+      }
+
+      fn in_branch(c: bool) -> i32 {
+          let f = if c { |x| helper(x) } else { |x| other(x) };
+          f(1)
+      }
+
+      fn in_match(n: i32) -> i32 {
+          let f = match n {
+              0 => |x| helper(x),
+              _ => |x| other(x),
+          };
+          f(2)
+      }
+
+      fn in_tuple() -> i32 {
+          let pair = (1, |x| helper(x));
+          (pair.1)(pair.0)
+      }
+
+      fn returned() -> impl Fn(i32) -> i32 {
+          return |x| helper(x);
+      }
+
+      fn boxed() -> Box<dyn Fn() -> i32> {
+          Box::new(move || plain())
+      }
+
+      fn tail_expression() -> impl Fn(i32) -> i32 {
+          |x| helper(x)
+      }
+
+      struct Holder {
+          cb: fn(i32) -> i32,
+          xs: [i32; 2],
+          v: i32,
+      }
+
+      impl Holder {
+          fn assigned_to_ivar(&mut self) {
+              self.cb = |x| other(x);
+          }
+
+          fn plain_call_to_ivar(&mut self) {
+              self.v = helper(1);
+          }
+
+          fn array_to_ivar(&mut self) {
+              self.xs = [helper(1), other(2)];
+          }
+      }
+
+      struct A;
+
+      impl A {
+          fn go_a(&self) -> i32 {
+              1
+          }
+      }
+
+      struct B;
+
+      impl B {
+          fn go_b(&self) -> i32 {
+              2
+          }
+      }
+
+      fn mk_a() -> A {
+          A
+      }
+
+      fn mk_b() -> B {
+          B
+      }
+
+      fn array_in_block() -> i32 {
+          let xs = { [mk_a(), mk_b()] };
+          xs.go_b()
+      }
+
+      fn array_to_field(holder: &mut Holder) {
+          holder.xs = [helper(1), other(2)];
+      }
+
+      fn in_struct_literal() -> Holder {
+          Holder { cb: |x| helper(x) }
+      }
+
+      fn assigned_to_field(holder: &mut Holder) {
+          holder.cb = |x| other(x);
+      }
+
+      fn called_at_once() -> i32 {
+          (|x| helper(x))(3)
+      }
+
+      fn in_array() -> i32 {
+          let fs = [|x| helper(x), |x| other(x)];
+          fs[0](4)
+      }
+
+      fn in_block_arm(n: i32) -> i32 {
+          let f = match n {
+              0 => {
+                  |x| helper(x)
+              }
+              _ => |x| other(x),
+          };
+          f(5)
+      }
+
+tests:
+  - name: every closure body call reaches its target from the enclosing function
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE callee.name IN ['helper', 'other', 'plain']
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 21 }
+      - { row: { caller: "plain_call_to_ivar", callee: "helper" } }
+      - { row: { caller: "array_to_field", callee: "helper" } }
+      - { row: { caller: "array_to_field", callee: "other" } }
+      - { row: { caller: "array_to_ivar", callee: "helper" } }
+      - { row: { caller: "array_to_ivar", callee: "other" } }
+      - { row: { caller: "assigned_to_field", callee: "other" } }
+      - { row: { caller: "assigned_to_ivar", callee: "other" } }
+      - { row: { caller: "boxed", callee: "plain" } }
+      - { row: { caller: "called_at_once", callee: "helper" } }
+      - { row: { caller: "in_array", callee: "helper" } }
+      - { row: { caller: "in_array", callee: "other" } }
+      - { row: { caller: "in_block_arm", callee: "helper" } }
+      - { row: { caller: "in_block_arm", callee: "other" } }
+      - { row: { caller: "in_struct_literal", callee: "helper" } }
+      - { row: { caller: "tail_expression", callee: "helper" } }
+      - { row: { caller: "in_branch", callee: "helper" } }
+      - { row: { caller: "in_branch", callee: "other" } }
+      - { row: { caller: "in_match", callee: "helper" } }
+      - { row: { caller: "in_match", callee: "other" } }
+      - { row: { caller: "in_tuple", callee: "helper" } }
+      - { row: { caller: "returned", callee: "helper" } }
+
+  - name: an array behind a block does not type its variable by its last element
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'array_in_block'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: "mk_a" } }
+      - { row: { callee: "mk_b" } }
+      - { not: true, row: { callee: "go_b" } }
+
+  - name: the closures are not definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['f', 'pair', 'fs']
+      RETURN d.name AS name
+    assert:
+      - { empty: true }

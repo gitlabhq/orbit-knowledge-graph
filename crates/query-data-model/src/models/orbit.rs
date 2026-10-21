@@ -50,6 +50,14 @@ pub trait OrbitQueryModel {
     fn query_backend(&self) -> &Self::BackendCatalog;
     fn query_authorization(&self) -> &Self::AuthorizationCatalog;
 
+    fn supports_deferred_node_loading(&self) -> bool {
+        self.query_backend().supports_deferred_node_loading()
+    }
+
+    fn supports_selective_latest_rows(&self) -> bool {
+        self.query_backend().supports_selective_latest_rows()
+    }
+
     fn entity(&self, name: &str) -> Option<&Entity> {
         self.graph().entity_named(name)
     }
@@ -151,6 +159,10 @@ pub trait OrbitQueryModel {
         self.query_backend().table_sort_key(table)
     }
 
+    fn equivalent_layouts(&self, table: &str) -> Vec<&str> {
+        self.query_backend().equivalent_layouts(table)
+    }
+
     fn in_sort_key(&self, table: &str, column: &str) -> bool {
         self.table_sort_key(table)
             .is_some_and(|key| key.iter().any(|sort_column| sort_column == column))
@@ -158,6 +170,14 @@ pub trait OrbitQueryModel {
 
     fn has_text_index(&self, property: PropertyId) -> bool {
         self.query_backend().has_text_index(property)
+    }
+
+    fn property_unique(&self, property: PropertyId) -> bool {
+        self.query_backend().property_unique(property)
+    }
+
+    fn property_mutable(&self, property: PropertyId) -> bool {
+        self.query_backend().property_mutable(property)
     }
 
     fn admin_only(&self, entity: &str, property: &str) -> bool {

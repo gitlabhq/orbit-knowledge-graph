@@ -18,7 +18,7 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
-use tracing::{debug, info, warn};
+use orbit_log_fields::{debug, info, warn};
 
 use crate::dead_letter::{
     DEAD_LETTER_STREAM, DEAD_LETTER_SUBJECT_PREFIX, DeadLetterEnvelope, dead_letter_subject,
@@ -303,16 +303,13 @@ impl NatsBroker {
             .get_or_create_consumer(&stream, &subject, subscription.max_ack_pending)
             .await?;
 
-        let consumer_type = match &self.config.consumer_name {
-            Some(name) => format!("durable({})", name),
-            None => "ephemeral".to_string(),
-        };
         let batch_size = self.config.batch_size();
         let fetch_expires = self.config.fetch_expires();
+        let subscription_name = format!("{stream_name}.{subject}");
         info!(
-            topic = %format!("{stream_name}.{subject}"),
-            consumer_type,
-            batch_size,
+            safe(NATS_SUBSCRIPTION) = subscription_name.as_str(),
+            safe(NATS_CONSUMER) = self.config.consumer_name.as_deref(),
+            safe(BATCH_SIZE) = batch_size,
             "subscription started"
         );
 
@@ -342,7 +339,7 @@ impl NatsBroker {
                     {
                         Ok(batch) => batch,
                         Err(e) => {
-                            warn!(error = %e, "fetch batch error");
+                            warn!(expanded(ERROR_MESSAGE) = %e, "fetch batch error");
                             metrics.record_nats_fetch_duration(
                                 fetch_start.elapsed().as_secs_f64(),
                                 "error",
@@ -372,7 +369,7 @@ impl NatsBroker {
                             return Loop::Stop;
                         }
                     }
-                    debug!(count = batch_count, "batch fetched");
+                    debug!(safe(COUNT) = batch_count, "fetched messages in batch");
                     Loop::Continue
                 }
             })

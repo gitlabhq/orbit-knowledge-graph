@@ -51,12 +51,14 @@ impl HydrationStage {
         let resolver_ctx = ResolverContext {
             security_context: Some(ctx.security_context()?.clone()),
         };
+        let requested_rows = ctx.compiled()?.input.limit as usize;
 
         resolve_virtual_columns(
             registry,
             &resolver_ctx,
             entity_virtual_columns,
             property_map,
+            requested_rows,
         )
         .await
     }
@@ -230,26 +232,19 @@ impl PipelineStage for HydrationStage {
                 let static_nodes: Vec<_> = result_context.nodes().cloned().collect();
                 let refs = hydration_helpers::extract_dynamic_refs(&query_result, &static_nodes);
                 if !refs.is_empty() {
-                    // Collect TPs from static nodes (e.g. center node in Neighbors).
-                    // Fall back to security context TPs for PathFinding where no
-                    // static nodes have TP columns.
-                    let mut tps = hydration_helpers::collect_dynamic_traversal_paths(
-                        &query_result,
-                        &static_nodes,
-                    );
-                    if tps.is_empty()
-                        && let Ok(sec) = ctx.security_context()
-                    {
-                        tps = sec
-                            .traversal_paths
-                            .iter()
-                            .map(|tp| tp.path.clone())
-                            .collect();
-                    }
+                    let scope: Vec<_> = ctx
+                        .security_context()
+                        .map(|sec| {
+                            sec.traversal_paths
+                                .iter()
+                                .map(|tp| tp.path.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default();
                     let ref_paths =
                         hydration_helpers::collect_dynamic_ref_paths(&query_result, &static_nodes);
                     let (nodes, ids_count) =
-                        hydration_helpers::hydrate_dynamic(entity_specs, &refs, &tps, &ref_paths)
+                        hydration_helpers::hydrate_dynamic(entity_specs, &refs, &scope, &ref_paths)
                             .inspect_err(|e| obs.record_error(e))?;
                     let (property_map, debug, executions) =
                         Self::execute_hydration(ctx, nodes, ids_count, "dynamic")

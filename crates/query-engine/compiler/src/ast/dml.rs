@@ -62,7 +62,7 @@ pub enum Expr {
     InSubquery {
         expr: Box<Expr>,
         cte_name: String,
-        column: String,
+        columns: Vec<String>,
     },
     /// Like InSubquery but embeds the query directly instead of referencing
     /// a CTE. Used for narrowing when CTE references would trigger
@@ -271,7 +271,7 @@ impl Cte {
 /// Complete SQL query:
 /// ```sql
 /// WITH cte1 AS (...), cte2 AS (...)
-/// SELECT ... FROM ... WHERE ... GROUP BY ... HAVING ... ORDER BY ... LIMIT ...
+/// SELECT ... FROM ... WHERE ... GROUP BY ... HAVING ... ORDER BY ... LIMIT ... OFFSET ...
 /// UNION ALL SELECT ...
 /// SETTINGS key = value
 /// ```
@@ -288,6 +288,7 @@ pub struct Query {
     /// `LIMIT n BY col1, col2` — ClickHouse per-group limit (applied after ORDER BY).
     pub limit_by: Option<(u32, Vec<Expr>)>,
     pub limit: Option<u32>,
+    pub offset: Option<u32>,
     /// UNION ALL with this query, used for recursive CTEs.
     pub union_all: Vec<Query>,
 }
@@ -323,6 +324,7 @@ impl Default for Query {
             order_by: vec![],
             limit_by: None,
             limit: None,
+            offset: None,
             union_all: vec![],
         }
     }

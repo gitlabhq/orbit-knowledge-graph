@@ -139,7 +139,7 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.username` | `default` | Auth user |
 | `graph.password` | None | Auth password |
 | `graph.session_settings` | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
-| `graph.insert_settings` | `{}` | Settings applied to INSERT operations only (e.g., `async_insert`, `wait_for_async_insert`) |
+| `graph.insert_settings` | See `config/default.yaml` | Settings applied to INSERT operations only. Quorum clusters drop `async_insert` and `wait_for_async_insert`; set a key here to override its default. |
 | `graph.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
 
 ### Self-managed replicated clusters
@@ -741,7 +741,7 @@ kubectl -n gkg logs deployment/gkg-indexer -f
 kubectl -n gkg logs deployment/gkg-dispatcher -f
 
 # Filter logs for a specific project
-kubectl -n gkg logs deployment/gkg-indexer -f | grep 'project_id=<id>'
+kubectl -n gkg logs deployment/gkg-indexer -f | grep '"gl_project_id":<id>'
 ```
 
 ### Inspect running configuration

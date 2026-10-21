@@ -13,7 +13,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter NOT (d.id IN [3, 4]), d.id >= 1, d.id <= 10, d._deleted = false (Deduplicate Final (Scan Table(gl_definition) AS d)))
+            - (Filter NOT (d.id IN [3, 4]), d._deleted = false (Deduplicate LimitBy ... (Filter d.id >= 1, d.id <= 10 (_))))
 
   - name: A complemented NOT becomes an ordinary node filter
     query:
@@ -30,4 +30,4 @@ cases:
     physical:
       clickhouse:
         planned:
-          expect: ["(Filter b.name != 'skip', ... (_))"]
+          expect: ["(Filter ..., b.name != 'skip' OR b._deleted = true (_))"]

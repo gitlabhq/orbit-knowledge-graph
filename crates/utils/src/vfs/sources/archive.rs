@@ -6,8 +6,8 @@ use std::io::Read;
 use std::sync::Arc;
 
 use flate2::read::GzDecoder;
+use orbit_log_fields::warn;
 use tar::EntryType;
-use tracing::warn;
 use typed_path::{Utf8Component, Utf8Components, Utf8UnixComponent, Utf8UnixPath};
 
 use super::{Loading, Put, Source, SourceError, Tag};
@@ -25,7 +25,10 @@ impl<R: Read> Source for Archive<R> {
             let mut entry = match entry {
                 Ok(entry) => entry,
                 Err(e) if !any_entry_seen && e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                    warn!(error = %e, "archive stream truncated before first entry; treating as empty");
+                    warn!(
+                        expanded(ERROR_MESSAGE) = %e,
+                        "archive stream truncated before first entry; treating as empty"
+                    );
                     return Err(SourceError::Empty);
                 }
                 Err(e) => return Err(SourceError::Io(e)),
@@ -144,7 +147,10 @@ fn relative_path<'a>(
         return Ok(None);
     };
     if first.as_str() != root.get_or_insert_with(|| first.as_str().to_owned()) {
-        warn!(entry = %path, "skipping archive entry outside the archive root");
+        warn!(
+            expanded(FILE_PATH) = %path,
+            "skipping archive entry outside the archive root"
+        );
         return Ok(None);
     }
     Ok(Some(components.as_str()))

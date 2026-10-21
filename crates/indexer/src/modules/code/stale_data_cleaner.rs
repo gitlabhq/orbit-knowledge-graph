@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::future::try_join_all;
+use orbit_log_fields::debug;
 use thiserror::Error;
-use tracing::debug;
 
 use super::config::CodeTableNames;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT, insert_overrides};
@@ -161,10 +161,7 @@ impl ClickHouseStaleDataCleaner {
             reason,
         };
 
-        debug!(
-            table,
-            %traversal_path, project_id, branch, "tombstoning stale rows"
-        );
+        debug!(safe(TABLE) = table, "tombstoning stale rows");
         let stale = self
             .client
             .query(query)
@@ -216,7 +213,7 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
             .await?;
         }
 
-        debug!(project_id, branch, "stale data deletion complete");
+        debug!("stale data deletion complete");
         Ok(())
     }
 }

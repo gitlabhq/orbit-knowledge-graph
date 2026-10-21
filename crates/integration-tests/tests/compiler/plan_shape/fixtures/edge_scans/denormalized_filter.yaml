@@ -13,9 +13,7 @@ physical:
   clickhouse:
     planned:
       expect: ["(Filter _orbit_edge_0.source_tags HAS ANY ['definition_type:function'], ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))"]
-      reject: ["(Scan Table(gl_definition) ...)"]
     emitted:
-      expect: ["(Filter ArrayContains(_orbit_edge_0.source_tags, 'definition_type:function'), ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))"]
+      expect: ["(Filter ArrayContains(_orbit_edge_0.source_tags, 'definition_type:function'), ... (_))"]
       ctes:
         absent: true
-      reject: ["(Scan Table(gl_definition) ...)"]

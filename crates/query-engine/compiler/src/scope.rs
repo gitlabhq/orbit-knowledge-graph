@@ -1,23 +1,62 @@
 use std::collections::{HashMap, HashSet};
 
 mod application;
-mod preparation;
 
-pub use application::apply;
-pub use preparation::prepare;
+pub use application::apply_plan;
 
 #[derive(Clone, Default)]
 pub struct QueryScope {
     nodes: HashMap<String, ScopeProof>,
     relationships: Vec<Option<ScopeProof>>,
-    requirements: Vec<ScopeProof>,
-    table_scans: HashSet<String>,
 }
 
 impl QueryScope {
-    pub fn table_scans(&self) -> &HashSet<String> {
-        &self.table_scans
+    pub fn new(
+        input: &Input,
+        nodes: HashMap<String, ScopeProof>,
+        model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    ) -> Self {
+        let relationships = input
+            .relationships
+            .iter()
+            .map(|relationship| relationship_proof(input, relationship, &nodes, model))
+            .collect();
+        Self {
+            nodes,
+            relationships,
+        }
     }
+
+    pub fn node(&self, alias: &str) -> Option<&ScopeProof> {
+        self.nodes.get(alias)
+    }
+
+    pub fn relationship(&self, index: usize) -> Option<&ScopeProof> {
+        self.relationships.get(index).and_then(Option::as_ref)
+    }
+}
+
+fn relationship_proof(
+    input: &Input,
+    relationship: &crate::input::InputRelationship,
+    proofs: &HashMap<String, ScopeProof>,
+    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+) -> Option<ScopeProof> {
+    let from_proof = proofs.get(&relationship.from);
+    let to_proof = proofs.get(&relationship.to);
+    if from_proof == to_proof {
+        return from_proof.cloned();
+    }
+    let from = input.entity_of(&relationship.from)?;
+    let to = input.entity_of(&relationship.to)?;
+    relationship.types.iter().find_map(|kind| {
+        match model.variant_scope(kind, from, to) {
+            Some(ontology::EdgeVariantScope::PruneToSource) => from_proof,
+            Some(ontology::EdgeVariantScope::PruneToTarget) => to_proof,
+            _ => None,
+        }
+        .cloned()
+    })
 }
 
 use ontology::TraversalPathKind;
@@ -86,17 +125,6 @@ pub fn scope_predicate(proof: &ScopeProof, alias: &str) -> Expr {
         .iter()
         .map(|path| Some(Expr::eq(path.clone(), Expr::string(UNRESOLVED_PATH))));
     Expr::or_all(matches.chain(unresolved)).expect("scope proof has at least one source")
-}
-
-pub fn resolved_scope_guard(proof: &ScopeProof) -> Expr {
-    Expr::and_all(proof.sources.iter().map(|source| {
-        Some(Expr::binary(
-            Op::Ne,
-            scope_value_expr(source),
-            Expr::string(UNRESOLVED_PATH),
-        ))
-    }))
-    .expect("scope proof has at least one source")
 }
 
 fn depth_between(column: Expr, path: &Expr, min: u32, max: u32) -> Expr {

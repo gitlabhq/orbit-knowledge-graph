@@ -1,0 +1,58 @@
+name: "Go: a field is a definition of a named struct type only"
+
+fixtures:
+  - path: main.go
+    content: |
+      package main
+
+      type Config struct {
+      	Name string
+      	Port int
+      }
+
+      type Commented struct {
+      	// First is documented.
+      	First string
+      	// Second is documented.
+      	Second int
+      }
+
+      type Base struct{}
+
+      type Derived struct {
+      	Base
+      	Level int
+      }
+
+      func TestTable() {
+      	tests := []struct {
+      		name string
+      		want int
+      	}{
+      		{name: "a", want: 1},
+      	}
+      	_ = tests
+      	var point struct {
+      		x int
+      		y int
+      	}
+      	_ = point
+      }
+
+tests:
+  - name: the fields of named struct types are the only Field definitions, with comments between them
+    query: |
+      MATCH (d:Definition) WHERE d.definition_type = 'Field'
+      RETURN d.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 5 }
+      - { column_values: { field: name, values: ["First", "Level", "Name", "Port", "Second"] } }
+
+  - name: an embedded field of a named struct is a supertype
+    query: |
+      MATCH (d:Definition)-[:EXTENDS]->(b:Definition) WHERE d.name = 'Derived'
+      RETURN b.name AS base
+    assert:
+      - { row_count: 1 }
+      - { row: { base: Base } }

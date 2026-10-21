@@ -66,7 +66,7 @@ Consumes CDC events from `siphon_stream_main_db` for the `p_knowledge_graph_code
 The dispatcher:
 
 1. Fetches a batch of pending messages (default batch size: 100)
-2. Decodes Siphon replication events, extracting `project_id`, `ref`, `commit_sha`, `traversal_path`
+2. Decodes Siphon replication events, extracting `project_id`, `ref`, `commit_sha`, `traversal_path` and, when present, `repository_storage`
 3. Deduplicates by `(project_id, branch)`, keeping the highest `task_id`
 4. Publishes `CodeIndexingTaskRequest` to `GKG_INDEXER`
 5. Acknowledges the batch
@@ -183,7 +183,7 @@ nats stream purge GKG_DEAD_LETTERS \
 4. Check indexer logs for the project:
 
    ```shell
-   kubectl logs -n gkg deployment/gkg-indexer -f | grep 'project_id=<id>'
+   kubectl logs -n gkg deployment/gkg-indexer -f | grep '"gl_project_id":<id>'
    ```
 
 ### Lock stuck (worker crashed mid-indexing)

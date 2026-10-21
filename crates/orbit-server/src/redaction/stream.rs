@@ -1,7 +1,8 @@
 use futures::StreamExt;
+use orbit_log_fields::{error, info, warn};
+use query_engine::pipeline::PipelineError;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
-use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::proto::{
@@ -18,6 +19,18 @@ pub enum RedactionExchangeError {
     InvalidMessage(&'static str),
     ResultIdMismatch { expected: String, received: String },
     ClientError { code: String, message: String },
+}
+
+impl RedactionExchangeError {
+    /// A closed or broken request stream is on the caller's side of the exchange.
+    pub fn into_pipeline_error(self) -> PipelineError {
+        match self {
+            Self::StreamClosed | Self::ReceiveFailed(_) => {
+                PipelineError::Streaming(format!("{self:?}"))
+            }
+            other => PipelineError::Authorization(format!("{other:?}")),
+        }
+    }
 }
 
 pub struct RedactionExchangeResult {
@@ -75,9 +88,9 @@ impl RedactionService {
             .collect();
 
         info!(
-            result_id = %result_id,
-            resource_count = proto_resources.len(),
-            "Requesting redaction authorization"
+            safe(RESULT_ID) = result_id.as_str(),
+            safe(COUNT) = proto_resources.len(),
+            "Requesting redaction authorization for resources"
         );
 
         let redaction_required = RedactionExchange {
@@ -92,7 +105,7 @@ impl RedactionService {
         let redaction_msg = match stream.next().await {
             Some(Ok(msg)) => msg,
             Some(Err(e)) => {
-                error!(error = %e, "Failed to receive redaction response");
+                error!(expanded(ERROR_MESSAGE) = %e, "Failed to receive redaction response");
                 return Err(RedactionExchangeError::ReceiveFailed(e));
             }
             None => {

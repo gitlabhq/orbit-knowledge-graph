@@ -1,9 +1,9 @@
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::{ArrowClickHouseClient, ArrowQuery};
+use orbit_log_fields::debug;
 use orbit_server_config::QueryConfig;
 use serde::Serialize;
 use tonic::Status;
-use tracing::debug;
 
 pub(crate) async fn fetch_status_query_batches(
     client: &ArrowClickHouseClient,
@@ -16,7 +16,11 @@ pub(crate) async fn fetch_status_query_batches(
         .to_http_settings()
         .map_err(|e| Status::internal(format!("query settings error ({label}): {e}")))?;
 
-    debug!(sql, label, "Status query");
+    debug!(
+        expanded(SQL) = sql,
+        safe(QUERY_NAME) = label,
+        "Status query"
+    );
 
     bind_params(client.query(sql).with_settings(settings))
         .fetch_arrow()

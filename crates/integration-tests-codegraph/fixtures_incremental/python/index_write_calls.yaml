@@ -1,0 +1,36 @@
+name: "Python: a call in the subscript of an assignment target links"
+
+fixtures:
+  - path: index_write.py
+    content: |
+      class Item:
+          pass
+
+
+      def make():
+          return Item()
+
+
+      def slot():
+          return 0
+
+
+      def index_write(a):
+          a[slot()] = make()
+
+
+      def member_index_write(o):
+          o.items[slot()] += 1
+
+tests:
+  - name: "the call in the subscript links next to the call on the right-hand side"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name IN ["index_write", "member_index_write"]
+      RETURN caller.name AS caller, callee.name AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: index_write, callee: make } }
+      - { row: { caller: index_write, callee: slot } }
+      - { row: { caller: member_index_write, callee: slot } }

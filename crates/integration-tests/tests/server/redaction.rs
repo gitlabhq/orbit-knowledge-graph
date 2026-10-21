@@ -8,8 +8,8 @@ use std::collections::HashSet;
 
 use crate::common::compile;
 use crate::common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, compile_and_execute,
-    load_ontology, run_redaction, test_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, TestContext, compile_and_execute, load_ontology,
+    run_redaction, test_security_context,
 };
 use integration_testkit::{run_subtests, run_subtests_shared, t};
 use orbit_server::redaction::QueryResult;
@@ -4029,211 +4029,6 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     );
 }
 
-fn with_after(json: &str, after: &str) -> String {
-    let mut v: serde_json::Value = serde_json::from_str(json).unwrap();
-    v["cursor"]["after"] = serde_json::Value::String(after.to_string());
-    v.to_string()
-}
-
-async fn fetch_page(
-    ctx: &TestContext,
-    json: &str,
-    ontology: &std::sync::Arc<ontology::Ontology>,
-    security_ctx: &query_engine::compiler::SecurityContext,
-) -> (QueryResult, query_engine::shared::PaginationMeta) {
-    let query = compile(
-        json,
-        query_engine::compiler::Frontend::JsonDsl,
-        ontology,
-        security_ctx,
-    )
-    .unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
-    let meta = query_engine::shared::paginate(&mut result, &query.input, &query.pagination);
-    (result, meta)
-}
-
-fn page_ids(result: &QueryResult) -> Vec<i64> {
-    let u = result.ctx().get("u").unwrap().clone();
-    result
-        .authorized_rows()
-        .filter_map(|r| r.get_id(&u))
-        .collect()
-}
-
-async fn cursor_pagination_basic(ctx: &TestContext) {
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-        "order_by": "u.id",
-        "cursor": {"page_size": 2}
-    }"#;
-
-    let query = compile(
-        json,
-        query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
-        &security_ctx,
-    )
-    .unwrap();
-    assert!(
-        query.base.sql.contains("LIMIT 3"),
-        "SQL LIMIT should be page_size + 1 probe row: {}",
-        query.base.sql
-    );
-
-    let (result, meta) = fetch_page(ctx, json, &ontology, &security_ctx).await;
-    assert!(meta.has_more);
-    assert_eq!(page_ids(&result), vec![1, 2], "first page");
-    let after = meta
-        .next_cursor
-        .expect("mid-stream page must carry a token");
-
-    let (result, meta) = fetch_page(ctx, &with_after(json, &after), &ontology, &security_ctx).await;
-    assert!(meta.has_more);
-    assert_eq!(
-        page_ids(&result),
-        vec![3, 4],
-        "second page continues past the seek anchor"
-    );
-    let after = meta
-        .next_cursor
-        .expect("mid-stream page must carry a token");
-
-    let (result, meta) = fetch_page(ctx, &with_after(json, &after), &ontology, &security_ctx).await;
-    assert!(!meta.has_more, "last page should not have more");
-    assert_eq!(meta.next_cursor, None, "exhausted stream has no token");
-    assert_eq!(page_ids(&result), vec![5], "last page");
-}
-
-async fn cursor_pagination_with_redaction(ctx: &TestContext) {
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-        "order_by": "u.id",
-        "cursor": {"page_size": 2}
-    }"#;
-
-    let mut mock_service = MockRedactionService::new();
-    mock_service.allow("user", &[1, 3, 5]);
-    mock_service.deny("user", &[2, 4]);
-
-    let query = compile(
-        json,
-        query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
-        &security_ctx,
-    )
-    .unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
-    run_redaction(&mut result, &mock_service);
-    let meta = query_engine::shared::paginate(&mut result, &query.input, &query.pagination);
-
-    assert!(meta.has_more);
-    assert_eq!(
-        page_ids(&result),
-        vec![1],
-        "redaction shortens the page (user 2 denied) instead of pulling user 3 forward"
-    );
-    let after = meta
-        .next_cursor
-        .expect("token anchors on last scanned row, even a denied one");
-
-    let query = compile(
-        &with_after(json, &after),
-        query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
-        &security_ctx,
-    )
-    .unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let mut result = QueryResult::from_batches(&batches, &query.base.result_context).unwrap();
-    run_redaction(&mut result, &mock_service);
-    let meta = query_engine::shared::paginate(&mut result, &query.input, &query.pagination);
-
-    assert_eq!(
-        page_ids(&result),
-        vec![3],
-        "next page continues after user 2, not after the last authorized row"
-    );
-    assert!(meta.has_more);
-}
-
-async fn cursor_pagination_rejects_foreign_token(ctx: &TestContext) {
-    let _ = ctx;
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-        "order_by": "u.id",
-        "cursor": {"page_size": 2}
-    }"#;
-    let other = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 5000}}],
-        "order_by": "u.id",
-        "cursor": {"page_size": 2}
-    }"#;
-
-    let token = query_engine::compiler::passes::cursor::encode(
-        {
-            let v: serde_json::Value = serde_json::from_str(other).unwrap();
-            query_engine::compiler::passes::cursor::canonical_hash(&v)
-        },
-        &[Some("2".into()), Some("2".into())],
-    );
-    let err = compile(
-        &with_after(json, &token),
-        query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
-        &security_ctx,
-    )
-    .unwrap_err();
-    assert!(
-        err.to_string().contains("different query"),
-        "token minted for a different query must be rejected: {err}"
-    );
-}
-
-async fn cursor_pagination_with_filters(ctx: &TestContext) {
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [{"id": "u", "entity": "User", "filters": {"state": "active"}}],
-        "order_by": "u.id",
-        "cursor": {"page_size": 2}
-    }"#;
-
-    let (result, meta) = fetch_page(ctx, json, &ontology, &security_ctx).await;
-    assert!(meta.has_more);
-    assert_eq!(
-        page_ids(&result),
-        vec![1, 2],
-        "first page of filtered results"
-    );
-    let after = meta.next_cursor.unwrap();
-
-    let (result, meta) = fetch_page(ctx, &with_after(json, &after), &ontology, &security_ctx).await;
-    assert!(!meta.has_more);
-    assert_eq!(
-        page_ids(&result),
-        vec![3, 4],
-        "second page of filtered results"
-    );
-}
-
 async fn search_merge_requests_with_redaction(ctx: &TestContext) {
     let (_, mut result) = compile_and_execute(
         ctx,
@@ -4431,7 +4226,7 @@ async fn cross_entity_id_collision_redaction(ctx: &TestContext) {
 
 #[tokio::test]
 async fn redaction_integration() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     setup_test_data(&ctx).await;
 
     // Read-only subtests share one database (seed once, query many).
@@ -4490,10 +4285,6 @@ async fn redaction_integration() {
         traversal_edge_columns_preserved_through_redaction,
         multi_hop_edge_columns_survive_redaction,
         enum_filter_normalization_int_vs_string_enums,
-        cursor_pagination_basic,
-        cursor_pagination_with_redaction,
-        cursor_pagination_rejects_foreign_token,
-        cursor_pagination_with_filters,
         search_merge_requests_with_redaction,
         redaction_preserves_row_order,
         redaction_preserves_row_order_desc,

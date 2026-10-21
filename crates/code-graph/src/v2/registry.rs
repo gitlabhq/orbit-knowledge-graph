@@ -165,7 +165,10 @@ pub fn dispatch_family(
                     all_errors.extend(errs);
                 }
                 None => {
-                    tracing::warn!(%lang, "no pipeline registered for language");
+                    orbit_log_fields::warn!(
+                        safe(LANGUAGE) = lang.as_ref(),
+                        "no pipeline registered for language"
+                    );
                 }
             }
         }

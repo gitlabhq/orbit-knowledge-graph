@@ -106,7 +106,7 @@ UNION arms also retain their local CTE definitions. Empty path arrays carry fiel
 
 `mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
 The shared runner and structural matcher live in `integration-testkit::plan_shape`.
-Logical assertions inspect parsed, normalized Input before scope preparation.
+Logical assertions inspect parsed, normalized Input before query scope application.
 They include node and relationship filters, groups, measures, ordering, and limits.
 Physical assertions select `planned` or `emitted` under each backend, keeping the selected plan separate from the SQL AST before enforcement.
 The explain view renders incoming relationships in source-to-target order so both frontends can share assertions.
@@ -156,78 +156,92 @@ Family explain views include neighbor access and routes, path frontier depths an
 Hydration fixtures use ordinary JSON/GQL node selectors plus an internal `hydration` setup block with `dynamic`, `path_segment_budget`, and alias-keyed `paths`.
 The harness applies that setup after normalization; hydration remains unavailable as a user query type.
 
-Each edge-chain emitter builds node bindings as it emits scans and joins.
-Each binding contains the graph identity, visible table alias, and hydration path expression when available.
-Lowering resolves elided endpoints through their emitted holders or pinned literals.
-Filtering CTEs do not make a node table visible in the result query block.
-Result enforcement consumes these bindings instead of searching the SQL tree for aliases.
-It still adds required authorization scans and projects redaction columns.
+Traversal and aggregation build one logical relation for each relationship
+occurrence. Each relation reads its routed stored edge tables. Shared node
+bindings compose those relations in one chain or branch. The planner joins a
+current node row when a query consumes canonical node data.
+
+Result enforcement consumes physical node bindings instead of searching the
+SQL tree for aliases. It still adds required authorization scans and projects
+redaction columns.
 Neighbors emits direction-specific redaction columns in its own query arms.
 Its projected binding carries only an identity needed for an additional role scan, when required.
 Property comparisons and cursor identities reuse the resolved node bindings.
-Lowering rejects identities that have neither a visible source nor an elided pinned value.
-FK hop elision retains elevated-role targets for authorization scans.
-It also retains multi-ID targets when projection, grouping, property aggregation, or ordering needs their values.
-Ungrouped aggregations can still elide targets used only as filters.
+Lowering rejects identities without a visible physical source. The planner
+retains current node reads for properties, grouping, sorting, conditions, and
+policy provenance.
 
 | # | Pass | Responsibility |
 |---|---|---|
-| 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas and computes the cursor query hash |
+| 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas |
 | 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
 | 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
-| 4 | `restrict` | Strips `admin_only` fields, validates user-supplied paths, and prepares query scope, including scope-only container removal ([Security](../security.md)) |
+| 4 | `restrict` | Strips `admin_only` fields, validates user-supplied paths, and derives immutable query scope ([Security](../security.md)) |
 | 5 | `plan` | Chooses performance-equivalent access paths, join order, hydration, and dedup strategies |
-| 6 | `lower` | Emits the SQL AST and physical result bindings from the query plan |
-| 7 | `response_policy` | Applies transport-size policy to result projections |
-| 8 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
-| 9 | `scope_requirements` | Applies scope predicates inside each scan's query block and guards for removed scope anchors |
+| 6 | `apply_scope` | Adds scope predicates to owned reads in the relation graph |
+| 7 | `lower` | Emits the SQL AST and physical result bindings from the query plan |
+| 8 | `response_policy` | Applies transport-size policy to result projections |
+| 9 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
 | 10 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
-| 11 | `cursor` | Applies keyset pagination (stable order, probe limit, seek predicate, and readback columns) |
+| 11 | `paginate` | Sets the probe limit and lowers `SKIP` to an `OFFSET` over a stable order |
 | 12 | `check` | Verifies every namespaced graph-table path column carries a valid role-scoped `startsWith` predicate or a fail-closed false predicate ([Security](../security.md)) |
 | 13 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (FK shapes, sort and group targets) need no second query |
 | 14 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
 | 15 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
 
-The planner emits ClickHouse SQL similar to these patterns:
+The planner emits ClickHouse SQL similar to these patterns.
 
 - One‑hop neighbors: equality filter on the edge table’s leading keys, `WHERE startsWith(traversal_path, ?) AND branch = ? AND src_id IN (...)` (for code) or `WHERE startsWith(traversal_path, ?) AND src_id IN (...)` (for SDLC), producing O(degree) scans per source.
-- Multi-selector traversals: chained JOINs/CTEs with DISTINCT frontiers between selectors to avoid blow-ups. A traversal can contain up to five node selectors and therefore four relationship selectors. Each relationship selector can independently use an inclusive `hops` range whose upper bound is 3.
+- Multi-selector traversals: stored edge relations compose through shared node bindings. A traversal can contain up to five node selectors and therefore four relationship selectors. Each relationship selector can independently use an inclusive `hops` range whose upper bound is 3.
 - Path finding: bounded expansion over the routed edge tables, with `path.max_depth` capped independently at 3.
 - Reverse hops: filter the edge table on `target_id`, supported by its target ID bloom filter.
 - Alternate relationship types: a query's relationship types may span multiple physical edge tables, or use a wildcard. In that case the compiler emits a `UNION ALL` across the relevant tables. Each arm selects the standard edge columns so downstream passes see a uniform schema.
 - Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results. Top-level `group_by` supports node groups and scalar property groups. Property groups keep the grouped alias table-backed, so security filters and latest-row checks apply before aggregation.
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
-- Derived‑table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions. This applies when a latest-row node scan has filters or narrowing predicates that should be applied inside the `FINAL` read. FK-star center scans and joined node scans use this shape.
-- Narrowing CTEs: edge-derived narrowing CTEs use `SELECT DISTINCT` for ID frontiers so high fan-out relationships do not feed millions of duplicate values into an `IN` set.
-- Cross-node comparisons resolve IDs through the plan's edge or FK columns. Other properties require node joins before comparison. FK hop removal keeps relationships needed by these comparisons.
-- FK candidate prefilters: joined FK plans may add `SELECT DISTINCT id FROM table WHERE ...` CTEs without `FINAL`. They then constrain the outer `FINAL` scan with `id IN (...)` and re-apply every predicate after latest-row resolution. Center candidate CTEs are only emitted when they include target-derived predicates. The compiler does not build a same-table center candidate that only repeats the center node's own filters.
+- Derived-table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions. Current-row reads can also use the selective form described below.
+- Exact endpoint metadata: a node filter can run on edge tags when every selected relationship variant carries that property.
+- Canonical node reads: uncovered filters and consumed properties join the current node row directly.
+- Cross-node comparisons resolve IDs through the plan's edge or FK columns. Other properties require node joins before comparison.
 - Row deduplication: `ReplacingMergeTree` does not guarantee merge-time dedup between queries, so the compiler injects query-time dedup (see [Row deduplication](#row-deduplication) below).
 
-These choices preserve factorization. Each hop operates on a compact frontier and prunes the next edge scan via semi‑joins. This mirrors Kùzu’s accumulate → semijoin → probe execution.
+Selective fixed chains define the first edge relation once. A distinct endpoint
+frontier narrows the next edge scan without replacing the original match rows.
+Declared equivalent layouts provide deterministic source- or target-oriented
+access when the selected endpoint is known.
 
 ### Row deduplication
 
-Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness for node table reads, mostly via `FINAL`. Hydration arms and narrowed node joins instead dedup with `LIMIT 1 BY <sort_key>`. This preserves the same latest-non-deleted semantics while keeping column pruning and projections (see the Hydration row below):
+Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness through `FINAL` or an explicit latest-row operation.
+
+`FINAL` is the default. A selective current-row read can use a two-step form instead:
+
+1. Read matching candidate rows without `FINAL`, then project and deduplicate the complete replacement key.
+2. Read all versions for those keys. Sort-key and unchanging-column filters run first, the latter as `(filter) OR _deleted`. Keep the greatest `_version` with `LIMIT 1 BY`, then apply the remaining filters and `_deleted = false`.
+
+The second filter application preserves latest-state semantics. An old version can find a candidate key, but it cannot make the current version match. The tombstone guard keeps a deleted row from resurfacing through an unchanging-column filter. Tuple membership keeps composite replacement keys intact. Routed edge reads apply this process to each physical table before `UNION ALL`.
+
+The planner uses this form for exact IDs, bounded ID ranges, relation frontiers, and positive filters marked as high selectivity in the ontology. Text searches on changing columns, negated filters, `!=`, `IS NOT NULL`, namespace-anchor-only filters, wide ID ranges, and low-selectivity fields keep `FINAL`. Backends must opt in; DuckDB does not use this ClickHouse strategy.
+
+A relation referenced more than once is stored as a materialized CTE. The exception is a relation whose selective predicates are all point lookups (one ID, or equality on a `unique` property); those are recomputed inline.
 
 | Scan type | Strategy | Rationale |
 |---|---|---|
-| Single-node traversal | Node table scan with `FINAL` | Applies `ReplacingMergeTree` latest-row semantics before filters and limits |
-| Node filter CTEs | Node table scan with `FINAL` | Ensures ID frontiers are derived from latest rows, not stale matching versions |
-| FK candidate CTEs | Non-`FINAL` ID or FK prefilter plus a latest-row recheck | Candidates can include stale matches. The target scan selects the latest version before rechecking filters. |
-| Edge narrowing CTEs | Non-`FINAL` edge-endpoint ID frontier | Narrows joined node scans to IDs the edges reach |
-| Redaction joins for filtered non-default auth IDs | Filtered node table subquery with `FINAL` | Lets enforcement joins for entities such as code definitions apply property filters inside the latest-row read |
+| Single-node traversal | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Applies latest-row semantics before filters and limits. |
+| Canonical endpoint reads | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Supplies current filters and properties that exact edge metadata does not cover. |
+| Redaction joins for filtered non-default auth IDs | Current-row node subquery | Lets enforcement joins for entities such as code definitions apply property filters inside the latest-row read. |
 | Hydration (UNION ALL arms) | Non-`FINAL` scan with `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`, outer `_deleted = false` | Hydration reads a tiny pinned `id IN (...)` set; dropping `FINAL` lets column pruning and projections apply (`FINAL` reconstructs full rows, defeating both). Dedup identity is the table's full sort key, matching `FINAL`'s per-ORDER-BY-key semantics. Falls back to `FINAL` when a table has no sort key. |
-| Main query node scans and broad node joins | Node table scan with `FINAL` | Keeps traversal, FK center, aggregation, and single-node lookup semantics consistent |
-| Narrowed node joins | Candidate-ID and sort-key filters before `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`; other node filters and `_deleted = false` outside | Sort-key values are the same for every version of a row, so those filters keep primary-key pruning. Mutable filters and deleted checks run after deduplication. |
-| Edge scans | `_deleted = false` in WHERE | Full-tuple ORDER BY makes RMT merge effective; only soft-delete filtering needed |
+| Main query node scans and joins | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Keeps traversal, aggregation, and single-node lookup semantics consistent. |
+| Fixed and variable stored-edge scans | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Prevents a newer edge tombstone from exposing an older live edge. |
+| Single-relation aggregation | Non-`FINAL` scan with sort-key and unchanging filters before `LIMIT 1 BY <replacement key> ORDER BY <replacement key>, _version DESC`; `FINAL` per table when the relationship spans several edge tables | Resolves current edge rows before evaluating the aggregate condition. |
 
-Filter placement rules for node `FINAL` scans:
+Filter placement rules for current-row reads:
 
-- **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are emitted on the `FINAL` scan so ClickHouse can still use primary-key pruning where supported.
-- **Mutable filters** (`state`, `status`, `draft`) also evaluate against the `FINAL` scan, preventing stale row versions from matching.
+- **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are emitted on the current-row read so ClickHouse can still use primary-key pruning where supported.
+- **Immutable non-key filters** (`created_at`, `author_id`) also run before the pick, as `(filter OR _deleted)`. A tombstone holds column defaults, and the guard lets it reach the pick and win.
+- **Mutable filters** (`state`, `status`, `draft`) evaluate after latest-row resolution, preventing stale row versions from matching. The selective form also uses them to find candidate keys.
 - **`_deleted = false`** is always applied after latest-row resolution, either on the `FINAL` scan or outside a wrapping subquery.
-- **Candidate CTEs** may over-select because they are only a performance prefilter. The target scan resolves the latest row before re-applying node filters and `_deleted = false`.
-- **Pinned FK target IDs** are pushed into the FK center `FINAL` subquery when the FK column lives on the center table.
+- **Exact edge metadata** can enforce a node filter only when every selected relationship variant carries the current value.
+- **Pinned endpoint IDs** remain predicates on the edge relation and any required current node read.
 
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
 
@@ -267,24 +281,20 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 - Anchors and FK columns come from the ontology's `traversal_path_lookup` declarations and edge scope annotations (`Ontology::is_anchor`, `Ontology::anchor_fk_mappings`).
 - Anchors: `Project`, `Group`, `MergeRequest`, `Definition`, `File`, `Directory`. The code entities let "find callers" traversals scope to the symbol's own project.
 
-**How the prefix is produced** (`scope::derive_scope_prefixes`, `ScopePrefix`)
+**How the prefix is produced** (`scope::derive_scope_proofs`, `ScopeProof`)
 
 - No pre-query lookup. The compiler emits a scalar subquery in the same statement: `(SELECT coalesce(if(argMaxOrNull(_deleted, _version), NULL, argMaxOrNull(traversal_path, _version)), '0/') FROM <anchor table> AS _scope WHERE _scope.<key> = ?)`.
 - ClickHouse evaluates it once before index analysis, so pruning equals a literal prefix (production `EXPLAIN`: 273 of 39 350 granules for both forms).
 - ID lookups use an aggregate over all matching versions. Full-path lookups use `FINAL` before filtering the mutable path, so an old name cannot resolve a renamed anchor.
 - A missing or deleted anchor yields `0/`. The predicate then falls back to the authorization filter alone (`startsWith(...) OR <lookup> = '0/'`). So rows whose anchor row is not indexed yet still return, as with the old resolver.
-- When scope preparation removes a container anchor, scope application adds `<lookup> != '0/'` to the query. A missing anchor then yields no rows, instead of counting the whole authorized scope.
-- Containment elision preserves the requested direction and constrains the target's traversal-path depth. The compiler retains the target's table scan even when the query does not return its properties.
 - Several anchors on one node give one `startsWith` per anchor, OR-ed. Above eight the node keeps only the authorization filter.
 - The lookup reads the anchor's current row, so a transferred project scopes to its new location as soon as its rows are indexed. No cache, no staleness window.
 
 **Where it lands**
 
-- Scope preparation runs after restriction. It removes a scope-only container only when the target's scope and hop depth exactly replace the relationship. It stores the bounded target proof in scope state and gives planning only the target alias that needs a table scan.
-- Planning and lowering do not consume scope proofs. Edge scans retain their input relationship index, including scans inside SIP producers and bounded-hop arms.
-- Scope application walks the emitted AST after result enforcement. It uses scan provenance to add predicates inside each scan's query block, including dedup subqueries and CTEs.
-- Removed containers retain a resolved-anchor guard. Security injection then adds caller authorization filters beside the scope filters.
-- Scope application, security injection, and final checks share callback-based query walkers. The walkers cover queries nested in expressions as well as derived tables and CTEs.
+- Restriction derives immutable node and relationship proofs. Planning does not consume them.
+- Scope application runs after planning and before lowering. It wraps each owned relation read with its scope predicate.
+- Lowering emits these predicates with the read. Security injection then adds caller authorization filters.
 
 **Propagation** (`Ontology::propagate_scope_prefixes`)
 
@@ -302,7 +312,7 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 
 ### Unified Response Format
 
-The server fetches one probe row beyond the requested window, trims it, and derives honest pagination metadata (`has_more`, `truncated`, `next_cursor`). Keyset cursors (`{ page_size, after }`) lower into seek predicates in SQL, so each page is a fresh bounded query. There is no offset slicing and no cross-page result cache. The formatting stage then transforms the trimmed `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` shape for all four query types (traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. `format_version` (semver) lets consumers detect breaking changes.
+The server fetches one probe row beyond the requested window, trims it, and derives honest pagination metadata (`has_more`, `truncated`). `SKIP` lowers to a SQL `OFFSET` over a stable order, so each page is a fresh bounded query. There is no cross-page result cache. The formatting stage then transforms the trimmed `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` shape for all four query types (traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. `format_version` (semver) lets consumers detect breaking changes.
 Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
 A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
 

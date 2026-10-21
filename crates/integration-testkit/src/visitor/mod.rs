@@ -235,13 +235,13 @@ impl ResponseView {
     }
 
     /// Assert exact node count. Satisfies [`Requirement::NodeCount`] and
-    /// [`Requirement::Cursor`].
+    /// [`Requirement::Skip`].
     ///
     /// Does NOT satisfy [`Requirement::NodeIds`] — use [`node_ids`](Self::node_ids)
     /// or [`assert_node_order`](Self::assert_node_order) to verify which IDs were returned.
     pub fn assert_node_count(&self, expected: usize) {
         self.tracker.satisfy(Requirement::NodeCount);
-        self.tracker.satisfy(Requirement::Cursor);
+        self.tracker.satisfy(Requirement::Skip);
         assert_eq!(
             self.response.nodes.len(),
             expected,
@@ -427,7 +427,7 @@ impl ResponseView {
         self.tracker.satisfy(Requirement::Aggregation);
         self.tracker.satisfy(Requirement::NodeCount);
         self.tracker.satisfy(Requirement::NodeIds);
-        self.tracker.satisfy(Requirement::Cursor);
+        self.tracker.satisfy(Requirement::Skip);
         // Any Filter requirements accumulated from the query are implicitly
         // satisfied — an empty result cannot violate a filter predicate.
         self.tracker.satisfy_all_filters();
@@ -448,7 +448,7 @@ impl ResponseView {
     /// Assert exact scalar row count for property-grouped aggregation responses.
     pub fn assert_row_count(&self, expected: usize) {
         self.tracker.satisfy(Requirement::Aggregation);
-        self.tracker.satisfy(Requirement::Cursor);
+        self.tracker.satisfy(Requirement::Skip);
         assert_eq!(
             self.rows().len(),
             expected,
@@ -472,7 +472,7 @@ impl ResponseView {
     pub fn assert_group_node_count(&self, group_key: &str, expected: usize) {
         self.tracker.satisfy(Requirement::Aggregation);
         self.tracker.satisfy(Requirement::NodeCount);
-        self.tracker.satisfy(Requirement::Cursor);
+        self.tracker.satisfy(Requirement::Skip);
         let actual = self
             .rows()
             .iter()

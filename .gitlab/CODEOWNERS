@@ -17,6 +17,8 @@
 
 [Architecture] @gitlab-org/orbit/team
 /docs/design-documents/decisions/
+/crates/orbit-log-fields/
+/crates/orbit-server/src/expanded_logs.rs
 
 [Technical Writing] @gitlab-org/technical-writing/tw-docops @gitlab-org/tw-leadership @gitlab-org/orbit/team
 /.vale/

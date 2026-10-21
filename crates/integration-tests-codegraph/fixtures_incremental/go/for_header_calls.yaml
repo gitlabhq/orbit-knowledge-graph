@@ -1,0 +1,65 @@
+name: "Go: a call in a loop header or a range expression links"
+
+fixtures:
+  - path: loops.go
+    content: |
+      package main
+
+      type Item struct{}
+
+      func (i Item) Touch() {}
+
+      func items() []Item { return nil }
+
+      func start() int { return 0 }
+
+      func limit() int { return 3 }
+
+      func step(i int) int { return i + 1 }
+
+      func headerCalls() {
+      	for i := start(); i < limit(); i = step(i) {
+      	}
+      }
+
+      func rangeCall() {
+      	for _, item := range items() {
+      		item.Touch()
+      	}
+      }
+
+      func condOnly() {
+      	i := 0
+      	for i < limit() {
+      		i = step(i)
+      	}
+      }
+
+tests:
+  - name: "calls in the init, condition and post statement of a for clause link"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "headerCalls"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 3 }
+      - { column_values: { field: callee, values: ["limit", "start", "step"] } }
+
+  - name: "the call in a range clause links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "rangeCall" AND callee.name = "items"
+      RETURN callee.name AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "a call in a condition-only for loop links"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = "condOnly"
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: callee, values: ["limit", "step"] } }

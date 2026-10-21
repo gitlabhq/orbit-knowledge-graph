@@ -33,8 +33,11 @@ pub struct QuotaConfig {
     pub fallback_cache_ttl_secs: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, strum::IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum QuotaAuthMode {
     /// `X-Admin-Email` / `X-Admin-Token` from `api_user` / `api_token`. GitLab.com only.
     AdminToken,

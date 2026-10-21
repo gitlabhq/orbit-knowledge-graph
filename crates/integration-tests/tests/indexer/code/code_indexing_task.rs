@@ -1276,7 +1276,7 @@ async fn a_stopped_engine_waits_for_a_job_whose_rows_are_still_in_flight() {
         *integration_testkit::GRAPH_SCHEMA_SQL,
     ])
     .await;
-    let (_nats, nats_url) = super::super::common::dispatch::start_nats().await;
+    let (_nats, nats_url) = super::super::common::start_nats().await;
     let broker = Arc::new(
         indexer::nats::NatsBroker::connect(&orbit_server_config::NatsConfiguration {
             url: nats_url,
@@ -1318,6 +1318,7 @@ async fn a_stopped_engine_waits_for_a_job_whose_rows_are_still_in_flight() {
         traversal_path: TraversalPath::new_unchecked(traversal_path),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
+        repository_storage: None,
     };
     broker
         .ensure_streams(&[CodeIndexingTaskRequest::subscription()])
@@ -2251,6 +2252,90 @@ async fn count_canary_edges(
     result.first().map_or(0, |b| b.num_rows())
 }
 
+#[tokio::test]
+async fn code_job_inserts_send_the_default_insert_settings() {
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+    let mock = MockGitlabServer::start().await;
+    let project = 2791;
+    mock.add_project(
+        project,
+        "main",
+        &[
+            ("src/main.py", "from helper import greet\ngreet()\n"),
+            ("src/helper.py", "def greet():\n    pass\n"),
+        ],
+    );
+    clickhouse
+        .execute(
+            "CREATE SETTINGS PROFILE orbit_writer SETTINGS async_insert = 0, wait_for_async_insert = 0",
+        )
+        .await;
+    clickhouse
+        .execute(
+            "CREATE USER orbit_writer IDENTIFIED WITH plaintext_password BY 'pw' \
+             SETTINGS PROFILE 'orbit_writer'",
+        )
+        .await;
+    clickhouse
+        .execute(&format!(
+            "GRANT ALL ON {}.* TO orbit_writer",
+            clickhouse.config.database
+        ))
+        .await;
+    let mut writer = clickhouse.clone();
+    writer.config.username = "orbit_writer".to_string();
+    writer.config.password = Some("pw".to_string());
+    writer.config.insert_settings = orbit_server_config::AppConfig::embedded_defaults()
+        .graph
+        .insert_settings;
+    writer
+        .config
+        .insert_settings
+        .insert("wait_for_async_insert".to_string(), "0".to_string());
+
+    let deps = CodeIndexingDeps::new(&mock, &writer);
+    let handler = deps.code_indexing_task_handler();
+    index_code(&handler, &writer, project, "first", 1, "1/2791/").await;
+    mock.replace_archive(project, &[("src/main.py", "print()\n")]);
+    index_code(&handler, &writer, project, "second", 2, "1/2791/").await;
+
+    clickhouse.execute("SYSTEM FLUSH LOGS").await;
+    let batches = clickhouse
+        .query(&format!(
+            "SELECT DISTINCT tables[1], Settings['async_insert'], Settings['wait_for_async_insert'], \
+                    Settings['async_insert_busy_timeout_min_ms'], \
+                    Settings['async_insert_busy_timeout_max_ms'] \
+             FROM system.query_log \
+             WHERE type = 'QueryFinish' AND query_kind = 'Insert' AND user = 'orbit_writer' \
+               AND current_database = '{}' AND length(tables) = 1",
+            clickhouse.config.database
+        ))
+        .await;
+    let columns: Vec<Vec<String>> = (0..5)
+        .map(|index| String::extract_column(&batches, index).expect("string column"))
+        .collect();
+    let sent: Vec<(String, [String; 4])> = (0..columns[0].len())
+        .map(|row| {
+            (
+                columns[0][row].clone(),
+                [1, 2, 3, 4].map(|column| columns[column][row].clone()),
+            )
+        })
+        .collect();
+
+    let table = |name: &str| format!("{}.{}", clickhouse.config.database, t(name));
+    for expected in [table("code_indexing_checkpoint"), table("gl_file")] {
+        assert!(sent.iter().any(|(name, _)| *name == expected), "{sent:?}");
+    }
+    for (name, settings) in &sent {
+        assert_eq!(settings, &["1", "1", "1000", "1000"], "{name}: {sent:?}");
+    }
+}
+
 async fn index_code(
     handler: &indexer::modules::code::CodeIndexingTaskHandler,
     _clickhouse: &integration_testkit::TestContext,
@@ -2349,6 +2434,7 @@ fn code_indexing_task_envelope(
         traversal_path: TraversalPath::new_unchecked(traversal_path),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
+        repository_storage: None,
     })
     .expect("failed to create envelope")
 }
@@ -2366,6 +2452,7 @@ fn code_indexing_backfill_envelope(
         traversal_path: TraversalPath::new_unchecked(traversal_path),
         dispatch_id: uuid::Uuid::new_v4(),
         campaign_id: None,
+        repository_storage: None,
     })
     .expect("failed to create envelope")
 }

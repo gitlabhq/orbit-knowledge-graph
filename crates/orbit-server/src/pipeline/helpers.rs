@@ -1,7 +1,7 @@
 use futures::StreamExt;
+use orbit_log_fields::{error, info, warn};
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
-use tracing::{error, info, warn};
 
 use crate::proto::execute_query_message::Content;
 use crate::proto::execute_query_result::Content::{FormattedText, ResultJson};
@@ -97,7 +97,7 @@ pub async fn send_invalid_request_error(
     tx: &mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
     message: String,
 ) {
-    warn!(error = %message, "Rejecting invalid query request");
+    warn!(expanded(ERROR_MESSAGE) = %message, "Rejecting invalid query request");
     let _ = tx
         .send(Ok(ExecuteQueryMessage {
             content: Some(execute_query_message::Content::Error(ExecuteQueryError {
@@ -115,7 +115,7 @@ pub async fn receive_query_request(
     let first_msg = match stream.next().await {
         Some(Ok(msg)) => msg,
         Some(Err(e)) => {
-            error!(error = %e, "Failed to receive initial message");
+            error!(expanded(ERROR_MESSAGE) = %e, "Failed to receive initial message");
             let _ = tx.send(Err(e)).await;
             return None;
         }
@@ -155,10 +155,10 @@ pub async fn send_query_error(
     // metric), so fall back to err.code() ("compile_error") for log readers.
     let reason = failure_reason(&error).unwrap_or_else(|| error.code());
     error!(
-        code = error.code(),
-        failure_reason = reason,
-        client_safe,
-        error = %error,
+        safe(ERROR_TYPE) = error.code(),
+        safe(REASON) = reason,
+        safe(CLIENT_SAFE) = client_safe,
+        expanded(ERROR_MESSAGE) = %error,
         "Pipeline error",
     );
     let _ = tx
@@ -235,7 +235,7 @@ fn classify_execution_error(msg: &str) -> String {
              is not selective enough. Try: add more specific filters, use \
              node_ids for direct ID selection, or scope by project_id."
         }
-        Some(ClickHouseLimit::TypeMismatch) => {
+        Some(ClickHouseLimit::TypeMismatch | ClickHouseLimit::BadQueryParameter) => {
             "Query has a type mismatch in a filter or aggregation. Check \
              that filter values match the column type (e.g. use integers \
              for ID fields, strings for text fields, DateTime format for \

@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use chrono::Utc;
 use code_graph::v2::CancellationToken;
 use gitlab_client::{GitlabClientError, ProjectInfo};
-use tracing::{debug, info, warn};
+use orbit_log_fields::{debug, expanded, info, safe, warn};
+use tracing::Instrument;
 
 use super::checkpoint::{CodeCheckpoint, CodeCheckpointStore};
 use super::metrics::CodeMetrics;
@@ -66,11 +67,17 @@ async fn run_with_heartbeat<T>(
                 match guard.renew(lock_ttl).await {
                     Ok(()) => {}
                     Err(error @ LockError::Lost) => {
-                        warn!(%error, "project lock lost mid-index; cancelling to avoid a double-write");
+                        warn!(
+                            expanded(ERROR_MESSAGE) = %error,
+                            "project lock lost mid-index; cancelling to avoid a double-write"
+                        );
                         cancel.cancel();
                     }
                     Err(error) => {
-                        warn!(%error, "lock renewal failed transiently; retrying on the next heartbeat tick");
+                        warn!(
+                            expanded(ERROR_MESSAGE) = %error,
+                            "lock renewal failed transiently; retrying on the next heartbeat tick"
+                        );
                     }
                 }
             }
@@ -135,17 +142,30 @@ impl Handler for CodeIndexingTaskHandler {
                     "failed to deserialize code indexing task request: {e}"
                 ))
             })?;
+        if request.traversal_path.is_valid_any_depth() {
+            let message_span = tracing::Span::current();
+            message_span.record(
+                safe::GL_ROOT_NAMESPACE_ID,
+                request.traversal_path.top_level_namespace_id(),
+            );
+            message_span.record(safe::TRAVERSAL_PATH, request.traversal_path.as_str());
+        }
 
-        debug!(
-            task_id = request.task_id,
-            project_id = request.project_id,
-            branch = ?request.branch,
-            dispatch_id = %request.dispatch_id,
-            campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
-            "received code indexing task"
+        let dispatch_id = request.dispatch_id.to_string();
+        let span = orbit_log_fields::info_span!(
+            "code_indexing_project",
+            safe(GL_PROJECT_ID) = request.project_id,
+            safe(TASK_ID) = request.task_id,
+            safe(COMMIT_SHA) = request.commit_sha.as_deref(),
+            safe(DISPATCH_ID) = dispatch_id.as_str(),
+            safe(CAMPAIGN_ID) = request.campaign_id.as_deref(),
+            expanded(BRANCH) = request.branch.as_deref(),
         );
+        span.in_scope(|| debug!("received code indexing task"));
 
-        self.process_task(&context, &request, message.attempt).await
+        self.process_task(&context, &request, message.attempt)
+            .instrument(span)
+            .await
     }
 }
 
@@ -187,11 +207,7 @@ impl CodeIndexingTaskHandler {
         let started_at = Utc::now();
 
         let Some((branch, project_info)) = self.resolve_branch(request).await? else {
-            warn!(
-                project_id = request.project_id,
-                task_id = request.task_id,
-                "project not found resolving default branch; acknowledging as deleted"
-            );
+            warn!("project not found resolving default branch; acknowledging as deleted");
             // Mirror the empty-repository path: write a checkpoint so the
             // dispatcher's `fetch_checkpointed_project_ids` filter excludes
             // this project on subsequent backfill cycles instead of
@@ -208,9 +224,7 @@ impl CodeIndexingTaskHandler {
             checkpoint.complete_empty_repository(request.task_id);
             if let Err(e) = self.checkpoint_store.save(&checkpoint).await {
                 warn!(
-                    project_id = request.project_id,
-                    task_id = request.task_id,
-                    error = %e,
+                    expanded(ERROR_MESSAGE) = %e,
                     "failed to write deleted-project checkpoint; dispatcher may republish"
                 );
             }
@@ -220,6 +234,7 @@ impl CodeIndexingTaskHandler {
             self.metrics.record_handler_duration(started_at);
             return Ok(());
         };
+        tracing::Span::current().record(expanded::BRANCH, branch.as_str());
 
         let checkpoint = self
             .checkpoint_store
@@ -230,19 +245,14 @@ impl CodeIndexingTaskHandler {
                 CodeCheckpoint::new(request.traversal_path.clone(), request.project_id, &branch)
             });
         if checkpoint.is_indexed_through(request.task_id) {
-            debug!(task_id = request.task_id, "already indexed, skipping");
+            debug!("already indexed, skipping");
             self.metrics.record_outcome("skipped_checkpoint");
             return Ok(());
         }
         let mode = checkpoint.indexing_mode();
 
         info!(
-            task_id = request.task_id,
-            project_id = request.project_id,
-            branch = %branch,
-            indexing_mode = ?mode,
-            dispatch_id = %request.dispatch_id,
-            campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
+            safe(INDEXING_MODE) = mode.as_str(),
             "starting code indexing"
         );
 
@@ -296,7 +306,10 @@ impl CodeIndexingTaskHandler {
         match self.repository_service.project_info(project_id).await {
             Ok(info) => info.repository_storage,
             Err(error) => {
-                warn!(project_id, %error, "repository storage lookup failed; using the tenant-wide archive budget");
+                warn!(
+                    expanded(ERROR_MESSAGE) = %error,
+                    "repository storage lookup failed; using the tenant-wide archive budget"
+                );
                 None
             }
         }
@@ -306,9 +319,7 @@ impl CodeIndexingTaskHandler {
         checkpoint.refund_attempt();
         if let Err(e) = self.checkpoint_store.save(checkpoint).await {
             warn!(
-                project_id = checkpoint.project_id,
-                branch = %checkpoint.branch,
-                error = %e,
+                expanded(ERROR_MESSAGE) = %e,
                 "failed to refund the attempt"
             );
         }
@@ -328,7 +339,11 @@ impl CodeIndexingTaskHandler {
             Err(held) => held,
         };
         let delay = held.time_left.unwrap_or(self.lock_ttl) + heartbeat_interval;
-        warn!(lock_key = %key, ?delay, "code indexing deferred: lock held by another indexer");
+        warn!(
+            expanded(KV_KEY) = key,
+            safe(RETRY_DELAY_S) = delay.as_secs_f64(),
+            "code indexing deferred: lock held by another indexer"
+        );
         Err(HandlerError::Deferred {
             reason: format!("lock {key} held by another indexer"),
             delay,
@@ -338,16 +353,6 @@ impl CodeIndexingTaskHandler {
     #[allow(
         clippy::too_many_arguments,
         reason = "indexing stage threads its collaborators and per-delivery state explicitly; a params struct would just move the arity"
-    )]
-    #[tracing::instrument(
-        name = "code_indexing_project",
-        skip_all,
-        fields(
-            project_id = request.project_id,
-            namespace_id,
-            traversal_path = %request.traversal_path,
-            branch = %branch,
-        )
     )]
     async fn index_with_lock(
         &self,
@@ -359,13 +364,12 @@ impl CodeIndexingTaskHandler {
         attempt: u32,
         observer: &mut dyn IndexingObserver,
     ) -> Result<&'static str, HandlerError> {
-        let Some(namespace_id) = request.traversal_path.top_level_namespace_id() else {
+        if request.traversal_path.top_level_namespace_id().is_none() {
             return Err(HandlerError::Processing(format!(
                 "traversal_path {:?} has no namespace_id",
                 request.traversal_path.as_str()
             )));
-        };
-        tracing::Span::current().record("namespace_id", namespace_id);
+        }
 
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
@@ -379,9 +383,16 @@ impl CodeIndexingTaskHandler {
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to save start: {e}")))?;
 
-        let repository_storage = match project_info {
-            Some(info) => info.repository_storage,
-            None => self.repository_storage(project_id).await,
+        let repository_storage = match request
+            .repository_storage
+            .as_ref()
+            .filter(|storage| !storage.is_empty())
+        {
+            Some(storage) => Some(storage.clone()),
+            None => match project_info {
+                Some(info) => info.repository_storage,
+                None => self.repository_storage(project_id).await,
+            },
         };
         let indexing_request = IndexingRequest {
             project_id,
@@ -414,9 +425,7 @@ impl CodeIndexingTaskHandler {
             Ok(outcome) => Ok(outcome),
             Err(IndexError::BudgetExceeded { budget }) => {
                 warn!(
-                    project_id,
-                    branch = %branch,
-                    budget_secs = budget.as_secs(),
+                    safe(TIMEOUT_S) = budget.as_secs_f64(),
                     "code indexing job exceeded its work budget"
                 );
                 Err(JOB_TIMEOUT_RETRY.global_failure(
@@ -443,7 +452,11 @@ impl CodeIndexingTaskHandler {
         let result = result.map(|outcome| outcome.metric_label());
 
         if let Err(e) = &result {
-            warn!(project_id, branch = %branch, error = %e, "failed to index code");
+            warn!(
+                safe(ERROR_TYPE) = e.error_kind(),
+                expanded(ERROR_MESSAGE) = %e,
+                "failed to index code"
+            );
         }
         let redelivered = match &result {
             Err(HandlerError::Backpressure(_)) => true,
@@ -456,16 +469,12 @@ impl CodeIndexingTaskHandler {
             match guard.renew(self.lock_ttl).await {
                 Ok(()) => self.refund_attempt(&mut checkpoint).await,
                 Err(error @ LockError::Lost) => warn!(
-                    project_id,
-                    branch = %branch,
-                    %error,
+                    expanded(ERROR_MESSAGE) = %error,
                     "lock not held at the end of the run; the attempt stays counted"
                 ),
                 Err(error) => {
                     warn!(
-                        project_id,
-                        branch = %branch,
-                        %error,
+                        expanded(ERROR_MESSAGE) = %error,
                         "lock renew failed transiently at the end of the run; refunding the attempt"
                     );
                     self.refund_attempt(&mut checkpoint).await;
@@ -592,6 +601,31 @@ mod tests {
             branch: &str,
             commit_sha: Option<&str>,
         ) -> Envelope {
+            Self::make_request_full(task_id, project_id, branch, commit_sha, None)
+        }
+
+        fn make_request_with_storage(
+            task_id: i64,
+            project_id: i64,
+            branch: &str,
+            repository_storage: Option<&str>,
+        ) -> Envelope {
+            Self::make_request_full(
+                task_id,
+                project_id,
+                branch,
+                Some("abc123"),
+                repository_storage,
+            )
+        }
+
+        fn make_request_full(
+            task_id: i64,
+            project_id: i64,
+            branch: &str,
+            commit_sha: Option<&str>,
+            repository_storage: Option<&str>,
+        ) -> Envelope {
             Envelope::new(&CodeIndexingTaskRequest {
                 task_id,
                 project_id,
@@ -600,6 +634,7 @@ mod tests {
                 traversal_path: TraversalPath::new_unchecked(format!("1/{project_id}/")),
                 dispatch_id: uuid::Uuid::new_v4(),
                 campaign_id: None,
+                repository_storage: repository_storage.map(str::to_string),
             })
             .unwrap()
         }
@@ -667,6 +702,7 @@ mod tests {
             traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
+            repository_storage: None,
         })
         .unwrap();
 
@@ -686,6 +722,7 @@ mod tests {
             traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
+            repository_storage: None,
         })
         .unwrap();
 
@@ -734,6 +771,7 @@ mod tests {
                 traversal_path: TraversalPath::new_unchecked("1/123/"),
                 dispatch_id: uuid::Uuid::new_v4(),
                 campaign_id: None,
+                repository_storage: None,
             })
             .unwrap();
 
@@ -744,6 +782,61 @@ mod tests {
                 "branch {branch:?}: got {result:?}"
             );
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_storage_on_a_push_task_skips_the_project_lookup() {
+        let config = crate::testkit::builders::test_pipeline_configuration();
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
+        for slot in 0..config.archive_storage_budget {
+            ctx.mock_locks
+                .set_lock(&crate::modules::code::repository::slot_key(
+                    Some("gitaly-2"),
+                    slot,
+                ));
+        }
+        let envelope = TestContext::make_request_with_storage(1, 123, "main", Some("gitaly-2"));
+
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            matches!(result, Err(HandlerError::Backpressure(_))),
+            "got {result:?}"
+        );
+        assert_eq!(ctx.counting_repo.project_info_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_empty_storage_on_a_push_task_falls_back_to_the_lookup() {
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_archive(
+            123,
+            build_tar_gz(&[("project-abc123/src/main.rs", b"fn main() {}")]),
+        );
+        let envelope = TestContext::make_request_with_storage(1, 123, "main", Some(""));
+
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(result.is_ok(), "got {result:?}");
+        assert_eq!(ctx.counting_repo.project_info_call_count(), 1);
+    }
+
+    #[test]
+    fn an_envelope_without_the_storage_still_deserializes() {
+        let request: CodeIndexingTaskRequest = serde_json::from_value(serde_json::json!({
+            "task_id": 1,
+            "project_id": 2,
+            "branch": "main",
+            "commit_sha": null,
+            "traversal_path": "1/2/",
+        }))
+        .unwrap();
+
+        assert_eq!(request.repository_storage, None);
     }
 
     #[tokio::test]
@@ -786,6 +879,7 @@ mod tests {
             traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
+            repository_storage: None,
         })
         .unwrap();
 
@@ -831,6 +925,7 @@ mod tests {
             traversal_path: TraversalPath::new_unchecked("1/123/"),
             dispatch_id: uuid::Uuid::new_v4(),
             campaign_id: None,
+            repository_storage: None,
         })
         .unwrap();
 

@@ -7,6 +7,7 @@ use std::time::Duration;
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
 use ontology::introspection::SchemaResponse;
+use orbit_log_fields::{info, warn};
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::Frontend;
@@ -15,7 +16,7 @@ use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use tracing::{Instrument, info, warn};
+use tracing::Instrument;
 
 use super::auth::extract_request_context;
 use crate::active_schema::ActiveSchema;
@@ -246,7 +247,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 self.active_schema
                     .snapshot()
                     .inspect_err(|error| {
-                        warn!(error = %error.message(), "Inlining the command catalog without relationship patterns");
+                        warn!(
+                            expanded(ERROR_MESSAGE) = %error.message(),
+                            "Inlining the command catalog without relationship patterns"
+                        );
                     })
                     .ok()
             })
@@ -274,9 +278,9 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let req = request.get_ref();
         let requested = &req.command_names;
         info!(
-            command_count = requested.len(),
-            format = ?req.format,
-            "Listing agent commands for user"
+            safe(COUNT) = requested.len(),
+            safe(RESPONSE_FORMAT) = req.format,
+            "Listing requested agent commands for user"
         );
 
         let all_commands = CommandRegistry::commands_for(
@@ -340,7 +344,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             req.parameters_json.as_str()
         };
 
-        info!(command_name = %req.command_name, "Invoking agent command for user");
+        info!(
+            expanded(REQUESTED_NAME) = %req.command_name,
+            "Invoking agent command for user"
+        );
 
         let command = self
             .tool_service
@@ -432,7 +439,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     }
                 };
 
-                info!(query_len = query.text.len(), "Executing query");
+                info!(safe(SIZE_BYTES) = query.text.len(), "Executing query");
 
                 let render = |output| match output {
                     QueryServiceOutput::Schema(response) => {
@@ -465,7 +472,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 match result {
                     Ok(()) => {}
                     Err(e @ PipelineError::Streaming(_)) if tx.is_closed() => {
-                        info!(error = %e, "Client left before the query result");
+                        info!(expanded(ERROR_MESSAGE) = %e, "Client left before the query result");
                     }
                     Err(e @ PipelineError::Timeout) => {
                         send_query_error(&tx, e).await;
@@ -491,7 +498,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
-        info!(format = ?req.format, "Fetching graph schema for user");
+        info!(
+            safe(RESPONSE_FORMAT) = req.format,
+            "Fetching graph schema for user"
+        );
         let schema = self.active_schema.snapshot()?;
 
         let response = if req.format == ResponseFormat::Llm as i32 {
@@ -517,7 +527,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
-        info!(format = ?req.format, "Fetching query response format for user");
+        info!(
+            safe(RESPONSE_FORMAT) = req.format,
+            "Fetching query response format for user"
+        );
 
         let version = ToolService::build_response_format_version();
         let schema = ToolService::build_response_format_schema().to_string();
@@ -554,7 +567,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 "GQL has no query DSL document; run CALL db.schema() for the graph shape",
             ));
         }
-        info!(format = ?req.format, "Fetching query DSL grammar for user");
+        info!(
+            safe(RESPONSE_FORMAT) = req.format,
+            "Fetching query DSL grammar for user"
+        );
 
         let response = if req.format == ResponseFormat::Llm as i32 {
             let toon =
@@ -593,7 +609,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             })
             .collect();
 
-        info!(count = skills.len(), "Listing embedded skills");
+        info!(safe(COUNT) = skills.len(), "Listing embedded skills");
         Ok(Response::new(ListSkillsResponse {
             skills,
             server_version: orbit_utils::version::get().to_string(),
@@ -608,7 +624,12 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
 
         let req = request.get_ref();
         let frontend = query_frontend(req.language).map_err(Status::invalid_argument)?;
-        info!(skill_name = %req.name, metadata_only = req.metadata_only, ?frontend, "Fetching embedded skill");
+        info!(
+            expanded(REQUESTED_NAME) = %req.name,
+            safe(METADATA_ONLY) = req.metadata_only,
+            safe(QUERY_FRONTEND) = <&str>::from(frontend),
+            "Fetching embedded skill"
+        );
 
         let skill = get_skill(&req.name, frontend, req.metadata_only)
             .map_err(|error| Status::not_found(error.to_string()))?;
@@ -647,7 +668,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let queries = named_query_definitions(&schema.named_queries, frontend, &values)
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        info!(count = queries.len(), "Listing named queries");
+        info!(safe(COUNT) = queries.len(), "Listing named queries");
         Ok(Response::new(ListNamedQueriesResponse { queries }))
     }
 
@@ -658,7 +679,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         extract_request_context(&request, &self.validator)?;
 
         let req = request.get_ref();
-        info!(format = ?req.format, "Fetching cluster health for user");
+        info!(
+            safe(RESPONSE_FORMAT) = req.format,
+            "Fetching cluster health for user"
+        );
 
         let response = self.cluster_health.get_cluster_health(req.format).await;
         Ok(Response::new(response))
@@ -677,7 +701,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let security_context =
             build_security_context(&claims).map_err(|e| Status::unauthenticated(e.to_string()))?;
 
-        info!(traversal_path = %traversal_path, format = ?req.format, "Fetching graph status for user");
+        info!(
+            safe(TRAVERSAL_PATH) = traversal_path.as_str(),
+            safe(RESPONSE_FORMAT) = req.format,
+            "Fetching graph status for user"
+        );
         let schema = self.active_schema.snapshot()?;
 
         let response = self
@@ -695,8 +723,8 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let paths = parse_authorized_paths(&ctx.claims, &request.get_ref().traversal_paths)?;
 
         info!(
-            path_count = paths.len(),
-            "Fetching indexing status for user"
+            safe(COUNT) = paths.len(),
+            "Fetching indexing status of traversal paths for user"
         );
         let schema = self.active_schema.snapshot()?;
         let statuses = self
@@ -715,7 +743,10 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let security_context = build_security_context(&ctx.claims)
             .map_err(|e| Status::unauthenticated(e.to_string()))?;
 
-        info!(traversal_path = %path, "Fetching item counts for user");
+        info!(
+            safe(TRAVERSAL_PATH) = path.as_str(),
+            "Fetching item counts for user"
+        );
         let schema = self.active_schema.snapshot()?;
         let counts = self
             .item_counts

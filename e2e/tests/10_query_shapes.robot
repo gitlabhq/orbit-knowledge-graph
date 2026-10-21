@@ -1,7 +1,7 @@
 *** Settings ***
 Documentation       Exercise the query_type variants and response formats beyond the traversal /
 ...                 aggregation shapes already used by 02-05: neighbors, path_finding, the llm
-...                 (TOON) response format, and GQL PAGE AFTER. Seeds one project + two issues
+...                 (TOON) response format, and GQL SKIP/LIMIT pagination. Seeds one project + two issues
 ...                 (IN_PROJECT) under the shared namespace and asserts the specific seeded nodes
 ...                 appear in each result.
 
@@ -55,18 +55,18 @@ Truncated Date Group Key Serializes As An ISO Date String
     Should Match Regexp    ${month}    ^\\d{4}-\\d{2}-\\d{2}$
     ...    truncated month key is not an ISO date string: ${month}
 
-GQL Page After Returns The Next Page Without Repeats
-    [Documentation]    PAGE 1 returns a next_cursor bound to the statement. PAGE 1 AFTER that
-    ...                cursor returns the second seeded issue and no id from the first page.
+GQL Skip Returns The Next Page Without Repeats
+    [Documentation]    SKIP 0 LIMIT 1 returns the first seeded issue with has_more set. SKIP 1 LIMIT 1
+    ...                returns the second seeded issue and no id from the first page.
     [Tags]    query-shapes
     ${query}=    Set Variable
     ...    MATCH (w:WorkItem {project_id: ${SHAPE_PROJECT_ID}}) RETURN w ORDER BY w.id
     Wait Until Result Node Ids Contain    ${query} LIMIT 10
     ...    ${SHAPE_ISSUE_ID}    ${SHAPE_SECOND_ISSUE_ID}
-    ${first}=    Orbit Query    ${query} PAGE 1
+    ${first}=    Orbit Query    ${query} SKIP 0 LIMIT 1
     ${page}=    Set Variable    ${first["result"]["pagination"]}
     Should Be True    ${page["has_more"]}    page one reports no more rows: ${page}
-    ${second}=    Orbit Query    ${query} PAGE 1 AFTER '${page["next_cursor"]}'
+    ${second}=    Orbit Query    ${query} SKIP 1 LIMIT 1
     ${ids}=    Evaluate
     ...    [n["id"] for resp in ($first, $second) for n in resp["result"]["nodes"]]
     ${expected}=    Evaluate    [str($SHAPE_ISSUE_ID), str($SHAPE_SECOND_ISSUE_ID)]

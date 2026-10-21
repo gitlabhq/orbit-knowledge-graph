@@ -6,7 +6,7 @@
 //!
 //! All variable names are `&'a str` backed by `FileArena` (bumpalo).
 
-use crate::trace;
+use crate::trace_event;
 use crate::v2::trace::Tracer;
 use crate::v2::types::ssa::ParseValue;
 use petgraph::algo::tarjan_scc;
@@ -186,13 +186,13 @@ impl<'a> SsaEngine<'a> {
             sealed: false,
         });
         self.stats.blocks_created += 1;
-        trace!(self.tracer, SsaBlockCreated { block_id: id.0 });
+        trace_event!(self.tracer, SsaBlockCreated { block_id: id.0 });
         id
     }
 
     pub(crate) fn add_predecessor(&mut self, block: BlockId, pred: BlockId) {
         self.blocks[block.0].predecessors.push(pred);
-        trace!(
+        trace_event!(
             self.tracer,
             SsaAddPredecessor {
                 block_id: block.0,
@@ -259,7 +259,7 @@ impl<'a> SsaEngine<'a> {
             }
         }
         self.blocks[block.0].sealed = true;
-        trace!(self.tracer, SsaBlockSealed { block_id: block.0 });
+        trace_event!(self.tracer, SsaBlockSealed { block_id: block.0 });
     }
 
     pub(crate) fn seal_remaining(&mut self) {
@@ -294,7 +294,7 @@ impl<'a> SsaEngine<'a> {
         } else {
             value
         };
-        trace!(
+        trace_event!(
             self.tracer,
             SsaWrite {
                 variable: variable.to_string(),
@@ -331,7 +331,7 @@ impl<'a> SsaEngine<'a> {
             value = target_value;
         }
         let result = self.resolve_value(&value);
-        trace!(
+        trace_event!(
             self.tracer,
             SsaRead {
                 variable: variable.to_string(),
@@ -475,7 +475,7 @@ impl<'a> SsaEngine<'a> {
             operands: SmallVec::new(),
             witnesses: [None, None],
         });
-        trace!(
+        trace_event!(
             self.tracer,
             SsaPhiCreated {
                 phi_id: id.0,
@@ -543,7 +543,7 @@ impl<'a> SsaEngine<'a> {
 
         let replacement = same.unwrap_or(SsaValue::Opaque);
         self.stats.phis_trivial += 1;
-        trace!(
+        trace_event!(
             self.tracer,
             SsaPhiTrivial {
                 phi_id: phi_id.0,
@@ -614,9 +614,9 @@ impl<'a> SsaEngine<'a> {
             return;
         }
         if depth >= Self::MAX_SCC_DEPTH {
-            tracing::warn!(
-                depth,
-                phis = phi_ids.len(),
+            orbit_log_fields::warn!(
+                safe(LIMIT) = Self::MAX_SCC_DEPTH,
+                safe(PHI_COUNT) = phi_ids.len(),
                 "SCC phi elimination hit max recursion depth"
             );
             return;
@@ -671,7 +671,7 @@ impl<'a> SsaEngine<'a> {
 
             if outer_values.len() == 1 {
                 let replacement = outer_values.into_iter().next().unwrap();
-                trace!(
+                trace_event!(
                     self.tracer,
                     SsaSccCollapse {
                         scc_size: scc.len(),
@@ -695,7 +695,6 @@ impl<'a> SsaEngine<'a> {
                             *op = replacement.clone();
                         }
                     }
-                    // Invalidate witnesses that reference collapsed phis.
                     for w in &mut phi.witnesses {
                         if let Some(wv) = w
                             && phi_vals.contains(wv)

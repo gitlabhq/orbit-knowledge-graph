@@ -1,0 +1,29 @@
+mod common;
+
+mod indexer {
+    pub(crate) mod common;
+}
+
+mod canary {
+    pub mod setup_test;
+}
+
+mod server {
+    pub mod analytics;
+    pub mod clickhouse_setup;
+    pub mod cluster_health;
+    pub mod corpus_smoke;
+    pub mod data_correctness;
+    pub mod error_outcomes;
+    pub mod graph_formatter;
+    pub mod grpc_tls;
+    pub mod http_tls;
+    pub mod performance;
+    pub mod query_cache;
+    pub mod redaction;
+    pub mod schema_readiness;
+    pub mod status;
+    pub mod telemetry;
+    pub mod tls_fixtures;
+    pub mod toon_formatter;
+}

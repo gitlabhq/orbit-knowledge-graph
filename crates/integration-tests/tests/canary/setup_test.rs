@@ -1,7 +1,7 @@
 use arrow::array::UInt64Array;
 use orbit_arrow::ArrowUtils;
 
-use crate::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL};
+use crate::common::GRAPH_SCHEMA_SQL;
 use integration_testkit::{TestContext, run_subtests, run_subtests_shared, t};
 
 async fn seed(ctx: &TestContext) {
@@ -65,7 +65,7 @@ async fn forked_write_does_not_leak_to_shared(ctx: &TestContext) {
 
 #[tokio::test]
 async fn infra_canary() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     seed(&ctx).await;
 
     run_subtests_shared!(
