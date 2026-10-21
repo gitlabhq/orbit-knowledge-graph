@@ -16,7 +16,7 @@ cases:
             - (Filter mr.source_branch = 'feature-x', mr._deleted = false (_))
           reject: ["(Deduplicate Final (Scan Table(gl_merge_request) AS mr))"]
 
-  - name: High-selectivity filters on an unchanging column apply before the latest-row pick
+  - name: High-selectivity filters on an unchanging column also find then check
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"name":"build"},"columns":["id","name"]}],"limit":10}
@@ -28,9 +28,11 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter j._deleted = false (Deduplicate LimitBy j.traversal_path, j.id (Filter j.name = 'build' OR j._deleted = true (Scan Table(gl_job) AS j))))
+            - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.name = 'build', ... (Scan Table(gl_job) AS j)))
+            - (Deduplicate LimitBy j.traversal_path, j.id (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
+            - (Filter j.name = 'build', j._deleted = false (_))
           reject:
-            - (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
+            - (Filter j.name = 'build' OR j._deleted = true (_))
             - (Deduplicate Final (Scan Table(gl_job) AS j))
 
   - name: Low-selectivity node filters keep FINAL
@@ -63,7 +65,7 @@ cases:
             - (Deduplicate LimitBy j.traversal_path, j.id (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
           reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
 
-  - name: High-selectivity ranges on an unchanging column apply before the latest-row pick
+  - name: High-selectivity ranges on an unchanging column also find then check
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"created_at":{"gte":"2026-10-10"}},"columns":["id","created_at"]}],"limit":10}
@@ -75,9 +77,10 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter j._deleted = false (Deduplicate LimitBy j.traversal_path, j.id (Filter j.created_at >= '2026-10-10' OR j._deleted = true (Scan Table(gl_job) AS j))))
+            - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.created_at >= '2026-10-10', ... (Scan Table(gl_job) AS j)))
+            - (Deduplicate LimitBy j.traversal_path, j.id (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
           reject:
-            - (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
+            - (Filter j.created_at >= '2026-10-10' OR j._deleted = true (_))
             - (Deduplicate Final (Scan Table(gl_job) AS j))
 
   - name: Namespace anchors keep FINAL by themselves
@@ -127,7 +130,7 @@ cases:
             - (Deduplicate LimitBy u.id (Filter u.id >= 1, u.id <= 10000, u.id IN ?.id (Scan Table(gl_user) AS u)))
           reject: ["(Deduplicate Final (Scan Table(gl_user) AS u))"]
 
-  - name: Text indexes on an unchanging column apply before the latest-row pick
+  - name: Text indexes on an unchanging column also find then check
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"f","entity":"MergeRequestDiffFile","filters":{"project_id":1000,"new_path":{"contains":"app/services"}},"columns":["new_path"]}],"limit":10}
@@ -141,9 +144,10 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.id (Filter contains(f.new_path, 'app/services') OR f._deleted = true, f.project_id = 1000 OR f._deleted = true (Scan Table(gl_merge_request_diff_file) AS f))))
+            - (Project f.traversal_path AS traversal_path, f.id AS id (Filter contains(f.new_path, 'app/services'), f.project_id = 1000, ... (Scan Table(gl_merge_request_diff_file) AS f)))
+            - (Deduplicate LimitBy f.traversal_path, f.id (Filter (f.traversal_path, f.id) IN ?.(traversal_path, id) (Scan Table(gl_merge_request_diff_file) AS f)))
           reject:
-            - (Filter (f.traversal_path, f.id) IN ?.(traversal_path, id) (_))
+            - (Filter contains(f.new_path, 'app/services') OR f._deleted = true, ... (_))
             - (Deduplicate Final (Scan Table(gl_merge_request_diff_file) AS f))
 
   - name: Negated high-selectivity node filters keep FINAL

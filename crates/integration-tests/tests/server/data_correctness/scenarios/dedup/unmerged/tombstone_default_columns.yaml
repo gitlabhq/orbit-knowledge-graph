@@ -1,4 +1,4 @@
-description: Tombstones hold column defaults or the deletion time, and a filter on an unchanging column must not resurrect the live version
+description: Tombstones hold column defaults or the deletion time, and a filter on an unchanging column must not resurrect the live version; the filter finds candidate keys and never runs inside the latest-row pick
 
 config:
   unmerged_seed: true
@@ -18,14 +18,15 @@ config:
 
 cases:
   - name: merge_request_defaults
-    description: An immutable filter before the latest-row pick does not resurrect a row whose tombstone holds column defaults
+    description: An immutable filter in the candidate scan does not resurrect a row whose tombstone holds column defaults
     query:
       gql: |
         MATCH (mr:MergeRequest) WHERE mr.id >= 9800 AND mr.id <= 9801 AND mr.created_at >= '2023-01-01' RETURN mr.id
 
     expect:
       skip_requirements: ["filter:created_at"]
-      sql_contains: ["OR (mr._deleted = true)"]
+      sql_contains: ["IN (SELECT traversal_path, id FROM"]
+      sql_not_contains: ["OR (mr._deleted = true)"]
       node_count: 1
       nodes:
         MergeRequest: { ids: [9801] }
@@ -38,7 +39,8 @@ cases:
 
     expect:
       skip_requirements: ["filter:created_at"]
-      sql_contains: ["OR (mr._deleted = true)"]
+      sql_contains: ["IN (SELECT traversal_path, id FROM"]
+      sql_not_contains: ["OR (mr._deleted = true)"]
       row_count: 1
       row_values: [{ n: 1 }]
 
@@ -50,7 +52,8 @@ cases:
 
     expect:
       skip_requirements: ["filter:created_at"]
-      sql_contains: ["OR (j._deleted = true)"]
+      sql_contains: ["IN (SELECT traversal_path, id FROM"]
+      sql_not_contains: ["OR (j._deleted = true)"]
       node_count: 1
       nodes:
         Job: { ids: [9901] }

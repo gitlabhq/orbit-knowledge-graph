@@ -62,7 +62,7 @@ cases:
             - (Filter c.id IN ?.id (Scan Table(gl_definition) AS c))
           occurrences:
             - { pattern: "(Scan Table(gl_code_edge) ...)", count: 2 }
-            - { pattern: "(Scan Table(gl_definition) ...)", count: 2 }
+            - { pattern: "(Scan Table(gl_definition) ...)", count: 3 }
           reject:
             - (Project ?.target_id AS id (Bind ? (Filter ... (_))))
         emitted:

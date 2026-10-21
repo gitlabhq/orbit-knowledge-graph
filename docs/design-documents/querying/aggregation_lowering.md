@@ -53,10 +53,9 @@ hold a tombstone.
 
 The planner can avoid a broad `FINAL` read when a positive predicate has a
 small expected result. It first finds candidate replacement keys without
-`FINAL`. It then reads every version for those keys. Sort-key and
-unchanging-column filters run first, with the tombstone guard. The read keeps
-the greatest `_version` with `LIMIT 1 BY`, then checks the remaining filters
-and the tombstone.
+`FINAL`. It then reads every version for those keys. Only sort-key filters
+run before the pick. The read keeps the greatest `_version` with
+`LIMIT 1 BY`, then checks the remaining filters and the tombstone.
 
 This form is latest-correct for mutable fields because candidate discovery does
 not decide the result. It only bounds the keys checked in the second read. The
