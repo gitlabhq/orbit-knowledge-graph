@@ -442,9 +442,18 @@ fn grep_for_a_hosted_kind_searches_the_origin_group() {
 #[test]
 fn context_posts_one_request_per_gitlab_token() {
     let (base_url, handle) = serve_routes(vec![
-        ("orbit/context", "orbit_context version=1.1.0 entities=1\n"),
-        ("orbit/context", "orbit_context version=1.1.0 entities=1\n"),
-        ("orbit/context", "orbit_context version=1.1.0 entities=1\n"),
+        (
+            "orbit/context",
+            "orbit_context version=1.1.0 entities=1\n- found=true\n",
+        ),
+        (
+            "orbit/context",
+            "orbit_context version=1.1.0 entities=1\n- found=true\n",
+        ),
+        (
+            "orbit/context",
+            "orbit_context version=1.1.0 entities=1\n- found=true\n",
+        ),
     ]);
     let dir = tempfile::tempdir().expect("tempdir");
 
@@ -486,7 +495,7 @@ fn context_posts_one_request_per_gitlab_token() {
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "orbit_context version=1.1.0 entities=1\n".repeat(3)
+        "- found=true\n".repeat(3)
     );
 }
 
@@ -610,7 +619,10 @@ fn context_branch_target_reads_its_merge_request_and_last_failed_pipeline() {
         ),
         ("pipelines/7/jobs", "[]"),
         ("pipelines?ref=refs", r#"[{"id":8,"status":"skipped"}]"#),
-        ("orbit/context", "orbit_context version=1.1.0 entities=1\n"),
+        (
+            "orbit/context",
+            "orbit_context version=1.1.0 entities=1\n- found=true\n",
+        ),
     ]);
     let base_url = base_url.replace("127.0.0.1", "localhost");
     let clone = git_clone_with_origin("https://localhost/my-group/my-project");
@@ -645,7 +657,7 @@ fn context_branch_target_reads_its_merge_request_and_last_failed_pipeline() {
         String::from_utf8_lossy(&output.stdout),
         "branch:fix-ci mr:4 opened\n\
          pipeline:7 failed ref fix-ci commit:0123456789abcdef https://localhost/p/-/pipelines/7\n\
-         orbit_context version=1.1.0 entities=1\n"
+         - found=true\n"
     );
 }
 
