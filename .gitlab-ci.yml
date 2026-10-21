@@ -6,11 +6,13 @@ stages: [test]
   timeout: 1h
   tags: [saas-windows-medium-amd64]
   variables:
-    RUSTUP_HOME: "$CI_PROJECT_DIR\\.rustup"
-    CARGO_HOME: "$CI_PROJECT_DIR\\.cargo"
+    RUSTUP_HOME: "C:\\r"
+    CARGO_HOME: "C:\\c"
+    CARGO_TARGET_DIR: "C:\\t"
     CARGO_TERM_COLOR: never
   before_script:
     - $ErrorActionPreference = 'Stop'
+    - git config --global core.longpaths true
     - Invoke-WebRequest -UseBasicParsing -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
     - .\rustup-init.exe -y --default-toolchain none --profile minimal
     - $env:PATH = "$env:CARGO_HOME\bin;$env:PATH"
