@@ -264,7 +264,7 @@ The first suite makes an administrator bot, turns on feature flags, and indexes 
 
 The `e2e` job runs on every main commit and is manual on MRs. It saves diagnostics when it fails and always removes the stack. Two more jobs use the same suites:
 
-- `e2e-ha` runs the suites on a ClickHouse cluster with replicas, and kills replicas during the run. It runs on a daily schedule and is manual on MRs.
+- `e2e-ha` runs the suites on a ClickHouse cluster with replicas, and kills replicas during the run. It runs in the post-merge pipeline and on a daily schedule. It is manual on MRs.
 - `e2e-pin-bump` runs on a daily schedule. It moves the pins in `versions.yaml` to their latest versions and updates one MR. On that MR, `e2e` runs automatically and must pass before the MR can merge.
 
 For setup, debugging, and the list of key files, see [E2E testing harness](../dev/e2e-testing.md).
