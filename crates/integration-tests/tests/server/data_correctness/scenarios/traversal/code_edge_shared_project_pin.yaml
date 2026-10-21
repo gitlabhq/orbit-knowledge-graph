@@ -24,8 +24,6 @@ config:
 cases:
   - name: source_project_filter_pins_target_scan
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"i","entity":"ImportedSymbol","filters":{"project_id":1000},"columns":["project_id"]},{"id":"d","entity":"Definition","columns":["project_id","name"]}],"relationships":[{"type":"IMPORTS","from":"i","to":"d"}],"limit":10}
       gql: |
         MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition) WHERE i.project_id = 1000 RETURN i.project_id, d.project_id, d.name LIMIT 10
     expect:
@@ -38,8 +36,6 @@ cases:
 
   - name: target_project_filter_pins_source_scan
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"i","entity":"ImportedSymbol","columns":["project_id"]},{"id":"d","entity":"Definition","filters":{"project_id":1002},"columns":["project_id","name"]}],"relationships":[{"type":"IMPORTS","from":"i","to":"d"}],"limit":10}
       gql: |
         MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition) WHERE d.project_id = 1002 RETURN i.project_id, d.project_id, d.name LIMIT 10
     expect:
@@ -52,8 +48,6 @@ cases:
 
   - name: no_project_filter_keeps_both_projects
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"i","entity":"ImportedSymbol","columns":["project_id"]},{"id":"d","entity":"Definition","filters":{"name":"compile"},"columns":["project_id","name"]}],"relationships":[{"type":"IMPORTS","from":"i","to":"d"}],"limit":10}
       gql: |
         MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition) WHERE d.name = 'compile' RETURN i.project_id, d.project_id, d.name LIMIT 10
     expect:
@@ -66,8 +60,6 @@ cases:
 
   - name: branch_filter_stays_on_the_edge_and_keeps_rows
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"project_id":1000,"branch":"main"},"columns":["project_id","branch"]},{"id":"d","entity":"Definition","columns":["project_id","name"]}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":100}
       gql: |
         MATCH (f:File)-[:DEFINES]->(d:Definition) WHERE f.project_id = 1000 AND f.branch = 'main' RETURN f.project_id, f.branch, d.project_id, d.name LIMIT 100
     expect:
@@ -84,8 +76,6 @@ cases:
       security:
         paths: ["1/"]
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","columns":["name"]},{"id":"callee","entity":"Definition","filters":{"project_id":1001},"columns":["name"]}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":10}
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE callee.project_id = 1001 RETURN caller.name, callee.name LIMIT 10
     expect:
