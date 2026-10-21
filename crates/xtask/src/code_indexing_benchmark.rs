@@ -164,6 +164,12 @@ fn validate_repositories(repositories: &[Repository]) -> Result<()> {
         if repository.name.contains(['/', '\\']) || repository.name.contains("..") {
             bail!("invalid repository name: {}", repository.name);
         }
+        if repository.project.is_empty() || repository.version.is_empty() {
+            bail!(
+                "repository {} must define project and version",
+                repository.name
+            );
+        }
         if !names.insert(&repository.name) {
             bail!("duplicate repository name: {}", repository.name);
         }
@@ -209,8 +215,14 @@ fn repository_matches(repository: &Repository, destination: &Path) -> bool {
     {
         return true;
     }
-    git_output(destination, ["rev-parse", "--abbrev-ref", "HEAD"])
-        .is_some_and(|branch| branch == repository.version)
+    git_output(
+        destination,
+        [
+            "rev-parse",
+            &format!("refs/remotes/origin/{}", repository.version),
+        ],
+    )
+    .is_some_and(|remote_head| remote_head == head)
 }
 
 fn git_output<const N: usize>(directory: &Path, arguments: [&str; N]) -> Option<String> {
@@ -554,6 +566,37 @@ mod tests {
             groups: Vec::new(),
         };
         assert!(repository_matches(&configured, &repository_path));
+    }
+
+    #[test]
+    fn branch_cache_requires_the_pinned_remote_head() {
+        let temporary = tempfile::tempdir().unwrap();
+        let repository_path = temporary.path().join("repo");
+        run_git(
+            temporary.path(),
+            ["init", "--initial-branch", "main", "repo"],
+        );
+        run_git(
+            &repository_path,
+            ["config", "user.email", "benchmark@example.com"],
+        );
+        run_git(&repository_path, ["config", "user.name", "Benchmark"]);
+        fs::write(repository_path.join("README.md"), "first").unwrap();
+        run_git(&repository_path, ["add", "README.md"]);
+        run_git(&repository_path, ["commit", "-m", "first"]);
+        let first = git_output(&repository_path, ["rev-parse", "HEAD"]).unwrap();
+        run_git(
+            &repository_path,
+            ["update-ref", "refs/remotes/origin/main", &first],
+        );
+
+        let configured = repository("repo");
+        assert!(repository_matches(&configured, &repository_path));
+
+        fs::write(repository_path.join("README.md"), "second").unwrap();
+        run_git(&repository_path, ["add", "README.md"]);
+        run_git(&repository_path, ["commit", "-m", "second"]);
+        assert!(!repository_matches(&configured, &repository_path));
     }
 
     fn run_git<const N: usize>(directory: &Path, arguments: [&str; N]) {
