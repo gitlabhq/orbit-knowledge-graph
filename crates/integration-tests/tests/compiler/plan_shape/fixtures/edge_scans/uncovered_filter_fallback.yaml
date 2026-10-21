@@ -13,11 +13,12 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Filter a._deleted = false (Deduplicate LimitBy ... (Filter a.definition_type = 'function' OR a._deleted = true, a.name = 'compile' OR a._deleted = true (Scan Table(gl_definition) AS a))))
+        - (Filter a.definition_type = 'function', a._deleted = false (Deduplicate LimitBy ... (Filter a.name = 'compile' OR a._deleted = true (Scan Table(gl_definition) AS a))))
         - (Filter _orbit_edge_0.source_tags HAS ANY ['definition_type:function'], ... (_))
     emitted:
       expect:
-        - (Filter (a.definition_type = 'function') OR (a._deleted = true), ((a.name = 'compile') AND (Lower(a.name) = Lower('compile'))) OR (a._deleted = true) (Scan Table(gl_definition) AS a))
+        - (Filter ((a.name = 'compile') AND (Lower(a.name) = Lower('compile'))) OR (a._deleted = true) (Scan Table(gl_definition) AS a))
+        - (Filter a.definition_type = 'function', a._deleted = false (Bind a (_)))
         - (Deduplicate LimitBy ... (_))
         - (Filter ArrayContains(_orbit_edge_0.source_tags, 'definition_type:function'), ... (_))
         - (Join ON a.id = _orbit_edge_0.source_id (_) (Bind a (_)))

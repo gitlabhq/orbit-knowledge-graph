@@ -64,7 +64,6 @@ properties:
     type: string
     source: import_type
     nullable: false
-    mutable: false
     description: "Import kind (e.g., module, symbol, wildcard)."
     selectivity: low
 
@@ -86,21 +85,18 @@ properties:
     type: string
     source: identifier_alias
     nullable: false
-    mutable: false
     description: "Import alias (e.g., 'import numpy as np')."
 
   start_line:
     type: int64
     source: start_line
     nullable: false
-    mutable: false
     description: "Start line."
 
   end_line:
     type: int64
     source: end_line
     nullable: false
-    mutable: false
     description: "End line."
 
   start_byte:
@@ -121,14 +117,12 @@ properties:
     type: int64
     source: start_char
     nullable: false
-    mutable: false
     description: "Start column."
 
   end_char:
     type: int64
     source: end_char
     nullable: false
-    mutable: false
     description: "End column."
 
 storage:

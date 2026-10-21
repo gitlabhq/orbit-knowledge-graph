@@ -83,7 +83,6 @@ properties:
     type: string
     source: language
     nullable: false
-    mutable: false
     description: "Programming language (e.g., ruby, python, java)."
     selectivity: low
 

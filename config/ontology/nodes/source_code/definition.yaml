@@ -82,7 +82,6 @@ properties:
     type: string
     source: definition_type
     nullable: false
-    mutable: false
     description: "Definition kind (e.g., Class, Module, Method, Function, Struct, Enum, Trait, Lambda)."
     selectivity: low
 
@@ -90,14 +89,12 @@ properties:
     type: int64
     source: start_line
     nullable: false
-    mutable: false
     description: "Start line."
 
   end_line:
     type: int64
     source: end_line
     nullable: false
-    mutable: false
     description: "End line."
 
   start_byte:
@@ -118,14 +115,12 @@ properties:
     type: int64
     source: start_char
     nullable: false
-    mutable: false
     description: "Start column."
 
   end_char:
     type: int64
     source: end_char
     nullable: false
-    mutable: false
     description: "End column."
 
   content:

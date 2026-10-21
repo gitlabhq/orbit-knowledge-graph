@@ -132,7 +132,6 @@ properties:
     type: int64
     source: user_id
     nullable: true
-    mutable: false
     description: "Deploying user ID."
 
   traversal_path:
