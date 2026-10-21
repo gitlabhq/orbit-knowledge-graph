@@ -315,6 +315,13 @@ fn tolerate_grep_flags(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString>
             out.extend(["-C".into(), cluster.into()]);
             continue;
         }
+        let first = cluster.chars().next().expect("cluster is not empty");
+        let flag_like = cluster.chars().all(|c| c.is_ascii_alphanumeric())
+            || short(first).is_some_and(takes_value);
+        if !flag_like {
+            out.extend(["-e".into(), arg]);
+            continue;
+        }
         let (mut kept, mut value_next) = (String::new(), false);
         for (at, c) in cluster.char_indices() {
             match short(c) {
@@ -1083,8 +1090,21 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, IndexArgs, SchemaArgs};
+    use super::{Cli, Commands, IndexArgs, SchemaArgs, tolerate_grep_flags};
     use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn grep_reads_a_dash_pattern_that_is_no_flag_as_the_pattern() {
+        let args = |list: &[&str]| {
+            list.iter()
+                .map(std::ffi::OsString::from)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            tolerate_grep_flags(args(&["orbit", "grep", "- +1.75", "-g*.rs"])),
+            args(&["orbit", "grep", "-e", "- +1.75", "-g*.rs"])
+        );
+    }
 
     #[test]
     fn cli_command_tree_verifies() {
