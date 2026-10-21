@@ -1,5 +1,5 @@
 name: context
-version: 1.13.0
+version: 1.14.0
 short: Expand local code context and GitLab entities
 description: >-
   Expand local code context and GitLab entities.
@@ -17,7 +17,8 @@ description: >-
   pipeline when it has none. Pipelines list failed jobs, and jobs show their
   logs; commits show their message, changed files, and merge requests.
   With no targets at all it reads the current branch. Files and line ranges
-  return numbered source with the indexed callers of the definitions shown.
+  return numbered source with the indexed callers of the definitions shown
+  and the test files that cover them.
   Ranges widen so no definition is cut in half.
   Directories list indexed files with definition counts. Choose a Definition ID for complete source and its indexed
   connections. Test connections appear in their own section. Reuse source; never

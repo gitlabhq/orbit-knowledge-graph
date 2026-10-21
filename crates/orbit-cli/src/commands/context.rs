@@ -556,7 +556,9 @@ fn render_local(
     for (path, start, end) in &targets.ranges {
         let (start, end) = snap_to_definitions(&client, &git, path, *start, *end)?;
         render_range(&mut out, &git, path, start, end)?;
-        out.push_str(&callers(&client, &git, path, start, end)?);
+        let (lines, calling) = callers(&client, &git, path, start, end)?;
+        out.push_str(&lines);
+        out.push_str(&tests_for(&client, &git, path, calling)?);
     }
     let mut shown: Vec<String> = targets
         .ranges
@@ -947,7 +949,7 @@ fn callers(
     path: &str,
     start: usize,
     end: usize,
-) -> Result<String> {
+) -> Result<(String, Vec<String>)> {
     let test = duckdb_client::search::excluded_path_predicate("c.file_path");
     let batches = client.query_arrow_json(
         &format!(
@@ -990,6 +992,7 @@ ORDER BY d.start_line, d.id, test, caller_path, caller_line"
     let lines = i64_column(&batches, "caller_line");
     let tests = duckdb_client::bool_column(&batches, "test");
     let mut defs: Vec<(i64, String, Vec<Caller>, usize)> = Vec::new();
+    let mut test_files: Vec<String> = Vec::new();
     for i in 0..targets.len() {
         if defs.last().is_none_or(|(id, ..)| *id != targets[i]) {
             defs.push((targets[i], names[i].clone(), Vec::new(), 0));
@@ -997,7 +1000,12 @@ ORDER BY d.start_line, d.id, test, caller_path, caller_line"
         let def = defs.last_mut().expect("pushed above");
         match (callers[i].is_empty(), tests[i]) {
             (true, _) => {}
-            (false, true) => def.3 += 1,
+            (false, true) => {
+                def.3 += 1;
+                if !test_files.contains(&paths[i]) {
+                    test_files.push(paths[i].clone());
+                }
+            }
             (false, false) => {
                 let caller = (callers[i].clone(), paths[i].clone(), lines[i]);
                 if !def.2.contains(&caller) {
@@ -1042,7 +1050,106 @@ ORDER BY d.start_line, d.id, test, caller_path, caller_line"
     if more > 0 {
         let _ = writeln!(out, "» +{more} more definitions with callers");
     }
-    Ok(out)
+    Ok((out, test_files))
+}
+
+const TESTS_SHOWN: usize = 3;
+
+/// Test file names that conventionally cover `path`: `x_test.go`, `x_spec.rb`, `test_x.py`,
+/// `x.test.ts`, `XTest.java`, and the like.
+fn test_names(path: &str) -> Vec<String> {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let Some((stem, ext)) = name.rsplit_once('.') else {
+        return Vec::new();
+    };
+    if stem.is_empty() {
+        return Vec::new();
+    }
+    let mut names = vec![
+        format!("{stem}_test.{ext}"),
+        format!("{stem}_spec.{ext}"),
+        format!("test_{stem}.{ext}"),
+        format!("{stem}_tests.{ext}"),
+        format!("{stem}.test.{ext}"),
+        format!("{stem}.spec.{ext}"),
+        format!("{stem}Test.{ext}"),
+        format!("{stem}Tests.{ext}"),
+    ];
+    for other in match ext {
+        "ts" | "tsx" | "js" | "jsx" | "mts" | "vue" => &["ts", "tsx", "js"][..],
+        _ => &[],
+    } {
+        names.push(format!("{stem}.test.{other}"));
+        names.push(format!("{stem}.spec.{other}"));
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Directories two paths share, so `spec/lib/a/x_spec.rb` ranks above `spec/b/x_spec.rb` for
+/// `lib/a/x.rb`.
+fn shared_dirs(a: &str, b: &str) -> usize {
+    let dirs = |path: &str| -> BTreeSet<String> {
+        let mut parts: Vec<&str> = path.split('/').collect();
+        parts.pop();
+        parts.into_iter().map(str::to_string).collect()
+    };
+    dirs(a).intersection(&dirs(b)).count()
+}
+
+/// Indexed test files for `path`: files named after it, then those that call its definitions,
+/// nearest first.
+fn tests_for(
+    client: &duckdb_client::DuckDbClient,
+    git: &workspace::GitInfo,
+    path: &str,
+    calling: Vec<String>,
+) -> Result<String> {
+    let names = test_names(path);
+    let mut named = Vec::new();
+    if !names.is_empty() {
+        let hydrator = NodeHydrator::embedded("File")?;
+        let batches = client.query_arrow_json(
+            &format!(
+                "SELECT {path} AS path FROM {table}
+                 WHERE {project} = ?1 AND {commit} = ?2
+                   AND regexp_extract({path}, '[^/]+$') IN (SELECT unnest(?3::VARCHAR[]))",
+                path = hydrator.column("path")?,
+                table = hydrator.table(),
+                project = hydrator.column("project_id")?,
+                commit = hydrator.column("commit_sha")?,
+            ),
+            &[
+                git.project_id.into(),
+                git.commit_sha.clone().into(),
+                names.into(),
+            ],
+        )?;
+        named = string_column(&batches, "path")
+            .into_iter()
+            .filter_map(|found| repo_relative(&git.repo_path, &found).ok())
+            .filter(|found| found != path)
+            .collect();
+        named.sort_by_key(|found| (std::cmp::Reverse(shared_dirs(path, found)), found.clone()));
+    }
+    let mut calling = calling;
+    calling.sort_by_key(|found| (std::cmp::Reverse(shared_dirs(path, found)), found.clone()));
+    let mut files = named;
+    for found in calling {
+        if !files.contains(&found) {
+            files.push(found);
+        }
+    }
+    files.retain(|file| file != path);
+    if files.is_empty() {
+        return Ok(String::new());
+    }
+    let mut shown: Vec<String> = files.iter().take(TESTS_SHOWN).cloned().collect();
+    if files.len() > TESTS_SHOWN {
+        shown.push(format!("+{} more", files.len() - TESTS_SHOWN));
+    }
+    Ok(format!("» tests for {path}: {}\n", shown.join(", ")))
 }
 
 fn repo_relative(repo_path: &std::path::Path, path: &str) -> Result<String> {
@@ -1238,6 +1345,14 @@ fn write_lines(out: &mut String, lines: &[&str], start: usize, end: usize) -> st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_names_follow_each_language_convention() {
+        assert!(
+            test_names("lib/a/emoji_converter.rb").contains(&"emoji_converter_spec.rb".to_string())
+        );
+        assert!(test_names("src/cursor.ts").contains(&"cursor.test.ts".to_string()));
+    }
 
     #[test]
     fn qualified_targets_use_what_gitlab_shows() {
