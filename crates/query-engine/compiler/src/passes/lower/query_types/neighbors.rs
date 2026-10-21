@@ -14,8 +14,8 @@ use crate::input::*;
 use crate::passes::lower::NodeBinding;
 
 use crate::passes::lower::sql::{
-    dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
-    id_list_predicate, id_range_predicate, rel_kind_filter,
+    dedup_subquery, deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate,
+    id_range_predicate, latest_edge_scan, rel_kind_filter,
 };
 use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
 
@@ -54,6 +54,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         edge,
         has_non_denorm,
         fused_table,
+        edge_sort_keys,
         outgoing_kinds,
         incoming_kinds,
         incoming_scope_preserving,
@@ -196,7 +197,6 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
                     );
                 }
             }
-            wp.push(deleted_false(a));
             wp
         };
 
@@ -241,8 +241,9 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             neighbor_path(edge_alias, neighbor_type, arm_neighbor_paths),
             neighbor_traversal_path_column(),
         ));
-        let (mut from, outer_pushed) = edge_table_scan_filtered(arm_tables, edge_alias, arm_where);
-        where_parts.extend(outer_pushed);
+        let (mut from, edge_live) =
+            latest_edge_scan(arm_tables, edge_sort_keys, edge_alias, arm_where);
+        where_parts.push(edge_live);
         let needs_center_table = !center_uses_default_pk;
 
         if has_non_denorm {
@@ -289,6 +290,13 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
                     ),
                 );
                 where_parts.push(deleted_false(&center_id));
+                if !center_node_ids.is_empty() {
+                    where_parts.push(id_list_predicate(
+                        &center_id,
+                        DEFAULT_PRIMARY_KEY,
+                        &center_node_ids,
+                    ));
+                }
             }
             select.push(SelectExpr::new(
                 Expr::col(&center_id, &center_redaction_col),
@@ -329,6 +337,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             plan,
             edge,
             table,
+            edge_sort_keys,
             edge_alias,
         );
         q.order_by = order_by;
@@ -402,13 +411,11 @@ fn build_fused_both_arm(
     center_filters: &[(String, crate::passes::plan::BoundFilter)],
     plan: &Plan<Neighbors>,
     edge: &EdgeTableConfig,
-    edge_table: &str,
+    edge_table: &String,
+    edge_sort_keys: &HashMap<String, Vec<String>>,
     edge_alias: &str,
 ) -> Query {
-    let arm_predicate = |kind_col: &str,
-                         id_col: &str,
-                         direction: query_data_model::DenormalizedDirection|
-     -> Expr {
+    let side_key = |kind_col: &str, id_col: &str| -> Vec<Expr> {
         let mut parts = vec![Expr::eq(
             Expr::col(edge_alias, kind_col),
             Expr::string(center_entity),
@@ -416,6 +423,13 @@ fn build_fused_both_arm(
         if !center_node_ids.is_empty() {
             parts.push(id_list_predicate(edge_alias, id_col, center_node_ids));
         }
+        parts
+    };
+    let arm_predicate = |kind_col: &str,
+                         id_col: &str,
+                         direction: query_data_model::DenormalizedDirection|
+     -> Expr {
+        let mut parts = side_key(kind_col, id_col);
         for (_, filter) in center_filters {
             let Some(property) = filter.property else {
                 continue;
@@ -499,18 +513,35 @@ fn build_fused_both_arm(
         ));
     }
 
-    let mut where_parts = vec![Expr::binary(Op::Or, source_arm, target_arm)];
-    if let Some(ref types) = edge.rel_type_filter
-        && let Some(f) = rel_kind_filter(edge_alias, types)
-    {
-        where_parts.push(f);
-    }
-    where_parts.push(deleted_false(edge_alias));
+    let side = |kind_col, id_col| {
+        Expr::conjoin(side_key(kind_col, id_col)).expect("side key has the center-kind conjunct")
+    };
+    let (from, edge_live) = latest_edge_scan(
+        std::slice::from_ref(edge_table),
+        edge_sort_keys,
+        edge_alias,
+        |_| {
+            let mut scan_where = vec![Expr::binary(
+                Op::Or,
+                side(SOURCE_KIND_COLUMN, SOURCE_ID_COLUMN),
+                side(TARGET_KIND_COLUMN, TARGET_ID_COLUMN),
+            )];
+            if let Some(ref types) = edge.rel_type_filter
+                && let Some(f) = rel_kind_filter(edge_alias, types)
+            {
+                scan_where.push(f);
+            }
+            scan_where
+        },
+    );
 
     let inner = Query {
         select: inner_select,
-        from: TableRef::scan(edge_table, edge_alias),
-        where_clause: Expr::conjoin(where_parts),
+        from,
+        where_clause: Expr::conjoin(vec![
+            Expr::binary(Op::Or, source_arm, target_arm),
+            edge_live,
+        ]),
         ..Default::default()
     };
 

@@ -15,7 +15,8 @@ physical:
       expect: ["(Neighbors center=mr direction=both fused table=gl_edge center_filter=false ... (_))"]
     emitted:
       expect:
-        - (Filter ((e.source_kind = 'MergeRequest') AND ArrayContains(e.source_tags, 'state:merged')) OR ((e.target_kind = 'MergeRequest') AND ArrayContains(e.target_tags, 'state:merged')), ... (_))
+        - (Filter ((e.source_kind = 'MergeRequest') AND ArrayContains(e.source_tags, 'state:merged')) OR ((e.target_kind = 'MergeRequest') AND ArrayContains(e.target_tags, 'state:merged')), e._deleted = false (_))
+        - (Deduplicate LimitBy ... (Sort ... (Project * (Filter (e.source_kind = 'MergeRequest') OR (e.target_kind = 'MergeRequest'), e.relationship_kind IN ['IN_PROJECT', 'AUTHORED'] (Scan Table(gl_edge) AS e)))))
       occurrences:
         - pattern: (Scan Table(gl_edge) AS e)
           count: 1

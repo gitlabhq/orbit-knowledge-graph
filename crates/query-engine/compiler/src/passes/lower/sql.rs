@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use ontology::constants::*;
 
 use crate::ast::*;
@@ -347,32 +349,40 @@ pub fn final_edge_table_scan(tables: &[String], alias: &str) -> TableRef {
     TableRef::union_all(queries, alias)
 }
 
-/// Like `edge_table_scan` but pushes per-arm predicates into each UNION arm; returns predicates the caller must apply on the enclosing query (single-table case).
-pub fn edge_table_scan_filtered(
+/// Latest row per edge sort key, with `scan_where` inside the pick and the returned `_deleted = false` outside it.
+pub fn latest_edge_scan(
     tables: &[String],
+    sort_keys: &HashMap<String, Vec<String>>,
     alias: &str,
-    arm_where: impl Fn(&str) -> Vec<Expr>,
-) -> (TableRef, Vec<Expr>) {
-    if tables.len() == 1 {
-        (TableRef::scan(&tables[0], alias), arm_where(alias))
+    scan_where: impl Fn(&str) -> Vec<Expr>,
+) -> (TableRef, Expr) {
+    let pick = |table: &String, scan_alias: &str, select: Vec<SelectExpr>| {
+        let (order_by, limit_by) = latest_row_dedup(scan_alias, &sort_keys[table]);
+        Query {
+            select,
+            from: TableRef::scan(table, scan_alias),
+            where_clause: Expr::conjoin(scan_where(scan_alias)),
+            order_by,
+            limit_by,
+            ..Default::default()
+        }
+    };
+    let from = if let [table] = tables {
+        TableRef::subquery(pick(table, alias, vec![SelectExpr::star()]), alias)
     } else {
         let inner_alias = format!("_{alias}");
-        let mut common_cols: Vec<SelectExpr> = ontology::constants::EDGE_RESERVED_COLUMNS
+        let columns: Vec<_> = EDGE_RESERVED_COLUMNS
             .iter()
-            .map(|col| SelectExpr::col(&inner_alias, *col))
+            .chain([&DELETED_COLUMN])
+            .map(|column| SelectExpr::col(&inner_alias, *column))
             .collect();
-        common_cols.push(SelectExpr::col(&inner_alias, DELETED_COLUMN));
-        let arms: Vec<Query> = tables
+        let arms = tables
             .iter()
-            .map(|table| Query {
-                select: common_cols.clone(),
-                from: TableRef::scan(table, &inner_alias),
-                where_clause: Expr::conjoin(arm_where(&inner_alias)),
-                ..Default::default()
-            })
+            .map(|table| pick(table, &inner_alias, columns.clone()))
             .collect();
-        (TableRef::union_all(arms, alias), Vec::new())
-    }
+        TableRef::union_all(arms, alias)
+    };
+    (from, deleted_false(alias))
 }
 
 /// `FINAL` applies the table engine's merge semantics at read time, so filters

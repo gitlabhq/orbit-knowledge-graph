@@ -19,7 +19,7 @@ physical:
       expect:
         - (Union ALL AS e (_) (_) (_) (_) (_))
         - (Scan Table(gl_ci_edge) AS _e)
-        - (Scan Table(gl_code_edge) AS _e)
+        - (Deduplicate LimitBy 1 BY _e.traversal_path, _e.relationship_kind, _e.project_id, _e.branch, ... (_))
         - (Scan Table(gl_diff_edge) AS _e)
         - (Scan Table(gl_edge) AS _e)
         - (Scan Table(gl_sec_edge) AS _e)

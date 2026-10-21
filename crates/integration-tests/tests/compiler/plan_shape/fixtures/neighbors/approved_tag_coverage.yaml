@@ -18,4 +18,4 @@ physical:
         - (Neighbors center=mr direction=incoming directional outgoing=[gl_edge] incoming=[gl_edge] center_filter=false relationships=[APPROVED] incoming_scoped=[] incoming_cross_scope=[APPROVED] (_))
     emitted:
       expect:
-        - (SemiJoin e.target_id IN subquery (Filter ArrayContains(e.target_tags, 'state:opened'), e.target_kind = 'MergeRequest', e.target_id = 99000, e.relationship_kind = 'APPROVED' (Scan Table(gl_edge) AS e)) (Project _ctr.id AS id (Filter _ctr.id = 99000, _ctr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS _ctr)))))
+        - (Limit 31 (Project ... (Filter ArrayContains(e.target_tags, 'state:opened'), e._deleted = false (Bind e (Deduplicate LimitBy ... (Sort ... (Project * (SemiJoin e.target_id IN subquery (Filter e.target_kind = 'MergeRequest', e.target_id = 99000, e.relationship_kind = 'APPROVED' (Scan Table(gl_edge) AS e)) (_)))))))))
