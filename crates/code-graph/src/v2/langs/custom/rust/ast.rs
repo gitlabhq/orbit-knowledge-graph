@@ -328,7 +328,7 @@ impl RustStructureExtractor {
                 return;
             }
         } else {
-            tracing::debug!("rust module missing name; continuing to walk children");
+            orbit_log_fields::debug!("rust module missing name; continuing to walk children");
         }
 
         if let Some(item_list) = module.item_list() {
@@ -338,7 +338,7 @@ impl RustStructureExtractor {
 
     fn collect_struct(&mut self, strukt: ast::Struct, module_parts: &[String], top_level: bool) {
         let Some(name) = strukt.name().map(|name| name.text().to_string()) else {
-            tracing::debug!("rust struct missing name; skipping definition");
+            orbit_log_fields::debug!("rust struct missing name; skipping definition");
             return;
         };
         let struct_parts = child_parts(module_parts, &name);
@@ -358,7 +358,7 @@ impl RustStructureExtractor {
 
     fn collect_union(&mut self, union_item: ast::Union, module_parts: &[String], top_level: bool) {
         let Some(name) = union_item.name().map(|name| name.text().to_string()) else {
-            tracing::debug!("rust union missing name; skipping definition");
+            orbit_log_fields::debug!("rust union missing name; skipping definition");
             return;
         };
         let union_parts = child_parts(module_parts, &name);
@@ -391,7 +391,7 @@ impl RustStructureExtractor {
 
     fn collect_enum(&mut self, enum_item: ast::Enum, module_parts: &[String], top_level: bool) {
         let Some(name) = enum_item.name().map(|name| name.text().to_string()) else {
-            tracing::debug!("rust enum missing name; skipping definition");
+            orbit_log_fields::debug!("rust enum missing name; skipping definition");
             return;
         };
         let enum_parts = child_parts(module_parts, &name);
@@ -447,7 +447,7 @@ impl RustStructureExtractor {
                 trait_parts
             }
             None => {
-                tracing::debug!("rust trait missing name; continuing to walk assoc items");
+                orbit_log_fields::debug!("rust trait missing name; continuing to walk assoc items");
                 module_parts.to_vec()
             }
         };
@@ -637,7 +637,9 @@ impl RustStructureExtractor {
                 function_parts
             }
             None => {
-                tracing::debug!("rust function missing name; continuing to walk nested items");
+                orbit_log_fields::debug!(
+                    "rust function missing name; continuing to walk nested items"
+                );
                 module_parts.to_vec()
             }
         };
@@ -720,7 +722,10 @@ impl RustStructureExtractor {
         N: AstNode + HasName,
     {
         let Some(name) = node.name().map(|name| name.text().to_string()) else {
-            tracing::debug!(definition_type, "rust named item missing name; skipping");
+            orbit_log_fields::debug!(
+                safe(KIND) = definition_type,
+                "rust named item missing name; skipping"
+            );
             return;
         };
         let fqn_parts = child_parts(module_parts, &name);

@@ -12,6 +12,10 @@ ignore = [
     "RUSTSEC-2026-0113",
     # jsonwebtoken pulls in rsa crate, but we ONLY use HS256 (HMAC). See #17.
     "RUSTSEC-2023-0071",
+    # webpki-roots 0.26.11 is a lock entry kept by tokio-websockets 0.10 (an optional async-nats
+    # dependency) that no workspace build reaches; cargo tree -i finds no path even with all features.
+    # The 0.26 line has no fix. Remove when async-nats moves to tokio-websockets >= 0.11.
+    "RUSTSEC-2026-0381",
     # rustls-webpki 0.102.8 - transitive dep from async-nats, no patch for 0.102.x
     # Remove when async-nats drops rustls-webpki 0.102.x (check: cargo tree -i rustls-webpki@0.102.8)
     "RUSTSEC-2026-0049",

@@ -73,10 +73,10 @@ impl TlsConfig {
 
         if !listener.enabled {
             if own.is_some() {
-                tracing::warn!(
-                    group,
-                    "tls.{group} names a certificate but tls.{group}.enabled is false, so the \
-                     listener stays plaintext"
+                orbit_log_fields::warn!(
+                    safe(LISTENER_GROUP) = group,
+                    "TLS listener group names a certificate but is not enabled, so the listener \
+                     stays plaintext"
                 );
             }
             return Ok(None);

@@ -31,12 +31,14 @@ properties:
     type: string
     source: username
     nullable: false
+    unique: true
     description: "Unique handle."
 
   email:
     type: string
     source: email
     nullable: false
+    unique: true
     like_allowed: false
     admin_only: true
     description: "Primary email. Admins only until per-cell authz lands (gated by `read_user_email_address`)."
@@ -199,6 +201,7 @@ storage:
     - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
   indexes:
+    - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_state, column: state, type: "set(10)", granularity: 2}
     - {name: idx_user_type, column: user_type, type: "set(26)", granularity: 2}
     - {name: idx_private_profile, column: private_profile, type: "minmax", granularity: 1}

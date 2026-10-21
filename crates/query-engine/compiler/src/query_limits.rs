@@ -14,6 +14,7 @@ pub const MAX_REL_TYPES: usize = 10;
 pub const MAX_FILTER_ENTRIES_PER_PROPERTY: usize = 10;
 pub const MAX_PREDICATES: usize = 16;
 pub const MAX_LIMIT: u32 = 1000;
+pub const MAX_SKIP: u32 = 10_000;
 pub const MAX_IDENTIFIER_LEN: usize = 64;
 pub const MAX_FILTER_STRING_LEN: usize = 1024;
 #[allow(

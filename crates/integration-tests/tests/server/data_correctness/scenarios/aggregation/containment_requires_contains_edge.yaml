@@ -1,0 +1,42 @@
+description: Group containment follows CONTAINS edges, so a project under the group path without an edge is not counted
+
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      group: [700]
+      project: [7098, 7099]
+  extra_seed:
+    gl_group:
+      - { id: 700, name: g700, full_path: g700, visibility_level: public, traversal_path: "1/700/" }
+    gl_project:
+      - { id: 7098, name: linked, full_path: "g700/linked", visibility_level: public, traversal_path: "1/700/7098/" }
+      - { id: 7099, name: unlinked, full_path: "g700/unlinked", visibility_level: public, traversal_path: "1/700/7099/" }
+    gl_edge:
+      - { traversal_path: "1/700/7098/", source_id: 700, source_kind: Group, relationship_kind: CONTAINS, target_id: 7098, target_kind: Project, source_tags: [], target_tags: [] }
+
+cases:
+  - name: count
+    description: Only the project with a CONTAINS edge is counted
+    query:
+      gql: |
+        MATCH (g:Group {id: 700})-[:CONTAINS]->(p:Project) RETURN count(p) AS c
+    expect:
+      skip_requirements: ["node_ids"]
+      row_count: 1
+      row_values: [{ c: 1 }]
+
+  - name: grouped
+    description: Grouping by project lists only the project with a CONTAINS edge
+    query:
+      gql: |
+        MATCH (g:Group {id: 700})-[:CONTAINS]->(p:Project) RETURN p, count(g) AS n LIMIT 10
+    expect:
+      skip_requirements: ["node_ids"]
+      groups:
+        p:
+          entity: Project
+          count: 1
+          ids: [7098]
+          rows:
+            - { entity: Project, id: 7098, values: { n: 1 } }

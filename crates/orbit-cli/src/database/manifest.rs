@@ -8,7 +8,7 @@ use strum::{AsRefStr, Display};
 use super::lock_database;
 use crate::workspace::{GitInfo, project_id_from_path};
 
-pub const MANIFEST_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/local/manifest.sql"));
+pub const MANIFEST_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/orbit_cli/manifest.sql"));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, AsRefStr)]
 #[strum(serialize_all = "lowercase")]
@@ -147,14 +147,18 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
     let _lock = match lock_database(db_path) {
         Ok(lock) => lock,
         Err(error) => {
-            tracing::warn!("failed to lock manifest: {error}");
+            orbit_log_fields::warn!(expanded(ERROR_MESSAGE) = %error, "failed to lock manifest");
             return;
         }
     };
     let client = match open_manifest(db_path) {
         Ok(c) => c,
         Err(e) => {
-            tracing::warn!("failed to open DuckDB to record git failure for {key}: {e}");
+            orbit_log_fields::warn!(
+                expanded(LOCAL_PATH) = %key,
+                expanded(ERROR_MESSAGE) = %e,
+                "failed to open DuckDB to record git failure"
+            );
             return;
         }
     };
@@ -167,7 +171,11 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
         None,
         None,
     ) {
-        tracing::warn!("failed to record git failure status for {key}: {e}");
+        orbit_log_fields::warn!(
+            expanded(LOCAL_PATH) = %key,
+            expanded(ERROR_MESSAGE) = %e,
+            "failed to record git failure status"
+        );
     }
 }
 

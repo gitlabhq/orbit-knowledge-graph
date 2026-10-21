@@ -32,6 +32,10 @@ pub struct DuckDbBindings {
 }
 
 impl RelationalMapping for DuckDbBindings {
+    fn supports_deferred_node_loading(&self) -> bool {
+        false
+    }
+
     fn variant_route(&self, variant: RelationshipVariantId) -> Option<&VariantRoute> {
         self.variants.get(variant.index())
     }
@@ -74,6 +78,18 @@ impl RelationalMapping for DuckDbBindings {
 
     fn has_text_index(&self, _property: PropertyId) -> bool {
         false
+    }
+
+    fn property_unique(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_some_and(|facts| facts.unique)
+    }
+
+    fn property_mutable(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_none_or(|facts| facts.mutable)
     }
 
     fn table_path_scopable(&self, _table: &str) -> bool {

@@ -1,0 +1,41 @@
+config:
+  redaction:
+    allow:
+      merge_request: [2000, 2001]
+      ci_pipeline: [99380, 99381, 99382]
+  extra_seed:
+    gl_pipeline:
+      - { id: 99380, iid: 1, ref: feature-a, status: success, source: merge_request_event, project_id: 1000, merge_request_id: 2000, traversal_path: "1/100/1000/" }
+      - { id: 99381, iid: 2, ref: fix-b, status: success, source: merge_request_event, project_id: 1000, merge_request_id: 2001, traversal_path: "1/100/1000/" }
+      - { id: 99382, iid: 3, ref: main, status: success, source: push, project_id: 1000, merge_request_id: null, traversal_path: "1/100/1000/" }
+
+cases:
+  - name: pinned_pipelines_find_their_merge_requests
+    description: TRIGGERED reads the merge request id from the pipeline and skips a pipeline with no merge request
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Pipeline","node_ids":[99380,99381,99382]}],"relationships":[{"type":"TRIGGERED","from":"mr","to":"p"}],"limit":10}
+      gql: |
+        MATCH (mr:MergeRequest)-[:TRIGGERED]->(p:Pipeline) WHERE p.id IN [99380, 99381, 99382] RETURN mr, p LIMIT 10
+    expect:
+      node_count: 4
+      nodes:
+        MergeRequest: { ids: [2000, 2001] }
+        Pipeline: { ids: [99380, 99381], absent: [99382] }
+      edges:
+        TRIGGERED: [[2000, 99380], [2001, 99381]]
+
+  - name: pinned_merge_request_finds_its_pipeline
+    description: TRIGGERED from one merge request returns only the pipeline that holds its id
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000]},{"id":"p","entity":"Pipeline"}],"relationships":[{"type":"TRIGGERED","from":"mr","to":"p"}],"limit":10}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:TRIGGERED]->(p:Pipeline) RETURN mr, p LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        MergeRequest: { ids: [2000] }
+        Pipeline: { ids: [99380], absent: [99381, 99382] }
+      edges:
+        TRIGGERED: [[2000, 99380]]

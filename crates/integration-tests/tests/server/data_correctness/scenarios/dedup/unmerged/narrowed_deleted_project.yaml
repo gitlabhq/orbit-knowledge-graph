@@ -1,4 +1,4 @@
-description: A narrowed Project join does not resurrect a version before its tombstone; the MR id range keeps the flat-chain narrowing path
+description: A filtered Project join does not resurrect a version before its tombstone
 
 config:
   unmerged_seed: true
@@ -20,13 +20,13 @@ config:
 
 query:
   json: |
-    {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[970]},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest","id_range":{"start":9710,"end":9710},"filters":{"title":"a"}},{"id":"d","entity":"MergeRequestDiff"}],
+    {"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","node_ids":[970]},{"id":"p","entity":"Project","filters":{"name":"project"}},{"id":"mr","entity":"MergeRequest","id_range":{"start":9710,"end":9710},"filters":{"title":"a"}},{"id":"d","entity":"MergeRequestDiff"}],
      "relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_DIFF","from":"mr","to":"d"}],"group_by":["d.state"],"aggregations":[{"count":"d","as":"c"}],"limit":10}
   gql: |
-    MATCH (g:Group {id: 970})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)
+    MATCH (g:Group {id: 970})-[:CONTAINS]->(p:Project {name: 'project'})<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)
     WHERE mr.id >= 9710 AND mr.id <= 9710 AND mr.title = 'a' RETURN d.state, count(d) AS c LIMIT 10
 
 expect:
-  sql_contains: ["_narrow_p", "LIMIT 1 BY p.traversal_path, p.id) AS p WHERE (p._deleted = false)"]
-  skip_requirements: ["node_ids", "filter:title"]
+  skip_requirements: ["node_ids", "filter:name", "filter:title"]
+  sql_contains: ["LIMIT 1 BY p.traversal_path, p.id", "p.name = 'project'", "p._deleted = false"]
   row_count: 0

@@ -1,5 +1,6 @@
 use labkit::verbose_logs::can_log_verbose;
 use orbit_billing::constants::normalize_realm;
+use orbit_log_fields::{expanded, safe};
 use tracing::field::Empty;
 
 use super::Claims;
@@ -12,18 +13,18 @@ pub struct RequestContext {
 }
 
 pub(crate) fn request_span() -> tracing::Span {
-    tracing::info_span!(
+    orbit_log_fields::info_span!(
         "orbit_request",
-        user_id = Empty,
-        gl_root_namespace_id = Empty,
-        gl_governing_namespace_id = Empty,
-        gl_organization_id = Empty,
-        source_type = Empty,
-        realm = Empty,
-        expanded_logs_requested = Empty,
-        ai_session_id = Empty,
-        client_request_id = Empty,
-        coding_agent = Empty,
+        safe(GL_USER_ID) = Empty,
+        safe(GL_ROOT_NAMESPACE_ID) = Empty,
+        safe(GL_GOVERNING_NAMESPACE_ID) = Empty,
+        safe(GL_ORGANIZATION_ID) = Empty,
+        safe(SOURCE_TYPE) = Empty,
+        safe(REALM) = Empty,
+        safe(EXPANDED_LOGS_REQUESTED) = Empty,
+        expanded(CLIENT_SESSION_ID) = Empty,
+        expanded(CLIENT_REQUEST_ID) = Empty,
+        expanded(CODING_AGENT) = Empty,
     )
 }
 
@@ -37,22 +38,34 @@ impl RequestContext {
 
     pub fn record_in_current_span(&self) {
         let span = tracing::Span::current();
-        span.record("user_id", self.claims.user_id);
+        span.record(safe::GL_USER_ID, self.claims.user_id);
         span.record(
-            "gl_root_namespace_id",
+            safe::GL_ROOT_NAMESPACE_ID,
             request_root_namespace_id(&self.claims),
         );
-        span.record("gl_governing_namespace_id", self.claims.root_namespace_id);
-        span.record("gl_organization_id", self.claims.organization_id);
-        span.record("source_type", <&str>::from(self.claims.source_type));
         span.record(
-            "realm",
+            safe::GL_GOVERNING_NAMESPACE_ID,
+            self.claims.root_namespace_id,
+        );
+        span.record(safe::GL_ORGANIZATION_ID, self.claims.organization_id);
+        span.record(safe::SOURCE_TYPE, <&str>::from(self.claims.source_type));
+        span.record(
+            safe::REALM,
             self.claims.realm.as_deref().and_then(normalize_realm),
         );
-        span.record("expanded_logs_requested", can_log_verbose(&VERBOSE_LOGS));
-        span.record("ai_session_id", self.claims.ai_session_id.as_deref());
-        span.record("client_request_id", self.claims.request_id.as_deref());
-        span.record("coding_agent", self.coding_agent());
+        span.record(
+            safe::EXPANDED_LOGS_REQUESTED,
+            can_log_verbose(&VERBOSE_LOGS),
+        );
+        span.record(
+            expanded::CLIENT_SESSION_ID,
+            self.claims.ai_session_id.as_deref(),
+        );
+        span.record(
+            expanded::CLIENT_REQUEST_ID,
+            self.claims.request_id.as_deref(),
+        );
+        span.record(expanded::CODING_AGENT, self.coding_agent());
     }
 }
 

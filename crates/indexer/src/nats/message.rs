@@ -5,7 +5,7 @@ use std::time::Duration;
 use async_nats::jetstream::AckKind;
 use async_trait::async_trait;
 use futures::stream::Stream as FuturesStream;
-use tracing::warn;
+use orbit_log_fields::warn;
 
 use super::broker::NatsBroker;
 use crate::types::{Envelope, Subscription};
@@ -124,18 +124,26 @@ impl NatsMessage {
         match dlq_result {
             Ok(()) => {
                 if let Err(ack_error) = self.ack().await {
-                    warn!(%ack_error, %message_id, "failed to ack exhausted message");
+                    warn!(
+                        expanded(ERROR_MESSAGE) = %ack_error,
+                        safe(MESSAGE_ID) = message_id.as_ref(),
+                        "failed to ack exhausted message"
+                    );
                 }
                 DlqResult::Published
             }
             Err(dlq_error) => {
                 warn!(
-                    %dlq_error,
-                    %message_id,
+                    expanded(ERROR_MESSAGE) = %dlq_error,
+                    safe(MESSAGE_ID) = message_id.as_ref(),
                     "failed to publish to dead letter queue, nacking for redelivery"
                 );
                 if let Err(nack_error) = self.nack().await {
-                    warn!(%nack_error, %message_id, "failed to nack message after DLQ failure");
+                    warn!(
+                        expanded(ERROR_MESSAGE) = %nack_error,
+                        safe(MESSAGE_ID) = message_id.as_ref(),
+                        "failed to nack message after DLQ failure"
+                    );
                 }
                 DlqResult::Nacked
             }
@@ -165,7 +173,7 @@ impl ProgressNotifier {
         if let Some(acker) = &self.acker
             && let Err(error) = acker.ack_progress().await
         {
-            warn!(%error, "failed to send in-progress ack");
+            warn!(expanded(ERROR_MESSAGE) = %error, "failed to send in-progress ack");
         }
     }
 }

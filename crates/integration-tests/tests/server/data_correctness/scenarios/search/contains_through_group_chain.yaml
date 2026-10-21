@@ -1,0 +1,34 @@
+description: A text filter at the end of a group chain prunes with the ngram index inside a materialized CTE that reads another CTE
+
+config:
+  unmerged_seed: true
+  extra_seed:
+    gl_merge_request:
+      - { id: 2100, iid: 7, title: Unrelated work, state: opened, source_branch: other, target_branch: main, project_id: 1000, traversal_path: "1/100/1000/" }
+
+query:
+  gql: |
+    MATCH (g:Group {full_path: 'public-group'})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)
+    WHERE mr.id >= 2000 AND mr.id <= 2200 AND mr.title CONTAINS 'SHIP FEAT'
+    RETURN mr.title ORDER BY mr.id LIMIT 10
+
+expect:
+  sql_contains: ["AS MATERIALIZED", "multiSearchAny(lower(mr.title), [lower('SHIP FEAT')])"]
+  indexes_used: [{ table: gl_merge_request, index: idx_title_ngram }]
+  node_count: 4
+  nodes:
+    Group:
+      ids: [100]
+      filters:
+        full_path: public-group
+    Project: { ids: [1000] }
+    MergeRequest:
+      order: [2004, 2005]
+      filters:
+        title: { contains: Ship feat }
+      rows:
+        - { id: 2004, title: Ship feature E }
+        - { id: 2005, title: Ship feature F }
+  edge_exists:
+    CONTAINS: [[100, 1000]]
+    IN_PROJECT: [[2004, 1000], [2005, 1000]]

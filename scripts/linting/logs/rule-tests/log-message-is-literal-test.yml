@@ -1,0 +1,23 @@
+id: log-message-is-literal
+valid:
+  - 'info!(safe(GL_PROJECT_ID) = id, "parsed file");'
+  - 'warn!(target: "orbit", "no {{braces}} here");'
+  - 'info_span!("index_project", safe(GL_PROJECT_ID) = id);'
+  - 'info!(expanded(SQL) = "{literal}", "value literals are fine");'
+  - 'format!("{x}");'
+  - |
+    #[cfg(test)]
+    mod tests {
+        fn t() { info!("debug {x}"); }
+    }
+  - 'info!("done {{literal}} {{also}}");'
+invalid:
+  - 'info!("parsed {path}");'
+  - 'orbit_log_fields::error!(expanded(ERROR_MESSAGE) = %e, "failed: {}", e);'
+  - 'info_span!("index {project}");'
+  - 'warn!(target: "orbit", "stalled at {offset}");'
+  - 'info!(r#"raw {path}"#);'
+  - 'info!("{{{x}}}");'
+  - 'info!("done {}", n);'
+  - 'orbit_log_fields::__tracing::info!("parsed {path}");'
+  - '__tracing::info!("parsed {path}");'

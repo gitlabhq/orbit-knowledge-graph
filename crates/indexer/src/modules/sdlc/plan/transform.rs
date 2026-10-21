@@ -38,6 +38,15 @@ pub(in crate::modules::sdlc) enum TransformSpec {
     Rust(String),
 }
 
+impl TransformSpec {
+    pub(in crate::modules::sdlc) fn label(&self) -> &str {
+        match self {
+            Self::DataFusion(_) => "data_fusion",
+            Self::Rust(name) => name,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Transformation {
     pub sql: String,

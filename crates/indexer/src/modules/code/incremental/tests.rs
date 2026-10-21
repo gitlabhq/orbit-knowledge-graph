@@ -871,7 +871,7 @@ async fn excluded_files_past_the_file_limit_do_not_fail_the_repository() {
     assert_eq!(report.stats.files_skipped, 10);
     let logs = logs.text();
     assert!(logs.contains("WARN"), "{logs}");
-    assert!(logs.contains("dropped=7"), "{logs}");
+    assert!(logs.contains("skipped_count=7"), "{logs}");
 }
 
 #[tokio::test]

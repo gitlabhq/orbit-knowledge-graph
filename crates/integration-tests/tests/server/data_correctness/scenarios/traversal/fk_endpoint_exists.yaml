@@ -1,0 +1,54 @@
+cases:
+  - name: nullable_and_missing_fk_targets_do_not_emit_edges
+    config:
+      security: { org_id: 1, paths: ["1/"] }
+      redaction:
+        allow:
+          merge_request: [2200, 2201, 2202]
+          ci_pipeline: [1101, 9999]
+      extra_seed:
+        gl_pipeline:
+          - { id: 1101, iid: 1, ref: main, status: success, source: push, project_id: 1000, user_id: 1, traversal_path: "1/100/1000/" }
+        gl_merge_request:
+          - { id: 2200, iid: 2200, title: Null FK, state: opened, source_branch: "null", target_branch: main, project_id: 1000, author_id: 1, traversal_path: "1/100/1000/" }
+          - { id: 2201, iid: 2201, title: Missing FK target, state: opened, source_branch: missing, target_branch: main, project_id: 1000, author_id: 1, head_pipeline_id: 9999, traversal_path: "1/100/1000/" }
+          - { id: 2202, iid: 2202, title: Live FK target, state: opened, source_branch: live, target_branch: main, project_id: 1000, author_id: 1, head_pipeline_id: 1101, traversal_path: "1/100/1000/" }
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(p:Pipeline)
+        WHERE mr.id >= 2200 AND mr.id <= 2202
+        RETURN mr, p LIMIT 10
+    expect:
+      sql_contains: ["head_pipeline_id IN (SELECT id FROM _orbit_relation_"]
+      node_count: 2
+      nodes:
+        MergeRequest: { ids: [2202], absent: [2200, 2201] }
+        Pipeline: { ids: [1101], absent: [9999] }
+      edges:
+        HAS_HEAD_PIPELINE: [[2202, 1101]]
+
+  - name: wrong_kind_and_missing_namespace_targets_do_not_emit_groups
+    config:
+      security: { org_id: 1, paths: ["1/"] }
+      redaction:
+        allow:
+          work_item: [4100, 4101, 4102]
+          group: [100, 1000, 9999]
+      extra_seed:
+        gl_work_item:
+          - { id: 4100, iid: 4100, title: Fix project namespace, state: opened, work_item_type: issue, confidential: false, project_id: 1000, author_id: 1, namespace_id: 1000, traversal_path: "1/100/1000/" }
+          - { id: 4101, iid: 4101, title: Fix missing group, state: opened, work_item_type: issue, confidential: false, project_id: 1000, author_id: 1, namespace_id: 9999, traversal_path: "1/100/1000/" }
+          - { id: 4102, iid: 4102, title: Fix live group, state: opened, work_item_type: issue, confidential: false, project_id: 1000, author_id: 1, namespace_id: 100, traversal_path: "1/100/" }
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group)
+        WHERE w.id >= 4100 AND w.id <= 4102
+        RETURN w, g LIMIT 10
+    expect:
+      sql_contains: ["namespace_id IN (SELECT id FROM _orbit_relation_"]
+      node_count: 2
+      nodes:
+        WorkItem: { ids: [4102], absent: [4100, 4101] }
+        Group: { ids: [100], absent: [1000, 9999] }
+      edges:
+        IN_GROUP: [[4102, 100]]

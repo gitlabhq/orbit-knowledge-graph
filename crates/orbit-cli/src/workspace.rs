@@ -501,8 +501,11 @@ fn is_ignored_by_enclosing_repo(repo: &Path) -> bool {
 fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
     let ws = CoreGitaliskWorkspaceFolder::new(workspace_path.to_string_lossy().to_string());
     if let Err(e) = ws.index_repositories() {
-        let path = workspace_path.display();
-        tracing::warn!("repository discovery failed in {path}: {e}");
+        orbit_log_fields::warn!(
+            expanded(LOCAL_PATH) = %workspace_path.display(),
+            expanded(ERROR_MESSAGE) = %e,
+            "repository discovery failed"
+        );
         return vec![];
     }
     ws.get_repositories()

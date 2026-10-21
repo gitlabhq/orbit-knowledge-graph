@@ -1,4 +1,4 @@
-name: A pinned final endpoint reverses the edge chain
+name: A pinned final endpoint anchors the chain at its last edge
 
 query:
   json: |
@@ -14,9 +14,12 @@ physical:
     planned:
       expect:
         - (Join ON _orbit_edge_1.source_id = _orbit_edge_0.target_id (_) (_))
-        - (Filter _orbit_edge_1.target_id = 7, ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_1)))
+        - (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.target_id = 7, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))))
+        - (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.target_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))))
       reject: ["(Scan Table(gl_definition) ...)"]
     emitted:
       expect:
         - (Join ON _orbit_edge_1.source_id = _orbit_edge_0.target_id (_) (_))
-        - (Filter _orbit_edge_1.target_id = 7, ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_1)))
+        - (Filter _orbit_edge_1.target_id = 7, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))
+        - (Filter _orbit_edge_0.target_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))
+      reject: ["(Scan Table(gl_definition) ...)"]

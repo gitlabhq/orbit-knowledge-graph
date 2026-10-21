@@ -18,7 +18,7 @@ orbit-server-config = { path = "../orbit-server-config" }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tracing = { workspace = true }
+orbit-log-fields = { workspace = true }
 
 [dev-dependencies]
 testcontainers = { workspace = true }

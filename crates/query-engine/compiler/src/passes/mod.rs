@@ -3,13 +3,13 @@
 
 pub mod check;
 pub mod codegen;
-pub mod cursor;
 pub mod enforce;
 mod errors;
 pub mod frontend;
 pub mod hydrate;
 pub mod lower;
 pub mod normalize;
+pub mod page;
 pub mod plan;
 pub mod relationships;
 pub mod response_policy;

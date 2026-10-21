@@ -29,12 +29,13 @@ impl QueryParser {
         Ok(match_nodes!(input.into_children();
             [Matches((pattern, predicates)), Return(projections), clauses..] => {
                 let mut query = Query {
-                    pattern, predicates, projections, order: None, limit: None, debug: false,
+                    pattern, predicates, projections, order: None, skip: None, limit: None, debug: false,
                 };
                 for clause in clauses {
                     match clause.as_rule() {
                         Rule::Order => query.order = Some(Self::Order(clause)?),
-                        Rule::Limit | Rule::Page => query.limit = Some(Self::limit(clause)?),
+                        Rule::Skip => query.skip = Some(Self::Skip(clause)?),
+                        Rule::Limit => query.limit = Some(Self::Limit(clause)?),
                         Rule::Debug => query.debug = Self::Debug(clause)?,
                         _ => return Err(mismatch(&clause)),
                     }
@@ -541,30 +542,20 @@ impl QueryParser {
         })
     }
 
-    #[alias(limit)]
-    fn Limit(input: Node) -> Result<Limit> {
+    fn Skip(input: Node) -> Result<u32> {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
-            [UnsignedInteger(value)] => Limit::Rows(row_count(&value, span, "LIMIT")?),
+            [UnsignedInteger(value)] => value
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| error_at(span, "SKIP must be a non-negative integer"))?,
         ))
     }
 
-    #[alias(limit)]
-    fn Page(input: Node) -> Result<Limit> {
+    fn Limit(input: Node) -> Result<u32> {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
-            [UnsignedInteger(value)] => Limit::Page {
-                span, size: row_count(&value, span, "PAGE")?, after: None,
-            },
-            [UnsignedInteger(value), After(after)] => Limit::Page {
-                span, size: row_count(&value, span, "PAGE")?, after: Some(after),
-            },
-        ))
-    }
-
-    fn After(input: Node) -> Result<String> {
-        Ok(match_nodes!(input.into_children();
-            [literal] => string(&literal)?,
+            [UnsignedInteger(value)] => row_count(&value, span, "LIMIT")?,
         ))
     }
 

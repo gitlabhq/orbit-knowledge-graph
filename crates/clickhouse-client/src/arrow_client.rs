@@ -12,6 +12,7 @@ use circuit_breaker::{CircuitBreaker, CircuitConfig};
 use clickhouse::{Client, query::Query};
 use futures::StreamExt;
 use futures::stream::BoxStream;
+use orbit_log_fields::warn;
 use orbit_observability::resilience::MetricsObserver;
 use orbit_utils::query_types::{ScalarType, SqlType};
 use serde::Serialize;
@@ -20,7 +21,7 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::SyncIoBridge;
-use tracing::{Instrument, warn};
+use tracing::Instrument;
 
 pub use clickhouse::QuerySummary;
 
@@ -248,7 +249,11 @@ impl ArrowClickHouseClient {
 
             for (batch_index, batch) in batches.iter().enumerate() {
                 if batch.schema() != schema {
-                    warn!(table, batch_index, "RecordBatch schema mismatch");
+                    warn!(
+                        safe(TABLE) = table,
+                        safe(BATCH_INDEX) = batch_index,
+                        "RecordBatch schema mismatch"
+                    );
                 }
 
                 writer.write(batch).map_err(ClickHouseError::ArrowEncode)?;
@@ -324,7 +329,11 @@ impl ArrowClickHouseClient {
 
         for (batch_index, batch) in batches.into_iter().enumerate() {
             if batch.schema() != schema {
-                warn!(table, batch_index, "RecordBatch schema mismatch");
+                warn!(
+                    safe(TABLE) = table,
+                    safe(BATCH_INDEX) = batch_index,
+                    "RecordBatch schema mismatch"
+                );
             }
             writer.write(&batch).map_err(ClickHouseError::ArrowEncode)?;
             drop(batch);
@@ -418,10 +427,10 @@ impl ArrowClickHouseClient {
 fn warn_on_dropped_elements(key: &str, scalar: &str, input: usize, bound: usize) {
     if bound != input {
         warn!(
-            param = key,
-            scalar,
-            input,
-            bound,
+            expanded(QUERY_PARAMETER) = key,
+            safe(CLICKHOUSE_TYPE) = scalar,
+            safe(COUNT) = input,
+            safe(SKIPPED_COUNT) = input - bound,
             "bind_param: array had elements that could not be converted, dropped values"
         );
     }

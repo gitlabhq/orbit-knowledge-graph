@@ -32,9 +32,9 @@ pub fn ensure_graph_schema(db_path: &Path, ddl: &str) -> Result<()> {
     drop(client);
 
     if had_data {
-        tracing::warn!(
-            "local graph schema or code index changed; rebuilding {} (previously indexed repositories must be re-indexed)",
-            db_path.display()
+        orbit_log_fields::warn!(
+            expanded(LOCAL_PATH) = %db_path.display(),
+            "local graph schema or code index changed; rebuilding (previously indexed repositories must be re-indexed)"
         );
     }
     remove_db_files(db_path)?;

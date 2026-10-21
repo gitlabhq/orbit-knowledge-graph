@@ -979,36 +979,36 @@ g04_mr_to_wi_path:
 
 h01_page_mrs_project:
   desc: "Page MRs project"
-  category: cursor
+  category: pagination
   query: |
     MATCH (mr:MergeRequest {project_id: {{GITLAB_PROJECT_ID}}, state: 'merged'})
     RETURN mr.iid, mr.title
     ORDER BY mr.created_at DESC
-    PAGE 50
+    LIMIT 50
 
 h02_page_jobs_pipeline:
   desc: "Page jobs pipeline"
-  category: cursor
+  category: pagination
   query: |
     MATCH (pl:Pipeline {id: {{PIPELINE_ID}}})-[:HAS_JOB]->(j:Job)
     RETURN j.name, j.status
-    PAGE 100
+    LIMIT 100
 
 h03_page_user_mrs:
   desc: "Page user MRs"
-  category: cursor
+  category: pagination
   query: |
     MATCH (u:User {id: {{AUTHOR_USER_ID}}})-[:AUTHORED]->(mr:MergeRequest)
     RETURN mr.iid, mr.title
-    PAGE 50
+    LIMIT 50
 
 h04_page_project_issues:
   desc: "Page project issues"
-  category: cursor
+  category: pagination
   query: |
     MATCH (w:WorkItem {state: 'opened'})-[:IN_PROJECT]->(p:Project {id: {{GITLAB_PROJECT_ID}}})
     RETURN w.iid, w.title
-    PAGE 100
+    LIMIT 100
 
 i01_file_definitions:
   desc: "File definitions"

@@ -21,7 +21,7 @@ pub enum Requirement {
     },
     Neighbors,
     AggregationSort,
-    Cursor,
+    Skip,
     /// Always derived for `search`, `traversal`, and `neighbors` queries
     /// to ensure no unexpected rows leak into the response.
     NodeCount,
@@ -47,10 +47,10 @@ impl std::fmt::Display for Requirement {
                     "AggregationSort (query has aggregation_sort — verify row ordering)"
                 )
             }
-            Self::Cursor => {
+            Self::Skip => {
                 write!(
                     f,
-                    "Cursor (query has cursor — call assert_node_count to verify page)"
+                    "Skip (query has SKIP — call assert_node_count to verify page)"
                 )
             }
             Self::NodeCount => {
@@ -120,8 +120,8 @@ impl QueryRequirements for Input {
             reqs.insert(Requirement::AggregationSort);
         }
 
-        if self.cursor.is_some() {
-            reqs.insert(Requirement::Cursor);
+        if self.skip.is_some() {
+            reqs.insert(Requirement::Skip);
         }
 
         reqs
@@ -666,27 +666,27 @@ mod tests {
     }
 
     #[test]
-    fn requirements_from_cursor() {
-        let input = parse_test_input(
+    fn requirements_from_skip() {
+        let mut input = parse_test_input(
             r#"{"query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
+        input.skip = Some(5);
         let reqs = input.requirements();
-        assert!(reqs.contains(&Requirement::Cursor));
+        assert!(reqs.contains(&Requirement::Skip));
         assert!(reqs.contains(&Requirement::NodeCount));
         assert_eq!(reqs.len(), 2);
     }
 
     #[test]
-    fn for_query_cursor_satisfied_by_assert_node_count() {
-        let input = parse_test_input(
+    fn for_query_skip_satisfied_by_assert_node_count() {
+        let mut input = parse_test_input(
             r#"{"query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
+        input.skip = Some(5);
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);
     }
@@ -819,14 +819,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Cursor")]
-    fn for_query_panics_on_unsatisfied_cursor() {
-        let input = parse_test_input(
+    #[should_panic(expected = "Skip")]
+    fn for_query_panics_on_unsatisfied_skip() {
+        let mut input = parse_test_input(
             r#"{"query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User"}],
-                "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
+        input.skip = Some(5);
         let view = ResponseView::for_query(&input, sample_search_response());
         drop(view);
     }
@@ -883,14 +883,14 @@ mod tests {
 
     #[test]
     fn for_query_combined_features_requires_all() {
-        let input = parse_test_input(
+        let mut input = parse_test_input(
             r#"{"query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User", "node_ids": [1, 2],
                          "filters": {"username": {"in": ["alice", "bob"]}}}],
                 "order_by": "u.id",
-                "cursor": {"page_size": 5},
                 "limit": 10}"#,
         );
+        input.skip = Some(5);
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_order("User", &[1, 2]);
         view.assert_node_count(2);

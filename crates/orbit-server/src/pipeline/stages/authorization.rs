@@ -1,8 +1,8 @@
 use std::time::Instant;
 
+use orbit_log_fields::info;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
-use tracing::info;
 
 use crate::proto::ExecuteQueryMessage;
 use crate::redaction::RedactionService;

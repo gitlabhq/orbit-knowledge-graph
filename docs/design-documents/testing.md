@@ -177,12 +177,12 @@ Query scenarios are the main test surface for query correctness. They live in [`
 
 Each scenario runs the full query pipeline: compile, execute, redact, hydrate, paginate, and format. Then it checks the response. A scenario can also check the generated SQL and the skip indexes that ClickHouse uses. Scenarios give the same query in JSON and in GQL, so both frontends must return the same result.
 
-The runner validates response schemas and cursor metadata. Repeated queries must
+The runner validates response schemas and page metadata. Repeated queries must
 preserve node order within each entity type, properties, edges, and aggregation rows. Pagination
 scenarios can compare their combined results with an unpaginated query.
 
-Four [Rust-only exceptions](../../crates/integration-tests/README.md#rust-only-data-correctness-tests)
-cover cursor encoding, excerpt length, raw path rows, and constructed compiler ASTs.
+Three [Rust-only exceptions](../../crates/integration-tests/README.md#rust-only-data-correctness-tests)
+cover excerpt length, raw path rows, and constructed compiler ASTs.
 The remaining query correctness cases use YAML.
 
 The format reference is in the [`integration-testkit` README](../../crates/integration-testkit/README.md).

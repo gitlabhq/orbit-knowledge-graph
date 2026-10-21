@@ -59,11 +59,11 @@ config:
       - { id: 3500, iid: 1, title: Other Route MR, state: opened, project_id: 3000, author_id: 1, head_pipeline_id: 3101, traversal_path: "2/200/3000/" }
       - { id: 4500, iid: 2, title: Route MR, state: opened, project_id: 3000, traversal_path: "2/200/3000/" }
     gl_merge_request_diff:
-      - { id: 20001, merge_request_id: 2501, project_id: 1000, state: collected, traversal_path: "1/100/1000/" }
-      - { id: 40001, merge_request_id: 4500, project_id: 3000, state: collected, traversal_path: "2/200/3000/" }
+      - { id: 20001, merge_request_id: 2500, project_id: 1000, state: collected, traversal_path: "1/100/1000/" }
+      - { id: 40001, merge_request_id: 3500, project_id: 3000, state: collected, traversal_path: "2/200/3000/" }
     gl_merge_request_diff_file:
-      - { id: 20002, merge_request_id: 2501, merge_request_diff_id: 20001, project_id: 1000, old_path: old.rs, new_path: new.rs, traversal_path: "1/100/1000/" }
-      - { id: 40002, merge_request_id: 4500, merge_request_diff_id: 40001, project_id: 3000, old_path: old.rs, new_path: new.rs, traversal_path: "2/200/3000/" }
+      - { id: 20002, merge_request_id: 2500, merge_request_diff_id: 20001, project_id: 1000, old_path: old.rs, new_path: new.rs, traversal_path: "1/100/1000/" }
+      - { id: 40002, merge_request_id: 3500, merge_request_diff_id: 40001, project_id: 3000, old_path: old.rs, new_path: new.rs, traversal_path: "2/200/3000/" }
     gl_vulnerability_scanner:
       - { id: 2101, external_id: route-scanner, name: Route Scanner, project_id: 1000, traversal_path: "1/100/1000/" }
       - { id: 4101, external_id: other-route-scanner, name: Route Scanner, project_id: 3000, traversal_path: "2/200/3000/" }
@@ -446,7 +446,7 @@ cases:
         CONTAINS:
           - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
       referential_integrity: true
-      sql_contains: [gl_edge, gl_ci_edge, gl_code_edge]
+      sql_contains: [gl_merge_request, gl_pipeline, gl_code_edge]
 
   - name: Merge request diff branch chain crosses three edge tables
     description: A four-hop chain composes default, diff, and code edge tables without losing joins
@@ -474,7 +474,7 @@ cases:
         CONTAINS:
           - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
       referential_integrity: true
-      sql_contains: [gl_edge, gl_diff_edge, gl_code_edge]
+      sql_contains: [gl_merge_request, gl_merge_request_diff, gl_code_edge]
 
   - name: Security scan directory chain crosses security and code tables
     description: A three-hop chain composes security and code edge tables without losing joins
@@ -498,7 +498,7 @@ cases:
           - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
           - { from: Branch, from_id: 2601, to: Directory, to_id: 2701 }
       referential_integrity: true
-      sql_contains: [gl_sec_edge, gl_code_edge]
+      sql_contains: [gl_security_scan, gl_code_edge]
 
   - name: Merge request alternatives union default CI and diff tables
     description: Relationship alternatives return every authorized row across three physical tables and exclude another namespace
@@ -555,7 +555,7 @@ cases:
         CONTAINS:
           - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
       referential_integrity: true
-      sql_contains: [gl_edge, gl_ci_edge, gl_code_edge]
+      sql_contains: [gl_merge_request, gl_pipeline, gl_code_edge]
 
   - name: Specialized routes exclude another namespace
     description: Security and code tables preserve namespace scope across their join
@@ -579,7 +579,7 @@ cases:
         CONTAINS:
           - { from: Project, from_id: 1000, to: Branch, to_id: 2601 }
       referential_integrity: true
-      sql_contains: [gl_sec_edge, gl_code_edge]
+      sql_contains: [gl_security_scan, gl_code_edge]
 
   - name: Cross-table shortest path excludes another namespace
     description: A multi-table path frontier returns the authorized project and excludes the same path in another organization
@@ -638,4 +638,4 @@ cases:
       skip_requirements: [node_ids]
       row_count: 1
       row_values: [{ n: 1 }]
-      sql_contains: [gl_ci_edge, gl_code_edge]
+      sql_contains: [gl_pipeline, gl_code_edge]

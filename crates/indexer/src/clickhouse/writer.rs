@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
+use orbit_log_fields::{error, warn};
 use thiserror::Error;
-use tracing::{error, warn};
 
 use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
@@ -98,8 +98,8 @@ impl ClickHouseWriter {
                 Err(e) => {
                     self.metrics.record_unmeterable_batch(table);
                     error!(
-                        table,
-                        error = %e,
+                        safe(TABLE) = table,
+                        expanded(ERROR_MESSAGE) = %e,
                         "batch has no logical-byte-size rule; counting 0 bytes and writing anyway"
                     );
                     0
@@ -154,7 +154,12 @@ impl ClickHouseWriter {
                 match fut.await {
                     Ok(report) => Step::Done(report),
                     Err(e) => {
-                        warn!(table, attempt = attempt + 1, error = %e, "durable write failed");
+                        warn!(
+                            safe(TABLE) = table,
+                            safe(ATTEMPT) = attempt + 1,
+                            expanded(ERROR_MESSAGE) = %e,
+                            "durable write failed"
+                        );
                         WRITE_RETRY.retry_or_give_up(attempt, (), e)
                     }
                 }

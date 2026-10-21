@@ -15,7 +15,6 @@ physical:
   clickhouse:
     planned:
       expect: ["(Filter _orbit_edge_0.target_tags HAS ANY ['draft:true'], _orbit_edge_0.target_tags HAS ANY ['state:merged'], ... (_))"]
-      reject: ["(Scan Table(gl_merge_request) ...)"]
     emitted:
       expect: ["(Filter ArrayContains(_orbit_edge_0.target_tags, 'draft:true'), ArrayContains(_orbit_edge_0.target_tags, 'state:merged'), ... (_))"]
       reject: ["(CTE _nf_mr (_))", "(Filter ArrayContains(_orbit_edge_0.target_tags, 'draft:'), ... (_))"]

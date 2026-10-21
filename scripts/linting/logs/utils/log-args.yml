@@ -1,0 +1,16 @@
+# Also the legacy `{ field = value }` block that tracing accepts after `target:`.
+id: log-args
+language: rust
+rule:
+  kind: token_tree
+  any:
+    - inside:
+        matches: tracing-macro
+    - regex: '^\{'
+      not:
+        precedes:
+          regex: '^=$'
+      inside:
+        kind: token_tree
+        inside:
+          matches: tracing-macro

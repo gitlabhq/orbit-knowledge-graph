@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use orbit_log_fields::{info, warn};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::campaign::CampaignState;
@@ -132,14 +132,14 @@ impl Trigger for Siphon {
             match result {
                 Ok(total) if total.dispatched > 0 || total.skipped > 0 => {
                     info!(
-                        dispatched = total.dispatched,
-                        skipped = total.skipped,
+                        safe(DISPATCHED_COUNT) = total.dispatched,
+                        safe(SKIPPED_COUNT) = total.skipped,
                         "siphon drain pass dispatched requests"
                     );
                 }
                 Ok(_) => {}
                 Err(error) => {
-                    warn!(%error, "siphon drain pass failed");
+                    warn!(expanded(ERROR_MESSAGE) = %error, "siphon drain pass failed");
                 }
             }
 

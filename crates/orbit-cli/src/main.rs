@@ -18,9 +18,10 @@ mod workspace;
 use anyhow::{Context, Result};
 use clap::builder::TypedValueParser;
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
+use orbit_log_fields::debug;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use tracing::{Level, debug};
+use tracing::Level;
 
 /// Only bounds commands too fast to hide a round trip behind their own work.
 /// Raising it buys no extra delivery and lengthens exit against a dead collector.

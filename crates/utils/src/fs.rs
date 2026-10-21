@@ -12,7 +12,8 @@ pub struct RemovedSymlink {
     pub reason: RemovedSymlinkReason,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum RemovedSymlinkReason {
     EscapesRoot,
     Dangling,
@@ -142,10 +143,10 @@ pub fn validate_symlinks(root: &Path) -> io::Result<Vec<RemovedSymlink>> {
             if meta.is_symlink() {
                 match check_symlink(&path, root) {
                     Ok(Some(removed)) => {
-                        tracing::warn!(
-                            relative_path = %removed.relative_path.display(),
-                            symlink_target = %removed.target.display(),
-                            reason = ?removed.reason,
+                        orbit_log_fields::warn!(
+                            expanded(FILE_PATH) = %removed.relative_path.display(),
+                            expanded(SYMLINK_TARGET) = %removed.target.display(),
+                            safe(REASON) = <&str>::from(removed.reason),
                             "removing symlink"
                         );
                         removed_symlinks.push(removed);

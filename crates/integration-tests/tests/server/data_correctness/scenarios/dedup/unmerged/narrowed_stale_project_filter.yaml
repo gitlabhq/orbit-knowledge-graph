@@ -2,6 +2,10 @@ description: A narrowed FK target applies mutable filters after selecting its la
 
 config:
   unmerged_seed: true
+  redaction:
+    allow:
+      project: [9700]
+      merge_request: [9710]
   extra_seed:
     gl_group:
       - { id: 970, name: root, full_path: root, traversal_path: "1/970/" }
@@ -10,6 +14,9 @@ config:
       - { id: 9700, name: project, full_path: "root/project", star_count: 2, traversal_path: "1/970/9700/", _version: "2024-06-01 00:00:00" }
     gl_merge_request:
       - { id: 9710, title: a, project_id: 9700, traversal_path: "1/970/9700/" }
+    gl_edge:
+      - { source_id: 970, source_kind: Group, relationship_kind: CONTAINS, target_id: 9700, target_kind: Project, traversal_path: "1/970/" }
+      - { source_id: 9710, source_kind: MergeRequest, relationship_kind: IN_PROJECT, target_id: 9700, target_kind: Project, traversal_path: "1/970/9700/" }
 
 query:
   json: |
@@ -20,7 +27,6 @@ query:
     RETURN p.name, count(mr) AS c LIMIT 10
 
 expect:
-  sql_contains: ["_candidate_p", "LIMIT 1 BY p.traversal_path, p.id) AS p WHERE"]
-  sql_not_contains: ["gl_edge"]
+  sql_contains: ["LIMIT 1 BY p.traversal_path, p.id", "p.star_count = 1", "gl_edge"]
   skip_requirements: ["node_ids", "filter:star_count"]
   row_count: 0

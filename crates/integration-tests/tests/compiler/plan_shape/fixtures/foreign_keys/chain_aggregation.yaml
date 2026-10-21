@@ -1,4 +1,4 @@
-name: FK-chain aggregation executes physical node joins with scoped current-row filters
+name: A target-held foreign key chain joins node rows in stored orientation
 
 query:
   json: |
@@ -32,15 +32,18 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Project (Join ON f.merge_request_diff_id = d.id (_) (_)))
-        - (Join ON pl.merge_request_id = mr.id (_) (_))
-        - (Join ON mr.latest_merge_request_diff_id = d.id (_) (_))
-        - (Bind pl (Filter ... (Deduplicate Final (Scan Table(gl_pipeline) AS pl))))
-        - (Bind mr (Filter ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr))))
+        - (Join ON mr.id = pl.merge_request_id (_) (_))
+        - (Join ON f.merge_request_diff_id = mr.latest_merge_request_diff_id (_) (_))
+        - (Filter pl.source = 'merge_request_event', pl.status = 'failed', ... (Deduplicate Final (Scan Table(gl_pipeline) AS pl)))
+        - (Filter d.id IN ?.id (Scan Table(gl_merge_request_diff) AS d))
       reject:
         - (Scan Table(gl_edge) ...)
         - (Scan Table(gl_ci_edge) ...)
-        - (Project 'TRIGGERED' AS e0_type, ... (_))
+        - (Scan Table(gl_diff_edge) ...)
     emitted:
       expect:
+        - (Join ON mr.id = pl.merge_request_id (_) (_))
         - (Aggregate group f.old_path, ... (_))
+      reject:
+        - (Scan Table(gl_edge) ...)
+        - (Scan Table(gl_ci_edge) ...)

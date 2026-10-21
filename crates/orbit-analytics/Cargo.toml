@@ -16,7 +16,7 @@ regress = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-tracing = { workspace = true }
+orbit-log-fields = { workspace = true }
 
 [build-dependencies]
 orbit-versions = { path = "../orbit-versions" }

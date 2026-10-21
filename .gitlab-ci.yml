@@ -360,6 +360,16 @@ rust-toolchain-sync-check:
   script:
     - mise run toolchain:check
 
+log-safety-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .mr-and-main-rules
+    - .no-cargo-home-cache
+  needs: []
+  script:
+    - mise run lint:logs
+
 metrics-catalog-check:
   stage: lint
   extends:
