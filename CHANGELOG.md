@@ -1,3 +1,14 @@
+## [0.152.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.151.1...v0.152.0) (2026-10-21)
+
+### Features
+
+* **cli:** send CLI version, OS, and arch on every CLI event ([538f543](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/538f5433680ecc7f553fe22d23d6ef3c43fad258)) by Jean-Gabriel Doyon
+* **indexer:** record how far indexed SDLC data trails the datalake ([d92a6fa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d92a6fad0e3be71507224f9cae32f198094aeb2d)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **indexer:** bound the merge request extract to the page keys ([794366f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/794366f88cbecf3aa3ae375d6281c8119406532c)) by Jean-Gabriel Doyon
+
 ## [0.151.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.151.0...v0.151.1) (2026-10-21)
 
 ### Fixes
