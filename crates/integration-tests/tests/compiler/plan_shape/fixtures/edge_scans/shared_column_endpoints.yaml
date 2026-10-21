@@ -1,8 +1,6 @@
 cases:
   - name: A project filter on one endpoint pins every endpoint scan of a code edge
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"i","entity":"ImportedSymbol","filters":{"project_id":42}},{"id":"d","entity":"Definition"}],"relationships":[{"type":"IMPORTS","from":"i","to":"d"}]}
       gql: |
         MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition) WHERE i.project_id = 42 RETURN i, d
     logical:
@@ -21,8 +19,6 @@ cases:
 
   - name: A filter on the target endpoint pins the source endpoint scan
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition"},{"id":"b","entity":"Definition","filters":{"project_id":42}}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
       gql: |
         MATCH (a:Definition)-[:CALLS]->(b:Definition) WHERE b.project_id = 42 RETURN a, b
     logical:
@@ -37,8 +33,6 @@ cases:
 
   - name: A selective shared-column filter stays on the edge scan
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"project_id":42,"branch":"main"}},{"id":"d","entity":"Definition"}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}]}
       gql: |
         MATCH (f:File)-[:DEFINES]->(d:Definition) WHERE f.project_id = 42 AND f.branch = 'main' RETURN f, d
     logical:
@@ -56,8 +50,6 @@ cases:
 
   - name: An endpoint takes only the shared columns its own table stores
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"name":"x"}},{"id":"b","entity":"Branch","filters":{"project_id":42}}],"relationships":[{"type":"CONTAINS","from":"p","to":"b"}]}
       gql: |
         MATCH (p:Project)-[:CONTAINS]->(b:Branch) WHERE p.name = 'x' AND b.project_id = 42 RETURN p, b
     logical:
@@ -73,8 +65,6 @@ cases:
             - (Filter p.project_id = 42, ... (_))
 
   - name: A same-alias column comparison stays on its own node scan
-    missing_frontends:
-      json: The JSON frontend does not expose property-to-property comparisons.
     query:
       gql: |
         MATCH (i:ImportedSymbol {id: 7})-[:IMPORTS]->(d:Definition) WHERE i.project_id = i.start_line RETURN i, d
@@ -91,8 +81,6 @@ cases:
 
   - name: An edge table without the column does not pin either endpoint
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"project_id":1}},{"id":"wi","entity":"WorkItem"}],"relationships":[{"type":"CLOSES","from":"mr","to":"wi"}]}
       gql: |
         MATCH (mr:MergeRequest {project_id: 1})-[:CLOSES]->(wi:WorkItem) RETURN mr, wi
     logical:
@@ -109,8 +97,6 @@ cases:
 
   - name: Variable-length hops do not pin the far endpoint
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"project_id":42}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","hops":[1,2]}]}
       gql: |
         MATCH (a:Definition)-[:CALLS*1..2]->(b:Definition) WHERE a.project_id = 42 RETURN a, b
     logical:
@@ -125,8 +111,6 @@ cases:
 
   - name: A two-hop chain pins the shared endpoint but not the far end
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"project_id":42}},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
       gql: |
         MATCH (a:Definition {project_id: 42})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition) RETURN a, b, c
     logical:

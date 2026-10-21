@@ -17,8 +17,6 @@ cases:
   - name: pinned_target_scopes_the_caller_join
     description: The caller redaction join carries the pinned definition's namespace prefix inside its latest-row pick, so the primary key bounds it before the id set
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
     expect:
@@ -67,8 +65,6 @@ cases:
         gl_code_edge:
           - { traversal_path: "1/100/1000/", project_id: 1002, branch: main, source_id: 99400, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition }
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
     expect:
@@ -91,8 +87,6 @@ cases:
         gl_code_edge:
           - { traversal_path: "1/100/1000/", project_id: 1002, branch: main, source_id: 99400, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition }
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
     expect:
@@ -117,8 +111,6 @@ cases:
         gl_code_edge:
           - { traversal_path: "1/100/1000/", project_id: 1002, branch: main, source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 99401, target_kind: Definition }
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[12000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":50}
       gql: |
         MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
     expect:
@@ -141,8 +133,6 @@ cases:
         gl_code_edge:
           - { traversal_path: "1/100/1000/", project_id: 1002, branch: main, source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 99401, target_kind: Definition }
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[12000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":50}
       gql: |
         MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
     expect:
