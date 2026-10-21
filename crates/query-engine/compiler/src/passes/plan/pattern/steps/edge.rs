@@ -36,13 +36,16 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             select_edge_layouts(pattern.model, &mut physical.edge_tables, &narrowed);
         }
         let mut predicates = self.edge_predicates(&physical);
-        for (node, ids) in endpoint_ids {
+        for (node, ids) in &endpoint_ids {
             if let Some(column) = relation.endpoint_column(node) {
-                predicates.push(membership(Column::new(alias, column), ids));
+                predicates.push(membership(Column::new(alias, column), ids.clone()));
             }
         }
         for node in endpoints {
-            if pattern.nodes[node].joined || !pattern.has_uncovered_filter(&pattern.nodes[node]) {
+            if pattern.nodes[node].joined
+                || !pattern.has_uncovered_filter(&pattern.nodes[node])
+                || endpoint_ids.iter().any(|(bound, _)| *bound == node)
+            {
                 continue;
             }
             let ids = self.node_ids(node)?;

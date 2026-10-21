@@ -26,26 +26,35 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         let key_column = Column::new(alias, &key.column);
         let mut predicates = pattern.nodes[endpoint].id_predicates(key_column.clone());
         if self.binding(endpoint).is_none() {
-            let reached = if pattern.endpoint_is_selective(endpoint) {
+            let selective = pattern.endpoint_is_selective(endpoint);
+            let mut reached = if selective {
                 None
             } else {
                 self.ids_through_holder(&key.node, &key.column)
             };
-            if let Some(reached) = reached.clone()
-                && pattern.nodes[endpoint].joined
+            if reached.is_none()
+                && !selective
+                && let Some(read) = self.nodes.get(&key.node).and_then(|state| state.read)
             {
-                self.set_ids(endpoint, reached);
-            } else {
-                let mut node = pattern.nodes[endpoint].clone();
-                node.columns = Some(ColumnSelection::List(vec![]));
-                if let Some(reached) = reached {
-                    node.predicates.push(membership(
-                        Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
-                        reached,
-                    ));
+                reached = Some(self.ids_reached_by(read, &key.column));
+            }
+            let read_later = pattern.nodes[endpoint].joined || pattern.holds_fk(endpoint);
+            match reached {
+                Some(reached) if read_later => self.set_ids(endpoint, reached),
+                None if read_later && !selective => {}
+                reached if self.ids(endpoint).is_none() => {
+                    let mut node = pattern.nodes[endpoint].clone();
+                    node.columns = Some(ColumnSelection::List(vec![]));
+                    if let Some(reached) = reached {
+                        node.predicates.push(membership(
+                            Column::new(&node.alias, DEFAULT_PRIMARY_KEY),
+                            reached,
+                        ));
+                    }
+                    let ids = self.node_ids_from(&node)?;
+                    predicates.push(membership(key_column.clone(), ids));
                 }
-                let ids = self.node_ids_from(&node)?;
-                predicates.push(membership(key_column.clone(), ids));
+                _ => {}
             }
         } else if let Some(ids) = self.ids(endpoint).cloned() {
             predicates.push(membership(key_column.clone(), ids));
@@ -76,7 +85,15 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         let key_column = Column::new(&node.alias, &key.column);
         node.predicates
             .extend(pattern.nodes[endpoint].id_predicates(key_column.clone()));
-        if let Some(ids) = self.endpoint_ids(endpoint) {
+        if self.binding(endpoint).is_none()
+            && self.ids(endpoint).is_none()
+            && pattern.has_selective_uncovered_filter(endpoint)
+        {
+            let mut far = pattern.nodes[endpoint].clone();
+            far.columns = Some(ColumnSelection::List(vec![]));
+            let ids = self.node_ids_from(&far)?;
+            node.predicates.push(membership(key_column.clone(), ids));
+        } else if let Some(ids) = self.endpoint_ids(endpoint) {
             node.predicates.push(membership(key_column.clone(), ids));
         }
         if let Some(ids) = self.reached_ids(&key.node) {

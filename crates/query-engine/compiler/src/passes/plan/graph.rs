@@ -294,9 +294,13 @@ impl RelationGraph {
                 && (!predicate.is_text_match() || predicate.filters_sort_key(key, true))
         };
         if !selective_latest || !predicates.iter().any(bounds_scan) {
+            let (keyed, rest): (Vec<_>, Vec<_>) = predicates
+                .into_iter()
+                .partition(|predicate| predicate.filters_sort_key(key, false));
             let read = self.read(table, alias, true);
+            let read = self.filter(read, keyed);
             let owned = self.owned(read, owner, alias);
-            return self.filter(owned, predicates);
+            return self.filter(owned, rest);
         }
         let (identity, rest): (Vec<_>, Vec<_>) = predicates
             .iter()

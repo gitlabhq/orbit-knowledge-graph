@@ -171,5 +171,5 @@ cases:
     physical:
       clickhouse:
         planned:
-          expect: ["(Filter j.id >= 1, j.id <= 100002, j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
+          expect: ["(Filter j._deleted = false (Bind j (Filter j.id >= 1, j.id <= 100002 (Deduplicate Final (Scan Table(gl_job) AS j)))))"]
           reject: ["(Deduplicate LimitBy ... (_))"]
