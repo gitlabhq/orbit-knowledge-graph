@@ -54,6 +54,11 @@ To answer package registry questions with GitLab Orbit:
 
 During the beta, GitLab Orbit queries don't use GitLab Credits.
 
+Each step shows the query in the JSON query language first, which GitLab Orbit accepts by default.
+If your account has openCypher turned on, JSON queries fail with a syntax error. Use the openCypher
+version under each JSON query instead. For more information, see
+[the API access page](../access/api.md).
+
 ## Step 1: Run your first query
 
 Start with a simple question: which five npm packages in your group are the newest?
@@ -106,6 +111,16 @@ Save this JSON to `newest-packages.json`. Replace `my-group/` with your top-leve
   },
   "response_format": "llm"
 }
+```
+
+With openCypher, pass the query inline to `glab orbit query`:
+
+```gql orbit-query
+MATCH (pkg:Package {package_type: 'npm'})-[:IN_PROJECT]->(p:Project)
+WHERE p.full_path STARTS WITH 'my-group/'
+RETURN pkg.name, pkg.version, pkg.package_type, pkg.created_at, p.full_path
+ORDER BY pkg.created_at DESC
+LIMIT 5
 ```
 
 Run the query with the GitLab CLI:
@@ -226,6 +241,15 @@ Save this JSON to `dependents.json` and run the same command.
 }
 ```
 
+With openCypher, pass the query inline to `glab orbit query`:
+
+```gql orbit-query
+MATCH (pkg:Package)-[:DECLARES_DEPENDENCY]->(d:Dependency {name: 'lodash'}), (pkg)-[:IN_PROJECT]->(p:Project)
+WHERE p.full_path STARTS WITH 'my-group/'
+RETURN pkg.name, pkg.version, d.version_pattern, p.full_path
+LIMIT 100
+```
+
 ```shell
 glab orbit query --file dependents.json
 ```
@@ -321,6 +345,14 @@ with your own.
 }
 ```
 
+With openCypher, pass the query inline to `glab orbit query`:
+
+```gql orbit-query
+MATCH (pkg:Package {name: '@my-group/my-package', version: '1.4.2'})-[:BUILT_BY]->(pl:Pipeline), (u:User)-[:TRIGGERED]->(pl)
+RETURN pkg.name, pkg.version, pl.iid, pl.ref, pl.sha, pl.tag, pl.status, pl.source, pl.created_at, u.username
+LIMIT 10
+```
+
 ```shell
 glab orbit query --file built-by.json
 ```
@@ -414,6 +446,16 @@ Save this JSON to `big-files.json` and run the same command.
 }
 ```
 
+With openCypher, pass the query inline to `glab orbit query`:
+
+```gql orbit-query
+MATCH (pkg:Package)-[:HAS_PACKAGE_FILE]->(f:PackageFile), (f)-[:IN_PROJECT]->(p:Project)
+WHERE f.size > 104857600 AND p.full_path STARTS WITH 'my-group/'
+RETURN pkg.name, pkg.version, pkg.package_type, f.file_name, f.size, p.full_path
+ORDER BY f.size DESC
+LIMIT 100
+```
+
 ```shell
 glab orbit query --file big-files.json
 ```
@@ -446,7 +488,7 @@ How many npm packages does each project in your group have?
 Today with REST: page through `GET /groups/:id/packages?package_type=npm` and count the results
 yourself.
 
-This is an `aggregation` query. It uses `group_by` on the project and `count` on the packages. It
+This is an `aggregation` query. It uses `group_by` on the project and `count` on the packages. The `status` filter counts only packages that GitLab lists. Without it, the count also includes packages still `processing` and packages `pending_destruction`. It
 sorts with `aggregation_sort`. Save this JSON to `counts.json` and run the same command.
 
 ```json orbit-query
@@ -458,7 +500,14 @@ sorts with `aggregation_sort`. Save this JSON to `counts.json` and run the same 
         "id": "pkg",
         "entity": "Package",
         "filters": {
-          "package_type": "npm"
+          "package_type": "npm",
+          "status": {
+            "in": [
+              "default",
+              "error",
+              "deprecated"
+            ]
+          }
         }
       },
       {
@@ -495,6 +544,16 @@ sorts with `aggregation_sort`. Save this JSON to `counts.json` and run the same 
   },
   "response_format": "llm"
 }
+```
+
+With openCypher, pass the query inline to `glab orbit query`:
+
+```gql orbit-query
+MATCH (pkg:Package {package_type: 'npm'})-[:IN_PROJECT]->(p:Project)
+WHERE p.full_path STARTS WITH 'my-group/' AND pkg.status IN ['default', 'error', 'deprecated']
+RETURN p.full_path, count(pkg) AS packages
+ORDER BY packages DESC
+LIMIT 20
 ```
 
 ```shell
