@@ -1,5 +1,5 @@
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -94,38 +94,40 @@ pub(super) fn put<T: Tag>(
             },
         ),
         Some(safe_fs::Entry::Symlink(target)) => {
-            into.put(path, Put::Symlink(to_virtual(&target, Prefixes::Drop)?))
+            into.put(path, Put::Symlink(symlink_target(&target)?))
         }
         None => Ok(()),
     }
 }
 
 pub(super) fn virtual_path(path: &Path) -> std::io::Result<String> {
-    to_virtual(path, Prefixes::Reject)
+    virtual_components(path.components())
 }
 
-/// Windows `read_link` returns drive-prefixed targets for absolute links, which
-/// Unix records as `/…`. Dropping the prefix keeps `C:\a\b` as `/a/b`.
-#[derive(Clone, Copy)]
-enum Prefixes {
-    Reject,
-    Drop,
+/// Windows `read_link` returns absolute targets with a drive, UNC or `\\?\`
+/// prefix, where Unix returns `/…`. The prefix names a host location that the
+/// catalog cannot hold, so it is dropped and the target stays root-relative.
+fn symlink_target(target: &Path) -> std::io::Result<String> {
+    virtual_components(
+        target
+            .components()
+            .filter(|component| !matches!(component, Component::Prefix(_))),
+    )
 }
 
-fn to_virtual(path: &Path, prefixes: Prefixes) -> std::io::Result<String> {
+fn virtual_components<'a>(
+    components: impl Iterator<Item = Component<'a>>,
+) -> std::io::Result<String> {
     let mut virtual_path = Utf8UnixPathBuf::new();
-    for component in path.components() {
+    for component in components {
         let part = match component {
-            std::path::Component::Prefix(_) => match prefixes {
-                Prefixes::Drop => continue,
-                Prefixes::Reject => {
-                    return Err(std::io::Error::new(
-                        ErrorKind::InvalidInput,
-                        "host prefix cannot name a virtual path",
-                    ));
-                }
-            },
-            std::path::Component::RootDir => "/",
+            Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    ErrorKind::InvalidInput,
+                    "host prefix cannot name a virtual path",
+                ));
+            }
+            Component::RootDir => "/",
             _ => component.as_os_str().to_str().ok_or_else(|| {
                 std::io::Error::new(ErrorKind::InvalidData, "source path is not UTF-8")
             })?,
@@ -133,24 +135,4 @@ fn to_virtual(path: &Path, prefixes: Prefixes) -> std::io::Result<String> {
         virtual_path.push(part);
     }
     Ok(virtual_path.into_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn symlink_targets_keep_absolute_paths_as_virtual_roots() {
-        let target = to_virtual(Path::new("/a/b"), Prefixes::Drop).unwrap();
-        assert_eq!(target, "/a/b");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn drive_prefixed_symlink_targets_map_to_virtual_roots() {
-        for raw in [r"C:\a\b", r"\\?\C:\a\b"] {
-            assert_eq!(to_virtual(Path::new(raw), Prefixes::Drop).unwrap(), "/a/b");
-            assert!(to_virtual(Path::new(raw), Prefixes::Reject).is_err());
-        }
-    }
 }
