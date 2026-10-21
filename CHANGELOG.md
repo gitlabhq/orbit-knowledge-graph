@@ -1,3 +1,18 @@
+## [0.151.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.150.0...v0.151.0) (2026-10-21)
+
+### Features
+
+* **gql:** replace cursor pagination with openCypher SKIP/LIMIT ([3d99972](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3d9997208eae8dbda4ad18eb0477592fefb71ec3)) by Aaron Algutifan
+
+### Fixes
+
+* **code-graph-incremental:** link Go calls into other packages through go.mod ([9c5089b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9c5089ba4db864f99dd39a00a2d15aacf358008e)) by Aaron Algutifan
+* **query:** close outstanding test coverage and perf gaps left by planner changes ([5847b2f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5847b2fc5bb56d06592c1de57f9d848f732914ac)) by Michael Usachenko
+
+### Other
+
+* **deps:** bump rustls-webpki and webpki-roots for the emSign root advisories ([be410ff](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/be410ff19626330b8c6b7a0d10fb10442a651a1c)) by Michael Usachenko
+
 ## [0.150.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.149.0...v0.150.0) (2026-10-20)
 
 ### Features
