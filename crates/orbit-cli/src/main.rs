@@ -41,17 +41,12 @@ struct Cli {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(about = descriptions::short("index"))]
 struct IndexArgs {
     /// Repository path, a folder inside one, or a directory that holds repositories (default: current directory).
     #[arg(value_name = "PATH", default_value = ".")]
     path: PathBuf,
 
-    /// Number of worker threads (0 = auto-detect based on CPU cores)
-    #[arg(short, long, default_value = "0")]
-    threads: usize,
-
-    /// Include detailed statistics in output
+    /// Include detailed statistics, with the slowest files per phase
     #[arg(short, long)]
     stats: bool,
 
@@ -59,9 +54,32 @@ struct IndexArgs {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Write this revision to a specific DuckDB file.
+    /// DuckDB file to write (default: ~/.gitlab/orbit/graph.duckdb).
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
+
+    /// Seconds a language family may take before the run stops (default: no limit).
+    #[arg(long, value_name = "SECONDS")]
+    budget: Option<u64>,
+}
+
+impl IndexArgs {
+    fn into_parts(self) -> (PathBuf, commands::index::incremental::Options) {
+        let options = commands::index::incremental::Options {
+            stats: self.stats,
+            verbose: self.verbose,
+            db: self.db,
+            budget_seconds: self.budget,
+        };
+        (self.path, options)
+    }
+}
+
+fn print_outputs(outputs: Vec<Vec<commands::index::incremental::FamilyOutput>>) -> Result<()> {
+    for output in outputs {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+    Ok(())
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -546,6 +564,7 @@ impl SetupFlags {
 enum Commands {
     /// Print the version string and exit.
     Version,
+    #[command(about = descriptions::short("index"))]
     Index(IndexArgs),
     Grep(Box<GrepArgs>),
     Context(ContextArgs),
@@ -835,13 +854,10 @@ async fn dispatch(
             println!("{}", env!("ORBIT_VERSION"));
             Ok(())
         }
-        Commands::Index(IndexArgs {
-            path,
-            threads,
-            stats,
-            verbose,
-            db,
-        }) => commands::index::run(path, threads, stats, verbose, db),
+        Commands::Index(args) => {
+            let (path, options) = args.into_parts();
+            print_outputs(commands::index::incremental::index(path, options)?)
+        }
         Commands::Grep(args) => run_grep(*args),
         Commands::Context(args) => commands::context::run(args),
         Commands::Sql(SqlArgs {
@@ -1122,7 +1138,7 @@ mod tests {
     #[test]
     fn former_local_and_remote_verbs_parse_at_top_level() {
         let Commands::Index(index) =
-            Cli::parse_from(["orbit", "index", "/tmp/repo", "--threads", "4"]).command
+            Cli::parse_from(["orbit", "index", "/tmp/repo", "--budget", "4"]).command
         else {
             panic!("expected index");
         };
@@ -1130,7 +1146,7 @@ mod tests {
             index,
             IndexArgs {
                 path: "/tmp/repo".into(),
-                threads: 4,
+                budget: Some(4),
                 stats: false,
                 verbose: false,
                 db: None,

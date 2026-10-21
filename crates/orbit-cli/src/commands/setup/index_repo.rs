@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use super::Target;
-use crate::commands::index::{index_command_line, index_with_progress};
+use crate::commands::index::{index_and_suggest, index_command_line};
 use crate::tui;
 use crate::workspace::git_toplevel;
 
@@ -41,7 +41,7 @@ pub(super) fn index_path_for(target: &Target, repo_root: &Path) -> String {
 }
 
 pub(super) fn index_repository(repo_root: PathBuf, index_path: String) -> Result<IndexOutcome> {
-    match index_with_progress(repo_root, None) {
+    match index_and_suggest(repo_root, None) {
         Ok(suggested_grep) => Ok(IndexOutcome::Indexed { suggested_grep }),
         Err(error) if tui::is_cancelled(&error) => Err(error),
         Err(error) => {

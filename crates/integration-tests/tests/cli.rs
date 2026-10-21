@@ -221,6 +221,52 @@ fn reindex_idempotent() {
 }
 
 #[test]
+fn incremental_index_follows_the_working_tree() {
+    let data = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    let write = |path: &str, text: &str| std::fs::write(repo.join(path), text).unwrap();
+    init_repo_at(
+        repo,
+        &[
+            ("Cargo.toml", "[package]\nname = \"demo\"\n"),
+            ("lib/greeter.rb", "class Greeter\nend\n"),
+            ("src/lib.rs", "pub fn helper() {}\n"),
+        ],
+    );
+    let names = |sql: &str| -> Vec<String> {
+        assert!(orbit_index(repo, data.path()));
+        let path = repo.to_str().unwrap();
+        let mut sql_cmd = orbit_cmd();
+        sql_cmd.args(["sql", "-F", "json", "--repo", path, sql]);
+        let out = sql_cmd.env("ORBIT_DATA_DIR", data.path()).output().unwrap();
+        let found: Value = serde_json::from_slice(&out.stdout).unwrap();
+        rows(&found)
+            .iter()
+            .map(|r| r["n"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let definitions = "SELECT fqn AS n FROM gl_definition ORDER BY fqn";
+    assert_eq!(names(definitions), ["Greeter", "helper"]);
+    write("src/lib.rs", "pub fn helper() {}\npub fn draft() {}\n");
+    assert_eq!(names(definitions), ["Greeter", "draft", "helper"]);
+    git(repo, &["mv", "src/lib.rs", "src/main.rs"]);
+    std::fs::create_dir_all(repo.join("py")).unwrap();
+    write("py/mod.py", "def py_fn():\n    pass\n");
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-qm", "rename, add python"]);
+    assert_eq!(
+        names(definitions),
+        ["Greeter", "draft", "helper", "py.mod.py_fn"]
+    );
+    let files = names("SELECT path AS n FROM gl_file ORDER BY path");
+    assert_eq!(
+        files,
+        ["Cargo.toml", "lib/greeter.rb", "py/mod.py", "src/main.rs"]
+    );
+}
+
+#[test]
 fn index_db_flag_writes_to_custom_path() {
     let tmp = tempfile::TempDir::new().unwrap();
     let db_path = tmp.path().join("custom.duckdb");
