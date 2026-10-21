@@ -20,7 +20,7 @@ pub(crate) enum Kind {
 const SEARCH_COMMANDS: &[&str] = &["ack", "ag", "egrep", "fgrep", "grep", "rg", "ripgrep"];
 
 const COMMAND_WRAPPERS: &[&str] = &[
-    "command", "env", "git", "nice", "nohup", "sudo", "time", "xargs",
+    "command", "env", "git", "nice", "nohup", "sudo", "time", "timeout", "xargs",
 ];
 
 const WRAPPER_VALUE_FLAGS: &[&str] = &[
@@ -70,7 +70,7 @@ const VALUE_LONG: &[&str] = &[
 ];
 
 /// Returns whether it nudged, so telemetry counts nudges rather than every tool call.
-pub(crate) fn run(kind: Kind) -> bool {
+pub(crate) fn run(kind: Kind, gitlab: bool) -> bool {
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() || !local_graph_exists() {
         return false;
@@ -78,19 +78,44 @@ pub(crate) fn run(kind: Kind) -> bool {
     let Ok(call) = serde_json::from_str::<Value>(&input) else {
         return false;
     };
-    respond(kind, &call)
+    respond(kind, &call, gitlab)
         .inspect(|response| println!("{response}"))
         .is_some()
 }
 
-fn respond(kind: Kind, call: &Value) -> Option<Value> {
-    (matches!(kind, Kind::Search) && should_nudge(call)).then(|| {
-        json!({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "additionalContext": spec::search_nudge_text(),
-            }
-        })
+fn nudge(text: &str) -> Value {
+    json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": text,
+        }
+    })
+}
+
+fn respond(kind: Kind, call: &Value, gitlab: bool) -> Option<Value> {
+    if !matches!(kind, Kind::Search) {
+        return None;
+    }
+    if gitlab && calls_glab(call) {
+        return Some(nudge(spec::gitlab_nudge_text()));
+    }
+    should_nudge(call).then(|| nudge(spec::search_nudge_text()))
+}
+
+fn calls_glab(call: &Value) -> bool {
+    let tool_input = call.get("tool_input").unwrap_or(call);
+    let command = tool_input
+        .get("command")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    segments(command).iter().any(|(words, _)| {
+        let mut words = words.iter().map(String::as_str).skip_while(|w| {
+            w.starts_with('-')
+                || w.contains('=')
+                || w.parse::<f64>().is_ok()
+                || COMMAND_WRAPPERS.contains(&program(w))
+        });
+        words.next().map(program) == Some("glab") && words.next() != Some("orbit")
     })
 }
 
@@ -309,12 +334,12 @@ mod tests {
         ] {
             let call =
                 json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_input": {"command": command}});
-            assert!(respond(Kind::Search, &call).is_some(), "{command}");
+            assert!(respond(Kind::Search, &call, false).is_some(), "{command}");
         }
         let tool = json!({"tool_name": "Grep", "tool_input": {"pattern": "fn main"}});
-        assert!(respond(Kind::Search, &tool).is_some());
+        assert!(respond(Kind::Search, &tool, false).is_some());
         let file = json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_name": "Grep", "tool_input": {"pattern": "rand", "path": "Cargo.toml"}});
-        assert!(respond(Kind::Search, &file).is_none());
+        assert!(respond(Kind::Search, &file, false).is_none());
     }
 
     #[test]
@@ -331,15 +356,15 @@ mod tests {
         ] {
             let call =
                 json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_input": {"command": command}});
-            assert!(respond(Kind::Search, &call).is_none(), "{command}");
+            assert!(respond(Kind::Search, &call, false).is_none(), "{command}");
         }
         let outside = json!({"cwd": "/", "tool_input": {"command": "rg foo"}});
-        assert!(respond(Kind::Search, &outside).is_none());
+        assert!(respond(Kind::Search, &outside, false).is_none());
         let elsewhere = json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_name": "Grep", "tool_input": {"pattern": "x", "path": "/usr"}});
-        assert!(respond(Kind::Search, &elsewhere).is_none());
+        assert!(respond(Kind::Search, &elsewhere, false).is_none());
         let glob = json!({"tool_name": "Glob", "tool_input": {"pattern": "*.rs"}});
-        assert!(respond(Kind::Search, &glob).is_none());
+        assert!(respond(Kind::Search, &glob, false).is_none());
         let read = json!({"tool_input": {"file_path": "/repo/src/main.rs"}});
-        assert!(respond(Kind::Read, &read).is_none());
+        assert!(respond(Kind::Read, &read, false).is_none());
     }
 }
