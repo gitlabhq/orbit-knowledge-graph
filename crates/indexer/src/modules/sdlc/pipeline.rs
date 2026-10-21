@@ -17,7 +17,7 @@ use crate::retry::{Backoff, LocalRetry, Step, drive_with};
 
 use super::datalake::{DatalakeQuery, FetchedPage, ScanStats, is_arrow_string_overflow};
 use super::metrics::SdlcMetrics;
-use super::paging::{block_size_for, next_page_limit};
+use super::paging::{block_size_for, first_page_limit, next_page_limit};
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore, WindowBounds};
@@ -152,6 +152,7 @@ impl Pipeline {
         let outputs = transform.outputs().to_vec();
         let params = base_query.params();
         let plan_limit = base_query.batch_size();
+        base_query.set_batch_size(first_page_limit(plan_limit));
         let mut stats = PipelineStats::default();
         let mut block_size = None;
 
