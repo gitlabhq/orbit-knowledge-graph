@@ -259,11 +259,13 @@ fn incremental_index_follows_the_working_tree() {
         names(definitions),
         ["Greeter", "draft", "helper", "py.mod.py_fn"]
     );
-    let files = names("SELECT path AS n FROM gl_file ORDER BY path");
+    let files = "SELECT path AS n FROM gl_file ORDER BY path";
     assert_eq!(
-        files,
+        names(files),
         ["Cargo.toml", "lib/greeter.rb", "py/mod.py", "src/main.rs"]
     );
+    std::fs::remove_file(repo.join("Cargo.toml")).unwrap();
+    assert_eq!(names(files), ["lib/greeter.rb", "py/mod.py", "src/main.rs"]);
 }
 
 #[test]

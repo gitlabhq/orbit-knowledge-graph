@@ -54,14 +54,20 @@ impl Project<'_> {
         let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
         let changed = input::paths(&self.git.repo_path, changes.changed)?;
         let mut changed = input::split(&changed, owner);
-        let mut removed = input::split_removed(changes.removed, owner);
+        let families = saved
+            .families
+            .iter()
+            .map(|name| {
+                SupportLang::from_family(name).with_context(|| {
+                    format!(
+                        "incremental state names a language family this build does not know: {name}"
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut removed = input::split_removed(changes.removed, owner, &families);
         let mut work = BTreeMap::new();
-        for name in &saved.families {
-            let family = SupportLang::from_family(name).with_context(|| {
-                format!(
-                    "incremental state names a language family this build does not know: {name}"
-                )
-            })?;
+        for family in families {
             let paths = changed
                 .remove(family.family())
                 .map_or_else(Vec::new, |(_, paths)| paths);

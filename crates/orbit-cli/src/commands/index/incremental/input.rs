@@ -96,14 +96,29 @@ fn file_name(path: &str) -> &str {
 pub(super) fn split_removed(
     paths: Vec<String>,
     owner: Option<SupportLang>,
+    families: &[SupportLang],
 ) -> BTreeMap<&'static str, Vec<String>> {
-    let mut families: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
+    let readers: Vec<_> = families
+        .iter()
+        .filter(|family| Some(**family) != owner)
+        .map(|family| (family.family(), manifests(*family)))
+        .collect();
+    let mut removed: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
     for path in paths {
-        if let Some(language) = parsed_language(&path).or(owner) {
-            families.entry(language.family()).or_default().push(path);
+        if let Some(language) = parsed_language(&path) {
+            removed.entry(language.family()).or_default().push(path);
+            continue;
+        }
+        for (family, names) in &readers {
+            if names.iter().any(|name| file_name(&path) == name) {
+                removed.entry(family).or_default().push(path.clone());
+            }
+        }
+        if let Some(owner) = owner {
+            removed.entry(owner.family()).or_default().push(path);
         }
     }
-    families
+    removed
 }
 
 fn parsed_language(path: &str) -> Option<SupportLang> {
