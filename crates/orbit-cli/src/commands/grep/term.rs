@@ -67,6 +67,13 @@ impl Term {
         }
     }
 
+    pub(super) fn mentions(&self, name: &str) -> bool {
+        match &self.regex {
+            Some((line, _)) => line.is_match(name),
+            None => !compact(&self.raw).is_empty() && compact(name).contains(&compact(&self.raw)),
+        }
+    }
+
     pub(super) fn names(&self, name: &str) -> bool {
         match &self.regex {
             Some((_, whole)) => whole.is_match(name),

@@ -12,7 +12,6 @@ bundled = ["duckdb/bundled", "duckdb/json"]
 [dependencies]
 duckdb = { workspace = true }
 arrow = { workspace = true }
-code-graph = { path = "../code-graph" }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
 orbit-arrow = { path = "../utils/arrow" }

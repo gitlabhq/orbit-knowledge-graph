@@ -1,12 +1,33 @@
 name: grep
-version: 2.1.2
+version: 2.8.0
 short: Search every line in local code, tests, config, and docs
 description: >-
   Search every line in local code, tests, config, and docs, like ripgrep.
   Matching ignores case, `_`, and `-`; quote `a|b|c` for OR alternatives.
-  Each file is one row with its matching lines grouped under their enclosing
-  `Kind name:start-end ←callers →callees`. Files that define a term come first,
+  Output follows rg's heading layout: each file's path once, then `line:text` for each match.
+  A `line-» Kind name:start-end` line precedes the matches inside each definition.
+  More than 20 files get a `»` index by directory first.
+  Import lines get `line-» imports ...`, and other code gets `line-» outside indexed definitions`.
+  Lines print in full; -m caps matches per file and -M caps line width.
+  A missing path searches tracked paths with the same last segment.
+  A scoped search with no matches widens one directory at a time and says so.
+  Files that define a term come first,
   then code, tests, and config or docs. A definition the query names prints
   first with its source. Pass paths as with rg; rg and grep flags such as
-  -A, -l, -w, and -g work. `--kind` takes definition kinds such as
-  `Class,Method`, or `File` and `Directory` to list where matches are.
+  -A, -l, -w, and -g work.
+  A kind and a colon start a search for the words after it, up to the next kind:
+  `orbit grep "mr:rate limit def:throttle"` runs two searches. Kinds are graph
+  nodes or short names: `def:`, `class:`, `method:`, `dir:`, and on GitLab `mr:`,
+  `issue:`, `branch:`, `commit:`, `comment:`. A trailing `def:` applies to the
+  words before it. `file:x` keeps paths containing x, and alone lists them.
+  `repo:group/project` searches that GitLab project. `-F` reads the query literally.
+  A plain search without paths or file filters also searches the GitLab group
+  behind `origin`. Its issues, merge requests, commits, notes, and other projects'
+  code print after local results, with tokens for `context`. Name a GitLab project,
+  group, URL, `Project[id]`, or `Group[id]` as a path to search it instead,
+  including its code when it has no local checkout. An indexed checkout of that
+  project is searched locally.
+  `mr:`, `issue:`, `commit:`, `comment:`, and `milestone:` search only GitLab;
+  `user:`, `project:`, and `group:` add scopes a plain search skips.
+  `branch:` finds branches by words from their names, with their merge requests
+  and pipelines.

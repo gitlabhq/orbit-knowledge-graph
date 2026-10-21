@@ -16,6 +16,7 @@ pub(super) struct Hit {
     pub(super) line: usize,
     pub(super) text: String,
     pub(super) def: Option<Def>,
+    pub(super) imports: Vec<String>,
     /// A `-A`/`-B`/`-C` line around a match rather than a match.
     pub(super) context: bool,
 }
@@ -37,6 +38,7 @@ impl Collect<'_> {
                 .trim_end_matches(['\n', '\r'])
                 .to_string(),
             def: None,
+            imports: Vec::new(),
             context,
         });
     }
@@ -57,6 +59,8 @@ impl Sink for Collect<'_> {
     }
 }
 
+const READERS: usize = 8;
+
 pub(super) fn scan(
     repo: &Path,
     paths: &[String],
@@ -71,6 +75,7 @@ pub(super) fn scan(
         walk.add(root);
     }
     walk.hidden(false)
+        .threads(READERS.max(std::thread::available_parallelism().map_or(1, usize::from)))
         .require_git(false)
         .filter_entry(|entry| entry.file_name() != ".git");
     if !options.globs.is_empty() {

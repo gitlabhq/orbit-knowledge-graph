@@ -4,7 +4,6 @@ use std::time::Duration;
 use arrow::record_batch::RecordBatch;
 use duckdb::params;
 
-use crate::converter::LocalGraphData;
 use crate::error::{DuckDbError, Result};
 
 const MAX_OPEN_RETRIES: u32 = 10;
@@ -123,13 +122,6 @@ impl DuckDbClient {
         for table in tables {
             self.conn
                 .execute(&format!("DELETE FROM {table}"), params![])?;
-        }
-        Ok(())
-    }
-
-    pub fn insert_graph(&self, data: LocalGraphData) -> Result<()> {
-        for (table, batch) in data.tables {
-            self.insert_batch(&table, &batch)?;
         }
         Ok(())
     }

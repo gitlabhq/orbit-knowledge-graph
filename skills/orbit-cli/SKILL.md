@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.24.1
+version: 0.28.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -47,23 +47,58 @@ If they decline, note the discrepancy in one line and continue with the correcte
 
 ```shell
 orbit index .
-orbit grep "rate limit" src --kind Method,Function
+orbit grep "method:rate limit" src
 orbit grep 'query_arrow|insert_batch|execute' crates/duckdb-client
 orbit context duckdb_client::search::DuckDbSearch::grep src/lib.rs:120-180 crates/duckdb-client
 ```
 
 Quote `a|b|c` for OR alternatives. Plain words ignore case, `_`, and `-`; terms
-with regex characters match as regex. Each file is one row: matching lines are
-grouped under their enclosing definition as `Kind name:start-end`, followed by
-`←callers` and `→callees`. Files that define a term come first, then code, tests,
-and config or docs. A definition the query names prints first with its source.
+with regex characters match as regex. Output follows rg's heading layout: each
+file's path once, then `line:text` per match, in full. A `line-» Kind name:start-end`
+line precedes the matches inside each definition. `line-» imports`
+names what an import line brings in, and `line-» outside indexed definitions` marks
+code no definition encloses. A path that does not exist searches tracked paths with the same last segment.
+A scoped search with no matches widens one directory at a time. A `»` line says what was searched.
+A search that matches more than 20 files lists them by directory, with matching lines per file,
+before the matches. Pipe through `head` to bound output; `-m N` caps matches
+per file and `-M N` hides lines wider than N. Files that define
+a term come first, then code, tests, and config or docs. A definition the query names prints first with its source.
 The usual rg and grep flags work: `-A`/`-B`/`-C`, `-l`, `-c`, `-w`, `-F`, `-g`.
-`--kind` takes definition kinds such as `Class,Method`. `--kind File` and
-`--kind Directory` list where the matches are, with their definitions.
+A kind and a colon start a search for the words after it, up to the next kind, so
+`orbit grep "mr:rate limit def:throttle"` runs two searches. Kinds are graph nodes
+or short names: `def:`, `class:`, `method:`, or `function:` for definitions, and
+`file:` or `dir:` alone list where matches are. A trailing `def:` applies to the
+words before it. `file:x` keeps paths containing x, and alone lists them.
+Unknown names such as `std::io` stay literal, and `-F` turns qualifiers off.
 
-Pass names as printed by `grep`, paths, ranges, or directories to `context`.
+A plain search with no paths or file filters also searches the GitLab group
+behind `origin`. It finds issues, merge requests, commits, notes, and code in other projects.
+Those results print after the local ones as tokens such as `MergeRequest[42]`.
+Name `group/project`, `Project[id]`, or `Group[id]` as a path to search another
+project or group, including its code when there is no local checkout.
+`mr:`, `issue:`, `commit:`, and `comment:` search GitLab only.
+`branch:` finds branches with their merge requests and pipelines, and
+`repo:group/project` names the project.
+
+```shell
+orbit grep "mr:rate limit repo:gitlab-org/gitlab"
+orbit grep "branch:approval rules"
+orbit context mr:42 issue:7 src/lib.rs:120-180
+orbit context branch:fix-ci pipeline:123 job:456 commit:0123abc repo:gitlab-org/cli
+```
+
+Pass names as printed by `grep`, paths, ranges, directories, or GitLab targets
+as grep prints them: `mr:42`, `issue:7`, `branch:name`, `pipeline:123`,
+`job:456`, `commit:sha`. They resolve in the `origin` project unless
+`repo:group/project` names another; `mr:group/project!42` names one per target.
+Merge requests and issues return description, comments, and review threads, and
+merge requests add changed files and failed CI jobs. A branch reads its merge
+request, or its latest pipeline. Pipelines list failed jobs, and jobs show
+their logs; commits show message, changed files, and merge requests. Bare
+`orbit context` reads the current branch. A `Definition:<id>` from another indexed checkout reads that checkout.
 Definition targets show full source and indexed relationships. File targets show
 a compact map and at most ten connections per section, with omitted counts.
+Line ranges show only the numbered lines.
 `<--` is a caller and `-->` is a callee. Reuse the returned source.
 
 <!-- orbit:section quick-start -->
