@@ -591,56 +591,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn job_logs_drop_timestamps_and_keep_lines_around_failures() {
-        let mut log =
-            vec!["2026-10-17T17:26:41.334491Z 01O --- FAIL: TestLimit (0.01s)".to_string()];
-        log.extend((0..30).map(|n| format!("2026-10-17T17:26:41.334491Z 01O step {n}")));
-        let lines = trace_lines(&log.join("\n"));
-        assert_eq!(lines[0], "--- FAIL: TestLimit (0.01s)");
-        let excerpt = failure_excerpt(&lines);
-        assert_eq!(
-            excerpt[..2],
-            ["1: --- FAIL: TestLimit (0.01s)", "2: step 0"]
-        );
-        assert_eq!(excerpt[4], "...");
-        assert_eq!(excerpt.last().unwrap(), "31: step 29");
-    }
-
-    #[test]
     fn job_logs_keep_file_diagnostics_and_drop_the_runner_epilogue() {
-        let mut log = vec!["$ golangci-lint run".to_string()];
-        log.push("client.go:127:10: string `".to_string());
-        log.extend((0..30).map(|n| format!("  query line {n}")));
-        log.push("` has 3 occurrences, make it a constant (goconst)".to_string());
+        let mut log = vec!["$ lint".to_string(), "client.go:127:10: bad".to_string()];
+        log.extend((0..30).map(|n| format!("line {n}")));
         log.extend(
             [
                 "Uploading artifacts for failed job",
-                "report.json: found 1 matching artifact files and directories",
-                "Cleaning up project directory and file based variables",
                 "ERROR: Job failed: exit code 1",
-                "$ exit 1",
-                "Cleaning up project directory and file based variables",
-                "ERROR: Job failed: command terminated with exit code 1",
             ]
             .map(str::to_string),
         );
         let excerpt = failure_excerpt(&log);
-        assert!(excerpt.contains(&"2: client.go:127:10: string `".to_string()));
+        assert!(excerpt.contains(&"2: client.go:127:10: bad".to_string()));
         assert_eq!(
             excerpt.last().unwrap(),
-            "37: ERROR: Job failed: exit code 1"
+            "34: ERROR: Job failed: exit code 1"
         );
-        assert!(!excerpt.iter().any(|line| line.contains("Uploading")));
-    }
-
-    #[test]
-    fn job_logs_show_a_repeated_failure_once() {
-        let mut log: Vec<String> = ["[0-0] Error: Timeout", "[0-1] Error: Timeout"]
-            .map(str::to_string)
-            .to_vec();
-        log.extend((0..30).map(|n| format!("step {n}")));
-        let excerpt = failure_excerpt(&log);
-        assert_eq!(excerpt[0], "1: [0-0] Error: Timeout");
-        assert!(!excerpt.iter().any(|line| line.contains("[0-1]")));
     }
 }

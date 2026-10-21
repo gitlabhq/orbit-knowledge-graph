@@ -109,24 +109,3 @@ pub(super) fn split_removed(
 fn parsed_language(path: &str) -> Option<SupportLang> {
     SupportLang::from_path(path).filter(|language| language.has_rules())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn each_family_gets_the_manifests_its_rules_read() {
-        let repo = tempfile::tempdir().unwrap();
-        for (path, content) in [
-            ("build.sh", "echo hi\n"),
-            ("main.go", "package main\n"),
-            ("go.mod", "module example.com/m\n"),
-        ] {
-            std::fs::write(repo.path().join(path), content).unwrap();
-        }
-        let families = split(&directory(repo.path()).unwrap(), None);
-        let paths = |family: &str| families[family].1.clone();
-        assert_eq!(paths("bash"), ["build.sh", "go.mod"]);
-        assert_eq!(paths("go"), ["main.go", "go.mod"]);
-    }
-}

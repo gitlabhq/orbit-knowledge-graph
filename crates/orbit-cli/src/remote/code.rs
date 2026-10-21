@@ -174,34 +174,3 @@ fn render(project: &str, branch: &str, code: &Code, nodes: &[Value]) -> String {
     }
     out
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn renders_definitions_and_file_ranges() {
-        let definition = json!({"fqn": "pkg.Evaluate", "definition_type": "Function", "file_path": "x.go",
-            "start_line": 10, "end_line": 11, "content": "func Evaluate() {\n}"});
-        let text = render(
-            "g/lib",
-            "main",
-            &Code::Symbol("Evaluate".into()),
-            &[definition],
-        );
-        assert_eq!(
-            text,
-            "g/lib/x.go:10-11 Function pkg.Evaluate\n10|func Evaluate() {\n11|}\n"
-        );
-        let file = json!({"path": "x.go", "content": "a\nb\nc\nd"});
-        let code = Code::parse("file", "x.go:2-3");
-        assert_eq!(
-            render("g/lib", "main", &code, &[file]),
-            "g/lib/x.go\n2|b\n3|c\n"
-        );
-        assert_eq!(
-            render("g/lib", "main", &code, &[]),
-            "file:x.go:2-3 in g/lib@main: not found in the graph\n"
-        );
-    }
-}

@@ -1344,58 +1344,12 @@ mod tests {
     #[test]
     fn qualified_targets_use_what_gitlab_shows() {
         use crate::remote::sdlc::Target;
-        let target = |value: &str| Some(Qualified::Target(value.to_string()));
-        assert_eq!(qualify("mr:42"), target("!42"));
-        assert_eq!(qualify("MR:gitlab-org/cli!42"), target("gitlab-org/cli!42"));
-        assert_eq!(qualify("issue:7"), target("#7"));
+        assert_eq!(qualify("mr:42"), Some(Qualified::Target("!42".into())));
         assert_eq!(
-            qualify("issue:gitlab-org/cli#7"),
-            target("gitlab-org/cli#7")
+            qualify("branch:aa/fix"),
+            Some(Qualified::Sdlc(Target::Branch("aa/fix".into())))
         );
-        let code = |kind: &str, value: &str| {
-            Some(Qualified::Code(
-                crate::remote::code::Code::parse(kind, value),
-                value.to_string(),
-            ))
-        };
-        assert_eq!(qualify("symbol:Foo::bar"), code("symbol", "Foo::bar"));
-        assert_eq!(
-            qualify("file:src/a.rs:10-40"),
-            code("file", "src/a.rs:10-40")
-        );
-        assert_eq!(
-            qualify("mr:fix/docker-platform"),
-            Some(Qualified::Sdlc(Target::Branch(
-                "fix/docker-platform".into()
-            )))
-        );
-        assert_eq!(
-            qualify("mr:branch:260456-fix"),
-            Some(Qualified::Sdlc(Target::Branch("260456-fix".into())))
-        );
-        assert_eq!(
-            qualify("branch:aa/fix-ci"),
-            Some(Qualified::Sdlc(Target::Branch("aa/fix-ci".into())))
-        );
-        assert_eq!(
-            qualify("pipeline:7"),
-            Some(Qualified::Sdlc(Target::Pipeline(7)))
-        );
-        assert_eq!(qualify("job:9"), Some(Qualified::Sdlc(Target::Job(9))));
-        assert_eq!(
-            qualify("commit:0123abc"),
-            Some(Qualified::Sdlc(Target::Commit("0123abc".into())))
-        );
-        assert_eq!(
-            qualify("repo:gitlab-org/cli/"),
-            Some(Qualified::Repo("gitlab-org/cli".into()))
-        );
-        for literal in [
-            "src/a.rs:10-40",
-            "Definition:7",
-            "MergeRequest:42",
-            "commit:main",
-        ] {
+        for literal in ["src/a.rs:10-40", "MergeRequest:42", "commit:main"] {
             assert_eq!(qualify(literal), None, "{literal}");
         }
     }

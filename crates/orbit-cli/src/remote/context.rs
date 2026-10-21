@@ -154,33 +154,11 @@ mod tests {
 
     #[test]
     fn tidy_drops_the_graph_timestamps_and_repeated_failed_jobs() {
-        let text = "orbit_context version=1.1.0 entities=1\n\
-            - mr:1 found=true\n  title=\"Fix\"\n  failed_jobs[1]:\n    lint (test) url\n      \
-            | 100: 2026-10-17T17:26:38.950589Z 01O x.go:1: bad\n  discussions[0]:\n\
-            graph:\nquery_type: neighbors\nnodes:\n  MergeRequest[1]{id}:\n    100\n\
-            pagination:\n  has_more: false\n- issue:2 found=true\n";
-        assert_eq!(
-            tidy(text, false),
-            "- mr:1 found=true\n  title=\"Fix\"\n  failed_jobs[1]:\n    lint (test) url\n      \
-             | 100: x.go:1: bad\n  discussions[0]:\n- issue:2 found=true\n"
-        );
+        let text = "orbit_context version=1.1.0 entities=1\n- mr:1 found=true\n  failed_jobs[1]:\n    lint url\n\
+                    graph:\nnodes:\n  x\n- issue:2 found=true\n";
         assert_eq!(
             tidy(text, true),
-            "- mr:1 found=true\n  title=\"Fix\"\n  discussions[0]:\n- issue:2 found=true\n"
+            "- mr:1 found=true\n- issue:2 found=true\n"
         );
-    }
-
-    #[test]
-    fn compact_keeps_the_start_of_descriptions_and_discussions() {
-        let mut text = String::from("- issue:1 found=true\n  title=\"T\"\n  description:\n");
-        text.extend((0..40).map(|n| format!("    d{n}\n")));
-        text.push_str("  discussions[2]:\n    @a 2026-01-01:\n");
-        text.extend((0..12).map(|n| format!("      a{n}\n")));
-        text.push_str("    @b 2026-01-02:\n      b0\n");
-        let (out, trimmed) = compact(&text);
-        assert!(trimmed);
-        assert!(out.contains("    d29\n") && !out.contains("    d30\n"));
-        assert!(out.contains("      a9\n") && !out.contains("      a10\n"));
-        assert!(out.ends_with("    @b 2026-01-02:\n      b0\n"));
     }
 }

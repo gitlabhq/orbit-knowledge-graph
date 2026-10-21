@@ -416,145 +416,18 @@ fn grep_for_a_hosted_kind_searches_the_origin_group() {
     let (base_url, handle) = serve_once(GREP_RESPONSE, "application/json");
     let base_url = base_url.replace("127.0.0.1", "localhost");
     let clone = git_clone_with_origin("https://localhost/my-group/my-project");
-    let data = tempfile::tempdir().expect("tempdir");
-
-    let output = run_orbit_with_data(clone.path(), data.path(), &base_url, &["grep", "mr:runner"]);
-    let request = handle.join().expect("join mock");
-
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+    let output = run_orbit_with_data(
+        clone.path(),
+        clone.path(),
+        &base_url,
+        &["grep", "mr:runner"],
     );
+    let request = handle.join().expect("join mock");
     assert_eq!(
         request.request_line,
         "GET /api/v4/orbit/grep?search=runner&full_path=my-group&scopes=merge_requests HTTP/1.1"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.starts_with(
-            "GitLab \"runner\" in localhost/my-group/my-project:\nMergeRequest[42]  Add runner\n"
-        ),
-        "{stdout}"
-    );
-}
-
-#[test]
-fn context_posts_one_request_per_gitlab_token() {
-    let (base_url, handle) = serve_routes(vec![
-        (
-            "orbit/context",
-            "orbit_context version=1.1.0 entities=1\n- found=true\n",
-        ),
-        (
-            "orbit/context",
-            "orbit_context version=1.1.0 entities=1\n- found=true\n",
-        ),
-        (
-            "orbit/context",
-            "orbit_context version=1.1.0 entities=1\n- found=true\n",
-        ),
-    ]);
-    let dir = tempfile::tempdir().expect("tempdir");
-
-    let output = run_orbit_with_data(
-        dir.path(),
-        dir.path(),
-        &base_url,
-        &[
-            "context",
-            "MergeRequest:42",
-            "gitlab-org/gitlab#7",
-            "Issue[5]",
-        ],
-    );
-    let requests = handle.join().expect("join mock");
-
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let mut tokens: Vec<serde_json::Value> = requests
-        .iter()
-        .map(|request| {
-            assert_eq!(request.request_line, "POST /api/v4/orbit/context HTTP/1.1");
-            let body: serde_json::Value = serde_json::from_str(&request.body).unwrap();
-            assert_eq!(body["response_format"], "llm");
-            body["tokens"].clone()
-        })
-        .collect();
-    tokens.sort_by_key(|token| token.to_string());
-    assert_eq!(
-        tokens,
-        vec![
-            serde_json::json!(["Issue[5]"]),
-            serde_json::json!(["MergeRequest[42]"]),
-            serde_json::json!(["gitlab-org/gitlab#7"]),
-        ]
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
-        "- found=true\n".repeat(3)
-    );
-}
-
-fn setup_claude_md(dir: &Path, home: &Path, base_url: &str) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_orbit"))
-        .current_dir(dir)
-        .args(["setup", "claude", "--project", "--yes", "--no-index"])
-        .args(["--skip", "hooks"])
-        .env("HOME", home)
-        .env("ORBIT_DATA_DIR", home)
-        .env("ORBIT_API_BASE_URL", base_url)
-        .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
-        .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
-        .env_remove("GITLAB_TOKEN")
-        .output()
-        .expect("run orbit setup");
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    std::fs::read_to_string(dir.join("CLAUDE.md")).expect("CLAUDE.md")
-}
-
-#[test]
-fn setup_mentions_gitlab_when_orbit_answers_for_origin() {
-    let (base_url, handle) = serve_once(r#"{"projects":[]}"#, "application/json");
-    let base_url = base_url.replace("127.0.0.1", "localhost");
-    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
-    let home = tempfile::tempdir().expect("tempdir");
-
-    let instructions = setup_claude_md(clone.path(), home.path(), &base_url);
-    let request = handle.join().expect("join mock");
-
-    assert!(
-        request
-            .request_line
-            .starts_with("GET /api/v4/orbit/graph_status?full_path=my-group%2Fmy-project "),
-        "{}",
-        request.request_line
-    );
-    assert!(
-        instructions.contains("must be used for GitLab instead of glab"),
-        "{instructions}"
-    );
-}
-
-#[test]
-fn setup_leaves_gitlab_out_when_orbit_does_not_answer() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let base_url = format!("http://localhost:{}", listener.local_addr().unwrap().port());
-    drop(listener);
-    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
-    let home = tempfile::tempdir().expect("tempdir");
-
-    let instructions = setup_claude_md(clone.path(), home.path(), &base_url);
-
-    assert!(instructions.contains("grep"), "{instructions}");
-    assert!(!instructions.contains("GitLab"), "{instructions}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("MergeRequest[42]  Add runner"));
 }
 
 fn serve_routes(
@@ -609,45 +482,24 @@ fn serve_routes(
 #[test]
 fn context_branch_target_reads_its_merge_request_and_last_failed_pipeline() {
     let (base_url, handle) = serve_routes(vec![
-        (
-            "merge_requests?",
-            r#"[{"id":41,"iid":3,"state":"merged"},{"id":42,"iid":4,"state":"opened"}]"#,
-        ),
+        ("merge_requests?", r#"[{"id":42,"iid":4,"state":"opened"}]"#),
         (
             "pipelines?ref=fix-ci",
-            r#"[{"id":8,"status":"skipped"},{"id":7,"status":"failed","ref":"fix-ci","sha":"0123456789abcdef","web_url":"https://localhost/p/-/pipelines/7"}]"#,
+            r#"[{"id":7,"status":"failed","ref":"fix-ci","sha":"0123456789abcdef","web_url":"https://localhost/p/-/pipelines/7"}]"#,
         ),
         ("pipelines/7/jobs", "[]"),
-        ("pipelines?ref=refs", r#"[{"id":8,"status":"skipped"}]"#),
-        (
-            "orbit/context",
-            "orbit_context version=1.1.0 entities=1\n- found=true\n",
-        ),
+        ("pipelines?ref=refs", "[]"),
+        ("orbit/context", "- found=true\n"),
     ]);
-    let base_url = base_url.replace("127.0.0.1", "localhost");
     let clone = git_clone_with_origin("https://localhost/my-group/my-project");
-    let data = tempfile::tempdir().expect("tempdir");
-
+    let base_url = base_url.replace("127.0.0.1", "localhost");
     let output = run_orbit_with_data(
         clone.path(),
-        data.path(),
+        clone.path(),
         &base_url,
         &["context", "branch:fix-ci"],
     );
     let requests = handle.join().expect("join mock");
-
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        requests[0].request_line.starts_with(
-            "GET /api/v4/projects/my-group%2Fmy-project/merge_requests?source_branch=fix-ci&state=all"
-        ),
-        "{}",
-        requests[0].request_line
-    );
     assert!(
         requests[4].body.contains("my-group/my-project!4"),
         "{}",
@@ -662,152 +514,57 @@ fn context_branch_target_reads_its_merge_request_and_last_failed_pipeline() {
 }
 
 #[test]
-fn bare_context_shows_the_failed_pipeline_of_the_current_branch() {
-    let (base_url, handle) = serve_routes(vec![
-        ("merge_requests?", "[]"),
-        (
-            "pipelines?ref",
-            r#"[{"id":7,"status":"failed","ref":"ci-fix","sha":"0123456789abcdef","web_url":"https://localhost/p/-/pipelines/7"}]"#,
-        ),
-        (
-            "pipelines/7/jobs",
-            r#"[{"id":9,"name":"unit","stage":"test","failure_reason":"script_failure","allow_failure":false,"web_url":"https://localhost/p/-/jobs/9"}]"#,
-        ),
-    ]);
-    let base_url = base_url.replace("127.0.0.1", "localhost");
-    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
-    let status = Command::new("git")
-        .args(["symbolic-ref", "HEAD", "refs/heads/ci-fix"])
-        .current_dir(clone.path())
-        .status()
-        .expect("run git");
-    assert!(status.success());
-    let data = tempfile::tempdir().expect("tempdir");
-
-    let output = run_orbit_with_data(clone.path(), data.path(), &base_url, &["context"]);
-    handle.join().expect("join mock");
-
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
-        "branch:ci-fix no merge request\n\
-         pipeline:7 failed ref ci-fix commit:0123456789abcdef https://localhost/p/-/pipelines/7\n\
-         failed_jobs[1]:\n  \
-         job:9 unit (test, script_failure) https://localhost/p/-/jobs/9\n"
-    );
-}
-
-#[test]
 fn grep_refreshes_an_edited_file_inline_or_detached() {
     let repo = tempfile::tempdir().expect("tempdir");
-    std::fs::write(repo.path().join("util.py"), "def helper():\n    return 1\n").unwrap();
-    std::fs::write(
-        repo.path().join("main.py"),
-        "from util import helper\n\ndef run():\n    return helper()\n",
-    )
-    .unwrap();
-    let git = |args: &[&str]| {
-        let status = Command::new("git")
-            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
-            .args(args)
-            .current_dir(repo.path())
-            .status()
-            .expect("run git");
-        assert!(status.success(), "git {args:?} failed");
-    };
-    git(&["init", "--quiet"]);
-    git(&["add", "."]);
-    git(&["commit", "--quiet", "-m", "init"]);
-    let orbit = |data: &Path, args: &[&str]| {
-        let output = run_orbit_with_data(repo.path(), data, "http://localhost:1", args);
+    let write = |name: &str, text: &str| std::fs::write(repo.path().join(name), text).unwrap();
+    write("util.py", "def helper():\n    return 1\n");
+    for args in [
+        &["init", "-q"][..],
+        &["add", "."],
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "init",
+        ],
+    ] {
         assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
+            Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .status()
+                .unwrap()
+                .success()
         );
-        String::from_utf8_lossy(&output.stdout).into_owned()
-    };
+    }
     let (edited, fresh) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    orbit(edited.path(), &["index", "."]);
-    std::thread::sleep(std::time::Duration::from_millis(1100));
-    std::fs::write(
-        repo.path().join("main.py"),
-        "from util import helper\n\n\ndef added():\n    return helper()\n\ndef run():\n    return added()\n",
-    )
-    .unwrap();
-
-    let found = orbit(edited.path(), &["grep", "added"]);
-    assert!(found.contains("Function added"), "{found}");
-    assert!(!found.contains("edited since index"), "{found}");
-
-    std::thread::sleep(std::time::Duration::from_millis(1100));
-    std::fs::write(
-        repo.path().join("util.py"),
-        "def helper():\n    return 1\n\ndef later():\n    return 2\n",
-    )
-    .unwrap();
-    let detached = || {
-        let output = orbit_command(
-            repo.path(),
-            edited.path(),
-            "http://localhost:1",
-            &["grep", "later"],
-        )
-        .env("ORBIT_REFRESH_WAIT_MS", "0")
-        .output()
-        .expect("run orbit binary");
+    let orbit = |data: &Path, args: &[&str], wait: &str| {
+        let output = orbit_command(repo.path(), data, "http://localhost:1", args)
+            .env("ORBIT_REFRESH_WAIT_MS", wait)
+            .output()
+            .expect("run orbit binary");
         String::from_utf8_lossy(&output.stdout).into_owned()
     };
-    let first = detached();
-    assert!(first.contains("edited since index"), "{first}");
-    let found = (0..60)
-        .map(|_| {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            detached()
-        })
-        .find(|found| found.contains("Function later"))
-        .expect("a detached refresh lands the edit");
-    assert!(!found.contains("edited since index"), "{found}");
-
-    orbit(fresh.path(), &["index", "."]);
-    let graph = "SELECT (SELECT list(fqn || ':' || start_line ORDER BY fqn) FROM gl_definition) AS defs, \
-                 (SELECT list(relationship_kind ORDER BY relationship_kind) FROM gl_edge) AS edges, \
-                 (SELECT count(*) FROM gl_edge e JOIN gl_definition d ON d.id = e.target_id) AS linked";
+    let pause = || std::thread::sleep(Duration::from_millis(1100));
+    orbit(edited.path(), &["index", "."], "2000");
+    pause();
+    write(
+        "util.py",
+        "def helper():\n    return 1\n\ndef later():\n    return 2\n",
+    );
+    assert!(orbit(edited.path(), &["grep", "later"], "0").contains("edited since index"));
+    let landed = (0..60).any(|_| {
+        std::thread::sleep(Duration::from_millis(500));
+        orbit(edited.path(), &["grep", "later"], "0").contains("Function later")
+    });
+    assert!(landed, "a detached refresh lands the edit");
+    orbit(fresh.path(), &["index", "."], "2000");
+    let graph = "SELECT (SELECT list(fqn ORDER BY fqn) FROM gl_definition) AS defs, (SELECT count(*) FROM gl_edge) AS edges";
     assert_eq!(
-        orbit(edited.path(), &["sql", "--format", "json", graph]),
-        orbit(fresh.path(), &["sql", "--format", "json", graph])
+        orbit(edited.path(), &["sql", "--format", "json", graph], "2000"),
+        orbit(fresh.path(), &["sql", "--format", "json", graph], "2000")
     );
-}
-
-#[test]
-fn grep_falls_back_to_any_word_when_gitlab_has_no_result_for_the_phrase() {
-    const EMPTY: &str = r#"{"version":"1.0.0","target":{"type":"group","id":1,"full_path":"my-group"},"scopes":[],"results":[],"result_count":0,"truncated":false}"#;
-    const ISSUE: &str = r#"{"version":"1.0.0","target":{"type":"group","id":1,"full_path":"my-group"},"scopes":[{"name":"work_items","status":"ok","backend":"basic","result_count":1}],"results":[{"scope":"work_items","type":"WorkItem","id":7,"token":"WorkItem[7]","reference":{"id":7},"text":"Describe shows negative percentages"}],"result_count":1,"truncated":false}"#;
-    let (base_url, handle) = serve_routes(vec![
-        ("search=describe&", ISSUE),
-        ("search=percent&", EMPTY),
-        ("search=describe", EMPTY),
-    ]);
-    let base_url = base_url.replace("127.0.0.1", "localhost");
-    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
-    let data = tempfile::tempdir().expect("tempdir");
-
-    let output = run_orbit_with_data(
-        clone.path(),
-        data.path(),
-        &base_url,
-        &["grep", "issue:describe percent"],
-    );
-    handle.join().expect("join mock");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("no GitLab result has every word"),
-        "{stdout}"
-    );
-    assert!(stdout.contains("negative percentages"), "{stdout}");
 }

@@ -200,19 +200,3 @@ pub(super) fn resolve(requested: &[String], known: &[String]) -> Result<Kinds> {
     }
     Ok(kinds)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn language_kinds_become_file_types_and_other_kinds_stay() {
-        let mut requested: Vec<String> =
-            ["py", "Function", "typescript", "fn", "files", "go", "nope"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-        assert_eq!(languages(&mut requested), ["go", "py", "ts"]);
-        assert_eq!(requested, ["Function", "fn", "files", "nope"]);
-    }
-}

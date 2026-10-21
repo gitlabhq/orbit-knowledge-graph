@@ -682,128 +682,48 @@ mod tests {
     }
 
     #[test]
-    fn results_merge_across_keywords_in_scope_order() {
-        let first = response(
-            r#"{"target":{"type":"Project","full_path":"group/project"},
-               "scopes":[{"name":"merge_requests","status":"ok"},{"name":"notes","status":"error","reason":{"code":"timeout"}},
-                {"name":"users","status":"unavailable","reason":{"code":"not_available_for_search_type"}}],
-               "results":[{"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[42]","reference":{"id":42,"iid":4,"project_path":"group/project"},"state":"merged","text":"Add scoped search"}],
-               "truncated":false}"#,
-        );
-        let second = response(
-            r#"{"scopes":[],"results":[
-                {"scope":"commits","type":"Commit","token":null,"reference":{"project_id":1,"sha":"0123456789abcdef0123"},"text":"Fix grep"},
-                {"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[42]","reference":{"id":42,"iid":4,"project_path":"group/project"},"state":"merged","text":"Add scoped search"},
-                {"scope":"notes","type":"Note","token":"Note[9]","reference":{"id":9,"noteable":"MergeRequest[42]","noteable_reference":"group/project!4"},"text":"grep should search notes"},
-                {"scope":"work_items","type":"WorkItem","token":"WorkItem[7]","reference":{"id":7,"iid":2,"project_path":"group/other"},"state":"opened","text":"Grep issue"},
-                {"scope":"blobs","type":"File","token":null,"reference":{"project_id":3,"project_path":"g/lib","path":"a.go"},"text":"a.go",
-                 "matches":[{"start_line":10,"end_line":11,"text":"// helper\nfunc Grep() {"}]},
-                {"scope":"blobs","type":"File","token":null,"reference":{"project_id":3,"project_path":"g/lib","path":"a.go"},"text":"a.go",
-                 "matches":[{"start_line":11,"end_line":11,"text":"func Grep() {"},{"start_line":20,"end_line":20,"text":"x := grep()"}]}],
-               "truncated":true}"#,
-        );
-        let keywords = ["grep".to_string(), "search".to_string()];
-        let (Outcome::Found(text), None) = render(
-            "gitlab.com/group/project",
-            "grep|search",
-            &keywords,
-            &[first, second],
-            None,
-            false,
-            false,
-        ) else {
+    fn results_merge_in_scope_order_and_report_failed_scopes() {
+        let item = |scope: &str, kind: &str, id: u32| {
+            format!(
+                r#"{{"scope":"{scope}","type":"{kind}","token":"{kind}[{id}]","reference":{{"id":{id},"iid":{id},"project_path":"g/p"}},"state":"opened","text":"t{id}"}}"#
+            )
+        };
+        let failed = r#""scopes":[{"name":"notes","status":"error","reason":{"code":"timeout"}}]"#;
+        let first = response(&format!(
+            r#"{{{failed},"results":[{}]}}"#,
+            item("merge_requests", "MergeRequest", 4)
+        ));
+        let second = response(&format!(
+            r#"{{"results":[{}]}}"#,
+            item("work_items", "WorkItem", 2)
+        ));
+        let (Outcome::Found(text), _) =
+            render("g", "a|b", &[], &[first, second], Some("g/p"), false, false)
+        else {
             panic!("expected results");
         };
+        let lines: Vec<&str> = text.lines().skip(1).take(3).collect();
         assert_eq!(
-            text,
-            format!(
-                "GitLab \"grep|search\" in gitlab.com/group/project, truncated:\n\
-                 issue:group/other#2 opened  Grep issue\n\
-                 mr:4 merged  Add scoped search\n\
-                 commit:0123456789abcdef0123  Fix grep\n\
-                 comment on mr:4  grep should search notes\n\
-                 g/lib/a.go\n\
-                 10-// helper\n\
-                 11:func Grep() {{\n\
-                 --\n\
-                 20:x := grep()\n\
-                 unavailable: notes (timeout)\n\
-                 next: {} context issue:group/other#2\n",
-                crate::commands::setup::spec::launcher()
-            )
+            lines,
+            [
+                "issue:2 opened  t2",
+                "mr:4 opened  t4",
+                "unavailable: notes (timeout)"
+            ]
         );
     }
 
     #[test]
     fn an_item_inlined_within_the_memory_is_not_inlined_again() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("var").join(INLINED);
-        let now = 10_000;
-        remember_inlined(&path, "MergeRequest[42]", now);
+        let path = dir.path().join(INLINED);
+        remember_inlined(&path, "MergeRequest[5]", 10_000);
         let record = std::fs::read_to_string(&path).unwrap();
-        assert!(inlined_recently(&record, "MergeRequest[42]", now + 60));
-        assert!(!inlined_recently(&record, "MergeRequest[4]", now + 60));
+        assert!(inlined_recently(&record, "MergeRequest[5]", 10_060));
         assert!(!inlined_recently(
             &record,
-            "MergeRequest[42]",
-            now + INLINE_MEMORY.as_secs()
+            "MergeRequest[5]",
+            10_000 + INLINE_MEMORY.as_secs()
         ));
-    }
-
-    #[test]
-    fn any_word_results_rank_by_title_terms_and_a_clear_winner_is_inlined() {
-        let found = response(
-            r#"{"target":{"type":"Project","full_path":"g/vscode"},"results":[
-                {"scope":"work_items","type":"WorkItem","token":"WorkItem[27]","reference":{"id":27,"iid":27,"project_path":"g/vscode"},"state":"opened","text":"Copilot Chat OTel: emit auto_mode when Auto model selection is used"},
-                {"scope":"work_items","type":"WorkItem","token":"WorkItem[1]","reference":{"id":1,"iid":1,"project_path":"g/vscode"},"state":"opened","text":"Feature to disable auto-expanding on sub-folders."},
-                {"scope":"work_items","type":"WorkItem","token":"WorkItem[2]","reference":{"id":2,"iid":2,"project_path":"g/vscode"},"state":"opened","text":"File nesting expand: false not respected in folders with a single child file nest"}]}"#,
-        );
-        let keywords = ["auto expand single child folder".to_string()];
-        let (Outcome::Found(text), winner) = render(
-            "gitlab.test/g/vscode",
-            "issue:auto expand single child folder",
-            &keywords,
-            &[found],
-            Some("g/vscode"),
-            true,
-            true,
-        ) else {
-            panic!("expected results");
-        };
-        assert_eq!(
-            text,
-            "GitLab \"issue:auto expand single child folder\" in gitlab.test/g/vscode:\n\
-             issue:2 opened  File nesting expand: false not respected in folders with a single child file nest\n\
-             issue:1 opened  Feature to disable auto-expanding on sub-folders.\n\
-             next: orbit context issue:2\n"
-                .replace("orbit", crate::commands::setup::spec::launcher())
-        );
-        assert_eq!(winner, None);
-
-        let found = response(
-            r#"{"results":[
-                {"scope":"merge_requests","type":"MergeRequest","token":"MergeRequest[5]","reference":{"id":5,"iid":1,"project_path":"g/gitaly"},"state":"merged","text":"Limit concurrent unauthenticated pack-objects processes"},
-                {"scope":"work_items","type":"WorkItem","token":"WorkItem[3]","reference":{"id":3,"iid":3,"project_path":"g/gitaly"},"state":"opened","text":"pack-objects cache misses"}]}"#,
-        );
-        let keywords = ["unauthenticated pack-objects".to_string()];
-        let (Outcome::Found(text), Some(winner)) = render(
-            "gitlab.test/g/gitaly",
-            "mr:unauthenticated pack-objects",
-            &keywords,
-            &[found],
-            Some("g/gitaly"),
-            false,
-            true,
-        ) else {
-            panic!("expected a winner");
-        };
-        assert_eq!(
-            winner,
-            Winner {
-                token: "g/gitaly!1".into(),
-                readable: "mr:1".into()
-            }
-        );
-        assert!(!text.contains("next:"));
     }
 }

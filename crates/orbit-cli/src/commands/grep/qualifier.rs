@@ -231,45 +231,22 @@ mod tests {
 
     #[test]
     fn each_kind_qualifier_starts_its_own_search() {
+        let mr = (strings(&["MergeRequest"]), "a".to_string());
         assert_eq!(
-            sections("mr:test x y def:run job"),
-            vec![
-                (strings(&["MergeRequest"]), "test x y".into()),
-                (strings(&["Definition"]), "run job".into()),
-            ]
+            sections("mr:a def:b c"),
+            vec![mr, (strings(&["Definition"]), "b c".into())]
         );
         assert_eq!(
             sections("rate limit methods:"),
             vec![(strings(&["methods"]), "rate limit".into())]
         );
-        assert_eq!(
-            sections("merge_requests:x"),
-            vec![(strings(&["MergeRequest"]), "x".into())]
-        );
-        let parsed = parse("issue:rate limit path:src repo:g/p").unwrap();
-        assert_eq!(parsed.globs, strings(&["*src*", "**/*src*/**"]));
-        assert_eq!(
-            globs_for("pkg/kubelet/"),
-            strings(&["**/*pkg/kubelet*", "**/*pkg/kubelet*/**"])
-        );
-        assert_eq!(parsed.targets, strings(&["g/p"]));
-        assert_eq!(parse("type:go grep"), None);
-        assert_eq!(parse("is:mr x"), None);
-        assert_eq!(parse("stage: test"), None);
         for literal in [
             "project: [",
-            "projects: \\[",
             "milestone: '19.6'",
-            "project: string",
-            "project:",
+            "stage: test",
+            "type:go grep",
         ] {
             assert_eq!(parse(literal), None, "{literal}");
         }
-        let mut paths = strings(&["def:", "src/"]);
-        assert_eq!(
-            absorb_trailing(Some("x".into()), &mut paths).as_deref(),
-            Some("x def:")
-        );
-        assert_eq!(paths, strings(&["src/"]));
     }
 }

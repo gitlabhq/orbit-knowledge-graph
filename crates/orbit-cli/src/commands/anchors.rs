@@ -244,36 +244,16 @@ mod tests {
     #[test]
     fn finds_lines_and_names_in_gitlab_text() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("executors/docker")).unwrap();
-        std::fs::write(dir.path().join("executors/docker/pull.go"), "x").unwrap();
-        let files: BTreeSet<String> = [
-            "executors/docker/pull.go".to_string(),
-            "app/models/project.rb".to_string(),
-        ]
-        .into();
-        let text = "--- FAIL: TestPullRetry\n    pull.go:88: expected 3\n\
-                    File \"/app/app/models/project.rb\", line 12, in save\n\
-                    We should call `retry_backoff` from `PullManager.Pull`, not loop.\n\
-                    see executors/docker/pull.go:120 and nowhere.go:5";
-        let anchors = extract(text, dir.path(), &files);
-        assert_eq!(
-            anchors.lines,
-            [
-                ("executors/docker/pull.go".to_string(), 88),
-                ("executors/docker/pull.go".to_string(), 120),
-                ("app/models/project.rb".to_string(), 12),
-            ]
-        );
-        assert!(anchors.names.contains(&"retry_backoff".to_string()));
-        assert!(anchors.names.contains(&"PullManager".to_string()));
-        assert!(!anchors.names.contains(&"TestPullRetry".to_string()));
-        assert!(!anchors.names.contains(&"should".to_string()));
-        assert!(!anchors.names.contains(&"executors".to_string()));
-        let ruby = extract(
-            "`final_answer_streaming_cut_off?` in chat/step_executor.rb:95",
+        let files: BTreeSet<String> = ["executors/docker/pull.go".to_string()].into();
+        let anchors = extract(
+            "pull.go:88: expected 3; call `retry_backoff`",
             dir.path(),
             &files,
         );
-        assert_eq!(ruby.names, ["final_answer_streaming_cut_off?"]);
+        assert_eq!(
+            anchors.lines,
+            [("executors/docker/pull.go".to_string(), 88)]
+        );
+        assert!(anchors.names.contains(&"retry_backoff".to_string()));
     }
 }

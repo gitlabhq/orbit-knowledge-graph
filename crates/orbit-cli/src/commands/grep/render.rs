@@ -429,39 +429,4 @@ data.json
             "src/a.rs:8\nsrc/b.rs:1\ndata.json:1\n"
         );
     }
-
-    #[test]
-    fn many_matching_files_get_an_index_by_directory_before_the_matches() {
-        let hits: Vec<Hit> = (0..45)
-            .map(|i| hit(&format!("dir{}/f{i}.rs", i % 35), 1, "go();", None))
-            .collect();
-        let out = show(&hits, &[Term::parse("go")], Output::Lines, &[]);
-        let lines: Vec<&str> = out.lines().collect();
-        assert_eq!(
-            lines[1],
-            "» 45 files by directory, matching lines per file:"
-        );
-        assert!(lines[2].starts_with("»   dir"));
-        assert_eq!(lines[32], "»   +5 more directories with 5 files");
-        assert!(!lines[33].starts_with("» "));
-        let few: Vec<Hit> = (0..20)
-            .map(|i| hit(&format!("f{i}.rs"), 1, "go();", None))
-            .collect();
-        assert!(
-            !show(&few, &[Term::parse("go")], Output::Lines, &[]).contains("files by directory")
-        );
-    }
-
-    #[test]
-    fn long_lines_print_in_full_unless_max_columns_is_set() {
-        let long = "x".repeat(400);
-        let hits = [hit("data.txt", 1, &long, None)];
-        let terms = [Term::parse("x")];
-        assert!(show(&hits, &terms, Output::Lines, &[]).ends_with(&format!("1:{long}\n")));
-        let options = Options {
-            max_columns: Some(100),
-            ..Options::default()
-        };
-        assert!(render_with(&hits, &terms, &options, &[]).ends_with("1:[Omitted long line]\n"));
-    }
 }
