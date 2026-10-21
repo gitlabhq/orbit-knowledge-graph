@@ -19,10 +19,10 @@ migrations:
 - version: 112
   scope: none
   note: >-
-    The MergeRequest extract finds its page keys first and joins metrics, reviewers
-    and approvals only for those keys instead of the whole window; on prod data it
-    returns the same rows as before (the version kept for the last MR of a page was
-    already arbitrary), so no indexed row changes.
+    The MergeRequest extract finds its page keys first, in a materialized CTE, and
+    joins metrics, reviewers and approvals only for those keys instead of the whole
+    window; on prod data it returns the same rows as before (the version kept for the
+    last MR of a page was already arbitrary), so no indexed row changes.
 - version: 111
   scope: "*"
   note: "Adds a minmax skip index on _deleted to every versioned table so a pre-pick filter can carry OR _deleted and still prune tombstone-free granules. Drops the unique marks on Label.title and Milestone.title (titles repeat across projects) and the mutable: false marks on code-graph commit_sha and File.size_bytes (ids do not include the commit). Full rebuild so the index files exist for every part."

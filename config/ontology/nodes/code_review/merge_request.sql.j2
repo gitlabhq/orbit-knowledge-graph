@@ -1,5 +1,5 @@
 WITH
-  _keys AS (SELECT
+  _keys AS MATERIALIZED (SELECT
     traversal_path,
     id,
     {{version_column}}
@@ -150,3 +150,5 @@ LEFT JOIN (
   GROUP BY traversal_path, merge_request_id ) AS approvals ON m.traversal_path = approvals._ap_tp
   AND m.id = approvals._ap_mr
 ORDER BY traversal_path, id
+-- MATERIALIZED is ignored unless this setting is on; it builds _keys once for all four readers.
+SETTINGS enable_materialized_cte = 1
