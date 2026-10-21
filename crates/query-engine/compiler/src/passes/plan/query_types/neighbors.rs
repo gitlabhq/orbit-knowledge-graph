@@ -1,6 +1,8 @@
 //! Neighbors: the center node, the edge tables and relationship kinds per direction, and whether the
 //! center's filters are answered by denormalized edge columns.
 
+use std::collections::HashMap;
+
 use ontology::constants::*;
 use query_data_model::{DenormalizedDirection, OrbitQueryModel, RelationshipId};
 
@@ -8,7 +10,7 @@ use super::EdgeTableConfig;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::filters::{BoundFilter, denormalized_facts, lowerable_denorm};
-use crate::passes::plan::{NodePlan, Plan};
+use crate::passes::plan::{NodePlan, Plan, sort_key};
 
 pub struct Neighbors {
     pub center: String,
@@ -16,6 +18,7 @@ pub struct Neighbors {
     pub edge: EdgeTableConfig,
     pub has_non_denorm: bool,
     pub fused_table: Option<String>,
+    pub edge_sort_keys: HashMap<String, Vec<String>>,
     pub outgoing_kinds: Vec<String>,
     pub incoming_kinds: Vec<String>,
     pub incoming_scope_preserving: Vec<String>,
@@ -230,6 +233,10 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
     tables.extend(edge.incoming_tables.iter().cloned());
     tables.sort();
     tables.dedup();
+    let edge_sort_keys = tables
+        .iter()
+        .map(|table| Ok((table.clone(), sort_key(model, table)?.to_vec())))
+        .collect::<Result<_>>()?;
     let fused_table = (direction == Direction::Both
         && !has_non_denorm
         && center.node_ids.len() != 1
@@ -243,6 +250,7 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
         edge,
         has_non_denorm,
         fused_table,
+        edge_sort_keys,
         outgoing_kinds: arm_kinds(true),
         incoming_kinds: arm_kinds(false),
         incoming_scope_preserving,

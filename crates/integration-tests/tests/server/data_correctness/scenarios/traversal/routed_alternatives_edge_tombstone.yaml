@@ -37,3 +37,19 @@ cases:
         IN_PROJECT: [[99332, 1000]]
         HAS_HEAD_PIPELINE: [[99332, 99331]]
       total_edge_count: 2
+
+  - name: tombstoned_alternative_drops_its_target
+    description: A head pipeline edge whose latest version is a tombstone drops the pipeline from the neighbors result
+    query:
+      json: |
+        {"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[99330]}],"neighbors":{"direction":"outgoing","rel_types":["IN_PROJECT","HAS_HEAD_PIPELINE"]}}
+      gql: |
+        MATCH (mr:MergeRequest {id: 99330})-[:IN_PROJECT|HAS_HEAD_PIPELINE]->(t) RETURN mr, t
+    expect:
+      node_count: 2
+      nodes:
+        MergeRequest: { ids: [99330] }
+        Project: { ids: [1000] }
+      edges:
+        IN_PROJECT: [[99330, 1000]]
+      total_edge_count: 1
