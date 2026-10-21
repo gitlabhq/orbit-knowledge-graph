@@ -56,7 +56,6 @@ fn run(path: PathBuf, options: Options, mode: Mode) -> Result<Vec<Vec<FamilyOutp
         };
         let state_dir = workspace.var_dir(git.project_id);
         let _state_lock = lock_incremental_state(&state_dir)?;
-        let _ = std::fs::remove_file(state_dir.join(REFRESHING));
         let db_path = workspace::resolve_db_path(options.db.clone(), &git)?;
         let writer = GraphWriter::open(&db_path, &git)?;
         manifest::record_status(
@@ -116,6 +115,20 @@ pub(crate) enum Freshness {
 
 const REFRESHING: &str = "refreshing";
 
+fn try_refresh_lock(state_dir: &std::path::Path) -> Result<Option<std::fs::File>> {
+    std::fs::create_dir_all(state_dir)?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(state_dir.join(REFRESHING))?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(error)) => Err(error.into()),
+    }
+}
+
 pub(crate) fn refresh(
     repo: &std::path::Path,
     db: Option<PathBuf>,
@@ -132,15 +145,9 @@ pub(crate) fn refresh(
     if changed.is_empty() {
         return Ok(Freshness::Fresh);
     }
-    let marker = state_dir.join(REFRESHING);
-    if std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&marker)
-        .is_err()
-    {
+    let Ok(Some(_refreshing)) = try_refresh_lock(&state_dir) else {
         return Ok(Freshness::Stale(changed));
-    }
+    };
     let outcome = (|| -> Result<()> {
         let _state_lock = lock_incremental_state(&state_dir)?;
         let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
@@ -153,9 +160,24 @@ pub(crate) fn refresh(
         }
         Ok(())
     })();
-    std::fs::remove_file(&marker)?;
     match outcome {
         Ok(()) => Ok(Freshness::Refreshed),
         Err(_) => Ok(Freshness::Stale(changed)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_marker_left_by_a_killed_refresh_does_not_block_the_next_one() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(REFRESHING), "").unwrap();
+        let held = try_refresh_lock(dir.path()).unwrap();
+        assert!(held.is_some());
+        assert!(try_refresh_lock(dir.path()).unwrap().is_none());
+        drop(held);
+        assert!(try_refresh_lock(dir.path()).unwrap().is_some());
     }
 }
