@@ -82,10 +82,11 @@ impl PipelineStage for AuthorizeAllStage {
         ctx: &mut QueryPipelineContext,
         _obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let input = ctx
+        let mut input = ctx
             .phases
             .remove::<ExtractionOutput>()
             .ok_or_else(|| PipelineError::custom("ExtractionOutput not found in phases"))?;
+        HydrationStage::resolve_owners(ctx, &mut input.query_result).await?;
         let authorizations = input
             .query_result
             .resource_checks()
