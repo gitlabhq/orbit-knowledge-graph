@@ -27,7 +27,9 @@ On GitLab Self-Managed, you run GitLab Orbit next to your instance. A deployment
 
 GitLab Orbit is distributed only as a Helm chart for Kubernetes. The Linux package does not include it.
 Some component names use the earlier product name, GitLab Knowledge Graph, for example the `gkg` chart and the `gkg_*` ClickHouse users.
-Install the chart on the cluster that runs GitLab, or on a separate cluster next to your instance.
+GitLab Orbit supports two deployment models. If GitLab runs from the Linux package, install GitLab Orbit on a
+Kubernetes cluster next to your instance. If GitLab runs from the GitLab Helm chart, install GitLab Orbit on the
+same cluster. In both models, GitLab Orbit runs in Kubernetes and reaches GitLab over the network.
 
 | Page | Description |
 |------|-------------|
