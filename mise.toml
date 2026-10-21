@@ -274,7 +274,7 @@ arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
 
 [tasks."bench:download-repos"]
-run = "gitlab-xtasks benchmark download-repos --config code-indexing-benchmark.yaml"
+run = "gitlab-xtasks benchmark download-repos --config code-indexing-benchmark.yaml --output-dir temp"
 description = "Download benchmark repositories"
 
 [task_templates."bench:engine"]
@@ -298,7 +298,7 @@ if [ "$BENCH_ACTION" = "run" ]; then
   gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local --scenario cg
   exit 0
 fi
-for repo in output/repos/*/; do
+for repo in temp/*/; do
   name=$(basename "$repo")
   echo "=== Indexing $name with code-graph ==="
   ./target/release/orbit index "$repo" --stats
