@@ -19,10 +19,10 @@ cases:
   - name: NOT over a non-nullable denormalized property reads edge tags instead of the node table
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","not":{"definition_type":{"in":["function","method"]}}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[12000],"not":{"definition_type":{"in":["function","method"]}}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"}]}
       gql: |
         MATCH (a:Definition)-[:CALLS]->(b:Definition)
-        WHERE NOT a.definition_type IN ['function', 'method']
+        WHERE a.id IN [12000] AND NOT a.definition_type IN ['function', 'method']
         RETURN a, b
     logical:
       expect:

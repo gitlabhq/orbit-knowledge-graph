@@ -652,13 +652,7 @@ fn multi_table_mixed_types_scan_every_route() {
     assert!(rendered.contains("FROM gl_code_edge"), "{rendered}");
     assert!(rendered.contains("FROM gl_edge"), "{rendered}");
     assert!(rendered.contains("UNION ALL"), "{rendered}");
-    assert_eq!(
-        rendered
-            .matches("_orbit_edge_0._version DESC LIMIT 1 BY")
-            .count(),
-        2,
-        "{rendered}"
-    );
+    assert_eq!(rendered.matches("LIMIT 1 BY").count(), 2, "{rendered}");
     assert!(!rendered.contains(" FINAL"), "{rendered}");
 }
 

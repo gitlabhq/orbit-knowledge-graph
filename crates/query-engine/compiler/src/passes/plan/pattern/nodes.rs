@@ -229,10 +229,8 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
         && !metric_target
         && !ordered
         && !local_predicate;
-    let pinned = input.query_type == QueryType::Traversal && !node.node_ids.is_empty();
     let joined = input.relationships.is_empty()
         || !pattern.model.supports_deferred_node_loading()
-        || pinned
         || group_target
         || metric_target
         || ordered

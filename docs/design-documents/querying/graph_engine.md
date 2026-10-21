@@ -185,7 +185,7 @@ policy provenance.
 | 10 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
 | 11 | `paginate` | Sets the probe limit and lowers `SKIP` to an `OFFSET` over a stable order |
 | 12 | `check` | Verifies every namespaced graph-table path column carries a valid role-scoped `startsWith` predicate or a fail-closed false predicate ([Security](../security.md)) |
-| 13 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (id-pinned traversal nodes, FK shapes, sort and group targets) need no second query |
+| 13 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (FK shapes, sort and group targets) need no second query |
 | 14 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
 | 15 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
 
