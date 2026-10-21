@@ -20,12 +20,12 @@ use orbit_server::grpc::OrbitServiceImpl;
 use orbit_server::proto::execute_query_message::Content;
 use orbit_server::proto::orbit_service_client::OrbitServiceClient;
 use orbit_server::proto::{
-    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, RedactionExchange,
+    ExecuteQueryError, ExecuteQueryMessage, ExecuteQueryRequest, QueryLanguage, RedactionExchange,
     RedactionResponse, redaction_exchange,
 };
 use orbit_server_config::AppConfig;
 use query_engine::shared::content::ColumnResolverRegistry;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::time::{sleep, timeout};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tonic::transport::Channel;
@@ -41,7 +41,7 @@ const ALL_FILES: [i64; 4] = [5001, 5002, 5003, 5004];
 async fn successful_query_is_a_success() {
     let mut server = Server::start().await;
 
-    server.run(project_query(json!({}))).await.unwrap();
+    server.run(project_query(None)).await.unwrap();
 
     server.assert_recorded("ok", "success").await;
 }
@@ -61,7 +61,7 @@ async fn caller_without_enabled_namespaces_is_a_caller_error() {
     )
     .unwrap();
     let mut call = tonic::Request::new(tokio_stream::iter([ExecuteQueryMessage {
-        content: Some(Content::Request(project_query(json!({})))),
+        content: Some(Content::Request(project_query(None))),
     }]));
     call.metadata_mut()
         .insert("authorization", format!("Bearer {token}").parse().unwrap());
@@ -88,8 +88,8 @@ async fn unparsable_datetime_filter_is_a_caller_error() {
     let mut server = Server::start().await;
 
     for value in ["garbage", "2026-09-30T00:00:00+00:00"] {
-        let filters = json!({"created_at": {"gte": value}});
-        let error = server.run(project_query(filters)).await.unwrap_err();
+        let filter = format!("p.created_at >= '{value}'");
+        let error = server.run(project_query(Some(&filter))).await.unwrap_err();
 
         assert_eq!(error.code, "execution_error");
         assert!(error.message.contains("filter values"), "{}", error.message);
@@ -102,7 +102,7 @@ async fn unparsable_datetime_filter_is_a_caller_error() {
 #[tokio::test]
 async fn closing_the_request_stream_during_redaction_is_a_caller_error() {
     let mut server = Server::start().await;
-    let mut query = server.open(project_query(json!({}))).await;
+    let mut query = server.open(project_query(None)).await;
     query.await_authorization_request().await;
 
     let QueryStream {
@@ -129,7 +129,7 @@ async fn closing_the_request_stream_during_redaction_is_a_caller_error() {
 #[tokio::test]
 async fn mismatched_redaction_response_is_a_server_error() {
     let mut server = Server::start().await;
-    let mut query = server.open(project_query(json!({}))).await;
+    let mut query = server.open(project_query(None)).await;
     query.await_authorization_request().await;
 
     let mismatched = RedactionResponse {
@@ -156,7 +156,7 @@ async fn mismatched_redaction_response_is_a_server_error() {
 #[tokio::test]
 async fn dropping_the_call_during_redaction_is_a_caller_error() {
     let mut server = Server::start().await;
-    let mut query = server.open(project_query(json!({}))).await;
+    let mut query = server.open(project_query(None)).await;
     query.await_authorization_request().await;
 
     drop(query);
@@ -218,13 +218,9 @@ async fn content_batch_over_the_cap_with_limit_at_the_cap_is_a_server_error() {
 #[tokio::test]
 async fn invalid_query_is_a_caller_error() {
     let mut server = Server::start().await;
-    let query = json!({
-        "query_type": "traversal",
-        "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["no_such_column"]}],
-        "limit": 10
-    });
+    let query = request("MATCH (p:Project {id: 1000}) RETURN p.no_such_column LIMIT 10");
 
-    let error = server.run(request(query)).await.unwrap_err();
+    let error = server.run(query).await.unwrap_err();
 
     assert_eq!(error.code, "compile_error");
     server
@@ -358,27 +354,23 @@ async fn seed(graph: &TestContext) {
     graph.optimize_all().await;
 }
 
-fn request(query: Value) -> ExecuteQueryRequest {
+fn request(query: &str) -> ExecuteQueryRequest {
     ExecuteQueryRequest {
-        query: query.to_string(),
+        query: query.into(),
+        language: QueryLanguage::Gql as i32,
         ..Default::default()
     }
 }
 
-fn project_query(filters: Value) -> ExecuteQueryRequest {
-    request(json!({
-        "query_type": "traversal",
-        "nodes": [{
-            "id": "p", "entity": "Project", "node_ids": [1000, 1001], "columns": ["name"], "filters": filters
-        }],
-        "limit": 10
-    }))
+fn project_query(filter: Option<&str>) -> ExecuteQueryRequest {
+    let filter = filter.map(|f| format!(" AND {f}")).unwrap_or_default();
+    request(&format!(
+        "MATCH (p:Project) WHERE p.id IN [1000, 1001]{filter} RETURN p.name LIMIT 10"
+    ))
 }
 
 fn file_content_query(node_ids: &[i64], limit: usize) -> ExecuteQueryRequest {
-    request(json!({
-        "query_type": "traversal",
-        "nodes": [{"id": "f", "entity": "File", "node_ids": node_ids, "columns": ["path", "content"]}],
-        "limit": limit
-    }))
+    request(&format!(
+        "MATCH (f:File) WHERE f.id IN {node_ids:?} RETURN f.path, f.content LIMIT {limit}"
+    ))
 }

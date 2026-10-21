@@ -1,8 +1,6 @@
 cases:
   - name: A selective single-node search finds then checks without a join
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username"],"filters":{"username":{"eq":"admin"}}}],"limit":10}
       gql: |
         MATCH (u:User {username: 'admin'}) RETURN u.username LIMIT 10
     logical:
@@ -21,8 +19,6 @@ cases:
 
   - name: A multi-filter ordered single-node search keeps one node read without a join
     query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username","state","created_at"],"filters":{"username":{"starts_with":"admin"},"state":{"in":["active","blocked"]},"created_at":{"gte":"2024-01-01"}}}],"limit":50,"order_by":"-u.created_at"}
       gql: |
         MATCH (u:User)
         WHERE u.username STARTS WITH 'admin' AND u.state IN ['active', 'blocked'] AND u.created_at >= '2024-01-01'

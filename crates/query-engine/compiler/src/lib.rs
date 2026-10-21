@@ -758,7 +758,7 @@ mod tests {
 
         let sql = compile(
             query,
-            Frontend::JsonDsl,
+            Frontend::Gql,
             &ONTOLOGY,
             &crate::testkit::admin_ctx(),
         )
