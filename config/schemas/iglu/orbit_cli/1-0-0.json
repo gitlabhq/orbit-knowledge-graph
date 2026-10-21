@@ -1,0 +1,29 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Orbit CLI binary and host that sent the event. Attached to every Orbit CLI event.",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "orbit_cli",
+    "version": "1-0-0",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "cli_version": {
+      "description": "Version of the Orbit CLI binary, such as `0.42.0`.",
+      "type": ["string", "null"],
+      "maxLength": 32
+    },
+    "os": {
+      "description": "Operating system the CLI binary was built for, such as `macos`, `linux`, or `windows`.",
+      "type": ["string", "null"],
+      "maxLength": 32
+    },
+    "arch": {
+      "description": "CPU architecture the CLI binary was built for, such as `aarch64` or `x86_64`.",
+      "type": ["string", "null"],
+      "maxLength": 32
+    }
+  }
+}
