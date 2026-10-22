@@ -1,8 +1,7 @@
 # yaml-language-server: $schema=../schemas/setup.schema.json
 # Every string `orbit setup` writes into an assistant's files: the managed instruction block, the
 # two hook nudges, the MCP server entry, and the `template_vars` that fill `{{name}}` placeholders
-# in the templates assistants declare. `remote` fills `{{name}}` placeholders in `instructions` when
-# Orbit can reach GitLab at setup time, and they render empty otherwise.
+# in the templates assistants declare.
 mcp_server:
   name: orbit
   command: "{{orbit}} mcp serve"
