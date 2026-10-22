@@ -333,18 +333,36 @@ graph:
         );
     }
 
+    /// `config/default.yaml` has to declare every setting, because the overlay
+    /// and the secret mount are partial and merge onto it. The schema marks
+    /// each non-`Option` field required, so validating the file against it is
+    /// what enforces that. The loader cannot: a scalar missing from a protobuf
+    /// document is indistinguishable from one set to zero.
     #[test]
-    fn missing_scalar_in_defaults_is_an_error() {
+    fn the_embedded_defaults_declare_every_required_setting() {
+        let schema = serde_json::to_value(schemars::schema_for!(AppConfig)).unwrap();
+        let validator = jsonschema::validator_for(&schema).expect("the generated schema compiles");
+
+        let complete: serde_json::Value =
+            orbit_utils::yaml::from_str(EMBEDDED_DEFAULTS).expect("the defaults parse");
+        assert!(
+            validator.is_valid(&complete),
+            "config/default.yaml does not satisfy its own schema: {:?}",
+            validator
+                .iter_errors(&complete)
+                .next()
+                .map(|e| e.to_string()),
+        );
+
         let yaml = EMBEDDED_DEFAULTS.replace("jwt_clock_skew_secs: 60\n", "");
-        assert_ne!(yaml, EMBEDDED_DEFAULTS);
+        assert_ne!(yaml, EMBEDDED_DEFAULTS, "the key being removed must exist");
+        let incomplete: serde_json::Value =
+            orbit_utils::yaml::from_str(&yaml).expect("the trimmed defaults parse");
 
-        let err = config::Config::builder()
-            .add_source(config::File::from_str(&yaml, config::FileFormat::Yaml))
-            .build()
-            .and_then(config::Config::try_deserialize::<AppConfig>)
-            .unwrap_err();
-
-        assert!(err.to_string().contains("jwt_clock_skew_secs"), "{err}");
+        assert!(
+            !validator.is_valid(&incomplete),
+            "a setting removed from config/default.yaml must fail validation"
+        );
     }
 
     fn write_overlay(dir: &Path, name: &str, yaml: &str) -> std::path::PathBuf {

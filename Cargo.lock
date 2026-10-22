@@ -5892,6 +5892,7 @@ dependencies = [
  "chrono",
  "config",
  "croner",
+ "jsonschema",
  "labkit-config",
  "orbit-log-fields",
  "orbit-utils",

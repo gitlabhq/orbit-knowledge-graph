@@ -19,6 +19,7 @@ prost = { workspace = true }
 serde-saphyr = { workspace = true }
 
 [dev-dependencies]
+jsonschema = { workspace = true }
 orbit-utils = { path = "../utils" }
 tempfile = { workspace = true }
 
