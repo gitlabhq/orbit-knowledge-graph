@@ -52,7 +52,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
                             reached,
                         ));
                     }
-                    let ids = self.node_ids_from(&node)?;
+                    let ids = self.node_ids_from(&node, None)?;
                     predicates.push(membership(key_column.clone(), ids));
                 }
                 _ => {}
@@ -92,7 +92,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         {
             let mut far = pattern.nodes[endpoint].clone();
             far.columns = Some(ColumnSelection::List(vec![]));
-            let ids = self.node_ids_from(&far)?;
+            let ids = self.node_ids_from(&far, None)?;
             node.predicates.push(membership(key_column.clone(), ids));
         } else if let Some(ids) = self.endpoint_ids(endpoint) {
             node.predicates.push(membership(key_column.clone(), ids));

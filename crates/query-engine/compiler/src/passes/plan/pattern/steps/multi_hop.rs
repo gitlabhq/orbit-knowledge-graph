@@ -185,7 +185,7 @@ fn hop_rows<M: OrbitQueryModel + ?Sized>(
             .iter()
             .map(|(property, filter)| property_filter(alias, property, filter)),
     );
-    current_edge_rows(graph, pattern, relation, alias, predicates)
+    current_edge_rows(graph, pattern, relation, alias, predicates, None)
 }
 
 fn complete_depth<M: OrbitQueryModel + ?Sized>(

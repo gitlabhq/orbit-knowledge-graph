@@ -13,6 +13,7 @@ use query_data_model::OrbitQueryModel;
 use super::{EdgeRelation, NodePlan, Pattern};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
+use crate::input::QueryType;
 use crate::passes::plan::graph::{BindingSource, ExecutionPlan, RelationGraph, RelationId};
 use crate::passes::plan::predicates::{Column, OutputValue, Predicate, Projection, membership};
 
@@ -20,6 +21,7 @@ type IdSet = (RelationId, String);
 
 pub(super) struct RelationBuilder<'a, M: OrbitQueryModel + ?Sized> {
     pattern: &'a Pattern<'a, M>,
+    driver_cap: Option<u32>,
     root: Option<RelationId>,
     outputs: Vec<Projection>,
     nodes: HashMap<String, PlannedNode>,
@@ -36,9 +38,10 @@ struct PlannedNode {
 }
 
 impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
-    pub fn new(pattern: &'a Pattern<'a, M>) -> Self {
+    pub fn new(pattern: &'a Pattern<'a, M>, row_cap: bool) -> Self {
         Self {
             pattern,
+            driver_cap: driver_cap(pattern).filter(|_| row_cap),
             root: None,
             outputs: Vec::new(),
             nodes: HashMap::new(),
@@ -91,7 +94,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             .values()
             .next()
             .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
-        let root = self.pattern.node_read(&mut self.graph, node)?;
+        let root = self.pattern.node_read(&mut self.graph, node, None)?;
         Ok(ExecutionPlan {
             graph: self.graph,
             root,
@@ -198,7 +201,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         node: &NodePlan,
         on: impl FnOnce(&Self) -> Result<(Column, Column)>,
     ) -> Result<()> {
-        let scan = self.node_read(node)?;
+        let scan = self.node_read(node, None)?;
         self.join_root(scan, &node.alias, on)?;
         self.outputs.extend(node.outputs());
         self.bind_table(node);
@@ -225,8 +228,8 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         );
     }
 
-    fn node_read(&mut self, node: &NodePlan) -> Result<RelationId> {
-        let read = self.pattern.node_read(&mut self.graph, node)?;
+    fn node_read(&mut self, node: &NodePlan, cap: Option<u32>) -> Result<RelationId> {
+        let read = self.pattern.node_read(&mut self.graph, node, cap)?;
         let state = self.nodes.entry(node.alias.clone()).or_default();
         state.read = Some(read);
         if node.conditions().iter().any(Predicate::is_selective) {
@@ -240,14 +243,15 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             return Ok(ids.clone());
         }
         let node = self.pattern.nodes[alias].clone();
-        self.node_ids_from(&node)
+        let cap = self.driver_cap.take();
+        self.node_ids_from(&node, cap)
     }
 
-    fn node_ids_from(&mut self, node: &NodePlan) -> Result<IdSet> {
+    fn node_ids_from(&mut self, node: &NodePlan, cap: Option<u32>) -> Result<IdSet> {
         if let Some(ids) = self.ids(&node.alias) {
             return Ok(ids.clone());
         }
-        let source = self.node_read(node)?;
+        let source = self.node_read(node, cap)?;
         let id = self.graph.project(
             source,
             vec![Projection::new(
@@ -261,12 +265,19 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
     }
 
     /// Keeps the ids an edge read produces for an endpoint when a later step can narrow by them.
-    fn bind_relation_ids(&mut self, index: usize, relation: &EdgeRelation, source: RelationId) {
+    fn bind_relation_ids(
+        &mut self,
+        index: usize,
+        relation: &EdgeRelation,
+        source: RelationId,
+        driver: bool,
+    ) {
         let pattern = self.pattern;
         let (start, end) = relation.direction.edge_columns();
-        let bounded = [&relation.from_node, &relation.to_node]
-            .into_iter()
-            .any(|node| self.ids(node).is_some() || pattern.endpoint_is_selective(node));
+        let bounded = driver
+            || [&relation.from_node, &relation.to_node]
+                .into_iter()
+                .any(|node| self.ids(node).is_some() || pattern.endpoint_is_selective(node));
         for (node, column) in [(&relation.from_node, start), (&relation.to_node, end)] {
             if self.ids(node).is_some() {
                 continue;
@@ -278,7 +289,9 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                     .any(|next| next.endpoint_column(node).is_some())
                 || pattern.model.supports_selective_latest_rows()
                     && pattern.nodes[node].joined
-                    && (pattern.endpoint_is_selective(other) || self.ids(other).is_some());
+                    && (driver
+                        || pattern.endpoint_is_selective(other)
+                        || self.ids(other).is_some());
             if used_later {
                 let ids = self.ids_reached_by(source, column);
                 self.set_ids(node, ids);
@@ -315,3 +328,20 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         (id, DEFAULT_PRIMARY_KEY.to_string())
     }
 }
+
+fn driver_cap<M: OrbitQueryModel + ?Sized>(pattern: &Pattern<'_, M>) -> Option<u32> {
+    let input = pattern.input;
+    (input.query_type == QueryType::Traversal
+        && pattern.model.supports_selective_latest_rows()
+        && !pattern.relations.is_empty()
+        && input.skip.is_none()
+        && input.order_by.is_none()
+        && pattern
+            .relations
+            .iter()
+            .all(|relation| relation.max_hops == 1)
+        && !pattern.nodes.values().any(NodePlan::is_pinned))
+    .then(|| input.fetch_limit().saturating_mul(DRIVER_OVERFETCH))
+}
+
+const DRIVER_OVERFETCH: u32 = 4;

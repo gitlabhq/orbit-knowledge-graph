@@ -303,6 +303,9 @@ fn check<M: OrbitQueryModel>(
             page::apply(&mut lowered.ast, &input, &lowered.metadata);
         }
         let (planned, emitted) = explain::physical(&plan, &lowered.ast);
+        if std::env::var_os("PLAN_SHAPE_DUMP").is_some() {
+            eprintln!("{label}\nplanned:\n{planned}\nemitted:\n{emitted}\n");
+        }
         let assertions = &scenario.physical[backend];
         if assertions.planned.is_none() && assertions.emitted.is_none() {
             failures.push(format!("{label}: missing assertion targets"));
@@ -395,7 +398,7 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
                 "clickhouse" => {
                     if let Err(errors) =
                         check(&scenario, remote, backend, path, |input, options| {
-                            plan::plan_clickhouse(input, remote, options)
+                            plan::plan_clickhouse(input, remote, options, true)
                         })
                     {
                         failures.extend(errors);
@@ -403,7 +406,7 @@ fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), 
                 }
                 "duckdb" => {
                     if let Err(errors) = check(&scenario, local, backend, path, |input, options| {
-                        plan::plan_duckdb(input, local, options)
+                        plan::plan_duckdb(input, local, options, true)
                     }) {
                         failures.extend(errors);
                     }
@@ -812,6 +815,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
                 dynamic,
                 path_segment_budget: budget,
             },
+            true,
         )
         .unwrap();
         let plan::QueryPlan::Hydration(hydration) = &plan else {

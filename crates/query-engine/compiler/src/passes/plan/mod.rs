@@ -66,6 +66,13 @@ impl QueryPlan {
         }
     }
 
+    pub fn row_cap(&self) -> Option<u32> {
+        match self {
+            Self::Traversal(plan) => plan.operation.execution.graph.row_cap(),
+            _ => None,
+        }
+    }
+
     pub fn is_point_lookup(&self) -> bool {
         let (nodes, relations) = match self {
             Self::Traversal(Plan {
@@ -100,28 +107,33 @@ pub fn plan_clickhouse(
     input: &Input,
     model: &query_data_model::ClickHouseDataModel,
     hydration_options: HydrationCompileOptions,
+    row_cap: bool,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options)
+    plan(input, model, hydration_options, row_cap)
 }
 
 pub fn plan_duckdb(
     input: &Input,
     model: &query_data_model::DuckDbDataModel,
     hydration_options: HydrationCompileOptions,
+    row_cap: bool,
 ) -> Result<QueryPlan> {
-    plan(input, model, hydration_options)
+    plan(input, model, hydration_options, row_cap)
 }
 
 fn plan<M>(
     input: &Input,
     model: &M,
     hydration_options: HydrationCompileOptions,
+    row_cap: bool,
 ) -> Result<QueryPlan>
 where
     M: OrbitQueryModel + ?Sized,
 {
     Ok(match input.query_type {
-        QueryType::Traversal => QueryPlan::Traversal(query_types::traversal::plan(input, model)?),
+        QueryType::Traversal => {
+            QueryPlan::Traversal(query_types::traversal::plan(input, model, row_cap)?)
+        }
         QueryType::Aggregation => {
             QueryPlan::Aggregation(query_types::aggregation::plan(input, model)?)
         }

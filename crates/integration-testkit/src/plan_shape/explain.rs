@@ -547,15 +547,19 @@ fn relation_node(
             sort_key,
             input,
             condition,
+            limit,
         } => Tree::node(
             Operator::Deduplicate,
             format!(
-                "LimitBy {}",
+                "LimitBy {}{}",
                 sort_key
                     .iter()
                     .map(|column| format!("{alias}.{column}"))
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(", "),
+                limit
+                    .map(|rows| format!(" Limit {rows}"))
+                    .unwrap_or_default()
             ),
             vec![filter(
                 condition.iter().flat_map(planned_predicate).collect(),

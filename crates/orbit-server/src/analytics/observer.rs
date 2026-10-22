@@ -226,6 +226,7 @@ mod tests {
                 ..Default::default()
             },
             has_virtual_columns: false,
+            fallback: None,
         });
         obs.compiled(Duration::from_millis(5));
         obs.executed(Duration::from_millis(50), 2);

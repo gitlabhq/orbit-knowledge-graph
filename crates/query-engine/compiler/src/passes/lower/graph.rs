@@ -232,6 +232,7 @@ fn emit_node(id: RelationId, reads: &Reads<'_>, current: Option<RelationId>) -> 
             alias,
             sort_key,
             condition,
+            limit,
         } => {
             let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
             let dedup = Query {
@@ -239,9 +240,22 @@ fn emit_node(id: RelationId, reads: &Reads<'_>, current: Option<RelationId>) -> 
                 limit_by,
                 ..emit_ref(input, reads, current).query(star())
             };
-            RelationOutput {
+            let picked = RelationOutput {
                 from: TableRef::subquery(dedup, alias),
                 predicates: condition.iter().map(predicate).collect(),
+            };
+            match limit {
+                Some(limit) => RelationOutput {
+                    from: TableRef::subquery(
+                        Query {
+                            limit: Some(*limit),
+                            ..picked.query(star())
+                        },
+                        alias,
+                    ),
+                    predicates: vec![],
+                },
+                None => picked,
             }
         }
     }

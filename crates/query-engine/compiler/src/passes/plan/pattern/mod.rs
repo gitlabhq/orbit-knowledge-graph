@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use query_data_model::OrbitQueryModel;
 
 use super::filters::BoundFilter;
-use super::graph::{ExecutionPlan, ReadOwner, RelationGraph, RelationId};
+use super::graph::{ExecutionPlan, LatestRows, ReadOwner, RelationGraph, RelationId};
 use super::predicates::{Column, Predicate, kind_column};
 use super::{DenormalizedKey, DenormalizedProperty, Plan, sort_key};
 use crate::error::{QueryError, Result};
@@ -74,7 +74,12 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         self.input.query_type == QueryType::Aggregation
     }
 
-    fn node_read(&self, graph: &mut RelationGraph, node: &NodePlan) -> Result<RelationId> {
+    fn node_read(
+        &self,
+        graph: &mut RelationGraph,
+        node: &NodePlan,
+        cap: Option<u32>,
+    ) -> Result<RelationId> {
         let table = node
             .table
             .as_ref()
@@ -85,7 +90,7 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             ReadOwner::Node(node.alias.clone()),
             sort_key(self.model, table)?,
             node.conditions(),
-            self.model.supports_selective_latest_rows(),
+            LatestRows::new(self.model.supports_selective_latest_rows(), cap),
         ))
     }
 
@@ -123,8 +128,8 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
     }
 
     /// The relation graph for the pattern, with the conditions that span nodes applied at its root.
-    pub(super) fn execution(&self) -> Result<ExecutionPlan> {
-        let mut execution = steps::RelationBuilder::new(self).build()?;
+    pub(super) fn execution(&self, row_cap: bool) -> Result<ExecutionPlan> {
+        let mut execution = steps::RelationBuilder::new(self, row_cap).build()?;
         let conditions = self
             .input
             .predicates

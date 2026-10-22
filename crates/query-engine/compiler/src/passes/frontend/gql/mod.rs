@@ -119,9 +119,15 @@ pub fn compile_query_model(
     data_model: &Arc<query_data_model::ClickHouseDataModel>,
     security_context: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let mut ctx = config::ClickhouseGqlCtx::new(security_context.clone(), Arc::clone(data_model));
-    query.load(&mut ctx);
-    crate::finish(&mut ctx, config::run_clickhouse_gql)
+    crate::finish(
+        || {
+            let mut ctx =
+                config::ClickhouseGqlCtx::new(security_context.clone(), Arc::clone(data_model));
+            query.clone().load(&mut ctx);
+            ctx
+        },
+        config::run_clickhouse_gql,
+    )
 }
 
 fn resolve_schema(

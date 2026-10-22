@@ -90,8 +90,26 @@ use std::sync::Arc;
 use config::CompilerCtx as _;
 
 fn finish<C: config::CompilerCtx>(
+    make: impl Fn() -> C,
+    run: impl Fn(&mut C) -> Result<()>,
+) -> Result<CompiledQueryContext> {
+    let mut ctx = make();
+    let mut compiled = output(&mut ctx, &run)?;
+    if ctx
+        .query_plan()
+        .as_ref()
+        .is_some_and(|plan| plan.row_cap().is_some())
+    {
+        let mut ctx = make();
+        ctx.set_row_cap(false);
+        compiled.fallback = Some(output(&mut ctx, &run)?.base);
+    }
+    Ok(compiled)
+}
+
+fn output<C: config::CompilerCtx>(
     ctx: &mut C,
-    run: impl FnOnce(&mut C) -> Result<()>,
+    run: impl Fn(&mut C) -> Result<()>,
 ) -> Result<CompiledQueryContext> {
     run(ctx)
         .and_then(|()| {
@@ -121,16 +139,22 @@ pub fn compile_model(
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     match fe {
-        Frontend::JsonDsl => {
-            let mut ctx = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_json_dsl)
-        }
-        Frontend::Gql => {
-            let mut ctx = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
-            ctx.set_raw(raw.to_string());
-            finish(&mut ctx, config::run_clickhouse_gql)
-        }
+        Frontend::JsonDsl => finish(
+            || {
+                let mut c = config::ClickhouseJsonDslCtx::new(ctx.clone(), Arc::clone(data_model));
+                c.set_raw(raw.to_string());
+                c
+            },
+            config::run_clickhouse_json_dsl,
+        ),
+        Frontend::Gql => finish(
+            || {
+                let mut c = config::ClickhouseGqlCtx::new(ctx.clone(), Arc::clone(data_model));
+                c.set_raw(raw.to_string());
+                c
+            },
+            config::run_clickhouse_gql,
+        ),
     }
 }
 
@@ -150,16 +174,22 @@ pub fn compile_local(
     let data_model = data_model::duckdb(Arc::clone(&ontology))
         .map_err(|error| QueryError::PipelineInvariant(error.to_string()))?;
     match fe {
-        Frontend::JsonDsl => {
-            let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&data_model));
-            c.set_raw(raw.to_string());
-            finish(&mut c, config::run_duckdb_json_dsl)
-        }
-        Frontend::Gql => {
-            let mut c = config::DuckdbGqlCtx::new(Arc::clone(&data_model));
-            c.set_raw(raw.to_string());
-            finish(&mut c, config::run_duckdb_gql)
-        }
+        Frontend::JsonDsl => finish(
+            || {
+                let mut c = config::DuckdbJsonDslCtx::new(Arc::clone(&data_model));
+                c.set_raw(raw.to_string());
+                c
+            },
+            config::run_duckdb_json_dsl,
+        ),
+        Frontend::Gql => finish(
+            || {
+                let mut c = config::DuckdbGqlCtx::new(Arc::clone(&data_model));
+                c.set_raw(raw.to_string());
+                c
+            },
+            config::run_duckdb_gql,
+        ),
     }
 }
 

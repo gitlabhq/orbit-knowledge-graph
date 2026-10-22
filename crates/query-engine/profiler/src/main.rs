@@ -305,6 +305,9 @@ fn run_compile_only(
                     let mut value = serde_json::json!({ "query": query });
                     if matches!(show, CompileShow::Base | CompileShow::Both) {
                         value["base_sql"] = serde_json::Value::String(compiled.base.render());
+                        if let Some(fallback) = &compiled.fallback {
+                            value["fallback_sql"] = serde_json::Value::String(fallback.render());
+                        }
                     }
                     if matches!(show, CompileShow::Hydration | CompileShow::Both) {
                         value["hydration"] =
@@ -327,6 +330,10 @@ fn run_compile_only(
         match show {
             CompileShow::Base => {
                 println!("{}", compiled.base.render());
+                if let Some(fallback) = &compiled.fallback {
+                    println!("-- fallback");
+                    println!("{}", fallback.render());
+                }
             }
             CompileShow::Hydration => {
                 println!("{}", format_hydration(&compiled.hydration));

@@ -127,6 +127,7 @@ pub enum RelationNode {
         alias: String,
         sort_key: Vec<String>,
         condition: Vec<Predicate>,
+        limit: Option<u32>,
     },
 }
 
@@ -170,6 +171,21 @@ impl RelationNode {
                 replace(left);
                 replace(right);
             }
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum LatestRows {
+    Final,
+    Keyed { cap: Option<u32> },
+}
+
+impl LatestRows {
+    pub fn new(keyed: bool, cap: Option<u32>) -> Self {
+        match keyed {
+            true => Self::Keyed { cap },
+            false => Self::Final,
         }
     }
 }
@@ -262,7 +278,7 @@ impl RelationGraph {
         owner: ReadOwner,
         key: &[String],
         predicates: Vec<Predicate>,
-        selective_latest: bool,
+        latest: LatestRows,
     ) -> RelationId {
         let read = ReadKey {
             table: table.to_string(),
@@ -270,12 +286,12 @@ impl RelationGraph {
             owner: owner.clone(),
             key: key.to_vec(),
             predicates: predicates.clone(),
-            selective_latest,
+            selective_latest: latest != LatestRows::Final,
         };
         if let Some((_, id)) = self.reads.iter().find(|(planned, _)| *planned == read) {
             return *id;
         }
-        let id = self.plan_current_rows(table, alias, owner, key, predicates, selective_latest);
+        let id = self.plan_current_rows(table, alias, owner, key, predicates, latest);
         self.reads.push((read, id));
         id
     }
@@ -287,13 +303,23 @@ impl RelationGraph {
         owner: ReadOwner,
         key: &[String],
         predicates: Vec<Predicate>,
-        selective_latest: bool,
+        latest: LatestRows,
     ) -> RelationId {
         let bounds_scan = |predicate: &Predicate| {
             predicate.is_selective()
                 && (!predicate.is_text_match() || predicate.filters_sort_key(key, true))
         };
-        if !selective_latest || !predicates.iter().any(bounds_scan) {
+        let pruned = predicates.iter().any(|predicate| {
+            predicate.is_point_lookup()
+                || predicate.is_selective() && predicate.filters_sort_key(key, false)
+        });
+        let cap = match latest {
+            LatestRows::Keyed { cap } => cap.filter(|_| !pruned),
+            LatestRows::Final => None,
+        };
+        let keyed =
+            latest != LatestRows::Final && (cap.is_some() || predicates.iter().any(bounds_scan));
+        if !keyed {
             let (keyed, rest): (Vec<_>, Vec<_>) = predicates
                 .into_iter()
                 .partition(|predicate| predicate.filters_sort_key(key, false));
@@ -331,8 +357,13 @@ impl RelationGraph {
                 }],
             );
         }
-        let latest = self.latest(current, alias, key.to_vec(), vec![]);
-        self.filter(latest, rest)
+        match cap {
+            Some(_) => self.latest(current, alias, key.to_vec(), rest, cap),
+            None => {
+                let latest = self.latest(current, alias, key.to_vec(), vec![], None);
+                self.filter(latest, rest)
+            }
+        }
     }
 
     pub fn filter(
@@ -405,12 +436,21 @@ impl RelationGraph {
         alias: impl Into<String>,
         sort_key: Vec<String>,
         condition: Vec<Predicate>,
+        limit: Option<u32>,
     ) -> RelationId {
         self.add(RelationNode::Latest {
             input: input.into(),
             alias: alias.into(),
             sort_key,
             condition,
+            limit,
+        })
+    }
+
+    pub fn row_cap(&self) -> Option<u32> {
+        self.nodes.iter().find_map(|node| match node {
+            RelationNode::Latest { limit, .. } => *limit,
+            _ => None,
         })
     }
 }

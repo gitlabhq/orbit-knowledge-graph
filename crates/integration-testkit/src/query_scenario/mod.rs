@@ -609,8 +609,14 @@ async fn execute_output(
     security: &SecurityContext,
     redaction: &MockRedactionService,
 ) -> PipelineOutput {
-    let batches = ctx.query_parameterized(&compiled.base).await;
-    let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context).unwrap();
+    let mut batches = ctx.query_parameterized(&compiled.base).await;
+    let mut result_context = &compiled.base.result_context;
+    let rows = batches.iter().map(|batch| batch.num_rows()).sum();
+    if let Some(fallback) = compiled.fallback_for(rows) {
+        batches = ctx.query_parameterized(fallback).await;
+        result_context = &fallback.result_context;
+    }
+    let mut result = QueryResult::from_batches(&batches, result_context).unwrap();
 
     let checks = result.resource_checks();
     let authorizations = redaction.check(&checks);

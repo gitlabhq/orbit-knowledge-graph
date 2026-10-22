@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use clickhouse_client::{ArrowClickHouseClient, QuerySummary};
+use query_engine::compiler::ParameterizedQuery;
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -15,11 +16,36 @@ use crate::pipeline::correlation;
 use crate::pipeline::service::QuerySettings;
 
 struct PreparedQuery {
+    label: &'static str,
     sql: String,
     params: HashMap<String, orbit_utils::query_types::ParamValue>,
     rendered_sql: String,
     query_id: String,
     http_settings: Vec<(String, String)>,
+}
+
+impl PreparedQuery {
+    fn new(
+        label: &'static str,
+        query: &ParameterizedQuery,
+        log_comment: &str,
+        settings: &[(String, String)],
+    ) -> Self {
+        let query_id = correlation::query_id(label);
+        let mut http_settings = vec![
+            ("query_id".to_string(), query_id.clone()),
+            ("log_comment".to_string(), log_comment.to_string()),
+        ];
+        http_settings.extend(settings.iter().cloned());
+        Self {
+            label,
+            sql: query.sql.clone(),
+            params: query.params.clone(),
+            rendered_sql: query.render(),
+            query_id,
+            http_settings,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -40,6 +66,7 @@ impl PipelineStage for ClickHouseExecutor {
         let client = ctx
             .server_extensions
             .get::<Arc<ArrowClickHouseClient>>()
+            .cloned()
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
             .inspect_err(|e| obs.record_error(e))?;
 
@@ -54,50 +81,66 @@ impl PipelineStage for ClickHouseExecutor {
             ctx.frontend,
             self.migration_version,
         );
+        let settings = ctx
+            .phases
+            .get::<QuerySettings>()
+            .map(|QuerySettings(settings)| settings.clone())
+            .unwrap_or_default();
 
-        let (prepared, result_context) = {
-            let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;
-            let query_id = correlation::query_id("base");
-            let mut http_settings = vec![
-                ("query_id".to_string(), query_id.clone()),
-                ("log_comment".to_string(), log_comment),
-            ];
-            if let Some(QuerySettings(settings)) = ctx.phases.get::<QuerySettings>() {
-                http_settings.extend(settings.iter().cloned());
-            }
-            let prepared = PreparedQuery {
-                sql: compiled.base.sql.clone(),
-                params: compiled.base.params.clone(),
-                rendered_sql: compiled.base.render(),
-                http_settings,
-                query_id,
-            };
-            (prepared, compiled.base.result_context.clone())
-        };
+        let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;
+        let base = PreparedQuery::new("base", &compiled.base, &log_comment, &settings);
+        let mut result_context = compiled.base.result_context.clone();
 
-        let (batches, execution) = execute_query(client, &prepared, start)
+        let (mut batches, execution) = execute_query(&client, &base, start)
             .await
             .inspect_err(|e| obs.record_error(e))?;
-
-        let elapsed = start.elapsed();
-        obs.executed(elapsed, batches.len());
-        obs.query_executed(
-            "base",
-            execution.stats.read_rows,
-            execution.stats.read_bytes,
-            execution.stats.memory_usage,
-        );
-
-        ctx.phases
-            .get_or_insert_default::<QueryExecutionLog>()
-            .0
-            .push(execution);
+        let fallback = compiled.fallback_for(rows(&batches)).map(|query| {
+            (
+                PreparedQuery::new("fallback", query, &log_comment, &settings),
+                query.result_context.clone(),
+            )
+        });
+        record(ctx, obs, execution, batches.len());
+        if let Some((fallback, context)) = fallback {
+            let (full, execution) = execute_query(&client, &fallback, Instant::now())
+                .await
+                .inspect_err(|e| obs.record_error(e))?;
+            record(ctx, obs, execution, full.len());
+            batches = full;
+            result_context = context;
+        }
 
         Ok(ExecutionOutput {
             batches,
             result_context,
         })
     }
+}
+
+fn rows(batches: &[arrow::record_batch::RecordBatch]) -> usize {
+    batches.iter().map(|batch| batch.num_rows()).sum()
+}
+
+fn record(
+    ctx: &mut QueryPipelineContext,
+    obs: &mut dyn PipelineObserver,
+    execution: QueryExecution,
+    batch_count: usize,
+) {
+    obs.executed(
+        Duration::from_secs_f64(execution.elapsed_ms / 1000.0),
+        batch_count,
+    );
+    obs.query_executed(
+        &execution.label,
+        execution.stats.read_rows,
+        execution.stats.read_bytes,
+        execution.stats.memory_usage,
+    );
+    ctx.phases
+        .get_or_insert_default::<QueryExecutionLog>()
+        .0
+        .push(execution);
 }
 
 async fn execute_query(
@@ -117,7 +160,7 @@ async fn execute_query(
         .map_err(|e| PipelineError::Execution(e.to_string()))?;
 
     let elapsed = start.elapsed();
-    let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
+    let result_rows = rows(&batches) as u64;
 
     let stats = apply_summary(
         QueryExecutionStats {
@@ -129,7 +172,7 @@ async fn execute_query(
     );
 
     let execution = QueryExecution {
-        label: "base".into(),
+        label: prepared.label.into(),
         rendered_sql: prepared.rendered_sql.clone(),
         query_id: prepared.query_id.clone(),
         elapsed_ms: elapsed.as_secs_f64() * 1000.0,

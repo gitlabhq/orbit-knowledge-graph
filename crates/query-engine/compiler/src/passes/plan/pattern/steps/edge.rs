@@ -9,7 +9,7 @@ use super::super::{EdgeRelation, Pattern};
 use super::{IdSet, RelationBuilder};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
-use crate::passes::plan::graph::{ReadOwner, RelationGraph, RelationId};
+use crate::passes::plan::graph::{LatestRows, ReadOwner, RelationGraph, RelationId};
 use crate::passes::plan::predicates::*;
 use crate::passes::plan::sort_key;
 
@@ -52,12 +52,14 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             let column = relation.endpoint_column(node).expect("relation endpoint");
             predicates.push(membership(Column::new(alias, column), ids));
         }
+        let driver = self.driver_cap.is_some();
         let mut source = if relation.max_hops > 1 {
             self.multi_hop_source(&physical)?
         } else {
             self.edge_source(&physical, predicates)?
         };
-        self.bind_relation_ids(index, relation, source);
+        let driver = driver && self.driver_cap.is_none();
+        self.bind_relation_ids(index, relation, source, driver);
         if relation.max_hops == 1 && pattern.relations.len() > 1 {
             source = self.graph.bind(source, alias);
         }
@@ -129,13 +131,16 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
                 .cloned()
                 .collect();
             let rows = self.graph.filter(rows, identity);
-            return Ok(self.graph.latest(rows, alias, key.to_vec(), predicates));
+            return Ok(self
+                .graph
+                .latest(rows, alias, key.to_vec(), predicates, None));
         }
         if relation.single_edge_table().is_some()
             || pattern.model.supports_selective_latest_rows()
                 && predicates.iter().any(Predicate::is_selective)
         {
-            return current_edge_rows(&mut self.graph, pattern, relation, alias, predicates);
+            let cap = self.driver_cap.take();
+            return current_edge_rows(&mut self.graph, pattern, relation, alias, predicates, cap);
         }
         let rows = plain_edge_rows(&mut self.graph, relation, true)?;
         Ok(self.graph.filter(rows, predicates))
@@ -213,6 +218,7 @@ pub(super) fn current_edge_rows<M: OrbitQueryModel + ?Sized>(
     relation: &EdgeRelation,
     alias: &str,
     predicates: Vec<Predicate>,
+    cap: Option<u32>,
 ) -> Result<RelationId> {
     let model = pattern.model;
     let owner = ReadOwner::Relationship(relation.input_index);
@@ -223,7 +229,7 @@ pub(super) fn current_edge_rows<M: OrbitQueryModel + ?Sized>(
             owner,
             sort_key(model, table)?,
             predicates,
-            model.supports_selective_latest_rows(),
+            LatestRows::new(model.supports_selective_latest_rows(), cap),
         ));
     }
     edge_union(
@@ -238,7 +244,7 @@ pub(super) fn current_edge_rows<M: OrbitQueryModel + ?Sized>(
                 owner.clone(),
                 sort_key(model, table)?,
                 predicates.clone(),
-                model.supports_selective_latest_rows(),
+                LatestRows::new(model.supports_selective_latest_rows(), cap),
             ))
         },
     )

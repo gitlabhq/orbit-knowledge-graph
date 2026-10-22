@@ -89,70 +89,88 @@ impl PipelineStage for ProfilerExecutor {
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let start = std::time::Instant::now();
         let client = ctx
             .server_extensions
             .get::<Arc<ArrowClickHouseClient>>()
+            .cloned()
             .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))?;
-        let compiled = ctx.compiled()?;
-        let result_context = compiled.base.result_context.clone();
-        let rendered_sql = compiled.base.render();
-
-        let correlation_id = labkit::correlation::current();
-        let log_comment = match &correlation_id {
+        let log_comment = match labkit::correlation::current() {
             Some(id) => format!("gkg;profiler;correlation_id={id}"),
             None => "gkg;profiler".to_string(),
         };
-
-        let mut query = client
-            .query(&compiled.base.sql)
-            .with_setting("log_comment", &log_comment);
-        for (key, param) in &compiled.base.params {
-            query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.data_type);
-        }
-        let (batches, summary) = query
-            .fetch_arrow_with_summary()
+        let compiled = ctx.compiled()?;
+        let (mut output, execution) = run_query(&client, "base", &compiled.base, &log_comment)
             .await
-            .map_err(|e| PipelineError::Execution(e.to_string()))
             .inspect_err(|e| obs.record_error(e))?;
-
-        let elapsed = start.elapsed();
-        obs.executed(elapsed, batches.len());
-        let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
-
-        let summary = summary.ok_or_else(|| {
-            PipelineError::Execution("missing X-ClickHouse-Summary header".into())
-        })?;
-
-        let execution = QueryExecution {
-            label: "base".into(),
-            rendered_sql,
-            query_id: String::new(),
-            elapsed_ms: elapsed.as_secs_f64() * 1000.0,
-            stats: QueryExecutionStats {
-                read_rows: summary.read_rows().unwrap_or(0),
-                read_bytes: summary.read_bytes().unwrap_or(0),
-                result_rows: summary.result_rows().unwrap_or(result_rows),
-                result_bytes: summary.result_bytes().unwrap_or(0),
-                elapsed_ns: summary.elapsed_ns().unwrap_or(elapsed.as_nanos() as u64),
-                memory_usage: summary.memory_usage().map(|v| v as i64).unwrap_or(0),
-            },
-            explain_plan: None,
-            explain_pipeline: None,
-            query_log: None,
-            processors: None,
-        };
-
-        ctx.phases
-            .get_or_insert_default::<QueryExecutionLog>()
-            .0
-            .push(execution);
-
-        Ok(ExecutionOutput {
-            batches,
-            result_context,
-        })
+        let mut executions = vec![execution];
+        let rows = output.batches.iter().map(|batch| batch.num_rows()).sum();
+        if let Some(fallback) = compiled.fallback_for(rows) {
+            let (full, execution) = run_query(&client, "fallback", fallback, &log_comment)
+                .await
+                .inspect_err(|e| obs.record_error(e))?;
+            executions.push(execution);
+            output = full;
+        }
+        for execution in executions {
+            obs.executed(
+                std::time::Duration::from_secs_f64(execution.elapsed_ms / 1000.0),
+                output.batches.len(),
+            );
+            ctx.phases
+                .get_or_insert_default::<QueryExecutionLog>()
+                .0
+                .push(execution);
+        }
+        Ok(output)
     }
+}
+
+async fn run_query(
+    client: &ArrowClickHouseClient,
+    label: &str,
+    query: &compiler::ParameterizedQuery,
+    log_comment: &str,
+) -> Result<(ExecutionOutput, QueryExecution), PipelineError> {
+    let start = std::time::Instant::now();
+    let mut request = client
+        .query(&query.sql)
+        .with_setting("log_comment", log_comment);
+    for (key, param) in &query.params {
+        request = ArrowClickHouseClient::bind_param(request, key, &param.value, &param.data_type);
+    }
+    let (batches, summary) = request
+        .fetch_arrow_with_summary()
+        .await
+        .map_err(|e| PipelineError::Execution(e.to_string()))?;
+    let elapsed = start.elapsed();
+    let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
+    let summary = summary
+        .ok_or_else(|| PipelineError::Execution("missing X-ClickHouse-Summary header".into()))?;
+    let execution = QueryExecution {
+        label: label.into(),
+        rendered_sql: query.render(),
+        query_id: String::new(),
+        elapsed_ms: elapsed.as_secs_f64() * 1000.0,
+        stats: QueryExecutionStats {
+            read_rows: summary.read_rows().unwrap_or(0),
+            read_bytes: summary.read_bytes().unwrap_or(0),
+            result_rows: summary.result_rows().unwrap_or(result_rows),
+            result_bytes: summary.result_bytes().unwrap_or(0),
+            elapsed_ns: summary.elapsed_ns().unwrap_or(elapsed.as_nanos() as u64),
+            memory_usage: summary.memory_usage().map(|v| v as i64).unwrap_or(0),
+        },
+        explain_plan: None,
+        explain_pipeline: None,
+        query_log: None,
+        processors: None,
+    };
+    Ok((
+        ExecutionOutput {
+            batches,
+            result_context: query.result_context.clone(),
+        },
+        execution,
+    ))
 }
 
 struct MockAuthorizationStage;

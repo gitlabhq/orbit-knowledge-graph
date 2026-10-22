@@ -1,4 +1,4 @@
-name: Unselective chains join edge reads without id sets or candidate rescans
+name: Unselective chains drive from a capped edge read and bound every later read by reached ids
 
 query:
   json: |
@@ -12,12 +12,16 @@ logical:
 physical:
   clickhouse:
     planned:
-      ctes:
-        absent: true
-      expect: ["(Join ON _orbit_edge_0.target_id = _orbit_edge_1.source_id (_) (_))"]
-      reject: ["(Filter _orbit_edge_1.source_id IN ?.id (_))"]
+      bind:
+        - (CTE $first (Deduplicate LimitBy ... (_)))
+        - (CTE $targets (Project _id_source.target_id AS id (Bind _id_source (Scan Relation(3) AS _orbit_relation))))
+      expect:
+        - (Deduplicate LimitBy _orbit_edge_0.traversal_path, _orbit_edge_0.relationship_kind, _orbit_edge_0.project_id, _orbit_edge_0.branch, _orbit_edge_0.source_id, _orbit_edge_0.target_id, _orbit_edge_0.source_kind, _orbit_edge_0.target_kind Limit 124 (Filter _orbit_edge_0.relationship_kind = 'CALLS', ... (Scan Table(gl_code_edge) AS _orbit_edge_0)))
+        - (Filter _orbit_edge_1.relationship_kind = 'CALLS', _orbit_edge_1.source_kind = 'Definition', _orbit_edge_1.target_kind = 'Definition', _orbit_edge_1.source_id IN $targets.id (Scan Table(gl_code_edge) AS _orbit_edge_1))
+        - (Join ON _orbit_edge_0.target_id = _orbit_edge_1.source_id (_) (_))
+      reject:
+        - (Deduplicate Final (_))
     emitted:
-      ctes:
-        absent: true
       occurrences:
         - { pattern: "(Scan Table(gl_code_edge) ...)", count: 2 }
+        - { pattern: "(Limit 124 (_))", count: 1 }

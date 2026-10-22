@@ -1,4 +1,4 @@
-name: Covered node filters use edge tags without node scans
+name: Covered node filters use edge tags and the capped edge read bounds the node reads
 
 query:
   json: |
@@ -12,8 +12,20 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter _orbit_edge_0._deleted = false, _orbit_edge_0.source_tags HAS ANY ['definition_type:function'] (Bind _orbit_edge_0 (Filter ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))))"]
-    emitted:
-      expect: ["(Filter ArrayContains(_orbit_edge_0.source_tags, 'definition_type:function'), ... (_))"]
+      bind:
+        - (CTE $edges (Deduplicate LimitBy ... (_)))
+        - (CTE $sources (Project _id_source.source_id AS id (_)))
+        - (CTE $targets (Project _id_source.target_id AS id (_)))
       ctes:
-        absent: true
+        exact_order: [$edges, $sources, $targets]
+      expect:
+        - (Deduplicate LimitBy _orbit_edge_0.traversal_path, _orbit_edge_0.relationship_kind, _orbit_edge_0.project_id, _orbit_edge_0.branch, _orbit_edge_0.source_id, _orbit_edge_0.target_id, _orbit_edge_0.source_kind, _orbit_edge_0.target_kind Limit 124 (Filter _orbit_edge_0.relationship_kind = 'CALLS', _orbit_edge_0.source_kind = 'Definition', _orbit_edge_0.target_kind = 'Definition', _orbit_edge_0._deleted = false, _orbit_edge_0.source_tags HAS ANY ['definition_type:function'] (Scan Table(gl_code_edge) AS _orbit_edge_0)))
+        - (Filter a.id IN $sources.id (Scan Table(gl_definition) AS a))
+        - (Filter b.id IN $targets.id (Scan Table(gl_definition) AS b))
+      reject:
+        - (Deduplicate Final (_))
+    emitted:
+      expect:
+        - (Limit 124 (Project * (Filter _orbit_edge_0._deleted = false, ArrayContains(_orbit_edge_0.source_tags, 'definition_type:function') (_))))
+      occurrences:
+        - { pattern: "(Scan Table(gl_code_edge) ...)", count: 1 }
