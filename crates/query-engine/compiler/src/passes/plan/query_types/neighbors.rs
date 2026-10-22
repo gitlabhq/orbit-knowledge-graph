@@ -152,6 +152,7 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
                     carries &= model
                         .variant_scope(relationship, source, target)
                         .is_some_and(|scope| match center_is_target {
+                            // The edge row carries the target's path; a source shares it only where the ontology says so.
                             true => scope.is_scope_preserving(),
                             false => {
                                 scope.propagates_to_source(relationship, source)
