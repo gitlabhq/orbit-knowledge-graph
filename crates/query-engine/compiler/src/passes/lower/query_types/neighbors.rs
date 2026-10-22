@@ -305,6 +305,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         }
     };
 
+    let mut uses_center = false;
     let mut query = if let Some(table) = fused_table {
         let mut q = build_fused_both_arm(
             &center_id,
@@ -321,7 +322,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         q.limit = Some(input.limit);
         q
     } else {
-        let arms_for = |dir: Direction| -> Vec<Query> {
+        let arms_for = |dir: Direction| -> Vec<(Query, bool)> {
             let (all_kinds, carrying, rest) = match dir {
                 Direction::Incoming => (
                     incoming_kinds,
@@ -335,38 +336,35 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
                 ),
             };
             if center_node_ids.is_empty() || !center_has_tp {
-                return vec![build_arm(dir, all_kinds, None)];
+                return vec![(build_arm(dir, all_kinds, None), false)];
             }
             if carrying.is_empty() {
                 let guard = (dir == Direction::Incoming).then_some(CenterBound::Id);
-                return vec![build_arm(dir, all_kinds, guard)];
+                return vec![(build_arm(dir, all_kinds, guard), guard.is_some())];
             }
             if rest.is_empty() {
-                return vec![build_arm(dir, all_kinds, Some(CenterBound::Path))];
+                return vec![(build_arm(dir, all_kinds, Some(CenterBound::Path)), true)];
             }
             vec![
-                build_arm(dir, carrying, Some(CenterBound::Path)),
-                build_arm(dir, rest, Some(CenterBound::Id)),
+                (build_arm(dir, carrying, Some(CenterBound::Path)), true),
+                (build_arm(dir, rest, Some(CenterBound::Id)), true),
             ]
         };
-        let mut arms = match direction {
+        let arms = match direction {
             Direction::Both => {
                 [arms_for(Direction::Outgoing), arms_for(Direction::Incoming)].concat()
             }
             dir => arms_for(dir),
         };
+        uses_center = arms.iter().any(|(_, used)| *used);
+        let mut arms: Vec<Query> = arms.into_iter().map(|(arm, _)| arm).collect();
         let mut first = arms.remove(0);
         first.union_all = arms;
         first.order_by = order_by;
         first.limit = Some(input.limit);
         first
     };
-    let reads_center = |q: &Query| {
-        std::iter::once(q)
-            .chain(&q.union_all)
-            .any(|arm| format!("{:?}", arm.where_clause).contains(center_rows))
-    };
-    if fused_table.is_none() && reads_center(&query) {
+    if uses_center {
         let (order_by, limit_by) = latest_row_dedup(center_rows, center_sort_key);
         let latest = Query {
             select: vec![SelectExpr::star()],
