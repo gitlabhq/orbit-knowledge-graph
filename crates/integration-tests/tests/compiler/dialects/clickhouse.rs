@@ -881,7 +881,7 @@ fn scoped_count_condition_excludes_the_scope_lookup() {
 }
 
 #[test]
-fn cross_namespace_related_to_edge_stays_unscoped() {
+fn cross_namespace_related_to_edge_scans_only_the_source_namespace() {
     let orbit_query = "MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem) WHERE p.id = 1 RETURN p, wi.id, rel.id, rel.title LIMIT 100";
     let json = r#"{
         "query_type": "traversal",
@@ -902,7 +902,11 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
 
     let related_scan = sql.split("FROM gl_edge AS _orbit_edge_1").nth(1).unwrap();
     let related_scope = related_scan.split(" ON ").next().unwrap();
-    assert!(!related_scope.contains(SCOPED_LOOKUP), "{sql}");
+    assert!(
+        related_scope.contains(SCOPED_LOOKUP)
+            && !sql.contains("startsWith(rel.traversal_path, (SELECT"),
+        "the RELATED_TO rows carry the source's path, the target may live anywhere: {sql}"
+    );
 
     let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
         panic!("expected static hydration");
