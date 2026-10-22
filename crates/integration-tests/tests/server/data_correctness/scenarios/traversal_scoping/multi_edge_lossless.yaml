@@ -5,7 +5,7 @@ config:
     gl_merge_request_diff_file:
       - { id: 9300, merge_request_id: 2000, merge_request_diff_id: 5000, project_id: 1000, new_path: "src/a.rs", traversal_path: "1/100/1000/" }
       - { id: 9301, merge_request_id: 2000, merge_request_diff_id: 5000, project_id: 1000, new_path: "src/b.rs", traversal_path: "1/100/1000/" }
-    gl_edge:
+    gl_diff_edge:
       - { traversal_path: "1/100/1000/", source_id: 5000, source_kind: MergeRequestDiff, relationship_kind: HAS_FILE, target_id: 9300, target_kind: MergeRequestDiffFile, source_tags: [], target_tags: [] }
       - { traversal_path: "1/100/1000/", source_id: 5000, source_kind: MergeRequestDiff, relationship_kind: HAS_FILE, target_id: 9301, target_kind: MergeRequestDiffFile, source_tags: [], target_tags: [] }
 

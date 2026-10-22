@@ -18,6 +18,12 @@ config:
       - { id: 7312, merge_request_id: 7111, merge_request_diff_id: 7211, project_id: 7010, new_path: "c.rs", traversal_path: "1/701/7010/" }
     gl_edge:
       - { source_id: 701, source_kind: Group, relationship_kind: CONTAINS, target_id: 7010, target_kind: Project, traversal_path: "1/701/" }
+    gl_diff_edge:
+      - { source_id: 7110, source_kind: MergeRequest, relationship_kind: HAS_LATEST_DIFF, target_id: 7210, target_kind: MergeRequestDiff, traversal_path: "1/701/7010/" }
+      - { source_id: 7111, source_kind: MergeRequest, relationship_kind: HAS_LATEST_DIFF, target_id: 7211, target_kind: MergeRequestDiff, traversal_path: "1/701/7010/" }
+      - { source_id: 7210, source_kind: MergeRequestDiff, relationship_kind: HAS_FILE, target_id: 7310, target_kind: MergeRequestDiffFile, traversal_path: "1/701/7010/" }
+      - { source_id: 7210, source_kind: MergeRequestDiff, relationship_kind: HAS_FILE, target_id: 7311, target_kind: MergeRequestDiffFile, traversal_path: "1/701/7010/" }
+      - { source_id: 7211, source_kind: MergeRequestDiff, relationship_kind: HAS_FILE, target_id: 7312, target_kind: MergeRequestDiffFile, traversal_path: "1/701/7010/" }
   redaction:
     allow:
       user: [1, 2, 3, 4, 5, 6, 7]
