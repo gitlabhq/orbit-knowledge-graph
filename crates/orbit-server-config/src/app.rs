@@ -169,11 +169,19 @@ fn reject_unknown_keys(document: &serde_json::Value) -> Result<(), ConfigError> 
 }
 
 fn parse_yaml(data: &[u8], path: &Path) -> Result<serde_json::Value, ConfigError> {
-    serde_saphyr::from_slice_with_options(data, serde_saphyr::options! { strict_booleans: true })
-        .map_err(|source| ConfigError::Parse {
-            path: path.to_path_buf(),
-            source: Box::new(source),
-        })
+    let document: serde_json::Value = serde_saphyr::from_slice_with_options(
+        data,
+        serde_saphyr::options! { strict_booleans: true },
+    )
+    .map_err(|source| ConfigError::Parse {
+        path: path.to_path_buf(),
+        source: Box::new(source),
+    })?;
+    // An empty or comment-only file parses to null, which would replace every layer beneath it.
+    Ok(match document {
+        serde_json::Value::Null => serde_json::Value::Object(serde_json::Map::new()),
+        document => document,
+    })
 }
 
 pub type SharedAppConfig = Arc<AppConfig>;
@@ -443,6 +451,21 @@ graph:
             ),
             "{err}"
         );
+    }
+
+    #[test]
+    fn an_overlay_with_nothing_in_it_changes_nothing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let defaults = serde_json::to_value(AppConfig::embedded_defaults()).unwrap();
+
+        for (name, yaml) in [
+            ("empty.yaml", ""),
+            ("comments.yaml", "# nothing set here\n"),
+        ] {
+            let overlay = write_overlay(dir.path(), name, yaml);
+            let config = AppConfig::load_from(Some(&overlay), dir.path()).unwrap();
+            assert_eq!(serde_json::to_value(config).unwrap(), defaults, "{name}");
+        }
     }
 
     #[test]
