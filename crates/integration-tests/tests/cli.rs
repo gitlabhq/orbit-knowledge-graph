@@ -1562,9 +1562,8 @@ fn grep_lists_matching_lines_with_their_definitions() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains(
-            "src/utils.py\n3-» Function read_file:3-4 ←run\n4:    return open(path).read()\n"
-        ),
+        stdout
+            .contains("src/utils.py\n3-» Function read_file:3-4\n4:    return open(path).read()\n"),
         "{stdout}"
     );
     let repo_arg = repo.path.to_str().unwrap();
@@ -1574,25 +1573,26 @@ fn grep_lists_matching_lines_with_their_definitions() {
     assert!(by_name.starts_with(&format!("{fqn}  [")), "{by_name}");
     let (file, err, ok) = run_cmd(&["context", "src/utils.py", "--repo", repo_arg], dd);
     assert!(
-        ok && file.starts_with("src/utils.py  [") && !file.contains("return open"),
+        ok && file.starts_with("src/utils.py:1-4\n1|import os\n")
+            && file.ends_with("» indexed callers of read_file: run (src/main.py:11)\n"),
         "{err}\n{file}"
     );
     let args = ["context", "src/utils.py", fqn, fqn, "--repo", repo_arg];
     let (context, err, ok) = run_cmd(&args, dd);
     assert!(ok && context.contains(&file), "{err}\n{context}");
-    assert_eq!(context.matches("return open(path).read()").count(), 1);
+    assert_eq!(context.matches("return open(path).read()").count(), 2);
     for (command, query, expected) in [
         (
             "grep",
             "App|read_file|READ_FILE",
-            "src/utils.py\n3-» Function read_file:3-4 ←run\n3:def read_file(path):\n",
+            "src/utils.py\n3-» Function read_file:3-4\n3:def read_file(path):\n",
         ),
         ("grep", "App|missing_symbol", " (App 1, missing_symbol 0)\n"),
         ("context", "src/utils.py:3-4", "3|def read_file(path):"),
         (
             "context",
             "src/utils.py:3-4",
-            "Connections:\n  <-- called by ",
+            "» indexed callers of read_file: run (src/main.py:11)",
         ),
         (
             "context",
@@ -1618,15 +1618,16 @@ fn grep_lists_matching_lines_with_their_definitions() {
         ok && out.contains("» lib/utils.py not found; searched src/utils.py\n"),
         "{err}\n{out}"
     );
-    for missing in [
-        "src.utils.read",
-        "' OR true --",
-        "../outside.py",
-        "src/utils.py:40",
-    ] {
+    for missing in ["src.utils.read", "' OR true --", "../outside.py"] {
         let (out, err, ok) = run_cmd(&["context", fqn, missing, "--repo", repo_arg], dd);
-        assert!(!ok && out.is_empty(), "{out}\n{err}");
+        assert!(
+            ok && out.starts_with(&format!("» {missing} does not exist\n"))
+                && out.contains(&format!("{fqn}  [Function]")),
+            "{out}\n{err}"
+        );
     }
+    let (out, err, ok) = run_cmd(&["context", fqn, "src/utils.py:40", "--repo", repo_arg], dd);
+    assert!(!ok && out.is_empty(), "{out}\n{err}");
     for invalid in ["|", "||", " | "] {
         let (out, err, ok) = run_cmd(&["grep", invalid, "--repo", repo_arg], dd);
         assert!(
@@ -1690,7 +1691,10 @@ fn context_relationship_order_is_stable_across_overloads() {
     let (file, stderr, ok) = run_cmd(&["context", "src/Target.java", "--repo", repo_arg], dd);
     assert!(ok, "{stderr}");
     assert!(
-        !file.contains("public class Target") && file.contains("via ping"),
+        file.contains("public class Target")
+            && file.contains(
+                "» indexed callers of ping: Caller (src/Caller.java:2), Caller (:3), run (:4), run (:5), run (:6)"
+            ),
         "{file}"
     );
 }
@@ -1741,29 +1745,20 @@ fn file_context_bounds_connections_and_keeps_full_definition_followups() {
     assert!(orbit_index(&repo, dd));
     let repo_arg = repo.to_str().unwrap();
     let (out, err, ok) = run_cmd(&["context", "src/models.py", "--repo", repo_arg], dd);
-    assert!(ok && !out.contains("return 0"), "{err}\n{out}");
-    assert_eq!(out.matches("  [Function]  L").count(), 67, "{out}");
-    assert_eq!(out.matches("connections omitted").count(), 2, "{out}");
-    assert!(out.lines().count() < 110, "{out}");
+    assert!(
+        ok && out.starts_with("src/models.py:1-201\n"),
+        "{err}\n{out}"
+    );
+    assert!(
+        out.contains(
+            "» indexed callers of entry_0: caller_0 (src/callers.py:3), caller_1 (:8), caller_2 (:13), caller_3 (:18), caller_4 (:23), +20 more, 25 in tests\n"
+        ),
+        "{out}"
+    );
     let (body, err, ok) = run_cmd(&["context", "src.models.entry_0", "--repo", repo_arg], dd);
     assert!(ok && body.contains("return 0"), "{err}\n{body}");
     assert_eq!(body.matches("[calls]").count(), 50, "{body}");
     assert!(!body.contains("connections omitted"), "{body}");
-    for path in ["src/callers.py", "tests/callers.py"] {
-        let (out, err, ok) = run_cmd(&["context", path, "--repo", repo_arg], dd);
-        assert!(
-            ok && out.contains("connections omitted; list all file edges:"),
-            "{err}\n{out}"
-        );
-        let sql = out
-            .lines()
-            .find_map(|line| line.split_once("sql \""))
-            .unwrap()
-            .1
-            .trim_end_matches('"');
-        let edges = orbit_sql(sql, dd);
-        assert_eq!(rows_where(&edges, "relationship_kind", "IMPORTS").len(), 50);
-    }
 }
 
 #[test]
