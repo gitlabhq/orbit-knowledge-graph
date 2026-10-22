@@ -480,15 +480,9 @@ fn serve_routes(
 }
 
 #[test]
-fn context_branch_target_reads_its_merge_request_and_last_failed_pipeline() {
+fn context_branch_target_reads_its_merge_request() {
     let (base_url, handle) = serve_routes(vec![
         ("merge_requests?", r#"[{"id":42,"iid":4,"state":"opened"}]"#),
-        (
-            "pipelines?ref=fix-ci",
-            r#"[{"id":7,"status":"failed","ref":"fix-ci","sha":"0123456789abcdef","web_url":"https://localhost/p/-/pipelines/7"}]"#,
-        ),
-        ("pipelines/7/jobs", "[]"),
-        ("pipelines?ref=refs", "[]"),
         ("orbit/context", "- found=true\n"),
     ]);
     let clone = git_clone_with_origin("https://localhost/my-group/my-project");
@@ -501,15 +495,72 @@ fn context_branch_target_reads_its_merge_request_and_last_failed_pipeline() {
     );
     let requests = handle.join().expect("join mock");
     assert!(
-        requests[4].body.contains("my-group/my-project!4"),
+        requests[1].body.contains("my-group/my-project!4"),
         "{}",
-        requests[4].body
+        requests[1].body
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "branch:fix-ci mr:4 opened\n\
-         pipeline:7 failed ref fix-ci commit:0123456789abcdef https://localhost/p/-/pipelines/7\n\
-         - found=true\n"
+        "branch:fix-ci mr:4 opened\n- found=true\n"
+    );
+}
+
+#[test]
+fn context_appends_the_local_code_a_merge_request_changes() {
+    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
+    let data = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(clone.path().join("src")).expect("mkdir");
+    std::fs::write(
+        clone.path().join("src/app.py"),
+        "def total(items):\n    count = len(items)\n    return count\n",
+    )
+    .expect("write source");
+    for args in [
+        ["add", "-A"].as_slice(),
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "init",
+        ],
+    ] {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(clone.path())
+            .status()
+            .expect("git");
+        assert!(status.success(), "git {args:?} failed");
+    }
+    let indexed = run_orbit_with_data(
+        clone.path(),
+        data.path(),
+        "http://localhost:1",
+        &["index", "."],
+    );
+    assert!(
+        indexed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&indexed.stderr)
+    );
+    let (base_url, handle) = serve_routes(vec![(
+        "orbit/context",
+        "- mr:my-group/my-project!4 found=true\n  changed_files[1]:\n    M src/app.py @ 2-3\n",
+    )]);
+    let base_url = base_url.replace("127.0.0.1", "localhost");
+    let output = run_orbit_with_data(
+        clone.path(),
+        data.path(),
+        &base_url,
+        &["context", "my-group/my-project!4"],
+    );
+    handle.join().expect("join mock");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("src/app.py:1-3  Function  src.app.total  (at 2-3)\n1|def total(items):\n2|    count = len(items)\n3|    return count\n"),
+        "{stdout}"
     );
 }
 
