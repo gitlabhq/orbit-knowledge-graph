@@ -734,7 +734,8 @@ fn name<'i>(node: &Node<'i>) -> Result<Name<'i>> {
     let value = raw
         .strip_prefix('`')
         .and_then(|s| s.strip_suffix('`'))
-        .map_or_else(|| raw.to_owned(), |s| s.replace("``", "`"));
+        .unwrap_or(raw)
+        .to_owned();
     crate::passes::validate::validate_identifier(&value)
         .map_err(|error| node.error(error.to_string()))?;
     Ok(Name {
