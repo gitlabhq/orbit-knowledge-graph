@@ -1,7 +1,7 @@
 ---
 name: orbit-wrapper
-description: Use the `glab orbit` CLI for questions about code structure, blast radius, cross-project links, and relationships across GitLab entities, and to build a repo map. It works on hosted or local data. Skip it for single-entity lookups or writes that `glab` already handles.
-version: 0.1.0
+description: Use Orbit (`glab orbit` or the standalone `orbit`) to search code and read it with its callers and tests. It reads merge requests, issues, pipelines, and failed jobs with the code they point at. Graph queries answer relationship and aggregation questions across GitLab entities. Skip it for writes that `glab` handles.
+version: 0.2.0
 license: MIT
 compatibility: Requires glab v1.117.0 or later with the Orbit CLI v0.131.0 or later, and network access to the GitLab instance for Orbit Remote commands.
 metadata:

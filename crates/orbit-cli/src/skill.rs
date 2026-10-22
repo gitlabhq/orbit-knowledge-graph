@@ -330,10 +330,33 @@ async fn resolved_view(name: &str) -> Result<BTreeMap<String, String>> {
     let Some(remote) = resolve_remote_tree(&client, name).await? else {
         return Ok(local);
     };
-    Ok(compose_tree(remote.files, local.clone()).unwrap_or_else(|error| {
-        warn(format!("could not compose the instance Orbit skill ({error}); using the embedded local skill"));
+    let composed = compose_tree(remote.files, local.clone()).unwrap_or_else(|error| {
+        warn(format!(
+            "could not compose the instance Orbit skill ({error}); using the embedded local skill"
+        ));
         local
-    }))
+    });
+    Ok(for_launcher(
+        composed,
+        crate::commands::setup::spec::launcher(),
+    ))
+}
+
+fn for_launcher(mut view: BTreeMap<String, String>, launcher: &str) -> BTreeMap<String, String> {
+    if launcher == crate::commands::setup::spec::GLAB_LAUNCHER {
+        return view;
+    }
+    if let Some(manifest) = view.get_mut(MANIFEST)
+        && let Some(heading) = manifest.find("\n# ")
+        && let Some(end) = manifest[heading + 1..].find('\n')
+    {
+        let at = heading + 1 + end + 1;
+        manifest.insert_str(
+            at,
+            &format!("\nThe Orbit CLI here is `{launcher}`: run each `glab orbit <command>` below as `{launcher} <command>`.\n"),
+        );
+    }
+    view
 }
 
 async fn print_skill_file(name: &str, requested: &str) -> Result<()> {
@@ -898,6 +921,21 @@ fn cleanup_stale_temporary_dirs(root: &Path, stale_before: SystemTime) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_standalone_binary_reads_glab_orbit_commands_as_its_own() {
+        let view = BTreeMap::from([(
+            MANIFEST.to_string(),
+            "---\nname: orbit\n---\n\n# Orbit skill\n\nRun `glab orbit query`.\n".to_string(),
+        )]);
+        let manifest = for_launcher(view.clone(), "orbit")
+            .remove(MANIFEST)
+            .unwrap();
+        assert!(manifest.contains(
+            "# Orbit skill\n\nThe Orbit CLI here is `orbit`: run each `glab orbit <command>` below as `orbit <command>`.\n"
+        ));
+        assert_eq!(for_launcher(view.clone(), "glab orbit"), view);
+    }
 
     fn remote_tree(version: &str, manifest: &str) -> ValidatedTree {
         let files = BTreeMap::from([

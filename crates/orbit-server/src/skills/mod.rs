@@ -192,7 +192,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(skill.version, frontmatter.version.to_string());
-        assert!(skill.description.starts_with("Use the `glab orbit` CLI"));
+        assert!(skill.description.starts_with("Use Orbit"));
         assert!(skill.compatibility.contains("Orbit CLI"));
     }
 
