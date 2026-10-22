@@ -69,6 +69,7 @@ impl ActiveSchema {
                 _ = shutdown.cancelled() => return,
                 Err(error) = self.follow_active_version(&loader, retry_backoff) => {
                     warn!(
+                        safe(ERROR_TYPE) = crate::expanded_logs::anyhow_error_type(&error),
                         expanded(ERROR_MESSAGE) = %error,
                         "active version watch lost; reopening"
                     );

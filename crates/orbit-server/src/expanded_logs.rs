@@ -37,8 +37,8 @@ fn valid_rust_log() -> Option<String> {
         .filter(|directive| EnvFilter::try_new(directive).is_ok())
 }
 
-/// The variant of a typed startup or mode error, else `fatal`: the webserver errors carry no kind.
-pub fn fatal_error_type(error: &anyhow::Error) -> &'static str {
+/// The variant of a typed error inside an `anyhow` error, else `fatal`: many webserver errors carry no kind.
+pub fn anyhow_error_type(error: &anyhow::Error) -> &'static str {
     if let Some(error) = error.downcast_ref::<indexer::config::IndexerError>() {
         return error.into();
     }
@@ -46,6 +46,9 @@ pub fn fatal_error_type(error: &anyhow::Error) -> &'static str {
         return error.into();
     }
     if let Some(error) = error.downcast_ref::<orbit_migrations::version::SchemaVersionError>() {
+        return error.into();
+    }
+    if let Some(error) = error.downcast_ref::<orbit_migrations::catalog::CatalogError>() {
         return error.into();
     }
     "fatal"
@@ -108,22 +111,27 @@ mod tests {
     const FILE_PATH: &str = "app/models/user.rb";
 
     #[test]
-    fn fatal_error_type_names_the_variant_of_a_mode_error() {
+    fn anyhow_error_type_names_the_variant_of_a_typed_error() {
         use indexer::config::{DispatcherError, IndexerError};
         use indexer::orchestrator::scheduled::SchedulerError;
 
         let indexer = IndexerError::Analytics(labkit_events::Error::MissingField("schema"));
         let dispatcher = DispatcherError::Scheduler(SchedulerError::TaskPanicked { count: 1 });
 
-        assert_eq!(fatal_error_type(&indexer.into()), "analytics");
-        assert_eq!(fatal_error_type(&dispatcher.into()), "scheduler");
+        assert_eq!(anyhow_error_type(&indexer.into()), "analytics");
+        assert_eq!(anyhow_error_type(&dispatcher.into()), "scheduler");
         let schema_version =
             orbit_migrations::version::SchemaVersionError::UnexpectedResult("x".into());
         assert_eq!(
-            fatal_error_type(&schema_version.into()),
+            anyhow_error_type(&schema_version.into()),
             "unexpected_result"
         );
-        assert_eq!(fatal_error_type(&anyhow::anyhow!("customer text")), "fatal");
+        let catalog = orbit_migrations::catalog::CatalogError::Missing(7);
+        assert_eq!(anyhow_error_type(&catalog.into()), "missing");
+        assert_eq!(
+            anyhow_error_type(&anyhow::anyhow!("customer text")),
+            "fatal"
+        );
     }
 
     #[derive(Clone, Default)]

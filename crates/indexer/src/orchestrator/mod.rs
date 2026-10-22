@@ -79,7 +79,7 @@ pub async fn launch(
             }
             Err(error) => {
                 warn!(
-                    safe(ERROR_TYPE) = "panic",
+                    safe(ERROR_TYPE) = crate::engine::join_error_type(&error),
                     expanded(ERROR_MESSAGE) = %error,
                     "trigger task panicked"
                 );

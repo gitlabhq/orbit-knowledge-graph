@@ -7,9 +7,23 @@ note: |
   error type, a line that is not expanded shows no cause. Use a
   `&'static str` from the error, such as `<&str>::from(&e)`, or a literal.
 rule:
-  matches: tracing-macro
-  regex: 'expanded\(\s*ERROR_MESSAGE\s*\)'
+  any:
+    - matches: tracing-macro
+    - matches: nested-tracing-args
+  has:
+    stopBy: end
+    kind: identifier
+    regex: '^expanded$'
+    precedes:
+      kind: token_tree
+      regex: '^\(\s*ERROR_MESSAGE\s*\)$'
   not:
     any:
-      - regex: 'safe\(\s*ERROR_TYPE\s*\)'
+      - has:
+          stopBy: end
+          kind: identifier
+          regex: '^safe$'
+          precedes:
+            kind: token_tree
+            regex: '^\(\s*ERROR_TYPE\s*\)$'
       - matches: test-code

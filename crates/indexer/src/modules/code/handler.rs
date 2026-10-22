@@ -68,6 +68,7 @@ async fn run_with_heartbeat<T>(
                     Ok(()) => {}
                     Err(error @ LockError::Lost) => {
                         warn!(
+                            safe(ERROR_TYPE) = <&str>::from(&error),
                             expanded(ERROR_MESSAGE) = %error,
                             "project lock lost mid-index; cancelling to avoid a double-write"
                         );
@@ -75,6 +76,7 @@ async fn run_with_heartbeat<T>(
                     }
                     Err(error) => {
                         warn!(
+                            safe(ERROR_TYPE) = <&str>::from(&error),
                             expanded(ERROR_MESSAGE) = %error,
                             "lock renewal failed transiently; retrying on the next heartbeat tick"
                         );

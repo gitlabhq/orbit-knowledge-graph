@@ -238,6 +238,7 @@ impl Engine {
                     if let Err(error) = result {
                         warn!(
                             safe(NATS_SUBSCRIPTION) = topic_name.as_str(),
+                            safe(ERROR_TYPE) = join_error_type(&error),
                             expanded(ERROR_MESSAGE) = %error,
                             "message processing task panicked"
                         );
@@ -251,7 +252,7 @@ impl Engine {
             if let Err(error) = result {
                 warn!(
                     safe(NATS_SUBSCRIPTION) = topic_name.as_str(),
-                    safe(ERROR_TYPE) = "panic",
+                    safe(ERROR_TYPE) = join_error_type(&error),
                     expanded(ERROR_MESSAGE) = %error,
                     "message processing task panicked"
                 );
@@ -561,7 +562,7 @@ async fn run_handlers(
             }
             Err(join_error) => {
                 warn!(
-                    safe(ERROR_TYPE) = "panic",
+                    safe(ERROR_TYPE) = join_error_type(&join_error),
                     expanded(ERROR_MESSAGE) = %join_error,
                     "handler task panicked"
                 );
@@ -610,6 +611,15 @@ async fn run_handlers(
     HandlersOutcome::Success
 }
 
+/// A task can end in a panic or, when its set is aborted, a cancellation.
+pub(crate) fn join_error_type(error: &tokio::task::JoinError) -> &'static str {
+    if error.is_panic() {
+        "panic"
+    } else {
+        "cancelled"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -621,6 +631,19 @@ mod tests {
     use handler::{HandlerError, PermanentAction};
     use orbit_server_config::SubscriptionConfig;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn join_error_type_tells_a_panic_from_a_cancellation() {
+        let panicked = tokio::spawn(async { panic!("customer text") })
+            .await
+            .unwrap_err();
+        let pending = tokio::spawn(std::future::pending::<()>());
+        pending.abort();
+        let cancelled = pending.await.unwrap_err();
+
+        assert_eq!(join_error_type(&panicked), "panic");
+        assert_eq!(join_error_type(&cancelled), "cancelled");
+    }
 
     fn test_context() -> HandlerContext {
         let mock = Arc::new(MockNatsServices::new());

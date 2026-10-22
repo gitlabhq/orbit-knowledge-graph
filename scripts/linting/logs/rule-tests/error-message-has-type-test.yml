@@ -9,8 +9,27 @@ valid:
     mod tests {
         fn t() { warn!(expanded(ERROR_MESSAGE) = %e, "failed"); }
     }
+  - |
+    tokio::select! {
+        _ = a => { warn!(safe(ERROR_TYPE) = "lock_lost", expanded(ERROR_MESSAGE) = %e, "lost"); }
+    }
 invalid:
   - 'warn!(expanded(ERROR_MESSAGE) = %e, "failed");'
   - 'orbit_log_fields::error!(safe(GL_PROJECT_ID) = id, expanded(ERROR_MESSAGE) = %e, "failed");'
   - 'debug!(target: "orbit", expanded(ERROR_MESSAGE) = ?e, "failed");'
   - 'warn!(safe(KIND) = "x", expanded(ERROR_MESSAGE) = %e, "failed");'
+  - |
+    tokio::select! {
+        _ = a => { warn!(expanded(ERROR_MESSAGE) = %e, "lost"); }
+    }
+  - |
+    tokio::select! {
+        _ = a => { orbit_log_fields::warn!(expanded(ERROR_MESSAGE) = %e, "lost"); }
+    }
+  - |
+    warn!(
+        // safe(ERROR_TYPE) is missing here
+        expanded(ERROR_MESSAGE) = %e,
+        "failed"
+    );
+  - 'warn!(expanded(ERROR_MESSAGE) = %e, "safe(ERROR_TYPE) in text");'

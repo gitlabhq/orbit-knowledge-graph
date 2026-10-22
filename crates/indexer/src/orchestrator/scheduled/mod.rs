@@ -23,9 +23,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use orbit_log_fields::{debug, info, warn};
+use orbit_log_fields::{debug, info, info_span, warn};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
@@ -97,14 +98,15 @@ pub async fn run_loop(
     for task in tasks {
         let lock = lock_service.clone();
         let token = shutdown.clone();
-        handles.spawn(run_task_loop(task, lock, token));
+        let span = info_span!("scheduled_task", safe(TASK) = task.name());
+        handles.spawn(run_task_loop(task, lock, token).instrument(span));
     }
 
     let mut panicked = 0usize;
     while let Some(result) = handles.join_next().await {
         if let Err(error) = result {
             warn!(
-                safe(ERROR_TYPE) = "panic",
+                safe(ERROR_TYPE) = crate::engine::join_error_type(&error),
                 expanded(ERROR_MESSAGE) = %error,
                 "task loop panicked"
             );
@@ -256,6 +258,24 @@ mod tests {
         }
     }
 
+    struct LoggingTask(ScheduleConfiguration);
+
+    #[async_trait]
+    impl ScheduledTask for LoggingTask {
+        fn name(&self) -> &str {
+            "logging"
+        }
+
+        fn schedule(&self) -> &ScheduleConfiguration {
+            &self.0
+        }
+
+        async fn run(&self) -> Result<(), TaskError> {
+            warn!("line inside the task");
+            Ok(())
+        }
+    }
+
     /// Lock service that always grants (simulates TTL expiry between runs).
     struct AlwaysGrantLockService;
 
@@ -309,6 +329,35 @@ mod tests {
 
         let result = tokio::time::timeout(Duration::from_secs(2), handle).await;
         assert!(result.is_ok(), "run_loop should exit after shutdown");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn lines_inside_a_task_carry_the_task_name() {
+        let (logs, _capture) = crate::testkit::logs::capture_logs();
+        let schedule = ScheduleConfiguration {
+            cron: CronSchedule::try_from(EVERY_5S.to_owned()).unwrap(),
+        };
+        let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(LoggingTask(schedule))];
+        let shutdown = CancellationToken::new();
+
+        let handle = tokio::spawn(run_loop(
+            tasks,
+            Arc::new(AlwaysGrantLockService),
+            shutdown.clone(),
+        ));
+        settle().await;
+        tokio::time::advance(Duration::from_secs(6)).await;
+        settle().await;
+        shutdown.cancel();
+        let _ = handle.await;
+
+        let line = logs
+            .text()
+            .lines()
+            .find(|line| line.contains("line inside the task"))
+            .map(str::to_owned)
+            .unwrap_or_default();
+        assert!(line.contains("task=\"logging\""), "{}", logs.text());
     }
 
     #[tokio::test(start_paused = true)]
