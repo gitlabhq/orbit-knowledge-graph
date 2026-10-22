@@ -804,7 +804,7 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
             return;
         }
         let loc = Loc::new(fi, c.index());
-        let nested = c.enclosing(|p| p.is(C::Def)).is_some_and(|p| p.is_class());
+        let nested = c.is_class() && c.enclosing(|p| p.is(C::Def)).is_some_and(|p| p.is_class());
         for name in c
             .child_sym(C::DefName)
             .filter(|_| !nested)
@@ -1054,7 +1054,7 @@ fn propagate_reexports(
                 Via::Own => {}
                 Via::Package(package) => {
                     let union = unions[package]
-                        .get_or_insert_with(|| package_exports(&packages[package], visible));
+                        .get_or_insert_with(|| package_exports(&packages[package], visible, trees));
                     for (&name, locs) in union.iter() {
                         for &loc in locs {
                             export(req.fi as usize, name, loc);
@@ -1192,10 +1192,20 @@ fn package_imports(
     (via, packages)
 }
 
-fn package_exports(files: &[u32], visible: &VisibleMap) -> PackageExports {
+fn package_exports(files: &[u32], visible: &VisibleMap, trees: &[Tree]) -> PackageExports {
+    let member = |loc: Loc| {
+        let def = trees[loc.fi as usize].cursor(loc.node);
+        !def.is_class()
+            && def
+                .enclosing(|p| p.is(C::Def))
+                .is_some_and(|p| p.is_class())
+    };
     let mut union = PackageExports::default();
     for &fi in files {
         for (&name, &loc) in &visible[fi as usize] {
+            if member(loc) {
+                continue;
+            }
             let locs = union.entry(name).or_default();
             if !locs.contains(&loc) {
                 locs.push(loc);
