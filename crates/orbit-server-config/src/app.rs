@@ -469,6 +469,26 @@ graph:
     }
 
     #[test]
+    fn every_missing_section_is_reported_at_once() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = write_overlay(
+            dir.path(),
+            "nulled.yaml",
+            "grpc: null\nengine:\n  handlers:\n    entity-handler: null\n",
+        );
+
+        let error = AppConfig::load_from(Some(&overlay), dir.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("- grpc: value is required"), "{error}");
+        assert!(
+            error.contains("- engine.handlers.entity_handler: value is required"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn explicit_overlay_file_must_exist() {
         let dir = tempfile::TempDir::new().unwrap();
         let missing = dir.path().join("missing.yaml");

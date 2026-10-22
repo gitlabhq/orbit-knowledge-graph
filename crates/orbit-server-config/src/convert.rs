@@ -35,8 +35,6 @@ use crate::tls::{ListenerTlsConfig, TlsConfig};
 /// name, so those are still parsed here and can still fail.
 #[derive(Debug, thiserror::Error)]
 pub enum ConvertError {
-    #[error("{section} is missing from the configuration")]
-    MissingSection { section: &'static str },
     #[error("{field} is not a socket address: {source}")]
     BindAddress {
         field: &'static str,
@@ -59,8 +57,10 @@ pub enum ConvertError {
 
 type Result<T> = std::result::Result<T, ConvertError>;
 
-fn section<T>(value: Option<T>, section: &'static str) -> Result<T> {
-    value.ok_or(ConvertError::MissingSection { section })
+/// The schema marks every section required and the loader validates before
+/// conversion, so a missing one means the two have drifted apart.
+fn present<T>(value: Option<T>) -> T {
+    value.expect("a section the schema marks required is set")
 }
 
 fn address(value: &str, field: &'static str) -> Result<SocketAddr> {
@@ -75,15 +75,6 @@ fn cron(expression: String, task: &'static str) -> Result<ScheduleConfiguration>
         .map_err(|source| ConvertError::Cron { task, source })
 }
 
-fn schedule(value: Option<impl Into<String>>, task: &'static str) -> Result<ScheduleConfiguration> {
-    match value {
-        Some(expression) => cron(expression.into(), task),
-        None => Err(ConvertError::MissingSection {
-            section: "schedule.tasks",
-        }),
-    }
-}
-
 impl TryFrom<proto::Config> for AppConfig {
     type Error = ConvertError;
 
@@ -92,27 +83,24 @@ impl TryFrom<proto::Config> for AppConfig {
             grpc_bind_address: address(&config.grpc_bind_address, "grpc_bind_address")?,
             jwt_clock_skew_secs: config.jwt_clock_skew_secs,
             health_check_url: config.health_check_url,
-            nats: nats(section(config.nats, "nats")?)?,
-            datalake: clickhouse(section(config.datalake, "datalake")?, "datalake")?,
-            graph: clickhouse(section(config.graph, "graph")?, "graph")?,
-            clickhouse_setup: clickhouse_setup(section(
-                config.clickhouse_setup,
-                "clickhouse_setup",
-            )?),
-            engine: engine(section(config.engine, "engine")?)?,
-            gitlab: gitlab(section(config.gitlab, "gitlab")?)?,
-            schedule: schedule_config(section(config.schedule, "schedule")?)?,
-            health_check: health_check(section(config.health_check, "health_check")?)?,
-            metrics: metrics(section(config.metrics, "metrics")?)?,
-            probe_server: probe_server(section(config.probe_server, "probe_server")?)?,
-            tls: tls(section(config.tls, "tls")?),
-            query: query(section(config.query, "query")?)?,
-            grpc: grpc(section(config.grpc, "grpc")?)?,
-            schema: schema(section(config.schema, "schema")?),
-            analytics: analytics(section(config.analytics, "analytics")?)?,
-            billing: billing(section(config.billing, "billing")?)?,
+            nats: nats(present(config.nats))?,
+            datalake: clickhouse(present(config.datalake)),
+            graph: clickhouse(present(config.graph)),
+            clickhouse_setup: clickhouse_setup(present(config.clickhouse_setup)),
+            engine: engine(present(config.engine))?,
+            gitlab: gitlab(present(config.gitlab)),
+            schedule: schedule_config(present(config.schedule))?,
+            health_check: health_check(present(config.health_check))?,
+            metrics: metrics(present(config.metrics))?,
+            probe_server: probe_server(present(config.probe_server))?,
+            tls: tls(present(config.tls)),
+            query: query(present(config.query)),
+            grpc: grpc(present(config.grpc))?,
+            schema: schema(present(config.schema)),
+            analytics: analytics(present(config.analytics))?,
+            billing: billing(present(config.billing))?,
             features: features(config.features)?,
-            object_storage: object_storage(section(config.object_storage, "object_storage")?)?,
+            object_storage: object_storage(present(config.object_storage))?,
         })
     }
 }
@@ -143,9 +131,9 @@ fn nats(value: proto::Nats) -> Result<NatsConfiguration> {
     })
 }
 
-fn clickhouse(value: proto::ClickHouse, name: &'static str) -> Result<ClickHouseConfiguration> {
-    let profiling = section(value.profiling, name)?;
-    Ok(ClickHouseConfiguration {
+fn clickhouse(value: proto::ClickHouse) -> ClickHouseConfiguration {
+    let profiling = present(value.profiling);
+    ClickHouseConfiguration {
         database: value.database,
         url: value.url,
         username: value.username,
@@ -160,7 +148,7 @@ fn clickhouse(value: proto::ClickHouse, name: &'static str) -> Result<ClickHouse
             processors: profiling.processors,
             instance_health: profiling.instance_health,
         },
-    })
+    }
 }
 
 fn clickhouse_setup(value: proto::ClickHouseSetup) -> ClickHouseSetupConfig {
@@ -173,20 +161,20 @@ fn clickhouse_setup(value: proto::ClickHouseSetup) -> ClickHouseSetupConfig {
     }
 }
 
-fn gitlab(value: proto::Gitlab) -> Result<GitlabConfig> {
-    let jwt = section(value.jwt, "gitlab.jwt")?;
-    Ok(GitlabConfig {
+fn gitlab(value: proto::Gitlab) -> GitlabConfig {
+    let jwt = present(value.jwt);
+    GitlabConfig {
         base_url: value.base_url,
         jwt: JwtConfig {
             signing_key: jwt.signing_key,
             verifying_key: jwt.verifying_key,
         },
         resolve_host: value.resolve_host,
-    })
+    }
 }
 
 fn tls(value: proto::Tls) -> TlsConfig {
-    let internal = value.internal.unwrap_or_default();
+    let internal = present(value.internal);
     TlsConfig {
         cert_path: value.cert_path,
         key_path: value.key_path,
@@ -199,14 +187,11 @@ fn tls(value: proto::Tls) -> TlsConfig {
 }
 
 fn engine(value: proto::Engine) -> Result<EngineConfiguration> {
-    let handlers = section(value.handlers, "engine.handlers")?;
-    let entity = section(handlers.entity_handler, "engine.handlers.entity-handler")?;
-    let code = section(
-        handlers.code_indexing_task,
-        "engine.handlers.code-indexing-task",
-    )?;
-    let pipeline = section(code.pipeline, "engine.handlers.code-indexing-task.pipeline")?;
-    let retry = section(value.datalake_retry, "engine.datalake_retry")?;
+    let handlers = present(value.handlers);
+    let entity = present(handlers.entity_handler);
+    let code = present(handlers.code_indexing_task);
+    let pipeline = present(code.pipeline);
+    let retry = present(value.datalake_retry);
 
     Ok(EngineConfiguration {
         max_concurrent_workers: value.max_concurrent_workers.map(|workers| workers as usize),
@@ -301,19 +286,16 @@ fn code_indexing_pipeline(value: proto::CodeIndexingPipeline) -> CodeIndexingPip
 }
 
 fn schedule_config(value: proto::Schedule) -> Result<ScheduleConfig> {
-    let tasks = section(value.tasks, "schedule.tasks")?;
-    let namespace = section(tasks.namespace, "schedule.tasks.namespace")?;
-    let siphon = section(tasks.siphon, "schedule.tasks.siphon")?;
-    let code_backfill = section(tasks.code_backfill, "schedule.tasks.code-backfill")?;
-    let stale_edge = section(
-        tasks.stale_edge_reconciliation,
-        "schedule.tasks.stale-edge-reconciliation",
-    )?;
+    let tasks = present(value.tasks);
+    let namespace = present(tasks.namespace);
+    let siphon = present(tasks.siphon);
+    let code_backfill = present(tasks.code_backfill);
+    let stale_edge = present(tasks.stale_edge_reconciliation);
 
     Ok(ScheduleConfig {
         tasks: ScheduledTasksConfiguration {
             global: GlobalDispatcherConfig {
-                schedule: schedule(tasks.global.map(|task| task.cron), "global")?,
+                schedule: cron(present(tasks.global).cron, "global")?,
             },
             namespace: NamespaceDispatcherConfig {
                 schedule: cron(namespace.cron, "namespace")?,
@@ -329,17 +311,14 @@ fn schedule_config(value: proto::Schedule) -> Result<ScheduleConfig> {
                 stale_sweeps_per_tick: code_backfill.stale_sweeps_per_tick as usize,
             },
             table_cleanup: TableCleanupConfig {
-                schedule: schedule(tasks.table_cleanup.map(|task| task.cron), "table-cleanup")?,
+                schedule: cron(present(tasks.table_cleanup).cron, "table-cleanup")?,
             },
             namespace_deletion: NamespaceDeletionSchedulerConfig {
-                schedule: schedule(
-                    tasks.namespace_deletion.map(|task| task.cron),
-                    "namespace-deletion",
-                )?,
+                schedule: cron(present(tasks.namespace_deletion).cron, "namespace-deletion")?,
             },
             migration_completion: MigrationCompletionConfig {
-                schedule: schedule(
-                    tasks.migration_completion.map(|task| task.cron),
+                schedule: cron(
+                    present(tasks.migration_completion).cron,
                     "migration-completion",
                 )?,
             },
@@ -367,9 +346,9 @@ fn health_check(value: proto::HealthCheck) -> Result<HealthCheckConfig> {
 }
 
 fn metrics(value: proto::Metrics) -> Result<MetricsConfig> {
-    let expanded = section(value.expanded_logs, "metrics.expanded_logs")?;
-    let otel = section(value.otel, "metrics.otel")?;
-    let prometheus = section(value.prometheus, "metrics.prometheus")?;
+    let expanded = present(value.expanded_logs);
+    let otel = present(value.otel);
+    let prometheus = present(value.prometheus);
 
     Ok(MetricsConfig {
         log_level: value.log_level,
@@ -400,15 +379,15 @@ fn probe_server(value: proto::ProbeServer) -> Result<ProbeServerConfig> {
     })
 }
 
-fn query(value: proto::QuerySettings) -> Result<QuerySettings> {
-    Ok(QuerySettings {
-        default: query_config(section(value.default, "query.default")?),
+fn query(value: proto::QuerySettings) -> QuerySettings {
+    QuerySettings {
+        default: query_config(present(value.default)),
         overrides: value
             .overrides
             .into_iter()
             .map(|(name, config)| (name, query_config(config)))
             .collect(),
-    })
+    }
 }
 
 fn query_config(value: proto::QueryConfig) -> QueryConfig {
@@ -453,7 +432,7 @@ fn schema(value: proto::Schema) -> SchemaConfig {
 }
 
 fn analytics(value: proto::Analytics) -> Result<AnalyticsConfig> {
-    let deployment = section(value.deployment, "analytics.deployment")?;
+    let deployment = present(value.deployment);
     Ok(AnalyticsConfig {
         enabled: value.enabled,
         collector_url: value.collector_url,
@@ -485,7 +464,7 @@ fn analytics(value: proto::Analytics) -> Result<AnalyticsConfig> {
 }
 
 fn billing(value: proto::Billing) -> Result<BillingConfig> {
-    let quota = section(value.quota, "billing.quota")?;
+    let quota = present(value.quota);
     Ok(BillingConfig {
         enabled: value.enabled,
         collector_url: value.collector_url,
@@ -639,11 +618,5 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(error, ConvertError::UnknownFeature(name) if name == "not_a_real_flag"));
-    }
-
-    #[test]
-    fn a_missing_section_names_itself() {
-        let error = AppConfig::try_from(proto::Config::default()).unwrap_err();
-        assert!(error.to_string().contains("grpc_bind_address"), "{error}");
     }
 }

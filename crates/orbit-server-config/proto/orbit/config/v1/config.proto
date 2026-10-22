@@ -15,24 +15,24 @@ message Config {
   string grpc_bind_address = 1 [(buf.validate.field).string.min_len = 1];
   uint64 jwt_clock_skew_secs = 2;
   optional string health_check_url = 3;
-  ProbeServer probe_server = 4;
-  Nats nats = 5;
-  ClickHouse datalake = 6;
-  ClickHouse graph = 7;
-  ClickHouseSetup clickhouse_setup = 8;
-  Engine engine = 9;
-  Gitlab gitlab = 10;
-  Schedule schedule = 11;
-  HealthCheck health_check = 12;
-  Metrics metrics = 13;
-  Tls tls = 14;
-  QuerySettings query = 15;
-  Grpc grpc = 16;
-  Schema schema = 17;
-  Analytics analytics = 18;
-  Billing billing = 19;
+  ProbeServer probe_server = 4 [(buf.validate.field).required = true];
+  Nats nats = 5 [(buf.validate.field).required = true];
+  ClickHouse datalake = 6 [(buf.validate.field).required = true];
+  ClickHouse graph = 7 [(buf.validate.field).required = true];
+  ClickHouseSetup clickhouse_setup = 8 [(buf.validate.field).required = true];
+  Engine engine = 9 [(buf.validate.field).required = true];
+  Gitlab gitlab = 10 [(buf.validate.field).required = true];
+  Schedule schedule = 11 [(buf.validate.field).required = true];
+  HealthCheck health_check = 12 [(buf.validate.field).required = true];
+  Metrics metrics = 13 [(buf.validate.field).required = true];
+  Tls tls = 14 [(buf.validate.field).required = true];
+  QuerySettings query = 15 [(buf.validate.field).required = true];
+  Grpc grpc = 16 [(buf.validate.field).required = true];
+  Schema schema = 17 [(buf.validate.field).required = true];
+  Analytics analytics = 18 [(buf.validate.field).required = true];
+  Billing billing = 19 [(buf.validate.field).required = true];
   map<string, FeatureScope> features = 20;
-  ObjectStorage object_storage = 21;
+  ObjectStorage object_storage = 21 [(buf.validate.field).required = true];
 }
 
 message ProbeServer {
@@ -71,7 +71,7 @@ message ClickHouse {
   bool replicated = 5;
   map<string, string> session_settings = 6;
   map<string, string> insert_settings = 7;
-  Profiling profiling = 8;
+  Profiling profiling = 8 [(buf.validate.field).required = true];
 }
 
 message Profiling {
@@ -85,7 +85,7 @@ message Profiling {
 message Gitlab {
   optional string base_url = 1;
   optional string resolve_host = 2;
-  Jwt jwt = 3;
+  Jwt jwt = 3 [(buf.validate.field).required = true];
 }
 
 message Jwt {
@@ -96,7 +96,7 @@ message Jwt {
 message Tls {
   optional string cert_path = 1;
   optional string key_path = 2;
-  ListenerTls internal = 3;
+  ListenerTls internal = 3 [(buf.validate.field).required = true];
 }
 
 message ListenerTls {
@@ -170,22 +170,22 @@ message CodeIndexingPipeline {
 }
 
 message CodeIndexingTaskHandler {
-  CodeIndexingPipeline pipeline = 1;
+  CodeIndexingPipeline pipeline = 1 [(buf.validate.field).required = true];
 }
 
 // `#[serde(rename_all = "kebab-case")]` on the Rust struct. Protobuf field names
 // cannot contain hyphens, so the YAML key is carried by json_name.
 message Handlers {
-  EntityHandler entity_handler = 1 [json_name = "entity-handler"];
-  CodeIndexingTaskHandler code_indexing_task = 2 [json_name = "code-indexing-task"];
+  EntityHandler entity_handler = 1 [json_name = "entity-handler", (buf.validate.field).required = true];
+  CodeIndexingTaskHandler code_indexing_task = 2 [json_name = "code-indexing-task", (buf.validate.field).required = true];
 }
 
 message Engine {
   optional uint64 max_concurrent_workers = 1;
   map<string, uint64> concurrency_groups = 2;
   map<string, SubscriptionConfig> topics = 3;
-  Handlers handlers = 4;
-  DatalakeRetry datalake_retry = 5;
+  Handlers handlers = 4 [(buf.validate.field).required = true];
+  DatalakeRetry datalake_retry = 5 [(buf.validate.field).required = true];
   repeated IndexerModule modules = 6;
 }
 
@@ -231,18 +231,18 @@ message StaleEdgeReconciliation {
 }
 
 message ScheduledTasks {
-  GlobalDispatcher global = 1;
-  NamespaceDispatcher namespace = 2;
-  SiphonRouter siphon = 3;
-  CodeBackfillSweep code_backfill = 4 [json_name = "code-backfill"];
-  TableCleanup table_cleanup = 5 [json_name = "table-cleanup"];
-  NamespaceDeletionScheduler namespace_deletion = 6 [json_name = "namespace-deletion"];
-  MigrationCompletion migration_completion = 7 [json_name = "migration-completion"];
-  StaleEdgeReconciliation stale_edge_reconciliation = 8 [json_name = "stale-edge-reconciliation"];
+  GlobalDispatcher global = 1 [(buf.validate.field).required = true];
+  NamespaceDispatcher namespace = 2 [(buf.validate.field).required = true];
+  SiphonRouter siphon = 3 [(buf.validate.field).required = true];
+  CodeBackfillSweep code_backfill = 4 [json_name = "code-backfill", (buf.validate.field).required = true];
+  TableCleanup table_cleanup = 5 [json_name = "table-cleanup", (buf.validate.field).required = true];
+  NamespaceDeletionScheduler namespace_deletion = 6 [json_name = "namespace-deletion", (buf.validate.field).required = true];
+  MigrationCompletion migration_completion = 7 [json_name = "migration-completion", (buf.validate.field).required = true];
+  StaleEdgeReconciliation stale_edge_reconciliation = 8 [json_name = "stale-edge-reconciliation", (buf.validate.field).required = true];
 }
 
 message Schedule {
-  ScheduledTasks tasks = 1;
+  ScheduledTasks tasks = 1 [(buf.validate.field).required = true];
 }
 
 message NamespaceTarget {
@@ -288,7 +288,7 @@ message QueryConfig {
 // overrides next to `default`. Protobuf has no catch-all, so the overrides move
 // under an explicit key. This is the one breaking YAML change in the file.
 message QuerySettings {
-  QueryConfig default = 1;
+  QueryConfig default = 1 [(buf.validate.field).required = true];
   map<string, QueryConfig> overrides = 2;
 }
 
@@ -309,9 +309,9 @@ message Prometheus {
 
 message Metrics {
   optional string log_level = 1;
-  ExpandedLogs expanded_logs = 2;
-  Otel otel = 3;
-  Prometheus prometheus = 4;
+  ExpandedLogs expanded_logs = 2 [(buf.validate.field).required = true];
+  Otel otel = 3 [(buf.validate.field).required = true];
+  Prometheus prometheus = 4 [(buf.validate.field).required = true];
 }
 
 message Schema {
@@ -340,7 +340,7 @@ message Deployment {
 message Analytics {
   bool enabled = 1;
   string collector_url = 2;
-  Deployment deployment = 3;
+  Deployment deployment = 3 [(buf.validate.field).required = true];
 }
 
 enum BillingAuthMode {
@@ -367,7 +367,7 @@ message Billing {
   bool enabled = 1;
   string collector_url = 2;
   BillingAuthMode auth_mode = 3;
-  Quota quota = 4;
+  Quota quota = 4 [(buf.validate.field).required = true];
 }
 
 message FeatureScope {
