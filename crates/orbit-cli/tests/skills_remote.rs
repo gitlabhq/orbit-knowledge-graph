@@ -141,7 +141,7 @@ fn tree_reply_with_manifest(version: &str, manifest: &str, body_text: &str) -> R
 }
 
 fn registry_reply() -> Reply {
-    let manifest = "---\nname: registry\nversion: 1.0.0\ndescription: Registry skill\ncompatibility: Requires Orbit CLI\nmetadata: {}\n---\n# Registry\n";
+    let manifest = "---\nname: registry\nversion: 1.0.0\ndescription: Registry skill\ncompatibility: Requires Orbit CLI\nmetadata: {}\n---\n# Registry\n<!-- orbit:include local:quick-start -->\n";
     named_tree_reply("registry", "1.0.0", manifest, "registry reference")
 }
 
@@ -953,7 +953,7 @@ fn another_remote_skill_is_listed_and_fetched_without_local_composition() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(String::from_utf8_lossy(&output.stdout).contains("registry \u{2014} Registry skill"));
 
-    let (url, server) = mock_server(vec![registry_reply(), registry_reply()]);
+    let (url, server) = mock_server(vec![registry_reply(), registry_reply(), registry_reply()]);
     let output = run_orbit(Some(&url), &cache, &["skills", "get", "registry"]);
     assert!(output.status.success(), "{}", stderr(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -968,6 +968,12 @@ fn another_remote_skill_is_listed_and_fetched_without_local_composition() {
     );
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(output.stdout, b"registry reference\n");
+    let local_file = run_orbit(
+        Some(&url),
+        &cache,
+        &["skills", "get", "registry", "references/local/cli.md"],
+    );
+    assert!(!local_file.status.success());
     let requests = server.join().unwrap();
     assert_eq!(
         requests[0].line,
@@ -1000,7 +1006,15 @@ fn another_skill_never_falls_back_to_the_embedded_orbit_skill() {
     let cache = tempfile::tempdir().unwrap();
     let output = run_orbit(None, &cache, &["skills", "get", "registry"]);
     assert!(!output.status.success());
-    assert!(stderr(&output).contains("only the orbit skill is available offline"));
+    assert!(
+        stderr(&output)
+            .contains("could not fetch the \"registry\" skill: no GitLab credential found")
+    );
+    assert!(
+        !stderr(&output).contains("embedded local skill"),
+        "{}",
+        stderr(&output)
+    );
     assert!(output.stdout.is_empty());
 
     let (url, server) = mock_server(vec![status_reply(500)]);
@@ -1021,4 +1035,35 @@ fn skills_list_prints_the_listing() {
     let output = run_orbit(None, &cache, &["skills", "list"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(String::from_utf8_lossy(&output.stdout).starts_with("orbit \u{2014}"));
+}
+
+#[test]
+fn invalid_skill_names_fail_without_sending_a_request() {
+    let cache = tempfile::tempdir().unwrap();
+    for name in ["../../user", "x?private_token=1", "Registry"] {
+        let output = run_orbit(Some("http://127.0.0.1:1"), &cache, &["skills", "get", name]);
+        assert!(!output.status.success());
+        assert!(
+            stderr(&output).contains("invalid skill name"),
+            "{}",
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn misconfigured_url_reports_its_own_reason_for_another_skill() {
+    let cache = tempfile::tempdir().unwrap();
+    let output = hermetic_orbit(&cache, &["skills", "get", "registry"])
+        .env("ORBIT_API_BASE_URL", "notaurl")
+        .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+        .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        !stderr(&output).contains("no GitLab credential"),
+        "{}",
+        stderr(&output)
+    );
 }

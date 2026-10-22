@@ -207,6 +207,7 @@ async fn execute(request: Request) -> Result<()> {
 }
 
 fn resolve_named(name: &str, path: &str) -> Result<Request> {
+    ensure_skill_name(name)?;
     Ok(Request::Print {
         name: name.to_string(),
         path: path.to_string(),
@@ -235,6 +236,13 @@ fn resolve(name_or_path: Option<&str>, path: Option<&str>) -> Result<Request> {
     })
 }
 
+fn ensure_skill_name(name: &str) -> Result<()> {
+    if !is_skill_name(name) {
+        bail!("invalid skill name {name:?}: use lowercase letters, digits and hyphens");
+    }
+    Ok(())
+}
+
 fn is_skill_name(value: &str) -> bool {
     !value.contains(['/', '.'])
         && !value.is_empty()
@@ -244,22 +252,16 @@ fn is_skill_name(value: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
-fn skill_client() -> Option<OrbitClient> {
+fn skill_client(name: &str) -> Result<Option<OrbitClient>> {
     match OrbitClient::from_skill_env() {
-        Ok(Some(client)) => Some(client),
-        Ok(None) => {
-            warn("no GitLab credential found; using the embedded local skill");
-            None
-        }
-        Err(error) => {
-            warn(format!("{error}; using the embedded local skill"));
-            None
-        }
+        Ok(Some(client)) => Ok(Some(client)),
+        Ok(None) => embedded_fallback(name, "no GitLab credential found"),
+        Err(error) => embedded_fallback(name, error),
     }
 }
 
 async fn list_skills() -> Result<()> {
-    let Some(client) = skill_client() else {
+    let Some(client) = skill_client(DEFAULT_SKILL)? else {
         return print_local_list();
     };
     match client.list_skills().await {
@@ -315,13 +317,8 @@ fn one_line(value: &str) -> String {
 
 async fn resolved_view(name: &str) -> Result<BTreeMap<String, String>> {
     let local = local_tree();
-    let Some(client) = skill_client() else {
-        return match name == DEFAULT_SKILL {
-            true => Ok(local),
-            false => bail!(
-                "no GitLab credential found; only the {DEFAULT_SKILL} skill is available offline"
-            ),
-        };
+    let Some(client) = skill_client(name)? else {
+        return Ok(local);
     };
     let Some(remote) = resolve_remote_tree(&client, name).await? else {
         return Ok(local);
@@ -392,10 +389,7 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
             // A 304 does not change the tree; rewriting the cache would only alter its timestamp.
             Ok(Some(cached.tree))
         }
-        404 if name != DEFAULT_SKILL => bail!(
-            "could not fetch the {name:?} skill: {}",
-            degradation_warning(&response)
-        ),
+        404 if name != DEFAULT_SKILL => embedded_fallback(name, degradation_warning(&response)),
         404 => embedded_fallback(name, "this GitLab instance does not serve Orbit skills"),
         status => match degradation(status) {
             Some(Degradation::Unavailable) if cached.is_some() => {
@@ -412,7 +406,7 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
 }
 
 /// Only the `orbit` skill has an embedded copy; any other skill comes from the server or fails.
-fn embedded_fallback(name: &str, reason: impl std::fmt::Display) -> Result<Option<ValidatedTree>> {
+fn embedded_fallback<T>(name: &str, reason: impl std::fmt::Display) -> Result<Option<T>> {
     if name != DEFAULT_SKILL {
         bail!("could not fetch the {name:?} skill: {reason}");
     }

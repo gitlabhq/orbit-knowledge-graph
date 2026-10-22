@@ -44,7 +44,7 @@ faster.
 
 ## Read the agent skill
 
-`orbit skills` lists the agent skills deployed by the selected GitLab instance.
+`orbit skills` (or `orbit skills list`) lists the agent skills deployed by the selected GitLab instance.
 `orbit skills get orbit [path]` validates and caches the instance's whole remote
 tree, composes it with local CLI guidance, and prints `SKILL.md` when `path` is
 omitted. `orbit skills get <name> [path]` fetches any other skill the instance
