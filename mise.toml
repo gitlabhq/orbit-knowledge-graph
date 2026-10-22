@@ -274,11 +274,7 @@ arg "[interval]" default="0.025" help="Sampling interval in seconds"
 
 [task_templates."bench:engine"]
 vars = { action = "run" }
-usage = '''
-flag "--cg" help="Run code-graph"
-flag "--cgi" help="Run code-graph-incremental (currently a no-op)"
-'''
-run = 'cargo xtask code-indexing-benchmark {{ vars.action }}{% if usage.cg %} --cg{% endif %}{% if usage.cgi %} --cgi{% endif %}'
+run = 'cargo xtask code-indexing-benchmark {{ vars.action }}'
 
 [tasks."bench:run"]
 extends = "bench:engine"

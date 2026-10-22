@@ -23,12 +23,14 @@ repos:
     source: gitlab
     project: gitlab-org/cells/http-router
     version: main
+    commit_sha: f07efd2ab55f7e8a768855e36d5df39b739191c4
     groups: [go, typescript]
 
   - name: gitlab-topology-service
     source: gitlab
     project: gitlab-org/cells/topology-service
     version: main
+    commit_sha: c4b2b85e3b8a0620def9fe5aa2b7c86b7c301fd8
     groups: [go]
 
   - name: gitlab-zoekt-indexer
@@ -41,6 +43,7 @@ repos:
     source: gitlab
     project: gitlab-org/analytics-section/siphon
     version: main
+    commit_sha: 7183c88f4863ef4b1f6203f22e1a4df7d833da52
     groups: [go]
 
   # Java (GitHub)

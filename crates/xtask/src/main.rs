@@ -29,12 +29,6 @@ enum Command {
     CodeIndexingBenchmark {
         #[arg(value_enum)]
         action: code_indexing_benchmark::Action,
-        /// Run the current code-graph engine.
-        #[arg(long, conflicts_with = "cgi", required_unless_present = "cgi")]
-        cg: bool,
-        /// Skip successfully until code-graph-incremental is connected.
-        #[arg(long, conflicts_with = "cg")]
-        cgi: bool,
         /// Cache root for repositories, builds, index data, and results.
         #[arg(long, env = "ORBIT_BENCH_ROOT")]
         root: Option<std::path::PathBuf>,
@@ -323,18 +317,11 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::CodeIndexingBenchmark {
             action,
-            cg: _,
-            cgi,
             root,
             config,
         } => {
             code_indexing_benchmark::run(code_indexing_benchmark::Options {
                 action,
-                engine: if cgi {
-                    code_indexing_benchmark::Engine::CodeGraphIncremental
-                } else {
-                    code_indexing_benchmark::Engine::CodeGraph
-                },
                 root,
                 config,
             })

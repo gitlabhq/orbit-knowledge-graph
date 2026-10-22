@@ -61,4 +61,3 @@ base64 = { workspace = true }
 
 [dev-dependencies]
 toml = { workspace = true }
-tempfile = { workspace = true }

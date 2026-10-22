@@ -11475,7 +11475,6 @@ dependencies = [
  "serde_json",
  "sqlformat",
  "tabled",
- "tempfile",
  "tokio",
  "tokio-stream",
  "toml",
