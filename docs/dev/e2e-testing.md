@@ -6,12 +6,12 @@ For the purpose and scope of e2e tests, see [Testing strategy](../design-documen
 ## Architecture
 
 Each run gets five namespaces: `e2e-<sha>-{gkg,nats,clickhouse,gitlab,siphon}`.
-The `e2e-ha` job adds `-ha` to the SHA, and the `e2e-gitlab-stable` job adds `-gl<lane>`.
+The `e2e-ha` job adds `-ha` to the SHA.
 
 `e2e/helmfile.yaml.gotmpl` deploys these releases:
 
 - `bootstrap` (local chart `e2e-bootstrap`): the namespaces and the per-run secrets.
-- `gitlab`: GitLab from the devel chart, or from the release chart for a [released version](#gitlab-versions). The migrations include the ClickHouse migrations.
+- `gitlab`: GitLab from the devel chart. The migrations include the ClickHouse migrations.
 - `postgresql` and `redis`: standalone Bitnami releases in the GitLab namespace.
 - `nats`: the NATS JetStream broker.
 - `clickhouse` (local chart): the datalake and graph database. Helmfile skips it when you set `E2E_CH_HOST`.
@@ -92,21 +92,13 @@ The `e2e-ha` job extends `e2e` and runs the same suites on a ClickHouse cluster 
 
 ### GitLab versions
 
-The `e2e-gitlab-stable` job extends `e2e` and runs the same suites against released GitLab EE versions. Its CI matrix has one `E2E_GITLAB_LANE` entry per version, for example `19-5`.
-
-- A lane deploys the release chart from `charts.gitlab.io` and the CNG `<lane>-stable` images, pinned under `gitlab_lanes` in `versions.yaml`.
-- A schedule with `SCHEDULE_ONLY=e2e-gitlab-stable` runs the job. On MRs it is manual with `allow_failure: true`.
-
-To add a version, run `E2E_GITLAB_LANE=19-6 e2e/scripts/bump-gitlab-pins.sh` and add `19-6` to the matrix.
-To run a lane locally, set `E2E_GITLAB_LANE` for `setup.sh` and `test.sh`.
+The `e2e-gitlab-stable` job runs the `e2e` suites against each GitLab EE version in its `E2E_GITLAB_LANE` matrix, pinned under `gitlab_lanes` in `versions.yaml`.
 
 ### Pin bump
 
 The `e2e-pin-bump` job runs on a daily schedule. It runs these scripts:
 
 - `bump-gitlab-pins.sh`: the newest devel chart, the `gitlab-org/gitlab` ref, and the four CNG image digests.
-  It runs again for each lane in `gitlab_lanes`, with the release chart, stable branch, and `<lane>-stable` images of that version.
-  It skips a lane that sets `repository`. That lane is pinned by hand, so its chart, ref, and digests do not change.
 - `bump-siphon-pins.sh`: the newest Siphon chart in the `stable` channel and the newest `0.0.N-beta` image.
 - `bump-orbit-pins.sh`: the latest Orbit release tag. You change the chart pin manually.
 
