@@ -1772,10 +1772,10 @@ fn orbit_query_structural_caps_reject_with_the_json_category() {
         )
     };
 
-    for (json, text) in [chain(5), ids(500), repeated_predicates(10), rel_types(10)] {
+    for (json, text) in [chain(5), ids(100), repeated_predicates(10), rel_types(10)] {
         compile_pair(&json, &text, &embedded_ontology(), &test_ctx()).unwrap();
     }
-    for (json, text) in [chain(6), ids(501), repeated_predicates(11), rel_types(11)] {
+    for (json, text) in [chain(6), ids(101), repeated_predicates(11), rel_types(11)] {
         let error = compile_pair(&json, &text, &embedded_ontology(), &test_ctx()).unwrap_err();
         assert!(
             matches!(error, QueryError::Validation(_)),
