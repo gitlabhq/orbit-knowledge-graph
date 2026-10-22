@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use orbit_log_fields::{debug, warn};
 use tracing::Instrument;
 
-use crate::nats::{KvPutOptions, KvPutResult};
+use crate::nats::{KvPutOptions, KvPutResult, NatsError};
 
 pub const INDEXING_LOCKS_BUCKET: &str = "indexing_locks";
 
@@ -18,6 +18,9 @@ pub type LockRevision = u64;
 pub enum LockError {
     #[error("lock operation failed: {0}")]
     Backend(String),
+    #[error("lock operation failed: {0}")]
+    #[strum(transparent)]
+    Nats(#[from] NatsError),
     #[error("lock lost: another holder owns it")]
     Lost,
 }
@@ -198,8 +201,7 @@ impl LockService for NatsLockService {
                 value.clone(),
                 KvPutOptions::create_only(),
             )
-            .await
-            .map_err(|e| LockError::Backend(e.to_string()))?
+            .await?
         {
             KvPutResult::Success(revision) => {
                 debug!(expanded(KV_KEY) = key, "lock acquired");
@@ -209,11 +211,7 @@ impl LockService for NatsLockService {
             KvPutResult::AlreadyExists => {}
         }
 
-        let entry = self
-            .nats
-            .kv_get(INDEXING_LOCKS_BUCKET, key)
-            .await
-            .map_err(|e| LockError::Backend(e.to_string()))?;
+        let entry = self.nats.kv_get(INDEXING_LOCKS_BUCKET, key).await?;
         let Some(entry) = entry else {
             return Ok(Err(unknown));
         };
@@ -238,8 +236,7 @@ impl LockService for NatsLockService {
                         value,
                         KvPutOptions::update_revision(entry.revision),
                     )
-                    .await
-                    .map_err(|e| LockError::Backend(e.to_string()))?
+                    .await?
                 {
                     KvPutResult::Success(revision) => {
                         debug!(expanded(KV_KEY) = key, "lock acquired after expiry");
@@ -269,8 +266,7 @@ impl LockService for NatsLockService {
                 value,
                 KvPutOptions::update_revision(revision),
             )
-            .await
-            .map_err(|e| LockError::Backend(e.to_string()))?
+            .await?
         {
             KvPutResult::Success(new_revision) => Ok(Some(new_revision)),
             KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch => Ok(None),
@@ -282,7 +278,7 @@ impl LockService for NatsLockService {
             .nats
             .kv_delete(INDEXING_LOCKS_BUCKET, key)
             .await
-            .map_err(|e| LockError::Backend(e.to_string()));
+            .map_err(LockError::from);
         debug!(expanded(KV_KEY) = key, "lock released");
         result
     }
@@ -292,6 +288,17 @@ impl LockService for NatsLockService {
 mod tests {
     use super::*;
     use crate::testkit::mocks::MockLockService;
+
+    #[test]
+    fn error_type_passes_the_nats_cause_through() {
+        let error = LockError::Nats(crate::nats::NatsError::KvPut {
+            bucket: "locks".into(),
+            key: "customer text".into(),
+            message: "customer text".into(),
+        });
+
+        assert_eq!(<&str>::from(&error), "kv_put");
+    }
 
     async fn settle() {
         for _ in 0..10 {

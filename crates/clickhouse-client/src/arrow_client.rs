@@ -68,13 +68,27 @@ where
     let mut attempt = 0;
     loop {
         match op().await {
-            Err(error)
-                if enabled
-                    && attempt < QUORUM_RETRY_ATTEMPTS
-                    && is_replication_transient(&error) =>
-            {
+            Err(error) if enabled && is_replication_transient(&error) => {
+                if attempt == QUORUM_RETRY_ATTEMPTS {
+                    warn!(
+                        safe(MAX_ATTEMPTS) = QUORUM_RETRY_ATTEMPTS,
+                        safe(ERROR_TYPE) = <&str>::from(&error),
+                        expanded(ERROR_MESSAGE) = %error,
+                        "transient ClickHouse error; retries exhausted"
+                    );
+                    return Err(error);
+                }
                 attempt += 1;
-                tokio::time::sleep(quorum_backoff(attempt)).await;
+                let delay = quorum_backoff(attempt);
+                warn!(
+                    safe(ATTEMPT) = attempt,
+                    safe(MAX_ATTEMPTS) = QUORUM_RETRY_ATTEMPTS,
+                    safe(RETRY_DELAY_S) = delay.as_secs_f64(),
+                    safe(ERROR_TYPE) = <&str>::from(&error),
+                    expanded(ERROR_MESSAGE) = %error,
+                    "transient ClickHouse error; retrying"
+                );
+                tokio::time::sleep(delay).await;
             }
             result => return result,
         }
@@ -864,6 +878,57 @@ mod tests {
         })
         .await;
         assert_eq!(result.unwrap(), 3);
+    }
+
+    #[derive(Clone, Default)]
+    struct Logs(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Logs {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quorum_retries_log_every_attempt_and_the_give_up() {
+        // A second dispatcher stops tracing-core from caching callsite interest
+        // from a test thread that has no subscriber.
+        let _second = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+        let logs = Logs::default();
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let result: Result<(), _> =
+            retry_quorum_conflicts(true, || async {
+                Err(bad_response(
+                    "Code: 286. DB::Exception: Quorum for previous write has not been satisfied yet. (UNSATISFIED_QUORUM_FOR_PREVIOUS_WRITE)",
+                ))
+            })
+            .await;
+
+        assert!(result.is_err());
+        let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        let retries = text.matches("transient ClickHouse error; retrying").count();
+        assert_eq!(retries, QUORUM_RETRY_ATTEMPTS as usize, "{text}");
+        assert_eq!(
+            text.matches("transient ClickHouse error; retries exhausted")
+                .count(),
+            1,
+            "{text}"
+        );
+        assert!(
+            text.contains("error_type=\"unsatisfied_quorum_for_previous_write\""),
+            "{text}"
+        );
     }
 
     #[tokio::test]

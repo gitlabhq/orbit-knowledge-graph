@@ -41,7 +41,7 @@ WHERE database = {database:String} AND startsWith(name, {prefix:String})";
 #[derive(Debug, Error, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum SchemaVersionError {
-    #[strum(serialize = "clickhouse")]
+    #[strum(transparent)]
     #[error("ClickHouse error: {0}")]
     ClickHouse(#[from] clickhouse_client::ClickHouseError),
 
@@ -280,6 +280,21 @@ async fn read_single_version(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn error_type_passes_the_inner_cause_through() {
+        let circuit = || clickhouse_client::ClickHouseError::CircuitOpen { service: "graph" };
+        let schema_version = SchemaVersionError::ClickHouse(circuit());
+        let catalog =
+            crate::catalog::CatalogError::SchemaVersion(SchemaVersionError::ClickHouse(circuit()));
+        let nats = crate::catalog::CatalogError::Nats(nats_client::NatsError::Connection(
+            "customer text".into(),
+        ));
+
+        assert_eq!(<&str>::from(&schema_version), "circuit_open");
+        assert_eq!(<&str>::from(&catalog), "circuit_open");
+        assert_eq!(<&str>::from(&nats), "connection");
+    }
 
     #[test]
     fn table_prefix_applies_version_number() {

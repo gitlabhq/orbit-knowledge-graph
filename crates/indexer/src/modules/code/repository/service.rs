@@ -14,6 +14,7 @@ pub type ByteStream =
 #[strum(serialize_all = "snake_case")]
 pub enum RepositoryServiceError {
     #[error("GitLab API error: {0}")]
+    #[strum(transparent)]
     GitlabApi(#[from] GitlabClientError),
 
     #[error("archive extraction failed: {0}")]
@@ -283,6 +284,14 @@ pub mod test_utils {
 mod tests {
     use super::*;
     use test_utils::{CountingRepositoryService, MockRepositoryService};
+
+    #[test]
+    fn error_type_passes_the_gitlab_cause_through() {
+        let error =
+            RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::Unauthorized);
+
+        assert_eq!(<&str>::from(&error), "unauthorized");
+    }
 
     fn build_caching_service(
         counting: Arc<test_utils::CountingRepositoryService>,

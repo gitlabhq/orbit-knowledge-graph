@@ -17,8 +17,9 @@ pub enum WriteError {
     #[error("failed to write: {0}")]
     Write(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
 
-    #[error("connection error: {0}")]
-    Connection(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
+    #[error("failed to write: {0}")]
+    #[strum(transparent)]
+    ClickHouse(#[from] clickhouse_client::ClickHouseError),
 }
 
 impl From<RetryExhausted> for WriteError {
@@ -187,6 +188,16 @@ impl ClickHouseWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn error_type_passes_the_clickhouse_cause_through() {
+        let error = WriteError::from(clickhouse_client::ClickHouseError::BadResponse {
+            status: 500,
+            body: "Code: 252. DB::Exception: Too many parts. (TOO_MANY_PARTS)".into(),
+        });
+
+        assert_eq!(<&str>::from(&error), "too_many_parts");
+    }
 
     #[test]
     fn durable_pins_async_insert_and_wait() {

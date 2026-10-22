@@ -1,5 +1,4 @@
 mod clients;
-mod error;
 mod writer;
 
 pub use clickhouse_client::{

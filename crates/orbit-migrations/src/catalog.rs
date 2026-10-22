@@ -19,10 +19,12 @@ pub type ActiveVersionChanges = BoxStream<'static, Result<Option<u32>, CatalogEr
 #[strum(serialize_all = "snake_case")]
 pub enum CatalogError {
     #[error(transparent)]
+    #[strum(transparent)]
     Nats(#[from] nats_client::NatsError),
     #[error(transparent)]
     Archive(#[from] ArchiveError),
     #[error(transparent)]
+    #[strum(transparent)]
     SchemaVersion(#[from] SchemaVersionError),
     #[error(
         "ontology archive v{0} is missing; seed the catalog from the exact deployed release before upgrading"
