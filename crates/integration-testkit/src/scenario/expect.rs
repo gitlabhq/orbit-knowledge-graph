@@ -18,6 +18,7 @@ pub async fn check_expect(
     dispatched: &[DispatchedMessage],
     location: &str,
 ) {
+    ctx.execute("SYSTEM FLUSH ASYNC INSERT QUEUE").await;
     for (table, node_expect) in &expect.nodes {
         check_nodes(ctx, table, node_expect, location).await;
     }
