@@ -43,7 +43,7 @@ command -v yq >/dev/null 2>&1 || { echo "yq (mikefarah v4+) required"; exit 1; }
 
 IMAGE_REPOSITORY=$(yq -r "$GITLAB_PINS.repository // \"\"" "$VERSIONS")
 if [[ -n "$IMAGE_REPOSITORY" ]]; then
-  log "Skipping $GITLAB_PINS: its images are pinned by hand from $IMAGE_REPOSITORY"
+  log "Skipping $GITLAB_PINS: the lane is pinned by hand to $IMAGE_REPOSITORY images, so its chart, ref, and digests stay as they are"
   exit 0
 fi
 
