@@ -91,7 +91,9 @@ fn rule_label(rule: &Rule) -> String {
         Rule::NullOperator => "IS NULL",
         Rule::SortItem => "a sort key",
         Rule::SortDirection => "ASC or DESC",
-        Rule::UnsignedInteger => "a non-negative integer",
+        Rule::UnsignedInteger | Rule::SkipCount | Rule::LimitCount => "a non-negative integer",
+        Rule::PathCount => "1",
+        Rule::HopCount => "a hop count from 1 to 3",
         Rule::StringLiteral
         | Rule::NumberLiteral
         | Rule::BooleanLiteral

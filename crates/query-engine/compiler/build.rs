@@ -54,6 +54,8 @@ fn main() {
 
     check_max_items(&schema, "/properties/nodes", MAX_NODES_CAP);
     check_max_items(&schema, "/properties/relationships", MAX_RELS_CAP);
+    check_max_items(&schema, "/properties/aggregations", MAX_AGGREGATIONS);
+    check_max_items(&schema, "/properties/group_by", MAX_GROUP_BY_KEYS);
     check_max_items(
         &schema,
         "/$defs/NodeSelector/properties/node_ids",
@@ -155,6 +157,9 @@ fn main() {
         "NotExpression",
         &format!("Negation{{0,{MAX_PREDICATE_DEPTH}}}"),
     );
+    check_grammar_numeric_max(&grammar, "HopCount", MAX_HOPS_CAP);
+    check_grammar_numeric_max(&grammar, "LimitCount", MAX_LIMIT);
+    check_grammar_numeric_max(&grammar, "SkipCount", MAX_SKIP);
     assert_eq!(
         MAX_NODE_IDS, MAX_IN_VALUES,
         "GQL ListLiteral and InListLiteral share the Value bound; keep MAX_NODE_IDS and MAX_IN_VALUES equal"
@@ -169,6 +174,22 @@ fn check_grammar_bound(grammar: &str, rule: &str, bound: &str) {
     assert!(
         production.contains(bound),
         "GQL grammar rule `{rule}` must contain `{bound}` to match query_limits.rs"
+    );
+}
+
+fn check_grammar_numeric_max(grammar: &str, rule: &str, expected: u32) {
+    let production = grammar
+        .lines()
+        .find(|line| line.starts_with(&format!("{rule} =")))
+        .unwrap_or_else(|| panic!("GQL grammar is missing rule `{rule}`"));
+    let maximum = production
+        .split('"')
+        .nth(1)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or_else(|| panic!("GQL grammar rule `{rule}` must start with its numeric maximum"));
+    assert_eq!(
+        maximum, expected,
+        "GQL grammar rule `{rule}` maximum must match query_limits.rs"
     );
 }
 

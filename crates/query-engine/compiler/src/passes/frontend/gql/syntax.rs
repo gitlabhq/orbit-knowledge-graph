@@ -103,7 +103,7 @@ impl QueryParser {
         let span = input.as_span();
         match_nodes!(input.into_children();
             [] => Ok(()),
-            [UnsignedInteger(count)] => if count.as_u64() == Some(1) {
+            [PathCount(count)] => if count.as_u64() == Some(1) {
                 Ok(())
             } else {
                 Err(error_at(span, "only one shortest path is supported; use ANY SHORTEST or SHORTEST 1"))
@@ -223,6 +223,14 @@ impl QueryParser {
 
     fn RangeDots(_input: Node) -> Result<()> {
         Ok(())
+    }
+
+    fn HopCount(input: Node) -> Result<Value> {
+        number(&input)
+    }
+
+    fn PathCount(input: Node) -> Result<Value> {
+        number(&input)
     }
 
     fn Where(input: Node) -> Result<BooleanExpression<Predicate>> {
@@ -548,7 +556,7 @@ impl QueryParser {
     fn Skip(input: Node) -> Result<u32> {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
-            [UnsignedInteger(value)] => value
+            [SkipCount(value)] => value
                 .as_u64()
                 .and_then(|n| u32::try_from(n).ok())
                 .ok_or_else(|| error_at(span, "SKIP must be a non-negative integer"))?,
@@ -558,7 +566,7 @@ impl QueryParser {
     fn Limit(input: Node) -> Result<u32> {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
-            [UnsignedInteger(value)] => row_count(&value, span, "LIMIT")?,
+            [LimitCount(value)] => row_count(&value, span, "LIMIT")?,
         ))
     }
 
@@ -605,6 +613,14 @@ impl QueryParser {
     }
 
     fn UnsignedInteger(input: Node) -> Result<Value> {
+        number(&input)
+    }
+
+    fn SkipCount(input: Node) -> Result<Value> {
+        number(&input)
+    }
+
+    fn LimitCount(input: Node) -> Result<Value> {
         number(&input)
     }
 

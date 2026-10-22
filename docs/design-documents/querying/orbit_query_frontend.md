@@ -218,7 +218,7 @@ Unsupported syntax or lowering returns a client-safe error rather than dropping 
 Syntax errors report line, column, and expected tokens without echoing query text; lowering errors name the offending identifier.
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
-Pest applies shared compiler caps before it builds the syntax tree. These cover identifiers, relationships, types, filters, projections, predicates, nesting, and ID lists.
+Pest applies shared compiler caps before it builds the syntax tree. These cover identifiers, relationships, types, filters, projections, predicates, nesting, ID lists, hop counts, `LIMIT`, and `SKIP`.
 Existing compiler limits still apply after lowering.
 Queries accept at most 16 input predicates across all MATCH clauses, including node filters, relationship filters, and cross-node comparisons.
 An ID selector or IN list counts as one predicate; an ID range counts as two.

@@ -2,9 +2,9 @@ use pest::Parser as _;
 
 use super::{QueryParser, Rule, parse_query};
 use crate::query_limits::{
-    MAX_COLUMNS, MAX_FILTER_STRING_LEN, MAX_FILTERS_PER_NODE, MAX_FILTERS_PER_REL,
-    MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_NODE_IDS, MAX_PREDICATE_DEPTH, MAX_PREDICATES,
-    MAX_REL_TYPES, MAX_RELS_CAP,
+    MAX_COLUMNS, MAX_FILTER_STRING_LEN, MAX_FILTERS_PER_NODE, MAX_FILTERS_PER_REL, MAX_HOPS_CAP,
+    MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_LIMIT, MAX_NODE_IDS, MAX_PREDICATE_DEPTH,
+    MAX_PREDICATES, MAX_REL_TYPES, MAX_RELS_CAP, MAX_SKIP,
 };
 
 fn accepts(rule: Rule, input: &str) -> bool {
@@ -95,4 +95,28 @@ fn strings_reject_raw_controls_and_match_the_shared_limit() {
     assert!(error.contains("string literal must not exceed"), "{error}");
     assert!(!accepts(Rule::StringLiteral, "'raw\0control'"));
     assert!(!accepts(Rule::StringLiteral, "'raw\nnewline'"));
+}
+
+#[test]
+fn numeric_clause_rules_match_shared_limits() {
+    for (valid, invalid) in [
+        (
+            format!("MATCH (n:Project) RETURN n LIMIT {MAX_LIMIT}"),
+            format!("MATCH (n:Project) RETURN n LIMIT {}", MAX_LIMIT + 1),
+        ),
+        (
+            format!("MATCH (n:Project) RETURN n SKIP {MAX_SKIP}"),
+            format!("MATCH (n:Project) RETURN n SKIP {}", MAX_SKIP + 1),
+        ),
+        (
+            format!("MATCH (a:Project)-[*1..{MAX_HOPS_CAP}]->(b:Project) RETURN b"),
+            format!(
+                "MATCH (a:Project)-[*1..{}]->(b:Project) RETURN b",
+                MAX_HOPS_CAP + 1
+            ),
+        ),
+    ] {
+        assert!(parse_query(&valid).is_ok(), "{valid}");
+        assert!(parse_query(&invalid).is_err(), "{invalid}");
+    }
 }
