@@ -59,31 +59,13 @@ local serverErrors(range) =
   '(sum(increase(%s{%s, status=~"%s"}[%s])) or vector(0)) + (sum(increase(%s{%s, failure_reason=~"%s"}[%s])) or vector(0))'
   % [Q, SEL, SERVER_STATUS, range, compilerRejected, SEL, COMPILER_FAULT, range];
 
-local NEUTRAL = [{ color: 'text', value: null }];
-local steps(pairs) = NEUTRAL + [{ color: p[1], value: p[0] } for p in pairs];
-local stepsDown(red, amber) = [
-  { color: 'red', value: null },
-  { color: '#EAB839', value: red },
-  { color: 'green', value: amber },
-];
+local NEUTRAL = o.NEUTRAL;
+local steps = o.steps;
+local stepsDown = o.stepsDown;
+local colored = o.colored;
 
 local tile(title, description, expr, unit, thresholds, decimals=null) =
-  o.stat(title, description, o.target(expr, title, DS) + { instant: true, range: false }, unit, 3, 4) + {
-    fieldConfig+: {
-      defaults+: {
-        color: { mode: 'thresholds' },
-        thresholds: { mode: 'absolute', steps: thresholds },
-        [if decimals != null then 'decimals']: decimals,
-      },
-    },
-    options+: {
-      textMode: 'value',
-      graphMode: 'none',
-      colorMode: 'value',
-      justifyMode: 'center',
-      text: { titleSize: 13, valueSize: 32 },
-    },
-  };
+  o.glanceTile(title, description, expr, DS, unit, thresholds, decimals);
 
 local percentiles(title, description) = o.timeseries(
   title,
@@ -107,11 +89,6 @@ local percentiles(title, description) = o.timeseries(
   },
   options+: { legend: { displayMode: 'table', placement: 'bottom', calcs: ['mean', 'max', 'lastNotNull'] } },
 };
-
-local colored(names) = [
-  { matcher: { id: 'byName', options: n[0] }, properties: [{ id: 'color', value: { mode: 'fixed', fixedColor: n[1] } }] }
-  for n in names
-];
 
 local errorBars(title, description, targets, colors) =
   o.barTimeseries(title, description, targets, 'short', 6, 9, minInterval='10m') + {

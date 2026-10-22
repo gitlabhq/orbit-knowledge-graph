@@ -1,20 +1,20 @@
 // Orbit — Indexer.
 //
-// Layout is story-shaped, not catalog-shaped:
-//   1. Health — four headline ratios for at-a-glance status.
+// Opens on the answer to "is the indexer healthy?" without scrolling:
+//   1. At a glance — SDLC freshness first, because it is what users see,
+//               then throughput and success for code and SDLC, dropped
+//               messages, and restarts; charts below show the same over time.
 //   2. Volume — "how many X in the dashboard window?" stat tiles,
 //               code first then SDLC.
-//   3. Throughput — SDLC rows-per-window as a smoothed line on the
-//               left, code projects-per-window as stacked bars on the
-//               right.
-//   4. Latency — heatmaps for the histograms, plus a top-N entity table.
-//   5. Reliability — error ratios and stage/kind breakdowns.
-//   6. Freshness and saturation — watermark lag per entity, ETL permits.
-//   7. Fleet — replica counts per indexer pool kind.
-//   8. Resources — CPU, memory, FS I/O, pressure, OOM, restarts, reduced to
+//   3. Latency — percentiles per stage, plus a top-N entity table.
+//   4. Reliability — error ratios and stage/kind breakdowns.
+//   5. Freshness and saturation — SDLC pairs behind by lag and by plan,
+//               watermark lag per entity, ETL permits.
+//   6. Fleet — replica counts per indexer pool kind.
+//   7. Resources — CPU, memory, FS I/O, pressure, OOM, restarts, reduced to
 //               avg and max per pool kind. Per-pod detail is a collapsed row.
-//   9. Schema migration — coverage and phase activity.
-//  10. Reference — every metric in every indexer domain, collapsed by
+//   8. Schema migration — coverage and phase activity.
+//   9. Reference — every metric in every indexer domain, collapsed by
 //                  default. Kept as the deep-debug fallback.
 
 local o = import 'lib/orbit.libsonnet';
@@ -29,7 +29,6 @@ local BUCKET = '2m';
 
 // Catalog lookups. Build aborts if any prom name drifts away from the
 // catalog so panel queries stay aligned with what the service emits.
-local codeCompleted = o.metric('gkg_indexer_code_repository_indexing_completed_total');
 local codeEmpty = o.metric('gkg_indexer_code_repository_empty_total');
 local codeErrors = o.metric('gkg_indexer_code_errors_total');
 local codeFileFaults = o.metric('gkg_indexer_code_file_faults_total');
@@ -48,33 +47,149 @@ local FRESH_LAG = '(%s and on (pod, entity) (increase(%s[6m]) > 0))' % [LAG, SDL
 // Every entity runs at least once per hourly namespace sweep; 65m without a run is a stall.
 local STALLED_ENTITIES = '(count by (entity) (%s) unless count by (entity) (increase(%s[65m]) > 0))' % [LAG, SDLC_RUNS];
 
-// 1. Health ---------------------------------------------------------------
-local health = [
-  o.row('Health'),
-  o.gaugeStat(
-    'Code: success rate (1h)',
-    'Share of repository indexing runs that ended in outcome=indexed over the last hour. Renders 0 when no indexing runs happened in the window.',
-    '(sum(rate(gkg_indexer_code_repository_indexing_completed_total{%s, outcome="indexed"}[1h]))) / (sum(rate(gkg_indexer_code_repository_indexing_completed_total{%s}[1h])) > 0)' % [SEL, SEL],
-    DS, 'percentunit', 6,
+// 1. At a glance ----------------------------------------------------------
+// Freshness is the symptom users see, so it leads; throughput and success
+// ratios explain it. Tiles summarize the selected time range unless the title
+// says otherwise.
+local DSP_SEL = o.GKG_DSP_SEL;
+local NEUTRAL = o.NEUTRAL;
+
+local tile(title, description, expr, unit, thresholds, decimals=null) =
+  o.glanceTile(title, description, expr, DS, unit, thresholds, decimals);
+
+// The dispatcher records one observation per enabled namespace and plan on
+// every freshness run, so bucket ratios are shares of namespace-plan pairs.
+local FRESH = o.metric('gkg_indexer_sdlc_freshness_lag_seconds').prom_name;
+local freshBucket(le, range, by='') =
+  'sum%s(increase(%s_bucket{%s, le="%s"}[%s]))' % [by, FRESH, DSP_SEL, le, range];
+local freshCount(range, by='') = 'sum%s(increase(%s_count{%s}[%s]))' % [by, FRESH, DSP_SEL, range];
+local freshShare(le, range) = '%s / %s' % [freshBucket(le, range), freshCount(range)];
+// Each run moves the count once, so `changes` is the number of runs in the window.
+local freshRuns(range) = 'scalar(max(changes(%s_count{%s}[%s])))' % [FRESH, DSP_SEL, range];
+local behind(le, range, by='') =
+  'clamp_min(%s - %s, 0) / %s' % [freshCount(range, by), freshBucket(le, range, by), freshRuns(range)];
+local band(lo, hi, range) =
+  'clamp_min(%s - %s, 0) / %s' % [freshBucket(hi, range), freshBucket(lo, range), freshRuns(range)];
+
+local CODE = o.metric('gkg_indexer_code_events_processed_total').prom_name;
+local CODE_DONE = 'outcome=~"indexed|empty_repository|error"';
+local SDLC_OK = sdlcPipelineDur.prom_name + '_count';
+local SDLC_ERR = sdlcErrors.prom_name;
+local ROWS = sdlcRows.prom_name;
+local DROPPED = o.metric('gkg_indexer_max_deliveries_exhausted_total').prom_name;
+
+local ROWS_TOP = 'topk(8, sum by (entity) (increase(%s{%s}[$__range] @ end())))' % [ROWS, SEL];
+local rowsTop = 'sum by (entity) (rate(%s{%s}[$__interval])) and on (entity) %s' % [ROWS, SEL, ROWS_TOP];
+
+local bars(title, description, targets, unit, colors=[], legend='table') =
+  o.barTimeseries(title, description, targets, unit, 12, 9, minInterval='10m') + {
+    fieldConfig+: { overrides: o.colored(colors) },
+    options+: { legend: { displayMode: legend, placement: 'bottom', calcs: ['mean', 'max'] } },
+  };
+
+local glance = [
+  o.row('At a glance'),
+  tile(
+    'Fresh',
+    'Share of enabled namespace and SDLC plan pairs whose indexed data was at most 15 minutes behind the datalake, over the selected time range. Measured by the dispatcher freshness task. Amber below 99%, red below 95%.',
+    freshShare('900.0', '$__range'),
+    'percentunit', o.stepsDown(0.95, 0.99), 2,
   ),
-  o.gaugeStat(
-    'SDLC: error rate (1h)',
-    'SDLC pipeline errors divided by rows processed, last hour. Lower is better.',
-    '(sum(rate(gkg_indexer_sdlc_pipeline_errors_total{%s}[1h]))) / (sum(rate(gkg_indexer_sdlc_pipeline_rows_processed_total{%s}[1h])) > 0)' % [SEL, SEL],
-    DS, 'percentunit', 6,
+  tile(
+    'Behind 1 h',
+    'Namespace and SDLC plan pairs more than 1 hour behind the datalake at the end of the selected time range. One namespace stuck on every plan counts once per plan. See the lag chart below for the split.',
+    behind('3600.0', '15m'),
+    'short', NEUTRAL, 0,
   ),
-  o.gaugeStat(
-    'SDLC: max watermark lag',
-    'Highest dispatch-to-completion lag among SDLC entity runs that completed in the last 6 minutes. Samples from older runs are ignored so a quiet entity does not pin the tile. Rising means SDLC is falling behind.',
-    'max(%s)' % [FRESH_LAG],
-    DS, 's', 6,
+  tile(
+    'Projects/min',
+    'Projects indexed per minute, averaged over the selected time range. Excludes empty repositories and pushes already indexed.',
+    'sum(rate(%s{%s, outcome="indexed"}[$__range])) * 60' % [CODE, SEL],
+    'short', NEUTRAL, 1,
   ),
-  o.gaugeStat(
-    'Indexer: message p95 (5m)',
-    'p95 of end-to-end NATS message dispatch duration over the last 5 minutes.',
-    'histogram_quantile(0.95, sum by (le) (rate(gkg_etl_message_duration_seconds_bucket{%s}[5m])))' % [SEL],
-    DS, 's', 6,
+  tile(
+    'Code OK',
+    'Share of code indexing tasks that did not fail in the selected time range. Amber below 99%, red below 95%. Failed tasks are retried, so freshness shows the user impact.',
+    '1 - (sum(increase(%s{%s, outcome="error"}[$__range])) or vector(0)) / sum(increase(%s{%s, %s}[$__range]))' % [CODE, SEL, CODE, SEL, CODE_DONE],
+    'percentunit', o.stepsDown(0.95, 0.99), 2,
   ),
+  tile(
+    'Rows/min',
+    'SDLC rows indexed per minute, averaged over the selected time range.',
+    'sum(rate(%s{%s}[$__range])) * 60' % [ROWS, SEL],
+    'short', NEUTRAL, 0,
+  ),
+  tile(
+    'SDLC OK',
+    'Share of SDLC plan runs that did not fail in the selected time range. Amber below 99%, red below 95%. Failed runs are retried, so freshness shows the user impact.',
+    'sum(increase(%s{%s}[$__range])) / (sum(increase(%s{%s}[$__range])) + (sum(increase(%s{%s}[$__range])) or vector(0)))' % [SDLC_OK, SEL, SDLC_OK, SEL, SDLC_ERR, SEL],
+    'percentunit', o.stepsDown(0.95, 0.99), 2,
+  ),
+  tile(
+    'Dropped',
+    'Indexing requests that NATS removed after all delivery attempts failed, in the selected time range. The dispatcher sends the work again on a later sweep, so the Fresh tile judges the impact.',
+    'round(sum(increase(%s{%s}[$__range]))) or vector(0)' % [DROPPED, DSP_SEL],
+    'short', NEUTRAL, 0,
+  ),
+  tile(
+    'Restarts',
+    'Indexer container restarts in the selected time range: crashes and OOM kills. Deploys replace pods and do not count. Amber from 1, red from 5.',
+    'round(sum(increase(kube_pod_container_status_restarts_total{%s}[$__range]))) or vector(0)' % [SEL],
+    'short', o.steps([[1, '#EAB839'], [5, 'red']]), 0,
+  ),
+  o.timeseries(
+    'SDLC freshness',
+    'Share of enabled namespace and SDLC plan pairs within each lag of the datalake, per 15 minutes or more. Dashed lines mark 95% and 99%.',
+    [
+      o.target(freshShare(b[0], '$__interval'), b[1], DS, b[2])
+      for b in [['60.0', 'in sync (≤ 1 min)', 'A'], ['900.0', '≤ 15 min', 'B'], ['3600.0', '≤ 1 h', 'C']]
+    ],
+    'percentunit', 12, 9,
+    overrides=o.colored([['in sync (≤ 1 min)', '#9085e9'], ['≤ 15 min', '#3987e5'], ['≤ 1 h', '#199e70']]),
+  ) + {
+    interval: '15m',
+    fieldConfig+: {
+      defaults+: {
+        decimals: 2,
+        custom+: { thresholdsStyle: { mode: 'dashed' }, fillOpacity: 0, lineWidth: 2, showPoints: 'never' },
+        thresholds: { mode: 'absolute', steps: [{ color: 'transparent', value: null }, { color: 'red', value: 0.95 }, { color: '#EAB839', value: 0.99 }] },
+      },
+    },
+    options+: { legend: { displayMode: 'table', placement: 'bottom', calcs: ['mean', 'min', 'lastNotNull'] } },
+  },
+  bars(
+    'SDLC rows indexed per minute',
+    'SDLC rows indexed per minute for the 8 plans with the most rows in the selected time range. All other plans are summed as Other.',
+    [
+      o.target('(%s) * 60' % rowsTop, '{{entity}}', DS, 'A'),
+      o.target('(sum(rate(%s{%s}[$__interval])) - sum(%s)) * 60' % [ROWS, SEL, rowsTop], 'Other', DS, 'B'),
+    ],
+    'short',
+    [['Other', '#8e8e9a']],
+    'list',
+  ),
+  bars(
+    'Projects indexed per minute',
+    'Code indexing tasks per minute by outcome: indexed, empty repository, and failed. Pushes already indexed are excluded.',
+    [o.target('sum by (outcome) (rate(%s{%s, %s}[$__interval])) * 60' % [CODE, SEL, CODE_DONE], '{{outcome}}', DS)],
+    'short',
+    [['indexed', '#3987e5'], ['empty_repository', '#8e8e9a'], ['error', '#e66767']],
+  ),
+  bars(
+    'Failures',
+    'Failed code tasks, failed SDLC plan runs, and requests NATS dropped after all delivery attempts, per 10 minutes or more. Failed work is retried, so compare with the SDLC freshness chart.',
+    [
+      o.target('sum(round(increase(%s{%s, outcome="error"}[$__interval]))) > 0' % [CODE, SEL], 'code errors', DS, 'A'),
+      o.target('sum(round(increase(%s{%s}[$__interval]))) > 0' % [SDLC_ERR, SEL], 'SDLC errors', DS, 'B'),
+      o.target(
+        'sum by (pipeline) (label_replace(round(increase(%s{%s}[$__interval])), "pipeline", "$1", "consumer", ".*-(code|sdlc)-.*")) > 0' % [DROPPED, DSP_SEL],
+        '{{pipeline}} dropped', DS, 'C',
+      ),
+    ],
+    'short',
+    [['code errors', '#d95926'], ['SDLC errors', '#3987e5'], ['code dropped', '#c98500'], ['sdlc dropped', '#9085e9']],
+    'list',
+  ) + { fieldConfig+: { defaults+: { decimals: 0 } }, options+: { legend+: { calcs: ['sum'] } } },
 ];
 
 // 2. Volume in window -----------------------------------------------------
@@ -134,29 +249,7 @@ local volume = [
   },
 ], DS, SEL, w=6);
 
-// 3. Throughput over time -------------------------------------------------
-// SDLC sits on the left because it carries most of the volume in prod.
-// Each data point is a count over one Grafana auto-window
-// (`$__rate_interval`, ~2 to 4 minutes for a 3h time picker). SDLC
-// renders as a smoothed line per entity; code renders as stacked bars
-// per outcome since the volume there is sparse and bars read better.
-local throughput = [
-  o.row('Throughput over time'),
-  o.counterIncreaseBars(
-    sdlcRows,
-    'SDLC: rows ingested over time',
-    'SDLC pipeline rows processed per bucket, drawn as a smoothed trend line per entity.',
-    DS, SEL, by=['entity'], unit='short', w=12, draw='line', stack=false, range='$__interval', minInterval=BUCKET,
-  ),
-  o.counterIncreaseBars(
-    codeCompleted,
-    'Code: projects indexed over time',
-    'Repository indexing runs per bucket, stacked by outcome.',
-    DS, SEL, by=['outcome'], unit='short', w=12, range='$__interval', minInterval=BUCKET, round=true,
-  ),
-];
-
-// 4. Latency --------------------------------------------------------------
+// 3. Latency --------------------------------------------------------------
 // Three p50/p95/p99 line panels (one per pipeline stage that matters)
 // plus a top-10 entity table for SDLC. Heatmap variants are still
 // available via o.histogramHeatmap if anyone wants to opt back in.
@@ -188,7 +281,7 @@ local latency = [
   ),
 ];
 
-// 5. Reliability ----------------------------------------------------------
+// 4. Reliability ----------------------------------------------------------
 local reliability = [
   o.row('Reliability'),
   o.counterIncreaseBars(
@@ -224,9 +317,43 @@ local reliability = [
   ),
 ];
 
-// 6. Freshness and saturation --------------------------------------------
+// 5. Freshness and saturation --------------------------------------------
 local freshness = [
   o.row('Freshness and saturation'),
+  bars(
+    'SDLC pairs behind, by lag',
+    'Namespace and SDLC plan pairs more than 15 minutes behind the datalake, by how far behind, averaged per freshness run. A namespace that never finished its first sync counts from the time it was enabled.',
+    [
+      o.target(band('900.0', '3600.0', '$__interval'), '15 min – 1 h', DS, 'A'),
+      o.target(band('3600.0', '14400.0', '$__interval'), '1 – 4 h', DS, 'B'),
+      o.target(band('14400.0', '57600.0', '$__interval'), '4 – 16 h', DS, 'C'),
+      o.target(behind('57600.0', '$__interval'), '> 16 h', DS, 'D'),
+    ],
+    'short',
+    [['15 min – 1 h', '#EAB839'], ['1 – 4 h', '#d95926'], ['4 – 16 h', '#e66767'], ['> 16 h', '#9085e9']],
+    'list',
+  ) + { interval: '15m', fieldConfig+: { defaults+: { decimals: 0 } } },
+  {
+    kind: 'panel',
+    type: 'bargauge',
+    title: 'Namespaces behind > 15 min, by plan',
+    description: 'For the 10 SDLC plans with the most namespaces more than 15 minutes behind the datalake at the end of the selected time range.',
+    datasource: o.target('', '', DS).datasource,
+    targets: [o.target('sort_desc(topk(10, %s > 0))' % behind('900.0', '15m', ' by (entity)'), '{{entity}}', DS) + { instant: true, range: false }],
+    fieldConfig: {
+      defaults: { unit: 'short', decimals: 0, min: 0, color: { mode: 'fixed', fixedColor: '#d95926' }, noValue: 'All plans fresh' },
+      overrides: [],
+    },
+    options: {
+      orientation: 'horizontal',
+      displayMode: 'basic',
+      showUnfilled: true,
+      valueMode: 'color',
+      namePlacement: 'left',
+      reduceOptions: { calcs: ['lastNotNull'], fields: '', values: false },
+    },
+    gridPos: { x: 0, y: 0, w: 12, h: 9 },
+  },
   o.timeseries(
     'SDLC: watermark lag per entity',
     'Dispatch-to-completion lag per SDLC entity, worst replica among runs that completed in the last 6 minutes. An entity with no recent run drops out instead of holding its last value. Rising lag means SDLC is falling behind on that entity.',
@@ -247,7 +374,7 @@ local freshness = [
   ),
 ];
 
-// 7. Fleet ---------------------------------------------------------------
+// 6. Fleet ---------------------------------------------------------------
 // The chart can deploy the indexer as split `code` and `sdlc` pools or as a
 // single `universal` pool. Both topologies get a tile; the one that is not
 // deployed renders the stat panel's no-value dash rather than a misleading
@@ -284,7 +411,7 @@ local fleet = [
   ),
 ];
 
-// 8. Resources -----------------------------------------------------------
+// 7. Resources -----------------------------------------------------------
 // Code and SDLC pools have different shapes (code is CPU- and scratch-bound,
 // SDLC is memory- and datalake-bound) and different limits, so a single
 // series per pod across both reads as noise. Every panel here reduces to avg
@@ -451,7 +578,7 @@ local resourcesPerPod = [
   ),
 ];
 
-// 9. Schema migration ----------------------------------------------------
+// 8. Schema migration ----------------------------------------------------
 // Schema migration is orchestrated by the dispatcher (DispatchIndexing
 // mode), so every series here is filtered to the dispatcher container,
 // not the indexer.
@@ -479,7 +606,7 @@ local migration = [
 + o.counterPanels(o.metric('gkg_schema_migration_completed_total'), DS, MIG_SEL)
 + o.counterPanels(o.metric('gkg_schema_cleanup_total'), DS, MIG_SEL);
 
-// 10. Reference (collapsed by default) ------------------------------------
+// 9. Reference (collapsed by default) -------------------------------------
 // Scheduler metrics used by the data deletion panels below.
 local schedulerDur = o.metric('gkg_scheduler_task_duration_seconds');
 local schedulerRuns = o.metric('gkg_scheduler_task_runs_total');
@@ -488,7 +615,6 @@ local schedulerErrors = o.metric('gkg_scheduler_task_errors_total');
 local deletionTableDur = o.metric('gkg_indexer_namespace_deletion_table_duration_seconds');
 local deletionTableErrors = o.metric('gkg_indexer_namespace_deletion_table_errors_total');
 
-local DSP_SEL = o.GKG_DSP_SEL;
 local NS_DEL_SEL = DSP_SEL + ', task="dispatch.namespace_deletion"';
 local CLEANUP_SEL = DSP_SEL + ', task="maintenance.table_cleanup"';
 
@@ -536,14 +662,14 @@ local dataDeletionPanels = [
 local reference =
   o.sectionCollapsed('ETL engine (reference)', o.metricsInDomain('indexer.etl'), DS, SEL)
   + o.sectionCollapsed('Code pipeline (reference)', o.metricsInDomain('indexer.code'), DS, SEL)
-  + o.sectionCollapsed('SDLC pipeline (reference)', o.metricsInDomain('indexer.sdlc'), DS, SEL)
+  + o.sectionCollapsed('SDLC pipeline (reference)', [m for m in o.metricsInDomain('indexer.sdlc') if m.prom_name != FRESH], DS, SEL)
+  + o.panelsFor(o.metric(FRESH), DS, DSP_SEL)
   + [o.rowCollapsed('Data deletion')] + dataDeletionPanels
   + o.sectionCollapsed('Scheduler (reference)', o.metricsInDomain('indexer.scheduler'), DS, DSP_SEL);
 
 local items =
-  health
+  glance
   + volume
-  + throughput
   + latency
   + reliability
   + freshness
@@ -561,7 +687,7 @@ o.dashboard(
   'orbit-indexer',
   'Orbit — Indexer',
   ['indexer'],
-  'Orbit indexer dashboard. Top-of-page rows tell the story (health, volume, throughput, latency, reliability, freshness). Bottom rows are the per-domain catalog reference and are collapsed by default.',
+  'Orbit indexer dashboard. The top section answers whether the indexer is healthy: SDLC freshness, throughput and success for code and SDLC, and failures. Lower rows break down volume, latency, reliability, and resources. The per-domain catalog reference is collapsed at the bottom.',
   items,
   annotations,
 )

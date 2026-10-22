@@ -17,7 +17,7 @@
       }
     ]
   },
-  "description": "Orbit indexer dashboard. Top-of-page rows tell the story (health, volume, throughput, latency, reliability, freshness). Bottom rows are the per-domain catalog reference and are collapsed by default.",
+  "description": "Orbit indexer dashboard. The top section answers whether the indexer is healthy: SDLC freshness, throughput and success for code and SDLC, and failures. Lower rows break down volume, latency, reliability, and resources. The per-domain catalog reference is collapsed at the bottom.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -45,7 +45,7 @@
       },
       "id": 1,
       "panels": [],
-      "title": "Health",
+      "title": "At a glance",
       "type": "row"
     },
     {
@@ -53,31 +53,44 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of repository indexing runs that ended in outcome=indexed over the last hour. Renders 0 when no indexing runs happened in the window.",
+      "description": "Share of enabled namespace and SDLC plan pairs whose indexed data was at most 15 minutes behind the datalake, over the selected time range. Measured by the dispatcher freshness task. Amber below 99%, red below 95%.",
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
           "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red"
+              },
+              {
+                "color": "#EAB839",
+                "value": 0.95
+              },
+              {
+                "color": "green",
+                "value": 0.99
+              }
+            ]
+          },
           "unit": "percentunit"
         }
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
+        "w": 3,
         "x": 0,
         "y": 1
       },
       "id": 2,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22%28sum%28rate%28gkg_indexer_code_repository_indexing_completed_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%2C%20outcome%3D\\%22indexed\\%22%7D%5B1h%5D%29%29%29%20%2F%20%28sum%28rate%28gkg_indexer_code_repository_indexing_completed_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B1h%5D%29%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
+        "graphMode": "none",
+        "justifyMode": "center",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -85,7 +98,11 @@
           "fields": "",
           "values": false
         },
-        "textMode": "value_and_name"
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
       },
       "targets": [
         {
@@ -93,12 +110,14 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "((sum(rate(gkg_indexer_code_repository_indexing_completed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\", outcome=\"indexed\"}[1h]))) / (sum(rate(gkg_indexer_code_repository_indexing_completed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[1h])) > 0)) or vector(0)",
-          "legendFormat": "Code: success rate (1h)",
+          "expr": "sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[$__range])) / sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "Fresh",
+          "range": false,
           "refId": "A"
         }
       ],
-      "title": "Code: success rate (1h)",
+      "title": "Fresh",
       "type": "stat"
     },
     {
@@ -106,137 +125,172 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "SDLC pipeline errors divided by rows processed, last hour. Lower is better.",
+      "description": "Namespace and SDLC plan pairs more than 1 hour behind the datalake at the end of the selected time range. One namespace stuck on every plan counts once per plan. See the lag chart below for the split.",
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
           "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 3,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[15m])), 0) / scalar(max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m])))",
+          "instant": true,
+          "legendFormat": "Behind 1 h",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Behind 1 h",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Projects indexed per minute, averaged over the selected time range. Excludes empty repositories and pushes already indexed.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(rate(gkg_indexer_code_events_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\", outcome=\"indexed\"}[$__range])) * 60",
+          "instant": true,
+          "legendFormat": "Projects/min",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Projects/min",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Share of code indexing tasks that did not fail in the selected time range. Amber below 99%, red below 95%. Failed tasks are retried, so freshness shows the user impact.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red"
+              },
+              {
+                "color": "#EAB839",
+                "value": 0.95
+              },
+              {
+                "color": "green",
+                "value": 0.99
+              }
+            ]
+          },
           "unit": "percentunit"
         }
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 6,
-        "y": 1
-      },
-      "id": 3,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22%28sum%28rate%28gkg_indexer_sdlc_pipeline_errors_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B1h%5D%29%29%29%20%2F%20%28sum%28rate%28gkg_indexer_sdlc_pipeline_rows_processed_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B1h%5D%29%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value_and_name"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "((sum(rate(gkg_indexer_sdlc_pipeline_errors_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[1h]))) / (sum(rate(gkg_indexer_sdlc_pipeline_rows_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[1h])) > 0)) or vector(0)",
-          "legendFormat": "SDLC: error rate (1h)",
-          "refId": "A"
-        }
-      ],
-      "title": "SDLC: error rate (1h)",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Highest dispatch-to-completion lag among SDLC entity runs that completed in the last 6 minutes. Samples from older runs are ignored so a quiet entity does not pin the tile. Rising means SDLC is falling behind.",
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "—",
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 1
-      },
-      "id": 4,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22max%28%28gkg_indexer_sdlc_watermark_lag_seconds%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%20and%20on%20%28pod%2C%20entity%29%20%28increase%28gkg_indexer_sdlc_pipeline_duration_seconds_count%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B6m%5D%29%20%3E%200%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value_and_name"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "(max((gkg_indexer_sdlc_watermark_lag_seconds{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"} and on (pod, entity) (increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[6m]) > 0)))) or vector(0)",
-          "legendFormat": "SDLC: max watermark lag",
-          "refId": "A"
-        }
-      ],
-      "title": "SDLC: max watermark lag",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "p95 of end-to-end NATS message dispatch duration over the last 5 minutes.",
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "—",
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
+        "w": 3,
+        "x": 9,
         "y": 1
       },
       "id": 5,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22histogram_quantile%280.95%2C%20sum%20by%20%28le%29%20%28rate%28gkg_etl_message_duration_seconds_bucket%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B5m%5D%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
       "options": {
         "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
+        "graphMode": "none",
+        "justifyMode": "center",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -244,7 +298,11 @@
           "fields": "",
           "values": false
         },
-        "textMode": "value_and_name"
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
       },
       "targets": [
         {
@@ -252,13 +310,753 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(histogram_quantile(0.95, sum by (le) (rate(gkg_etl_message_duration_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))) or vector(0)",
-          "legendFormat": "Indexer: message p95 (5m)",
+          "expr": "1 - (sum(increase(gkg_indexer_code_events_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\", outcome=\"error\"}[$__range])) or vector(0)) / sum(increase(gkg_indexer_code_events_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\", outcome=~\"indexed|empty_repository|error\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "Code OK",
+          "range": false,
           "refId": "A"
         }
       ],
-      "title": "Indexer: message p95 (5m)",
+      "title": "Code OK",
       "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "SDLC rows indexed per minute, averaged over the selected time range.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 1
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(rate(gkg_indexer_sdlc_pipeline_rows_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range])) * 60",
+          "instant": true,
+          "legendFormat": "Rows/min",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Rows/min",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Share of SDLC plan runs that did not fail in the selected time range. Amber below 99%, red below 95%. Failed runs are retried, so freshness shows the user impact.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 2,
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red"
+              },
+              {
+                "color": "#EAB839",
+                "value": 0.95
+              },
+              {
+                "color": "green",
+                "value": 0.99
+              }
+            ]
+          },
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 1
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range])) / (sum(increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range])) + (sum(increase(gkg_indexer_sdlc_pipeline_errors_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range])) or vector(0)))",
+          "instant": true,
+          "legendFormat": "SDLC OK",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "SDLC OK",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Indexing requests that NATS removed after all delivery attempts failed, in the selected time range. The dispatcher sends the work again on a later sweep, so the Fresh tile judges the impact.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "id": 8,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "round(sum(increase(gkg_indexer_max_deliveries_exhausted_total{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__range]))) or vector(0)",
+          "instant": true,
+          "legendFormat": "Dropped",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Dropped",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Indexer container restarts in the selected time range: crashes and OOM kills. Deploys replace pods and do not count. Amber from 1, red from 5.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "noValue": "—",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              },
+              {
+                "color": "#EAB839",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 1
+      },
+      "id": 9,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "titleSize": 13,
+          "valueSize": 32
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "round(sum(increase(kube_pod_container_status_restarts_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range]))) or vector(0)",
+          "instant": true,
+          "legendFormat": "Restarts",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Restarts",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Share of enabled namespace and SDLC plan pairs within each lag of the datalake, per 15 minutes or more. Dashed lines mark 95% and 99%.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent"
+              },
+              {
+                "color": "red",
+                "value": 0.95
+              },
+              {
+                "color": "#EAB839",
+                "value": 0.99
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "in sync (≤ 1 min)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#9085e9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "≤ 15 min"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3987e5",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "≤ 1 h"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#199e70",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "id": 10,
+      "interval": "15m",
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "min",
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"60.0\"}[$__interval])) / sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval]))",
+          "legendFormat": "in sync (≤ 1 min)",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[$__interval])) / sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval]))",
+          "legendFormat": "≤ 15 min",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[$__interval])) / sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval]))",
+          "legendFormat": "≤ 1 h",
+          "refId": "C"
+        }
+      ],
+      "title": "SDLC freshness",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "SDLC rows indexed per minute for the 8 plans with the most rows in the selected time range. All other plans are summed as Other.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Other"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8e8e9a",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "id": 11,
+      "interval": "10m",
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "(sum by (entity) (rate(gkg_indexer_sdlc_pipeline_rows_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__interval])) and on (entity) topk(8, sum by (entity) (increase(gkg_indexer_sdlc_pipeline_rows_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range] @ end())))) * 60",
+          "legendFormat": "{{entity}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "(sum(rate(gkg_indexer_sdlc_pipeline_rows_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__interval])) - sum(sum by (entity) (rate(gkg_indexer_sdlc_pipeline_rows_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__interval])) and on (entity) topk(8, sum by (entity) (increase(gkg_indexer_sdlc_pipeline_rows_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range] @ end()))))) * 60",
+          "legendFormat": "Other",
+          "refId": "B"
+        }
+      ],
+      "title": "SDLC rows indexed per minute",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Code indexing tasks per minute by outcome: indexed, empty repository, and failed. Pushes already indexed are excluded.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "indexed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3987e5",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "empty_repository"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#8e8e9a",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#e66767",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "id": 12,
+      "interval": "10m",
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (outcome) (rate(gkg_indexer_code_events_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\", outcome=~\"indexed|empty_repository|error\"}[$__interval])) * 60",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Projects indexed per minute",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Failed code tasks, failed SDLC plan runs, and requests NATS dropped after all delivery attempts, per 10 minutes or more. Failed work is retried, so compare with the SDLC freshness chart.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "code errors"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#d95926",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "SDLC errors"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#3987e5",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "code dropped"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#c98500",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sdlc dropped"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#9085e9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "id": 13,
+      "interval": "10m",
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(round(increase(gkg_indexer_code_events_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\", outcome=\"error\"}[$__interval]))) > 0",
+          "legendFormat": "code errors",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum(round(increase(gkg_indexer_sdlc_pipeline_errors_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__interval]))) > 0",
+          "legendFormat": "SDLC errors",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (pipeline) (label_replace(round(increase(gkg_indexer_max_deliveries_exhausted_total{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])), \"pipeline\", \"$1\", \"consumer\", \".*-(code|sdlc)-.*\")) > 0",
+          "legendFormat": "{{pipeline}} dropped",
+          "refId": "C"
+        }
+      ],
+      "title": "Failures",
+      "type": "timeseries"
     },
     {
       "collapsed": false,
@@ -266,9 +1064,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 5
+        "y": 23
       },
-      "id": 6,
+      "id": 14,
       "panels": [],
       "title": "Volume in window — code indexing",
       "type": "row"
@@ -289,9 +1087,9 @@
         "h": 3,
         "w": 6,
         "x": 0,
-        "y": 6
+        "y": 24
       },
-      "id": 7,
+      "id": 15,
       "links": [
         {
           "targetBlank": false,
@@ -342,9 +1140,9 @@
         "h": 3,
         "w": 6,
         "x": 6,
-        "y": 6
+        "y": 24
       },
-      "id": 8,
+      "id": 16,
       "links": [
         {
           "targetBlank": false,
@@ -395,9 +1193,9 @@
         "h": 3,
         "w": 6,
         "x": 12,
-        "y": 6
+        "y": 24
       },
-      "id": 9,
+      "id": 17,
       "links": [
         {
           "targetBlank": false,
@@ -448,9 +1246,9 @@
         "h": 3,
         "w": 6,
         "x": 18,
-        "y": 6
+        "y": 24
       },
-      "id": 10,
+      "id": 18,
       "links": [
         {
           "targetBlank": false,
@@ -507,9 +1305,9 @@
         "h": 2,
         "w": 6,
         "x": 0,
-        "y": 9
+        "y": 27
       },
-      "id": 11,
+      "id": 19,
       "options": {
         "legend": {
           "showLegend": false
@@ -554,9 +1352,9 @@
         "h": 2,
         "w": 6,
         "x": 6,
-        "y": 9
+        "y": 27
       },
-      "id": 12,
+      "id": 20,
       "options": {
         "legend": {
           "showLegend": false
@@ -601,9 +1399,9 @@
         "h": 2,
         "w": 6,
         "x": 12,
-        "y": 9
+        "y": 27
       },
-      "id": 13,
+      "id": 21,
       "options": {
         "legend": {
           "showLegend": false
@@ -648,9 +1446,9 @@
         "h": 2,
         "w": 6,
         "x": 18,
-        "y": 9
+        "y": 27
       },
-      "id": 14,
+      "id": 22,
       "options": {
         "legend": {
           "showLegend": false
@@ -679,9 +1477,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 11
+        "y": 29
       },
-      "id": 15,
+      "id": 23,
       "panels": [],
       "title": "Volume in window — SDLC indexing",
       "type": "row"
@@ -702,9 +1500,9 @@
         "h": 3,
         "w": 6,
         "x": 0,
-        "y": 12
+        "y": 30
       },
-      "id": 16,
+      "id": 24,
       "links": [
         {
           "targetBlank": false,
@@ -755,9 +1553,9 @@
         "h": 3,
         "w": 6,
         "x": 6,
-        "y": 12
+        "y": 30
       },
-      "id": 17,
+      "id": 25,
       "links": [
         {
           "targetBlank": false,
@@ -808,9 +1606,9 @@
         "h": 3,
         "w": 6,
         "x": 12,
-        "y": 12
+        "y": 30
       },
-      "id": 18,
+      "id": 26,
       "links": [
         {
           "targetBlank": false,
@@ -861,9 +1659,9 @@
         "h": 3,
         "w": 6,
         "x": 18,
-        "y": 12
+        "y": 30
       },
-      "id": 19,
+      "id": 27,
       "links": [
         {
           "targetBlank": false,
@@ -920,9 +1718,9 @@
         "h": 2,
         "w": 6,
         "x": 0,
-        "y": 15
+        "y": 33
       },
-      "id": 20,
+      "id": 28,
       "options": {
         "legend": {
           "showLegend": false
@@ -967,9 +1765,9 @@
         "h": 2,
         "w": 6,
         "x": 6,
-        "y": 15
+        "y": 33
       },
-      "id": 21,
+      "id": 29,
       "options": {
         "legend": {
           "showLegend": false
@@ -1014,9 +1812,9 @@
         "h": 2,
         "w": 6,
         "x": 12,
-        "y": 15
+        "y": 33
       },
-      "id": 22,
+      "id": 30,
       "options": {
         "legend": {
           "showLegend": false
@@ -1061,9 +1859,9 @@
         "h": 2,
         "w": 6,
         "x": 18,
-        "y": 15
+        "y": 33
       },
-      "id": 23,
+      "id": 31,
       "options": {
         "legend": {
           "showLegend": false
@@ -1092,139 +1890,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 17
+        "y": 35
       },
-      "id": 24,
-      "panels": [],
-      "title": "Throughput over time",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "SDLC pipeline rows processed per bucket, drawn as a smoothed trend line per entity.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 25,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "none"
-            }
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 18
-      },
-      "id": 25,
-      "interval": "2m",
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max",
-            "sum"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (entity) (increase(gkg_indexer_sdlc_pipeline_rows_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__interval]))",
-          "legendFormat": "{{entity}}",
-          "refId": "A"
-        }
-      ],
-      "title": "SDLC: rows ingested over time",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Repository indexing runs per bucket, stacked by outcome.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "barAlignment": 0,
-            "drawStyle": "bars",
-            "fillOpacity": 70,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "showPoints": "never",
-            "stacking": {
-              "group": "A",
-              "mode": "normal"
-            }
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 18
-      },
-      "id": 26,
-      "interval": "2m",
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max",
-            "sum"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (outcome) (round(increase(gkg_indexer_code_repository_indexing_completed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__interval])))",
-          "legendFormat": "{{outcome}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Code: projects indexed over time",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 26
-      },
-      "id": 27,
+      "id": 32,
       "panels": [],
       "title": "Latency",
       "type": "row"
@@ -1250,9 +1918,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 27
+        "y": 36
       },
-      "id": 28,
+      "id": 33,
       "options": {
         "legend": {
           "calcs": [
@@ -1319,9 +1987,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 27
+        "y": 36
       },
-      "id": 29,
+      "id": 34,
       "options": {
         "legend": {
           "calcs": [
@@ -1388,9 +2056,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 35
+        "y": 44
       },
-      "id": 30,
+      "id": 35,
       "options": {
         "legend": {
           "calcs": [
@@ -1458,9 +2126,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 35
+        "y": 44
       },
-      "id": 31,
+      "id": 36,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -1518,9 +2186,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 43
+        "y": 52
       },
-      "id": 32,
+      "id": 37,
       "panels": [],
       "title": "Reliability",
       "type": "row"
@@ -1552,9 +2220,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 44
+        "y": 53
       },
-      "id": 33,
+      "id": 38,
       "interval": "2m",
       "options": {
         "legend": {
@@ -1611,9 +2279,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 44
+        "y": 53
       },
-      "id": 34,
+      "id": 39,
       "interval": "2m",
       "options": {
         "legend": {
@@ -1664,9 +2332,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 61
       },
-      "id": 35,
+      "id": 40,
       "options": {
         "legend": {
           "calcs": [
@@ -1721,9 +2389,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 52
+        "y": 61
       },
-      "id": 36,
+      "id": 41,
       "interval": "2m",
       "options": {
         "legend": {
@@ -1780,9 +2448,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 69
       },
-      "id": 37,
+      "id": 42,
       "interval": "2m",
       "options": {
         "legend": {
@@ -1818,12 +2486,215 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 77
       },
-      "id": 38,
+      "id": 43,
       "panels": [],
       "title": "Freshness and saturation",
       "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "Namespace and SDLC plan pairs more than 15 minutes behind the datalake, by how far behind, averaged per freshness run. A namespace that never finished its first sync counts from the time it was enabled.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "15 min – 1 h"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#EAB839",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "1 – 4 h"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#d95926",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "4 – 16 h"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#e66767",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "> 16 h"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#9085e9",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 78
+      },
+      "id": 44,
+      "interval": "15m",
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[$__interval])), 0) / scalar(max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])))",
+          "legendFormat": "15 min – 1 h",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"14400.0\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[$__interval])), 0) / scalar(max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])))",
+          "legendFormat": "1 – 4 h",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"57600.0\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"14400.0\"}[$__interval])), 0) / scalar(max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])))",
+          "legendFormat": "4 – 16 h",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"57600.0\"}[$__interval])), 0) / scalar(max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])))",
+          "legendFormat": "> 16 h",
+          "refId": "D"
+        }
+      ],
+      "title": "SDLC pairs behind, by lag",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "For the 10 SDLC plans with the most namespaces more than 15 minutes behind the datalake at the end of the selected time range.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "#d95926",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "min": 0,
+          "noValue": "All plans fresh",
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 78
+      },
+      "id": 45,
+      "options": {
+        "displayMode": "basic",
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sort_desc(topk(10, clamp_min(sum by (entity)(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m])) - sum by (entity)(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[15m])), 0) / scalar(max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m]))) > 0))",
+          "instant": true,
+          "legendFormat": "{{entity}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Namespaces behind > 15 min, by plan",
+      "type": "bargauge"
     },
     {
       "datasource": {
@@ -1846,9 +2717,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 69
+        "y": 87
       },
-      "id": 39,
+      "id": 46,
       "options": {
         "legend": {
           "calcs": [
@@ -1897,9 +2768,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 69
+        "y": 87
       },
-      "id": 40,
+      "id": 47,
       "options": {
         "legend": {
           "calcs": [
@@ -1943,9 +2814,9 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 77
+        "y": 95
       },
-      "id": 41,
+      "id": 48,
       "links": [
         {
           "targetBlank": false,
@@ -1986,9 +2857,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 81
+        "y": 99
       },
-      "id": 42,
+      "id": 49,
       "panels": [],
       "title": "Fleet",
       "type": "row"
@@ -2009,9 +2880,9 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 82
+        "y": 100
       },
-      "id": 43,
+      "id": 50,
       "links": [
         {
           "targetBlank": false,
@@ -2062,9 +2933,9 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 82
+        "y": 100
       },
-      "id": 44,
+      "id": 51,
       "links": [
         {
           "targetBlank": false,
@@ -2115,9 +2986,9 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 82
+        "y": 100
       },
-      "id": 45,
+      "id": 52,
       "links": [
         {
           "targetBlank": false,
@@ -2173,9 +3044,9 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 86
+        "y": 104
       },
-      "id": 46,
+      "id": 53,
       "options": {
         "legend": {
           "calcs": [
@@ -2209,9 +3080,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 93
+        "y": 111
       },
-      "id": 47,
+      "id": 54,
       "panels": [],
       "title": "Resources",
       "type": "row"
@@ -2232,9 +3103,9 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 94
+        "y": 112
       },
-      "id": 48,
+      "id": 55,
       "links": [
         {
           "targetBlank": false,
@@ -2285,9 +3156,9 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 94
+        "y": 112
       },
-      "id": 49,
+      "id": 56,
       "links": [
         {
           "targetBlank": false,
@@ -2338,9 +3209,9 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 94
+        "y": 112
       },
-      "id": 50,
+      "id": 57,
       "links": [
         {
           "targetBlank": false,
@@ -2391,9 +3262,9 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 94
+        "y": 112
       },
-      "id": 51,
+      "id": 58,
       "links": [
         {
           "targetBlank": false,
@@ -2477,9 +3348,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 98
+        "y": 116
       },
-      "id": 52,
+      "id": 59,
       "options": {
         "legend": {
           "calcs": [
@@ -2546,9 +3417,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 98
+        "y": 116
       },
-      "id": 53,
+      "id": 60,
       "options": {
         "legend": {
           "calcs": [
@@ -2634,9 +3505,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 106
+        "y": 124
       },
-      "id": 54,
+      "id": 61,
       "options": {
         "legend": {
           "calcs": [
@@ -2703,9 +3574,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 106
+        "y": 124
       },
-      "id": 55,
+      "id": 62,
       "options": {
         "legend": {
           "calcs": [
@@ -2781,9 +3652,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 114
+        "y": 132
       },
-      "id": 56,
+      "id": 63,
       "options": {
         "legend": {
           "calcs": [
@@ -2859,9 +3730,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 114
+        "y": 132
       },
-      "id": 57,
+      "id": 64,
       "options": {
         "legend": {
           "calcs": [
@@ -2937,9 +3808,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 122
+        "y": 140
       },
-      "id": 58,
+      "id": 65,
       "options": {
         "legend": {
           "calcs": [
@@ -3000,9 +3871,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 130
+        "y": 148
       },
-      "id": 59,
+      "id": 66,
       "panels": [
         {
           "datasource": {
@@ -3025,9 +3896,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 131
+            "y": 149
           },
-          "id": 60,
+          "id": 67,
           "options": {
             "legend": {
               "calcs": [
@@ -3076,9 +3947,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 131
+            "y": 149
           },
-          "id": 61,
+          "id": 68,
           "options": {
             "legend": {
               "calcs": [
@@ -3127,9 +3998,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 139
+            "y": 157
           },
-          "id": 62,
+          "id": 69,
           "options": {
             "legend": {
               "calcs": [
@@ -3187,9 +4058,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 139
+            "y": 157
           },
-          "id": 63,
+          "id": 70,
           "options": {
             "legend": {
               "calcs": [
@@ -3247,9 +4118,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 147
+            "y": 165
           },
-          "id": 64,
+          "id": 71,
           "options": {
             "legend": {
               "calcs": [
@@ -3307,9 +4178,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 147
+            "y": 165
           },
-          "id": 65,
+          "id": 72,
           "options": {
             "legend": {
               "calcs": [
@@ -3367,9 +4238,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 155
+            "y": 173
           },
-          "id": 66,
+          "id": 73,
           "options": {
             "legend": {
               "calcs": [
@@ -3416,9 +4287,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 163
+        "y": 181
       },
-      "id": 67,
+      "id": 74,
       "panels": [],
       "title": "Schema migration",
       "type": "row"
@@ -3444,9 +4315,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 164
+        "y": 182
       },
-      "id": 68,
+      "id": 75,
       "options": {
         "legend": {
           "calcs": [
@@ -3495,9 +4366,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 164
+        "y": 182
       },
-      "id": 69,
+      "id": 76,
       "options": {
         "legend": {
           "calcs": [
@@ -3546,9 +4417,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 172
+        "y": 190
       },
-      "id": 70,
+      "id": 77,
       "options": {
         "legend": {
           "calcs": [
@@ -3597,9 +4468,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 172
+        "y": 190
       },
-      "id": 71,
+      "id": 78,
       "options": {
         "legend": {
           "calcs": [
@@ -3648,9 +4519,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 172
+        "y": 190
       },
-      "id": 72,
+      "id": 79,
       "options": {
         "legend": {
           "calcs": [
@@ -3684,9 +4555,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 180
+        "y": 198
       },
-      "id": 73,
+      "id": 80,
       "panels": [
         {
           "datasource": {
@@ -3709,9 +4580,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 181
+            "y": 199
           },
-          "id": 74,
+          "id": 81,
           "options": {
             "legend": {
               "calcs": [
@@ -3760,9 +4631,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 181
+            "y": 199
           },
-          "id": 75,
+          "id": 82,
           "options": {
             "legend": {
               "calcs": [
@@ -3811,9 +4682,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 181
+            "y": 199
           },
-          "id": 76,
+          "id": 83,
           "options": {
             "legend": {
               "calcs": [
@@ -3880,9 +4751,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 189
+            "y": 207
           },
-          "id": 77,
+          "id": 84,
           "options": {
             "legend": {
               "calcs": [
@@ -3931,9 +4802,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 189
+            "y": 207
           },
-          "id": 78,
+          "id": 85,
           "options": {
             "legend": {
               "calcs": [
@@ -3982,9 +4853,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 189
+            "y": 207
           },
-          "id": 79,
+          "id": 86,
           "options": {
             "legend": {
               "calcs": [
@@ -4033,9 +4904,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 197
+            "y": 215
           },
-          "id": 80,
+          "id": 87,
           "options": {
             "legend": {
               "calcs": [
@@ -4102,9 +4973,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 197
+            "y": 215
           },
-          "id": 81,
+          "id": 88,
           "options": {
             "legend": {
               "calcs": [
@@ -4153,9 +5024,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 197
+            "y": 215
           },
-          "id": 82,
+          "id": 89,
           "options": {
             "legend": {
               "calcs": [
@@ -4204,9 +5075,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 205
+            "y": 223
           },
-          "id": 83,
+          "id": 90,
           "options": {
             "legend": {
               "calcs": [
@@ -4273,9 +5144,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 205
+            "y": 223
           },
-          "id": 84,
+          "id": 91,
           "options": {
             "legend": {
               "calcs": [
@@ -4324,9 +5195,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 205
+            "y": 223
           },
-          "id": 85,
+          "id": 92,
           "options": {
             "legend": {
               "calcs": [
@@ -4375,9 +5246,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 213
+            "y": 231
           },
-          "id": 86,
+          "id": 93,
           "options": {
             "legend": {
               "calcs": [
@@ -4444,9 +5315,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 213
+            "y": 231
           },
-          "id": 87,
+          "id": 94,
           "options": {
             "legend": {
               "calcs": [
@@ -4495,9 +5366,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 213
+            "y": 231
           },
-          "id": 88,
+          "id": 95,
           "options": {
             "legend": {
               "calcs": [
@@ -4564,9 +5435,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 221
+            "y": 239
           },
-          "id": 89,
+          "id": 96,
           "options": {
             "legend": {
               "calcs": [
@@ -4615,9 +5486,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 221
+            "y": 239
           },
-          "id": 90,
+          "id": 97,
           "options": {
             "legend": {
               "calcs": [
@@ -4655,9 +5526,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 229
+        "y": 247
       },
-      "id": 91,
+      "id": 98,
       "panels": [
         {
           "datasource": {
@@ -4680,9 +5551,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 230
+            "y": 248
           },
-          "id": 92,
+          "id": 99,
           "options": {
             "legend": {
               "calcs": [
@@ -4731,9 +5602,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 230
+            "y": 248
           },
-          "id": 93,
+          "id": 100,
           "options": {
             "legend": {
               "calcs": [
@@ -4800,9 +5671,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 230
+            "y": 248
           },
-          "id": 94,
+          "id": 101,
           "options": {
             "legend": {
               "calcs": [
@@ -4851,9 +5722,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 238
+            "y": 256
           },
-          "id": 95,
+          "id": 102,
           "options": {
             "legend": {
               "calcs": [
@@ -4902,9 +5773,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 238
+            "y": 256
           },
-          "id": 96,
+          "id": 103,
           "options": {
             "legend": {
               "calcs": [
@@ -4953,9 +5824,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 238
+            "y": 256
           },
-          "id": 97,
+          "id": 104,
           "options": {
             "legend": {
               "calcs": [
@@ -5004,9 +5875,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 246
+            "y": 264
           },
-          "id": 98,
+          "id": 105,
           "options": {
             "legend": {
               "calcs": [
@@ -5073,9 +5944,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 246
+            "y": 264
           },
-          "id": 99,
+          "id": 106,
           "options": {
             "legend": {
               "calcs": [
@@ -5124,9 +5995,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 246
+            "y": 264
           },
-          "id": 100,
+          "id": 107,
           "options": {
             "legend": {
               "calcs": [
@@ -5175,9 +6046,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 254
+            "y": 272
           },
-          "id": 101,
+          "id": 108,
           "options": {
             "legend": {
               "calcs": [
@@ -5226,9 +6097,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 254
+            "y": 272
           },
-          "id": 102,
+          "id": 109,
           "options": {
             "legend": {
               "calcs": [
@@ -5295,9 +6166,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 254
+            "y": 272
           },
-          "id": 103,
+          "id": 110,
           "options": {
             "legend": {
               "calcs": [
@@ -5346,9 +6217,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 262
+            "y": 280
           },
-          "id": 104,
+          "id": 111,
           "options": {
             "legend": {
               "calcs": [
@@ -5397,9 +6268,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 262
+            "y": 280
           },
-          "id": 105,
+          "id": 112,
           "options": {
             "legend": {
               "calcs": [
@@ -5448,9 +6319,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 262
+            "y": 280
           },
-          "id": 106,
+          "id": 113,
           "options": {
             "legend": {
               "calcs": [
@@ -5499,9 +6370,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 270
+            "y": 288
           },
-          "id": 107,
+          "id": 114,
           "options": {
             "legend": {
               "calcs": [
@@ -5568,9 +6439,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 270
+            "y": 288
           },
-          "id": 108,
+          "id": 115,
           "options": {
             "legend": {
               "calcs": [
@@ -5619,9 +6490,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 270
+            "y": 288
           },
-          "id": 109,
+          "id": 116,
           "options": {
             "legend": {
               "calcs": [
@@ -5688,9 +6559,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 278
+            "y": 296
           },
-          "id": 110,
+          "id": 117,
           "options": {
             "legend": {
               "calcs": [
@@ -5739,9 +6610,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 278
+            "y": 296
           },
-          "id": 111,
+          "id": 118,
           "options": {
             "legend": {
               "calcs": [
@@ -5790,9 +6661,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 278
+            "y": 296
           },
-          "id": 112,
+          "id": 119,
           "options": {
             "legend": {
               "calcs": [
@@ -5841,9 +6712,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 286
+            "y": 304
           },
-          "id": 113,
+          "id": 120,
           "options": {
             "legend": {
               "calcs": [
@@ -5910,9 +6781,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 286
+            "y": 304
           },
-          "id": 114,
+          "id": 121,
           "options": {
             "legend": {
               "calcs": [
@@ -5961,9 +6832,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 286
+            "y": 304
           },
-          "id": 115,
+          "id": 122,
           "options": {
             "legend": {
               "calcs": [
@@ -6012,9 +6883,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 294
+            "y": 312
           },
-          "id": 116,
+          "id": 123,
           "options": {
             "legend": {
               "calcs": [
@@ -6081,9 +6952,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 294
+            "y": 312
           },
-          "id": 117,
+          "id": 124,
           "options": {
             "legend": {
               "calcs": [
@@ -6132,9 +7003,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 294
+            "y": 312
           },
-          "id": 118,
+          "id": 125,
           "options": {
             "legend": {
               "calcs": [
@@ -6183,9 +7054,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 302
+            "y": 320
           },
-          "id": 119,
+          "id": 126,
           "options": {
             "legend": {
               "calcs": [
@@ -6234,9 +7105,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 302
+            "y": 320
           },
-          "id": 120,
+          "id": 127,
           "options": {
             "legend": {
               "calcs": [
@@ -6303,9 +7174,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 302
+            "y": 320
           },
-          "id": 121,
+          "id": 128,
           "options": {
             "legend": {
               "calcs": [
@@ -6354,9 +7225,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 310
+            "y": 328
           },
-          "id": 122,
+          "id": 129,
           "options": {
             "legend": {
               "calcs": [
@@ -6405,9 +7276,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 310
+            "y": 328
           },
-          "id": 123,
+          "id": 130,
           "options": {
             "legend": {
               "calcs": [
@@ -6456,9 +7327,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 310
+            "y": 328
           },
-          "id": 124,
+          "id": 131,
           "options": {
             "legend": {
               "calcs": [
@@ -6525,9 +7396,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 318
+            "y": 336
           },
-          "id": 125,
+          "id": 132,
           "options": {
             "legend": {
               "calcs": [
@@ -6565,9 +7436,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 326
+        "y": 344
       },
-      "id": 126,
+      "id": 133,
       "panels": [
         {
           "datasource": {
@@ -6590,9 +7461,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 327
+            "y": 345
           },
-          "id": 127,
+          "id": 134,
           "options": {
             "legend": {
               "calcs": [
@@ -6641,9 +7512,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 327
+            "y": 345
           },
-          "id": 128,
+          "id": 135,
           "options": {
             "legend": {
               "calcs": [
@@ -6710,9 +7581,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 327
+            "y": 345
           },
-          "id": 129,
+          "id": 136,
           "options": {
             "legend": {
               "calcs": [
@@ -6745,126 +7616,6 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
-          "fieldConfig": {
-            "defaults": {
-              "custom": {
-                "drawStyle": "line",
-                "fillOpacity": 10,
-                "lineInterpolation": "smooth",
-                "showPoints": "auto"
-              },
-              "unit": "s"
-            }
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 0,
-            "y": 335
-          },
-          "id": 130,
-          "options": {
-            "legend": {
-              "calcs": [
-                "lastNotNull",
-                "max"
-              ],
-              "displayMode": "table",
-              "placement": "bottom"
-            },
-            "tooltip": {
-              "mode": "multi"
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "$ORBIT_DS"
-              },
-              "expr": "histogram_quantile(0.5, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
-              "legendFormat": "p50 {{entity}}",
-              "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "$ORBIT_DS"
-              },
-              "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
-              "legendFormat": "p95 {{entity}}",
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "$ORBIT_DS"
-              },
-              "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
-              "legendFormat": "p99 {{entity}}",
-              "refId": "C"
-            }
-          ],
-          "title": "gkg_indexer_sdlc_freshness_lag_seconds — p50/p95/p99",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
-          "fieldConfig": {
-            "defaults": {
-              "custom": {
-                "drawStyle": "line",
-                "fillOpacity": 10,
-                "lineInterpolation": "smooth",
-                "showPoints": "auto"
-              },
-              "unit": "short"
-            }
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 335
-          },
-          "id": 131,
-          "options": {
-            "legend": {
-              "calcs": [
-                "lastNotNull",
-                "max"
-              ],
-              "displayMode": "table",
-              "placement": "bottom"
-            },
-            "tooltip": {
-              "mode": "multi"
-            }
-          },
-          "targets": [
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "$ORBIT_DS"
-              },
-              "expr": "sum by (entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
-              "legendFormat": "{{entity}}",
-              "refId": "A"
-            }
-          ],
-          "title": "gkg_indexer_sdlc_freshness_lag_seconds — observation rate",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
           "description": "Duration of a full handler invocation across all its pipelines.",
           "fieldConfig": {
             "defaults": {
@@ -6880,10 +7631,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 335
+            "x": 0,
+            "y": 353
           },
-          "id": 132,
+          "id": 137,
           "options": {
             "legend": {
               "calcs": [
@@ -6949,10 +7700,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
-            "y": 343
+            "x": 8,
+            "y": 353
           },
-          "id": 133,
+          "id": 138,
           "options": {
             "legend": {
               "calcs": [
@@ -7000,10 +7751,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
-            "y": 343
+            "x": 16,
+            "y": 353
           },
-          "id": 134,
+          "id": 139,
           "options": {
             "legend": {
               "calcs": [
@@ -7069,10 +7820,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 343
+            "x": 0,
+            "y": 361
           },
-          "id": 135,
+          "id": 140,
           "options": {
             "legend": {
               "calcs": [
@@ -7120,10 +7871,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
-            "y": 351
+            "x": 8,
+            "y": 361
           },
-          "id": 136,
+          "id": 141,
           "options": {
             "legend": {
               "calcs": [
@@ -7171,10 +7922,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
-            "y": 351
+            "x": 16,
+            "y": 361
           },
-          "id": 137,
+          "id": 142,
           "options": {
             "legend": {
               "calcs": [
@@ -7222,10 +7973,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 351
+            "x": 0,
+            "y": 369
           },
-          "id": 138,
+          "id": 143,
           "options": {
             "legend": {
               "calcs": [
@@ -7291,10 +8042,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
-            "y": 359
+            "x": 8,
+            "y": 369
           },
-          "id": 139,
+          "id": 144,
           "options": {
             "legend": {
               "calcs": [
@@ -7342,10 +8093,10 @@
           "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
-            "y": 359
+            "x": 16,
+            "y": 369
           },
-          "id": 140,
+          "id": 145,
           "options": {
             "legend": {
               "calcs": [
@@ -7372,6 +8123,126 @@
           ],
           "title": "gkg_indexer_sdlc_watermark_lag_seconds",
           "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "s"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 377
+          },
+          "id": 146,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "histogram_quantile(0.5, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[5m])))",
+              "legendFormat": "p50 {{entity}}",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[5m])))",
+              "legendFormat": "p95 {{entity}}",
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[5m])))",
+              "legendFormat": "p99 {{entity}}",
+              "refId": "C"
+            }
+          ],
+          "title": "gkg_indexer_sdlc_freshness_lag_seconds — p50/p95/p99",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "short"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 377
+          },
+          "id": 147,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "sum by (entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[5m]))",
+              "legendFormat": "{{entity}}",
+              "refId": "A"
+            }
+          ],
+          "title": "gkg_indexer_sdlc_freshness_lag_seconds — observation rate",
+          "type": "timeseries"
         }
       ],
       "title": "SDLC pipeline (reference)",
@@ -7383,9 +8254,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 367
+        "y": 385
       },
-      "id": 141,
+      "id": 148,
       "panels": [
         {
           "datasource": {
@@ -7408,9 +8279,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 368
+            "y": 386
           },
-          "id": 142,
+          "id": 149,
           "options": {
             "legend": {
               "calcs": [
@@ -7483,9 +8354,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 368
+            "y": 386
           },
-          "id": 143,
+          "id": 150,
           "interval": "2m",
           "options": {
             "legend": {
@@ -7542,9 +8413,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 376
+            "y": 394
           },
-          "id": 144,
+          "id": 151,
           "interval": "2m",
           "options": {
             "legend": {
@@ -7595,9 +8466,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 376
+            "y": 394
           },
-          "id": 145,
+          "id": 152,
           "options": {
             "legend": {
               "calcs": [
@@ -7670,9 +8541,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 384
+            "y": 402
           },
-          "id": 146,
+          "id": 153,
           "interval": "2m",
           "options": {
             "legend": {
@@ -7729,9 +8600,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 384
+            "y": 402
           },
-          "id": 147,
+          "id": 154,
           "interval": "2m",
           "options": {
             "legend": {
@@ -7782,9 +8653,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 392
+            "y": 410
           },
-          "id": 148,
+          "id": 155,
           "options": {
             "legend": {
               "calcs": [
@@ -7851,9 +8722,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 392
+            "y": 410
           },
-          "id": 149,
+          "id": 156,
           "options": {
             "legend": {
               "calcs": [
@@ -7902,9 +8773,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 392
+            "y": 410
           },
-          "id": 150,
+          "id": 157,
           "options": {
             "legend": {
               "calcs": [
@@ -7942,9 +8813,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 400
+        "y": 418
       },
-      "id": 151,
+      "id": 158,
       "panels": [
         {
           "datasource": {
@@ -7967,9 +8838,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 401
+            "y": 419
           },
-          "id": 152,
+          "id": 159,
           "options": {
             "legend": {
               "calcs": [
@@ -8036,9 +8907,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 401
+            "y": 419
           },
-          "id": 153,
+          "id": 160,
           "options": {
             "legend": {
               "calcs": [
@@ -8087,9 +8958,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 401
+            "y": 419
           },
-          "id": 154,
+          "id": 161,
           "options": {
             "legend": {
               "calcs": [
@@ -8138,9 +9009,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 409
+            "y": 427
           },
-          "id": 155,
+          "id": 162,
           "options": {
             "legend": {
               "calcs": [
@@ -8207,9 +9078,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 409
+            "y": 427
           },
-          "id": 156,
+          "id": 163,
           "options": {
             "legend": {
               "calcs": [
@@ -8258,9 +9129,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 409
+            "y": 427
           },
-          "id": 157,
+          "id": 164,
           "options": {
             "legend": {
               "calcs": [
@@ -8309,9 +9180,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 417
+            "y": 435
           },
-          "id": 158,
+          "id": 165,
           "options": {
             "legend": {
               "calcs": [
@@ -8360,9 +9231,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 417
+            "y": 435
           },
-          "id": 159,
+          "id": 166,
           "options": {
             "legend": {
               "calcs": [
