@@ -192,10 +192,8 @@ fn row_matches(row: &HashMap<String, ColumnValue>, matcher: &RowMatcher) -> bool
 fn value_matches(expected: &Matcher, actual: &ColumnValue) -> bool {
     match expected {
         Matcher::Contains(c) => actual.as_string().is_some_and(|s| s.contains(&c.contains)),
-        Matcher::Value(value) => {
-            let json = serde_json::to_value(value).expect("YAML value converts to JSON");
-            ColumnValue::from(json) == *actual
-        }
+        Matcher::Not(n) => ColumnValue::from(n.not.clone()) != *actual,
+        Matcher::Value(value) => ColumnValue::from(value.clone()) == *actual,
     }
 }
 
@@ -262,10 +260,8 @@ fn request_value_matches(expected: &Matcher, actual: &serde_json::Value) -> bool
             serde_json::Value::String(s) => s.contains(&c.contains),
             _ => false,
         },
-        Matcher::Value(value) => {
-            let json = serde_json::to_value(value).expect("YAML value converts to JSON");
-            json == *actual
-        }
+        Matcher::Not(n) => n.not != *actual,
+        Matcher::Value(value) => value == actual,
     }
 }
 

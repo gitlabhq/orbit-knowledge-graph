@@ -389,11 +389,12 @@ func (IndexingState) EnumDescriptor() ([]byte, []int) {
 type IndexingPhase int32
 
 const (
-	IndexingPhase_INDEXING_PHASE_UNKNOWN     IndexingPhase = 0 // checkpoints not readable, or no top-level group in the path
-	IndexingPhase_INDEXING_PHASE_NOT_STARTED IndexingPhase = 1
-	IndexingPhase_INDEXING_PHASE_SYNCING     IndexingPhase = 2
-	IndexingPhase_INDEXING_PHASE_READY       IndexingPhase = 3
-	IndexingPhase_INDEXING_PHASE_ERROR       IndexingPhase = 4 // indexing is done, but some data failed to index
+	IndexingPhase_INDEXING_PHASE_UNKNOWN            IndexingPhase = 0 // checkpoints not readable, or no top-level group in the path
+	IndexingPhase_INDEXING_PHASE_NOT_STARTED        IndexingPhase = 1
+	IndexingPhase_INDEXING_PHASE_SYNCING            IndexingPhase = 2
+	IndexingPhase_INDEXING_PHASE_READY              IndexingPhase = 3
+	IndexingPhase_INDEXING_PHASE_ERROR              IndexingPhase = 4 // indexing is done, but some data failed to index
+	IndexingPhase_INDEXING_PHASE_SOURCE_UNAVAILABLE IndexingPhase = 5 // the source table does not exist on this GitLab version
 )
 
 // Enum value maps for IndexingPhase.
@@ -404,13 +405,15 @@ var (
 		2: "INDEXING_PHASE_SYNCING",
 		3: "INDEXING_PHASE_READY",
 		4: "INDEXING_PHASE_ERROR",
+		5: "INDEXING_PHASE_SOURCE_UNAVAILABLE",
 	}
 	IndexingPhase_value = map[string]int32{
-		"INDEXING_PHASE_UNKNOWN":     0,
-		"INDEXING_PHASE_NOT_STARTED": 1,
-		"INDEXING_PHASE_SYNCING":     2,
-		"INDEXING_PHASE_READY":       3,
-		"INDEXING_PHASE_ERROR":       4,
+		"INDEXING_PHASE_UNKNOWN":            0,
+		"INDEXING_PHASE_NOT_STARTED":        1,
+		"INDEXING_PHASE_SYNCING":            2,
+		"INDEXING_PHASE_READY":              3,
+		"INDEXING_PHASE_ERROR":              4,
+		"INDEXING_PHASE_SOURCE_UNAVAILABLE": 5,
 	}
 )
 
@@ -4614,13 +4617,14 @@ const file_orbit_proto_rawDesc = "" +
 	"\x16INDEXING_STATE_INDEXED\x10\x02\x12\x18\n" +
 	"\x14INDEXING_STATE_ERROR\x10\x03\x12\x1a\n" +
 	"\x16INDEXING_STATE_UNKNOWN\x10\x04\x12\x1b\n" +
-	"\x17INDEXING_STATE_INDEXING\x10\x05*\x9b\x01\n" +
+	"\x17INDEXING_STATE_INDEXING\x10\x05*\xc2\x01\n" +
 	"\rIndexingPhase\x12\x1a\n" +
 	"\x16INDEXING_PHASE_UNKNOWN\x10\x00\x12\x1e\n" +
 	"\x1aINDEXING_PHASE_NOT_STARTED\x10\x01\x12\x1a\n" +
 	"\x16INDEXING_PHASE_SYNCING\x10\x02\x12\x18\n" +
 	"\x14INDEXING_PHASE_READY\x10\x03\x12\x18\n" +
-	"\x14INDEXING_PHASE_ERROR\x10\x042\xab\t\n" +
+	"\x14INDEXING_PHASE_ERROR\x10\x04\x12%\n" +
+	"!INDEXING_PHASE_SOURCE_UNAVAILABLE\x10\x052\xab\t\n" +
 	"\fOrbitService\x12D\n" +
 	"\tListTools\x12\x1a.orbit.v1.ListToolsRequest\x1a\x1b.orbit.v1.ListToolsResponse\x12\\\n" +
 	"\x11ListAgentCommands\x12\".orbit.v1.ListAgentCommandsRequest\x1a#.orbit.v1.ListAgentCommandsResponse\x12_\n" +

@@ -355,6 +355,8 @@ CREATE TABLE IF NOT EXISTS checkpoint (
 
 Three states: no row, or no `indexed_at`, means first pass (start from epoch). Empty `cursor_values` with `indexed_at` means the plan finished its last run cleanly. Non-empty `cursor_values` means the plan was interrupted mid-pagination and should resume from that cursor.
 
+A plan whose Siphon source table does not exist completes at once with `indexed_at` set and the watermark at the epoch. ClickHouse reports such a table as `UNKNOWN_TABLE`; a newer GitLab version adds it later. The run is not retried and the other plans on the same message are not delayed. The schema activation gate counts the run as complete and the indexing status reports the entity as `source_unavailable`. The next run after the table appears is a normal first pass over the whole window. The change detector logs a missing source table once and keeps detecting changes on the other tables.
+
 Readers take the newest row per key by `_version`. The exception is `indexed_at`: it is the newest value written since the last tombstone. A page write from an overlapping run cannot hide a completion.
 
 Position keys encode scope and entity, e.g. `"global.User"` or `"ns.42.Project"` for namespace 42's Project plan.

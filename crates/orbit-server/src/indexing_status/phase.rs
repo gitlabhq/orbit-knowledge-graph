@@ -6,11 +6,16 @@ pub enum Phase {
     Syncing,
     Ready,
     Error,
+    SourceUnavailable,
 }
 
 impl Phase {
     pub fn is_settled(self) -> bool {
-        matches!(self, Phase::Ready | Phase::Error)
+        matches!(self, Phase::Ready | Phase::Error | Phase::SourceUnavailable)
+    }
+
+    fn is_indexed(self) -> bool {
+        matches!(self, Phase::Ready | Phase::SourceUnavailable)
     }
 }
 
@@ -22,7 +27,9 @@ pub fn combine_phases(phases: impl IntoIterator<Item = Phase>) -> Option<Phase> 
         None
     } else if phases.contains(&Phase::Unknown) {
         Some(Phase::Unknown)
-    } else if all(Phase::Ready) {
+    } else if all(Phase::SourceUnavailable) {
+        Some(Phase::SourceUnavailable)
+    } else if phases.iter().all(|each| each.is_indexed()) {
         Some(Phase::Ready)
     } else if phases.iter().all(|each| each.is_settled()) {
         Some(Phase::Error)
@@ -30,5 +37,24 @@ pub fn combine_phases(phases: impl IntoIterator<Item = Phase>) -> Option<Phase> 
         Some(Phase::NotStarted)
     } else {
         Some(Phase::Syncing)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_unavailable_folds_like_ready_unless_everything_is_unavailable() {
+        use Phase::*;
+        assert_eq!(combine_phases([SourceUnavailable]), Some(SourceUnavailable));
+        assert_eq!(combine_phases([SourceUnavailable, Ready]), Some(Ready));
+        assert_eq!(combine_phases([SourceUnavailable, Error]), Some(Error));
+        assert_eq!(combine_phases([SourceUnavailable, Syncing]), Some(Syncing));
+        assert_eq!(
+            combine_phases([SourceUnavailable, NotStarted]),
+            Some(Syncing)
+        );
+        assert_eq!(combine_phases([SourceUnavailable, Unknown]), Some(Unknown));
     }
 }

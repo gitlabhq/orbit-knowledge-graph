@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, TimeDelta, Utc};
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
-use indexer::checkpoint::NAMESPACE_KEY_PREFIX;
+use indexer::checkpoint::{Checkpoint, NAMESPACE_KEY_PREFIX};
 use ontology::pipelines::PipelineDescriptor;
 use orbit_migrations::execute::CHECKPOINT_TABLE;
 use orbit_migrations::version::prefixed_table_name;
@@ -23,6 +23,7 @@ const PLAN_CHECKPOINTS_SQL: &str = "\
 SELECT root, plan, \
        maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at) AS last_completed_at, \
        argMax(attempts, _version) AS attempts, \
+       argMax(watermark, _version) AS watermark, \
        max(_version) AS written_at \
   FROM (SELECT *, \
                toInt64OrZero(splitByChar('.', key)[2]) AS root, \
@@ -36,8 +37,7 @@ SELECT root, plan, \
 HAVING argMax(_deleted, _version) = false";
 
 struct PlanCheckpoint {
-    indexed_at: Option<DateTime<Utc>>,
-    attempts: i64,
+    checkpoint: Checkpoint,
     written_at: DateTime<Utc>,
 }
 
@@ -48,15 +48,19 @@ pub struct PlanCheckpoints {
 
 impl PlanCheckpoints {
     pub fn get_plan_phase(&self, plan: &str, now: DateTime<Utc>) -> Phase {
-        let Some(checkpoint) = self.by_plan.get(plan) else {
+        let Some(PlanCheckpoint {
+            checkpoint,
+            written_at,
+        }) = self.by_plan.get(plan)
+        else {
             return Phase::NotStarted;
         };
 
-        if checkpoint.indexed_at.is_some() {
+        if checkpoint.is_source_unavailable() {
+            Phase::SourceUnavailable
+        } else if checkpoint.indexed_at.is_some() {
             Phase::Ready
-        } else if checkpoint.attempts >= MAX_SDLC_ATTEMPTS
-            || now - checkpoint.written_at > STALE_AFTER
-        {
+        } else if checkpoint.attempts >= MAX_SDLC_ATTEMPTS || now - *written_at > STALE_AFTER {
             Phase::Error
         } else {
             Phase::Syncing
@@ -66,7 +70,7 @@ impl PlanCheckpoints {
     pub fn get_last_completed_at(&self, plans: &[PipelineDescriptor]) -> Option<DateTime<Utc>> {
         let indexed_at: Option<Vec<DateTime<Utc>>> = plans
             .iter()
-            .map(|plan| self.by_plan.get(&plan.name)?.indexed_at)
+            .map(|plan| self.by_plan.get(&plan.name)?.checkpoint.indexed_at)
             .collect();
 
         indexed_at?.into_iter().min()
@@ -108,26 +112,29 @@ pub async fn read_plan_checkpoints(
     let indexed_at = Option::<DateTime<Utc>>::extract_column(&batches, 2)
         .map_err(map_column_extraction_error)?;
     let attempts = i64::extract_column(&batches, 3).map_err(map_column_extraction_error)?;
-    let written_at =
+    let watermarks =
         DateTime::<Utc>::extract_column(&batches, 4).map_err(map_column_extraction_error)?;
+    let written_at =
+        DateTime::<Utc>::extract_column(&batches, 5).map_err(map_column_extraction_error)?;
 
-    for ((((root, plan), indexed_at), attempts), written_at) in roots
+    for (((((root, plan), indexed_at), attempts), watermark), written_at) in roots
         .into_iter()
         .zip(plans)
         .zip(indexed_at)
         .zip(attempts)
+        .zip(watermarks)
         .zip(written_at)
     {
-        let checkpoint = PlanCheckpoint {
-            indexed_at,
-            attempts,
-            written_at,
-        };
-        checkpoints
-            .entry(root)
-            .or_default()
-            .by_plan
-            .insert(plan, checkpoint);
+        let mut checkpoint = Checkpoint::new(watermark);
+        checkpoint.attempts = attempts;
+        checkpoint.indexed_at = indexed_at;
+        checkpoints.entry(root).or_default().by_plan.insert(
+            plan,
+            PlanCheckpoint {
+                checkpoint,
+                written_at,
+            },
+        );
     }
     Ok(checkpoints)
 }

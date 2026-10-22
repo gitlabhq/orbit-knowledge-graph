@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use ontology::EtlScope;
-use orbit_log_fields::{debug, info, info_span, safe};
+use orbit_log_fields::{debug, info, info_span, safe, warn};
 use tokio::task::JoinSet;
 use tracing::Instrument;
 use uuid::Uuid;
@@ -11,13 +11,13 @@ use uuid::Uuid;
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::{Checkpoint, CheckpointStore, WindowBounds, namespace_position_key};
 
-use crate::durability::RunDurability;
+use crate::durability::{RunDurability, WriteDurability};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
-use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineStats};
+use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineError, PipelineStats};
 use crate::modules::sdlc::plan::{
     DeletedFilter, Plan, PreparedQuery, TraversalPathFilter, WatermarkFilter,
 };
@@ -144,6 +144,7 @@ impl EntityHandler {
             .map_err(|err| HandlerError::Processing(err.to_string()))?
             .unwrap_or_else(|| Checkpoint::new(request.watermark));
         let window = checkpoint.pull_window(request.watermark);
+        let synced_until = checkpoint.synced_until();
         let mode = window.indexing_mode();
         observer.set_indexing_mode(mode);
 
@@ -182,74 +183,23 @@ impl EntityHandler {
                 column: &self.plan.deleted_column,
             }));
 
-        let ranges = match &self.partition_strategy {
-            Some(strategy) if checkpoint.is_first_pass_before_paging() => {
-                strategy
-                    .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_ref())
-                    .await?
+        let result = match self
+            .run(
+                &request,
+                &pipeline_context,
+                base_query,
+                &checkpoint_key,
+                checkpoint,
+                window,
+            )
+            .await
+        {
+            Ok(stats) => Ok(stats),
+            Err(PipelineError::SourceUnavailable(reason)) => {
+                self.complete_without_source(&checkpoint_key, synced_until, &reason)
+                    .await
             }
-            _ => Vec::new(),
-        };
-
-        let result = if ranges.is_empty() {
-            self.pipeline
-                .run_plan(
-                    &pipeline_context,
-                    &self.plan,
-                    base_query,
-                    &checkpoint_key,
-                    checkpoint,
-                    window,
-                )
-                .await
-        } else {
-            info!(
-                safe(PARTITION_COUNT) = ranges.len(),
-                "running partitioned initial load"
-            );
-
-            let partition_result = self
-                .run_partitions(
-                    base_query.into_partitions(ranges),
-                    &checkpoint_key,
-                    window,
-                    &context,
-                    &pipeline_context,
-                )
-                .await;
-
-            match partition_result {
-                Ok(stats) => {
-                    let partition_checkpoints = self
-                        .checkpoint_store
-                        .load_by_prefix(&format!(
-                            "{checkpoint_key}{}",
-                            PartitionAssignment::CHECKPOINT_PREFIX
-                        ))
-                        .await
-                        .map_err(|err| HandlerError::Processing(err.to_string()))?;
-
-                    match consolidated_watermark(&partition_checkpoints, request.watermark) {
-                        Ok(watermark) => self
-                            .checkpoint_store
-                            .consolidate(&checkpoint_key, &watermark)
-                            .await
-                            .map(|()| stats)
-                            .map_err(|err| HandlerError::Processing(err.to_string())),
-                        // A parent still at its first-pass start re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
-                        Err(incomplete) => {
-                            info!(
-                                expanded(KV_KEY) = checkpoint_key.as_str(),
-                                safe(PARTITION_COUNT) = incomplete.len(),
-                                expanded(ADDITIONAL_DETAILS) = %incomplete.join(", "),
-                                "partitions still in progress; deferring consolidation to next dispatch"
-                            );
-                            Ok(stats)
-                        }
-                    }
-                }
-                Err(e) => Err(e),
-            }
+            Err(PipelineError::Failed(error)) => Err(error),
         };
 
         match &result {
@@ -283,6 +233,102 @@ impl EntityHandler {
         result
     }
 
+    async fn run(
+        &self,
+        request: &IndexingRequest,
+        pipeline_context: &PipelineContext,
+        base_query: PreparedQuery,
+        checkpoint_key: &str,
+        checkpoint: Checkpoint,
+        window: WindowBounds,
+    ) -> Result<PipelineStats, PipelineError> {
+        let ranges = match &self.partition_strategy {
+            Some(strategy) if checkpoint.is_first_pass_before_paging() => {
+                strategy
+                    .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_ref())
+                    .await?
+            }
+            _ => Vec::new(),
+        };
+
+        if ranges.is_empty() {
+            return self
+                .pipeline
+                .run_plan(
+                    pipeline_context,
+                    &self.plan,
+                    base_query,
+                    checkpoint_key,
+                    checkpoint,
+                    window,
+                )
+                .await;
+        }
+
+        info!(
+            safe(PARTITION_COUNT) = ranges.len(),
+            "running partitioned initial load"
+        );
+        let stats = self
+            .run_partitions(
+                base_query.into_partitions(ranges),
+                checkpoint_key,
+                window,
+                pipeline_context,
+            )
+            .await?;
+        let partition_checkpoints = self
+            .checkpoint_store
+            .load_by_prefix(&format!(
+                "{checkpoint_key}{}",
+                PartitionAssignment::CHECKPOINT_PREFIX
+            ))
+            .await
+            .map_err(|err| HandlerError::Processing(err.to_string()))?;
+
+        match consolidated_watermark(&partition_checkpoints, request.watermark) {
+            Ok(watermark) => self
+                .checkpoint_store
+                .consolidate(checkpoint_key, &watermark)
+                .await
+                .map_err(|err| HandlerError::Processing(err.to_string()))?,
+            Err(incomplete) => {
+                info!(
+                    expanded(KV_KEY) = checkpoint_key,
+                    safe(PARTITION_COUNT) = incomplete.len(),
+                    expanded(ADDITIONAL_DETAILS) = %incomplete.join(", "),
+                    "partitions still in progress; deferring consolidation to next dispatch"
+                );
+            }
+        }
+        Ok(stats)
+    }
+
+    async fn complete_without_source(
+        &self,
+        checkpoint_key: &str,
+        synced_until: Option<DateTime<Utc>>,
+        reason: &str,
+    ) -> Result<PipelineStats, HandlerError> {
+        warn!(
+            safe(ENTITY) = self.plan.name.as_str(),
+            expanded(ERROR_MESSAGE) = reason,
+            "source table does not exist; the plan is complete with nothing new indexed until it appears"
+        );
+        self.metrics
+            .record_pipeline_error(&self.plan.name, "source_unavailable");
+        let mut checkpoint = Checkpoint::new(DateTime::<Utc>::UNIX_EPOCH);
+        match synced_until {
+            Some(watermark) => checkpoint.complete(watermark),
+            None => checkpoint.complete_without_source(),
+        }
+        self.checkpoint_store
+            .save(checkpoint_key, &checkpoint, WriteDurability::Durable)
+            .await
+            .map_err(|err| HandlerError::Processing(err.to_string()))?;
+        Ok(PipelineStats::default())
+    }
+
     async fn run_partitions(
         &self,
         partitions: Vec<(
@@ -291,10 +337,9 @@ impl EntityHandler {
         )>,
         checkpoint_key: &str,
         window: WindowBounds,
-        context: &HandlerContext,
         parent_pipeline_context: &PipelineContext,
     ) -> Result<PipelineStats, HandlerError> {
-        let mut set: JoinSet<Result<PipelineStats, HandlerError>> = JoinSet::new();
+        let mut set: JoinSet<Result<PipelineStats, PipelineError>> = JoinSet::new();
         for (assignment, query) in partitions {
             let position_key = format!("{checkpoint_key}{}", assignment.position_suffix());
 
@@ -319,7 +364,7 @@ impl EntityHandler {
             let pipeline = Arc::clone(&self.pipeline);
             let partition_context = PipelineContext {
                 writer: Arc::clone(&self.writer),
-                progress: context.progress.clone(),
+                progress: parent_pipeline_context.progress.clone(),
                 observer: Arc::clone(&parent_pipeline_context.observer),
             };
 

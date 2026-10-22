@@ -120,6 +120,11 @@ impl TestContext {
     }
 
     async fn complete_required_pipelines(&self, namespace_ids: &[i64]) {
+        self.complete_required_pipelines_except(namespace_ids, &[])
+            .await;
+    }
+
+    async fn complete_required_pipelines_except(&self, namespace_ids: &[i64], left_out: &[&str]) {
         let invalidated = orbit_migrations::scope::find_invalidated_pipelines(
             &self.ontology,
             &orbit_migrations::scope::MigrationScope::Full,
@@ -132,6 +137,7 @@ impl TestContext {
             invalidated
                 .namespaced
                 .iter()
+                .filter(|pipeline_name| !left_out.contains(&pipeline_name.as_str()))
                 .map(move |pipeline_name| format!("ns.{namespace_id}.{pipeline_name}"))
         });
         self.insert_completed_checkpoints(
@@ -480,6 +486,61 @@ async fn migration_completion_checker_promotes_rebuilt_rollback_version() {
             version_entry(*SCHEMA_VERSION, "active"),
         ],
         "the rebuilt version must be promoted once its checkpoint covers all enabled namespaces"
+    );
+}
+
+#[tokio::test]
+async fn migration_completion_checker_promotes_when_a_required_plan_has_no_source_table() {
+    let context = TestContext::new().await;
+
+    common::create_namespace(&context.clickhouse, 100, None, 20, "1/100/").await;
+    context.given_enabled_namespaces([100]).await;
+    context
+        .clickhouse
+        .drop_table("siphon_ai_governance_sessions")
+        .await;
+
+    let graph = context.clickhouse.create_client();
+    context
+        .given_migration(*SCHEMA_VERSION + 1, *SCHEMA_VERSION)
+        .await;
+    context
+        .complete_required_pipelines_except(&[100], &["AgentSession"])
+        .await;
+    context
+        .catalog
+        .publish(&embedded_archive(*SCHEMA_VERSION))
+        .await
+        .unwrap();
+    let checker = context.completion_checker();
+
+    checker.run().await.unwrap();
+    assert_eq!(
+        read_all_versions(&graph).await.unwrap(),
+        vec![
+            version_entry(*SCHEMA_VERSION + 1, "active"),
+            version_entry(*SCHEMA_VERSION, "migrating"),
+        ],
+        "the gate must hold while the plan that reads the missing table has no completed run"
+    );
+
+    common::handlers::namespace_handler(&context.clickhouse)
+        .await
+        .handle(
+            common::handlers::handler_context(),
+            common::handlers::namespace_envelope_with_targets(1, 100, &["AgentSession".into()]),
+        )
+        .await
+        .unwrap();
+    checker.run().await.unwrap();
+
+    assert_eq!(
+        read_all_versions(&graph).await.unwrap(),
+        vec![
+            version_entry(*SCHEMA_VERSION + 1, "retired"),
+            version_entry(*SCHEMA_VERSION, "active"),
+        ],
+        "a plan whose source table does not exist completes with nothing indexed and lets the version activate"
     );
 }
 

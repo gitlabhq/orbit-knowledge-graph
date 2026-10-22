@@ -83,13 +83,6 @@ impl Checkpoint {
         }
     }
 
-    pub fn indexing_mode(&self) -> IndexingMode {
-        match self.indexed_at {
-            Some(_) => IndexingMode::Incremental,
-            None => IndexingMode::Full,
-        }
-    }
-
     pub fn is_first_pass_before_paging(&self) -> bool {
         matches!(self.progress(), Progress::FirstPass)
     }
@@ -109,6 +102,15 @@ impl Checkpoint {
             Progress::Paging => self.resume_floor,
             Progress::FirstPass => None,
         }
+    }
+
+    /// A finished run that indexed nothing because the source table does not exist.
+    pub fn is_source_unavailable(&self) -> bool {
+        self.indexed_at.is_some() && !self.has_indexed_rows()
+    }
+
+    fn has_indexed_rows(&self) -> bool {
+        self.watermark != DateTime::<Utc>::UNIX_EPOCH
     }
 
     pub fn resume_cursor(&self) -> &[String] {
@@ -156,11 +158,15 @@ impl Checkpoint {
         self.indexed_at = Some(Utc::now());
     }
 
+    pub fn complete_without_source(&mut self) {
+        self.complete(DateTime::<Utc>::UNIX_EPOCH);
+    }
+
     fn progress(&self) -> Progress {
         match (&self.cursor_values, self.indexed_at) {
             (Some(_), _) => Progress::Paging,
-            (None, Some(_)) => Progress::Completed,
-            (None, None) => Progress::FirstPass,
+            (None, Some(_)) if self.has_indexed_rows() => Progress::Completed,
+            (None, _) => Progress::FirstPass,
         }
     }
 }
@@ -541,6 +547,31 @@ mod tests {
                 floor: Some(ts("2026-06-07T21:59:30Z")),
             }
         );
+    }
+
+    #[test]
+    fn source_unavailable_counts_as_a_run_but_keeps_the_first_pass_window() {
+        let now = ts("2026-06-07T22:00:00Z");
+        let mut checkpoint = Checkpoint::new(ts("2026-06-07T21:00:00Z"));
+        checkpoint.start_attempt();
+        checkpoint.complete_without_source();
+
+        assert!(checkpoint.is_source_unavailable());
+        assert!(checkpoint.indexed_at.is_some());
+        assert_eq!(checkpoint.attempts, 0);
+        assert!(checkpoint.is_first_pass_before_paging());
+        assert_eq!(checkpoint.synced_until(), None);
+        assert_eq!(
+            checkpoint.pull_window(now),
+            WindowBounds {
+                target: now,
+                floor: None
+            }
+        );
+
+        checkpoint.complete(now);
+        assert!(!checkpoint.is_source_unavailable());
+        assert!(checkpoint.is_completed());
     }
 
     #[test]

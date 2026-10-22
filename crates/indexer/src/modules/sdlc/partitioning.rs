@@ -9,7 +9,8 @@ use ontology::{Extract, Ontology};
 
 use crate::handler::HandlerError;
 
-use super::datalake::DatalakeQuery;
+use super::datalake::{DatalakeError, DatalakeQuery};
+use super::pipeline::PipelineError;
 use orbit_utils::traversal_path::TraversalPath;
 
 /// The probe derives its bucket width from the id span to land near this count;
@@ -89,7 +90,7 @@ impl PartitionStrategy {
         &self,
         datalake: &dyn DatalakeQuery,
         traversal_path: Option<&TraversalPath>,
-    ) -> Result<Vec<PartitionAssignment>, HandlerError> {
+    ) -> Result<Vec<PartitionAssignment>, PipelineError> {
         if self.count <= 1 || self.key_columns.is_empty() {
             return Ok(Vec::new());
         }
@@ -101,7 +102,12 @@ impl PartitionStrategy {
                 None,
             )
             .await
-            .map_err(|err| HandlerError::Processing(format!("partition probe failed: {err}")))?;
+            .map_err(|err| match err {
+                DatalakeError::SourceUnavailable(_) => PipelineError::from(err),
+                other => {
+                    HandlerError::Processing(format!("partition probe failed: {other}")).into()
+                }
+            })?;
         let cuts = parse_cut_tuples(&batches, self.key_columns.len());
 
         if cuts.len() < self.count as usize {

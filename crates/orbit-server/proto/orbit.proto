@@ -562,6 +562,7 @@ enum IndexingPhase {
   INDEXING_PHASE_SYNCING = 2;
   INDEXING_PHASE_READY = 3;
   INDEXING_PHASE_ERROR = 4;  // indexing is done, but some data failed to index
+  INDEXING_PHASE_SOURCE_UNAVAILABLE = 5;
 }
 
 message GetIndexingStatusRequest {
