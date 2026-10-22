@@ -33,28 +33,23 @@ const DEFINITIONS: &[&str] = &[
     "symbols",
 ];
 const VALUE_KINDS: &[&str] = &["Variable", "Var", "Constant", "Const", "Static", "Local"];
-const LANGUAGES: &[(&str, &str)] = &[
-    ("python", "py"),
-    ("typescript", "ts"),
-    ("javascript", "js"),
-    ("golang", "go"),
-    ("rb", "ruby"),
-    ("rs", "rust"),
-    ("kt", "kotlin"),
-    ("cs", "csharp"),
-    ("c++", "cpp"),
-    ("shell", "sh"),
-    ("bash", "sh"),
-];
-
 pub(super) fn languages(requested: &mut Vec<String>) -> Vec<String> {
+    use code_graph_incremental::treesitter::{SupportLang, all_languages};
     let mut builder = ignore::types::TypesBuilder::new();
     builder.add_defaults();
-    let known: std::collections::HashSet<String> = builder
-        .definitions()
-        .into_iter()
-        .map(|def| def.name().to_string())
-        .collect();
+    let definitions = builder.definitions();
+    let search_type = |name: &str| {
+        if definitions.iter().any(|def| def.name() == name) {
+            return Some(name.to_string());
+        }
+        let language = SupportLang::from_alias(name).or_else(|| SupportLang::from_family(name))?;
+        let (_, entry) = all_languages().find(|(lang, _)| *lang == language)?;
+        let glob = format!("*.{}", entry.extensions().first()?);
+        definitions
+            .iter()
+            .find(|def| def.globs().contains(&glob))
+            .map(|def| def.name().to_string())
+    };
     let mut types = Vec::new();
     requested.retain(|name| {
         let lower = name.to_lowercase();
@@ -62,12 +57,7 @@ pub(super) fn languages(requested: &mut Vec<String>) -> Vec<String> {
             .iter()
             .chain(FAMILIES.iter())
             .any(|list| list.contains(&lower.as_str()));
-        let language = LANGUAGES
-            .iter()
-            .find(|(alias, _)| *alias == lower)
-            .map(|(_, ty)| ty.to_string())
-            .or_else(|| known.contains(&lower).then(|| lower.clone()));
-        match (keyword, language) {
+        match (keyword, search_type(&lower)) {
             (false, Some(ty)) => {
                 types.push(ty);
                 false

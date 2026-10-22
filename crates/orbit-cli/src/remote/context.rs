@@ -45,14 +45,6 @@ async fn fetch_one(client: OrbitClient, token: String) -> Result<Vec<u8>, Remote
         })
 }
 
-static TRACE_TIMESTAMP: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"^(\s*\| (?:\d+: )?)\d{4}-\d\d-\d\dT[\d:.]+Z \d+[OE]\+? ?")
-        .expect("valid pattern")
-});
-
-static TRACE_LINE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"^\s*\| (?:\d+: )?(.*)$").expect("valid pattern"));
-
 static GRAPH_KEY: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^(query_type|nodes|edges|pagination)\b").expect("valid pattern")
 });
@@ -81,14 +73,7 @@ pub(crate) fn tidy(text: &str, drop_failed_jobs: bool) -> String {
             in_failed_jobs = true;
             continue;
         }
-        let line = TRACE_TIMESTAMP.replace(line, "$1");
-        if TRACE_LINE
-            .captures(&line)
-            .is_some_and(|found| super::sdlc::EPILOGUE.is_match(&found[1]))
-        {
-            continue;
-        }
-        out.push_str(&line);
+        out.push_str(line);
         out.push('\n');
     }
     out
