@@ -129,7 +129,6 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
                 .iter()
                 .filter(|predicate| predicate.filters_sort_key(key, true))
                 .cloned()
-                .map(|predicate| predicate.guard_tombstones(key, alias))
                 .collect();
             let rows = self.graph.filter(rows, identity);
             return Ok(self.graph.latest(rows, alias, key.to_vec(), predicates));

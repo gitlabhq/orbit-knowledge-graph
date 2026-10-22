@@ -13,6 +13,7 @@ pub struct CodeTableNames {
     pub definition: String,
     pub imported_symbol: String,
     edge_tables: HashMap<String, Vec<(String, String, String)>>,
+    node_columns: HashMap<String, Vec<String>>,
 }
 
 impl CodeTableNames {
@@ -23,6 +24,19 @@ impl CodeTableNames {
             .map(|node| node.name.as_str())
             .collect();
 
+        let node_columns = ontology
+            .nodes()
+            .filter(|node| node.domain == CODE_DOMAIN)
+            .map(|node| {
+                (
+                    prefixed_table_name(&node.destination_table, *SCHEMA_VERSION),
+                    node.immutable_columns()
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                )
+            })
+            .collect();
         let mut edge_tables: HashMap<String, Vec<(String, String, String)>> = HashMap::new();
         for edge in ontology.edges() {
             let involves_code_node = code_node_types.contains(edge.source_kind.as_str())
@@ -49,7 +63,13 @@ impl CodeTableNames {
                 *SCHEMA_VERSION,
             ),
             edge_tables,
+            node_columns,
         })
+    }
+
+    /// Unchanging non-key columns a tombstone for `table` must carry.
+    pub fn immutable_columns(&self, table: &str) -> &[String] {
+        self.node_columns.get(table).map_or(&[], Vec::as_slice)
     }
 
     pub fn edge_table_for(

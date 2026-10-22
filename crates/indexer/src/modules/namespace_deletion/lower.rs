@@ -14,8 +14,8 @@ pub struct DeletionStatement {
 ///
 /// For each namespaced node table and the shared edge table, emits:
 /// ```sql
-/// INSERT INTO {prefixed_table} ({sort_key..., _deleted, _version})
-/// SELECT {sort_key..., true, now64(6)}
+/// INSERT INTO {prefixed_table} ({sort_key..., unchanging columns..., _deleted, _version})
+/// SELECT {sort_key..., unchanging columns..., true, now64(6)}
 /// FROM {prefixed_table}
 /// WHERE startsWith(traversal_path, {traversal_path:String})
 ///   AND _deleted = false
@@ -54,6 +54,7 @@ fn build_statements(
             &node.destination_table,
             &prefixed,
             sort_key,
+            &node.immutable_columns(),
             extra_predicate,
         ));
     }
@@ -67,6 +68,7 @@ fn build_statements(
             edge_table,
             &prefixed,
             &config.sort_key,
+            &[],
             extra_predicate,
         ));
     }
@@ -78,14 +80,20 @@ fn build_deletion_insert(
     unprefixed_table: &str,
     prefixed_table: &str,
     sort_key: &[String],
+    carried_columns: &[&str],
     extra_predicate: Option<&str>,
 ) -> DeletionStatement {
-    let sort_key_cols = sort_key.join(", ");
-    let insert_columns = format!("{sort_key_cols}, {DELETED_COLUMN}, {VERSION_COLUMN}");
+    let carried_cols = sort_key
+        .iter()
+        .map(String::as_str)
+        .chain(carried_columns.iter().copied())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let insert_columns = format!("{carried_cols}, {DELETED_COLUMN}, {VERSION_COLUMN}");
     let extra = extra_predicate.map(|p| format!(" {p}")).unwrap_or_default();
     let sql = format!(
         "INSERT INTO {prefixed_table} ({insert_columns}) \
-         SELECT {sort_key_cols}, true, now64(6) \
+         SELECT {carried_cols}, true, now64(6) \
          FROM {prefixed_table} \
          WHERE (startsWith({TRAVERSAL_PATH_COLUMN}, {{{TRAVERSAL_PATH_COLUMN}:String}}) \
          AND ({DELETED_COLUMN} = false){extra})"
@@ -220,6 +228,27 @@ mod tests {
             "should include id from sort key: {}",
             statement.sql
         );
+    }
+
+    #[test]
+    fn node_statements_carry_the_unchanging_columns() {
+        let ontology = load_ontology();
+        let statements = build_deletion_statements(&ontology);
+        let node = ontology
+            .nodes()
+            .find(|node| node.destination_table == "gl_file")
+            .expect("gl_file node");
+        let carried = node.immutable_columns();
+        assert!(carried.contains(&"path"), "{carried:?}");
+        let statement = find_statement(&statements, "gl_file");
+        for column in carried {
+            assert_eq!(
+                statement.sql.matches(&format!(", {column},")).count(),
+                2,
+                "{column} must appear in the INSERT list and the SELECT: {}",
+                statement.sql
+            );
+        }
     }
 
     #[test]

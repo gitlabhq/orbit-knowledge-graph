@@ -82,6 +82,10 @@ Runtime-only pipeline knobs are also version-neutral. `extract.partition_count` 
 parallelism) is stripped from the source fingerprint (`remove_runtime_extract_fields`). It
 changes neither the stored data nor the DDL.
 
+### Tombstone contract
+
+A delete is a row with `_deleted = true` and a newer `_version`. It carries the full sort key and every column the ontology marks `mutable: false`. Those values are copied from the row it deletes. The SDLC pipelines get this by projecting the datalake row. The code stale sweeps and namespace deletion select those columns from the live row. The query planner relies on it. A filter on an unchanging column runs before the latest-row pick because the tombstone passes the same filter.
+
 ### `gkg_schema_version` control table
 
 The Indexer and DispatchIndexing modes create this table on startup if it does not exist.
