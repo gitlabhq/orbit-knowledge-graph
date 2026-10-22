@@ -45,19 +45,17 @@ local contentGitalyCalls = o.metric('gkg.content.gitaly.calls');
 // 1. At a glance ----------------------------------------------------------
 // Tiles summarize the selected time range and stay in text color until a threshold is crossed, so only real
 // trouble is coloured. Thresholds follow the latency (5 s, 25 s) and error
-// (99.5%) objectives.
+// (99%) objectives, with the same definitions as the orbit_query SLO in runbooks.
 local Q = pipelineQueries.prom_name;
 local DUR = pipelineDuration.prom_name;
-local VALID = 'status!~"compile_error|security_error", query_type!="unknown"';
-local SERVER_STATUS = 'execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error';
+local VALID = 'outcome!="caller_error"';
+local SERVER = 'outcome="server_error"';
 local COMPILER_FAULT = 'lowering|enforcement|codegen|pipeline|ontology_internal|security';
 local OK = 'status="ok", query_type!="unknown"';
 local SCHEMA = 'status="ok", query_type="unknown"';
 local REJECTED = 'status=~"compile_error|security_error"';
 
-local serverErrors(range) =
-  '(sum(increase(%s{%s, status=~"%s"}[%s])) or vector(0)) + (sum(increase(%s{%s, failure_reason=~"%s"}[%s])) or vector(0))'
-  % [Q, SEL, SERVER_STATUS, range, compilerRejected, SEL, COMPILER_FAULT, range];
+local serverErrors(range) = 'sum(increase(%s{%s, %s}[%s])) or vector(0)' % [Q, SEL, SERVER, range];
 
 local NEUTRAL = o.NEUTRAL;
 local steps = o.steps;
@@ -123,26 +121,26 @@ local glance = [
   o.row('At a glance'),
   tile(
     'Queries/min',
-    'Valid queries per minute, averaged over the selected time range: successful queries and server failures. Excludes rejected client queries and schema calls.',
-    'sum(rate(%s{%s, %s}[$__range])) * 60' % [Q, SEL, VALID],
+    'Valid queries per minute, averaged over the selected time range: successful queries and server failures. Excludes caller errors and schema calls.',
+    'sum(rate(%s{%s, %s, query_type!="unknown"}[$__range])) * 60' % [Q, SEL, VALID],
     'short', NEUTRAL, 1,
   ),
   tile(
     'Success',
-    'Share of valid queries in the selected time range that did not fail on the server side. Objective: 99.5%. Amber below the objective, red below 95%. Rejected client queries are not counted.',
+    'Share of valid queries in the selected time range that did not fail on the server side. Objective: 99%. Amber below the objective, red below 95%. Caller errors (bad queries, cancels, unreadable values) are not counted.',
     '1 - (%s) / (sum(increase(%s{%s, %s}[$__range])) > 0)' % [serverErrors('$__range'), Q, SEL, VALID],
-    'percentunit', stepsDown(0.95, 0.995), 2,
+    'percentunit', stepsDown(0.95, 0.99), 2,
   ),
   tile(
     'Server errors',
-    'Queries that failed because of the service in the selected time range: execution, timeout, streaming, content resolution, redaction, and compiler faults. The count grows with the time range, so it stays neutral; the Success tile judges it. See the chart below for the split by type.',
+    'Queries that failed because of the service in the selected time range: database errors, timeouts, content resolution, redaction, and compiler faults. The count grows with the time range, so it stays neutral; the Success tile judges it. See the chart below for the split by type.',
     serverErrors('$__range'),
     'short', NEUTRAL, 0,
   ),
   tile(
     'Under 5 s',
-    'Share of successful queries in the selected time range that finished in 5 seconds or less.',
-    'sum(increase(%s_bucket{%s, %s, le="5.0"}[$__range])) / (sum(increase(%s_count{%s, %s}[$__range])) > 0)' % [DUR, SEL, OK, DUR, SEL, OK],
+    'Share of valid queries in the selected time range that finished in 5 seconds or less. Objective: 95%. Server faults count too, so a timeout counts as slow.',
+    'sum(increase(%s_bucket{%s, %s, query_type!="unknown", le="5.0"}[$__range])) / (sum(increase(%s_count{%s, %s, query_type!="unknown"}[$__range])) > 0)' % [DUR, SEL, VALID, DUR, SEL, VALID],
     'percentunit', stepsDown(0.9, 0.95), 1,
   ),
   tile(
@@ -200,15 +198,12 @@ local glance = [
   ),
   errorBars(
     'Server errors by type',
-    'Queries that failed because of the service, by type, per 10 minutes. compiler_fault counts compiler bugs, not invalid client input.',
+    'Queries that failed because of the service, by status, per 10 minutes. compile_error here counts compiler bugs, not invalid client input.',
+    [o.target('sum by (status) (increase(%s{%s, %s}[$__interval])) > 0' % [Q, SEL, SERVER], '{{status}}', DS, 'A')],
     [
-      o.target('sum by (status) (increase(%s{%s, status=~"%s"}[$__interval])) > 0' % [Q, SEL, SERVER_STATUS], '{{status}}', DS, 'A'),
-      o.target('sum(increase(%s{%s, failure_reason=~"%s"}[$__interval])) > 0' % [compilerRejected, SEL, COMPILER_FAULT], 'compiler_fault', DS, 'B'),
-    ],
-    [
-      ['execution_error', '#3987e5'], ['streaming_error', '#d95926'], ['timeout', '#c98500'],
+      ['execution_error', '#3987e5'], ['security_error', '#d95926'], ['timeout', '#c98500'],
       ['content_resolution_error', '#199e70'], ['authorization_error', '#d55181'],
-      ['custom_error', '#9085e9'], ['compiler_fault', '#e66767'],
+      ['custom_error', '#9085e9'], ['compile_error', '#e66767'],
     ],
   ),
   errorBars(

@@ -74,8 +74,14 @@ local band(lo, hi, range) =
 
 local CODE = o.metric('gkg_indexer_code_events_processed_total').prom_name;
 local CODE_DONE = 'outcome=~"indexed|empty_repository|error"';
-local SDLC_OK = sdlcPipelineDur.prom_name + '_count';
 local SDLC_ERR = sdlcErrors.prom_name;
+// Same definition as the indexing SLOs in runbooks: every handler attempt counts, flow control does not.
+local HANDLER_RUNS = o.metric('gkg_etl_handler_duration_seconds').prom_name + '_count';
+local HANDLER_ERRORS = o.metric('gkg_etl_handler_errors_total').prom_name;
+local FAILED = 'error_kind!~"backpressure|deferred"';
+local handlerOk(handler) =
+  '1 - (sum(increase(%s{%s, %s, %s}[$__range])) or vector(0)) / (sum(increase(%s{%s, %s}[$__range])) > 0)'
+  % [HANDLER_ERRORS, SEL, handler, FAILED, HANDLER_RUNS, SEL, handler];
 local ROWS = sdlcRows.prom_name;
 local DROPPED = o.metric('gkg_indexer_max_deliveries_exhausted_total').prom_name;
 
@@ -110,8 +116,8 @@ local glance = [
   ),
   tile(
     'Code OK',
-    'Share of code indexing tasks that did not fail in the selected time range. Amber below 99%, red below 95%. Failed tasks are retried, so freshness shows the user impact.',
-    '1 - (sum(increase(%s{%s, outcome="error"}[$__range])) or vector(0)) / (sum(increase(%s{%s, %s}[$__range])) > 0)' % [CODE, SEL, CODE, SEL, CODE_DONE],
+    'Share of code indexing attempts that did not fail in the selected time range. No free lane and lock waits are not failures. Objective: 99%. Amber below 99%, red below 95%. Failed tasks are retried, so freshness shows the user impact.',
+    handlerOk('handler="code_indexing_task"'),
     'percentunit', o.stepsDown(0.95, 0.99), 2,
   ),
   tile(
@@ -122,8 +128,8 @@ local glance = [
   ),
   tile(
     'SDLC OK',
-    'Share of SDLC plan runs that did not fail in the selected time range. Amber below 99%, red below 95%. Failed runs are retried, so freshness shows the user impact.',
-    'sum(increase(%s{%s}[$__range])) / ((sum(increase(%s{%s}[$__range])) + (sum(increase(%s{%s}[$__range])) or vector(0))) > 0)' % [SDLC_OK, SEL, SDLC_OK, SEL, SDLC_ERR, SEL],
+    'Share of SDLC handler runs that did not fail in the selected time range. Objective: 99%. Amber below 99%, red below 95%. Failed runs are retried, so freshness shows the user impact.',
+    handlerOk('handler=~"entity\\\\..*"'),
     'percentunit', o.stepsDown(0.95, 0.99), 2,
   ),
   tile(

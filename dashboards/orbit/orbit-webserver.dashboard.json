@@ -53,7 +53,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Valid queries per minute, averaged over the selected time range: successful queries and server failures. Excludes rejected client queries and schema calls.",
+      "description": "Valid queries per minute, averaged over the selected time range: successful queries and server failures. Excludes caller errors and schema calls.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -115,7 +115,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!~\"compile_error|security_error\", query_type!=\"unknown\"}[$__range])) * 60",
+          "expr": "sum(rate(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", outcome!=\"caller_error\", query_type!=\"unknown\"}[$__range])) * 60",
           "instant": true,
           "legendFormat": "Queries/min",
           "range": false,
@@ -130,7 +130,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of valid queries in the selected time range that did not fail on the server side. Objective: 99.5%. Amber below the objective, red below 95%. Rejected client queries are not counted.",
+      "description": "Share of valid queries in the selected time range that did not fail on the server side. Objective: 99%. Amber below the objective, red below 95%. Caller errors (bad queries, cancels, unreadable values) are not counted.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -163,7 +163,7 @@
               },
               {
                 "color": "green",
-                "value": 0.995
+                "value": 0.99
               }
             ]
           },
@@ -200,7 +200,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "1 - ((sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[$__range])) or vector(0)) + (sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__range])) or vector(0))) / (sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status!~\"compile_error|security_error\", query_type!=\"unknown\"}[$__range])) > 0)",
+          "expr": "1 - (sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", outcome=\"server_error\"}[$__range])) or vector(0)) / (sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", outcome!=\"caller_error\"}[$__range])) > 0)",
           "instant": true,
           "legendFormat": "Success",
           "range": false,
@@ -215,7 +215,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Queries that failed because of the service in the selected time range: execution, timeout, streaming, content resolution, redaction, and compiler faults. The count grows with the time range, so it stays neutral; the Success tile judges it. See the chart below for the split by type.",
+      "description": "Queries that failed because of the service in the selected time range: database errors, timeouts, content resolution, redaction, and compiler faults. The count grows with the time range, so it stays neutral; the Success tile judges it. See the chart below for the split by type.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -277,7 +277,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[$__range])) or vector(0)) + (sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__range])) or vector(0))",
+          "expr": "sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", outcome=\"server_error\"}[$__range])) or vector(0)",
           "instant": true,
           "legendFormat": "Server errors",
           "range": false,
@@ -292,7 +292,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of successful queries in the selected time range that finished in 5 seconds or less.",
+      "description": "Share of valid queries in the selected time range that finished in 5 seconds or less. Objective: 95%. Server faults count too, so a timeout counts as slow.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -362,7 +362,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\", query_type!=\"unknown\", le=\"5.0\"}[$__range])) / (sum(increase(gkg_query_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=\"ok\", query_type!=\"unknown\"}[$__range])) > 0)",
+          "expr": "sum(increase(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", outcome!=\"caller_error\", query_type!=\"unknown\", le=\"5.0\"}[$__range])) / (sum(increase(gkg_query_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", outcome!=\"caller_error\", query_type!=\"unknown\"}[$__range])) > 0)",
           "instant": true,
           "legendFormat": "Under 5 s",
           "range": false,
@@ -853,7 +853,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "((sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[$__interval])) or vector(0)) + (sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__interval])) or vector(0)))",
+          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", outcome=\"server_error\"}[$__interval])) or vector(0))",
           "legendFormat": "Server errors",
           "refId": "B"
         },
@@ -1161,7 +1161,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Queries that failed because of the service, by type, per 10 minutes. compiler_fault counts compiler bugs, not invalid client input.",
+      "description": "Queries that failed because of the service, by status, per 10 minutes. compile_error here counts compiler bugs, not invalid client input.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -1198,7 +1198,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "streaming_error"
+              "options": "security_error"
             },
             "properties": [
               {
@@ -1273,7 +1273,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "compiler_fault"
+              "options": "compile_error"
             },
             "properties": [
               {
@@ -1313,18 +1313,9 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (status) (increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[$__interval])) > 0",
+          "expr": "sum by (status) (increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", outcome=\"server_error\"}[$__interval])) > 0",
           "legendFormat": "{{status}}",
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__interval])) > 0",
-          "legendFormat": "compiler_fault",
-          "refId": "B"
         }
       ],
       "title": "Server errors by type",
