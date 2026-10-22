@@ -27,17 +27,18 @@ const STATE_HALF_OPEN: u8 = 2;
 ///       └──────────────────►Open
 /// ```
 ///
-/// | From     | Event             | To       |
-/// |----------|-------------------|----------|
-/// | Closed   | failure threshold | Open     |
-/// | Open     | cooldown elapsed  | HalfOpen |
-/// | HalfOpen | probe succeeds    | Closed   |
-/// | HalfOpen | probe fails       | Open     |
+/// | From     | Event                        | To       |
+/// |----------|------------------------------|----------|
+/// | Closed   | failure threshold            | Open     |
+/// | Open     | cooldown elapsed             | HalfOpen |
+/// | HalfOpen | probe succeeds               | Closed   |
+/// | HalfOpen | probe fails                  | Open     |
+/// | HalfOpen | no probe outcome in cooldown | HalfOpen |
 #[derive(Debug)]
 enum CircuitState {
     Closed { failures: VecDeque<Instant> },
     Open { until: Instant },
-    HalfOpen,
+    HalfOpen { probe_deadline: Instant },
 }
 
 /// State label without internal data, for observer callbacks.
@@ -122,19 +123,20 @@ impl Circuit {
         }
 
         let mut inner = self.inner.lock();
-        match &inner.state {
-            CircuitState::Closed { .. } => AcquireResult::Allowed,
-            CircuitState::Open { until } => {
-                if now >= *until {
-                    inner.state = CircuitState::HalfOpen;
-                    self.state.store(STATE_HALF_OPEN, Ordering::Release);
-                    AcquireResult::Probe
-                } else {
-                    AcquireResult::Rejected
-                }
-            }
-            CircuitState::HalfOpen => AcquireResult::Rejected,
+        let probe_due = match &inner.state {
+            CircuitState::Closed { .. } => return AcquireResult::Allowed,
+            CircuitState::Open { until } => now >= *until,
+            CircuitState::HalfOpen { probe_deadline } => now >= *probe_deadline,
+        };
+        if !probe_due {
+            return AcquireResult::Rejected;
         }
+
+        inner.state = CircuitState::HalfOpen {
+            probe_deadline: now + inner.config.cooldown,
+        };
+        self.state.store(STATE_HALF_OPEN, Ordering::Release);
+        AcquireResult::Probe
     }
 
     /// Record success. Closed → atomic load only, no lock.
@@ -146,7 +148,7 @@ impl Circuit {
         let mut inner = self.inner.lock();
         match &inner.state {
             CircuitState::Closed { .. } | CircuitState::Open { .. } => None,
-            CircuitState::HalfOpen => {
+            CircuitState::HalfOpen { .. } => {
                 inner.state = CircuitState::Closed {
                     failures: VecDeque::new(),
                 };
@@ -188,7 +190,7 @@ impl Circuit {
                     None
                 }
             }
-            CircuitState::HalfOpen => {
+            CircuitState::HalfOpen { .. } => {
                 inner.state = CircuitState::Open {
                     until: now + cooldown,
                 };
