@@ -132,6 +132,25 @@ pub async fn unfinished_first_pass_counts_each_attempt_with_a_session_query_cach
     );
 }
 
+pub async fn missing_destination_table_still_fails_the_run(ctx: &TestContext) {
+    create_user(ctx, 1).await;
+    ctx.drop_table(&t("gl_user")).await;
+
+    let result = entity_handler_with_partitions(ctx, "User", 1)
+        .await
+        .handle(handler_context(), global_envelope())
+        .await;
+
+    assert!(
+        result.is_err(),
+        "a missing graph table is not a missing source"
+    );
+    assert_eq!(
+        checkpoint_column::<Option<DateTime<Utc>>>(ctx, "global.User", "indexed_at").await,
+        [None]
+    );
+}
+
 pub async fn incremental_run_keeps_indexed_at_and_ends_with_zero_attempts(ctx: &TestContext) {
     insert_checkpoint(ctx, "global.User", "null", COMPLETED_AT).await;
 

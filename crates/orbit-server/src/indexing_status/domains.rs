@@ -20,11 +20,12 @@ pub struct EntityStatus {
 pub fn get_domain_statuses(
     ontology: &Ontology,
     plan_phases: &[(&PipelineDescriptor, Phase)],
+    source_unavailable: &[&PipelineDescriptor],
     code_phase: Option<Phase>,
 ) -> Vec<DomainStatus> {
     ontology
         .domains()
-        .map(|domain| {
+        .filter_map(|domain| {
             let nodes: Vec<&NodeEntity> = domain
                 .node_names
                 .iter()
@@ -37,7 +38,13 @@ pub fn get_domain_statuses(
                 .filter(|(plan, _)| plan_belongs_to_domain(ontology, plan, domain))
                 .map(|(_, phase)| *phase);
             let code = code_phase.filter(|_| has_code_nodes);
-            let phase = combine_phases(feeding_plans.chain(code)).unwrap_or(Phase::Unknown);
+            let silenced = source_unavailable
+                .iter()
+                .any(|plan| plan_belongs_to_domain(ontology, plan, domain));
+            let phase = match combine_phases(feeding_plans.chain(code)) {
+                None if silenced => return None,
+                phase => phase.unwrap_or(Phase::Unknown),
+            };
 
             let entities = nodes
                 .iter()
@@ -47,12 +54,12 @@ pub fn get_domain_statuses(
                 })
                 .collect();
 
-            DomainStatus {
+            Some(DomainStatus {
                 name: domain.name.clone(),
                 phase,
                 has_code_nodes,
                 entities,
-            }
+            })
         })
         .collect()
 }
