@@ -394,7 +394,7 @@ const (
 	IndexingPhase_INDEXING_PHASE_SYNCING            IndexingPhase = 2
 	IndexingPhase_INDEXING_PHASE_READY              IndexingPhase = 3
 	IndexingPhase_INDEXING_PHASE_ERROR              IndexingPhase = 4 // indexing is done, but some data failed to index
-	IndexingPhase_INDEXING_PHASE_SOURCE_UNAVAILABLE IndexingPhase = 5 // the source table does not exist on this GitLab version
+	IndexingPhase_INDEXING_PHASE_SOURCE_UNAVAILABLE IndexingPhase = 5
 )
 
 // Enum value maps for IndexingPhase.
