@@ -220,7 +220,7 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
         .aggregation
         .group_by
         .iter()
-        .any(|group| group.node() == node.alias);
+        .any(|group| group.node() == node.alias && pattern.group_tag(group).is_none());
     let metric_target = input.aggregation.metrics.iter().any(|metric| {
         metric.expr.node() == node.alias
             && metric.expr.property().is_some_and(|property| {

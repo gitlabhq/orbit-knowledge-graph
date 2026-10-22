@@ -323,6 +323,27 @@ pub(crate) fn tag_membership(alias: &str, column: &str, values: &[String]) -> Ex
     }
 }
 
+pub(crate) fn tag_value(tags: Expr, key: &str) -> Expr {
+    let prefix = format!("{key}:");
+    let tag = Expr::func(
+        Function::ArrayFirst,
+        vec![
+            Expr::lambda(
+                "_orbit_tag",
+                Expr::func(
+                    Function::StartsWith,
+                    vec![Expr::ident("_orbit_tag"), Expr::string(&prefix)],
+                ),
+            ),
+            tags,
+        ],
+    );
+    Expr::func(
+        Function::Substring,
+        vec![tag, Expr::int(prefix.len() as i64 + 1)],
+    )
+}
+
 /// When multiple tables are involved, each UNION arm projects only the
 /// columns common to all edge tables (the 6 reserved edge columns) so
 /// that tables with extra columns (e.g. gl_code_edge's project_id/branch)

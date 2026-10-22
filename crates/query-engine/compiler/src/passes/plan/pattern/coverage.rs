@@ -3,12 +3,16 @@
 use std::collections::HashSet;
 
 use ontology::constants::*;
-use query_data_model::{DenormalizedDirection, DenormalizedProperty, OrbitQueryModel};
+use ontology::{DataType, EnumType};
+use query_data_model::{
+    DenormalizedDirection, DenormalizedKey, DenormalizedProperty, OrbitQueryModel, PropertyId,
+};
 
 use super::{EdgeRelation, NodePlan, Pattern};
+use crate::input::InputGroupByKey;
 use crate::passes::normalize::is_wildcard;
-use crate::passes::plan::filters::{BoundFilter, lowerable_denorm};
-use crate::passes::plan::predicates::{Predicate, tag_filter};
+use crate::passes::plan::filters::{BoundFilter, denorm_tag_values};
+use crate::passes::plan::predicates::{Column, Predicate, tag_filter};
 
 impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
     pub fn denorm_facts(
@@ -16,6 +20,16 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         relation: &EdgeRelation,
         node: &str,
         filter: &BoundFilter,
+    ) -> Option<&DenormalizedProperty> {
+        self.denorm_property(relation, node, filter.property?)
+            .filter(|facts| denorm_tag_values(&facts.tag_key, &filter.filter).is_some())
+    }
+
+    fn denorm_property(
+        &self,
+        relation: &EdgeRelation,
+        node: &str,
+        property: PropertyId,
     ) -> Option<&DenormalizedProperty> {
         if relation.fk.is_some() || is_wildcard(&relation.rel_types) {
             return None;
@@ -26,12 +40,53 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             DenormalizedDirection::Target
         };
         let (source, target) = (relation.source_entity?, relation.target_entity?);
-        lowerable_denorm(filter, direction, &self.denormalized).filter(|facts| {
-            relation
-                .relationships
-                .iter()
-                .all(|relationship| facts.variants.contains(&(*relationship, source, target)))
-        })
+        self.denormalized
+            .get(&DenormalizedKey {
+                property,
+                direction,
+            })
+            .filter(|facts| {
+                relation
+                    .relationships
+                    .iter()
+                    .all(|relationship| facts.variants.contains(&(*relationship, source, target)))
+            })
+    }
+
+    /// The one-hop edge tag that copies a grouped string property verbatim, so grouping need not read the node.
+    pub fn group_tag(&self, group: &InputGroupByKey) -> Option<(Column, String)> {
+        let InputGroupByKey::Property {
+            node,
+            property,
+            truncate: None,
+            ..
+        } = group
+        else {
+            return None;
+        };
+        let entity = self
+            .model
+            .graph()
+            .entity_id(self.nodes.get(node)?.entity.as_deref()?)?;
+        let stored = self.model.property_for_entity_id(entity, property)?;
+        let pass_through = match stored.data_type {
+            DataType::String => true,
+            DataType::Enum => stored.enum_type == EnumType::String,
+            _ => false,
+        };
+        if stored.nullable || !pass_through {
+            return None;
+        }
+        self.relations
+            .iter()
+            .filter(|relation| relation.max_hops == 1)
+            .find_map(|relation| {
+                let facts = self.denorm_property(relation, node, stored.id)?;
+                Some((
+                    Column::new(&relation.alias, &facts.edge_column),
+                    facts.tag_key.clone(),
+                ))
+            })
     }
 
     pub fn denorm_hop(

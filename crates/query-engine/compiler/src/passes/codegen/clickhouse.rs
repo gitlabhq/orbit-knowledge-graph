@@ -491,6 +491,7 @@ pub(crate) fn function_name(function: Function) -> &'static str {
         Function::ArrayContainsAny => "hasAny",
         Function::ArrayContainsAll => "hasAll",
         Function::ArrayFilter => "arrayFilter",
+        Function::ArrayFirst => "arrayFirst",
         Function::ArrayMap => "arrayMap",
         Function::ArrayExists => "arrayExists",
         Function::Unnest => "arrayJoin",

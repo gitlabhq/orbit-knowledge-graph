@@ -386,13 +386,17 @@ impl Context {
 
         if matches!(
             name,
-            Function::ArrayFilter | Function::ArrayMap | Function::ArrayExists
+            Function::ArrayFilter
+                | Function::ArrayFirst
+                | Function::ArrayMap
+                | Function::ArrayExists
         ) && args.len() == 2
         {
             let predicate = self.emit_expr(&args[0]);
             let array = self.emit_expr(&args[1]);
             return match name {
                 Function::ArrayFilter => format!("list_filter({array}, {predicate})"),
+                Function::ArrayFirst => format!("list_filter({array}, {predicate})[1]"),
                 Function::ArrayMap => format!("list_transform({array}, {predicate})"),
                 _ => format!("(len(list_filter({array}, {predicate})) > 0)"),
             };
@@ -431,6 +435,7 @@ impl Context {
             | Function::ToString
             | Function::ToJson
             | Function::ArrayFilter
+            | Function::ArrayFirst
             | Function::ArrayMap
             | Function::ArrayExists
             | Function::ByteLength

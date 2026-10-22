@@ -1,8 +1,6 @@
 //! Aggregation: plan the pattern like a traversal, then derive groups, measures, and the deferred
 //! latest-row condition from the relation graph.
 
-use std::collections::HashMap;
-
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use query_data_model::OrbitQueryModel;
@@ -11,15 +9,26 @@ use crate::error::Result;
 use crate::input::{
     AggExpr, AggFunction, Input, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
 };
+use crate::passes::plan::Plan;
 use crate::passes::plan::graph::{ExecutionPlan, RelationNode};
 use crate::passes::plan::pattern::Pattern;
 use crate::passes::plan::predicates::{Column, Predicate};
-use crate::passes::plan::{NodePlan, Plan};
 
 #[derive(Clone, PartialEq)]
 pub struct Group {
     pub column: Column,
     pub truncate: Option<TruncateUnit>,
+    pub tag_key: Option<String>,
+}
+
+impl Group {
+    fn new(column: Column) -> Self {
+        Self {
+            column,
+            truncate: None,
+            tag_key: None,
+        }
+    }
 }
 
 pub struct Measure {
@@ -47,15 +56,16 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
 ) -> Result<Plan<Aggregation>> {
     let pattern = Pattern::new(input, model)?;
     let execution = pattern.execution()?;
-    let result = aggregation_plan(input, &pattern.nodes, &execution);
+    let result = aggregation_plan(input, &pattern, &execution);
     Ok(pattern.into_plan(execution, |execution| Aggregation { execution, result }))
 }
 
-fn aggregation_plan(
+fn aggregation_plan<M: OrbitQueryModel + ?Sized>(
     input: &Input,
-    nodes: &HashMap<String, NodePlan>,
+    pattern: &Pattern<'_, M>,
     execution: &ExecutionPlan,
 ) -> AggregationPlan {
+    let nodes = &pattern.nodes;
     let aggregation = &input.aggregation;
     let mut plan = AggregationPlan {
         groups: vec![],
@@ -76,9 +86,16 @@ fn aggregation_plan(
                 truncate,
                 ..
             } => {
-                let group = Group {
-                    column: execution.property(node, property),
-                    truncate: *truncate,
+                let unjoined = nodes.get(node.as_str()).is_some_and(|node| !node.joined);
+                let group = match pattern.group_tag(group).filter(|_| unjoined) {
+                    Some((column, tag_key)) => Group {
+                        tag_key: Some(tag_key),
+                        ..Group::new(column)
+                    },
+                    None => Group {
+                        truncate: *truncate,
+                        ..Group::new(execution.property(node, property))
+                    },
                 };
                 plan.group_outputs.push((group.clone(), alias));
                 add_group(&mut plan.groups, group);
@@ -90,10 +107,7 @@ fn aggregation_plan(
                 for column in metadata.requested_columns() {
                     add_group(
                         &mut plan.groups,
-                        Group {
-                            column: execution.property(node, &column),
-                            truncate: None,
-                        },
+                        Group::new(execution.property(node, &column)),
                     );
                 }
                 let primary_key = execution
@@ -103,19 +117,10 @@ fn aggregation_plan(
                     .and_then(|binding| binding.property_source.as_ref())
                     .map(|source| Column::new(source, DEFAULT_PRIMARY_KEY))
                     .unwrap_or_else(|| execution.property(node, DEFAULT_PRIMARY_KEY));
+                add_group(&mut plan.groups, Group::new(primary_key));
                 add_group(
                     &mut plan.groups,
-                    Group {
-                        column: primary_key,
-                        truncate: None,
-                    },
-                );
-                add_group(
-                    &mut plan.groups,
-                    Group {
-                        column: execution.property(node, &metadata.redaction_id_column),
-                        truncate: None,
-                    },
+                    Group::new(execution.property(node, &metadata.redaction_id_column)),
                 );
             }
         }

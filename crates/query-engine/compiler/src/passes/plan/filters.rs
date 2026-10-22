@@ -7,7 +7,7 @@ use query_data_model::{OrbitQueryModel, RelationalMapping};
 
 use super::predicates::{Column, Predicate};
 use super::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
-use crate::input::{FilterOp, Input, InputFilter, PredicateTarget};
+use crate::input::{FilterOp, Input, InputFilter, InputGroupByKey, PredicateTarget};
 
 #[derive(Clone)]
 pub struct BoundFilter {
@@ -208,6 +208,21 @@ pub fn denormalized_facts(
                                     condition.target == PredicateTarget::Node(node.id.clone())
                                 })
                                 .map(|condition| condition.property.as_str()),
+                        )
+                        .chain(
+                            input
+                                .aggregation
+                                .group_by
+                                .iter()
+                                .filter_map(|group| match group {
+                                    InputGroupByKey::Property {
+                                        node: owner,
+                                        property,
+                                        truncate: None,
+                                        ..
+                                    } if *owner == node.id => Some(property.as_str()),
+                                    _ => None,
+                                }),
                         )
                         .filter_map(move |property| {
                             let property = model.graph().property_id(entity, property)?;

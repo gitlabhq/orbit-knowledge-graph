@@ -108,6 +108,7 @@ pub enum Function {
     ArrayContainsAny,
     ArrayContainsAll,
     ArrayFilter,
+    ArrayFirst,
     ArrayMap,
     ArrayExists,
     Unnest,
@@ -128,7 +129,8 @@ impl Function {
             | Self::ByteLength
             | Self::ArrayReverse
             | Self::Unnest => count == 1,
-            Self::If | Self::Substring => count == 3,
+            Self::If => count == 3,
+            Self::Substring => count == 2 || count == 3,
             _ => count == 2,
         }
     }

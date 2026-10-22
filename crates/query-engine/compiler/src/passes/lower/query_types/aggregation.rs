@@ -3,6 +3,7 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::{Input, OrderDirection};
 use crate::passes::lower::predicates::{column, predicate};
+use crate::passes::lower::sql::tag_value;
 use crate::passes::lower::{EmitOutput, graph};
 use crate::passes::plan::query_types::aggregation::{AggregationPlan, Group};
 use crate::passes::plan::{Aggregation, Plan};
@@ -33,12 +34,13 @@ pub(crate) fn emit(plan: &Plan<Aggregation>, input: &Input) -> Result<Emitted> {
 
 fn group(value: &Group) -> Expr {
     let column = column(&value.column);
-    match value.truncate {
-        Some(unit) => Expr::TimeBucket {
+    match (&value.tag_key, value.truncate) {
+        (Some(key), _) => tag_value(column, key),
+        (None, Some(unit)) => Expr::TimeBucket {
             unit,
             value: Box::new(column),
         },
-        None => column,
+        (None, None) => column,
     }
 }
 
