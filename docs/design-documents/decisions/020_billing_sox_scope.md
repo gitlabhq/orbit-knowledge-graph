@@ -56,7 +56,7 @@ Every path in scope is locked down with required-reviewer `CODEOWNERS` rules.
 
 ### Extended hook points
 
-These components live outside `orbit-billing` but can change billing correctness without touching billing code. Each is in scope for SOX review. The exact file paths are maintained in `.gitlab/CODEOWNERS`. Update those paths when a hook point is added or moved. When a new category is introduced, update this table in a separate docs MR.
+These components live outside `orbit-billing` but can change billing correctness without touching billing code. Each is in scope for SOX review. The exact file paths are maintained in `.gitlab/CODEOWNERS`. Update those paths when a hook point is added or moved, and update this table when a new category is introduced.
 
 | Hook point | Why in scope |
 |---|---|
@@ -73,7 +73,7 @@ These components live outside `orbit-billing` but can change billing correctness
 
 ### Out of scope (intentionally)
 
-Paths not covered by the SOX section in CODEOWNERS are outside this declared scope. This is a maintained review boundary, not proof that other code cannot affect billing. Changes that introduce or move a billing hook point must update the scoped paths. A new hook-point category also needs a separate docs MR that updates this table. The controls below reduce, but do not eliminate, the risk of an unrecognized dependency expanding the surface.
+Paths not covered by the SOX section in CODEOWNERS are outside this declared scope. This is a maintained review boundary, not proof that other code cannot affect billing. Changes that introduce or move a billing hook point must update the scoped paths. Changes that introduce a new hook-point category must also update this table. The controls below reduce, but do not eliminate, the risk of an unrecognized dependency expanding the surface.
 
 ## Implementation
 
@@ -117,7 +117,7 @@ What improves:
 
 What gets harder:
 
-- The hook-point list is a maintenance liability. A future code change can introduce a *new* path through which billing correctness is silently affected. Add the path to CODEOWNERS, and update this ADR in a separate docs MR only if it introduces a new hook-point category. Reviewers of in-scope code need to recognize when a refactor expands the hook-point surface.
+- The hook-point list is a maintenance liability. A future code change can introduce a *new* path through which billing correctness is silently affected. Add the path to CODEOWNERS, and update this ADR only if it introduces a new hook-point category. Reviewers of in-scope code need to recognize when a refactor expands the hook-point surface.
 - Cross-crate refactors that touch the pipeline observer trait now require SOX-reviewer approval, even if the refactor's intent is unrelated to billing.
 - The architecture test adds a CI step. Cost is small but non-zero.
 

@@ -55,15 +55,8 @@ Run `mise lint:docs` before pushing any documentation changes.
 
 ## Documentation conventions
 
-- Do not change documentation in an MR that changes code. After the code MR
-  merges, open a separate docs MR that updates the owning document.
-- This rule does not apply to a docs change that a CI or build check needs to
-  pass on the code MR. Examples are generated references, the crate map row,
-  relative links that `check_docs_markdown` checks, query examples that
-  `corpus-smoke-test` runs, and `skills/` files that the build validates.
-- Configuration, such as `.gitlab/CODEOWNERS` and `.gitlab/duo/`, is not
-  documentation. Change it in the code MR.
-- Design documents describe the current system.
+- Do not change any file under `docs/` in an MR that changes code. Change it
+  only when a CI or build check fails without it.
 - Rewrite or remove stale text instead of preserving history.
 - Keep `README.md` a front page: what GitLab Orbit is, the quickstart, and links.
   Put lists such as languages, entity types, and commands only in the page that

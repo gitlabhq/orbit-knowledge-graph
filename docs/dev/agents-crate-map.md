@@ -1,6 +1,6 @@
 # Crate map
 
-Every `[workspace]` member needs a row here. `crates/xtask/build.rs` enforces this. Change the row in the MR that adds, removes, or renames the crate. Update other documents in a separate docs MR. See [Documentation conventions](../../CONTRIBUTING.md#documentation-conventions).
+Every `[workspace]` member needs a row here; `crates/xtask/build.rs` enforces this.
 
 Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, HealthCheck, ClickhouseSetup via `--mode`).
 
