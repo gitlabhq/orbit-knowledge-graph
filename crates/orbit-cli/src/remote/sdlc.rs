@@ -62,10 +62,6 @@ fn text(value: &Value) -> &str {
     value.as_str().unwrap_or_default()
 }
 
-fn short(sha: &str) -> String {
-    sha.to_string()
-}
-
 fn names(value: &Value) -> Vec<String> {
     value
         .as_array()
@@ -310,7 +306,7 @@ async fn pipeline_text(
         "pipeline:{id} {} ref {} commit:{} {}\n",
         text(&pipeline["status"]),
         text(&pipeline["ref"]),
-        short(text(&pipeline["sha"])),
+        text(&pipeline["sha"]),
         text(&pipeline["web_url"])
     );
     let jobs = get_json(
@@ -361,7 +357,7 @@ async fn commit_text(
     let commit = get_json(client, &base, &[]).await?;
     let mut out = format!(
         "commit:{} {}\n  author {} {}\n",
-        short(text(&commit["id"])),
+        text(&commit["id"]),
         text(&commit["title"]),
         text(&commit["author_name"]),
         text(&commit["authored_date"])
