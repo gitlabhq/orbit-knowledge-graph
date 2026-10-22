@@ -289,7 +289,11 @@ impl ClickHouseNamespaceDeletionStore {
         live_paths: Result<Vec<String>, NamespaceDeletionStoreError>,
         current_paths: &HashSet<String>,
     ) -> Result<(), NamespaceDeletionStoreError> {
-        let stale_paths: Vec<String> = live_paths?
+        let live_paths = live_paths?;
+        if current_paths.is_empty() {
+            return Ok(());
+        }
+        let stale_paths: Vec<String> = live_paths
             .into_iter()
             .filter(|path| !current_paths.contains(path))
             .collect();
@@ -421,10 +425,6 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
                 }];
             }
         };
-
-        if current_paths.is_empty() {
-            return Vec::new();
-        }
 
         let mut outcomes = Vec::with_capacity(self.reconcile_statements.len());
         for (statement, live_paths) in self.reconcile_statements.iter().zip(live_paths) {
