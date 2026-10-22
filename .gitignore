@@ -75,3 +75,5 @@ e2e/report.html
 !bench/infra/.terraform.lock.hcl
 image-digests/
 .cargo-cache/
+
+crates/fuzz/tests/*/corpus/

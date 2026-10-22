@@ -60,52 +60,69 @@ glab = "1.123.0"
 run = ["lefthook install --force", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
 description = "Install git hooks (lefthook + worktree support)"
 
+[tasks."fuzz:corpus-unpack"]
+run = "scripts/fuzz/unpack-corpus.sh"
+description = "Extract every fuzz target's corpus.tar.gz into its corpus/ directory (wipes corpus/ first)"
+
+[tasks."fuzz:corpus-pack"]
+run = "scripts/fuzz/pack-corpus.sh"
+description = "Pack every fuzz target's corpus/ directory into its LFS-tracked corpus.tar.gz"
+
+[tasks."fuzz:deep"]
+run = "scripts/fuzz/deep.sh"
+description = "Run libFuzzer with AddressSanitizer over every fuzz target, sharing FUZZ_BUDGET_SECONDS (default 600)"
+
+[tasks."test:fuzz"]
+depends = ["fuzz:corpus-unpack"]
+run = "cargo test -p orbit-fuzz --no-fail-fast"
+description = "Replay each fuzz target's corpus, then a second of random inputs, on stable Rust"
+
 [tasks."fuzz:compile"]
-run = "cargo +nightly bolero test fuzz_compile -p orbit-fuzz"
+run = ["scripts/fuzz/unpack-corpus.sh fuzz_compile", "cargo +nightly bolero test fuzz_compile -p orbit-fuzz"]
 description = "Fuzz the query compiler (compile JSON → SQL pipeline)"
 
 [tasks."fuzz:compile-structured"]
-run = "cargo +nightly bolero test fuzz_compile_structured -p orbit-fuzz"
+run = ["scripts/fuzz/unpack-corpus.sh fuzz_compile_structured", "cargo +nightly bolero test fuzz_compile_structured -p orbit-fuzz"]
 description = "Fuzz the query compiler with structured JSON query generation"
 
 [tasks."fuzz:gql"]
-run = "cargo +nightly bolero test fuzz_gql -p orbit-fuzz"
+run = ["scripts/fuzz/unpack-corpus.sh fuzz_gql", "cargo +nightly bolero test fuzz_gql -p orbit-fuzz"]
 description = "Fuzz the Orbit query frontend with unstructured text"
 
 [tasks."fuzz:gql-grammar"]
-run = "cargo +nightly bolero test fuzz_gql_grammar -p orbit-fuzz"
+run = ["scripts/fuzz/unpack-corpus.sh fuzz_gql_grammar", "cargo +nightly bolero test fuzz_gql_grammar -p orbit-fuzz"]
 description = "Fuzz the Orbit query frontend with derivations of its own grammar"
 
 [tasks."fuzz:ruby"]
-run = "cargo +nightly bolero test fuzz_ruby -p orbit-fuzz"
+run = ["scripts/fuzz/unpack-corpus.sh fuzz_ruby", "cargo +nightly bolero test fuzz_ruby -p orbit-fuzz"]
 description = "Fuzz the Ruby code parser"
 
 [tasks."fuzz:python"]
-run = "cargo +nightly bolero test fuzz_python -p orbit-fuzz"
+run = ["scripts/fuzz/unpack-corpus.sh fuzz_python", "cargo +nightly bolero test fuzz_python -p orbit-fuzz"]
 description = "Fuzz the Python code parser"
 
 [tasks."fuzz:typescript"]
-run = "cargo +nightly bolero test fuzz_typescript -p orbit-fuzz"
+run = ["scripts/fuzz/unpack-corpus.sh fuzz_typescript", "cargo +nightly bolero test fuzz_typescript -p orbit-fuzz"]
 description = "Fuzz the TypeScript/JavaScript code parser"
 
 [tasks."fuzz:java"]
-run = "cargo +nightly bolero test fuzz_java -p orbit-fuzz"
+run = ["scripts/fuzz/unpack-corpus.sh fuzz_java", "cargo +nightly bolero test fuzz_java -p orbit-fuzz"]
 description = "Fuzz the Java code parser"
 
 [tasks."fuzz:kotlin"]
-run = "cargo +nightly bolero test fuzz_kotlin -p orbit-fuzz"
+run = ["scripts/fuzz/unpack-corpus.sh fuzz_kotlin", "cargo +nightly bolero test fuzz_kotlin -p orbit-fuzz"]
 description = "Fuzz the Kotlin code parser"
 
 [tasks."fuzz:csharp"]
-run = "cargo +nightly bolero test fuzz_csharp -p orbit-fuzz"
+run = ["scripts/fuzz/unpack-corpus.sh fuzz_csharp", "cargo +nightly bolero test fuzz_csharp -p orbit-fuzz"]
 description = "Fuzz the C# code parser"
 
 [tasks."fuzz:rust-parser"]
-run = "cargo +nightly bolero test fuzz_rust_parser -p orbit-fuzz"
+run = ["scripts/fuzz/unpack-corpus.sh fuzz_rust_parser", "cargo +nightly bolero test fuzz_rust_parser -p orbit-fuzz"]
 description = "Fuzz the Rust code parser"
 
 [tasks."fuzz:indexer-messages"]
-run = "cargo +nightly bolero test fuzz_indexer_messages -p orbit-fuzz"
+run = ["scripts/fuzz/unpack-corpus.sh fuzz_indexer_messages", "cargo +nightly bolero test fuzz_indexer_messages -p orbit-fuzz"]
 description = "Fuzz indexer message deserialization"
 
 # The workspace step shares the unit-test features; the second relinks `orbit` without the server's FIPS module.

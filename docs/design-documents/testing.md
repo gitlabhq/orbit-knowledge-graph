@@ -66,9 +66,9 @@ e2e --> perf
 | Container tests | `crates/integration-tests/tests/` | `mise test:integration` |
 | E2E | `e2e/` | `e2e/scripts/setup.sh`, then `e2e/scripts/test.sh` |
 | Performance | `code-indexing-benchmark.yaml`, `crates/query-engine/profiler/` | `mise query:profile` |
-| Fuzzing | `crates/fuzz/` | `mise fuzz:<target>` |
+| Fuzzing | `crates/fuzz/` | `mise test:fuzz`, `mise fuzz:<target>` |
 
-The Rust test jobs run on every MR and every main commit, and none of them is allowed to fail.
+The Rust test jobs run on every MR and every main commit. Only `fuzz-smoke` is allowed to fail.
 
 ## Build scripts
 
@@ -304,7 +304,14 @@ Some failures only occur at production scale. Examples are evictions on the temp
 
 ## Fuzzing
 
-The [`orbit-fuzz`](../../crates/fuzz/README.md) crate has Bolero targets for the query frontends (JSON and GQL), the language parsers, and indexer message deserialization. Each target has a `mise fuzz:<target>` task and needs a nightly Rust toolchain. Fuzzing runs locally. CI compiles the targets but does not run them.
+The [`orbit-fuzz`](../../crates/fuzz/README.md) crate has Bolero targets for the query frontends (JSON and GQL), the language parsers, and indexer message deserialization. Each target keeps its corpus in a Git LFS archive and has a `mise fuzz:<target>` task that needs a nightly Rust toolchain.
+
+CI runs the targets in two tiers:
+
+- `fuzz-smoke` runs `mise test:fuzz` on every MR and main commit. It replays each corpus on stable Rust, then runs one second of random inputs. It may fail without failing the pipeline until the corpora have grown.
+- `fuzz-deep` runs libFuzzer with AddressSanitizer on nightly Rust, in three shards, from a daily schedule with `SCHEDULE_ONLY=fuzz-deep`. On an MR it is a manual job. It keeps the grown corpora and any crashes as artifacts for 30 days.
+
+The crate README covers corpus promotion and crash triage.
 
 ## Gates around the tests
 
