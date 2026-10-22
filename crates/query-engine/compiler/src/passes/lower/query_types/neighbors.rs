@@ -58,6 +58,8 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         incoming_kinds,
         incoming_scope_preserving,
         incoming_cross_scope,
+        outgoing_scope_preserving,
+        outgoing_cross_scope,
         outgoing_neighbor_paths,
         incoming_neighbor_paths,
     } = &plan.operation;
@@ -75,8 +77,8 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     let center_id_range = cnp.id_range.clone();
     let edge_alias = "e";
 
-    let center_lookup = |edge: &str, center: &str| Expr::InSelect {
-        expr: Box::new(Expr::col(edge, TARGET_ID_COLUMN)),
+    let center_lookup = |edge: &str, edge_col: &str, center: &str| Expr::InSelect {
+        expr: Box::new(Expr::col(edge, edge_col)),
         query: Box::new(Query {
             select: vec![SelectExpr::col(center, DEFAULT_PRIMARY_KEY)],
             from: TableRef::scan_final(&center_table, center),
@@ -177,22 +179,29 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             if let Some(f) = rel_kind_filter(a, arm_kinds) {
                 wp.push(f);
             }
-            if dir == Direction::Incoming && !center_node_ids.is_empty() && center_has_tp {
-                if incoming_cross_scope.is_empty() {
+            let (carrying, rest) = match dir {
+                Direction::Incoming => (incoming_scope_preserving, incoming_cross_scope),
+                _ => (outgoing_scope_preserving, outgoing_cross_scope),
+            };
+            if !center_node_ids.is_empty() && center_has_tp {
+                if rest.is_empty() {
                     wp.push(path_lookup(a));
-                } else if incoming_scope_preserving.is_empty() {
-                    wp.push(center_lookup(a, "_ctr"));
+                } else if carrying.is_empty() {
+                    wp.push(center_lookup(a, center_edge_col, "_ctr"));
                 } else {
-                    let narrowed_filter = rel_kind_filter(a, incoming_scope_preserving)
-                        .expect("nonempty scoped kinds");
-                    let broad_filter = rel_kind_filter(a, incoming_cross_scope)
-                        .expect("nonempty cross-scope kinds");
+                    let narrowed_filter =
+                        rel_kind_filter(a, carrying).expect("nonempty scoped kinds");
+                    let broad_filter =
+                        rel_kind_filter(a, rest).expect("nonempty cross-scope kinds");
                     wp.push(
                         Expr::or_all([
                             Some(Expr::and(narrowed_filter, path_lookup(a))),
-                            Some(Expr::and(broad_filter, center_lookup(a, "_ctr"))),
+                            Some(Expr::and(
+                                broad_filter,
+                                center_lookup(a, center_edge_col, "_ctr"),
+                            )),
                         ])
-                        .expect("incoming route groups are nonempty"),
+                        .expect("route groups are nonempty"),
                     );
                 }
             }
