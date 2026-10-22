@@ -68,10 +68,6 @@ pub enum Predicate {
         relation: RelationId,
         keys: Vec<String>,
     },
-    Scope {
-        alias: String,
-        proof: crate::scope::ScopeProof,
-    },
 }
 
 impl Predicate {
@@ -139,7 +135,6 @@ impl Predicate {
             | Self::EntityKind { column, .. } => in_key(&column.name),
             Self::Membership { columns, .. } => columns.iter().all(|column| in_key(&column.name)),
             Self::RelationshipKinds { .. } => in_key(RELATIONSHIP_KIND_COLUMN),
-            Self::Scope { .. } => in_key(TRAVERSAL_PATH_COLUMN),
             _ => false,
         }
     }

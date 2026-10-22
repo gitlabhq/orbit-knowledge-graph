@@ -1,9 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-mod application;
-
-pub use application::apply_plan;
-
 #[derive(Clone, Default)]
 pub struct QueryScope {
     nodes: HashMap<String, ScopeProof>,

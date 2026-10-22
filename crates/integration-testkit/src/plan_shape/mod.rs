@@ -289,7 +289,7 @@ fn check<M: OrbitQueryModel>(
                 continue;
             }
         };
-        let mut lowered = match lower::emit(&plan, &input) {
+        let mut lowered = match lower::emit(&plan, &input, None) {
             Ok(lowered) => lowered,
             Err(error) => {
                 failures.push(format!("{label}: {error}"));

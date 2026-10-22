@@ -5,8 +5,13 @@ use crate::error::{QueryError, Result};
 use crate::input::{Input, OrderDirection};
 use crate::passes::lower::{graph, predicates};
 use crate::passes::plan::{EdgeRelation, Plan, Traversal};
+use crate::scope::QueryScope;
 
-pub(crate) fn emit(plan: &Plan<Traversal>, input: &Input) -> Result<Emitted> {
+pub(crate) fn emit(
+    plan: &Plan<Traversal>,
+    input: &Input,
+    scope: Option<&QueryScope>,
+) -> Result<Emitted> {
     let execution = &plan.operation.execution;
     let mut read = super::super::redaction_columns(plan, execution);
     read.extend(
@@ -15,7 +20,7 @@ pub(crate) fn emit(plan: &Plan<Traversal>, input: &Input) -> Result<Emitted> {
             .iter()
             .map(|order| execution.property(&order.node, &order.property)),
     );
-    let mut output = graph::execute(execution, &read);
+    let mut output = graph::execute(execution, &read, scope);
     let nodes = output.take_bindings(plan, input)?;
     let mut query = output.into_query(vec![], vec![], vec![], input.limit);
     query.order_by = match (&input.order_by, &input.relationship_return.sort) {

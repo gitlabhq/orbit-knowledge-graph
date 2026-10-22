@@ -76,7 +76,6 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
             cte_name: super::graph::relation_name(*relation),
             columns: keys.clone(),
         },
-        Predicate::Scope { alias, proof } => crate::scope::scope_predicate(proof, alias),
     }
 }
 
