@@ -126,7 +126,7 @@ A node selector names one entity type in the ontology.
 | `entity` | `string` | Ontology node type, such as `Project`, `User`, `MergeRequest`, `File`, or `Definition`. |
 | `columns` | `string` or `array` | Properties to return. Use `"*"` for all non-restricted properties or an array of names. If omitted, GitLab Orbit returns the entity's default columns. |
 | `filters` | `object` | Property filters. |
-| `node_ids` | `array` | Exact IDs to match. Accepts integers or digit strings. Maximum 500. |
+| `node_ids` | `array` | Exact IDs to match. Accepts integers or digit strings. Maximum 100. |
 | `id_range` | `object` | Inclusive ID range with `start` and `end`. |
 | `id_property` | `string` | Property used by `node_ids` and `id_range`. Default `id`. |
 
@@ -660,7 +660,7 @@ GitLab Orbit rejects broad or ambiguous queries before compiling SQL.
 | Nodes per query | 5 |
 | Relationships per query | 5 |
 | Aggregations per query | 10 |
-| `node_ids` per selector | 500 |
+| `node_ids` per selector | 100 |
 | Values in an `in` filter | 100 |
 | Columns per node selector | 50 |
 | Relationship types per selector | 10 |

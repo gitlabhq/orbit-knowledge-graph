@@ -22,7 +22,7 @@ The module's `LICENSE` contains the Apache-2.0 license and upstream attribution 
 The new Rust implementation remains under the repository's license.
 
 The grammar restricts identifiers and arrows to ASCII. Escaped identifiers must still pass the compiler's identifier rules.
-Keywords are case insensitive; identifiers are case sensitive. Strings support M23 escape forms, and comments count as whitespace.
+Keywords are case insensitive; identifiers are case sensitive. Strings support M23 escape forms, reject raw control characters, and contain at most 1,024 decoded characters. Comments count as whitespace.
 `OFFSET`, `DEBUG`, `ANY`, and `SHORTEST` are reserved in addition to the openCypher reserved words, so a variable with one of those names needs backticks.
 
 ## Compiler boundary
@@ -218,6 +218,7 @@ Unsupported syntax or lowering returns a client-safe error rather than dropping 
 Syntax errors report line, column, and expected tokens without echoing query text; lowering errors name the offending identifier.
 
 Query text is limited to 32 KiB. A flat Pest scan checks nesting before recursive parsing, with a limit of 32 levels.
+Pest applies shared compiler caps before it builds the syntax tree. These cover identifiers, relationships, types, filters, projections, predicates, nesting, and ID lists.
 Existing compiler limits still apply after lowering.
 Queries accept at most 16 input predicates across all MATCH clauses, including node filters, relationship filters, and cross-node comparisons.
 An ID selector or IN list counts as one predicate; an ID range counts as two.

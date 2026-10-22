@@ -11,6 +11,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/query_limits.rs");
     println!("cargo:rerun-if-changed=src/passes/frontend/json_dsl/schema_contract.rs");
+    println!("cargo:rerun-if-changed=src/passes/frontend/gql/query.pest");
 
     let schema_dir = PathBuf::from(std::env::var("SCHEMA_DIR").unwrap_or_else(|_| {
         panic!("SCHEMA_DIR must be set via .cargo/config.toml [env] when building the compiler")
@@ -95,6 +96,79 @@ fn main() {
         &schema,
         "/$defs/FilterEntry/oneOf",
         MAX_FILTER_ENTRIES_PER_PROPERTY,
+    );
+
+    let grammar =
+        std::fs::read_to_string("src/passes/frontend/gql/query.pest").expect("read GQL grammar");
+    check_grammar_bound(
+        &grammar,
+        "UnescapedSymbolicName",
+        &format!("IdentifierPart{{0,{}}}", MAX_IDENTIFIER_LEN - 1),
+    );
+    check_grammar_bound(
+        &grammar,
+        "EscapedSymbolicName",
+        &format!("IdentifierPart{{0,{}}}", MAX_IDENTIFIER_LEN - 1),
+    );
+    check_grammar_bound(
+        &grammar,
+        "NodeProjection",
+        &format!("ProjectionProperty){{0,{}}}", MAX_COLUMNS - 1),
+    );
+    check_grammar_bound(
+        &grammar,
+        "RelationshipTypes",
+        &format!("SchemaName){{0,{}}}", MAX_REL_TYPES - 1),
+    );
+    check_grammar_bound(
+        &grammar,
+        "InListLiteral",
+        &format!("Value){{0,{}}}", MAX_IN_VALUES - 1),
+    );
+    check_grammar_bound(
+        &grammar,
+        "ListLiteral",
+        &format!("Value){{0,{}}}", MAX_NODE_IDS - 1),
+    );
+    check_grammar_bound(
+        &grammar,
+        "PatternElement",
+        &format!("PatternElementChain){{0,{MAX_RELS_CAP}}}"),
+    );
+    check_grammar_bound(
+        &grammar,
+        "AndExpression",
+        &format!("NotExpression){{0,{}}}", MAX_PREDICATES - 1),
+    );
+    check_grammar_bound(
+        &grammar,
+        "NodeMapLiteral",
+        &format!("MapEntry){{0,{}}}", MAX_FILTERS_PER_NODE - 1),
+    );
+    check_grammar_bound(
+        &grammar,
+        "RelationshipMapLiteral",
+        &format!("MapEntry){{0,{}}}", MAX_FILTERS_PER_REL - 1),
+    );
+    check_grammar_bound(
+        &grammar,
+        "NotExpression",
+        &format!("Negation{{0,{MAX_PREDICATE_DEPTH}}}"),
+    );
+    assert_eq!(
+        MAX_NODE_IDS, MAX_IN_VALUES,
+        "GQL ListLiteral and InListLiteral share the Value bound; keep MAX_NODE_IDS and MAX_IN_VALUES equal"
+    );
+}
+
+fn check_grammar_bound(grammar: &str, rule: &str, bound: &str) {
+    let production = grammar
+        .lines()
+        .find(|line| line.starts_with(&format!("{rule} =")))
+        .unwrap_or_else(|| panic!("GQL grammar is missing rule `{rule}`"));
+    assert!(
+        production.contains(bound),
+        "GQL grammar rule `{rule}` must contain `{bound}` to match query_limits.rs"
     );
 }
 

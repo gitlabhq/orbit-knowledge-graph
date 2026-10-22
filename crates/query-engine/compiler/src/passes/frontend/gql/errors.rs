@@ -97,8 +97,10 @@ fn rule_label(rule: &Rule) -> String {
         | Rule::BooleanLiteral
         | Rule::TemporalLiteral => "a value",
         Rule::FunctionName => "a function call",
-        Rule::ListLiteral => "a list",
-        Rule::MapLiteral | Rule::MapEntry => "a property map such as {name: 'x'}",
+        Rule::InListLiteral | Rule::ListLiteral => "a list",
+        Rule::NodeMapLiteral | Rule::RelationshipMapLiteral | Rule::MapEntry => {
+            "a property map such as {name: 'x'}"
+        }
         Rule::RangeLiteral => "a hop range such as *1..3",
         other => return format!("{other:?}"),
     }

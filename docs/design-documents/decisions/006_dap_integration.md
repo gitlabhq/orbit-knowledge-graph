@@ -265,7 +265,7 @@ Prompt content for Orbit-aware agents should teach:
   file contents, job logs or diffs, real-time pipeline or deployment state, or a
   resource the user referenced by URL.
 - How to query. Discover the schema first and expand only the relevant
-  nodes. Respect the server limits (3 hops, 1,000 results, 500 node IDs per
+  nodes. Respect the server limits (3 hops, 1,000 results, 100 node IDs per
   selector) and filter early. Read results as TOON, the compact text
   format for LLM consumption.
 

@@ -1,5 +1,7 @@
 mod ast;
 mod errors;
+#[cfg(test)]
+mod grammar_contract;
 mod lower;
 mod syntax;
 

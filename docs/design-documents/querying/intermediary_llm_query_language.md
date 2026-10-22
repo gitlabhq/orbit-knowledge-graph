@@ -477,7 +477,7 @@ Each relationship step has a hard-coded hop cap, and the schema enforces the sam
 - `hops` upper bound limited to 3 to prevent resource exhaustion
 - `limit` capped at 1000 results (default: 30)
 - Path `max_depth` limited to 3
-- `node_ids` capped at 500 per node selector
+- `node_ids` capped at 100 per node selector
 - `IN` filter values capped at 100 per filter
 - `cursor.page_size` capped at 1000
 

@@ -8,6 +8,7 @@ use serde_json::{Number, Value};
 use super::ast::*;
 use super::{QueryParser, Rule};
 use crate::input::{BooleanExpression, Direction, FilterOp, OrderDirection, TruncateUnit};
+use crate::query_limits::MAX_FILTER_STRING_LEN;
 
 pub(super) type Node<'i> = pest_consume::Node<'i, Rule, ()>;
 pub(super) type Result<T> = std::result::Result<T, Error<Rule>>;
@@ -134,10 +135,10 @@ impl QueryParser {
             [Variable(variable), NodeLabel(label)] => NodePattern {
                 span, variable, label: Some(label), properties: Vec::new(),
             },
-            [Variable(variable), MapLiteral(map)] => NodePattern {
+            [Variable(variable), NodeMapLiteral(map)] => NodePattern {
                 span, variable, label: None, properties: map.entries,
             },
-            [Variable(variable), NodeLabel(label), MapLiteral(map)] => NodePattern {
+            [Variable(variable), NodeLabel(label), NodeMapLiteral(map)] => NodePattern {
                 span, variable, label: Some(label), properties: map.entries,
             },
         ))
@@ -183,7 +184,9 @@ impl QueryParser {
                 Rule::Variable => relationship.variable = Some(Self::Variable(child)?),
                 Rule::RelationshipTypes => relationship.types = Self::RelationshipTypes(child)?,
                 Rule::RangeLiteral => relationship.range = Some(Self::RangeLiteral(child)?),
-                Rule::MapLiteral => relationship.properties = Some(Self::MapLiteral(child)?),
+                Rule::RelationshipMapLiteral => {
+                    relationship.properties = Some(Self::RelationshipMapLiteral(child)?)
+                }
                 _ => return Err(mismatch(&child)),
             }
         }
@@ -570,18 +573,12 @@ impl QueryParser {
         ))
     }
 
-    fn MapLiteral(input: Node) -> Result<MapLiteral> {
-        let span = input.as_span();
-        let mut keys = HashSet::new();
-        let mut entries = Vec::new();
-        for child in input.into_children() {
-            let entry = Self::MapEntry(child.clone())?;
-            if !keys.insert(entry.key.value.clone()) {
-                return Err(child.error("duplicate property in a map"));
-            }
-            entries.push(entry);
-        }
-        Ok(MapLiteral { span, entries })
+    fn NodeMapLiteral(input: Node) -> Result<MapLiteral> {
+        map(input)
+    }
+
+    fn RelationshipMapLiteral(input: Node) -> Result<MapLiteral> {
+        map(input)
     }
 
     fn MapEntry(input: Node) -> Result<MapEntry> {
@@ -617,10 +614,13 @@ impl QueryParser {
     }
 
     #[alias(value)]
+    fn InListLiteral(input: Node) -> Result<Value> {
+        list(input)
+    }
+
+    #[alias(value)]
     fn ListLiteral(input: Node) -> Result<Value> {
-        Ok(match_nodes!(input.into_children();
-            [value(values)..] => Value::Array(values.collect()),
-        ))
+        list(input)
     }
 
     fn Variable(input: Node) -> Result<Name> {
@@ -630,6 +630,20 @@ impl QueryParser {
     fn SchemaName(input: Node) -> Result<Name> {
         name(&input)
     }
+}
+
+fn map(input: Node) -> Result<MapLiteral> {
+    let span = input.as_span();
+    let mut keys = HashSet::new();
+    let mut entries = Vec::new();
+    for child in input.into_children() {
+        let entry = QueryParser::MapEntry(child.clone())?;
+        if !keys.insert(entry.key.value.clone()) {
+            return Err(child.error("duplicate property in a map"));
+        }
+        entries.push(entry);
+    }
+    Ok(MapLiteral { span, entries })
 }
 
 fn directed(input: Node, direction: Direction) -> Result<Relationship> {
@@ -647,6 +661,12 @@ fn directed(input: Node, direction: Direction) -> Result<Relationship> {
 
 fn leaf(comparison: Comparison<'_>) -> BooleanExpression<Predicate<'_>> {
     BooleanExpression::Leaf(Predicate::Comparison(Box::new(comparison)))
+}
+
+fn list(input: Node) -> Result<Value> {
+    Ok(match_nodes!(<QueryParser>; input.into_children();
+        [value(values)..] => Value::Array(values.collect()),
+    ))
 }
 
 fn row_count(value: &Value, span: Span<'_>, clause: &str) -> Result<u32> {
@@ -747,6 +767,11 @@ fn string(node: &Node) -> Result<String> {
             }
             _ => return Err(mismatch(node)),
         }
+    }
+    if result.chars().count() > MAX_FILTER_STRING_LEN {
+        return Err(node.error(format!(
+            "string literal must not exceed {MAX_FILTER_STRING_LEN} characters"
+        )));
     }
     Ok(result)
 }

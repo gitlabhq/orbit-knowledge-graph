@@ -310,7 +310,7 @@
             ]
           },
           "minItems": 1,
-          "maxItems": 500
+          "maxItems": 100
         },
         "id_range": {
           "$ref": "#/$defs/IdRange",
