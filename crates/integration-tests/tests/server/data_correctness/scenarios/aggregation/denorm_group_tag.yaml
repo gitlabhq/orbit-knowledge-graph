@@ -1,19 +1,32 @@
-description: Grouping by a denormalized property counts each member through its edge tag
+description: Grouping by job status through the pipeline edge tag counts each job of the head pipeline
 
 config:
   security:
-    paths: ["1/101/"]
+    paths: ["1/100/1000/"]
+  extra_seed:
+    gl_merge_request:
+      - { id: 99300, iid: 30, title: Head pipeline MR, state: opened, source_branch: hp, target_branch: main, project_id: 1000, author_id: 1, head_pipeline_id: 99310, traversal_path: "1/100/1000/" }
+    gl_pipeline:
+      - { id: 99310, iid: 31, status: failed, ref: hp, source: push, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_job:
+      - { id: 99320, name: build, status: success, pipeline_id: 99310, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 99321, name: test, status: failed, pipeline_id: 99310, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 99322, name: lint, status: failed, pipeline_id: 99310, project_id: 1000, traversal_path: "1/100/1000/" }
+    gl_ci_edge:
+      - { traversal_path: "1/100/1000/", source_id: 99310, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 99320, target_kind: Job, source_tags: [], target_tags: ["status:success"] }
+      - { traversal_path: "1/100/1000/", source_id: 99310, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 99321, target_kind: Job, source_tags: [], target_tags: ["status:failed"] }
+      - { traversal_path: "1/100/1000/", source_id: 99310, source_kind: Pipeline, relationship_kind: HAS_JOB, target_id: 99322, target_kind: Job, source_tags: [], target_tags: ["status:failed"] }
 
 query:
   json: |
-    {"query_type":"aggregation","nodes":[{"id":"u","entity":"User"},{"id":"g","entity":"Group"},{"id":"p","entity":"Project","node_ids":[1001]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"},{"type":"CONTAINS","from":"g","to":"p"}],"group_by":["u.state"],"aggregations":[{"count":"u","as":"n"}],"aggregation_sort":"-n"}
+    {"query_type":"aggregation","nodes":[{"id":"m","entity":"MergeRequest","node_ids":[99300]},{"id":"pl","entity":"Pipeline"},{"id":"j","entity":"Job"}],"relationships":[{"type":"HAS_HEAD_PIPELINE","from":"m","to":"pl"},{"type":"HAS_JOB","from":"pl","to":"j"}],"group_by":["j.status"],"aggregations":[{"count":"j","as":"n"}],"aggregation_sort":"-n"}
   gql: |
-    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project {id: 1001})
-    RETURN u.state, count(u) AS n ORDER BY n DESC
+    MATCH (m:MergeRequest {id: 99300})-[:HAS_HEAD_PIPELINE]->(pl:Pipeline)-[:HAS_JOB]->(j:Job)
+    RETURN j.status, count(j) AS n ORDER BY n DESC
 
 expect:
   skip_requirements: [node_ids, aggregation_sort]
   row_count: 2
   row_values:
-    - { u_state: active, n: 3 }
-    - { u_state: blocked, n: 1 }
+    - { j_status: failed, n: 2 }
+    - { j_status: success, n: 1 }

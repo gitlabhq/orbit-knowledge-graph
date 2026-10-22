@@ -1,5 +1,5 @@
 cases:
-  - name: Grouping by a verbatim edge tag skips the endpoint table
+  - name: Grouping by a tag the job row writes skips the job table
     query:
       json: |
         {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[278964]},{"id":"m","entity":"MergeRequest"},{"id":"pl","entity":"Pipeline"},{"id":"j","entity":"Job"}],"relationships":[{"type":"IN_PROJECT","from":"m","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"m","to":"pl"},{"type":"HAS_JOB","from":"pl","to":"j"}],"group_by":["j.status"],"aggregations":[{"count":"j","as":"n"}]}
@@ -50,3 +50,19 @@ cases:
           expect:
             - (Aggregate group j.status, group j.name, ... (_))
             - (Scan Table(gl_job) AS j)
+
+  - name: Tags written by a standalone edge keep the endpoint table
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User"},{"id":"g","entity":"Group","node_ids":[100]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"}],"group_by":["u.state"],"aggregations":[{"count":"u","as":"n"}]}
+      gql: |
+        MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100})
+        RETURN u.state, count(u) AS n
+    logical:
+      expect: ["(Aggregate group u.state AS u_state, COUNT(u) AS n (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Aggregate group u.state, u.state AS u_state, ... (_))
+            - (Scan Table(gl_user) AS u)

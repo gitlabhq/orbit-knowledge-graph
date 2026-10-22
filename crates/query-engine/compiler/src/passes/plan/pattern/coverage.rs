@@ -5,7 +5,8 @@ use std::collections::HashSet;
 use ontology::constants::*;
 use ontology::{DataType, EnumType};
 use query_data_model::{
-    DenormalizedDirection, DenormalizedKey, DenormalizedProperty, OrbitQueryModel, PropertyId,
+    DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint, OrbitQueryModel,
+    PropertyId, RelationalMapping,
 };
 
 use super::{EdgeRelation, NodePlan, Pattern};
@@ -53,7 +54,7 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             })
     }
 
-    /// The one-hop edge tag that copies a grouped string property verbatim, so grouping need not read the node.
+    /// The tag that the property holder writes on its own one-hop edge row, so grouping need not read the node.
     pub fn group_tag(&self, group: &InputGroupByKey) -> Option<(Column, String)> {
         let InputGroupByKey::Property {
             node,
@@ -64,22 +65,21 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         else {
             return None;
         };
-        let entity = self
+        let entity = self.nodes.get(node)?.entity.as_deref()?;
+        let stored = self
             .model
-            .graph()
-            .entity_id(self.nodes.get(node)?.entity.as_deref()?)?;
-        let stored = self.model.property_for_entity_id(entity, property)?;
-        let pass_through = match stored.data_type {
-            DataType::String => true,
+            .property_for_entity_id(self.model.graph().entity_id(entity)?, property)?;
+        let verbatim = match stored.data_type {
+            DataType::String => !self.model.property_is_free_text(entity, property),
             DataType::Enum => stored.enum_type == EnumType::String,
             _ => false,
         };
-        if stored.nullable || !pass_through {
+        if stored.nullable || !verbatim {
             return None;
         }
         self.relations
             .iter()
-            .filter(|relation| relation.max_hops == 1)
+            .filter(|relation| relation.max_hops == 1 && self.holds_foreign_key(relation, node))
             .find_map(|relation| {
                 let facts = self.denorm_property(relation, node, stored.id)?;
                 Some((
@@ -87,6 +87,25 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
                     facts.tag_key.clone(),
                 ))
             })
+    }
+
+    fn holds_foreign_key(&self, relation: &EdgeRelation, node: &str) -> bool {
+        let (Some(source), Some(target)) = (relation.source_entity, relation.target_entity) else {
+            return false;
+        };
+        let key = self.model.query_backend().foreign_key(
+            self.model.graph(),
+            &relation.relationships,
+            source,
+            target,
+        );
+        key.is_some_and(|key| {
+            relation.endpoint_column(node)
+                == Some(match key.holder {
+                    Endpoint::Source => SOURCE_ID_COLUMN,
+                    Endpoint::Target => TARGET_ID_COLUMN,
+                })
+        })
     }
 
     pub fn denorm_hop(
