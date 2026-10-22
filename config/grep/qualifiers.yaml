@@ -1,6 +1,3 @@
-# Short names for `orbit grep` qualifiers such as `mr:words`, keyed by ontology node.
-# Every node name works as well (`merge_request:`, `pipeline:`). Aliases for a node that
-# leaves the ontology are ignored.
 MergeRequest: [mr, pr]
 WorkItem: [issue, epic, task]
 Note: [comment]
