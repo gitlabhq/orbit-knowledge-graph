@@ -28,10 +28,14 @@ echo "shard $index/$total: ${targets[*]} (${seconds}s each)"
 
 "$root/scripts/fuzz/unpack-corpus.sh" "${targets[@]}"
 
+RUSTC="$(rustup which --toolchain nightly rustc)"
+export RUSTC
+export RUSTUP_TOOLCHAIN=nightly
+
 failed=()
 for target in "${targets[@]}"; do
-  echo "+ cargo +nightly bolero test $target -p orbit-fuzz --engine libfuzzer --sanitizer $sanitizer -T ${seconds}s"
-  cargo +nightly bolero test "$target" -p orbit-fuzz --engine libfuzzer --sanitizer "$sanitizer" -T "${seconds}s" ||
+  echo "+ cargo bolero test $target -p orbit-fuzz --toolchain nightly --engine libfuzzer --sanitizer $sanitizer -T ${seconds}s"
+  cargo bolero test "$target" -p orbit-fuzz --toolchain nightly --engine libfuzzer --sanitizer "$sanitizer" -T "${seconds}s" ||
     failed+=("$target")
 done
 
