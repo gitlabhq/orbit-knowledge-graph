@@ -94,6 +94,7 @@ impl AppConfig {
             merge(&mut document, parse_yaml(&data, &path)?);
         }
         merge(&mut document, secrets::tree(secret_dir)?);
+        reject_unknown_keys(&document)?;
 
         let json = serde_json::to_vec(&document).expect("a parsed document re-serialises");
         let loaded = Loader::new()
@@ -149,6 +150,24 @@ fn overlay_path(overlay: Option<&Path>) -> Option<PathBuf> {
     }
 }
 
+/// Loading ignores unknown keys, but a typo in these sections would leave a
+/// listener plaintext or a feature off with nothing to notice it.
+fn reject_unknown_keys(document: &serde_json::Value) -> Result<(), ConfigError> {
+    serde_json::from_value::<TlsConfig>(document["tls"].clone()).map_err(|source| {
+        ConfigError::StrictSection {
+            section: "tls",
+            source,
+        }
+    })?;
+    serde_json::from_value::<FeaturesConfig>(document["features"].clone()).map_err(|source| {
+        ConfigError::StrictSection {
+            section: "features",
+            source,
+        }
+    })?;
+    Ok(())
+}
+
 fn parse_yaml(data: &[u8], path: &Path) -> Result<serde_json::Value, ConfigError> {
     serde_saphyr::from_slice_with_options(data, serde_saphyr::options! { strict_booleans: true })
         .map_err(|source| ConfigError::Parse {
@@ -174,6 +193,12 @@ pub enum ConfigError {
         path: PathBuf,
         #[source]
         source: Box<serde_saphyr::Error>,
+    },
+    #[error("{section}: {source}")]
+    StrictSection {
+        section: &'static str,
+        #[source]
+        source: serde_json::Error,
     },
     #[error(transparent)]
     Secrets(#[from] crate::secrets::SecretError),
@@ -395,6 +420,29 @@ graph:
 
         assert_eq!(config.query.overrides.len(), 1);
         assert!(!config.query.default.use_query_cache.unwrap());
+    }
+
+    #[test]
+    fn a_misspelled_feature_scope_key_is_rejected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = write_overlay(
+            dir.path(),
+            "features.yaml",
+            "features:\n  code_graph_incremental:\n    enabeld: true\n",
+        );
+
+        let err = AppConfig::load_from(Some(&overlay), dir.path()).unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                ConfigError::StrictSection {
+                    section: "features",
+                    ..
+                }
+            ),
+            "{err}"
+        );
     }
 
     #[test]
