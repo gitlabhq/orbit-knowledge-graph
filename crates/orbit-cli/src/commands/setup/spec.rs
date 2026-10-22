@@ -54,20 +54,30 @@ fn substitute_launcher(text: &str, launcher: &str) -> String {
     text.replace("{{orbit}}", launcher)
 }
 
-fn render_instructions(launcher: &str, remote: bool) -> String {
+fn render_instructions(launcher: &str, remote: bool, query_syntax: &str) -> String {
     let mut text = TEXTS.instructions.trim_end().to_string();
     for (name, value) in &TEXTS.remote {
         let value = if remote { value.as_str() } else { "" };
         text = text.replace(&format!("{{{{{name}}}}}"), value);
     }
+    let text = text.replace("{{query_syntax}}", query_syntax);
     substitute_launcher(&text, launcher)
 }
 
 static REACHES_GITLAB: LazyLock<bool> =
     LazyLock::new(|| crate::remote::client::gitlab_usable(Path::new(".")));
 
-static RENDERED_INSTRUCTIONS: LazyLock<String> =
-    LazyLock::new(|| render_instructions(launcher(), reaches_gitlab()));
+static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| {
+    let remote = reaches_gitlab();
+    let served = remote
+        .then(|| crate::remote::client::query_graph_description(Path::new(".")))
+        .flatten()
+        .filter(|description| description.contains("MATCH"));
+    let syntax = served
+        .as_deref()
+        .unwrap_or(crate::descriptions::gql_syntax());
+    render_instructions(launcher(), remote, syntax)
+});
 
 pub(crate) fn reaches_gitlab() -> bool {
     *REACHES_GITLAB
@@ -301,7 +311,8 @@ mod tests {
             (GLAB_LAUNCHER, "`glab orbit grep"),
         ] {
             for remote in [true, false] {
-                let rendered = render_instructions(launcher, remote);
+                let rendered =
+                    render_instructions(launcher, remote, crate::descriptions::gql_syntax());
                 assert!(rendered.contains(expected), "{launcher}: {rendered}");
                 assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
                 for phrase in [
@@ -321,11 +332,12 @@ mod tests {
                     rendered.contains("instead of glab and glab api") == remote,
                     "{launcher}"
                 );
-                let budget = if remote { 120 } else { 75 };
+                assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
+                let budget = if remote { 220 } else { 75 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
-        let local = render_instructions(DIRECT_LAUNCHER, false);
+        let local = render_instructions(DIRECT_LAUNCHER, false, crate::descriptions::gql_syntax());
         assert_eq!(
             local.lines().filter(|line| line.starts_with("- ")).count(),
             2,

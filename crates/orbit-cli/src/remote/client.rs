@@ -23,6 +23,7 @@ const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
 const SKILLS_PATH: &str = "/api/v4/orbit/skills";
 const GREP_PATH: &str = "/api/v4/orbit/grep";
 const CONTEXT_PATH: &str = "/api/v4/orbit/context";
+const COMMANDS_PATH: &str = "/api/v4/orbit/agent/commands";
 const SHORT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const GREP_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -403,28 +404,53 @@ pub(crate) fn gitlab_usable(dir: &Path) -> bool {
     let origin = super::origin::project(dir)
         .filter(|(origin_host, _)| *origin_host == host)
         .map(|(_, path)| path);
+    block_on_short(async move {
+        match origin {
+            Some(path) => client.get_graph_status(&[("full_path", path)]).await,
+            None => client.get_status().await,
+        }
+    })
+    .is_some()
+}
+
+pub(crate) fn query_graph_description(dir: &Path) -> Option<String> {
+    let client = OrbitClient::from_env_in(dir).ok()?;
+    let body = block_on_short(async move {
+        client
+            .get_bytes(
+                COMMANDS_PATH,
+                &[("command_names", "query_graph".to_string())],
+            )
+            .await
+    })?;
+    let commands: Vec<serde_json::Value> = serde_json::from_slice(&body).ok()?;
+    commands
+        .iter()
+        .find(|command| command["name"] == "query_graph")
+        .and_then(|command| command["description"].as_str())
+        .map(str::to_string)
+}
+
+fn block_on_short<T, F>(future: F) -> Option<T>
+where
+    T: Send + 'static,
+    F: std::future::Future<Output = Result<T, RemoteError>> + Send + 'static,
+{
     std::thread::spawn(move || {
-        let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+        let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-        else {
-            return false;
-        };
+            .ok()?;
         runtime.block_on(async {
-            let probe = async {
-                match origin {
-                    Some(path) => client.get_graph_status(&[("full_path", path)]).await,
-                    None => client.get_status().await,
-                }
-            };
-            matches!(
-                tokio::time::timeout(SHORT_REQUEST_TIMEOUT, probe).await,
-                Ok(Ok(_))
-            )
+            tokio::time::timeout(SHORT_REQUEST_TIMEOUT, future)
+                .await
+                .ok()?
+                .ok()
         })
     })
     .join()
-    .unwrap_or(false)
+    .ok()
+    .flatten()
 }
 
 fn resolve_via_credential_helper(dir: &Path) -> Option<ResolvedEndpoint> {
