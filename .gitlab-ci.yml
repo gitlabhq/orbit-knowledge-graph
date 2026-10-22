@@ -1569,7 +1569,6 @@ e2e-ha:
       when: manual
       allow_failure: true
 
-# One entry per released GitLab version, pinned under gitlab_lanes in e2e/config/versions.yaml.
 e2e-gitlab-stable:
   extends: e2e
   parallel:

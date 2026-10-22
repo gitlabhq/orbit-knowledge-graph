@@ -17,7 +17,6 @@
 #
 # Usage:
 #   e2e/scripts/bump-gitlab-pins.sh
-#   E2E_GITLAB_LANE=19-5 e2e/scripts/bump-gitlab-pins.sh
 #   git diff -- e2e/config/versions.yaml
 #   git commit -am 'chore(e2e): bump gitlab pins'
 
@@ -42,7 +41,6 @@ fi
 
 command -v yq >/dev/null 2>&1 || { echo "yq (mikefarah v4+) required"; exit 1; }
 
-# --- Latest chart version ------------------------------------------------
 # The devel repo publishes a fresh chart every few hours tagged with the
 # source pipeline ID. We pick the one with the newest `created` timestamp.
 log "Finding latest chart version in $CHART_INDEX"
@@ -54,7 +52,6 @@ CHART_VERSION=$(curl -sSL --fail "$CHART_INDEX" \
 log "  chart: $CHART_VERSION"
 yq -i "$GITLAB_PINS.chart = \"$CHART_VERSION\"" "$VERSIONS"
 
-# --- Pin gitlab-org/gitlab ref to the current branch HEAD ----------------
 log "Resolving gitlab-org/gitlab $GITLAB_BRANCH -> commit SHA"
 GITLAB_SHA=$(curl -sSL --fail \
   "https://gitlab.com/api/v4/projects/gitlab-org%2Fgitlab/repository/branches/$GITLAB_BRANCH" \
@@ -65,7 +62,6 @@ yq -i "$GITLAB_PINS.ref = \"$GITLAB_SHA\"" "$VERSIONS"
 
 "$E2E_DIR/scripts/publish-siphon-tables.sh"
 
-# --- Resolve the CNG Rails image digests ----------------------------------
 fetch_digest() {
   local image="$1"
   local token
