@@ -67,19 +67,14 @@ cargo +nightly bolero test <target_name> -p orbit-fuzz
 
 If your default toolchain is nightly, you can omit `+nightly`.
 
-On macOS, AddressSanitizer doesn't link, so use `FUZZ_SANITIZER=NONE mise fuzz:deep`.
+On macOS, use `FUZZ_SANITIZER=NONE mise fuzz:deep` because AddressSanitizer doesn't link.
 
-## Corpus
+## Corpus and CI
 
-Corpora live in Git LFS as `tests/<target>/corpus.tar.gz`. Run `git lfs install --skip-repo` once. `mise fuzz:corpus-unpack` extracts them and replaces any local `corpus/`, and `mise fuzz:corpus-pack` writes them back.
+Seeds are in `seeds.yaml`. The grown corpus and crashes are in private GCS buckets ([infra](../../scripts/ci/fuzz/infra/README.md)). To add the grown corpus locally, run `FUZZ_CORPUS_BUCKET=<bucket> FUZZ_CORPUS_TOKEN="$(gcloud auth print-access-token)" mise fuzz:corpus-pull`.
 
-## CI
-
-- `fuzz-smoke` replays the corpora on every MR and is allowed to fail.
-- `fuzz-deep` runs `mise fuzz:deep` daily in 3 shards and keeps grown corpora and crashes as artifacts for 30 days.
-
-To promote a corpus, copy the artifact `corpus/` directories into `tests/<target>/` and run `mise fuzz:corpus-pack`. To reproduce a crash, add the input to the target's `corpus/` and run `cargo test -p orbit-fuzz --test <target>`.
-
-A new target needs a `[[test]]` block with `harness = false`, a mise task, and packed seed inputs.
+- `fuzz-smoke` replays the corpus on every MR.
+- `fuzz-deep` fuzzes daily and writes the corpus back.
+- Fuzzer output goes to `tests/<target>/fuzz.log`, not the public job log. Crashes upload to the crash bucket.
 
 See [Fuzzing](../../docs/design-documents/testing.md#fuzzing).
