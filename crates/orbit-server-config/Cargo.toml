@@ -14,10 +14,11 @@ strum = { workspace = true }
 sysinfo = { workspace = true }
 thiserror = { workspace = true }
 orbit-log-fields = { workspace = true }
+labkit-config = { workspace = true }
 prost = { workspace = true }
+serde-saphyr = { workspace = true }
 
 [dev-dependencies]
-labkit-config = { workspace = true }
 orbit-utils = { path = "../utils" }
 tempfile = { workspace = true }
 
