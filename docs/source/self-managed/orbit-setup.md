@@ -275,8 +275,8 @@ GitLab Self-Managed.
 
 ### TLS and network requirements
 
-GitLab connects to the gRPC endpoint over TLS on port 50054. Both Rails and Workhorse open their own
-connections, so both require a route to the endpoint.
+GitLab connects to the gRPC endpoint on port 50054.
+Both Rails and Workhorse open their own connections, so both require a route to the endpoint.
 
 TLS can terminate in one of two places: a load balancer in front of the `gkg-webserver` service, or the
 webserver itself with `tls.enabled` and `tls.existingSecret`. Only the webserver case needs the certificate
