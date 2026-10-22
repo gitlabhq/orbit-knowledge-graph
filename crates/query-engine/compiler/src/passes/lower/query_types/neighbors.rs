@@ -15,7 +15,7 @@ use crate::passes::lower::NodeBinding;
 
 use crate::passes::lower::sql::{
     dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
-    id_list_predicate, id_range_predicate, rel_kind_filter,
+    id_list_predicate, id_range_predicate, latest_row_dedup, rel_kind_filter,
 };
 use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
 
@@ -68,6 +68,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         outgoing_cross_scope,
         outgoing_neighbor_paths,
         incoming_neighbor_paths,
+        center_sort_key,
     } = &plan.operation;
     let direction = *direction;
     let has_non_denorm = *has_non_denorm;
@@ -362,6 +363,19 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         first
     };
     if fused_table.is_none() && !center_node_ids.is_empty() && center_has_tp {
+        let (order_by, limit_by) = latest_row_dedup(center_rows, center_sort_key);
+        let latest = Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan(&center_table, center_rows),
+            where_clause: Some(id_list_predicate(
+                center_rows,
+                DEFAULT_PRIMARY_KEY,
+                &center_node_ids,
+            )),
+            order_by,
+            limit_by,
+            ..Default::default()
+        };
         query.ctes.push(crate::ast::Cte {
             name: center_rows.to_string(),
             query: Box::new(Query {
@@ -369,11 +383,8 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
                     SelectExpr::col(center_rows, DEFAULT_PRIMARY_KEY),
                     SelectExpr::col(center_rows, TRAVERSAL_PATH_COLUMN),
                 ],
-                from: TableRef::scan_final(&center_table, center_rows),
-                where_clause: Expr::conjoin(vec![
-                    id_list_predicate(center_rows, DEFAULT_PRIMARY_KEY, &center_node_ids),
-                    deleted_false(center_rows),
-                ]),
+                from: TableRef::subquery(latest, center_rows),
+                where_clause: Some(deleted_false(center_rows)),
                 ..Default::default()
             }),
             recursive: false,

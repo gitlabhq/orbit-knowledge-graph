@@ -24,6 +24,7 @@ pub struct Neighbors {
     pub outgoing_cross_scope: Vec<String>,
     pub outgoing_neighbor_paths: Vec<(String, String)>,
     pub incoming_neighbor_paths: Vec<(String, String)>,
+    pub center_sort_key: Vec<String>,
 }
 
 pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
@@ -259,6 +260,10 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
         outgoing_cross_scope,
         outgoing_neighbor_paths: neighbor_paths(true),
         incoming_neighbor_paths: neighbor_paths(false),
+        center_sort_key: match center.table.as_deref() {
+            Some(table) => super::super::sort_key(model, table)?.to_vec(),
+            None => Vec::new(),
+        },
     });
     plan.node_edge_mappings.insert(
         center.alias.clone(),
