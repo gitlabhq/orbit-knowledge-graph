@@ -92,7 +92,7 @@ fn enforce_traversal_path_filters(
             continue;
         };
         if security_ctx.paths_at_least(min_role).is_empty() {
-            return Err(QueryError::Security(format!(
+            return Err(QueryError::Authorization(format!(
                 "{entity} requires access level {min_role} on at least one authorized path"
             )));
         }
@@ -533,8 +533,8 @@ mod tests {
             "traversal_path role-scope errors should be safe for clients, got: {err:?}"
         );
         assert!(
-            err.to_string().contains("authorized traversal_path scope"),
-            "Reporter paths must not satisfy SecurityManager traversal_path filters, got: {err}"
+            err.to_string().contains("requires access level 25"),
+            "Reporter paths must not satisfy a SecurityManager entity, got: {err}"
         );
     }
 
