@@ -207,7 +207,6 @@ async fn execute(request: Request) -> Result<()> {
 }
 
 fn resolve_named(name: &str, path: &str) -> Result<Request> {
-    ensure_known_skill(name)?;
     Ok(Request::Print {
         name: name.to_string(),
         path: path.to_string(),
@@ -218,8 +217,10 @@ fn resolve(name_or_path: Option<&str>, path: Option<&str>) -> Result<Request> {
     let Some(first) = name_or_path else {
         return Ok(Request::List);
     };
+    if first == "list" && path.is_none() {
+        return Ok(Request::List);
+    }
     if is_skill_name(first) {
-        ensure_known_skill(first)?;
         return Ok(Request::Print {
             name: first.to_string(),
             path: path.unwrap_or(MANIFEST).to_string(),
@@ -232,16 +233,6 @@ fn resolve(name_or_path: Option<&str>, path: Option<&str>) -> Result<Request> {
         name: DEFAULT_SKILL.to_string(),
         path: first.to_string(),
     })
-}
-
-fn ensure_known_skill(name: &str) -> Result<()> {
-    if name != DEFAULT_SKILL {
-        bail!(
-            "unknown skill name {name:?}. Known skills:\n  {DEFAULT_SKILL}\n\nUse `{} skills get <name> [path]`.",
-            crate::commands::setup::spec::launcher()
-        );
-    }
-    Ok(())
 }
 
 fn is_skill_name(value: &str) -> bool {
@@ -325,11 +316,19 @@ fn one_line(value: &str) -> String {
 async fn resolved_view(name: &str) -> Result<BTreeMap<String, String>> {
     let local = local_tree();
     let Some(client) = skill_client() else {
-        return Ok(local);
+        return match name == DEFAULT_SKILL {
+            true => Ok(local),
+            false => bail!(
+                "no GitLab credential found; only the {DEFAULT_SKILL} skill is available offline"
+            ),
+        };
     };
     let Some(remote) = resolve_remote_tree(&client, name).await? else {
         return Ok(local);
     };
+    if name != DEFAULT_SKILL {
+        return Ok(remote.files);
+    }
     Ok(compose_tree(remote.files, local.clone()).unwrap_or_else(|error| {
         warn(format!("could not compose the instance Orbit skill ({error}); using the embedded local skill"));
         local
@@ -363,8 +362,7 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
                 ));
                 return Ok(Some(cached.tree));
             }
-            warn(format!("{error}; using the embedded local skill"));
-            return Ok(None);
+            return embedded_fallback(name, error);
         }
     };
 
@@ -377,8 +375,7 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
                     ));
                     return Ok(Some(cached.tree));
                 }
-                warn("Orbit skill response has no ETag; using the embedded local skill");
-                return Ok(None);
+                return embedded_fallback(name, "Orbit skill response has no ETag");
             };
             let tree = validate_remote_envelope(name, &etag, &response.body)?;
             if let Err(error) = publish_cache(&origin, &tree) {
@@ -395,12 +392,11 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
             // A 304 does not change the tree; rewriting the cache would only alter its timestamp.
             Ok(Some(cached.tree))
         }
-        404 => {
-            warn(
-                "this GitLab instance does not serve Orbit skills; using the embedded local skill",
-            );
-            Ok(None)
-        }
+        404 if name != DEFAULT_SKILL => bail!(
+            "could not fetch the {name:?} skill: {}",
+            degradation_warning(&response)
+        ),
+        404 => embedded_fallback(name, "this GitLab instance does not serve Orbit skills"),
         status => match degradation(status) {
             Some(Degradation::Unavailable) if cached.is_some() => {
                 warn(format!(
@@ -409,16 +405,19 @@ async fn resolve_remote_tree(client: &OrbitClient, name: &str) -> Result<Option<
                 ));
                 Ok(cached.map(|cached| cached.tree))
             }
-            Some(_) => {
-                warn(format!(
-                    "{}; using the embedded local skill",
-                    degradation_warning(&response)
-                ));
-                Ok(None)
-            }
+            Some(_) => embedded_fallback(name, degradation_warning(&response)),
             None => Err(map_http_error(status, body_text(&response)).into()),
         },
     }
+}
+
+/// Only the `orbit` skill has an embedded copy; any other skill comes from the server or fails.
+fn embedded_fallback(name: &str, reason: impl std::fmt::Display) -> Result<Option<ValidatedTree>> {
+    if name != DEFAULT_SKILL {
+        bail!("could not fetch the {name:?} skill: {reason}");
+    }
+    warn(format!("{reason}; using the embedded local skill"));
+    Ok(None)
 }
 
 const BODY_EXCERPT_CHARS: usize = 200;
@@ -934,7 +933,14 @@ mod tests {
                 path: MANIFEST.to_string(),
             }
         );
-        assert!(resolve_named("unknown", MANIFEST).is_err());
+        assert_eq!(
+            resolve_named("registry", MANIFEST).unwrap(),
+            Request::Print {
+                name: "registry".to_string(),
+                path: MANIFEST.to_string(),
+            }
+        );
+        assert_eq!(resolve(Some("list"), None).unwrap(), Request::List);
         assert!(
             resolve(Some("references/local/sql.md"), Some(MANIFEST))
                 .unwrap_err()
