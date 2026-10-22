@@ -38,17 +38,17 @@ gitlab:
 # e2e-gitlab-stable matrix pins. Add or bump: E2E_GITLAB_LANE=<lane> scripts/bump-gitlab-pins.sh
 gitlab_lanes:
   "19-5":
-    chart: "10.5.0"
-    ref: "688b043e4884dc7139f6462107a224aec0a9bb29"
+    chart: "10.5.1"
+    ref: "e4383f16d7a065d0e8c6e4eb2bc969dc6c17c7bc"
     images:
       webservice:
-        digest: "sha256:31b2bdc4ef95b337a2e4d751a3001a83b2c368a4bca38ea6cd0f21370d767044"
+        digest: "sha256:2ab6b77769f777ec2dc94004ea493d1d3c2e6fe116d54d2679f7ce3bbc70c9ac"
       workhorse:
-        digest: "sha256:fb0a74667d81f75174a4454cf5b3c1ba5fd5dc1227da60012d39e172c6d9b157"
+        digest: "sha256:adf0f41e1bb4bf487d580ceaef429ee09dddf32a313f7d8e0a2f2c846edc5663"
       sidekiq:
-        digest: "sha256:694a62038383acac8798e263a9f1b6d05670e3ed21cefb6bbdf17d29c644cafe"
+        digest: "sha256:3ee087c7251f1225c31cf0ed3fe0323013679c5da504b9c0a94f042b8fed9968"
       toolbox:
-        digest: "sha256:e819a68288851954def386c222bf194c4df51597e4365a082f9429b6b4c621c9"
+        digest: "sha256:950fc05a3d47ce7da463d82044b7f7ea5050c8383be6b04dedd0bdc34abc514e"
     repository: registry.gitlab.com/gitlab-org/build/cng-mirror
 gkg:
   chart: "4.1.0"
