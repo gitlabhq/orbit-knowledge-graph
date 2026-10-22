@@ -1423,3 +1423,20 @@ e2e-ha:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
+
+e2e-gitlab-stable:
+  extends: e2e
+  parallel:
+    matrix:
+      - E2E_GITLAB_LANE: ["19-5"]
+  variables:
+    E2E_SUFFIX: "-gl${E2E_GITLAB_LANE}"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "e2e-gitlab-stable"
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == 'automation/e2e-pin-bump'
+      allow_failure: true
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
