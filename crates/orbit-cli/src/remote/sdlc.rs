@@ -1,18 +1,10 @@
 use std::fmt::Write as _;
 use std::path::Path;
-use std::sync::LazyLock;
 
 use serde_json::Value;
 
 use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, RemoteError};
-
-static TERMINAL_NOISE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
-        r"\x1b\[[0-9;]*[A-Za-z]|section_(?:start|end):\d+:[^\r\n]*|^\d{4}-\d\d-\d\dT[\d:.]+Z \d\d[OE]\+? ?",
-    )
-        .expect("terminal noise pattern is valid")
-});
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Target {
@@ -199,13 +191,11 @@ pub(crate) async fn read(
             ))
         }
         Target::Job(id) => {
-            if let Ok(body) = super::context::fetch(client.clone(), &[format!("Job[{id}]")]).await {
-                let text = String::from_utf8_lossy(&body);
-                if text.contains(" found=true") {
-                    return Ok(Found::Text(super::context::tidy(&text, false)));
-                }
-            }
-            Ok(Found::Text(job_text(client, &encoded, *id).await?))
+            let body = super::context::fetch(client.clone(), &[format!("Job[{id}]")]).await?;
+            Ok(Found::Text(super::context::tidy(
+                &String::from_utf8_lossy(&body),
+                false,
+            )))
         }
         Target::Commit(sha) => Ok(Found::Text(commit_text(client, &encoded, sha).await?)),
     }
@@ -218,17 +208,7 @@ async fn read_branch(
     branch: &str,
 ) -> Result<Found, RemoteError> {
     if let Some(mr) = merge_request(client, encoded, branch).await? {
-        let mut note = format!("branch:{branch} mr:{} {}\n", mr.iid, mr.state);
-        for reference in [
-            branch.to_string(),
-            format!("refs/merge-requests/{}/head", mr.iid),
-        ] {
-            if let Some(pipeline) = latest_pipeline(client, encoded, &reference).await?
-                && text(&pipeline["status"]) == "failed"
-            {
-                note.push_str(&pipeline_text(client, encoded, &pipeline).await?);
-            }
-        }
+        let note = format!("branch:{branch} mr:{} {}\n", mr.iid, mr.state);
         return Ok(Found::MergeRequest {
             note,
             reference: format!("{project}!{}", mr.iid),
@@ -345,16 +325,8 @@ async fn pipeline_text(
         return Ok(out);
     }
     let _ = writeln!(out, "failed_jobs[{}]:", jobs.len());
-    for (index, job) in jobs.iter().enumerate() {
+    for job in &jobs {
         let _ = writeln!(out, "  {}", job_line(job));
-        if index >= TRACED_JOBS {
-            continue;
-        }
-        if let Some(id) = job["id"].as_i64() {
-            for line in failure_excerpt(&trace(client, project, id).await) {
-                let _ = writeln!(out, "    | {line}");
-            }
-        }
     }
     Ok(out)
 }
@@ -378,32 +350,6 @@ fn job_line(job: &Value) -> String {
         flags.join(", "),
         text(&job["web_url"])
     )
-}
-
-async fn trace(client: &OrbitClient, project: &str, job: i64) -> Vec<String> {
-    match client
-        .get_api(&format!("projects/{project}/jobs/{job}/trace"), &[])
-        .await
-    {
-        Ok(trace) => trace_lines(&String::from_utf8_lossy(&trace)),
-        Err(_) => Vec::new(),
-    }
-}
-
-async fn job_text(client: &OrbitClient, project: &str, id: i64) -> Result<String, RemoteError> {
-    let job = get_json(client, &format!("projects/{project}/jobs/{id}"), &[]).await?;
-    let mut out = format!(
-        "{} {} pipeline:{} ref {} commit:{}\n",
-        job_line(&job),
-        text(&job["status"]),
-        job["pipeline"]["id"],
-        text(&job["ref"]),
-        short(text(&job["commit"]["id"]))
-    );
-    for line in trace(client, project, id).await {
-        let _ = writeln!(out, "  | {line}");
-    }
-    Ok(out)
 }
 
 async fn commit_text(
@@ -479,133 +425,4 @@ async fn commit_text(
         }
     }
     Ok(out)
-}
-
-static FAILURE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
-        r"\b(FAIL(ED|URE)?|ERROR|[Ee]rror|panic|Traceback|Exception|[Ff]ailed)\b|^\s*---\s*FAIL|^\s*●|✕|✗",
-    )
-    .expect("valid pattern")
-});
-
-static DIAGNOSTIC: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(?:^|[\s(])[\w./@+-]*\w\.[A-Za-z][A-Za-z0-9]{0,7}:\d+(?::\d+)?\b")
-        .expect("valid pattern")
-});
-
-static DEPENDENCY: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"node_modules/|node:internal|site-packages/|/go/pkg/mod/|/usr/lib/")
-        .expect("valid pattern")
-});
-
-pub(crate) static EPILOGUE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(
-        r"^(Uploading artifacts|Cleaning up project directory|Saving cache|Creating cache|Uploading cache|Not uploading cache|ERROR: Job failed|WARNING: .*artifact|\$ exit \d+|\S+: found \d+ matching artifact files and directories)",
-    )
-    .expect("valid pattern")
-});
-
-static LINE_PREFIX: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"^(\s*\[[^\]]*\])*\s*").expect("valid pattern"));
-
-const EXCERPT_LINES: usize = 80;
-const LINE_CHARS: usize = 240;
-const TRACED_JOBS: usize = 3;
-
-fn is_failure(line: &str) -> bool {
-    FAILURE.is_match(line) || (DIAGNOSTIC.is_match(line) && !DEPENDENCY.is_match(line))
-}
-
-fn clip(line: &str) -> String {
-    match line.char_indices().nth(LINE_CHARS) {
-        Some((end, _)) => format!("{}…", &line[..end]),
-        None => line.to_string(),
-    }
-}
-
-fn failure_excerpt(lines: &[String]) -> Vec<String> {
-    let end = lines.len()
-        - lines
-            .iter()
-            .rev()
-            .take_while(|line| EPILOGUE.is_match(line))
-            .count();
-    let tail = end.saturating_sub(20);
-    let mut wanted = std::collections::BTreeSet::new();
-    for (index, line) in lines[..tail].iter().enumerate() {
-        if is_failure(line) {
-            wanted.extend(index.saturating_sub(3)..(index + 4).min(tail));
-        }
-    }
-    let mut seen = std::collections::HashSet::new();
-    let distinct: Vec<usize> = wanted
-        .into_iter()
-        .filter(|index| seen.insert(LINE_PREFIX.replace(&lines[*index], "")))
-        .collect();
-    let skipped = distinct.len().saturating_sub(EXCERPT_LINES);
-    let mut wanted: Vec<usize> = distinct.into_iter().take(EXCERPT_LINES).collect();
-    wanted.extend(tail..end);
-    wanted.extend(
-        lines[end..]
-            .iter()
-            .position(|line| line.starts_with("ERROR: Job failed"))
-            .map(|offset| end + offset),
-    );
-    let mut out = Vec::new();
-    let mut last = None;
-    for index in wanted {
-        if last.is_some_and(|last| index > last + 1) || (last.is_none() && index > 0) {
-            out.push(
-                match (
-                    skipped,
-                    last.is_some_and(|last| last < tail && index >= tail),
-                ) {
-                    (1.., true) => format!("... {skipped} more lines near failures"),
-                    _ => "...".to_string(),
-                },
-            );
-        }
-        out.push(format!("{}: {}", index + 1, clip(&lines[index])));
-        last = Some(index);
-    }
-    out
-}
-
-pub(crate) fn trace_lines(trace: &str) -> Vec<String> {
-    let lines: Vec<String> = trace
-        .lines()
-        .map(|line| {
-            let line = line
-                .rsplit('\r')
-                .find(|part| !part.is_empty())
-                .unwrap_or("");
-            TERMINAL_NOISE.replace_all(line, "").trim_end().to_string()
-        })
-        .filter(|line| !line.is_empty())
-        .collect();
-    lines
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn job_logs_keep_file_diagnostics_and_drop_the_runner_epilogue() {
-        let mut log = vec!["$ lint".to_string(), "client.go:127:10: bad".to_string()];
-        log.extend((0..30).map(|n| format!("line {n}")));
-        log.extend(
-            [
-                "Uploading artifacts for failed job",
-                "ERROR: Job failed: exit code 1",
-            ]
-            .map(str::to_string),
-        );
-        let excerpt = failure_excerpt(&log);
-        assert!(excerpt.contains(&"2: client.go:127:10: bad".to_string()));
-        assert_eq!(
-            excerpt.last().unwrap(),
-            "34: ERROR: Job failed: exit code 1"
-        );
-    }
 }

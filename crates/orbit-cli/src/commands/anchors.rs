@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use anyhow::Result;
 use regex::Regex;
@@ -13,30 +14,37 @@ pub(crate) struct Anchors {
     pub(crate) names: Vec<String>,
 }
 
-fn line_patterns() -> [Regex; 2] {
-    [
-        Regex::new(r"([A-Za-z0-9_./@+-]+\.[A-Za-z0-9]{1,8}):(\d+)").expect("valid pattern"),
-        Regex::new(r#"File "([^"]+)", line (\d+)"#).expect("valid pattern"),
-    ]
-}
+const PATH: &str = r"[\w./@+-]*\w\.[A-Za-z][A-Za-z0-9]{0,7}";
 
-fn local_path(root: &Path, raw: &str, files: &BTreeSet<String>) -> Option<String> {
-    let trimmed = raw
-        .trim_start_matches("./")
-        .trim_start_matches("/app/")
-        .trim_start_matches('/');
-    if files.contains(trimmed) {
-        return Some(trimmed.to_string());
+static PATH_LINES: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r#"({PATH})"?(?::|,? line )(\d+)"#)).expect("valid pattern")
+});
+
+pub(crate) fn local_path(
+    root: Option<&Path>,
+    raw: &str,
+    files: &BTreeSet<String>,
+) -> Option<String> {
+    let known =
+        |path: &str| files.contains(path) || root.is_some_and(|root| root.join(path).is_file());
+    let segments: Vec<&str> = raw
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .collect();
+    if let [name] = segments.as_slice() {
+        if known(name) {
+            return Some(name.to_string());
+        }
+        let suffix = format!("/{name}");
+        let mut found = files.iter().filter(|file| file.ends_with(&suffix));
+        return match (found.next(), found.next()) {
+            (Some(only), None) => Some(only.clone()),
+            _ => None,
+        };
     }
-    if root.join(trimmed).is_file() {
-        return Some(trimmed.to_string());
-    }
-    let suffix = format!("/{trimmed}");
-    let mut found = files.iter().filter(|file| file.ends_with(&suffix));
-    match (found.next(), found.next()) {
-        (Some(only), None) => Some(only.clone()),
-        _ => None,
-    }
+    (0..segments.len() - 1)
+        .map(|start| segments[start..].join("/"))
+        .find(|candidate| known(candidate))
 }
 
 fn identifier_words(text: &str) -> Vec<String> {
@@ -67,16 +75,15 @@ fn identifier_words(text: &str) -> Vec<String> {
 
 pub(crate) fn extract(text: &str, root: &Path, files: &BTreeSet<String>) -> Anchors {
     let mut anchors = Anchors::default();
-    for pattern in line_patterns() {
-        for found in pattern.captures_iter(text) {
-            let (Some(path), Ok(line)) =
-                (local_path(root, &found[1], files), found[2].parse::<i64>())
-            else {
-                continue;
-            };
-            if line > 0 && !anchors.lines.contains(&(path.clone(), line)) {
-                anchors.lines.push((path, line));
-            }
+    for found in PATH_LINES.captures_iter(text) {
+        let (Some(path), Ok(line)) = (
+            local_path(Some(root), &found[1], files),
+            found[2].parse::<i64>(),
+        ) else {
+            continue;
+        };
+        if line > 0 && !anchors.lines.contains(&(path.clone(), line)) {
+            anchors.lines.push((path, line));
         }
     }
     anchors.names = identifier_words(text);
@@ -245,14 +252,21 @@ mod tests {
     fn finds_lines_and_names_in_gitlab_text() {
         let dir = tempfile::tempdir().unwrap();
         let files: BTreeSet<String> = ["executors/docker/pull.go".to_string()].into();
+        let files: BTreeSet<String> = files
+            .into_iter()
+            .chain(["app/models.py".to_string(), "index.js".to_string()])
+            .collect();
         let anchors = extract(
-            "pull.go:88: expected 3; call `retry_backoff`",
+            "pull.go:88: expected 3; call `retry_backoff`\n  File \"/srv/app/models.py\", line 12\n  node_modules/x/index.js:4",
             dir.path(),
             &files,
         );
         assert_eq!(
             anchors.lines,
-            [("executors/docker/pull.go".to_string(), 88)]
+            [
+                ("executors/docker/pull.go".to_string(), 88),
+                ("app/models.py".to_string(), 12)
+            ]
         );
         assert!(anchors.names.contains(&"retry_backoff".to_string()));
     }
