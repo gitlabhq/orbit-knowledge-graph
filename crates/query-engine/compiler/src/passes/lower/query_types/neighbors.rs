@@ -77,15 +77,12 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     let center_id_range = cnp.id_range.clone();
     let edge_alias = "e";
 
-    let center_lookup = |edge: &str, edge_col: &str, center: &str| Expr::InSelect {
+    let center_rows = "_ctr";
+    let center_lookup = |edge: &str, edge_col: &str| Expr::InSelect {
         expr: Box::new(Expr::col(edge, edge_col)),
         query: Box::new(Query {
-            select: vec![SelectExpr::col(center, DEFAULT_PRIMARY_KEY)],
-            from: TableRef::scan_final(&center_table, center),
-            where_clause: Expr::conjoin(vec![
-                id_list_predicate(center, DEFAULT_PRIMARY_KEY, &center_node_ids),
-                deleted_false(center),
-            ]),
+            select: vec![SelectExpr::col(center_rows, DEFAULT_PRIMARY_KEY)],
+            from: TableRef::cte(center_rows, center_rows),
             ..Default::default()
         }),
     };
@@ -93,12 +90,8 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     let path_lookup = |edge: &str| Expr::InSelect {
         expr: Box::new(Expr::col(edge, TRAVERSAL_PATH_COLUMN)),
         query: Box::new(Query {
-            select: vec![SelectExpr::col("_tpd", TRAVERSAL_PATH_COLUMN)],
-            from: TableRef::scan_final(&center_table, "_tpd"),
-            where_clause: Expr::conjoin(vec![
-                id_list_predicate("_tpd", DEFAULT_PRIMARY_KEY, &center_node_ids),
-                deleted_false("_tpd"),
-            ]),
+            select: vec![SelectExpr::col(center_rows, TRAVERSAL_PATH_COLUMN)],
+            from: TableRef::cte(center_rows, center_rows),
             ..Default::default()
         }),
     };
@@ -187,7 +180,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
                 if rest.is_empty() {
                     wp.push(path_lookup(a));
                 } else if carrying.is_empty() {
-                    wp.push(center_lookup(a, center_edge_col, "_ctr"));
+                    wp.push(center_lookup(a, center_edge_col));
                 } else {
                     let narrowed_filter =
                         rel_kind_filter(a, carrying).expect("nonempty scoped kinds");
@@ -196,10 +189,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
                     wp.push(
                         Expr::or_all([
                             Some(Expr::and(narrowed_filter, path_lookup(a))),
-                            Some(Expr::and(
-                                broad_filter,
-                                center_lookup(a, center_edge_col, "_ctr"),
-                            )),
+                            Some(Expr::and(broad_filter, center_lookup(a, center_edge_col))),
                         ])
                         .expect("route groups are nonempty"),
                     );
@@ -328,7 +318,7 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         }
     };
 
-    let query = if let Some(table) = fused_table {
+    let mut query = if let Some(table) = fused_table {
         let mut q = build_fused_both_arm(
             &center_id,
             &center_entity,
@@ -355,6 +345,25 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         arm.limit = Some(input.limit);
         arm
     };
+    if fused_table.is_none() && !center_node_ids.is_empty() && center_has_tp {
+        query.ctes.push(crate::ast::Cte {
+            name: center_rows.to_string(),
+            query: Box::new(Query {
+                select: vec![
+                    SelectExpr::col(center_rows, DEFAULT_PRIMARY_KEY),
+                    SelectExpr::col(center_rows, TRAVERSAL_PATH_COLUMN),
+                ],
+                from: TableRef::scan_final(&center_table, center_rows),
+                where_clause: Expr::conjoin(vec![
+                    id_list_predicate(center_rows, DEFAULT_PRIMARY_KEY, &center_node_ids),
+                    deleted_false(center_rows),
+                ]),
+                ..Default::default()
+            }),
+            recursive: false,
+            materialized: true,
+        });
+    }
     let role_identity = (!has_non_denorm && center_uses_default_pk).then(|| {
         query
             .select

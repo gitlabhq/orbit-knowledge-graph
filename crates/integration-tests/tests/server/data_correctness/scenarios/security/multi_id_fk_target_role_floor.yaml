@@ -36,7 +36,7 @@ cases:
     expect:
       row_count: 1
       row_values: [{ n: 0 }]
-      sql_contains: ["_role_f.id IN (SELECT", "LIMIT 1 BY _role_f.traversal_path, _role_f.id", "false"]
+      sql_contains: ["f.id IN [90000, 90001]", "LIMIT 1 BY f.traversal_path, f.id", "false"]
       skip_requirements: [node_ids]
 
   - name: developer_counts_the_finding
