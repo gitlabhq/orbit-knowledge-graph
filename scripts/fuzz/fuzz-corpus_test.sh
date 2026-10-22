@@ -25,11 +25,12 @@ corpus="$work/scripts/fuzz/corpus.sh"
 run="$work/scripts/fuzz/run.sh"
 unset FUZZ_CORPUS_TOKEN FUZZ_CORPUS_JWT FUZZ_CORPUS_WIF_PROVIDER
 
-mkdir -p "$tests/fuzz_b/corpus" && touch "$tests/fuzz_b/corpus/stale"
+mkdir -p "$tests/fuzz_b/corpus" && touch "$tests/fuzz_b/corpus/found" && printf old > "$tests/fuzz_b/corpus/seed-0"
 bash "$corpus" pull > /dev/null
 test "$(cat "$tests/fuzz_a/corpus/seed-0")" = "seed a"
 printf 'line one\nline two\n' | cmp - "$tests/fuzz_a/corpus/seed-1"
-test "$(ls -A "$tests/fuzz_b/corpus")" = "seed-0"
+test "$(ls -A "$tests/fuzz_b/corpus" | tr '\n' ' ')" = "found seed-0 "
+test "$(cat "$tests/fuzz_b/corpus/seed-0")" = "seed b"
 test -z "$(ls -A "$tests/fuzz_c/corpus")"
 
 if bash "$corpus" push fuzz_a 2> "$work/err"; then exit 1; fi

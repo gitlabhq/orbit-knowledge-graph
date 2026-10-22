@@ -47,7 +47,6 @@ check() {
 
 pull() {
   local dir="$tests/$1" archive="$work/$1.tar.gz" status seed n=0
-  rm -rf "$dir/corpus"
   mkdir -p "$dir/corpus"
   yq -o=json -I=0 ".$1 // [] | .[].input" "$seeds" > "$work/$1.seeds"
   while IFS= read -r seed; do

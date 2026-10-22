@@ -62,7 +62,7 @@ description = "Install git hooks (lefthook + worktree support)"
 
 [tasks."fuzz:corpus-pull"]
 run = "scripts/fuzz/corpus.sh pull"
-description = "Rebuild every fuzz target's corpus/ from crates/fuzz/seeds.yaml and, with a token, the grown corpus in GCS"
+description = "Add crates/fuzz/seeds.yaml and, with a token, the grown corpus in GCS to every fuzz target's corpus/"
 
 [tasks."fuzz:deep"]
 run = "scripts/fuzz/run.sh deep"
