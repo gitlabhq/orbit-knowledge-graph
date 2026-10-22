@@ -18,6 +18,52 @@ pub enum RepoStatus {
     Error,
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct IncrementalState {
+    pub commit_sha: String,
+    pub dirty_paths: Vec<String>,
+    #[serde(default)]
+    pub dirty_removed: Vec<String>,
+    pub families: Vec<String>,
+    pub owner: Option<String>,
+}
+
+pub fn save_incremental_state(
+    path: &Path,
+    project_id: i64,
+    state: &IncrementalState,
+) -> Result<()> {
+    let _lock = lock_database(path)?;
+    open_manifest(path)?
+        .execute(
+            "INSERT INTO _orbit_incremental_state (project_id, state)
+             VALUES (?1, ?2::JSON)
+             ON CONFLICT (project_id) DO UPDATE SET state = ?2::JSON",
+            &[json!(project_id), serde_json::to_value(state)?],
+        )
+        .context("failed to save incremental state")?;
+    Ok(())
+}
+
+pub fn load_incremental_state(path: &Path, project_id: i64) -> Result<Option<IncrementalState>> {
+    let _lock = lock_database(path)?;
+    let rows = open_manifest(path)?
+        .query_arrow_json(
+            "SELECT state::VARCHAR AS state FROM _orbit_incremental_state WHERE project_id = ?1",
+            &[json!(project_id)],
+        )
+        .context("failed to load incremental state")?;
+    let Some(state) = duckdb_client::string_column(&rows, "state")
+        .into_iter()
+        .next()
+    else {
+        return Ok(None);
+    };
+    serde_json::from_str(&state)
+        .map(Some)
+        .context("invalid incremental state in manifest")
+}
+
 pub fn record_status(
     path: &Path,
     git: &GitInfo,
