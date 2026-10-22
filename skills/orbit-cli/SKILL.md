@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.29.0
+version: 0.30.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -103,12 +103,17 @@ Line ranges show only the numbered lines.
 `<--` is a caller and `-->` is a callee. Reuse the returned source.
 
 <!-- orbit:section quick-start -->
-## Query and map
+## Choose the command
+
+- `orbit grep 'a|b'` searches code, tests, config, and docs and labels each match with its enclosing definition. A plain query also searches the GitLab group behind `origin`.
+- `orbit context <name> <path>:<lines> mr:42 job:9` reads several targets in one call. Definitions come with their callers and tests, and GitLab merge requests, issues, branches, pipelines, and jobs come with the local code they point at. A bare `orbit context` reads the current branch's merge request and CI failures.
+- `orbit query` answers relationship and aggregation questions across GitLab entities, such as who reviewed which merge requests or which changes to an area failed CI. Write the query in the language below.
+- `orbit sql` aggregates over the local code graph, and `orbit repo-map overview` maps the directories.
 
 ```shell
-orbit schema gl_definition
-orbit sql "SELECT definition_type, count(*) n FROM gl_definition GROUP BY 1 ORDER BY n DESC"
-orbit repo-map overview                 # then tree, api, class, extends, imports
+orbit grep 'retry_backoff|RetryBackoff'
+orbit context src/retry.rs:40-90 retry_backoff mr:42
+orbit repo-map overview
 ```
 
 <!-- /orbit:section -->
