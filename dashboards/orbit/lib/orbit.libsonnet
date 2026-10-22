@@ -406,6 +406,8 @@ local glanceTile(title, description, expr, ds_var, unit, thresholds, decimals=nu
       defaults+: {
         color: { mode: 'thresholds' },
         thresholds: { mode: 'absolute', steps: thresholds },
+        // No value would otherwise take the lowest threshold color, red on success tiles.
+        mappings: [{ type: 'special', options: { match: 'null+nan', result: { text: '—', color: 'text', index: 0 } } }],
         [if decimals != null then 'decimals']: decimals,
       },
     },

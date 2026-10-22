@@ -60,6 +60,19 @@
             "mode": "thresholds"
           },
           "decimals": 1,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -124,6 +137,19 @@
             "mode": "thresholds"
           },
           "decimals": 2,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -196,6 +222,19 @@
             "mode": "thresholds"
           },
           "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -260,6 +299,19 @@
             "mode": "thresholds"
           },
           "decimals": 1,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -331,6 +383,19 @@
           "color": {
             "mode": "thresholds"
           },
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -395,6 +460,19 @@
             "mode": "thresholds"
           },
           "decimals": 1,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -467,6 +545,19 @@
             "mode": "thresholds"
           },
           "decimals": 1,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -535,6 +626,19 @@
             "mode": "thresholds"
           },
           "decimals": 1,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
