@@ -64,6 +64,8 @@ local steps = o.steps;
 local stepsDown = o.stepsDown;
 local colored = o.colored;
 
+// Ratios guard their denominator with `> 0` and quantiles filter with `>= 0`, so a
+// range with no queries shows no value instead of NaN.
 local tile(title, description, expr, unit, thresholds, decimals=null) =
   o.glanceTile(title, description, expr, DS, unit, thresholds, decimals);
 
@@ -128,7 +130,7 @@ local glance = [
   tile(
     'Success',
     'Share of valid queries in the selected time range that did not fail on the server side. Objective: 99.5%. Amber below the objective, red below 95%. Rejected client queries are not counted.',
-    '1 - (%s) / sum(increase(%s{%s, %s}[$__range]))' % [serverErrors('$__range'), Q, SEL, VALID],
+    '1 - (%s) / (sum(increase(%s{%s, %s}[$__range])) > 0)' % [serverErrors('$__range'), Q, SEL, VALID],
     'percentunit', stepsDown(0.95, 0.995), 2,
   ),
   tile(
@@ -140,31 +142,31 @@ local glance = [
   tile(
     'Under 5 s',
     'Share of successful queries in the selected time range that finished in 5 seconds or less.',
-    'sum(increase(%s_bucket{%s, %s, le="5.0"}[$__range])) / sum(increase(%s_count{%s, %s}[$__range]))' % [DUR, SEL, OK, DUR, SEL, OK],
+    'sum(increase(%s_bucket{%s, %s, le="5.0"}[$__range])) / (sum(increase(%s_count{%s, %s}[$__range])) > 0)' % [DUR, SEL, OK, DUR, SEL, OK],
     'percentunit', stepsDown(0.9, 0.95), 1,
   ),
   tile(
     'p50',
     'Median duration of successful queries in the selected time range.',
-    'histogram_quantile(0.50, sum by (le) (rate(%s_bucket{%s, %s}[$__range])))' % [DUR, SEL, OK],
+    'histogram_quantile(0.50, sum by (le) (rate(%s_bucket{%s, %s}[$__range]))) >= 0' % [DUR, SEL, OK],
     's', NEUTRAL,
   ),
   tile(
     'p95',
     'p95 duration of successful queries in the selected time range. Amber from 5 s, red from 25 s.',
-    'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s, %s}[$__range])))' % [DUR, SEL, OK],
+    'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s, %s}[$__range]))) >= 0' % [DUR, SEL, OK],
     's', steps([[5, '#EAB839'], [25, 'red']]), 1,
   ),
   tile(
     'p99',
     'p99 duration of successful queries in the selected time range. Amber from 25 s, the long-tail objective (99% of queries within 25 s).',
-    'histogram_quantile(0.99, sum by (le) (rate(%s_bucket{%s, %s}[$__range])))' % [DUR, SEL, OK],
+    'histogram_quantile(0.99, sum by (le) (rate(%s_bucket{%s, %s}[$__range]))) >= 0' % [DUR, SEL, OK],
     's', steps([[25, '#EAB839']]), 1,
   ),
   tile(
     'Rejected',
     'Share of queries in the selected time range (schema calls excluded) that were rejected before running: invalid client input (bad syntax, unknown schema, and so on) or a user with no enabled namespace. Not a service fault, so it stays neutral.',
-    '(sum(increase(%s{%s, %s}[$__range])) or vector(0)) / (sum(increase(%s{%s}[$__range])) - (sum(increase(%s{%s, %s}[$__range])) or vector(0)))' % [Q, SEL, REJECTED, Q, SEL, Q, SEL, SCHEMA],
+    '(sum(increase(%s{%s, %s}[$__range])) or vector(0)) / ((sum(increase(%s{%s}[$__range])) - (sum(increase(%s{%s, %s}[$__range])) or vector(0))) > 0)' % [Q, SEL, REJECTED, Q, SEL, Q, SEL, SCHEMA],
     'percentunit', NEUTRAL, 1,
   ),
   volume(
