@@ -804,7 +804,7 @@ fn gather_visible_one(tree: &Tree, fi: usize, exports_key: u32) -> FxHashMap<u32
             return;
         }
         let loc = Loc::new(fi, c.index());
-        let nested = c.is_class() && c.enclosing(|p| p.is(C::Def)).is_some_and(|p| p.is_class());
+        let nested = c.enclosing(|p| p.is(C::Def)).is_some_and(|p| p.is_class());
         for name in c
             .child_sym(C::DefName)
             .filter(|_| !nested)
