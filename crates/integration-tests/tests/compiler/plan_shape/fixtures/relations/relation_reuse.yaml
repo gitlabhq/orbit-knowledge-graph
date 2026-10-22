@@ -14,7 +14,7 @@ cases:
             - (Filter _orbit_edge_1.source_id IN ? . id, ... (_))
             - (Filter _orbit_edge_2.source_id IN ? . id, ... (_))
           occurrences:
-            - { pattern: "(Project _id_source.target_id AS id (_))", count: 3 }
+            - { pattern: "(Project _id_source.target_id AS id (_))", count: 4 }
 
   - name: One reached ID set narrows every branch arm
     query:

@@ -14,4 +14,4 @@ physical:
   clickhouse:
     emitted:
       expect:
-        - (SemiJoin _e.traversal_path IN subquery (_) (Project _tpd.traversal_path AS traversal_path (Filter _tpd.id = 1000, _tpd._deleted = false (Deduplicate Final (Scan Table(gl_project) AS _tpd)))))
+        - (SemiJoin _e.traversal_path IN subquery (_) (Project _ctr.traversal_path AS traversal_path (Scan Table(_ctr) AS _ctr)))
