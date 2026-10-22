@@ -41,7 +41,16 @@ impl CodeStaleSweep {
         let mut statements: Vec<(String, String)> = table_names
             .node_tables()
             .iter()
-            .map(|table| (table.to_string(), node_sweep(table, &checkpoint_table)))
+            .map(|table| {
+                (
+                    table.to_string(),
+                    node_sweep(
+                        table,
+                        &checkpoint_table,
+                        table_names.immutable_columns(table),
+                    ),
+                )
+            })
             .collect();
         statements.extend(
             table_names
@@ -145,16 +154,24 @@ impl CodeStaleSweep {
     }
 }
 
-fn node_sweep(table: &str, checkpoint_table: &str) -> String {
+fn node_sweep(table: &str, checkpoint_table: &str, carried_columns: &[String]) -> String {
+    let insert_carried = carried_columns
+        .iter()
+        .map(|column| format!(", {column}"))
+        .collect::<String>();
+    let select_carried = carried_columns
+        .iter()
+        .map(|column| format!("s.{column},\n            "))
+        .collect::<String>();
     format!(
         r#"
-        INSERT INTO {table} (traversal_path, project_id, branch, id, _version, _deleted)
+        INSERT INTO {table} (traversal_path, project_id, branch, id{insert_carried}, _version, _deleted)
         SELECT
             s.traversal_path,
             s.project_id,
             s.branch,
             s.id,
-            cp.indexed_at - toIntervalMicrosecond(1) AS _version,
+            {select_carried}cp.indexed_at - toIntervalMicrosecond(1) AS _version,
             true AS _deleted
         FROM {table} AS s FINAL
         INNER JOIN {checkpoint_table} AS cp FINAL
@@ -242,7 +259,7 @@ mod tests {
 
     #[test]
     fn node_sweep_tombstones_only_final_survivors() {
-        let sql = node_sweep("v9_gl_file", "v9_code_indexing_checkpoint");
+        let sql = node_sweep("v9_gl_file", "v9_code_indexing_checkpoint", &[]);
         assert!(
             sql.contains("FROM v9_gl_file AS s FINAL"),
             "a raw-parts scan emits a no-op tombstone per superseded part row \
@@ -258,9 +275,21 @@ mod tests {
     }
 
     #[test]
+    fn node_sweep_carries_the_unchanging_columns() {
+        let names = table_names();
+        let carried = names.immutable_columns(&names.file);
+        assert!(carried.iter().any(|c| c == "path"), "{carried:?}");
+        let sql = node_sweep(&names.file, "v9_cp", carried);
+        for column in carried {
+            assert!(sql.contains(&format!(", {column}")), "{sql}");
+            assert!(sql.contains(&format!("s.{column},")), "{sql}");
+        }
+    }
+
+    #[test]
     fn sweeps_scope_to_the_namespace_path_for_pk_pruning() {
         for sql in [
-            node_sweep("v9_gl_file", "v9_cp"),
+            node_sweep("v9_gl_file", "v9_cp", &[]),
             edge_sweep("v9_gl_code_edge", "v9_cp"),
             edge_sweep("v9_gl_edge", "v9_cp"),
         ] {

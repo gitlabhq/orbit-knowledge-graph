@@ -39,13 +39,18 @@ use conditions::{check_condition_column, check_condition_counts};
 pub(crate) const BASE_SCHEMA_JSON: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
+static BASE_SCHEMA: OnceLock<serde_json::Value> = OnceLock::new();
 static BASE_SCHEMA_VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
+
+pub(crate) fn base_schema() -> &'static serde_json::Value {
+    BASE_SCHEMA.get_or_init(|| {
+        serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON")
+    })
+}
 
 pub(crate) fn base_validator() -> &'static jsonschema::Validator {
     BASE_SCHEMA_VALIDATOR.get_or_init(|| {
-        let schema: serde_json::Value =
-            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
-        jsonschema::validator_for(&schema).expect("schema.json must be a valid JSON Schema")
+        jsonschema::validator_for(base_schema()).expect("schema.json must be a valid JSON Schema")
     })
 }
 
@@ -87,11 +92,12 @@ pub(crate) fn node_ref_regex() -> &'static regex::Regex {
 
 pub(crate) fn collect_schema_errors(
     validator: &jsonschema::Validator,
+    schema: &serde_json::Value,
     value: &serde_json::Value,
 ) -> Result<()> {
     let errors: Vec<_> = validator
         .iter_errors(value)
-        .map(|e| format_schema_error(&e))
+        .map(|e| format_schema_error(&e, schema))
         .collect();
 
     if errors.is_empty() {

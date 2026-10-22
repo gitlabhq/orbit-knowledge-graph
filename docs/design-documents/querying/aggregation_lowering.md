@@ -42,12 +42,14 @@ tombstones. Absorbing enum values are stable too. Verified:
 `MergeRequest.state=merged` has 0/652127 un-merges; `Job.status` reverses on
 retry so is never stable.
 
-A tombstone is the exception. The indexer writes it with the sort key and
-defaults in every other column. An immutable filter such as `created_at >= X`
-rejects it, and the pick then resurrects the older live row. So a filter on a
-non-key column runs before the pick only as `(filter OR _deleted)`. The
-`minmax` skip index on `_deleted` keeps that disjunction to the granules that
-hold a tombstone.
+A tombstone carries the sort key and every column marked `mutable: false`,
+copied from the row it deletes. Every writer honours that contract. The SDLC
+pipelines project the datalake row. The code stale sweeps and namespace
+deletion select the columns from the live row they tombstone. The planner
+relies on it. A filter on an unchanging column runs inside the latest-row
+pick. The tombstone passes the same filter, wins the pick, and the `_deleted`
+check drops it. Rows tombstoned before the contract hold defaults in those
+columns. They can resurface under such a filter until the next full rebuild.
 
 ## Selective current-row reads
 

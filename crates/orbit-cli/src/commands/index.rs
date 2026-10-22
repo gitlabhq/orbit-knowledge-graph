@@ -1,186 +1,102 @@
-mod summary;
+pub(crate) mod incremental;
 
-use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 use arrow::array::{Array, StringArray};
-use code_graph::v2::{
-    CancellationToken, FamilyFileCount, PipelineConfig, ProgressObserver, ProgressPhase,
-    SilentProgress,
-};
-use ontology::Ontology;
-use orbit_log_fields::info;
-use serde::Serialize;
 use tracing::Level;
 use tracing_subscriber::fmt::format::FmtSpan;
 
 use super::setup::spec;
-use crate::database::{GraphReader, GraphWriter, manifest};
+use crate::database::GraphReader;
 use crate::tui;
 use crate::workspace::{self, GitInfo};
 
-/// Per-file byte cap for local indexing; files above it are recorded as nodes
-/// but not loaded or parsed.
-const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
-
-#[derive(Serialize)]
-pub(crate) struct IndexOutput {
-    repository: String,
-    path: String,
-    time_seconds: f64,
-    graph: GraphStats,
-    processing: ProcessingStats,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    database_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    detailed: Option<DetailedStats>,
-}
-
-#[derive(Serialize)]
-struct GraphStats {
-    directories: usize,
-    files: usize,
-    definitions: usize,
-    imported_symbols: usize,
-    relationships: usize,
-}
-
-#[derive(Serialize)]
-struct ProcessingStats {
-    skipped_files: usize,
-    errored_files: usize,
-}
-
-#[derive(Debug, Clone, Default)]
-struct IndexGraphStats {
-    directories: usize,
-    files: usize,
-    definitions: usize,
-    imported_symbols: usize,
-    relationships: usize,
-    relationship_types: HashMap<String, usize>,
-    definition_types: HashMap<String, usize>,
-}
-
-struct IndexRunResult {
-    total_processing_time: Duration,
-    skipped_files: Vec<code_graph::v2::SkippedFile>,
-    faulted_files: Vec<code_graph::v2::FaultedFile>,
-    graph_stats: IndexGraphStats,
-    database_path: Option<String>,
-    slowest_files: Vec<code_graph::v2::FileTimingEntry>,
-    language_timings: Vec<code_graph::v2::LanguageTimings>,
-    phase_timings: code_graph::v2::PhaseTimings,
-}
-
-#[derive(Serialize)]
-struct DetailedStats {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    skipped_files: Vec<SkippedFile>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    errored_files: Vec<ErroredFile>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    slowest_files: Vec<SlowFile>,
-    language_timings: Vec<LanguageTiming>,
-    phase_timings: PhaseTiming,
-    relationship_types: HashMap<String, usize>,
-    definition_types: HashMap<String, usize>,
-}
-
-#[derive(Serialize)]
-struct LanguageTiming {
-    language: String,
-    file_count: usize,
-    total_bytes: u64,
-    parse_ms: f64,
-    graph_build_ms: f64,
-    resolve_ms: f64,
-    total_ms: f64,
-}
-
-#[derive(Serialize)]
-struct PhaseTiming {
-    file_discovery_ms: f64,
-    structural_graph_ms: f64,
-    language_processing_ms: f64,
-    total_ms: f64,
-}
-
-#[derive(Serialize)]
-struct SlowFile {
-    path: String,
-    language: String,
-    size_bytes: u64,
-    parse_ms: f64,
-    resolve_ms: f64,
-    total_ms: f64,
-}
-
-#[derive(Serialize)]
-struct SkippedFile {
-    path: String,
-    reason: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    detail: String,
-}
-
-#[derive(Serialize)]
-struct ErroredFile {
-    path: String,
-    kind: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    detail: String,
-}
-
-pub(crate) fn run(
-    path: PathBuf,
-    threads: usize,
-    show_stats: bool,
-    verbose: bool,
-    db: Option<PathBuf>,
-) -> Result<()> {
+pub(crate) fn run(path: PathBuf, options: incremental::Options) -> Result<()> {
     let person_is_watching = std::io::stdout().is_terminal();
-    install_tracing(verbose, person_is_watching);
-    let opened = LocalIndexer::open(path, threads, show_stats, db);
-    if person_is_watching
-        && let Err(error) = &opened
-        && let Some(NoRepositoryFound(folder)) = error.downcast_ref()
-    {
-        return show_how_to_pick_a_repository(folder);
-    }
-    let mut indexer = opened?;
-
+    install_tracing(options.verbose, person_is_watching);
     if !person_is_watching {
-        indexer.pipeline_config.cancel = cancel_on_ctrl_c();
-        for output in indexer.index_all(&mut LogReporter)? {
+        let options = incremental::Options {
+            cancel: cancel_on_ctrl_c(),
+            ..options
+        };
+        for output in incremental::index(path, options)? {
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         return Ok(());
     }
 
     tui::intro("Orbit index")?;
-    if let Some(name) = close_screen_on_failure(indexer.index_showing_progress())? {
+    let stats = options.stats;
+    let outcome = index_showing_progress(path, options);
+    if let Err(error) = &outcome
+        && let Some(NoRepositoryFound(folder)) = error.downcast_ref()
+    {
+        return show_how_to_pick_a_repository(folder);
+    }
+    let outputs = close_screen_on_failure(outcome)?;
+    if stats {
+        for output in &outputs {
+            tui::card("Slowest files", output.slowest_files().join("\n"))?;
+        }
+    }
+    if let Some(name) = suggested_grep(&outputs) {
         tui::card("Try it", grep_command_line(&name))?;
     }
     tui::outro("Done.")
 }
 
-/// Returns a definition name worth a first grep.
 pub(crate) fn index_with_progress(path: PathBuf, db: Option<PathBuf>) -> Result<Option<String>> {
-    LocalIndexer::open(path, 0, false, db)?.index_showing_progress()
+    let outputs = index_showing_progress(
+        path,
+        incremental::Options {
+            db,
+            ..Default::default()
+        },
+    )?;
+    Ok(suggested_grep(&outputs))
 }
 
 pub(crate) fn index_before_first_query(path: PathBuf, db: Option<PathBuf>) -> Result<()> {
     if !std::io::stderr().is_terminal() {
-        return collect(path, 0, false, db).map(drop);
+        return collect(path, false, db).map(drop);
     }
     tui::intro("Orbit index")?;
     close_screen_on_failure(index_with_progress(path, db))?;
     tui::outro("Indexed.")
+}
+
+pub(crate) fn collect(
+    path: PathBuf,
+    stats: bool,
+    db: Option<PathBuf>,
+) -> Result<Vec<incremental::IndexOutput>> {
+    incremental::index(
+        path,
+        incremental::Options {
+            stats,
+            db,
+            ..Default::default()
+        },
+    )
+}
+
+fn index_showing_progress(
+    path: PathBuf,
+    options: incremental::Options,
+) -> Result<Vec<incremental::IndexOutput>> {
+    let _control_echo_off = tui::turn_off_control_echo();
+    incremental::index(
+        path,
+        incremental::Options {
+            cancel: cancel_on_ctrl_c(),
+            progress: true,
+            ..options
+        },
+    )
 }
 
 fn close_screen_on_failure<T>(outcome: Result<T>) -> Result<T> {
@@ -193,12 +109,12 @@ fn close_screen_on_failure<T>(outcome: Result<T>) -> Result<T> {
     }
 }
 
-fn cancel_on_ctrl_c() -> CancellationToken {
-    let cancel = CancellationToken::new();
-    let token = cancel.clone();
+fn cancel_on_ctrl_c() -> Arc<AtomicBool> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flag = cancel.clone();
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
-            token.cancel();
+            flag.store(true, Ordering::Relaxed);
         }
         if tokio::signal::ctrl_c().await.is_ok() {
             tui::restore_control_echo();
@@ -208,15 +124,45 @@ fn cancel_on_ctrl_c() -> CancellationToken {
     cancel
 }
 
-/// Synchronous (the pipeline and DuckDB driver both block), so async callers
-/// must wrap it in `spawn_blocking`.
-pub(crate) fn collect(
-    path: PathBuf,
-    threads: usize,
-    show_stats: bool,
-    db: Option<PathBuf>,
-) -> Result<Vec<IndexOutput>> {
-    LocalIndexer::open(path, threads, show_stats, db)?.index_all(&mut LogReporter)
+fn suggested_grep(outputs: &[incremental::IndexOutput]) -> Option<String> {
+    let output = outputs.first()?;
+    let git = workspace::git_info(Path::new(output.path())).ok()?;
+    most_referenced_definition(&git, Some(PathBuf::from(output.database_path())))
+}
+
+#[derive(Debug)]
+pub(crate) struct NoRepositoryFound(pub PathBuf);
+
+impl std::fmt::Display for NoRepositoryFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "no git repository found in {}. Pass a repository path, or a directory containing one.",
+            self.0.display()
+        )
+    }
+}
+
+impl std::error::Error for NoRepositoryFound {}
+
+fn show_how_to_pick_a_repository(folder: &Path) -> Result<()> {
+    let example = example_repository_path();
+    let steps = [
+        ("Index a repository by path:", index_command_line(example)),
+        ("Or go into it first:", format!("cd {example}")),
+        ("", index_command_line(".")),
+    ]
+    .map(|(label, command)| format!("{label:<27}  {command}"))
+    .join("\n");
+
+    tui::card(
+        "No git repository here",
+        format!(
+            "{} has no git repository in it.\n\n{steps}",
+            folder.display()
+        ),
+    )?;
+    tui::outro("Nothing indexed.")
 }
 
 pub(crate) fn grep_command_line(definition_name: &str) -> String {
@@ -250,42 +196,6 @@ pub(crate) fn example_repository_path() -> &'static str {
         "~/src/app"
     }
 }
-
-fn show_how_to_pick_a_repository(folder: &Path) -> Result<()> {
-    let example = example_repository_path();
-    let steps = [
-        ("Index a repository by path:", index_command_line(example)),
-        ("Or go into it first:", format!("cd {example}")),
-        ("", index_command_line(".")),
-    ]
-    .map(|(label, command)| format!("{label:<27}  {command}"))
-    .join("\n");
-
-    tui::intro("Orbit index")?;
-    tui::card(
-        "No git repository here",
-        format!(
-            "{} has no git repository in it.\n\n{steps}",
-            folder.display()
-        ),
-    )?;
-    tui::outro("Nothing indexed.")
-}
-
-#[derive(Debug)]
-struct NoRepositoryFound(PathBuf);
-
-impl std::fmt::Display for NoRepositoryFound {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "no git repository found in {}. Pass a repository path, or a directory containing one.",
-            self.0.display()
-        )
-    }
-}
-
-impl std::error::Error for NoRepositoryFound {}
 
 fn most_referenced_definition(git: &GitInfo, db: Option<PathBuf>) -> Option<String> {
     let batches = GraphReader::open(db)
@@ -325,544 +235,4 @@ fn install_tracing(verbose: bool, person_is_watching: bool) {
         .with_writer(std::io::stderr)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
-}
-
-pub(crate) trait IndexReporter {
-    fn repository_started(&mut self, _git: &GitInfo) -> Arc<dyn ProgressObserver> {
-        Arc::new(SilentProgress)
-    }
-    fn repository_indexed(&mut self, _output: &IndexOutput) {}
-    fn repository_failed(&mut self, repo_path: &Path, error: &anyhow::Error);
-}
-
-struct LogReporter;
-
-impl IndexReporter for LogReporter {
-    fn repository_failed(&mut self, repo_path: &Path, error: &anyhow::Error) {
-        orbit_log_fields::error!(
-            expanded(LOCAL_PATH) = %repo_path.display(),
-            expanded(ERROR_MESSAGE) = %format_args!("{error:#}"),
-            "failed to index repository"
-        );
-    }
-}
-
-struct TuiReporter {
-    bars: Option<Arc<RepositoryBars>>,
-    git: Option<GitInfo>,
-    suggested_grep: Option<String>,
-}
-
-impl TuiReporter {
-    fn new() -> Self {
-        Self {
-            bars: None,
-            git: None,
-            suggested_grep: None,
-        }
-    }
-}
-
-impl IndexReporter for TuiReporter {
-    fn repository_started(&mut self, git: &GitInfo) -> Arc<dyn ProgressObserver> {
-        let title = format!(
-            "{}  {} @ {}",
-            repository_name(git),
-            git.branch,
-            git.short_sha()
-        );
-        let bars = Arc::new(RepositoryBars::open(title));
-        self.bars = Some(bars.clone());
-        self.git = Some(git.clone());
-        bars
-    }
-
-    fn repository_indexed(&mut self, output: &IndexOutput) {
-        if let Some(bars) = self.bars.take() {
-            bars.close(output);
-        }
-
-        if let Some(detailed) = &output.detailed {
-            let _ = tui::card("Timings", summary::format_timings(detailed));
-        }
-
-        if self.suggested_grep.is_none()
-            && let Some(git) = &self.git
-        {
-            self.suggested_grep =
-                most_referenced_definition(git, output.database_path.as_ref().map(PathBuf::from));
-        }
-    }
-
-    fn repository_failed(&mut self, repo_path: &Path, error: &anyhow::Error) {
-        match self.bars.take() {
-            Some(bars) => bars.fail(error),
-            None => tui::error(format!("{}: {error:#}", repo_path.display())),
-        }
-    }
-}
-
-struct RepositoryBars {
-    group: tui::ProgressGroup,
-    phases: OnceLock<PhaseBars>,
-}
-
-struct PhaseBars {
-    parse: tui::Bar,
-    resolve: tui::Bar,
-}
-
-impl RepositoryBars {
-    fn open(title: String) -> Self {
-        Self {
-            group: tui::progress_group(title),
-            phases: OnceLock::new(),
-        }
-    }
-
-    fn close(&self, output: &IndexOutput) {
-        if let Some(phases) = self.phases.get() {
-            phases
-                .parse
-                .finish(summary::count_noun(output.graph.definitions, "definition"));
-            phases.resolve.finish(format!(
-                "{} · {:.1} s",
-                summary::count_noun(output.graph.relationships, "relationship"),
-                output.time_seconds
-            ));
-        }
-        self.group.close();
-    }
-
-    fn fail(&self, error: &anyhow::Error) {
-        let cancelled = tui::is_cancelled(error);
-        if let Some(phases) = self.phases.get() {
-            for bar in [&phases.parse, &phases.resolve] {
-                match cancelled {
-                    true => bar.cancel_at_current_count(),
-                    false => bar.fail_at_current_count(),
-                }
-            }
-        }
-        match cancelled {
-            true => self.group.cancel(),
-            false => self.group.fail(format!("{error:#}")),
-        }
-    }
-}
-
-impl ProgressObserver for RepositoryBars {
-    fn discovery_finished(
-        &self,
-        total_files: usize,
-        parseable_files: usize,
-        files_per_family: &[FamilyFileCount],
-    ) {
-        self.group.note(summary::format_discovery_summary(
-            total_files,
-            parseable_files,
-            files_per_family,
-        ));
-
-        self.phases.get_or_init(|| PhaseBars {
-            parse: self.group.bar("Parse  ", parseable_files),
-            resolve: self.group.bar("Resolve", parseable_files),
-        });
-    }
-
-    fn files_advanced(&self, phase: ProgressPhase, count: usize) {
-        let Some(phases) = self.phases.get() else {
-            return;
-        };
-        match phase {
-            ProgressPhase::Parse => phases.parse.advance(count),
-            ProgressPhase::Resolve => phases.resolve.advance(count),
-        }
-    }
-}
-
-fn repository_name(git: &GitInfo) -> String {
-    git.repo_path
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| "repository".to_string())
-}
-
-struct LocalIndexer {
-    db: Option<PathBuf>,
-    manifest_path: PathBuf,
-    repos: Vec<PathBuf>,
-    ontology: Ontology,
-    pipeline_config: PipelineConfig,
-    show_stats: bool,
-}
-
-impl LocalIndexer {
-    fn open(path: PathBuf, threads: usize, show_stats: bool, db: Option<PathBuf>) -> Result<Self> {
-        let db = db.map(std::path::absolute).transpose()?;
-        let workspace = workspace::Workspace::open_default()?;
-        let path = dunce::canonicalize(&path)?;
-        let repos = workspace.resolve_repos(&path)?;
-        if repos.is_empty() {
-            return Err(NoRepositoryFound(path).into());
-        }
-
-        let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
-        if db.is_some() && repos.len() != 1 {
-            bail!("--db selects one revision file; index one repository at a time");
-        }
-
-        let pipeline_config = PipelineConfig {
-            worker_threads: threads,
-            per_file_timeout: Some(Duration::from_secs(2)),
-            per_file_parse_timeout: Some(Duration::from_millis(100)),
-            per_file_walk_timeout: Some(Duration::from_millis(100)),
-            per_file_ssa_timeout: Some(Duration::from_millis(100)),
-            cross_file_resolve_timeout: Some(Duration::from_secs(180)),
-            ..Default::default()
-        };
-
-        Ok(Self {
-            db,
-            manifest_path: std::path::absolute(workspace.manifest_path())?,
-            repos,
-            ontology,
-            pipeline_config,
-            show_stats,
-        })
-    }
-
-    fn index_showing_progress(mut self) -> Result<Option<String>> {
-        self.pipeline_config.cancel = cancel_on_ctrl_c();
-        let _control_echo_off = tui::turn_off_control_echo();
-        let mut reporter = TuiReporter::new();
-        self.index_all(&mut reporter)?;
-        Ok(reporter.suggested_grep)
-    }
-
-    fn index_all(&self, reporter: &mut dyn IndexReporter) -> Result<Vec<IndexOutput>> {
-        let mut outputs = Vec::with_capacity(self.repos.len());
-        for repo_path in &self.repos {
-            match self.index_repository(repo_path, reporter) {
-                Ok(output) => {
-                    reporter.repository_indexed(&output);
-                    outputs.push(output);
-                }
-                Err(error) if tui::is_cancelled(&error) => {
-                    reporter.repository_failed(repo_path, &error);
-                    return Err(error);
-                }
-                Err(error) => reporter.repository_failed(repo_path, &error),
-            }
-        }
-
-        let failed = self.repos.len() - outputs.len();
-        if failed > 0 {
-            bail!(
-                "{failed} of {} repositories failed to index",
-                self.repos.len()
-            );
-        }
-        Ok(outputs)
-    }
-
-    fn index_repository(
-        &self,
-        repo_path: &Path,
-        reporter: &mut dyn IndexReporter,
-    ) -> Result<IndexOutput> {
-        let git = workspace::git_info(repo_path).inspect_err(|error| {
-            manifest::record_git_info_failure(&self.manifest_path, repo_path, &error.to_string())
-        })?;
-        let db_path = workspace::resolve_db_path(self.db.clone(), &git)?;
-        let writer = Arc::new(std::sync::Mutex::new(GraphWriter::open(&db_path, &git)?));
-        let key = git.repo_path.to_string_lossy().to_string();
-        info!(
-            expanded(LOCAL_PATH) = %key,
-            expanded(BRANCH) = %git.branch,
-            safe(COMMIT_SHA) = git.commit_sha.as_str(),
-            "indexing repository"
-        );
-        manifest::record_status(
-            &self.manifest_path,
-            &git,
-            manifest::RepoStatus::Indexing,
-            None,
-            &db_path,
-        )?;
-
-        let mut pipeline_config = self.pipeline_config.clone();
-        pipeline_config.progress = reporter.repository_started(&git);
-        let result = index_repo(&git, &db_path, &writer, &self.ontology, pipeline_config)
-            .inspect_err(|error| {
-                let recorded = manifest::record_status(
-                    &self.manifest_path,
-                    &git,
-                    manifest::RepoStatus::Error,
-                    Some(&error.to_string()),
-                    &db_path,
-                );
-                if let Err(manifest_error) = recorded {
-                    orbit_log_fields::warn!(
-                        expanded(ERROR_MESSAGE) = %manifest_error,
-                        "failed to record error status in manifest"
-                    );
-                }
-            })?;
-        manifest::record_status(
-            &self.manifest_path,
-            &git,
-            manifest::RepoStatus::Indexed,
-            None,
-            &db_path,
-        )?;
-        Ok(build_index_output(
-            &repository_name(&git),
-            &key,
-            &result,
-            self.show_stats,
-        ))
-    }
-}
-
-fn fatal_pipeline_reason(errors: &[code_graph::v2::pipeline::PipelineError]) -> Option<String> {
-    let fatal_count = errors.iter().filter(|e| e.fatal).count();
-    let first = errors.iter().find(|e| e.fatal)?;
-    Some(format!(
-        "code indexing failed during {}: {} ({fatal_count} fatal pipeline error(s))",
-        first.stage, first.error
-    ))
-}
-
-fn index_repo(
-    git: &workspace::GitInfo,
-    db_path: &std::path::Path,
-    writer: &Arc<std::sync::Mutex<GraphWriter>>,
-    ontology: &Ontology,
-    pipeline_config: code_graph::v2::PipelineConfig,
-) -> Result<IndexRunResult> {
-    let key = git.repo_path.to_string_lossy().to_string();
-    let root_path = key.clone();
-    let start_time = std::time::Instant::now();
-
-    let tracer = code_graph::v2::trace::Tracer::new(false);
-    let mut filter = code_graph::v2::config::CodeFilter::new(
-        Some(MAX_INDEXED_FILE_BYTES),
-        None,
-        code_graph::v2::config::detect_language_from_path,
-    );
-    let file_inventory = std::sync::Arc::new(
-        orbit_utils::fs_walk::walk_dir(&git.repo_path, &mut filter)
-            .context("failed to walk repository files")?,
-    );
-
-    writer.lock().unwrap().clear(ontology)?;
-
-    let converter: std::sync::Arc<dyn code_graph::v2::GraphConverter> =
-        std::sync::Arc::new(duckdb_client::DuckDbConverter {
-            project_id: git.project_id,
-            branch: git.branch.clone(),
-            commit_sha: git.commit_sha.clone(),
-            ontology: std::sync::Arc::new(ontology.clone()),
-        });
-    let batch_writer = Arc::clone(writer);
-    let on_batch: std::sync::Arc<code_graph::v2::OnBatch> = std::sync::Arc::new(
-        move |table: &str, batch: arrow::record_batch::RecordBatch| {
-            if batch.num_rows() == 0 {
-                return Ok(());
-            }
-            batch_writer
-                .lock()
-                .unwrap()
-                .insert_batch(table, &batch)
-                .map_err(|e| code_graph::v2::SinkError(format!("DuckDB write to {table}: {e}")))
-        },
-    );
-
-    let cancel = pipeline_config.cancel.clone();
-    let v2_result = code_graph::v2::Pipeline::run_with_tracer(
-        std::path::Path::new(&root_path),
-        file_inventory,
-        pipeline_config,
-        tracer,
-        converter,
-        on_batch,
-    );
-    if cancel.is_cancelled() {
-        writer.lock().unwrap().clear(ontology)?;
-        return Err(tui::cancelled("indexing cancelled"));
-    }
-
-    for err in &v2_result.errors {
-        orbit_log_fields::warn!(
-            safe(PHASE) = err.stage,
-            expanded(ERROR_MESSAGE) = %err.error,
-            expanded(FILE_PATH) = %err.file_path,
-            "pipeline error"
-        );
-    }
-    if let Some(reason) = fatal_pipeline_reason(&v2_result.errors) {
-        anyhow::bail!(reason);
-    }
-
-    writer.lock().unwrap().complete(&git.commit_sha)?;
-    refresh_git_index(&git.repo_path);
-
-    Ok(IndexRunResult {
-        total_processing_time: start_time.elapsed(),
-        skipped_files: v2_result.skipped,
-        faulted_files: v2_result.faults,
-        graph_stats: IndexGraphStats {
-            directories: v2_result.stats.directories_indexed,
-            files: v2_result.stats.files_indexed,
-            definitions: v2_result.stats.definitions_count,
-            imported_symbols: v2_result.stats.imports_count,
-            relationships: v2_result.stats.edges_count,
-            relationship_types: HashMap::new(),
-            definition_types: HashMap::new(),
-        },
-        database_path: Some(db_path.display().to_string()),
-        slowest_files: v2_result.stats.slowest_files,
-        language_timings: v2_result.stats.language_timings,
-        phase_timings: v2_result.stats.phase_timings,
-    })
-}
-
-fn build_index_output(
-    repo_name: &str,
-    path: &str,
-    result: &IndexRunResult,
-    show_stats: bool,
-) -> IndexOutput {
-    let stats = &result.graph_stats;
-    let graph = GraphStats {
-        directories: stats.directories,
-        files: stats.files,
-        definitions: stats.definitions,
-        imported_symbols: stats.imported_symbols,
-        relationships: stats.relationships,
-    };
-
-    let detailed = show_stats.then(|| DetailedStats {
-        skipped_files: result
-            .skipped_files
-            .iter()
-            .map(|s| SkippedFile {
-                path: s.path.clone(),
-                reason: s.kind.as_metric_label().to_string(),
-                detail: s.detail.clone(),
-            })
-            .collect(),
-        errored_files: result
-            .faulted_files
-            .iter()
-            .map(|f| ErroredFile {
-                path: f.path.clone(),
-                kind: f.kind.as_metric_label().to_string(),
-                detail: f.detail.clone(),
-            })
-            .collect(),
-        slowest_files: result
-            .slowest_files
-            .iter()
-            .map(|f| SlowFile {
-                path: f.path.clone(),
-                language: f.language.clone(),
-                size_bytes: f.size_bytes,
-                parse_ms: (f.parse_ms * 100.0).round() / 100.0,
-                resolve_ms: (f.resolve_ms * 100.0).round() / 100.0,
-                total_ms: (f.total_ms * 100.0).round() / 100.0,
-            })
-            .collect(),
-        language_timings: result
-            .language_timings
-            .iter()
-            .map(|lt| LanguageTiming {
-                language: lt.language.clone(),
-                file_count: lt.file_count,
-                total_bytes: lt.total_bytes,
-                parse_ms: (lt.parse_ms * 100.0).round() / 100.0,
-                graph_build_ms: (lt.graph_build_ms * 100.0).round() / 100.0,
-                resolve_ms: (lt.resolve_ms * 100.0).round() / 100.0,
-                total_ms: (lt.total_ms * 100.0).round() / 100.0,
-            })
-            .collect(),
-        phase_timings: PhaseTiming {
-            file_discovery_ms: (result.phase_timings.file_discovery_ms * 100.0).round() / 100.0,
-            structural_graph_ms: (result.phase_timings.structural_graph_ms * 100.0).round() / 100.0,
-            language_processing_ms: (result.phase_timings.language_processing_ms * 100.0).round()
-                / 100.0,
-            total_ms: (result.phase_timings.total_ms * 100.0).round() / 100.0,
-        },
-        relationship_types: stats.relationship_types.clone(),
-        definition_types: stats.definition_types.clone(),
-    });
-
-    IndexOutput {
-        repository: repo_name.to_string(),
-        path: path.to_string(),
-        time_seconds: result.total_processing_time.as_secs_f64(),
-        graph,
-        processing: ProcessingStats {
-            skipped_files: result.skipped_files.len(),
-            errored_files: result.faulted_files.len(),
-        },
-        database_path: result.database_path.clone(),
-        detailed,
-    }
-}
-
-/// `orbit grep` asks `git status` which matched files changed since the index. After a fresh
-/// checkout every file's cached stat data is stale and each status re-hashes the whole tree, so
-/// refresh the cache once here.
-fn refresh_git_index(repo: &Path) {
-    let _ = std::process::Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["update-index", "-q", "--refresh"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::fatal_pipeline_reason;
-    use code_graph::v2::pipeline::PipelineError;
-
-    fn pipeline_error(stage: &'static str, msg: &str, fatal: bool) -> PipelineError {
-        PipelineError {
-            file_path: String::new(),
-            error: msg.to_string(),
-            stage,
-            fatal,
-        }
-    }
-
-    #[test]
-    fn no_errors_is_not_fatal() {
-        assert!(fatal_pipeline_reason(&[]).is_none());
-    }
-
-    #[test]
-    fn non_fatal_errors_do_not_bail() {
-        let errors = [
-            pipeline_error("parse", "bad syntax", false),
-            pipeline_error("walk", "skip", false),
-        ];
-        assert!(fatal_pipeline_reason(&errors).is_none());
-    }
-
-    #[test]
-    fn a_fatal_error_bails_with_first_reason_and_count() {
-        let errors = [
-            pipeline_error("parse", "recoverable", false),
-            pipeline_error("sink_write", "DuckDB write failed", true),
-            pipeline_error("conversion", "arrow overflow", true),
-        ];
-        let reason = fatal_pipeline_reason(&errors).expect("fatal must bail");
-        assert!(reason.contains("sink_write"), "{reason}");
-        assert!(reason.contains("DuckDB write failed"), "{reason}");
-        assert!(reason.contains("2 fatal"), "{reason}");
-    }
 }

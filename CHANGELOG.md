@@ -1,3 +1,53 @@
+## [0.154.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.153.0...v0.154.0) (2026-10-22)
+
+### Features
+
+* **dashboards:** indexer at a glance overview ([5f7a593](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5f7a5935c0ea78bc6008d8831d2a3f3fa65faee4)) by Bohdan Parkhomchuk
+
+## [0.153.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.152.0...v0.153.0) (2026-10-22)
+
+### Features
+
+* **named-queries:** add context_for_issue, context_for_review, and context_for_job ([8013854](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8013854530fe780eab83f158d267a25cb3f10e6c)) by Aaron Algutifan
+* **orbit-cli:** index with the incremental engine ([25d825d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/25d825db5355359e1606f2bc503426dd92fa50fc)) by Aaron Algutifan
+
+### Fixes
+
+* **code-graph-incremental:** leave class members out of the names a package shares ([eb5a9c8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/eb5a9c811c2373ba3a2f4ab340fd6a57d2a9389c)) by Aaron Algutifan
+* **indexer:** count only top-level groups as enabled roots ([056c136](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/056c136cb1426a1d29c998f50e34dc2774694c71)) by Bohdan Parkhomchuk
+* **indexer:** write tombstones with unchanged columns and drop the planner's tombstone guard ([352f83a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/352f83a24bd314bb114ac9e72f5f18dc66294b47)) by Michael Usachenko
+
+### Performance
+
+* **compiler:** bound unfiltered FK endpoints by the keys their holder reached ([cad715a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cad715abe45f7376f81b7868b76977b6f28956ed)) by Jean-Gabriel Doyon
+
+### Other
+
+* update docs review app URL for Cloudflare Workers ([ecbd716](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ecbd716fee180f39a55757ddf6c5176bf56b77e8)) by Marcel Amirault
+
+## [0.152.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.151.1...v0.152.0) (2026-10-21)
+
+### Features
+
+* **cli:** send CLI version, OS, and arch on every CLI event ([538f543](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/538f5433680ecc7f553fe22d23d6ef3c43fad258)) by Jean-Gabriel Doyon
+* **indexer:** record how far indexed SDLC data trails the datalake ([d92a6fa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d92a6fad0e3be71507224f9cae32f198094aeb2d)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **indexer:** bound the merge request extract to the page keys ([794366f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/794366f88cbecf3aa3ae375d6281c8119406532c)) by Jean-Gabriel Doyon
+
+## [0.151.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.151.0...v0.151.1) (2026-10-21)
+
+### Fixes
+
+* **observability:** separate caller errors from server errors in query metrics ([d952d6e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d952d6e592eaa79bf2dda212e0c7a0d6762b18b2)) by Bohdan Parkhomchuk
+* **utils:** map Windows absolute symlink targets in vfs Directory ([06e6db0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/06e6db0b6bf5375ce2f8f67141cb1c9d81a28afe)) by Dmitry Gruzd
+
+### Other
+
+* **adr:** add ADR 021 for entity context expansion in the context endpoint ([0bbcabf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0bbcabf44f9ba2522d067519e7b1a7b3f1ecf45f)) by Dmitry Gruzd
+* **e2e:** run HA suite in post-merge pipeline ([2d3b0d9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2d3b0d983f7781a50daf6190e8e11d62fbab017e)) by Michael Usachenko
+
 ## [0.151.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.150.0...v0.151.0) (2026-10-21)
 
 ### Features

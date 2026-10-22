@@ -140,6 +140,25 @@ async fn assert_graph_data_deleted(context: &TestContext) {
     for table in [t("gl_project"), t("gl_file"), t("gl_edge")] {
         assert_active_row_count(context, &table, DELETED_NAMESPACE_PATH, 0).await;
     }
+    let result = context
+        .query(&format!(
+            "SELECT count() FROM {} \
+             WHERE traversal_path = '{DELETED_NAMESPACE_PATH}' AND id = 1 AND _deleted = true \
+               AND path = 'src/lib.rs' AND name = 'lib.rs' AND extension = 'rs'",
+            t("gl_file")
+        ))
+        .await;
+    let batch = result.first().expect("count batch");
+    let count = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<arrow::array::UInt64Array>()
+        .expect("count column")
+        .value(0);
+    assert_eq!(
+        count, 1,
+        "the file tombstone must carry its unchanging columns"
+    );
 }
 
 async fn assert_sibling_graph_data_retained(context: &TestContext) {

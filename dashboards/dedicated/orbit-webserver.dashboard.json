@@ -60,6 +60,19 @@
             "mode": "thresholds"
           },
           "decimals": 1,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -124,6 +137,19 @@
             "mode": "thresholds"
           },
           "decimals": 2,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -174,7 +200,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "1 - ((sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[$__range])) or vector(0)) + (sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__range])) or vector(0))) / sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!~\"compile_error|security_error\", query_type!=\"unknown\"}[$__range]))",
+          "expr": "1 - ((sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=~\"execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error\"}[$__range])) or vector(0)) + (sum(increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", failure_reason=~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__range])) or vector(0))) / (sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status!~\"compile_error|security_error\", query_type!=\"unknown\"}[$__range])) > 0)",
           "instant": true,
           "legendFormat": "Success",
           "range": false,
@@ -196,6 +222,19 @@
             "mode": "thresholds"
           },
           "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -260,6 +299,19 @@
             "mode": "thresholds"
           },
           "decimals": 1,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -310,7 +362,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\", le=\"5.0\"}[$__range])) / sum(increase(gkg_query_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__range]))",
+          "expr": "sum(increase(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\", le=\"5.0\"}[$__range])) / (sum(increase(gkg_query_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__range])) > 0)",
           "instant": true,
           "legendFormat": "Under 5 s",
           "range": false,
@@ -331,6 +383,19 @@
           "color": {
             "mode": "thresholds"
           },
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -373,7 +438,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__range])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__range]))) >= 0",
           "instant": true,
           "legendFormat": "p50",
           "range": false,
@@ -395,6 +460,19 @@
             "mode": "thresholds"
           },
           "decimals": 1,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -445,7 +523,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__range])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__range]))) >= 0",
           "instant": true,
           "legendFormat": "p95",
           "range": false,
@@ -467,6 +545,19 @@
             "mode": "thresholds"
           },
           "decimals": 1,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -513,7 +604,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__range])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_query_pipeline_duration_seconds_bucket{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type!=\"unknown\"}[$__range]))) >= 0",
           "instant": true,
           "legendFormat": "p99",
           "range": false,
@@ -535,6 +626,19 @@
             "mode": "thresholds"
           },
           "decimals": 1,
+          "mappings": [
+            {
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "color": "text",
+                  "index": 0,
+                  "text": "—"
+                }
+              },
+              "type": "special"
+            }
+          ],
           "noValue": "—",
           "thresholds": {
             "mode": "absolute",
@@ -577,7 +681,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=~\"compile_error|security_error\"}[$__range])) or vector(0)) / (sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[$__range])) - (sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type=\"unknown\"}[$__range])) or vector(0)))",
+          "expr": "(sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=~\"compile_error|security_error\"}[$__range])) or vector(0)) / ((sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\"}[$__range])) - (sum(increase(gkg_query_pipeline_queries_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", status=\"ok\", query_type=\"unknown\"}[$__range])) or vector(0))) > 0)",
           "instant": true,
           "legendFormat": "Rejected",
           "range": false,

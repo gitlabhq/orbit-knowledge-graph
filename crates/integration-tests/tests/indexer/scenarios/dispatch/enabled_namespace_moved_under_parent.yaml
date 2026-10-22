@@ -1,0 +1,32 @@
+description: >
+  An enrollment update for a group that moved under a parent dispatches
+  nothing for it, because the group is no longer a top-level namespace, while
+  a top-level group in the same batch still dispatches
+
+seed:
+  namespace_traversal_paths:
+    - { id: 700, traversal_path: "7/800/700/" }
+    - { id: 900, traversal_path: "9/900/" }
+  project_namespace_traversal_paths:
+    - { id: 7000, traversal_path: "7/800/700/7000/" }
+    - { id: 9000, traversal_path: "9/900/9000/" }
+
+cdc:
+  - table: knowledge_graph_enabled_namespaces
+    operation: update
+    rows:
+      - { root_namespace_id: 700 }
+      - { root_namespace_id: 900 }
+
+dispatch: enabled_namespaces
+
+expect:
+  dispatched:
+    - kind: namespace
+      count: 1
+      rows:
+        - { namespace: 900, traversal_path: "9/900/" }
+    - kind: code_task
+      count: 1
+      rows:
+        - { project_id: 9000, traversal_path: "9/900/9000/" }

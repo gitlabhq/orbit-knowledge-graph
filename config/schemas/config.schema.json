@@ -858,6 +858,9 @@
         },
         "stale-edge-reconciliation": {
           "$ref": "#/$defs/StaleEdgeReconciliationConfig"
+        },
+        "namespace-freshness": {
+          "$ref": "#/$defs/NamespaceFreshnessConfig"
         }
       },
       "additionalProperties": false,
@@ -869,7 +872,8 @@
         "table-cleanup",
         "namespace-deletion",
         "migration-completion",
-        "stale-edge-reconciliation"
+        "stale-edge-reconciliation",
+        "namespace-freshness"
       ]
     },
     "GlobalDispatcherConfig": {
@@ -1001,6 +1005,19 @@
       "required": [
         "cron",
         "lookback_secs"
+      ]
+    },
+    "NamespaceFreshnessConfig": {
+      "description": "Records how far indexed SDLC data trails the datalake for every enabled namespace.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "$ref": "#/$defs/CronSchedule"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cron"
       ]
     },
     "HealthCheckConfig": {

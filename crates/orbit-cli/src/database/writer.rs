@@ -72,6 +72,10 @@ impl GraphWriter {
         Ok(())
     }
 
+    pub fn count(&self, sql: &str) -> Result<usize> {
+        Ok(duckdb_client::scalar_i64(&self.client.query_arrow(sql)?) as usize)
+    }
+
     pub fn complete(&self, commit: &str) -> Result<()> {
         self.client.execute(
             "INSERT INTO _orbit_meta (key, value) VALUES ('indexed_commit', ?1)",
