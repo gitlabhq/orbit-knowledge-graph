@@ -40,11 +40,32 @@ Fuzz testing for Orbit with [Bolero](https://github.com/camshaft/bolero).
 
 ## Running
 
+With mise (recommended):
+
 ```sh
 mise test:fuzz                 # replay every corpus, then 1s of random inputs
 mise fuzz:deep                 # libFuzzer + AddressSanitizer over every target
-mise fuzz:gql-grammar          # fuzz one target until stopped; `mise tasks` lists them
+mise fuzz:compile              # fuzz the query compiler (unstructured)
+mise fuzz:compile-structured   # fuzz the query compiler (structured)
+mise fuzz:gql                  # fuzz the Orbit query frontend (unstructured)
+mise fuzz:gql-grammar          # fuzz the Orbit query frontend (grammar derivations)
+mise fuzz:ruby                 # fuzz the Ruby parser
+mise fuzz:python               # fuzz the Python parser
+mise fuzz:typescript           # fuzz the TypeScript/JS parser
+mise fuzz:java                 # fuzz the Java parser
+mise fuzz:kotlin               # fuzz the Kotlin parser
+mise fuzz:csharp               # fuzz the C# parser
+mise fuzz:rust-parser          # fuzz the Rust parser
+mise fuzz:indexer-messages     # fuzz indexer message deserialization
 ```
+
+Or directly with cargo-bolero:
+
+```sh
+cargo +nightly bolero test <target_name> -p orbit-fuzz
+```
+
+If your default toolchain is nightly, you can omit `+nightly`.
 
 On macOS, AddressSanitizer fails to link. Use `FUZZ_SANITIZER=NONE mise fuzz:deep`.
 
@@ -73,3 +94,5 @@ Each shard splits `FUZZ_BUDGET_SECONDS` (2700) across its targets and must finis
 **Triage a crash:** copy the input from the `crashes/` artifact into `tests/<target>/corpus/`, reproduce with `cargo test -p orbit-fuzz --test <target>`, fix it, and pack the input so it stays as a regression test.
 
 **Add a target:** add `tests/<target>/fuzz_target.rs`, a `[[test]]` block with `harness = false`, a `mise fuzz:<target>` task, and a few seed inputs, then run `scripts/fuzz/pack-corpus.sh <target>`.
+
+See [Fuzzing](../../docs/design-documents/testing.md#fuzzing).
