@@ -216,9 +216,9 @@ Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between backg
 `FINAL` is the default. A selective current-row read can use a two-step form instead:
 
 1. Read matching candidate rows without `FINAL`, then project and deduplicate the complete replacement key.
-2. Read all versions for those keys. Sort-key and unchanging-column filters run first, the latter as `(filter) OR _deleted`. Keep the greatest `_version` with `LIMIT 1 BY`, then apply the remaining filters and `_deleted = false`.
+2. Read all versions for those keys. Sort-key and unchanging-column filters run first; a tombstone carries both, so it passes them and wins the pick. Keep the greatest `_version` with `LIMIT 1 BY`, then apply the remaining filters and `_deleted = false`.
 
-The second filter application preserves latest-state semantics. An old version can find a candidate key, but it cannot make the current version match. The tombstone guard keeps a deleted row from resurfacing through an unchanging-column filter. Tuple membership keeps composite replacement keys intact. Routed edge reads apply this process to each physical table before `UNION ALL`.
+The second filter application preserves latest-state semantics. An old version can find a candidate key, but it cannot make the current version match. Because a tombstone carries the unchanging columns, a deleted row cannot resurface through a filter on one of them. Tuple membership keeps composite replacement keys intact. Routed edge reads apply this process to each physical table before `UNION ALL`.
 
 The planner uses this form for exact IDs, bounded ID ranges, relation frontiers, and positive filters marked as high selectivity in the ontology. Text searches on changing columns, negated filters, `!=`, `IS NOT NULL`, namespace-anchor-only filters, wide ID ranges, and low-selectivity fields keep `FINAL`. Backends must opt in; DuckDB does not use this ClickHouse strategy.
 
@@ -237,7 +237,7 @@ A relation referenced more than once is stored as a materialized CTE. The except
 Filter placement rules for current-row reads:
 
 - **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are emitted on the current-row read so ClickHouse can still use primary-key pruning where supported.
-- **Immutable non-key filters** (`created_at`, `author_id`) also run before the pick, as `(filter OR _deleted)`. A tombstone holds column defaults, and the guard lets it reach the pick and win.
+- **Immutable non-key filters** (`created_at`, `author_id`) also run before the pick. The indexer writes every tombstone with these columns, so the tombstone passes the filter, reaches the pick and wins.
 - **Mutable filters** (`state`, `status`, `draft`) evaluate after latest-row resolution, preventing stale row versions from matching. The selective form also uses them to find candidate keys.
 - **`_deleted = false`** is always applied after latest-row resolution, either on the `FINAL` scan or outside a wrapping subquery.
 - **Exact edge metadata** can enforce a node filter only when every selected relationship variant carries the current value.

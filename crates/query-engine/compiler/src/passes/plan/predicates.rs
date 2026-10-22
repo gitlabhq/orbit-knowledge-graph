@@ -68,7 +68,6 @@ pub enum Predicate {
         relation: RelationId,
         keys: Vec<String>,
     },
-    OrTombstone(Box<Predicate>, String),
     Scope {
         alias: String,
         proof: crate::scope::ScopeProof,
@@ -84,7 +83,6 @@ impl Predicate {
                 &|_| false,
             ),
             Self::Property { selective, .. } => *selective,
-            Self::OrTombstone(predicate, _) => predicate.is_selective(),
             Self::Ids { .. } | Self::Membership { .. } => true,
             Self::IdRange { start, end, .. } => {
                 end.saturating_sub(*start) <= crate::passes::validate::MAX_ID_RANGE_SPAN
@@ -143,14 +141,6 @@ impl Predicate {
             Self::RelationshipKinds { .. } => in_key(RELATIONSHIP_KIND_COLUMN),
             Self::Scope { .. } => in_key(TRAVERSAL_PATH_COLUMN),
             _ => false,
-        }
-    }
-
-    pub fn guard_tombstones(self, sort_key: &[String], alias: &str) -> Self {
-        if self.filters_sort_key(sort_key, false) {
-            self
-        } else {
-            Self::OrTombstone(Box::new(self), alias.to_string())
         }
     }
 }
