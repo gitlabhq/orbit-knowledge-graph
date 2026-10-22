@@ -50,18 +50,19 @@ pub(in crate::passes) fn latest_rows_for_join(
     table: &str,
     alias: &str,
     sort_key: Option<&[String]>,
-) -> TableRef {
+    scope: Option<Expr>,
+) -> (TableRef, Option<Expr>) {
     let Expr::Column {
         table: source_alias,
         column,
     } = identity
     else {
-        return TableRef::scan_final(table, alias);
+        return (TableRef::scan_final(table, alias), scope);
     };
     let Some(sort_key) =
         sort_key.filter(|key| key.iter().any(|column| column == DEFAULT_PRIMARY_KEY))
     else {
-        return TableRef::scan_final(table, alias);
+        return (TableRef::scan_final(table, alias), scope);
     };
     let mut relation = None;
     crate::ast::visit::visit_relations(source, &mut |candidate| {
@@ -70,7 +71,7 @@ pub(in crate::passes) fn latest_rows_for_join(
         }
     });
     let Some(relation) = relation else {
-        return TableRef::scan_final(table, alias);
+        return (TableRef::scan_final(table, alias), scope);
     };
     let keys = Query {
         select: vec![SelectExpr::col(source_alias, column)],
@@ -78,20 +79,22 @@ pub(in crate::passes) fn latest_rows_for_join(
         ..Default::default()
     };
     let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
-    TableRef::subquery(
+    let membership = Expr::InSelect {
+        expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
+        query: Box::new(keys),
+    };
+    let pick = TableRef::subquery(
         Query {
             select: vec![SelectExpr::star()],
             from: TableRef::scan(table, alias),
-            where_clause: Some(Expr::InSelect {
-                expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
-                query: Box::new(keys),
-            }),
+            where_clause: Expr::and_all([Some(membership), scope]),
             order_by,
             limit_by,
             ..Default::default()
         },
         alias,
-    )
+    );
+    (pick, None)
 }
 
 pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
