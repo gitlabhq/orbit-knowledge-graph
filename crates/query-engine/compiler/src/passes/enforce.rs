@@ -9,6 +9,7 @@ use crate::passes::lower::sql::{
 };
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
 use crate::passes::plan::filters::{FilterOwner, ordered_filters};
+use crate::scope::{QueryScope, scope_predicate};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::EntityAuthConfig;
 use std::collections::{HashMap, HashSet};
@@ -110,10 +111,11 @@ pub fn enforce_lowered_return(
     input: &Input,
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    scope: Option<&QueryScope>,
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth.clone_from(model.entity_auth());
-    enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |entity| {
+    enforce_lowered_return_with(node, input, metadata, model, scope, &mut ctx, |entity| {
         model
             .redaction_id_column(entity)
             .unwrap_or(DEFAULT_PRIMARY_KEY)
@@ -129,7 +131,7 @@ pub fn enforce_local_return(
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
-    enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |_| {
+    enforce_lowered_return_with(node, input, metadata, model, None, &mut ctx, |_| {
         DEFAULT_PRIMARY_KEY.to_string()
     })?;
     Ok(ctx)
@@ -140,6 +142,7 @@ fn enforce_lowered_return_with(
     input: &Input,
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    scope: Option<&QueryScope>,
     ctx: &mut ResultContext,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
@@ -165,6 +168,7 @@ fn enforce_lowered_return_with(
                 &selectable_nodes,
                 &metadata.nodes,
                 model,
+                scope,
                 redaction_column,
             )?
         }
@@ -204,6 +208,7 @@ pub fn enforce_role_scans(
     input: &Input,
     metadata: &LoweredMetadata,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    scope: Option<&QueryScope>,
 ) -> Result<()> {
     let Node::Query(query) = node else {
         return Ok(());
@@ -228,13 +233,14 @@ pub fn enforce_role_scans(
             QueryError::Enforcement(format!("protected node '{}' has no table", input_node.id))
         })?;
         let role_alias = format!("_role_{}", input_node.id);
-        let role_scan = latest_rows_for_join(
+        let (role_scan, scope) = latest_rows_for_join(
             &query.ctes,
             &query.from,
             identity,
             table,
             &role_alias,
             model.table_sort_key(table),
+            node_scope(scope, &input_node.id, &role_alias),
         );
         query.from = TableRef::join(
             JoinType::Inner,
@@ -245,10 +251,11 @@ pub fn enforce_role_scans(
                 Expr::col(&role_alias, DEFAULT_PRIMARY_KEY),
             ),
         );
-        query.where_clause = Some(match query.where_clause.take() {
-            Some(existing) => Expr::and(existing, deleted_false(&role_alias)),
-            None => deleted_false(&role_alias),
-        });
+        query.where_clause = Expr::and_all([
+            query.where_clause.take(),
+            Some(deleted_false(&role_alias)),
+            scope,
+        ]);
     }
     Ok(())
 }
@@ -274,12 +281,19 @@ fn set_output(q: &mut Query, output: SelectExpr) {
     }
 }
 
+fn node_scope(scope: Option<&QueryScope>, node: &str, alias: &str) -> Option<Expr> {
+    scope
+        .and_then(|scope| scope.node(node))
+        .map(|proof| scope_predicate(proof, alias))
+}
+
 fn enforce_return_columns(
     q: &mut Query,
     input: &Input,
     selectable_nodes: &HashSet<&str>,
     bindings: &HashMap<String, NodeBinding>,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    scope: Option<&QueryScope>,
     redaction_column: impl Fn(query_data_model::EntityId) -> String,
 ) -> Result<()> {
     for node in &input.nodes {
@@ -321,13 +335,14 @@ fn enforce_return_columns(
                         node.id
                     ))
                 })?;
-                let latest = latest_rows_for_join(
+                let (latest, scope) = latest_rows_for_join(
                     &q.ctes,
                     &q.from,
                     identity,
                     table,
                     &node.id,
                     model.table_sort_key(table),
+                    node_scope(scope, &node.id, &node.id),
                 );
                 let scan = if node.filters.is_empty() {
                     latest
@@ -348,6 +363,7 @@ fn enforce_return_columns(
                         predicates.push(id_range_predicate(&node.id, range));
                     }
                     predicates.push(deleted_false(&node.id));
+                    predicates.extend(scope.clone());
                     TableRef::subquery(
                         Query {
                             select: vec![SelectExpr::star()],
@@ -365,10 +381,11 @@ fn enforce_return_columns(
                     Expr::eq(identity.clone(), Expr::col(&node.id, DEFAULT_PRIMARY_KEY)),
                 );
                 if node.filters.is_empty() {
-                    q.where_clause = Some(match q.where_clause.take() {
-                        Some(existing) => Expr::and(existing, deleted_false(&node.id)),
-                        None => deleted_false(&node.id),
-                    });
+                    q.where_clause = Expr::and_all([
+                        q.where_clause.take(),
+                        Some(deleted_false(&node.id)),
+                        scope,
+                    ]);
                 }
             }
             Expr::col(table_alias.as_deref().unwrap_or(&node.id), redaction_column)
