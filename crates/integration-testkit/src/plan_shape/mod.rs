@@ -822,7 +822,7 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
             HydrationPathFilter::PrefixSet(paths) => (true, paths),
         };
         assert_eq!((actual_set, paths.len()), (set, expected_paths));
-        let lowered = lower::emit(&plan, &input).unwrap();
+        let lowered = lower::emit(&plan, &input, None).unwrap();
         let (sql, _) = compiler::emit_simple_query(&lowered.ast).unwrap();
         assert_eq!(sql.contains("arrayExists"), set);
         assert_eq!(
