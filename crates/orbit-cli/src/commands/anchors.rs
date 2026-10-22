@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -10,9 +10,19 @@ use crate::workspace::GitInfo;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Anchors {
-    pub(crate) lines: Vec<(String, i64)>,
+    pub(crate) spans: Vec<(String, i64, i64)>,
     pub(crate) names: Vec<String>,
 }
+
+const DEFINITION_LINES: i64 = 60;
+const WINDOW_LINES: i64 = 8;
+const BUDGET_LINES: usize = 220;
+const NAMED_DEFINITIONS: usize = 10;
+const CALLERS_SHOWN: usize = 8;
+
+static CHANGED_FILE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)^\s+[AMR] (\S+)(?: \(from \S+\))? @ (.+)$").expect("valid pattern")
+});
 
 const PATH: &str = r"[\w./@+-]*\w\.[A-Za-z][A-Za-z0-9]{0,7}";
 
@@ -75,15 +85,28 @@ fn identifier_words(text: &str) -> Vec<String> {
 
 pub(crate) fn extract(text: &str, root: &Path, files: &BTreeSet<String>) -> Anchors {
     let mut anchors = Anchors::default();
+    let mut push = |path: String, start: i64, end: i64| {
+        if start > 0 && end >= start && !anchors.spans.contains(&(path.clone(), start, end)) {
+            anchors.spans.push((path, start, end));
+        }
+    };
     for found in PATH_LINES.captures_iter(text) {
-        let (Some(path), Ok(line)) = (
+        if let (Some(path), Ok(line)) = (
             local_path(Some(root), &found[1], files),
             found[2].parse::<i64>(),
-        ) else {
+        ) {
+            push(path, line, line);
+        }
+    }
+    for found in CHANGED_FILE.captures_iter(text) {
+        let Some(path) = local_path(Some(root), &found[1], files) else {
             continue;
         };
-        if line > 0 && !anchors.lines.contains(&(path.clone(), line)) {
-            anchors.lines.push((path, line));
+        for range in found[2].split(", ") {
+            let (start, end) = range.split_once('-').unwrap_or((range, range));
+            if let (Ok(start), Ok(end)) = (start.parse(), end.parse()) {
+                push(path.clone(), start, end);
+            }
         }
     }
     anchors.names = identifier_words(text);
@@ -108,7 +131,6 @@ struct Found {
     kind: String,
     start: i64,
     end: i64,
-    line: Option<i64>,
 }
 
 fn definitions(
@@ -142,104 +164,161 @@ FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2 AND fqn NOT LIKE '%
             kind: kinds[i].clone(),
             start: starts[i],
             end: ends[i],
-            line: None,
         })
         .collect())
 }
 
-fn resolve(client: &GraphReader, git: &GitInfo, anchors: &Anchors) -> Result<Vec<Found>> {
-    let mut found: Vec<Found> = Vec::new();
-    for (path, line) in &anchors.lines {
+struct Region {
+    definition: Option<Found>,
+    path: String,
+    spans: Vec<(i64, i64)>,
+}
+
+impl Region {
+    fn lines(&self) -> BTreeSet<i64> {
+        let (low, high) = self
+            .definition
+            .as_ref()
+            .map_or((1, i64::MAX), |def| (def.start, def.end));
+        if let Some(def) = &self.definition
+            && def.end - def.start < DEFINITION_LINES
+        {
+            return (def.start..=def.end).collect();
+        }
+        self.spans
+            .iter()
+            .flat_map(|(start, end)| {
+                (start - WINDOW_LINES).max(low)..=(end + WINDOW_LINES).min(high)
+            })
+            .collect()
+    }
+}
+
+fn regions(client: &GraphReader, git: &GitInfo, anchors: &Anchors) -> Result<Vec<Region>> {
+    let mut order: Vec<(String, Option<i64>)> = Vec::new();
+    let mut grouped: BTreeMap<(String, Option<i64>), Region> = BTreeMap::new();
+    for (path, start, end) in &anchors.spans {
         let enclosing = definitions(
             client,
             git,
             "file_path = ?3 AND start_line <= ?4 AND end_line >= ?4 ORDER BY end_line - start_line LIMIT 1",
-            vec![path.clone().into(), (*line).into()],
-        )?;
-        match enclosing.into_iter().next() {
-            Some(def) if found.iter().any(|known| known.id == def.id) => {}
-            Some(def) => found.push(Found {
-                line: Some(*line),
-                ..def
-            }),
-            None => found.push(Found {
-                id: -1,
+            vec![path.clone().into(), (*start).into()],
+        )?
+        .into_iter()
+        .next();
+        let key = (path.clone(), enclosing.as_ref().map(|def| def.id));
+        if !grouped.contains_key(&key) {
+            order.push(key.clone());
+        }
+        grouped
+            .entry(key)
+            .or_insert_with(|| Region {
+                definition: enclosing,
                 path: path.clone(),
-                fqn: String::new(),
-                kind: String::new(),
-                start: *line,
-                end: *line,
-                line: Some(*line),
-            }),
-        }
+                spans: Vec::new(),
+            })
+            .spans
+            .push((*start, *end));
     }
-    for name in &anchors.names {
-        let named = definitions(client, git, "name = ?3 LIMIT 2", vec![name.clone().into()])?;
-        if let [def] = named.as_slice()
-            && !found.iter().any(|known| known.id == def.id)
-        {
-            found.push(def.clone());
-        }
-    }
-    Ok(found)
+    Ok(order
+        .into_iter()
+        .filter_map(|key| grouped.remove(&key))
+        .collect())
 }
 
-fn neighbor_names(client: &GraphReader, sql: &str, id: i64) -> Result<Vec<String>> {
-    let batches = client.query_arrow_json(sql, &[id.into()])?;
+fn callers(client: &GraphReader, id: i64) -> Result<Vec<String>> {
+    let batches = client.query_arrow_json(
+        "SELECT DISTINCT d.name AS name FROM gl_edge e
+JOIN gl_definition d ON d.id = e.source_id
+WHERE e.relationship_kind = 'CALLS' AND e.source_kind = 'Definition' AND e.target_id = ?1
+  AND e.source_id <> e.target_id ORDER BY d.name",
+        &[id.into()],
+    )?;
     Ok(duckdb_client::string_column(&batches, "name"))
 }
 
-fn listed(label: &str, names: Vec<String>) -> Option<String> {
-    (!names.is_empty()).then(|| format!("  {label}: {}", names.join(", ")))
+fn spans_label(spans: &[(i64, i64)]) -> String {
+    spans
+        .iter()
+        .map(|(start, end)| match start == end {
+            true => start.to_string(),
+            false => format!("{start}-{end}"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub(crate) fn render(client: &GraphReader, git: &GitInfo, anchors: &Anchors) -> Result<String> {
     let mut out = String::new();
-    for def in resolve(client, git, anchors)? {
-        let content = std::fs::read_to_string(git.repo_path.join(&def.path)).unwrap_or_default();
-        let lines: Vec<&str> = content.lines().collect();
-        let show = |out: &mut String, number: i64| {
-            if let Some(text) = usize::try_from(number - 1).ok().and_then(|i| lines.get(i)) {
-                out.push_str(&format!("  {number}| {}\n", text.trim_end()));
+    let mut used = 0;
+    let mut skipped = Vec::new();
+    let mut shown = BTreeSet::new();
+    for region in regions(client, git, anchors)? {
+        let lines = region.lines();
+        let label = spans_label(&region.spans);
+        if used + lines.len() > BUDGET_LINES {
+            skipped.push(format!("{}:{label}", region.path));
+            continue;
+        }
+        let content = std::fs::read_to_string(git.repo_path.join(&region.path)).unwrap_or_default();
+        let source: Vec<&str> = content.lines().collect();
+        match &region.definition {
+            Some(def) => {
+                shown.insert(def.id);
+                out.push_str(&format!(
+                    "{}:{}-{}  {}  {}  (at {label})\n",
+                    region.path, def.start, def.end, def.kind, def.fqn
+                ));
             }
-        };
-        if def.id < 0 {
-            out.push_str(&format!("{}:{}\n", def.path, def.start));
-        } else {
+            None => out.push_str(&format!("{}  (at {label})\n", region.path)),
+        }
+        let mut last = None;
+        for number in &lines {
+            let Some(text) = usize::try_from(number - 1).ok().and_then(|i| source.get(i)) else {
+                continue;
+            };
+            if last.is_some_and(|last| number - last > 1) {
+                out.push_str("  ...\n");
+            }
+            out.push_str(&format!("{number}|{}\n", text.trim_end()));
+            last = Some(*number);
+            used += 1;
+        }
+        if let Some(def) = &region.definition {
+            let names = callers(client, def.id)?;
+            if !names.is_empty() {
+                let more = names.len().saturating_sub(CALLERS_SHOWN);
+                let mut listed = names
+                    .into_iter()
+                    .take(CALLERS_SHOWN)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if more > 0 {
+                    listed.push_str(&format!(", +{more} more"));
+                }
+                out.push_str(&format!("» called by {listed}\n"));
+            }
+        }
+        out.push('\n');
+    }
+    let mut named = 0;
+    for name in &anchors.names {
+        if named == NAMED_DEFINITIONS {
+            break;
+        }
+        let found = definitions(client, git, "name = ?3 LIMIT 2", vec![name.clone().into()])?;
+        if let [def] = found.as_slice()
+            && shown.insert(def.id)
+        {
             out.push_str(&format!(
                 "{}:{}-{}  {}  {}\n",
                 def.path, def.start, def.end, def.kind, def.fqn
             ));
-            show(&mut out, def.start);
+            named += 1;
         }
-        if let Some(line) = def.line.filter(|line| *line != def.start) {
-            show(&mut out, line);
-        }
-        if def.id >= 0 {
-            let callers = neighbor_names(
-                client,
-                "SELECT DISTINCT d.name AS name FROM gl_edge e
-JOIN gl_definition d ON d.id = e.source_id
-WHERE e.relationship_kind = 'CALLS' AND e.source_kind = 'Definition' AND e.target_id = ?1
-  AND e.source_id <> e.target_id",
-                def.id,
-            )?;
-            let callees = neighbor_names(
-                client,
-                "SELECT DISTINCT d.name AS name FROM gl_edge e
-JOIN gl_definition d ON d.id = e.target_id
-WHERE e.relationship_kind = 'CALLS' AND e.target_kind = 'Definition' AND e.source_id = ?1
-  AND e.source_id <> e.target_id",
-                def.id,
-            )?;
-            for row in [listed("called by", callers), listed("calls", callees)]
-                .into_iter()
-                .flatten()
-            {
-                out.push_str(&row);
-                out.push('\n');
-            }
-        }
+    }
+    if !skipped.is_empty() {
+        out.push_str(&format!("» not shown: {}\n", skipped.join(" ")));
     }
     Ok(out)
 }
@@ -257,15 +336,17 @@ mod tests {
             .chain(["app/models.py".to_string(), "index.js".to_string()])
             .collect();
         let anchors = extract(
-            "pull.go:88: expected 3; call `retry_backoff`\n  File \"/srv/app/models.py\", line 12\n  node_modules/x/index.js:4",
+            "pull.go:88: expected 3; call `retry_backoff`\n  File \"/srv/app/models.py\", line 12\n  node_modules/x/index.js:4\n  changed_files[1]:\n    M app/models.py @ 9, 16-23",
             dir.path(),
             &files,
         );
         assert_eq!(
-            anchors.lines,
+            anchors.spans,
             [
-                ("executors/docker/pull.go".to_string(), 88),
-                ("app/models.py".to_string(), 12)
+                ("executors/docker/pull.go".to_string(), 88, 88),
+                ("app/models.py".to_string(), 12, 12),
+                ("app/models.py".to_string(), 9, 9),
+                ("app/models.py".to_string(), 16, 23)
             ]
         );
         assert!(anchors.names.contains(&"retry_backoff".to_string()));
