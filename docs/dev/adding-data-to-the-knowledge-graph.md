@@ -302,9 +302,10 @@ This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql
 
 ### 5.6 Document
 
-After the code MR merges, open a separate docs MR. Add a row to
-`docs/design-documents/data_model.md`: the node table, the mermaid
-relationship diagram, the `IN_PROJECT` source list, and a new relationship-types row.
+After the code MR merges, open a separate docs MR. Add the node to the user
+schema reference,
+[`docs/source/remote/schema.md`](../source/remote/schema.md), in the table for
+its domain. Update the node count in the page description and the intro.
 
 ### 5.7 Validate (toolchain matters)
 

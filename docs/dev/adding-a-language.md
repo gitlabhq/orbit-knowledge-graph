@@ -382,16 +382,11 @@ For debugging: `--no-fail-fast --retries 0`.
 - Body: `Closes #NNN`
 - CI checks: see [Testing](../design-documents/testing.md#ci-checks).
 
-### Step 8 — Update the design doc
+### Step 8 — Update the user docs
 
-After the code MR merges, open a separate docs MR. In
-[`docs/design-documents/indexing/code_indexing.md`](../design-documents/indexing/code_indexing.md),
-add the language to the tree-sitter bullet under **Parser architecture**:
-
-```diff
-- - **Python, Kotlin, Java, C#, Go, Ruby, C, and C++** use tree-sitter grammars.
-+ - **Python, Kotlin, Java, C#, Go, Ruby, C, C++, and <Lang>** use tree-sitter grammars.
-```
+After the code MR merges, open a separate docs MR. Add the language to the
+[supported languages table](../source/compare-local-remote.md#supported-languages)
+and to the language list in [`docs/source/_index.md`](../source/_index.md).
 
 ## Pre-flight checklist
 
