@@ -30,8 +30,14 @@ fn orbit_skills_match_cli_commands() {
 fn named_queries_render_and_compile() {
     let directory = PathBuf::from(env!("NAMED_QUERIES_DIR"));
     let ontology = embedded_ontology();
-    let security_context = compiler::SecurityContext::new(1, vec!["1/".into()])
-        .expect("static security context must be valid");
+    let security_context = compiler::SecurityContext::new_with_roles(
+        1,
+        vec![compiler::AuthorizedPath::new(
+            "1/",
+            compiler::AccessLevel::Owner as u32,
+        )],
+    )
+    .expect("static security context must be valid");
     let queries = named_queries::NamedQueries::load_from_dir(&directory)
         .unwrap_or_else(|error| panic!("named queries failed to load: {error}"));
 
