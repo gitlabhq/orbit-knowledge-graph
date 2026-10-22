@@ -273,7 +273,9 @@ For setup, debugging, and the list of key files, see [E2E testing harness](../de
 
 ### Indexing benchmarks
 
-[`code-indexing-benchmark.yaml`](../../code-indexing-benchmark.yaml) lists real repositories, grouped by language. When an MR changes an indexing crate, CI uses [`gitlab-xtasks`](https://gitlab.com/gitlab-org/rust/gitlab-xtasks) and hyperfine to time `orbit index` on them. Then it posts the results as an MR comment. A slower result does not fail the MR.
+[`code-indexing-benchmark.yaml`](../../code-indexing-benchmark.yaml) lists real repositories, grouped by language. The local xtask reads this file, downloads pinned revisions, builds Orbit, and writes the timing results. Use `mise bench:run` for measured runs and `mise bench:smoke` for one indexing pass per repository.
+
+Repositories, Cargo output, and result JSON stay under `/tmp/orbit-code-indexing-benchmark` on Unix or `%TEMP%\orbit-code-indexing-benchmark` on Windows. Each invocation gets an isolated data directory and one database per repository. Set `ORBIT_BENCH_ROOT` to use another location. Shared CI runners do not produce stable timing results, so code-indexing benchmarks do not run in CI. Automated backfill measurements belong in a dedicated E2E cluster with controlled compute and Gitaly.
 
 ### Synthetic query load
 
