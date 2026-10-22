@@ -100,9 +100,6 @@ materialized views. The dispatcher creates unversioned tables and unversioned vi
 refreshable views at startup only when the database active version matches the embedded version.
 During migration completion, it creates the incoming auxiliary tables and refreshable views before
 promotion and drops outgoing version-prefixed refreshable views afterward.
-Startup replaces a refreshable view in two steps: it drops the view, then creates it. If the create
-step fails, the view is missing. Every migration completion tick creates any missing refreshable
-view of the active version when that version matches the embedded version.
 
 Standard materialized views default to `versioned: true`. The view and its `to_table` receive the
 schema-version prefix and are dropped on version rollover. So they must reference version-tracked
