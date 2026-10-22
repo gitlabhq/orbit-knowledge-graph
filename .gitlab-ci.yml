@@ -944,12 +944,6 @@ fuzz-smoke:
   script:
     - mise run test:fuzz
     - sccache --show-stats || true
-  artifacts:
-    when: on_failure
-    access: developer
-    paths:
-      - crates/fuzz/tests/*/fuzz.log
-    expire_in: 30 days
 
 fuzz-deep:
   stage: test
@@ -980,8 +974,6 @@ fuzz-deep:
     access: developer
     paths:
       - crates/fuzz/tests/*/corpus/
-      - crates/fuzz/tests/*/crashes/
-      - crates/fuzz/tests/*/fuzz.log
     expire_in: 30 days
 
 # Build Stage
