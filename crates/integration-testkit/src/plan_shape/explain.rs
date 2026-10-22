@@ -225,10 +225,11 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             let result = &plan.operation.result;
             let group = |value: &compiler::passes::plan::query_types::aggregation::Group| {
                 let column = planned_column(&value.column);
-                value.truncate.map_or_else(
-                    || column.clone(),
-                    |unit| format!("bucket({}, {column})", unit.name()),
-                )
+                match (&value.tag_key, value.truncate) {
+                    (Some(key), _) => format!("tag({column}, {key})"),
+                    (None, Some(unit)) => format!("bucket({}, {column})", unit.name()),
+                    (None, None) => column,
+                }
             };
             let condition = if result.condition.is_empty() {
                 String::new()

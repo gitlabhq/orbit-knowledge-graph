@@ -1,0 +1,52 @@
+cases:
+  - name: Grouping by a verbatim edge tag skips the endpoint table
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[278964]},{"id":"m","entity":"MergeRequest"},{"id":"pl","entity":"Pipeline"},{"id":"j","entity":"Job"}],"relationships":[{"type":"IN_PROJECT","from":"m","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"m","to":"pl"},{"type":"HAS_JOB","from":"pl","to":"j"}],"group_by":["j.status"],"aggregations":[{"count":"j","as":"n"}]}
+      gql: |
+        MATCH (p:Project {id: 278964})<-[:IN_PROJECT]-(m:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pl:Pipeline)-[:HAS_JOB]->(j:Job)
+        RETURN j.status, count(j) AS n
+    logical:
+      expect: ["(Aggregate group j.status AS j_status, COUNT(j) AS n (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Aggregate group tag(_orbit_edge_2.target_tags, status), tag(_orbit_edge_2.target_tags, status) AS j_status, COUNT() AS n (_))
+          reject: ["(Scan Table(gl_job) ...)"]
+        emitted:
+          expect:
+            - (Aggregate group Substring(ArrayFirst(_orbit_tag -> StartsWith(_orbit_tag, 'status:'), _orbit_edge_2.target_tags), 8), ... (_))
+          reject: ["(Scan Table(gl_job) ...)"]
+
+  - name: Mapped enum tags keep the endpoint table
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[278964]},{"id":"m","entity":"MergeRequest"},{"id":"pl","entity":"Pipeline"},{"id":"j","entity":"Job"}],"relationships":[{"type":"IN_PROJECT","from":"m","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"m","to":"pl"},{"type":"HAS_JOB","from":"pl","to":"j"}],"group_by":["j.failure_reason"],"aggregations":[{"count":"j","as":"n"}]}
+      gql: |
+        MATCH (p:Project {id: 278964})<-[:IN_PROJECT]-(m:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pl:Pipeline)-[:HAS_JOB]->(j:Job)
+        RETURN j.failure_reason, count(j) AS n
+    logical:
+      expect: ["(Aggregate group j.failure_reason AS j_failure_reason, COUNT(j) AS n (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Aggregate group j.failure_reason, j.failure_reason AS j_failure_reason, COUNT() AS n (_))
+            - (Scan Table(gl_job) AS j)
+
+  - name: An uncovered group keeps the endpoint table for every group
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"p","entity":"Project","node_ids":[278964]},{"id":"m","entity":"MergeRequest"},{"id":"pl","entity":"Pipeline"},{"id":"j","entity":"Job"}],"relationships":[{"type":"IN_PROJECT","from":"m","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"m","to":"pl"},{"type":"HAS_JOB","from":"pl","to":"j"}],"group_by":["j.status","j.name"],"aggregations":[{"count":"j","as":"n"}]}
+      gql: |
+        MATCH (p:Project {id: 278964})<-[:IN_PROJECT]-(m:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pl:Pipeline)-[:HAS_JOB]->(j:Job)
+        RETURN j.status, j.name, count(j) AS n
+    logical:
+      expect: ["(Aggregate group j.status AS j_status, group j.name AS j_name, COUNT(j) AS n (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Aggregate group j.status, group j.name, ... (_))
+            - (Scan Table(gl_job) AS j)

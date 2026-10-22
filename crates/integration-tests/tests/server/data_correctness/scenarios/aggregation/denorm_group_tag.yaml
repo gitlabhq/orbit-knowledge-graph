@@ -1,0 +1,19 @@
+description: Grouping by a denormalized property counts each member through its edge tag
+
+config:
+  security:
+    paths: ["1/101/"]
+
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"u","entity":"User"},{"id":"g","entity":"Group"},{"id":"p","entity":"Project","node_ids":[1001]}],"relationships":[{"type":"MEMBER_OF","from":"u","to":"g"},{"type":"CONTAINS","from":"g","to":"p"}],"group_by":["u.state"],"aggregations":[{"count":"u","as":"n"}],"aggregation_sort":"-n"}
+  gql: |
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project {id: 1001})
+    RETURN u.state, count(u) AS n ORDER BY n DESC
+
+expect:
+  skip_requirements: [node_ids, aggregation_sort]
+  row_count: 2
+  row_values:
+    - { u_state: active, n: 3 }
+    - { u_state: blocked, n: 1 }

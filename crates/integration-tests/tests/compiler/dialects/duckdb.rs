@@ -101,8 +101,19 @@ fn canonical_functions_execute_in_duckdb() {
             "éc",
         ),
         (
+            Expr::func(
+                Function::Substring,
+                vec![Expr::string("status:failed"), Expr::int(8)],
+            ),
+            "failed",
+        ),
+        (
             Expr::func(Function::ArrayFilter, vec![positive(), array()]),
             "[2]",
+        ),
+        (
+            Expr::func(Function::ArrayFirst, vec![positive(), array()]),
+            "2",
         ),
         (
             Expr::func(
