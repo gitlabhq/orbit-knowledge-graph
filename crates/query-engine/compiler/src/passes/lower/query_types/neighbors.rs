@@ -337,13 +337,12 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             if center_node_ids.is_empty() || !center_has_tp {
                 return vec![build_arm(dir, all_kinds, None)];
             }
-            if carrying.is_empty() || rest.is_empty() {
-                let bound = if rest.is_empty() {
-                    CenterBound::Path
-                } else {
-                    CenterBound::Id
-                };
-                return vec![build_arm(dir, all_kinds, Some(bound))];
+            if carrying.is_empty() {
+                let guard = (dir == Direction::Incoming).then_some(CenterBound::Id);
+                return vec![build_arm(dir, all_kinds, guard)];
+            }
+            if rest.is_empty() {
+                return vec![build_arm(dir, all_kinds, Some(CenterBound::Path))];
             }
             vec![
                 build_arm(dir, carrying, Some(CenterBound::Path)),
@@ -362,7 +361,12 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         first.limit = Some(input.limit);
         first
     };
-    if fused_table.is_none() && !center_node_ids.is_empty() && center_has_tp {
+    let reads_center = |q: &Query| {
+        std::iter::once(q)
+            .chain(&q.union_all)
+            .any(|arm| format!("{:?}", arm.where_clause).contains(center_rows))
+    };
+    if fused_table.is_none() && reads_center(&query) {
         let (order_by, limit_by) = latest_row_dedup(center_rows, center_sort_key);
         let latest = Query {
             select: vec![SelectExpr::star()],
