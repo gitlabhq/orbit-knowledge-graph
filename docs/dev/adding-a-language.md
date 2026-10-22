@@ -59,7 +59,6 @@ Sizes from the C and C++ MRs. All paths relative to `crates/`.
 | `code-graph/src/v2/langs/generic/mod.rs` | +1 `pub mod` | +1 |
 | `code-graph/src/v2/registry.rs` | +2 `use`; +1 `register_v2_pipelines!` row | +3 |
 | `integration-tests-codegraph/fixtures/<lang>/*.yaml` | 3+ fixtures | ~150 |
-| `docs/design-documents/indexing/code_indexing.md` | Add language to tree-sitter bullet | +2 |
 
 Total: ~700-1,400 LoC across 12-16 files.
 
@@ -377,9 +376,15 @@ mise lint:code:fix                                                   # auto-fix
 
 For debugging: `--no-fail-fast --retries 0`.
 
-### Step 7 — Update the design doc
+### Step 7 — Open the MR
 
-In
+- Title: `feat(code-graph): add <Lang> language support`
+- Body: `Closes #NNN`
+- CI checks: see [Testing](../design-documents/testing.md#ci-checks).
+
+### Step 8 — Update the design doc
+
+After the code MR merges, open a separate docs MR. In
 [`docs/design-documents/indexing/code_indexing.md`](../design-documents/indexing/code_indexing.md),
 add the language to the tree-sitter bullet under **Parser architecture**:
 
@@ -387,12 +392,6 @@ add the language to the tree-sitter bullet under **Parser architecture**:
 - - **Python, Kotlin, Java, C#, Go, Ruby, C, and C++** use tree-sitter grammars.
 + - **Python, Kotlin, Java, C#, Go, Ruby, C, C++, and <Lang>** use tree-sitter grammars.
 ```
-
-### Step 8 — Open the MR
-
-- Title: `feat(code-graph): add <Lang> language support`
-- Body: `Closes #NNN`
-- CI checks: see [Testing](../design-documents/testing.md#ci-checks).
 
 ## Pre-flight checklist
 
@@ -406,7 +405,6 @@ add the language to the tree-sitter bullet under **Parser architecture**:
 - [ ] 3+ fixtures (definitions, imports, call resolution)
 - [ ] `cargo nextest run -p integration-tests-codegraph -E 'test(<lang>)'` green
 - [ ] `mise lint:code` clean
-- [ ] `code_indexing.md` updated
 - [ ] MR title in conventional-commit form
 
 ## Common traps
