@@ -135,8 +135,6 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
         .filter(|relationship| touches(relationship, false))
         .copied()
         .collect();
-    // Kinds whose every variant at the center writes the center's own traversal path on the edge row,
-    // so the arm can match the center's path exactly; the rest keep only the id bound.
     let split_by_path = |kinds: &[&str], center_is_target: bool| {
         let (mut carrying, mut rest) = (Vec::new(), Vec::new());
         for relationship in kinds {
