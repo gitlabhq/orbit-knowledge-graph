@@ -5,10 +5,9 @@ use async_trait::async_trait;
 use orbit_arrow::ArrowUtils;
 use orbit_log_fields::{info, warn};
 use orbit_migrations::catalog::OntologyCatalog;
-use orbit_migrations::execute::MigrationError;
 use orbit_migrations::scope::{CODE_INDEXING_CHECKPOINT_TABLE, MigrationScope};
 use orbit_migrations::version::{
-    SCHEMA_VERSION, promote_version, read_active_version, read_migrating_version, table_prefix,
+    SCHEMA_VERSION, promote_version, read_migrating_version, table_prefix,
 };
 use orbit_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use orbit_utils::traversal_path::{TopLevelSplit, TraversalPath};
@@ -134,23 +133,8 @@ impl MigrationCompletionChecker {
         if let Err(error) = self.catalog.sync_active_version(&self.graph).await {
             warn!(expanded(ERROR_MESSAGE) = %error, "active version mirror skipped this tick");
         }
-        if let Err(error) = self.create_missing_refreshable_views().await {
-            warn!(expanded(ERROR_MESSAGE) = %error, "refreshable view check skipped this tick");
-        }
         self.reconcile_dead_versions().await?;
         Ok(())
-    }
-
-    async fn create_missing_refreshable_views(&self) -> Result<(), MigrationError> {
-        if read_active_version(&self.graph).await? != Some(*SCHEMA_VERSION) {
-            return Ok(());
-        }
-        orbit_migrations::execute::create_missing_refreshable_views(
-            &self.graph,
-            &self.ontology,
-            *SCHEMA_VERSION,
-        )
-        .await
     }
 
     async fn check_completion(&self) -> Result<(), TaskError> {

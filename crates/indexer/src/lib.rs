@@ -294,18 +294,9 @@ pub async fn run_dispatcher(
                     );
                 }
             }
-            if let Err(error) = orbit_migrations::execute::replace_refreshable_views(
-                &graph,
-                &ontology,
-                active_version,
-            )
-            .await
-            {
-                warn!(
-                    expanded(ERROR_MESSAGE) = %error,
-                    "failed to replace refreshable views at startup; missing views are created every completion tick"
-                );
-            }
+            orbit_migrations::execute::replace_refreshable_views(&graph, &ontology, active_version)
+                .await
+                .map_err(schema::migration::DispatcherMigrationError::from)?;
         }
         Ok(_) => {}
         Err(error) => {
