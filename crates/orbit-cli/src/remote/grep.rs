@@ -18,7 +18,8 @@ pub(crate) const SCOPES: &[(&str, &str)] = &[
     ("Branch", "branches"),
 ];
 const BRANCHES: &str = "branches";
-const DEFAULT_SCOPES: &[&str] = &["work_items", "merge_requests", "blobs", "commits", "notes"];
+const DEFAULT_SCOPES: &[&str] = &["work_items", "merge_requests", "notes"];
+const MAX_SEARCHES: usize = 5;
 
 pub(crate) fn scope_for(kind: &str) -> Option<&'static str> {
     let lower = kind.to_ascii_lowercase();
@@ -230,6 +231,7 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
     let keywords: Vec<String> = keywords
         .iter()
         .filter(|k| k.trim().len() >= 2)
+        .take(MAX_SEARCHES)
         .cloned()
         .collect();
     if keywords.is_empty() && !only_branches {
