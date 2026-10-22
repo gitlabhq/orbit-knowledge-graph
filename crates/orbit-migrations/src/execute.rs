@@ -144,41 +144,77 @@ pub async fn replace_refreshable_views(
     ontology: &ontology::Ontology,
     version: u32,
 ) -> Result<(), MigrationError> {
+    for view in refreshable_view_definitions(ontology, version)? {
+        run_ddl(
+            graph,
+            &view.name,
+            format!("DROP VIEW IF EXISTS {}", view.name),
+        )
+        .await?;
+        run_ddl(graph, &view.name, view.create_sql).await?;
+    }
+    Ok(())
+}
+
+pub async fn create_missing_refreshable_views(
+    graph: &ArrowClickHouseClient,
+    ontology: &ontology::Ontology,
+    version: u32,
+) -> Result<(), MigrationError> {
+    let views = refreshable_view_definitions(ontology, version)?;
+    let view_names: Vec<&str> = views.iter().map(|view| view.name.as_str()).collect();
+    let existing = existing_names(graph, &view_names).await?;
+
+    for view in views.iter().filter(|view| !existing.contains(&view.name)) {
+        orbit_log_fields::warn!(
+            safe(TABLE) = view.name.as_str(),
+            "creating missing refreshable view"
+        );
+        run_ddl(graph, &view.name, &view.create_sql).await?;
+    }
+    Ok(())
+}
+
+struct RefreshableViewDefinition {
+    name: String,
+    create_sql: String,
+}
+
+fn refreshable_view_definitions(
+    ontology: &ontology::Ontology,
+    version: u32,
+) -> Result<Vec<RefreshableViewDefinition>, MigrationError> {
     let prefix = table_prefix(version);
     let storage = query_data_model::Relational::<
         query_data_model::implementations::clickhouse::layout::ClickHouse,
     >::derive(ontology)?;
-    for view in storage.refreshable_views() {
-        let view_name = if view.versioned {
-            format!("{prefix}{}", view.name)
-        } else {
-            view.name.clone()
-        };
-        let rendered_select =
-            schema::render_refreshable_view_select(&view.select_query, &storage, version, &prefix)
-                .map_err(|error| MigrationError::Ddl {
-                    entity_name: view_name.clone(),
-                    reason: error.to_string(),
-                })?;
-
-        run_ddl(
-            graph,
-            &view_name,
-            format!("DROP VIEW IF EXISTS {view_name}"),
-        )
-        .await?;
-        run_ddl(
-            graph,
-            &view_name,
-            format!(
-                "CREATE MATERIALIZED VIEW IF NOT EXISTS {view_name}\n\
+    storage
+        .refreshable_views()
+        .iter()
+        .map(|view| {
+            let name = if view.versioned {
+                format!("{prefix}{}", view.name)
+            } else {
+                view.name.clone()
+            };
+            let rendered_select = schema::render_refreshable_view_select(
+                &view.select_query,
+                &storage,
+                version,
+                &prefix,
+            )
+            .map_err(|error| MigrationError::Ddl {
+                entity_name: name.clone(),
+                reason: error.to_string(),
+            })?;
+            let create_sql = format!(
+                "CREATE MATERIALIZED VIEW IF NOT EXISTS {name}\n\
              REFRESH {} APPEND TO {}\nAS {rendered_select}",
                 view.refresh, view.append_to,
-            ),
-        )
-        .await?;
-    }
-    Ok(())
+            );
+            Ok(RefreshableViewDefinition { name, create_sql })
+        })
+        .collect()
 }
 
 pub async fn drop_versioned_refreshable_views(
@@ -251,6 +287,32 @@ async fn run_parameterized_query(
         entity_name: entity_name.to_string(),
         reason: error.to_string(),
     })
+}
+
+async fn existing_names(
+    graph: &ArrowClickHouseClient,
+    names: &[&str],
+) -> Result<HashSet<String>, MigrationError> {
+    let batches = graph
+        .query(
+            "SELECT name FROM system.tables \
+             WHERE database = {database:String} AND name IN {names:Array(String)}",
+        )
+        .param("database", graph.database())
+        .param("names", names)
+        .fetch_arrow()
+        .await
+        .map_err(|error| MigrationError::Ddl {
+            entity_name: names.join(","),
+            reason: error.to_string(),
+        })?;
+    Ok(batches
+        .iter()
+        .flat_map(|batch| {
+            (0..batch.num_rows())
+                .filter_map(|row| ArrowUtils::get_column_string(batch, "name", row))
+        })
+        .collect())
 }
 
 async fn existing_entity_names(

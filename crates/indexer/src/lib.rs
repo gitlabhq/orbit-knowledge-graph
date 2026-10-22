@@ -303,7 +303,7 @@ pub async fn run_dispatcher(
             {
                 warn!(
                     expanded(ERROR_MESSAGE) = %error,
-                    "failed to replace refreshable views at startup"
+                    "failed to replace refreshable views at startup; missing views are created every completion tick"
                 );
             }
         }

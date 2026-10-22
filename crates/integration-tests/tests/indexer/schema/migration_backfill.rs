@@ -702,6 +702,23 @@ async fn migration_completion_preserves_state_until_target_archive_is_usable() {
 }
 
 #[tokio::test]
+async fn migration_completion_checker_recreates_missing_view_of_active_version() {
+    let context = TestContext::new().await;
+    let graph = context.clickhouse.create_client();
+    ensure_version_table(&graph).await.unwrap();
+    mark_version_active(&graph, *SCHEMA_VERSION).await.unwrap();
+    let schema = orbit_migrations::schema::GraphSchema::from_ontology(&context.ontology).unwrap();
+    execute::create_unversioned_definitions(&graph, &schema)
+        .await
+        .unwrap();
+    context.remove_target_view().await;
+
+    context.completion_checker().run().await.unwrap();
+
+    assert!(context.promotion_state().await.target_view_exists);
+}
+
+#[tokio::test]
 async fn dispatcher_bootstraps_bundled_active_archive_before_migration() {
     const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
     const POLL_INTERVAL: Duration = Duration::from_millis(100);
