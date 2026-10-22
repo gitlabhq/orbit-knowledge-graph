@@ -1086,7 +1086,7 @@ fn skills_help_presents_get_as_the_canonical_command() {
     assert!(get_help.status.success());
     let get_help = String::from_utf8(get_help.stdout).unwrap();
     assert!(get_help.contains(
-        "Print a file from the selected instance's agent skill, composed with local CLI guidance."
+        "Print a file from an agent skill served by the selected instance. The orbit skill is composed with local CLI guidance; other skills are printed as the server returns them."
     ));
     assert!(get_help.contains("Usage: orbit skills get <NAME> [PATH]"));
 }
@@ -1101,8 +1101,9 @@ fn skills_reject_unknown_names_and_paths() {
     assert!(!unknown_name.status.success());
     assert!(unknown_name.stdout.is_empty());
     let error = String::from_utf8(unknown_name.stderr).unwrap();
-    assert!(error.contains("unknown skill name") && error.contains("orbit"));
-    assert!(error.contains("skills get <name> [path]"));
+    assert!(error.contains("could not fetch the \"unknown-name\" skill"));
+    assert!(error.contains("no GitLab credential found"));
+    assert!(!error.contains("embedded local skill"));
 
     let path_as_name = hermetic_skills_cmd(cache.path())
         .args(["skills", "get", "references/local/sql.md"])
@@ -1111,8 +1112,7 @@ fn skills_reject_unknown_names_and_paths() {
     assert!(!path_as_name.status.success());
     assert!(path_as_name.stdout.is_empty());
     let error = String::from_utf8(path_as_name.stderr).unwrap();
-    assert!(error.contains("unknown skill name \"references/local/sql.md\""));
-    assert!(error.contains("Known skills:") && error.contains("orbit"));
+    assert!(error.contains("invalid skill name \"references/local/sql.md\""));
     assert!(!error.contains("path shorthand"));
 
     for path in [

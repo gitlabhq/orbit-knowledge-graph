@@ -137,13 +137,22 @@ fn tree_reply(version: &str, body_text: &str) -> Reply {
 }
 
 fn tree_reply_with_manifest(version: &str, manifest: &str, body_text: &str) -> Reply {
+    named_tree_reply("orbit", version, manifest, body_text)
+}
+
+fn registry_reply() -> Reply {
+    let manifest = "---\nname: registry\nversion: 1.0.0\ndescription: Registry skill\ncompatibility: Requires Orbit CLI\nmetadata: {}\n---\n# Registry\n<!-- orbit:include local:quick-start -->\n";
+    named_tree_reply("registry", "1.0.0", manifest, "registry reference")
+}
+
+fn named_tree_reply(name: &str, version: &str, manifest: &str, body_text: &str) -> Reply {
     let reference = format!("{body_text}\n");
     let files = BTreeMap::from([
         ("SKILL.md", manifest),
         ("references/remote.md", reference.as_str()),
     ]);
     let body = serde_json::json!({
-        "name": "orbit",
+        "name": name,
         "version": version,
         "compatibility": "Requires Orbit CLI",
         "server_version": "0.1.0",
@@ -924,6 +933,149 @@ fn a_wrapper_request_warns_when_a_recorded_agent_cannot_run_it() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(
         stderr(&output).contains("cannot run"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn another_remote_skill_is_listed_and_fetched_without_local_composition() {
+    let cache = tempfile::tempdir().unwrap();
+    let listing = Reply {
+        status: 200,
+        reason: "OK",
+        etag: None,
+        body: r#"{"skills":[{"name":"orbit","description":"O"},{"name":"registry","description":"Registry skill"}]}"#.to_string(),
+    };
+    let (url, server) = mock_server(vec![listing]);
+    let output = run_orbit(Some(&url), &cache, &["skills"]);
+    server.join().unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("registry \u{2014} Registry skill"));
+
+    let (url, server) = mock_server(vec![registry_reply(), registry_reply(), registry_reply()]);
+    let output = run_orbit(Some(&url), &cache, &["skills", "get", "registry"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("name: registry")
+            && stdout.contains("orbit:include local:quick-start")
+            && !stdout.contains("## Query and map"),
+        "{stdout}"
+    );
+    let output = run_orbit(
+        Some(&url),
+        &cache,
+        &["skills", "get", "registry", "references/remote.md"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(output.stdout, b"registry reference\n");
+    let local_file = run_orbit(
+        Some(&url),
+        &cache,
+        &["skills", "get", "registry", "references/local/cli.md"],
+    );
+    assert!(!local_file.status.success());
+    assert!(
+        stderr(&local_file).contains("unknown skill file"),
+        "{}",
+        stderr(&local_file)
+    );
+    let requests = server.join().unwrap();
+    assert_eq!(
+        requests[0].line,
+        "GET /api/v4/orbit/skills/registry HTTP/1.1"
+    );
+}
+
+#[test]
+fn unknown_skill_surfaces_the_server_404() {
+    let cache = tempfile::tempdir().unwrap();
+    let (url, server) = mock_server(vec![Reply {
+        status: 404,
+        reason: "Not Found",
+        etag: None,
+        body: r#"{"message":"404 Skill Not Found. Known skills: [\"orbit\"]"}"#.to_string(),
+    }]);
+    let output = run_orbit(Some(&url), &cache, &["skills", "get", "nope"]);
+    server.join().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("Known skills"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn another_skill_never_falls_back_to_the_embedded_orbit_skill() {
+    let cache = tempfile::tempdir().unwrap();
+    let output = run_orbit(None, &cache, &["skills", "get", "registry"]);
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output)
+            .contains("could not fetch the \"registry\" skill: no GitLab credential found")
+    );
+    assert!(
+        !stderr(&output).contains("embedded local skill"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(output.stdout.is_empty());
+
+    let (url, server) = mock_server(vec![status_reply(500)]);
+    let output = run_orbit(Some(&url), &cache, &["skills", "get", "registry"]);
+    server.join().unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        !stderr(&output).contains("embedded local skill"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn skills_list_prints_the_listing() {
+    let cache = tempfile::tempdir().unwrap();
+    let output = run_orbit(None, &cache, &["skills", "list"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("orbit \u{2014}"));
+}
+
+#[test]
+fn invalid_skill_names_fail_without_sending_a_request() {
+    let cache = tempfile::tempdir().unwrap();
+    for name in ["../../user", "x?private_token=1", "Registry"] {
+        let output = run_orbit(Some("http://127.0.0.1:1"), &cache, &["skills", "get", name]);
+        assert!(!output.status.success());
+        assert!(
+            stderr(&output).contains("invalid skill name")
+                && stderr(&output).contains("skills get <name> [path]"),
+            "{}",
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn misconfigured_url_reports_its_own_reason_for_another_skill() {
+    let cache = tempfile::tempdir().unwrap();
+    let output = hermetic_orbit(&cache, &["skills", "get", "registry"])
+        .env("ORBIT_API_BASE_URL", "notaurl")
+        .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+        .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        !stderr(&output).contains("no GitLab credential"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("ORBIT_API_BASE_URL"),
         "{}",
         stderr(&output)
     );
