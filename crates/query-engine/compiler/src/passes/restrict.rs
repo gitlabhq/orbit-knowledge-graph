@@ -82,6 +82,19 @@ fn enforce_traversal_path_filters(
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     for node in &input.nodes {
+        let Some(entity) = node.entity.as_deref() else {
+            continue;
+        };
+        let Some(min_role) = model.entity_minimum_access_level(entity) else {
+            continue;
+        };
+        if security_ctx.paths_at_least(min_role).is_empty() {
+            return Err(QueryError::Security(format!(
+                "{entity} requires access level {min_role} on at least one authorized path"
+            )));
+        }
+    }
+    for node in &input.nodes {
         let (Some(entity), Some(tp_filters)) = (
             node.entity.as_deref(),
             node.filters.get(TRAVERSAL_PATH_COLUMN),
