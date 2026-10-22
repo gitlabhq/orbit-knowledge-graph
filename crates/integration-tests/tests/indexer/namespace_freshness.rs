@@ -25,6 +25,8 @@ const IN_SYNC: i64 = 100;
 const PENDING: i64 = 200;
 const STALE: i64 = 300;
 const NEVER_SYNCED: i64 = 400;
+const MOVED_PARENT: i64 = 500;
+const MOVED: i64 = 600;
 
 #[tokio::test]
 async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
@@ -78,6 +80,21 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
             .await;
         create_namespace(&clickhouse, id, None, 20, &format!("1/{id}/")).await;
     }
+    clickhouse
+        .execute(&format!(
+            "INSERT INTO siphon_knowledge_graph_enabled_namespaces \
+             (id, root_namespace_id, traversal_path, created_at, updated_at) \
+             VALUES ({MOVED}, {MOVED}, '1/{MOVED_PARENT}/{MOVED}/', now() - INTERVAL 1440 MINUTE, now())"
+        ))
+        .await;
+    create_namespace(
+        &clickhouse,
+        MOVED,
+        Some(MOVED_PARENT),
+        20,
+        &format!("1/{MOVED_PARENT}/{MOVED}/"),
+    )
+    .await;
     clickhouse
         .execute(&format!(
             "INSERT INTO work_items (id, traversal_path, _siphon_watermark) VALUES \
