@@ -140,7 +140,7 @@ fn main() {
     check_grammar_bound(
         &grammar,
         "AndExpression",
-        &format!("NotExpression){{0,{MAX_PREDICATES}}}"),
+        &format!("NotExpression){{0,{MAX_PREDICATE_LEAVES}}}"),
     );
     check_grammar_bound(
         &grammar,

@@ -60,9 +60,9 @@ RangeDots = { ".." }
 
 Where = { ^"WHERE" ~ SP ~ AndExpression }
 
-// A conjunction recognizes the seventeenth predicate so shared validation can report the global limit of 16.
-// Parentheses can create several conjunction nodes; shared validation counts leaves across the whole query.
-AndExpression = { NotExpression ~ (SP ~ (^"AND" | UnsupportedBooleanOperator) ~ SP ~ NotExpression){0,16} }
+// A conjunction recognizes the 257th condition so shared validation can report its syntax-tree leaf limit.
+// The lower 16-predicate execution budget still rejects ordinary queries after lowering.
+AndExpression = { NotExpression ~ (SP ~ (^"AND" | UnsupportedBooleanOperator) ~ SP ~ NotExpression){0,256} }
 
 // OR and XOR are named tokens only so syntax.rs can explain the supported alternatives.
 UnsupportedBooleanOperator = @{ (^"XOR" | ^"OR") ~ !IdentifierPart }
@@ -170,9 +170,9 @@ ControlCharacter = _{ '\u{0000}'..'\u{001f}' | "\u{007f}" }
 // Escape letters b, f, n, r, and t are case-insensitive. Unicode has exactly four or eight hex digits.
 EscapedChar = _{ "\\" ~ ("\\" | "'" | "\"" | ^"b" | ^"f" | ^"n" | ^"r" | ^"t" | "u" ~ ASCII_HEX_DIGIT{4} | "U" ~ ASCII_HEX_DIGIT{8}) }
 
-// Lists are nonempty. The 101st value is a sentinel for the shared 100-value diagnostic.
-// These rules stay separate because IN has a narrower role, although both limits are equal today.
-InListLiteral = { "[" ~ SP? ~ Value ~ (SP? ~ "," ~ SP? ~ Value){0,100} ~ SP? ~ "]" }
+// Empty IN and its 101st value are sentinels for the shared 1-100-value diagnostic.
+// General value lists remain nonempty. Both upper limits are equal today.
+InListLiteral = { "[" ~ SP? ~ (Value ~ (SP? ~ "," ~ SP? ~ Value){0,100})? ~ SP? ~ "]" }
 ListLiteral = { "[" ~ SP? ~ Value ~ (SP? ~ "," ~ SP? ~ Value){0,100} ~ SP? ~ "]" }
 
 Variable = { SymbolicName }
