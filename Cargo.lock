@@ -2768,7 +2768,6 @@ dependencies = [
  "arrow",
  "duckdb",
  "ontology",
- "orbit-arrow",
  "orbit-search",
  "orbit-utils",
  "serde_json",

@@ -14,7 +14,6 @@ duckdb = { workspace = true }
 arrow = { workspace = true }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
-orbit-arrow = { path = "../utils/arrow" }
 anyhow = { workspace = true }
 ontology = { path = "../ontology" }
 serde_json = { workspace = true }
