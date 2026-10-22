@@ -51,7 +51,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Pinned versions | `config/versions.yaml` (`schema` u32 bumped via `mise schema:bump`; `query_dsl`, `raw_output_format`, `toon_output_format`, `gql_output_format` semvers enforced by `scripts/checks/check-pinned-version.sh`; `gitlab_system_note_actions` upstream SHA; `vendored:` section for DuckDB and other vendored deps with sub-pins, artifact dirs, and scripts; embedded at compile time as `orbit_versions::VERSIONS`) |
 | Vendored dependency system | `docs/dev/runbooks/vendored_dependencies.md` (lifecycle, YAML contract, script contract, validation layers); generic runner in `scripts/vendored/run.sh` |
 | Graph DDL (local DuckDB) | Generated at runtime from ontology via `generate_local_tables()` + `duckdb_ddl` |
-| Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |
+| Datalake DDL (ClickHouse) | `config/seeds/siphon.sql` |
 | gRPC service definition | `crates/orbit-server/proto/orbit.proto` |
 | Server config structure | `crates/orbit-server-config/src/app.rs` (`AppConfig`), `config/default.yaml` (embedded; declares every setting, no Rust fallbacks) |
 | Object storage config | `config/default.yaml` (`object_storage:` section), `crates/orbit-server-config/src/object_storage.rs`, client in `crates/object-storage/src/lib.rs` |

@@ -790,10 +790,10 @@ fn resolve_dependency_candidate(
     };
     let Some(target_manifest_path) = manifest_cache.dependency_manifest_path(&dependency_dir)?
     else {
-        tracing::debug!(
-            rejected_path = %dependency_dir.display(),
-            source_manifest = %parsed.manifest_path.display(),
-            dependency = manifest_name,
+        orbit_log_fields::debug!(
+            expanded(LOCAL_PATH) = %dependency_dir.display(),
+            expanded(MANIFEST_PATH) = %parsed.manifest_path.display(),
+            expanded(PACKAGE_NAME) = manifest_name,
             "dropping path dependency resolving outside the indexed repository",
         );
         return Ok(None);

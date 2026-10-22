@@ -1,0 +1,25 @@
+id: span-record-is-constant
+language: rust
+severity: error
+message: Name the recorded span field with `safe::NAME` or `expanded::NAME` from orbit_log_fields.
+rule:
+  kind: call_expression
+  all:
+    - has:
+        field: function
+        kind: field_expression
+        all:
+          - has:
+              field: field
+              regex: '^record$'
+          - has:
+              field: value
+              regex: '(?i)(span|span::current\(\))$'
+    - has:
+        field: arguments
+        has:
+          nthChild: 1
+          not:
+            regex: '^(safe|expanded)::[A-Z][A-Z0-9_]*$'
+  not:
+    matches: test-code

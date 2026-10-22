@@ -16,6 +16,22 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 112
+  scope: none
+  note: >-
+    The MergeRequest extract finds its page keys first, in a materialized CTE, and
+    joins metrics, reviewers and approvals only for those keys instead of the whole
+    window; on prod data it returns the same rows as before (the version kept for the
+    last MR of a page was already arbitrary), so no indexed row changes.
+- version: 111
+  scope: "*"
+  note: "Adds a minmax skip index on _deleted to every versioned table so a pre-pick filter can carry OR _deleted and still prune tombstone-free granules. Drops the unique marks on Label.title and Milestone.title (titles repeat across projects) and the mutable: false marks on code-graph commit_sha and File.size_bytes (ids do not include the commit). Full rebuild so the index files exist for every part."
+- version: 110
+  scope: none
+  note: >-
+    Ontology marks User.username, User.email, Project.full_path, Group.full_path,
+    Label.title and Milestone.title as unique so the query planner treats an equality
+    on them as a point lookup; no table DDL or indexed row changes.
 - version: 109
   scope: "*"
   note: Forces a full re-index to backfill existing graph rows.

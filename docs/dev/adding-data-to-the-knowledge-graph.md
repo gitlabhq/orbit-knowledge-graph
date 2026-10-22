@@ -282,7 +282,7 @@ This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql
 
 ### 5.5 Test fixtures + SDLC scenario
 
-- **`fixtures/siphon.sql`**: add a `CREATE TABLE … siphon_<table>` for each new source table, using the simplified fixture form (mirror the existing `siphon_packages_build_infos` block: no CODECs, `PROJECTION pg_pkey_ordered`). The scenario harness seeds rows into these.
+- **`config/seeds/siphon.sql`**: add a `CREATE TABLE … siphon_<table>` for each new source table, using the simplified fixture form (mirror the existing `siphon_packages_build_infos` block: no CODECs, `PROJECTION pg_pkey_ordered`). The scenario harness seeds rows into these.
 - **SDLC scenario YAML**: entity-ETL coverage lives in `crates/integration-tests/tests/indexer/scenarios/sdlc/<domain>/`, executed by the `scenario_indexing` test. Add a `.yaml` scenario, not a Rust function (see [Testing](../design-documents/testing.md#testing-principles)). Mirror `processes_packages.yaml` (node + IN_PROJECT) and `processes_package_built_by_pipeline.yaml` (edge from a join row):
 
   ```yaml
@@ -352,7 +352,7 @@ knowledge-graph:
 - [ ] Edge YAML (join FKs handled).
 - [ ] **Registered in `schema.yaml`** (nodes map + edges map).
 - [ ] `mise schema:bump` run; `mise run schema:generate:ddl` run; `graph.sql` shows the new `gl_<node>`.
-- [ ] `fixtures/siphon.sql` updated; SDLC YAML scenario(s) added.
+- [ ] `config/seeds/siphon.sql` updated; SDLC YAML scenario(s) added.
 - [ ] Query-side YAML scenario(s) added under `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/` to verify the new entity is queryable end-to-end.
 - [ ] `data_model.md` updated.
 - [ ] `cargo test -p ontology` + `mise test:integration:indexer:sdlc:scenario <domain>/` green (correct toolchain).

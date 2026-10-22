@@ -23,29 +23,6 @@ fn compile_to_ast_works() {
 }
 
 #[test]
-fn incoming_self_relationship_keeps_the_foreign_key_on_its_source() {
-    let ontology = crate::compiler::setup::embedded_ontology();
-    let compiled = compile_pair(
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "canceling", "entity": "Pipeline", "filters": {"status": "success"}, "columns": ["id"]},
-                {"id": "canceled", "entity": "Pipeline", "columns": ["id"]}
-            ],
-            "relationships": [{"type": "AUTO_CANCELED_BY", "from": "canceling", "to": "canceled", "direction": "incoming"}],
-            "limit": 10
-        }"#,
-        "MATCH (canceling:Pipeline {status: 'success'})<-[:AUTO_CANCELED_BY]-(canceled:Pipeline) RETURN canceling.id, canceled.id LIMIT 10",
-        &ontology,
-        &test_ctx(),
-    ).unwrap();
-    let sql = compiled.base.render();
-    assert!(sql.contains("canceled.auto_canceled_by_id"), "{sql}");
-    assert!(!sql.contains("canceling.auto_canceled_by_id"), "{sql}");
-    assert!(!sql.contains("FROM gl_edge"), "{sql}");
-}
-
-#[test]
 fn traversal_query() {
     let orbit_query = "MATCH (n:Note {confidential: true})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username ORDER BY n.created_at DESC LIMIT 25";
     let json = r#"{
@@ -443,8 +420,7 @@ fn filter_operators() {
     let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    // Search uses FINAL for latest-row dedup.
-    assert!(rendered.contains(" FINAL"));
+    assert!(rendered.contains("LIMIT 1 BY"));
     assert!(rendered.contains("_deleted"));
     assert!(rendered.contains(">="));
     assert!(rendered.contains("IN"));
@@ -676,6 +652,8 @@ fn multi_table_mixed_types_scan_every_route() {
     assert!(rendered.contains("FROM gl_code_edge"), "{rendered}");
     assert!(rendered.contains("FROM gl_edge"), "{rendered}");
     assert!(rendered.contains("UNION ALL"), "{rendered}");
+    assert_eq!(rendered.matches("LIMIT 1 BY").count(), 2, "{rendered}");
+    assert!(!rendered.contains(" FINAL"), "{rendered}");
 }
 
 #[test]
@@ -801,6 +779,25 @@ fn scoped_traversal_injects_tight_prefix() {
 }
 
 #[test]
+fn scoped_authorization_join_injects_tight_prefix() {
+    let orbit_query = "MATCH (c:Definition)-[:CALLS]->(d:Definition) WHERE d.project_id = 5 AND d.name = 'compile' RETURN c.fqn, d.fqn LIMIT 100";
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "c", "entity": "Definition", "columns": ["fqn"]},
+            {"id": "d", "entity": "Definition", "columns": ["fqn"], "filters": {"project_id": {"eq": 5}, "name": {"eq": "compile"}}}
+        ],
+        "relationships": [{"type": "CALLS", "from": "c", "to": "d"}],
+        "limit": 100
+    }"#;
+    let sql = render_scoped(json, orbit_query);
+    assert!(
+        sql.contains("startsWith(c.traversal_path, (SELECT") && sql.contains("(_scope.id = 5)"),
+        "the caller's authorization scan must carry the project prefix: {sql}"
+    );
+}
+
+#[test]
 fn scoped_aggregation_injects_tight_prefix() {
     let orbit_query = "MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project) WHERE p.id = 1 RETURN p, count(wi) AS c LIMIT 100";
     let json = r#"{
@@ -868,11 +865,9 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
     let compiled = compile_pair(json, orbit_query, &ontology, &admin_ctx()).unwrap();
     let sql = compiled.base.render();
 
-    let before_related = sql.split("RELATED_TO").next().unwrap();
-    assert!(before_related.contains(SCOPED_LOOKUP), "{sql}");
-
-    let after_related = sql.split("RELATED_TO").nth(1).unwrap();
-    assert!(!after_related.contains(SCOPED_LOOKUP), "{sql}");
+    let related_scan = sql.split("FROM gl_edge AS _orbit_edge_1").nth(1).unwrap();
+    let related_scope = related_scan.split(" ON ").next().unwrap();
+    assert!(!related_scope.contains(SCOPED_LOOKUP), "{sql}");
 
     let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
         panic!("expected static hydration");
@@ -1353,13 +1348,15 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
         "MATCH (u:User) RETURN collect(u.username)",
-        "MATCH (u:User) RETURN u SKIP 1",
+        "MATCH (u:User {id: 1}) RETURN u LIMIT 1 SKIP 1",
+        "MATCH (u:User {id: 1}) RETURN u SKIP 1 SKIP 1",
+        "MATCH (u:User {id: 1}) RETURN u SKIP -1",
+        "MATCH (u:User {id: 1}) RETURN u SKIP 10001",
         "MATCH (u:User) RETURN u DEBUG DEBUG",
         "MATCH (u:User) RETURN u DEBUG LIMIT 1",
         "MATCH (u:User) RETURN u LIMIT 1 ORDER BY u.id",
-        "MATCH (u:User) RETURN u LIMIT 1 PAGE 1",
-        "MATCH (u:User) RETURN u PAGE 1 LIMIT 1",
-        "MATCH (u:User) RETURN u AFTER 'token'",
+        "MATCH (u:User {id: 1}) RETURN u PAGE 1",
+        "MATCH (u:User {id: 1}) RETURN u LIMIT 1 AFTER 'token'",
         "MATCH (u:User) RETURN u; DEBUG",
         "MATCH (u:User) RETURN count(u) AS n AS other",
         "MATCH (u:User) RETURN u ORDER BY u.id, u.username",
@@ -1788,24 +1785,6 @@ fn orbit_query_structural_caps_reject_with_the_json_category() {
 }
 
 #[test]
-fn orbit_query_incoming_arrows_lower_to_the_outgoing_fk_plan() {
-    let json = r#"{"query_type":"traversal","nodes":[{"id":"n","entity":"Note","node_ids":[1],"columns":["confidential"]},{"id":"u","entity":"User","columns":["username"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#;
-    let orbit_query =
-        "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN n.confidential, u.username";
-    let compiled = compile_pair(json, orbit_query, &embedded_ontology(), &test_ctx()).unwrap();
-    assert!(
-        compiled.base.sql.contains("_narrow_u"),
-        "AUTHORED should resolve to the FK plan: {}",
-        compiled.base.sql
-    );
-    assert!(
-        compiled.base.sql.contains("n.author_id AS e0_src"),
-        "edge source must be the User side: {}",
-        compiled.base.sql
-    );
-}
-
-#[test]
 fn orbit_query_traversal_aliases_are_ignored_and_sortable() {
     let ontology = embedded_ontology();
     let ctx = test_ctx();
@@ -1824,8 +1803,8 @@ fn orbit_query_traversal_aliases_are_ignored_and_sortable() {
             "RETURN mr.iid AS number, p{.full_path} AS project ORDER BY number DESC LIMIT 5",
         ),
         (
-            "RETURN mr.iid ORDER BY mr.iid PAGE 5",
-            "RETURN mr.iid AS number ORDER BY number PAGE 5",
+            "RETURN mr.iid ORDER BY mr.iid SKIP 5 LIMIT 5",
+            "RETURN mr.iid AS number ORDER BY number SKIP 5 LIMIT 5",
         ),
     ] {
         let plain = compile(&format!("{base} {plain}"), Frontend::Gql, &ontology, &ctx).unwrap();
@@ -1899,79 +1878,6 @@ fn orbit_query_digit_string_ids_and_aggregated_identity_columns() {
 }
 
 #[test]
-fn orbit_query_page_matches_json_cursor() {
-    let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]}],"order_by":"u.id","cursor":{"page_size":5}}"#;
-    let orbit_query =
-        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 5";
-    let compiled = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
-    let rendered = compiled.base.render();
-    assert!(rendered.contains("_orbit_cursor_0"), "{rendered}");
-    assert!(rendered.contains("LIMIT 6"), "{rendered}");
-    assert_eq!(compiled.input.cursor.as_ref().map(|c| c.page_size), Some(5));
-}
-
-#[test]
-fn orbit_query_after_token_binds_to_the_statement() {
-    let first =
-        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2";
-    let page = compile(first, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
-    let hash = page.pagination.query_hash;
-    assert_ne!(hash, 0);
-    let keys = vec![Some("2".to_owned()); page.pagination.key_count];
-    let token = compiler::passes::cursor::encode(hash, &keys);
-
-    for next in [
-        format!(
-            "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 7 AFTER '{token}'"
-        ),
-        format!(
-            "\nMATCH ( u : User )\nWHERE u . id >= 1 AND u . id <= 10000\nRETURN u . username\nORDER BY u . id /* page */\nPAGE 7\nAFTER '{token}'\n// next page\n"
-        ),
-    ] {
-        let compiled = compile(&next, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
-        assert_eq!(compiled.pagination.query_hash, hash);
-        assert_eq!(compiled.input.cursor.as_ref().unwrap().page_size, 7);
-        assert!(
-            compiled.base.render().contains("u.id >"),
-            "{}",
-            compiled.base.render()
-        );
-    }
-
-    let edited = format!(
-        "MATCH (u:User) WHERE u.id >= 2 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2 AFTER '{token}'"
-    );
-    let error = compile(&edited, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap_err();
-    assert!(matches!(error, QueryError::PaginationError(_)), "{error}");
-
-    let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"columns":["username"]}],"order_by":"u.id","cursor":{"page_size":2}}"#;
-    let json_hash = compile(json, Frontend::JsonDsl, &test_ontology(), &test_ctx())
-        .unwrap()
-        .pagination
-        .query_hash;
-    let foreign = compiler::passes::cursor::encode(json_hash, &keys);
-    let crossed = format!(
-        "MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.id PAGE 2 AFTER '{foreign}'"
-    );
-    let error = compile(&crossed, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap_err();
-    assert!(matches!(error, QueryError::PaginationError(_)), "{error}");
-}
-
-#[test]
-fn orbit_query_page_size_bounds_match_json() {
-    for query in [
-        "MATCH (u:User {id: 1}) RETURN u PAGE 0",
-        "MATCH (u:User {id: 1}) RETURN u PAGE 1001",
-    ] {
-        let error = compile(query, Frontend::Gql, &test_ontology(), &test_ctx()).expect_err(query);
-        assert!(
-            matches!(&error, QueryError::Validation(m) if m.contains("cursor.page_size")),
-            "{query}: {error}"
-        );
-    }
-}
-
-#[test]
 fn orbit_query_debug_and_dynamic_properties_match_json_options() {
     let json = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}],"options":{"include_debug_sql":true}}"#;
     let compiled = compile_pair(
@@ -2013,10 +1919,11 @@ fn orbit_query_debug_and_dynamic_properties_match_json_options() {
 #[test]
 fn orbit_query_optional_clauses_preserve_options() {
     for order in ["", " ORDER BY u.id"] {
-        for (limit, rows, page) in [
+        for (limit, rows, skip) in [
             ("", None, None),
             (" LIMIT 7", Some(7), None),
-            (" PAGE 7", None, Some(7)),
+            (" SKIP 7", None, Some(7)),
+            (" SKIP 7 LIMIT 3", Some(3), Some(7)),
         ] {
             for debug in ["", " DEBUG"] {
                 let query = format!("MATCH (u:User {{id: 1}}) RETURN u{order}{limit}{debug}");
@@ -2029,7 +1936,7 @@ fn orbit_query_optional_clauses_preserve_options() {
                     "{query}"
                 );
                 assert_eq!(input.order_by.is_some(), !order.is_empty(), "{query}");
-                assert_eq!(input.cursor.as_ref().map(|c| c.page_size), page, "{query}");
+                assert_eq!(input.skip, skip, "{query}");
                 if let Some(rows) = rows {
                     assert_eq!(input.limit, rows, "{query}");
                 }
@@ -2063,10 +1970,10 @@ fn orbit_query_debug_in_literals_and_comments_stays_data() {
 }
 
 #[test]
-fn orbit_query_reserved_page_words_need_backticks() {
+fn orbit_query_reserved_skip_words_need_backticks() {
     assert!(
         compile(
-            "MATCH (page:User {id: 1}) RETURN page",
+            "MATCH (offset:User {id: 1}) RETURN offset",
             Frontend::Gql,
             &test_ontology(),
             &test_ctx()
@@ -2074,7 +1981,7 @@ fn orbit_query_reserved_page_words_need_backticks() {
         .is_err()
     );
     compile(
-        "MATCH (`page`:User {id: 1}) RETURN `page`",
+        "MATCH (`offset`:User {id: 1}) RETURN `offset`",
         Frontend::Gql,
         &test_ontology(),
         &test_ctx(),
@@ -2136,4 +2043,35 @@ fn gql_prepares_queries_and_scoped_schema() {
         );
     }
     assert!(compile("CALL db.schema()", Frontend::Gql, &ontology, &ctx).is_err());
+}
+
+#[test]
+fn cte_statements_carry_the_ctes_they_read() {
+    let compiled = compile(
+        "MATCH (g:Group)-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) WHERE g.full_path = 'g701' RETURN p, count(f) AS c LIMIT 10",
+        Frontend::Gql,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap();
+    let statements = compiler::passes::codegen::clickhouse::cte_statements(&compiled.ast).unwrap();
+    assert!(
+        statements
+            .iter()
+            .any(|(_, sql, _)| sql.starts_with("WITH ")),
+        "expected a CTE body that reads another CTE"
+    );
+    for (own, sql, _) in &statements {
+        for (position, _) in sql.match_indices("_orbit_relation_") {
+            let digits: String = sql[position + "_orbit_relation_".len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            let name = format!("_orbit_relation_{digits}");
+            assert!(
+                &name == own || sql.contains(&format!("{name} AS ")),
+                "{name} is read but not defined in: {sql}"
+            );
+        }
+    }
 }

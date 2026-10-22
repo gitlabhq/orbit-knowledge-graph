@@ -1,15 +1,13 @@
 # Aggregation lowering: why FINAL stays the default
 
-Status: decided (FINAL retained). Records an investigation into replacing the
-`FINAL` aggregation form with `argMax`-based alternatives, and why the
-measurements rejected them on a healthy (well-merged) cluster.
+Status: decided. `FINAL` remains the default. The planner can replace a selective
+current-row read with candidate-key discovery and `LIMIT 1 BY`. The rejected
+`argMax` aggregation forms remain out of the compiler.
 
 ## Current form
 
 Count-by-state aggregations ("merged MRs per author", "failed jobs by name")
-lower to one form in `crates/query-engine/compiler/src/passes/lower/`.
-There `single_node.rs` emits `TableRef::scan_final`: scan with `FINAL`, then
-`GROUP BY` and `COUNT()`.
+usually scan with `FINAL`, then apply `GROUP BY` and `COUNT()`.
 
 ```sql
 SELECT j.name, COUNT() FROM gkg.v58_gl_job AS j FINAL
@@ -38,19 +36,43 @@ These diverge for any **reversible** column. Proof on prod (`gl_job`
 does not. ClickHouse refuses to auto-push a `WHERE` below `FINAL` for exactly
 this reason. A column is **version-stable** when its value is identical across
 every version-row. For such a column, filter-first equals latest-state.
-Version-stable columns are sort-key columns (`traversal_path`, `id`), immutable
-attributes (`created_at`, `*_id`), and absorbing enum values. Verified:
+Sort-key columns (`traversal_path`, `id`) are version-stable. Immutable
+attributes (`created_at`, `*_id`) are stable across live versions but not across
+tombstones. Absorbing enum values are stable too. Verified:
 `MergeRequest.state=merged` has 0/652127 un-merges; `Job.status` reverses on
 retry so is never stable.
 
-## The alternatives considered
+A tombstone carries the sort key and every column marked `mutable: false`,
+copied from the row it deletes. Every writer honours that contract. The SDLC
+pipelines project the datalake row. The code stale sweeps and namespace
+deletion select the columns from the live row they tombstone. The planner
+relies on it. A filter on an unchanging column runs inside the latest-row
+pick. The tombstone passes the same filter, wins the pick, and the `_deleted`
+check drops it. Rows tombstoned before the contract hold defaults in those
+columns. They can resurface under such a filter until the next full rebuild.
+
+## Selective current-row reads
+
+The planner can avoid a broad `FINAL` read when a positive predicate has a
+small expected result. It first finds candidate replacement keys without
+`FINAL`. It then reads every version for those keys. Sort-key and
+unchanging-column filters run first, with the tombstone guard. The read keeps
+the greatest `_version` with `LIMIT 1 BY`, then checks the remaining filters
+and the tombstone.
+
+This form is latest-correct for mutable fields because candidate discovery does
+not decide the result. It only bounds the keys checked in the second read. The
+planner uses the complete replacement key and keeps `FINAL` for low-selectivity,
+negated, or wide-range predicates.
+
+## The rejected alternatives
 
 | Form | Idea | Latest-correct? |
 |---|---|---|
 | **K1** | filter in `WHERE`, `argMaxIfOrNull(col,_version,_deleted=false)` in `HAVING` | only for version-stable filter columns |
 | **M** | candidate-prune `id IN (selective-set)` + `argMax(col,_version)` in `HAVING` | yes, any column |
 
-Both resolve latest-version-per-id with `GROUP BY id`, so the hash table is
+Both resolve the latest version for each ID with `GROUP BY id`, so the hash table is
 sized to the **result cardinality**.
 
 ## Why they were rejected (settled-parts measurements)
@@ -77,8 +99,9 @@ Authoritative, `log_comment`-tagged, prod v58, scope `1/9970/`, parts merged
 
 ## Decision
 
-Keep `FINAL` as the single aggregation-lowering form. Do not build the K1/M
-multi-strategy selector.
+Keep `FINAL` as the default. Do not build the K1/M `argMax` selector. Use the
+shared planner current-row operation only when ontology and structural metadata
+identify a selective predicate.
 
 The earlier benchmark that motivated this work measured FINAL at 16.5s and
 alternatives 4-16x faster. That benchmark ran while the v58 backfill had gl_job

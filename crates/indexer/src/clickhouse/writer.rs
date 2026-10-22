@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use arrow::record_batch::RecordBatch;
 use clickhouse_client::ArrowClickHouseClient;
+use orbit_log_fields::{error, warn};
 use thiserror::Error;
-use tracing::{error, warn};
 
 use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
@@ -98,8 +98,8 @@ impl ClickHouseWriter {
                 Err(e) => {
                     self.metrics.record_unmeterable_batch(table);
                     error!(
-                        table,
-                        error = %e,
+                        safe(TABLE) = table,
+                        expanded(ERROR_MESSAGE) = %e,
                         "batch has no logical-byte-size rule; counting 0 bytes and writing anyway"
                     );
                     0
@@ -154,7 +154,12 @@ impl ClickHouseWriter {
                 match fut.await {
                     Ok(report) => Step::Done(report),
                     Err(e) => {
-                        warn!(table, attempt = attempt + 1, error = %e, "durable write failed");
+                        warn!(
+                            safe(TABLE) = table,
+                            safe(ATTEMPT) = attempt + 1,
+                            expanded(ERROR_MESSAGE) = %e,
+                            "durable write failed"
+                        );
                         WRITE_RETRY.retry_or_give_up(attempt, (), e)
                     }
                 }
@@ -185,6 +190,30 @@ mod tests {
         assert_eq!(
             insert_overrides(WriteDurability::Durable),
             &[("async_insert", "1"), ("wait_for_async_insert", "1")]
+        );
+    }
+
+    #[test]
+    fn durable_inserts_from_embedded_defaults() {
+        use clickhouse_client::ClickHouseConfigurationExt;
+
+        let mut graph = orbit_server_config::AppConfig::embedded_defaults().graph;
+        let durable_sql = |graph: &orbit_server_config::ClickHouseConfiguration| {
+            graph
+                .build_client("graph")
+                .build_insert_sql_with_overrides("t", insert_overrides(WriteDurability::Durable))
+        };
+        assert_eq!(
+            durable_sql(&graph),
+            "INSERT INTO t SETTINGS async_insert=1, async_insert_busy_timeout_max_ms=1000, \
+             async_insert_busy_timeout_min_ms=1000, optimize_on_insert=0, \
+             wait_for_async_insert=1 FORMAT ArrowStream"
+        );
+        graph.replicated = true;
+        assert_eq!(
+            durable_sql(&graph),
+            "INSERT INTO t SETTINGS async_insert_busy_timeout_max_ms=1000, \
+             async_insert_busy_timeout_min_ms=1000, optimize_on_insert=0 FORMAT ArrowStream"
         );
     }
 

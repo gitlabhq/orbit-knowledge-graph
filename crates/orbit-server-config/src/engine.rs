@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use chrono::{DateTime, Timelike, Utc};
 use croner::Cron;
+use orbit_log_fields::info;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
 use crate::resources::{ContainerResources, derive_code_indexing_slots};
 
@@ -206,8 +206,8 @@ impl EntityHandlerConfig {
         let batch = resources.derive_datalake_batch_size();
         self.datalake_batch_size = Some(batch);
         info!(
-            memory_limit_bytes = resources.memory_limit_bytes,
-            value = batch,
+            safe(MEMORY_LIMIT_BYTES) = resources.memory_limit_bytes,
+            safe(BATCH_SIZE) = batch,
             "derived engine.handlers.entity_handler.datalake_batch_size"
         );
     }
@@ -314,18 +314,18 @@ impl CodeIndexingPipelineConfig {
         if self.small_indexing_slots.is_none() {
             self.small_indexing_slots = Some(slots.small_indexing_slots);
             info!(
-                available_parallelism = resources.available_parallelism,
-                memory_limit_bytes = resources.memory_limit_bytes,
-                value = slots.small_indexing_slots,
+                safe(CPU_COUNT) = resources.available_parallelism,
+                safe(MEMORY_LIMIT_BYTES) = resources.memory_limit_bytes,
+                safe(CONCURRENCY) = slots.small_indexing_slots,
                 "derived code-indexing pipeline.small_indexing_slots"
             );
         }
         if self.big_indexing_slots.is_none() {
             self.big_indexing_slots = Some(slots.big_indexing_slots);
             info!(
-                available_parallelism = resources.available_parallelism,
-                memory_limit_bytes = resources.memory_limit_bytes,
-                value = slots.big_indexing_slots,
+                safe(CPU_COUNT) = resources.available_parallelism,
+                safe(MEMORY_LIMIT_BYTES) = resources.memory_limit_bytes,
+                safe(CONCURRENCY) = slots.big_indexing_slots,
                 "derived code-indexing pipeline.big_indexing_slots"
             );
         }
@@ -418,6 +418,14 @@ pub struct MigrationCompletionConfig {
     pub schedule: ScheduleConfiguration,
 }
 
+/// Records how far indexed SDLC data trails the datalake for every enabled namespace.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct NamespaceFreshnessConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+}
+
 /// Tombstones edges a node's pipeline stopped emitting, off the indexing path.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -446,6 +454,7 @@ pub struct ScheduledTasksConfiguration {
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
     pub migration_completion: MigrationCompletionConfig,
     pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
+    pub namespace_freshness: NamespaceFreshnessConfig,
 }
 
 // ── Top-level engine config ──────────────────────────────────────────
@@ -456,8 +465,20 @@ pub struct ScheduledTasksConfiguration {
 /// [`EngineConfiguration::modules`], letting operators run multiple specialised
 /// indexer Deployments (e.g. a light SDLC pool and a beefy code pool) from the
 /// same binary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    strum::IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum IndexerModule {
     /// SDLC entity handlers (one per ontology entity type, subscribing to global or namespace topics).
     Sdlc,
@@ -612,6 +633,10 @@ mod tests {
         assert_eq!(tasks.global.schedule.cron.expression(), "0 */1 * * * *");
         assert_eq!(tasks.namespace.schedule.cron.expression(), "*/30 * * * * *");
         assert_eq!(tasks.namespace.sweep_interval_secs, 3600);
+        assert_eq!(
+            tasks.namespace_freshness.schedule.cron.expression(),
+            "0 */5 * * * *"
+        );
         assert_eq!(tasks.code_backfill.publish_window, 200_000);
         assert_eq!(tasks.code_backfill.stale_sweeps_per_tick, 10);
         assert_eq!(

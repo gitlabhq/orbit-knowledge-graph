@@ -1,0 +1,289 @@
+- path: com/example/Main.kt
+  content: |
+    package com.example
+
+    import com.example.foo.Foo
+    import com.example.nestedclasses.Parent
+    import org.slf4j.Logger
+    import org.slf4j.LoggerFactory
+    import com.example.enums.Enum
+
+    val logger: Logger = LoggerFactory.getLogger(Main::class.java)
+
+    fun main() {
+        val foo = Foo()
+        foo.foo()
+        foo.companionFoo()
+        foo.baz()
+        logger.info("Hello, World!")
+        val inferedGrandChild = Parent.Child.GrandChild()
+        inferedGrandChild.greet()
+        val typedGrandChild: Parent.GrandChild = Parent.GrandChild()
+        typedGrandChild.greet()
+        Enum.ENUM_VALUE_1.enumMethod()
+        val enumValue = Enum.ENUM_VALUE_2
+        enumValue.enumMethod2()
+    }
+
+- path: com/example/edgecases/filter/CallLoop.kt
+  content: |
+    package smoketest.coroutines
+
+    import kotlinx.coroutines.flow.flow
+
+    class CoroutinesController {
+        fun a() = flow {}
+        fun flow() = flow { emit("World") }
+    }
+
+- path: com/example/edgecases/filter/Filter.kt
+  content: |
+    package com.example.edgecases.filter
+
+    interface Filter {
+        fun filter(value: String): Boolean = true
+    }
+
+- path: com/example/edgecases/filter/ServerFilter.kt
+  content: |
+    package com.example.edgecases.filter
+
+    open class ServerFilter : Filter {
+        class Filter : ServerFilter() {
+            override fun filter(value: String): Boolean = super.filter(value)
+        }
+
+        override fun filter(value: String): Boolean = super.filter(value)
+    }
+
+- path: com/example/entites/Person.kt
+  content: |
+    package com.example.entites
+
+    interface Person {
+        fun getName(): String
+    }
+
+    class User : Person {
+        override fun getName(): String = "User"
+    }
+
+    class Admin : Person {
+        override fun getName(): String = "Admin"
+    }
+
+- path: com/example/enums/Enum.kt
+  content: |
+    package com.example.enums
+
+    enum class Enum {
+        ENUM_VALUE_1,
+        ENUM_VALUE_2,
+        ENUM_VALUE_3;
+
+        fun enumMethod() {
+            System.out.println("Enum method called")
+        }
+
+        fun enumMethod2() {
+            System.out.println("Enum method 2 called")
+        }
+    }
+
+- path: com/example/extensions/Extensions.kt
+  content: |
+    package com.example.extensions
+
+    import com.example.extensions.utils.*
+    import com.example.extensions.entities.ExtendMe
+    import com.example.extensions.entities.ExtendMeFromProperty
+
+    fun ExtendMe.printValue() {
+        println(value)
+    }
+
+    val ExtendMe.extend
+        get() = ExtendMeFromProperty(value, "<wrapper>")
+
+    fun callToExtensions() {
+        val extendMe = ExtendMe("Hello")
+        extendMe.printValue()
+        extendMe.extend.printValue()
+    }
+
+    fun callToImportedExtensions() {
+        val extendMe = ExtendMe("Hello")
+        extendMe.reverse()
+        extendMe.reversed.printValue()
+    }
+
+- path: com/example/extensions/entities/Entities.kt
+  content: |
+    package com.example.extensions.entities
+
+    data class ExtendMe(val value: String)
+
+    data class ExtendMeFromProperty(val value: String, val wrapper: String) {
+        fun printValue() {
+            println(wrapper)
+            println(value)
+            println(wrapper)
+        }
+    }
+
+- path: com/example/extensions/imported/Imported.kt
+  content: |
+    package com.example.extensions.imported
+
+    import external.ExternalType
+
+    fun ExternalType.print() {
+        println(this.value)
+    }
+
+    fun callToImported() {
+        val externalType = ExternalType("Hello")
+        externalType.print()
+    }
+
+- path: com/example/extensions/utils/Utils.kt
+  content: |
+    package com.example.extensions.utils
+
+    import com.example.extensions.entities.ExtendMe
+
+    fun ExtendMe.reverse() = ExtendMe(value.reversed())
+
+    val ExtendMe.reversed
+        get() = ExtendMe(value.reversed())
+
+- path: com/example/foo/Bar.kt
+  content: |
+    package com.example.foo
+
+    open class Bar : Baz {
+        fun bar() {}
+    }
+
+- path: com/example/foo/Baz.kt
+  content: |
+    package com.example.foo
+
+    interface Baz {
+        fun baz() = "baz"
+    }
+
+- path: com/example/foo/Foo.kt
+  content: |
+    package com.example.foo
+
+    class Foo : Bar() {
+        companion object {
+            fun companionFoo() {}
+        }
+
+        fun fooInFooBody() {}
+
+        fun foo() {
+            super.bar()
+            fooInFooBody()
+        }
+
+        inner class InnerFoo {
+            fun innerFoo() {
+                fooInFooBody()
+            }
+        }
+    }
+
+- path: com/example/if/If.kt
+  content: |
+    package com.example.if
+
+    import com.example.entites.Admin
+    import com.example.entites.User
+
+    data class IfConfig(val isAdmin: Boolean)
+
+    fun ifTypeInference(config: IfConfig) = if (config.isAdmin) Admin() else User()
+
+    fun usageOfIfTypeInference(config: IfConfig) {
+        ifTypeInference(config).getName()
+    }
+
+- path: com/example/nestedclasses/Nested.kt
+  content: |
+    package com.example.nestedclasses
+
+    class Parent {
+        class Child {
+            open class GrandChild {
+                open fun greet() {
+                    println("Hello")
+                }
+            }
+        }
+
+        class GrandChild : Child.GrandChild() {
+            override fun greet() {
+                super.greet()
+            }
+        }
+    }
+
+- path: com/example/operator/AnimalList.kt
+  content: |
+    package com.example.operator
+
+    class AnimalList {
+        companion object {
+            fun of(list1: AnimalList, list2: AnimalList): AnimalList {
+                return (list1 + list2).display()
+            }
+        }
+
+        operator fun plus(other: AnimalList): AnimalList = AnimalList()
+        fun display() = Unit
+    }
+
+- path: com/example/try/Try.kt
+  content: |
+    package com.example.try
+
+    import com.example.entites.Admin
+    import com.example.entites.User
+
+    data class TryConfig(val isAdmin: Boolean)
+
+    fun tryTypeInference(config: TryConfig?) {
+        val result = try {
+            if (config == null) {
+                throw Exception("config is null")
+            } else if (config.isAdmin) {
+                Admin()
+            } else {
+                User()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+        result?.getName()
+    }
+
+- path: com/example/when/When.kt
+  content: |
+    package com.example.when
+
+    import com.example.entites.Admin
+    import com.example.entites.User
+
+    data class Config(val type: String)
+
+    fun whenTypeInference(config: Config) {
+        val person = when (config.type) {
+            "admin" -> Admin()
+            else -> User()
+        }
+        person.getName()
+    }

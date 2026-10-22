@@ -19,7 +19,8 @@ use crate::context::TestContext;
 
 pub use format::{
     CdcEvent, CdcOperation, ContainsMatcher, DispatchExpect, DispatchKind, DispatchSpec,
-    EdgeExpect, Expect, Matcher, NodeExpect, RunSpec, Scenario, Scope, Seed, SeedSettings, Step,
+    EdgeExpect, Expect, Matcher, NodeExpect, NotMatcher, RunSpec, Scenario, Scope, Seed,
+    SeedSettings, Step,
 };
 pub use seed::DEFAULT_REPLICATED_AT;
 
@@ -134,6 +135,12 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, handlers: &dyn
 
     for (index, step) in steps.iter().enumerate() {
         let location = format!("{name} (step {})", index + 1);
+        for table in &step.drop_tables {
+            ctx.drop_table(table).await;
+        }
+        for table in &step.create_tables {
+            ctx.create_table(table).await;
+        }
         seed::apply_seed(ctx, &step.seed, &step.seed_settings, &columns, &location).await;
         let input = HandlerInput {
             scope,

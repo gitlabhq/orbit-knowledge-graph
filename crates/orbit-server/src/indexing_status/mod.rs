@@ -11,8 +11,8 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::EtlScope;
 use ontology::pipelines::PipelineDescriptor;
+use orbit_log_fields::warn;
 use orbit_utils::traversal_path::TraversalPath;
-use tracing::warn;
 
 pub use self::domains::{DomainStatus, EntityStatus};
 pub use self::phase::Phase;
@@ -65,10 +65,20 @@ impl IndexingStatusService {
             projects::read_project_coverage(&self.client, &schema.ontology, scopes),
         );
         let checkpoints = checkpoints
-            .inspect_err(|error| warn!(%error, "Indexing status could not read plan checkpoints"))
+            .inspect_err(|error| {
+                warn!(
+                    expanded(ERROR_MESSAGE) = %error,
+                    "Indexing status could not read plan checkpoints"
+                )
+            })
             .unwrap_or_default();
         let coverage = coverage
-            .inspect_err(|error| warn!(%error, "Indexing status could not read project coverage"))
+            .inspect_err(|error| {
+                warn!(
+                    expanded(ERROR_MESSAGE) = %error,
+                    "Indexing status could not read project coverage"
+                )
+            })
             .ok();
 
         let now = Utc::now();
@@ -100,17 +110,21 @@ fn build_scope_status(
         .top_level_namespace_id()
         .and_then(|root| checkpoints.get(&root));
 
+    let (source_unavailable, plans): (Vec<&PipelineDescriptor>, Vec<&PipelineDescriptor>) =
+        plans.iter().partition(|plan| {
+            root_checkpoints.is_some_and(|by_plan| by_plan.is_source_unavailable(&plan.name))
+        });
     let plan_phases: Vec<(&PipelineDescriptor, Phase)> = plans
         .iter()
         .map(|plan| {
             let phase = root_checkpoints
                 .map(|by_plan| by_plan.get_plan_phase(&plan.name, now))
                 .unwrap_or(Phase::Unknown);
-            (plan, phase)
+            (*plan, phase)
         })
         .collect();
     let last_completed_at =
-        root_checkpoints.and_then(|by_plan| by_plan.get_last_completed_at(plans));
+        root_checkpoints.and_then(|by_plan| by_plan.get_last_completed_at(&plans));
 
     // The Project plan writes the project list, so the code total is final only once it settles.
     let project_list_phase = combine_phases(
@@ -127,7 +141,12 @@ fn build_scope_status(
         None => Some(Phase::Unknown),
     };
 
-    let domains = domains::get_domain_statuses(&schema.ontology, &plan_phases, code_phase);
+    let domains = domains::get_domain_statuses(
+        &schema.ontology,
+        &plan_phases,
+        &source_unavailable,
+        code_phase,
+    );
     let phase = combine_phases(domains.iter().map(|domain| domain.phase)).unwrap_or(Phase::Unknown);
     let sdlc_phase =
         combine_phases(plan_phases.iter().map(|(_, phase)| *phase)).unwrap_or(Phase::Unknown);

@@ -1,0 +1,17 @@
+cases:
+  - name: Multi-table alternatives expose one typed stored relation
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Pipeline","node_ids":[99000]},{"id":"b","entity":"Pipeline"}],"relationships":[{"type":["CHILD_OF","AUTO_CANCELED_BY"],"from":"a","to":"b"}]}
+      gql: |
+        MATCH (a:Pipeline {id: 99000})-[r:CHILD_OF|AUTO_CANCELED_BY]->(b:Pipeline)
+        RETURN a, b, type(r)
+    logical:
+      expect: ["(EdgeScan CHILD_OF|AUTO_CANCELED_BY a->b AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Deduplicate LimitBy ... (_))
+            - (Scan Table(gl_ci_edge) AS _orbit_edge_0)
+            - (Project _orbit_edge_0.relationship_kind AS e0_type, ... (_))

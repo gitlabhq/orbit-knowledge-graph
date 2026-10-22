@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use clickhouse_client::ArrowClickHouseClient;
 use ontology::Ontology;
+use orbit_log_fields::warn;
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::SecurityContext;
-use tracing::warn;
 
 pub use self::response::build_item_counts_response;
 
@@ -35,7 +35,12 @@ impl ItemCountService {
 
         let counts = counts::count_visible_entities(&self.client, &entities)
             .await
-            .inspect_err(|error| warn!(%error, "Item counts could not be read"))
+            .inspect_err(|error| {
+                warn!(
+                    expanded(ERROR_MESSAGE) = %error,
+                    "Item counts could not be read"
+                )
+            })
             .unwrap_or_default();
         entities
             .into_iter()

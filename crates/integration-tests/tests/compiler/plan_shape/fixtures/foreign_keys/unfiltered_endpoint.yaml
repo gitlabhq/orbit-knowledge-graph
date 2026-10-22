@@ -1,0 +1,82 @@
+cases:
+  - name: An unfiltered grouped FK endpoint reads only the keys its holder reached
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "u", "entity": "User", "columns": ["id", "username"]},
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}
+          ],
+          "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+          "group_by": ["u"],
+          "aggregations": [{"count": "mr", "as": "mr_count"}]
+        }
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
+        RETURN u{.id, .username}, count(mr) AS mr_count
+    logical:
+      expect: ["(Aggregate group u AS u, COUNT(mr) AS mr_count (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Join ON u.id = mr.author_id (_) (_))
+            - (Project _id_source.author_id AS id (Bind _id_source (_)))
+            - (Filter u.id IN ?.id (Scan Table(gl_user) AS u))
+          reject:
+            - (Deduplicate Final (Scan Table(gl_user) AS u))
+
+  - name: An unfiltered deferred FK endpoint reads only the keys its holder reached
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "u", "entity": "User", "columns": ["id", "username"]},
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}, "columns": ["id", "title", "merged_at"]}
+          ],
+          "relationships": [{"type": "MERGED", "from": "u", "to": "mr"}]
+        }
+      gql: |
+        MATCH (u:User)-[:MERGED]->(mr:MergeRequest {state: 'merged'})
+        RETURN u.id, u.username, mr.id, mr.title, mr.merged_at
+    logical:
+      expect: ["(Filter mr.state = 'merged' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Project _id_source.merge_user_id AS id (Bind _id_source (_)))
+            - (Filter u.id IN ?.id (Scan Table(gl_user) AS u))
+            - (Filter mr.merge_user_id IN ?.id (_))
+          reject:
+            - (Deduplicate Final (Scan Table(gl_user) AS u))
+
+  - name: An FK holder reads only rows whose key an earlier hop reached
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "g", "entity": "Group", "node_ids": [1]},
+            {"id": "p", "entity": "Project", "columns": ["id"]},
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}, "columns": ["id"]}
+          ],
+          "relationships": [
+            {"type": "CONTAINS", "from": "g", "to": "p"},
+            {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+          ]
+        }
+      gql: |
+        MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'merged'})
+        RETURN p.id, mr.id
+    logical:
+      expect: ["(Filter mr.state = 'merged' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter mr.project_id IN ?.id, ... (Scan Table(gl_merge_request) AS mr))
+          reject:
+            - (Deduplicate Final (Scan Table(gl_merge_request) AS mr))

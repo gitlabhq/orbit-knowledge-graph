@@ -59,11 +59,23 @@ fn is_server_unavailable(error: &clickhouse::error::Error) -> bool {
     }
 }
 
+const UNKNOWN_TABLE_CODE: &str = "(UNKNOWN_TABLE)";
+
 impl ClickHouseError {
     pub(crate) fn is_retryable(&self) -> bool {
         match self {
             Self::Query(inner) | Self::Insert(inner) => is_clickhouse_error_transient(inner),
             Self::BadResponse { status, .. } => *status >= 500,
+            _ => false,
+        }
+    }
+
+    pub fn is_unknown_table(&self) -> bool {
+        match self {
+            Self::Query(clickhouse::error::Error::BadResponse(message)) => {
+                message.contains(UNKNOWN_TABLE_CODE)
+            }
+            Self::BadResponse { body, .. } => body.contains(UNKNOWN_TABLE_CODE),
             _ => false,
         }
     }

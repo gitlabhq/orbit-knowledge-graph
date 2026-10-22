@@ -195,10 +195,12 @@ struct PropertyYaml {
     #[serde(default)]
     selectivity: Option<FieldSelectivity>,
     #[serde(default)]
+    unique: bool,
+    #[serde(default)]
     description: Option<String>,
     #[serde(default)]
     traversal_path_lookup: Option<TraversalPathLookupYaml>,
-    #[serde(default)]
+    #[serde(default = "PropertyYaml::default_mutable")]
     mutable: bool,
     #[serde(default)]
     terminal_values: Option<Vec<String>>,
@@ -218,6 +220,10 @@ impl PropertyYaml {
         true
     }
     fn default_filterable() -> bool {
+        true
+    }
+
+    fn default_mutable() -> bool {
         true
     }
 }
@@ -383,6 +389,7 @@ impl NodeYaml {
                     admin_only: prop_def.admin_only,
                     hidden: prop_def.hidden,
                     selectivity,
+                    unique: prop_def.unique,
                     description: prop_def.description,
                     traversal_path_lookup: prop_def.traversal_path_lookup.map(|l| {
                         TraversalPathLookupSpec {

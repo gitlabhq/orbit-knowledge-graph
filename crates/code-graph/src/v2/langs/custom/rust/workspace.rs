@@ -149,9 +149,9 @@ impl WorkspacePlan {
                     });
                 }
                 Err(err) => {
-                    tracing::warn!(
-                        manifest = %workspace_manifest_path.display(),
-                        error = %err,
+                    orbit_log_fields::warn!(
+                        expanded(MANIFEST_PATH) = %workspace_manifest_path.display(),
+                        expanded(ERROR_MESSAGE) = %err,
                         "failed to plan rust-analyzer workspace; continuing with others"
                     );
                     last_error = Some(err);

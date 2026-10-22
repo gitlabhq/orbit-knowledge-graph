@@ -139,7 +139,7 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.username` | `default` | Auth user |
 | `graph.password` | None | Auth password |
 | `graph.session_settings` | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
-| `graph.insert_settings` | `{}` | Settings applied to INSERT operations only (e.g., `async_insert`, `wait_for_async_insert`) |
+| `graph.insert_settings` | See `config/default.yaml` | Settings applied to INSERT operations only. Quorum clusters drop `async_insert` and `wait_for_async_insert`; set a key here to override its default. |
 | `graph.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
 
 ### Self-managed replicated clusters
@@ -332,6 +332,7 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each s
 | Namespace deletion | `schedule.tasks.namespace-deletion.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Schedules and executes namespace deletions |
 | Migration completion | `schedule.tasks.migration-completion.cron` | `0 */1 * * * *` (every minute) | Detects completed schema migrations and reconciles dead versions |
 | Stale-edge reconciliation | `schedule.tasks.stale-edge-reconciliation.cron` | `0 */30 * * * *` (every 30 minutes) | Tombstones stale mutable-FK edges |
+| Namespace freshness | `schedule.tasks.namespace-freshness.cron` | `0 */5 * * * *` (every 5 minutes) | Records how far indexed SDLC data trails the datalake for every enabled namespace |
 
 The namespace dispatcher is checkpoint-driven. With no change-detection checkpoint it
 dispatches every enabled namespace once (cold start) and records a checkpoint.
@@ -741,7 +742,7 @@ kubectl -n gkg logs deployment/gkg-indexer -f
 kubectl -n gkg logs deployment/gkg-dispatcher -f
 
 # Filter logs for a specific project
-kubectl -n gkg logs deployment/gkg-indexer -f | grep 'project_id=<id>'
+kubectl -n gkg logs deployment/gkg-indexer -f | grep '"gl_project_id":<id>'
 ```
 
 ### Inspect running configuration

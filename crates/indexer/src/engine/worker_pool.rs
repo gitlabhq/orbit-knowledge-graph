@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use opentelemetry::KeyValue;
+use orbit_log_fields::{debug, info};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tracing::{debug, info};
 
 use super::metrics::EngineMetrics;
 use orbit_server_config::EngineConfiguration;
@@ -59,9 +59,15 @@ impl WorkerPool {
             .map(|(name, &limit)| (name.clone(), Arc::new(Semaphore::new(limit))))
             .collect();
 
+        let mut group_limits: Vec<String> = configuration
+            .concurrency_groups
+            .iter()
+            .map(|(name, limit)| format!("{name}={limit}"))
+            .collect();
+        group_limits.sort();
         info!(
-            global_limit = configuration.max_concurrent_workers(),
-            group_limits = ?group_semaphores.keys().collect::<Vec<_>>(),
+            safe(CONCURRENCY) = configuration.max_concurrent_workers(),
+            safe(WORKER_GROUPS) = group_limits.join(","),
             "worker pool created"
         );
 
@@ -95,8 +101,8 @@ impl WorkerPool {
                 &[KeyValue::new("permit_kind", "group"), group_label.clone()],
             );
             debug!(
-                group = group_name,
-                duration_ms = wait_duration.as_millis() as u64,
+                safe(WORKER_GROUP) = group_name,
+                safe(DURATION_S) = wait_duration.as_secs_f64(),
                 "group permit acquired"
             );
             attributes.push(KeyValue::new("permit_kind", group_name.to_owned()));

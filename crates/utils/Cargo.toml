@@ -10,10 +10,10 @@ flate2 = { workspace = true }
 ignore = { workspace = true }
 lz4_flex = { workspace = true }
 memchr = { workspace = true }
+orbit-log-fields = { workspace = true }
 regex = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }
-rustix = { workspace = true, features = ["fs"] }
 serde = { workspace = true }
 serde-saphyr = { workspace = true }
 serde_json = { workspace = true }
@@ -22,8 +22,10 @@ strum = { workspace = true }
 tar = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 typed-path = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["fs"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }

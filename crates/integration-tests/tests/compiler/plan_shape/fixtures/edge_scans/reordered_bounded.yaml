@@ -1,4 +1,4 @@
-name: Bounded hops keep source ordering when endpoint filters are outside union arms
+name: Target-anchored bounded hops expand from the target layout
 ontology_overlay: reordered_edges
 
 query:
@@ -13,8 +13,11 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Scan Table(gl_code_edge) ...)"]
-      reject: ["(Scan Table(gl_code_edge_by_target) ...)"]
+      expect:
+        - (Scan Table(gl_code_edge_by_target) ...)
+        - (Filter e1._deleted = false (Deduplicate LimitBy ... (Filter e1.relationship_kind = 'CALLS', e1.target_kind = 'Definition', e1.target_id = 12001 (_))))
+        - (Project prepend((e2.target_id, e2.target_kind), _depth_1.path_nodes) AS path_nodes, ... (_))
+      reject: ["(Scan Table(gl_code_edge) ...)"]
   duckdb:
     planned:
       expect: ["(Scan Table(gl_edge) ...)"]

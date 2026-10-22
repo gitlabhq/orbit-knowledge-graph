@@ -75,13 +75,14 @@ pub struct OTelPipelineObserver {
 
 impl OTelPipelineObserver {
     pub(super) fn finish_schema(&self) {
-        self.record_outcome("ok");
+        self.record_outcome("ok", "success");
     }
 
-    fn record_outcome(&self, status: &'static str) {
+    fn record_outcome(&self, status: &'static str, outcome: &'static str) {
         let attrs = [
             KeyValue::new(spec::labels::QUERY_TYPE, self.query_type),
             KeyValue::new(spec::labels::STATUS, status),
+            KeyValue::new(spec::labels::OUTCOME, outcome),
         ];
         METRICS.queries.add(1, &attrs);
         METRICS
@@ -143,7 +144,7 @@ impl PipelineObserver for OTelPipelineObserver {
     }
 
     fn record_error(&self, err: &PipelineError) {
-        self.record_outcome(err.code());
+        self.record_outcome(err.code(), err.outcome());
 
         if let Some(reason) = failure_reason(err) {
             METRICS
@@ -154,7 +155,7 @@ impl PipelineObserver for OTelPipelineObserver {
 
     fn finish(&self, row_count: usize, redacted_count: usize) {
         let qt = [KeyValue::new(spec::labels::QUERY_TYPE, self.query_type)];
-        self.record_outcome("ok");
+        self.record_outcome("ok", "success");
         METRICS.compile_duration.record(self.compile_secs, &qt);
         METRICS.execute_duration.record(self.execute_secs, &qt);
         METRICS

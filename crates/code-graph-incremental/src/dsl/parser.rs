@@ -108,12 +108,19 @@ fn visit_node(c: &mut Ctx<'_>, node: PNode<'_>, field: u16) -> R<Pat> {
         }
     }
 
+    let labelled = match text {
+        Text::From(slot, _) => kids
+            .iter()
+            .any(|kid| matches!(kid, Pat::Cap { slot: kid, .. } if *kid == slot)),
+        _ => false,
+    };
     Ok(Pat::Node {
         kind,
         field,
         text,
         kids,
         optional,
+        labelled,
     })
 }
 

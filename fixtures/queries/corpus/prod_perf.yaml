@@ -15,6 +15,7 @@
 #   {{ASSIGNEE_USER_ID}} = 5054237  (User)
 #   {{APPROVER_USER_ID}} = 20271294  (User)
 #   {{AUTHOR_USER_ID}} = 64248  (User)
+#   {{AUTHOR_USERNAME}} = stanhu  (User 64248)
 #   {{PROLIFIC_AUTHOR_USER_ID}} = 128633  (User)
 #   {{BOT_USER_ID}} = 1786152  (User)
 #   {{MR_ID}} = 549661405  (MergeRequest)
@@ -979,36 +980,36 @@ g04_mr_to_wi_path:
 
 h01_page_mrs_project:
   desc: "Page MRs project"
-  category: cursor
+  category: pagination
   query: |
     MATCH (mr:MergeRequest {project_id: {{GITLAB_PROJECT_ID}}, state: 'merged'})
     RETURN mr.iid, mr.title
     ORDER BY mr.created_at DESC
-    PAGE 50
+    LIMIT 50
 
 h02_page_jobs_pipeline:
   desc: "Page jobs pipeline"
-  category: cursor
+  category: pagination
   query: |
     MATCH (pl:Pipeline {id: {{PIPELINE_ID}}})-[:HAS_JOB]->(j:Job)
     RETURN j.name, j.status
-    PAGE 100
+    LIMIT 100
 
 h03_page_user_mrs:
   desc: "Page user MRs"
-  category: cursor
+  category: pagination
   query: |
     MATCH (u:User {id: {{AUTHOR_USER_ID}}})-[:AUTHORED]->(mr:MergeRequest)
     RETURN mr.iid, mr.title
-    PAGE 50
+    LIMIT 50
 
 h04_page_project_issues:
   desc: "Page project issues"
-  category: cursor
+  category: pagination
   query: |
     MATCH (w:WorkItem {state: 'opened'})-[:IN_PROJECT]->(p:Project {id: {{GITLAB_PROJECT_ID}}})
     RETURN w.iid, w.title
-    PAGE 100
+    LIMIT 100
 
 i01_file_definitions:
   desc: "File definitions"
@@ -1082,3 +1083,65 @@ i09_defs_in_file_path:
     RETURN d.name, d.start_line
     ORDER BY d.start_line
     LIMIT 100
+
+# Run-4 replay shapes from the !2904 prod A/B: FK narrowing from a selective
+# far endpoint, and an empty id set that must not scan the holder table.
+
+n01_user_by_username_authored_mrs:
+  desc: "User by username, authored MRs (FK holder bounded by a selective far endpoint)"
+  category: traversal
+  query: |
+    MATCH (u:User {username: '{{AUTHOR_USERNAME}}'})-[:AUTHORED]->(mr:MergeRequest)
+    RETURN mr.id, mr.title
+    LIMIT 20
+
+n02_pipeline_by_mr_jobs:
+  desc: "Pipelines of one MR, their jobs"
+  category: traversal
+  query: |
+    MATCH (p:Pipeline {merge_request_id: {{MR_ID}}})-[:HAS_JOB]->(j:Job)
+    RETURN j.id, j.name, j.status
+    LIMIT 50
+
+n03_work_items_in_group_prefix:
+  desc: "Work items in groups under a path prefix"
+  category: traversal
+  query: |
+    MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group)
+    WHERE g.full_path STARTS WITH 'gitlab-org/orbit'
+    RETURN w.id, w.title, g.full_path
+    LIMIT 20
+
+n04_jobs_in_missing_project_count:
+  desc: "Job count for a project path that matches nothing (empty id set)"
+  category: aggregation
+  query: |
+    MATCH (j:Job)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/does-not-exist'})
+    RETURN count(j) AS n
+
+n05_jobs_by_name_in_pipeline_count:
+  desc: "Pipelines holding a job with one exact name"
+  category: aggregation
+  query: |
+    MATCH (p:Pipeline)-[:HAS_JOB]->(j:Job {name: 'rspec unit pg16 1/32'})
+    WHERE p.project_id = {{GITLAB_PROJECT_ID}}
+    RETURN count(p) AS n
+
+n06_mr_notes_contains:
+  desc: "Notes on one MR that contain a word"
+  category: traversal
+  query: |
+    MATCH (mr:MergeRequest {id: {{MR_ID}}})-[:HAS_NOTE]->(n:Note)
+    WHERE n.note CONTAINS 'pipeline'
+    RETURN n.id, n.note
+    LIMIT 20
+
+n07_failed_mr_pipeline_diff_files:
+  desc: "Diff files behind failed MR pipelines (FK chain with the key on the target side)"
+  category: aggregation
+  query: |
+    MATCH (pl:Pipeline {status: 'failed', source: 'merge_request_event'})<-[:TRIGGERED]-(mr:MergeRequest)
+      -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
+    WHERE pl.project_id = {{KG_PROJECT_ID}}
+    RETURN f.old_path, count(f) AS appearances
+    LIMIT 60

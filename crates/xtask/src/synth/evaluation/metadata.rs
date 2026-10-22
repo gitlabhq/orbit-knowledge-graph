@@ -121,7 +121,7 @@ impl RunMetadata {
         let json = serde_json::to_string_pretty(self)?;
         std::fs::write(&path, json)?;
 
-        tracing::info!("Saved run metadata to {:?}", path);
+        orbit_log_fields::info!(expanded(LOCAL_PATH) = %path.display(), "saved run metadata");
         Ok(())
     }
 }

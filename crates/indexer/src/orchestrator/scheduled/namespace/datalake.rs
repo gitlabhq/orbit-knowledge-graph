@@ -7,8 +7,8 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use futures::StreamExt;
 use ontology::{PathResolution, ReindexSource};
+use orbit_log_fields::{error, warn};
 use orbit_utils::traversal_path::{TOP_LEVEL_PREFIX_REGEX, TraversalPath};
-use tracing::{error, warn};
 
 use crate::clickhouse::{ArrowClickHouseClient, ClickHouseError, TIMESTAMP_FORMAT};
 use crate::orchestrator::dispatch::NamespaceDispatchRequest;
@@ -17,18 +17,20 @@ use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
 
 const BRANCH_FALLBACK_CONCURRENCY: usize = 4;
 
-const CHANGE_QUERY_SQL: &str = r#"WITH
+const CHANGES_CTE_SQL: &str = r#"WITH
   enabled AS (
     {{enabled_namespaces}}
   ),
   changed AS (
 {{branches}}
   )
-SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
+"#;
+
+const CHANGE_QUERY_SQL: &str = r#"SELECT DISTINCT enabled.root_namespace_id, enabled.traversal_path, changed.target
 FROM changed
 INNER JOIN enabled ON changed.root_path = enabled.traversal_path"#;
 
-const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path, '{{target}}' AS target
+const CHANGE_BRANCH_SQL: &str = r#"    SELECT {{root_path}} AS root_path, '{{target}}' AS target, {{watermark_column}} AS watermark
     FROM {{table}}
     WHERE {{watermark_column}} > {lower:String}
       AND {{watermark_column}} <= {upper:String}
@@ -93,10 +95,12 @@ impl DatalakeChangeDetector {
         upper: &str,
         combined_err: &ClickHouseError,
     ) -> Result<Vec<RecordBatch>, TaskError> {
-        warn!(
-            error = %combined_err,
-            "combined change detection query failed; retrying one branch per source table"
-        );
+        if !combined_err.is_unknown_table() {
+            warn!(
+                expanded(ERROR_MESSAGE) = %combined_err,
+                "combined change detection query failed; retrying one branch per source table"
+            );
+        }
 
         let mut stream = futures::stream::iter(0..self.query.branches.len())
             .map(|index| async move {
@@ -115,14 +119,22 @@ impl DatalakeChangeDetector {
         while let Some((branch, result)) = stream.next().await {
             match result {
                 Ok(branch_batches) => batches.extend(branch_batches),
+                Err(err) if err.is_unknown_table() => {
+                    failed += 1;
+                    warn!(
+                        safe(TABLE) = branch.table.as_str(),
+                        safe(ENTITY) = branch.target.as_str(),
+                        "change detection source table does not exist; skipping it until it appears"
+                    );
+                }
                 Err(err) => {
                     failed += 1;
                     self.metrics
                         .record_error(super::TASK_NAME, "detection_branch");
                     error!(
-                        table = %branch.table,
-                        entity = %branch.target,
-                        error = %err,
+                        safe(TABLE) = branch.table.as_str(),
+                        safe(ENTITY) = branch.target.as_str(),
+                        expanded(ERROR_MESSAGE) = %err,
                         "change detection branch failed; skipping it until the next full sweep"
                     );
                 }
@@ -225,24 +237,28 @@ impl NamespaceChangeQuery {
             .map(|source| BranchQuery {
                 table: source.table.clone(),
                 target: source.target.clone(),
-                sql: render_change_query(&BTreeSet::from([source.clone()])),
+                sql: render_change_query(CHANGE_QUERY_SQL, &BTreeSet::from([source.clone()])),
             })
             .collect();
         Self {
-            combined_sql: render_change_query(&sources),
+            combined_sql: render_change_query(CHANGE_QUERY_SQL, &sources),
             branches,
         }
     }
 }
 
-fn render_change_query(reindex_sources: &BTreeSet<ReindexSource>) -> String {
+/// Renders `select` over the changed rows of every source, as `changed`, and the enabled roots, as `enabled`.
+pub(super) fn render_change_query(
+    select: &str,
+    reindex_sources: &BTreeSet<ReindexSource>,
+) -> String {
     let branches = reindex_sources
         .iter()
         .map(render_change_branch)
         .collect::<Vec<_>>()
         .join("\nUNION ALL\n");
 
-    CHANGE_QUERY_SQL
+    format!("{CHANGES_CTE_SQL}{select}")
         .replace("{{enabled_namespaces}}", resolved_enabled_namespaces_sql())
         .replace("{{branches}}", &branches)
 }
@@ -361,16 +377,30 @@ mod tests {
         vec![batch]
     }
 
-    fn branch_error() -> ClickHouseError {
+    #[derive(Clone, Copy)]
+    enum StubError {
+        Branch,
+        UnknownTable,
+    }
+
+    fn stub_error(error: StubError) -> ClickHouseError {
+        let body = match error {
+            StubError::Branch => {
+                "Code: 47. DB::Exception: Unknown expression or function identifier"
+            }
+            StubError::UnknownTable => {
+                "Code: 60. DB::Exception: Unknown table expression identifier 'siphon_notes' (UNKNOWN_TABLE)"
+            }
+        };
         ClickHouseError::BadResponse {
             status: 404,
-            body: "Code: 47. DB::Exception: Unknown expression or function identifier".to_string(),
+            body: body.to_string(),
         }
     }
 
     struct StubClient {
-        combined: Result<Vec<RecordBatch>, ()>,
-        branches: BTreeMap<&'static str, Result<Vec<RecordBatch>, ()>>,
+        combined: Result<Vec<RecordBatch>, StubError>,
+        branches: BTreeMap<&'static str, Result<Vec<RecordBatch>, StubError>>,
         calls: AtomicUsize,
     }
 
@@ -392,7 +422,7 @@ mod tests {
                     .map(|(_, result)| result)
                     .expect("branch query names a known table")
             };
-            result.clone().map_err(|()| branch_error())
+            result.clone().map_err(stub_error)
         }
     }
 
@@ -435,10 +465,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_missing_source_table_is_skipped_and_the_other_branches_still_count() {
+        let client = Arc::new(StubClient {
+            combined: Err(StubError::UnknownTable),
+            branches: BTreeMap::from([
+                ("work_items", Ok(change_batches(&[(9, "1/9/", "WorkItem")]))),
+                ("siphon_notes", Err(StubError::UnknownTable)),
+            ]),
+            calls: AtomicUsize::new(0),
+        });
+        let detector = detector(
+            client.clone(),
+            [column_source("work_items"), column_source("siphon_notes")],
+        );
+
+        let namespaces = detect(&detector).await;
+
+        assert_eq!(client.calls.load(Ordering::SeqCst), 3);
+        assert_eq!(namespaces.len(), 1);
+        assert_eq!(namespaces[0].namespace_id, 9);
+    }
+
+    #[tokio::test]
     async fn all_branches_failing_is_an_error() {
         let client = Arc::new(StubClient {
-            combined: Err(()),
-            branches: BTreeMap::from([("work_items", Err(())), ("siphon_notes", Err(()))]),
+            combined: Err(StubError::Branch),
+            branches: BTreeMap::from([
+                ("work_items", Err(StubError::Branch)),
+                ("siphon_notes", Err(StubError::Branch)),
+            ]),
             calls: AtomicUsize::new(0),
         });
         let detector = detector(
@@ -506,7 +561,7 @@ mod tests {
     {enabled}
   ),
   changed AS (
-    SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path, 'WorkItem' AS target
+    SELECT concat(splitByChar('/', traversal_path)[1], '/', splitByChar('/', traversal_path)[2], '/') AS root_path, 'WorkItem' AS target, _siphon_watermark AS watermark
     FROM work_items
     WHERE _siphon_watermark > {{lower:String}}
       AND _siphon_watermark <= {{upper:String}}

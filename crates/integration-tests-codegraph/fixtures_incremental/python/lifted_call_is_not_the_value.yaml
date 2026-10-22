@@ -1,0 +1,48 @@
+name: "Python: a call lifted out of a sum links but is not the value of the local"
+
+fixtures:
+  - path: main.py
+    content: |
+      class Box:
+          def m(self):
+              pass
+
+
+      class Other:
+          def m(self):
+              pass
+
+
+      def f() -> Box:
+          return Box()
+
+
+      def direct():
+          x = f()
+          x.m()
+
+
+      def summed(a):
+          x = a + f()
+          x.m()
+
+tests:
+  - name: "a call that is the whole value types the local"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'direct'
+      RETURN callee.fqn AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: main.Box.m } }
+      - { row: { callee: main.f } }
+
+  - name: "a call inside a sum links but leaves the local opaque"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'summed'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: main.f } }

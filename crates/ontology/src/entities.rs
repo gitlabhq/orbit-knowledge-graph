@@ -367,6 +367,17 @@ impl Default for NodeEntity {
 }
 
 impl NodeEntity {
+    /// Column-backed fields marked `mutable: false` outside the sort key. A tombstone must carry
+    /// them, or a pre-pick filter on one rejects the tombstone and resurrects an older live row.
+    pub fn immutable_columns(&self) -> Vec<&str> {
+        self.fields
+            .iter()
+            .filter(|field| !field.mutable && field.column_name().is_some())
+            .map(|field| field.name.as_str())
+            .filter(|name| !self.sort_key.iter().any(|key| key == name))
+            .collect()
+    }
+
     pub fn listed_fields(&self) -> impl Iterator<Item = &Field> {
         self.fields.iter().filter(|field| !field.hidden)
     }
@@ -568,6 +579,8 @@ pub struct Field {
     /// High-selectivity columns (IDs, paths, names) narrow effectively.
     /// Derived automatically from `data_type` unless overridden in YAML.
     pub selectivity: FieldSelectivity,
+    /// One live row per value within its namespace, so an equality on it is a point lookup.
+    pub unique: bool,
     pub description: Option<String>,
     pub traversal_path_lookup: Option<TraversalPathLookupSpec>,
     pub mutable: bool,
@@ -592,6 +605,7 @@ impl Default for Field {
             admin_only: false,
             hidden: false,
             selectivity: FieldSelectivity::High,
+            unique: false,
             description: None,
             traversal_path_lookup: None,
             mutable: true,

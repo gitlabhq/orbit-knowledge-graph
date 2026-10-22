@@ -36,6 +36,7 @@ properties:
     type: string
     source: full_path
     nullable: false
+    unique: true
     description: "Full path (e.g. gitlab-org/gitlab)."
     traversal_path_lookup:
       kind: full_path
@@ -156,6 +157,7 @@ storage:
     - {name: last_activity_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
+    - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_archived, column: archived, type: "minmax", granularity: 1}
     - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}
     - {name: idx_updated_at, column: updated_at, type: "minmax", granularity: 1}

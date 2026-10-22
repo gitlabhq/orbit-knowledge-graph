@@ -1,0 +1,47 @@
+name: "Scala: a parenless def read links to the def"
+
+fixtures:
+  - path: Tree.scala
+    content: |
+      class Tree(val value: Int, var child: Tree) {
+        def right: Tree = child
+        def size(): Int = 1
+      }
+
+      object Walk {
+        def transform(t: Tree): Int = {
+          val r = t.right
+          val s = t.size()
+          r.value + s
+        }
+
+        def chain(t: Tree): Int = t.right.size()
+      }
+
+tests:
+  - name: a parenless def read on the right-hand side links to the def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'transform' AND t.name = 'right'
+      RETURN t.fqn AS callee, t.definition_type AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Tree.right", kind: "Function" } }
+
+  - name: a parenless def read as a chain object links to the def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'chain' AND t.name = 'right'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Tree.right" } }
+
+  - name: a call with parentheses still links to the def
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.name = 'transform' AND t.name = 'size'
+      RETURN t.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "Tree.size" } }

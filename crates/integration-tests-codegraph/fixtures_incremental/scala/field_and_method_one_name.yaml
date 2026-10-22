@@ -1,0 +1,41 @@
+name: "Scala: a val and a def of one name keep separate bindings"
+
+fixtures:
+  - path: late/Late.scala
+    content: |
+      package late
+
+      class Other {
+        def b(): Unit = ()
+      }
+
+      class Late {
+        def x(a: Int): Late = new Late()
+
+        def b(): Unit = ()
+
+        val x: Other = new Other()
+
+        def goCall(): Unit = x(1).b()
+
+        def go(): Unit = x.b()
+      }
+
+tests:
+  - name: a call of an overload declared before the val of its name targets the def
+    # Known gap: a class-body val is a binding, not a def, so the call of its name is typed by the val, on main too.
+    skip: true
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'late.Late.goCall'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["late.Late.b", "late.Late.x"] } }
+
+  - name: a bare read of the val types the receiver by the val
+    query: |
+      MATCH (c:Definition)-[:CALLS]->(t:Definition)
+      WHERE c.fqn = 'late.Late.go'
+      RETURN t.fqn AS callee
+    assert:
+      - { column_values: { field: callee, values: ["late.Other.b"] } }

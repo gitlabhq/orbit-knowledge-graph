@@ -1,13 +1,30 @@
 cases:
   - name: pinned_target_narrows_the_caller_join
-    description: The caller redaction join reads only the keys of edges into the pinned definition
+    description: The caller redaction join reads only the keys of edges into the pinned definition, and the edge relation it reads more than once is materialized
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
     expect:
-      sql_contains: ["caller.id IN (SELECT id FROM _narrow_caller)"]
+      sql_contains: ["caller.id IN (SELECT id FROM _orbit_relation_", "WITH _orbit_relation_4 AS MATERIALIZED (SELECT _orbit_edge_0.relationship_kind"]
+      node_count: 2
+      nodes:
+        Definition:
+          ids: [12000, 12001]
+      edges:
+        CALLS:
+          - [12000, 12001]
+
+  - name: pinned_target_scopes_the_caller_join
+    description: The caller redaction join carries the pinned definition's namespace prefix inside its latest-row pick, so the primary key bounds it before the id set
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
+      gql: |
+        MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
+    expect:
+      sql_contains: ["startsWith(caller.traversal_path, (SELECT"]
       node_count: 2
       nodes:
         Definition:
@@ -17,14 +34,14 @@ cases:
           - [12000, 12001]
 
   - name: pinned_source_narrows_the_callee_join
-    description: The callee redaction join reads only the keys of edges out of the pinned definition
+    description: The callee redaction join reads only the keys of edges out of the pinned definition, and the edge relation it reads more than once is materialized
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[12000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":50}
       gql: |
         MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
     expect:
-      sql_contains: ["callee.id IN (SELECT id FROM _narrow_callee)"]
+      sql_contains: ["callee.id IN (SELECT id FROM _orbit_relation_", "WITH _orbit_relation_4 AS MATERIALIZED (SELECT _orbit_edge_0.relationship_kind"]
       node_count: 2
       nodes:
         Definition:
@@ -34,11 +51,110 @@ cases:
           - [12000, 12001]
 
   - name: unpinned_partner_keeps_the_full_join
-    description: Without a pinned partner there are no edge keys to narrow the redaction join
+    description: Without a bounded relation there are no safe keys to narrow the redaction join
     query:
       gql: |
         MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.project_id = 1000 RETURN caller, callee LIMIT 50
     expect:
       compile_only: true
       sql_contains: ["AS callee FINAL ON"]
-      sql_not_contains: ["_narrow_"]
+
+  - name: pinned_target_drops_a_denied_caller
+    description: The narrowed caller join still removes a caller whose project id the user may not read, with its edge
+    config:
+      redaction:
+        allow:
+          project: [1000]
+      extra_seed:
+        gl_definition:
+          - { id: 99400, traversal_path: "1/100/1000/", project_id: 1002, branch: main, name: denied_caller, fqn: denied_caller }
+        gl_code_edge:
+          - { traversal_path: "1/100/1000/", project_id: 1002, branch: main, source_id: 99400, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
+      gql: |
+        MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
+    expect:
+      sql_contains: ["caller.id IN (SELECT id FROM _orbit_relation_"]
+      node_count: 2
+      nodes:
+        Definition:
+          ids: [12000, 12001]
+          absent: [99400]
+      edges:
+        CALLS:
+          - [12000, 12001]
+
+  - name: pinned_target_keeps_an_allowed_caller
+    description: The same narrowed caller join returns the extra caller when its project id is readable
+    config:
+      extra_seed:
+        gl_definition:
+          - { id: 99400, traversal_path: "1/100/1000/", project_id: 1002, branch: main, name: denied_caller, fqn: denied_caller }
+        gl_code_edge:
+          - { traversal_path: "1/100/1000/", project_id: 1002, branch: main, source_id: 99400, source_kind: Definition, relationship_kind: CALLS, target_id: 12001, target_kind: Definition }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition"},{"id":"def","entity":"Definition","node_ids":[12001]}],"relationships":[{"type":"CALLS","from":"caller","to":"def"}],"limit":50}
+      gql: |
+        MATCH (caller:Definition)-[:CALLS]->(def:Definition {id: 12001}) RETURN caller, def LIMIT 50
+    expect:
+      node_count: 3
+      nodes:
+        Definition:
+          ids: [12000, 12001, 99400]
+      edges:
+        CALLS:
+          - [12000, 12001]
+          - [99400, 12001]
+
+  - name: pinned_source_drops_a_denied_callee
+    description: The narrowed callee join still removes a callee whose project id the user may not read, with its edge
+    config:
+      redaction:
+        allow:
+          project: [1000]
+      extra_seed:
+        gl_definition:
+          - { id: 99401, traversal_path: "1/100/1000/", project_id: 1002, branch: main, name: denied_callee, fqn: denied_callee }
+        gl_code_edge:
+          - { traversal_path: "1/100/1000/", project_id: 1002, branch: main, source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 99401, target_kind: Definition }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[12000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":50}
+      gql: |
+        MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
+    expect:
+      sql_contains: ["callee.id IN (SELECT id FROM _orbit_relation_"]
+      node_count: 2
+      nodes:
+        Definition:
+          ids: [12000, 12001]
+          absent: [99401]
+      edges:
+        CALLS:
+          - [12000, 12001]
+
+  - name: pinned_source_keeps_an_allowed_callee
+    description: The same narrowed callee join returns the extra callee when its project id is readable
+    config:
+      extra_seed:
+        gl_definition:
+          - { id: 99401, traversal_path: "1/100/1000/", project_id: 1002, branch: main, name: denied_callee, fqn: denied_callee }
+        gl_code_edge:
+          - { traversal_path: "1/100/1000/", project_id: 1002, branch: main, source_id: 12000, source_kind: Definition, relationship_kind: CALLS, target_id: 99401, target_kind: Definition }
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","node_ids":[12000]},{"id":"callee","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":50}
+      gql: |
+        MATCH (caller:Definition {id: 12000})-[:CALLS]->(callee:Definition) RETURN caller, callee LIMIT 50
+    expect:
+      node_count: 3
+      nodes:
+        Definition:
+          ids: [12000, 12001, 99401]
+      edges:
+        CALLS:
+          - [12000, 12001]
+          - [12000, 99401]

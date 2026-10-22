@@ -1,6 +1,6 @@
 use k8s_openapi::api::apps::v1::{Deployment, StatefulSet};
 use kube::{Api, Client};
-use tracing::warn;
+use orbit_log_fields::warn;
 
 use crate::error::Error;
 use crate::types::{ResourceKind, ServiceHealth, Status};
@@ -53,7 +53,13 @@ impl K8sChecker {
                 }
             }
             Err(e) => {
-                warn!(namespace, deployment = name, error = %e, "Failed to get deployment status");
+                warn!(
+                    safe(K8S_NAMESPACE) = namespace,
+                    safe(COMPONENT) = name,
+                    safe(K8S_KIND) = "deployment",
+                    expanded(ERROR_MESSAGE) = %e,
+                    "Failed to get deployment status"
+                );
                 ServiceHealth {
                     name: name.to_string(),
                     namespace: namespace.to_string(),
@@ -90,7 +96,13 @@ impl K8sChecker {
                 }
             }
             Err(e) => {
-                warn!(namespace, statefulset = name, error = %e, "Failed to get statefulset status");
+                warn!(
+                    safe(K8S_NAMESPACE) = namespace,
+                    safe(COMPONENT) = name,
+                    safe(K8S_KIND) = "statefulset",
+                    expanded(ERROR_MESSAGE) = %e,
+                    "Failed to get statefulset status"
+                );
                 ServiceHealth {
                     name: name.to_string(),
                     namespace: namespace.to_string(),

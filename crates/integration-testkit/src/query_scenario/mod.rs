@@ -15,10 +15,11 @@ use std::sync::Arc;
 
 use format::ExpectedIndex;
 use futures::FutureExt;
-use pagination::{PageCollection, next_page, with_after, without_cursor};
+use pagination::{PageCollection, assert_page_bounds, page_query, unpaginated};
+use query_engine::compiler::passes::codegen::clickhouse::cte_statements;
 use query_engine::compiler::{
-    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ResultContext,
-    SecurityContext,
+    AccessLevel, AuthorizedPath, CompiledQueryContext, Frontend, Input, ParameterizedQuery,
+    ResultContext, SecurityContext,
 };
 use query_engine::formatters::{GqlFormatter, GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{
@@ -27,7 +28,7 @@ use query_engine::pipeline::{
 use query_engine::shared::content::ColumnResolverRegistry;
 use query_engine::shared::{CompilationStage, PipelineOutput, RedactionOutput};
 use response::{
-    assert_compilation, assert_cursor, assert_output, assert_repeated_response, repeat_count,
+    assert_compilation, assert_output, assert_pagination, assert_repeated_response, repeat_count,
     validate_response,
 };
 
@@ -110,7 +111,7 @@ pub async fn run_query(
         redaction,
     )
     .await;
-    assert_cursor(&output, "run_query");
+    assert_pagination(&output, "run_query");
     let response = validate_response(&compiled.input, GraphFormatter.format(&output), "run_query");
     ResponseView::for_query(&compiled.input, response)
 }
@@ -345,8 +346,7 @@ async fn run_frontend(
     }
 
     if !expect.indexes_used.is_empty() {
-        let plan = ctx.explain_plan(&compiled.base).await;
-        assert_indexes_used(&plan, &expect.indexes_used, label);
+        assert_indexes_used(ctx, &compiled, &expect.indexes_used, label).await;
     }
 
     if !expect.pages.is_empty() {
@@ -380,8 +380,7 @@ async fn run_frontend(
         let compiled = assert_compilation(compiled, expect, frontend_key, label)
             .expect("repeated query should compile");
         if !expect.indexes_used.is_empty() {
-            let plan = ctx.explain_plan(&compiled.base).await;
-            assert_indexes_used(&plan, &expect.indexes_used, label);
+            assert_indexes_used(ctx, &compiled, &expect.indexes_used, label).await;
         }
         let output = execute_output(
             ctx,
@@ -397,21 +396,59 @@ async fn run_frontend(
     }
 }
 
-fn assert_indexes_used(plan: &serde_json::Value, expected: &[ExpectedIndex], label: &str) {
+async fn assert_indexes_used(
+    ctx: &TestContext,
+    compiled: &CompiledQueryContext,
+    expected: &[ExpectedIndex],
+    label: &str,
+) {
+    let query = &compiled.base;
+    let plan = ctx.explain_plan(query).await;
+    let ctes = cte_statements(&compiled.ast).expect("CTE statements render");
     for ExpectedIndex { table, index } in expected {
-        let scan = read_from_merge_tree(plan, table).unwrap_or_else(|| {
-            panic!("{label}: no ReadFromMergeTree step for table {table}\nplan: {plan:#}")
-        });
-        let entry = skip_index(scan, index).unwrap_or_else(|| {
-            panic!("{label}: skip index {index} not applied on {table}\nplan: {plan:#}")
-        });
-        let initial = entry["Initial Granules"].as_u64().unwrap_or(0);
-        let selected = entry["Selected Granules"].as_u64().unwrap_or(initial);
+        let mut cte_plans = Vec::new();
+        let mut scans = Vec::new();
+        read_from_merge_tree(&plan, table, &mut scans);
+        if !scans.iter().any(|scan| skip_index(scan, index).is_some()) {
+            for (_, sql, params) in &ctes {
+                let statement = ParameterizedQuery {
+                    sql: sql.clone(),
+                    params: params.clone(),
+                    result_context: query.result_context.clone(),
+                    query_config: query.query_config.clone(),
+                    dialect: query.dialect,
+                };
+                cte_plans.push(ctx.explain_plan(&statement).await);
+            }
+            for cte_plan in &cte_plans {
+                read_from_merge_tree(cte_plan, table, &mut scans);
+            }
+        }
         assert!(
-            selected < initial,
-            "{label}: skip index {index} on {table} selected {selected} of {initial} granules\nplan: {plan:#}"
+            !scans.is_empty(),
+            "{label}: no ReadFromMergeTree step for table {table}"
+        );
+        assert!(
+            scans.iter().any(|scan| skip_index(scan, index).is_some()),
+            "{label}: skip index {index} not applied on any {table} scan"
+        );
+        assert!(
+            scans.iter().any(|scan| index_pruned(scan, index)),
+            "{label}: skip index {index} did not prune granules on any {table} scan"
         );
     }
+}
+
+fn index_pruned(value: &serde_json::Value, index: &str) -> bool {
+    let pruned = |entry: &serde_json::Value| {
+        let initial = entry["Initial Granules"].as_u64().unwrap_or(0);
+        let selected = entry["Selected Granules"].as_u64().unwrap_or(initial);
+        selected < initial
+    };
+    skip_index(value, index).is_some()
+        && [index, "<Combined skip indexes>"]
+            .iter()
+            .any(|name| skip_index(value, name).is_some_and(pruned))
 }
 
 fn unversioned_table(description: &str) -> &str {
@@ -428,7 +465,8 @@ fn unversioned_table(description: &str) -> &str {
 fn read_from_merge_tree<'a>(
     value: &'a serde_json::Value,
     table: &str,
-) -> Option<&'a serde_json::Value> {
+    scans: &mut Vec<&'a serde_json::Value>,
+) {
     match value {
         serde_json::Value::Object(map) => {
             let is_scan = map.get("Node Type").and_then(serde_json::Value::as_str)
@@ -438,14 +476,15 @@ fn read_from_merge_tree<'a>(
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|description| unversioned_table(description) == table);
             if is_scan && scans_table {
-                return Some(value);
+                scans.push(value);
             }
-            map.values().find_map(|v| read_from_merge_tree(v, table))
+            map.values()
+                .for_each(|child| read_from_merge_tree(child, table, scans));
         }
-        serde_json::Value::Array(items) => {
-            items.iter().find_map(|v| read_from_merge_tree(v, table))
-        }
-        _ => None,
+        serde_json::Value::Array(items) => items
+            .iter()
+            .for_each(|child| read_from_merge_tree(child, table, scans)),
+        _ => {}
     }
 }
 
@@ -478,12 +517,11 @@ async fn run_pages(
     expect: &QueryExpect,
     label: &str,
 ) {
-    let mut query_str = base_query.trim_end().to_owned();
-
     let mut collected = PageCollection::default();
 
     for (i, page_expect) in expect.pages.iter().enumerate() {
         let page_label = format!("{label} page {}", i + 1);
+        let query_str = page_query(frontend, base_query, i);
 
         let compiled = compile_like_server(&query_str, frontend, (data_model, ontology), security)
             .await
@@ -501,15 +539,13 @@ async fn run_pages(
         let response = assert_output(&output, frontend, page_expect, &page_label);
         let response = serde_json::from_value(response).expect("response should deserialize");
         collected.push(&response);
-        if let Some(cursor) = next_page(&response, i, expect.pages.len(), &page_label) {
-            query_str = with_after(frontend, base_query, &cursor);
-        }
+        assert_page_bounds(&response, i, expect.pages.len(), &page_label);
     }
 
     if let Some(all_pages) = &expect.all_pages {
         collected.assert_expect(all_pages, label);
         if all_pages.matches_unpaginated {
-            let query = without_cursor(frontend, base_query);
+            let query = unpaginated(frontend, base_query);
             let compiled = compile_like_server(&query, frontend, (data_model, ontology), security)
                 .await
                 .unwrap_or_else(|error| panic!("{label}: unpaginated compile failed: {error}"));
@@ -522,7 +558,7 @@ async fn run_pages(
                 redaction,
             )
             .await;
-            assert_cursor(&output, label);
+            assert_pagination(&output, label);
             let response =
                 validate_response(&compiled.input, GraphFormatter.format(&output), label);
             collected.assert_matches(&response, label);
@@ -629,7 +665,6 @@ fn pipeline_output(
     let pagination = Some(query_engine::shared::paginate(
         &mut query_result,
         &compiled.input,
-        &compiled.pagination,
     ));
     PipelineOutput {
         row_count: query_result.authorized_count(),
@@ -722,27 +757,22 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 );
             }
         }
-        if !ne.prop_absent.is_empty() && !view.nodes_of_type(entity).is_empty() {
-            let present = ne.prop_present.clone();
-            let absent = ne.prop_absent.clone();
-            for prop in &absent {
-                let present = present.clone();
-                let absent_field = prop.clone();
-                view.assert_filter(entity, prop, move |n| {
-                    let has_positive =
-                        present.iter().any(|p| n.has_prop(p)) || !n.properties.is_empty();
-                    has_positive && !n.has_prop(&absent_field)
-                });
+        for prop in &ne.prop_absent {
+            if view.nodes_of_type(entity).is_empty() {
+                continue;
             }
-        } else {
-            for prop in &ne.prop_absent {
-                for node in view.nodes_of_type(entity) {
-                    assert!(
-                        !node.has_prop(prop),
-                        "{label}: {entity}/{} should not have property '{prop}'",
-                        node.id
-                    );
-                }
+            let absent = prop.clone();
+            view.assert_filter(entity, prop, move |n| {
+                !n.properties.is_empty() && !n.has_prop(&absent)
+            });
+        }
+        if ne.no_properties {
+            for node in view.nodes_of_type(entity) {
+                assert!(
+                    node.properties.is_empty(),
+                    "{label}: {entity}/{} should carry no properties",
+                    node.id
+                );
             }
         }
         if let Some(absent) = &ne.absent {
@@ -1184,7 +1214,7 @@ fn parse_requirement(name: &str) -> Option<Requirement> {
         "node_ids" => Some(Requirement::NodeIds),
         "node_count" => Some(Requirement::NodeCount),
         "order_by" => Some(Requirement::OrderBy),
-        "cursor" => Some(Requirement::Cursor),
+        "skip" => Some(Requirement::Skip),
         "aggregation" => Some(Requirement::Aggregation),
         "aggregation_sort" => Some(Requirement::AggregationSort),
         "neighbors" => Some(Requirement::Neighbors),

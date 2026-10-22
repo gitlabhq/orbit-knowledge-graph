@@ -17,6 +17,13 @@ fi
 
 export E2E_GKG_TAG="${E2E_GKG_TAG:-dev}"
 
+export E2E_GITLAB_LANE="${E2E_GITLAB_LANE:-}"
+if [[ -n "$E2E_GITLAB_LANE" ]]; then
+  GITLAB_PINS=".gitlab_lanes.\"$E2E_GITLAB_LANE\""
+else
+  GITLAB_PINS=".gitlab"
+fi
+
 export NS_NATS="e2e-${E2E_SHA}-nats"
 export NS_CH="${E2E_CH_NAMESPACE:-e2e-${E2E_SHA}-clickhouse}"
 export NS_GITLAB="e2e-${E2E_SHA}-gitlab"

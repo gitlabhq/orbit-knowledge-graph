@@ -1,0 +1,6 @@
+ruleDirs:
+  - scripts/linting/logs/rules
+utilDirs:
+  - scripts/linting/logs/utils
+testConfigs:
+  - testDir: scripts/linting/logs/rule-tests

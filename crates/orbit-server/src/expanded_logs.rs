@@ -1,24 +1,11 @@
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use labkit::fields::{GL_ORGANIZATION_ID, GL_PROJECT_ID, GL_ROOT_NAMESPACE_ID};
 use labkit::verbose_logs::{ExpandedLogsPolicy, SpanFacts, VerboseLogsConfig};
+use orbit_log_fields::safe;
 use orbit_server_config::ExpandedLogsConfig;
 use orbit_utils::traversal_path::TraversalPath;
 use tracing_subscriber::EnvFilter;
-
-const TRAVERSAL_PATH: &str = "traversal_path";
-const EXPANDED_LOGS_REQUESTED: &str = "expanded_logs_requested";
-const USER_ID: &str = "user_id";
-
-const SAFE_FIELDS: &[&str] = &[
-    GL_ROOT_NAMESPACE_ID,
-    GL_ORGANIZATION_ID,
-    GL_PROJECT_ID,
-    USER_ID,
-    TRAVERSAL_PATH,
-    EXPANDED_LOGS_REQUESTED,
-];
 
 /// Rails sends this token when its `gkg_verbose_logs` feature flag is on.
 pub static VERBOSE_LOGS: LazyLock<VerboseLogsConfig> = LazyLock::new(|| {
@@ -54,9 +41,9 @@ fn valid_rust_log() -> Option<String> {
 pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         let location = info.location().map(ToString::to_string);
-        tracing::error!(
-            panic_location = location.as_deref(),
-            error_message = info.payload_as_str(),
+        orbit_log_fields::error!(
+            safe(PANIC_LOCATION) = location.as_deref(),
+            expanded(ERROR_MESSAGE) = info.payload_as_str(),
             "panic"
         );
     }));
@@ -65,19 +52,19 @@ pub fn install_panic_hook() {
 pub fn policy(config: &ExpandedLogsConfig) -> ExpandedLogsPolicy {
     let internal: HashSet<u64> = config.root_namespace_ids.iter().copied().collect();
     ExpandedLogsPolicy::default()
-        .with_safe_fields(SAFE_FIELDS)
+        .with_safe_fields(safe::ALL)
         .with_global_override(config.global_override)
         .with_predicate(move |facts| is_requested(facts) || is_internal_tenant(facts, &internal))
 }
 
 fn is_requested(facts: &SpanFacts<'_>) -> bool {
-    facts.get_bool(EXPANDED_LOGS_REQUESTED) == Some(true)
+    facts.get_bool(safe::EXPANDED_LOGS_REQUESTED) == Some(true)
 }
 
 /// A customer path inside an internal span must not be expanded.
 fn is_internal_tenant(facts: &SpanFacts<'_>, internal: &HashSet<u64>) -> bool {
-    let by_id = facts.get_u64(GL_ROOT_NAMESPACE_ID);
-    let by_path = facts.get_str(TRAVERSAL_PATH);
+    let by_id = facts.get_u64(safe::GL_ROOT_NAMESPACE_ID);
+    let by_path = facts.get_str(safe::TRAVERSAL_PATH);
     if by_id.is_none() && by_path.is_none() {
         return false;
     }
@@ -147,13 +134,17 @@ mod tests {
     }
 
     fn log_parsed_file() {
-        tracing::info!(gl_project_id = 7, file_path = FILE_PATH, "parsed file");
+        orbit_log_fields::info!(
+            safe(GL_PROJECT_ID) = 7,
+            expanded(FILE_PATH) = FILE_PATH,
+            "parsed file"
+        );
     }
 
     #[test]
     fn internal_root_namespace_lines_are_expanded() {
         let logs = capture(&config(false, vec![9970]), || {
-            let span = tracing::info_span!("work", gl_root_namespace_id = 9970_u64);
+            let span = orbit_log_fields::info_span!("work", safe(GL_ROOT_NAMESPACE_ID) = 9970_u64);
             span.in_scope(log_parsed_file);
         });
 
@@ -163,7 +154,7 @@ mod tests {
     #[test]
     fn other_root_namespace_lines_keep_only_safe_fields() {
         let logs = capture(&config(false, vec![9970]), || {
-            let span = tracing::info_span!("work", gl_root_namespace_id = 42_u64);
+            let span = orbit_log_fields::info_span!("work", safe(GL_ROOT_NAMESPACE_ID) = 42_u64);
             span.in_scope(log_parsed_file);
         });
 
@@ -174,7 +165,7 @@ mod tests {
     #[test]
     fn traversal_path_names_the_root_namespace() {
         let logs = capture(&config(false, vec![9970]), || {
-            let span = tracing::info_span!("work", traversal_path = "1/9970/123/");
+            let span = orbit_log_fields::info_span!("work", safe(TRAVERSAL_PATH) = "1/9970/123/");
             span.in_scope(log_parsed_file);
         });
 
@@ -184,9 +175,10 @@ mod tests {
     #[test]
     fn customer_path_inside_an_internal_span_is_not_expanded() {
         let logs = capture(&config(false, vec![9970]), || {
-            let outer = tracing::info_span!("work", gl_root_namespace_id = 9970_u64);
-            let inner =
-                outer.in_scope(|| tracing::info_span!("project", traversal_path = "1/42/123/"));
+            let outer = orbit_log_fields::info_span!("work", safe(GL_ROOT_NAMESPACE_ID) = 9970_u64);
+            let inner = outer.in_scope(|| {
+                orbit_log_fields::info_span!("project", safe(TRAVERSAL_PATH) = "1/42/123/")
+            });
             inner.in_scope(log_parsed_file);
         });
 
@@ -196,10 +188,10 @@ mod tests {
     #[test]
     fn requested_lines_are_expanded() {
         let logs = capture(&config(false, vec![]), || {
-            let span = tracing::info_span!(
+            let span = orbit_log_fields::info_span!(
                 "request",
-                gl_root_namespace_id = 42_u64,
-                expanded_logs_requested = true
+                safe(GL_ROOT_NAMESPACE_ID) = 42_u64,
+                safe(EXPANDED_LOGS_REQUESTED) = true
             );
             span.in_scope(log_parsed_file);
         });
@@ -218,8 +210,8 @@ mod tests {
     fn rust_analyzer_lines_are_dropped() {
         let filter = tracing_subscriber::EnvFilter::new(log_directive(Some("info")));
         let logs = capture_with_filter(&config(true, vec![]), filter, || {
-            tracing::error!(target: "ra_ap_hir_def::attrs", "unknown crate acme_secret");
-            tracing::error!(target: "orbit_server", "kept");
+            orbit_log_fields::error!(target: "ra_ap_hir_def::attrs", "unknown crate acme_secret");
+            orbit_log_fields::error!(target: "orbit_server", "kept");
         });
 
         assert!(!logs.contains("acme_secret"), "{logs}");

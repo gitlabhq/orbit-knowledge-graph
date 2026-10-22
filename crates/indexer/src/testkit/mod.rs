@@ -1,4 +1,6 @@
 pub mod builders;
+#[cfg(test)]
+pub mod logs;
 pub mod mocks;
 
 pub use builders::*;

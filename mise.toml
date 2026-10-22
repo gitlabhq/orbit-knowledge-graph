@@ -30,7 +30,7 @@ RUSTC_WRAPPER = "{% if env.RUSTC_WRAPPER is defined %}{{env.RUSTC_WRAPPER}}{% el
 "cargo:cargo-geiger" = "0.13.0"
 "cargo:cargo-cyclonedx" = "0.5.7"
 "cargo:cargo-zigbuild" = "0.23.4"
-"cargo:ast-grep" = "0.42.0"
+ast-grep = "0.51.0"
 "cargo:https://gitlab.com/gitlab-org/rust/gitlab-xtasks" = "tag:v1.6.1"
 "cargo:cargo-bolero" = "0.13.4"
 "cargo:cargo-shear" = "1.13.1"
@@ -49,12 +49,12 @@ lefthook = "2.1.3"
 protoc = "34.1"
 jq = "1.7"
 yq = "4.52.5"
-hyperfine = "1.20.0"
 "aqua:gitleaks/gitleaks" = "8.30.1"
 "github:google/go-jsonnet" = "0.22.0"
 # aws-lc-fips-sys compiles the AWS-LC FIPS module from source and needs cmake and go.
 cmake = "4.4.3"
 go = "1.27.1"
+glab = "1.123.0"
 
 [tasks."hooks:install"]
 run = ["lefthook install --force", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
@@ -201,6 +201,17 @@ run = [
 ]
 description = "Run clippy lint checks"
 
+[tasks."lint:logs"]
+run = [
+  "ast-grep test --skip-snapshot-tests",
+  """ast-grep scan crates \
+    --globs '!**/tests/**' --globs '!**/tests.rs' --globs '!**/test_helpers.rs' \
+    --globs '!**/testing.rs' --globs '!**/testkit.rs' --globs '!**/testkit/**' \
+    --globs '!**/benches/**' --globs '!**/examples/**' --globs '!**/build.rs' \
+    --globs '!crates/integration-*/**' --globs '!crates/fuzz/**'""",
+]
+description = "Check log, span and print call sites against the red data rules (scripts/linting/logs)"
+
 [tasks."lint:deps"]
 run = "cargo shear"
 description = "Check for unused workspace and crate dependencies"
@@ -257,34 +268,18 @@ arg "<repo_path>"
 arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
 
-[tasks."bench:download-repos"]
-run = "gitlab-xtasks benchmark download-repos --config code-indexing-benchmark.yaml"
-description = "Download benchmark repositories"
+[task_templates."bench:engine"]
+vars = { action = "run" }
+run = 'cargo xtask code-indexing-benchmark {{ vars.action }}'
 
 [tasks."bench:run"]
-depends = ["bench:download-repos"]
-run = "cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled && gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local"
-description = "Run code indexing benchmark"
+extends = "bench:engine"
+description = "Run a measured code indexing benchmark"
 
-[tasks."bench:v2"]
-depends = ["bench:download-repos"]
-run = """
-cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled
-for repo in output/repos/*/; do
-  name=$(basename "$repo")
-  echo "=== Indexing $name with v2 ==="
-  ./target/release/orbit index "$repo" --stats 2>&1 || echo "FAILED: $name"
-done
-"""
-description = "Run v2 pipeline against all downloaded benchmark repos"
-
-[tasks."bench:list-repos"]
-run = "gitlab-xtasks benchmark list-repos --config code-indexing-benchmark.yaml"
-description = "List benchmark repositories"
-
-[tasks."bench:list-groups"]
-run = "gitlab-xtasks benchmark list-groups --config code-indexing-benchmark.yaml"
-description = "List benchmark repo groups"
+[tasks."bench:smoke"]
+extends = "bench:engine"
+vars = { action = "smoke" }
+description = "Run one code indexing pass against each benchmark repository"
 
 [tasks."proto:go"]
 run = "scripts/dev/proto-go.sh generate"

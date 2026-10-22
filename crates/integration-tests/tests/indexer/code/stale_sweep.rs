@@ -80,6 +80,7 @@ async fn drained_namespace_sweeps_unclaimed_rows_once() {
     sweep.run_for_drained(&drained).await.expect("sweep failed");
 
     assert!(!file_is_active(&clickhouse, project_id, 111).await);
+    assert!(tombstone_keeps_path(&clickhouse, project_id, 111).await);
     assert!(file_is_active(&clickhouse, project_id, 222).await);
     assert_eq!(active_edge_count(&clickhouse, "gl_edge", 111).await, 0);
     assert_eq!(active_edge_count(&clickhouse, "gl_code_edge", 111).await, 0);
@@ -315,6 +316,18 @@ async fn insert_file(
             t("gl_file")
         ))
         .await;
+}
+
+async fn tombstone_keeps_path(clickhouse: &TestContext, project_id: i64, id: i64) -> bool {
+    let rows = clickhouse
+        .query(&format!(
+            "SELECT id FROM {} \
+             WHERE project_id = {project_id} AND id = {id} AND _deleted = true \
+               AND path = 'src/F{id}.java'",
+            t("gl_file")
+        ))
+        .await;
+    rows.first().is_some_and(|b| b.num_rows() > 0)
 }
 
 async fn file_is_active(clickhouse: &TestContext, project_id: i64, id: i64) -> bool {

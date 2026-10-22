@@ -334,6 +334,31 @@ for `var`. Python assignment rules use function labels. Rust declarations take
 effect in source order. Scope labels are YAML symbols; the engine does not branch
 on language names.
 
+A text label such as `(__rhs @$V)` holds only the text of the node it names, and
+the subtree of V is dropped. A rule writes `(__rhs @$V $V)` to place the node
+under its label as well. A call, lambda or array inside that expression then
+survives canonicalization and is walked for edges. The rewriter records that the
+text and the child come from the same capture. Canonicalization marks a node it
+hoists out of a node it drops as lifted. A lifted node under such a label is
+walked, but it is never the value of the label. So `x = f()` types `x` by the
+call, and `x = a + f()` leaves `x` opaque. A language rule that replaces a
+transparent wrapper by its call, as Rust does for `f()?`, `f().await`, `&f()`
+and `(f())`, makes the call the value.
+
+A `__qualifier` marker on the object of a member names a module or type, as in
+`ptr::write`. The linker resolves that object through declared items and imports
+only. A parameter or local with the same name does not shadow it. The same marker
+on a binding, as on a bounded type parameter, adds that binding to those items.
+A `__qualifier` binding declares that item only. The linker does not walk its
+right-hand side, so a language rule must not put a call under such a binding.
+
+A `__ssa_loop` has one header shape. The loop variable is a `__binding` with a
+`__declaration` that the loop rule places directly under the loop. The children
+before it are the header, evaluated once before the loop. A bare `__declaration`
+scopes the loop variable to the loop; a labelled one binds it where the label
+says. A loop without a declared variable has no header, and all of its children
+run in the loop block.
+
 C and C++ compound statements, Java and C# blocks, and Lua blocks retain lexical boundaries. Their
 local declarations introduce bindings independently of assignments to outer names.
 JavaScript-family iteration rules retain the source expression and bind the loop
@@ -422,7 +447,7 @@ Archive downloads also share a budget per Gitaly storage across all indexer pods
 
 When a renewal reports the slot lost, or renewals fail until the lease expires, the download future is dropped. The legacy extractor reads the stream on a blocking thread that outlives the future. So it also carries a cancel flag, set on drop, that fails its next read. Together these stop the Gitaly stream, and a second pod cannot overlap it. The attempt then retries through the normal archive retry.
 
-The storage comes from `repository_storage` in the `/info` response. Backfill tasks reuse the lookup they already make to resolve the default branch. Push tasks make one lookup, which the one-hour project-info cache usually serves. Either way a task makes at most one lookup, whatever the cache holds. After a storage move the old key stays in use until the cache expires. GitLab versions whose `/info` omits the field, and failed lookups, use a separate tenant-wide budget, `archive_tenant_budget`, under the keys `archive.tenant.<slot>`. Its default is 8. That is above the per-storage default, so a tenant with a few storages is not starved before the Rails field ships. It is far below today's worst case of `fetch_concurrency × pods` (about 40), so an Orbit upgrade alone already bounds the load. During a mixed rollout the two key spaces are independent. A storage can then see its storage budget plus the tenant budget at once, because some projects resolve a storage and others do not.
+The storage comes from `repository_storage` on the task row when GitLab fills it, so those push tasks make no lookup. Otherwise it comes from the `/info` response. Backfill tasks reuse the lookup they already make to resolve the default branch. Push tasks without the column make one lookup, which the one-hour project-info cache usually serves. Either way a task makes at most one lookup, whatever the cache holds. After a storage move the key follows the value on the newest task row, or the cache for tasks without one. GitLab versions whose `/info` omits the field, and failed lookups, use a separate tenant-wide budget, `archive_tenant_budget`, under the keys `archive.tenant.<slot>`. Its default is 8. That is above the per-storage default, so a tenant with a few storages is not starved before the Rails field ships. It is far below today's worst case of `fetch_concurrency × pods` (about 40), so an Orbit upgrade alone already bounds the load. During a mixed rollout the two key spaces are independent. A storage can then see its storage budget plus the tenant budget at once, because some projects resolve a storage and others do not.
 
 A job queues for a slot for at most `archive_lease_max_wait_secs` (default 30), while it holds one of the pod's fetch slots. A longer wait would let one busy storage pin every fetch slot of a pod. Projects on idle storages would starve. After the wait the job goes back to the queue without spending a checkpoint attempt, and it does not count as a fetch error. When the project lock is lost it also goes back, but the attempt stays counted, the same as a lost lock during the lane wait. It does spend a JetStream delivery, though. NATS counts every redelivery toward `max_deliver` (5 by default), and each NAK waits `retry_interval_secs` (60) first. A storage that stays saturated for several minutes therefore drops the task from the stream. The project then waits for the dispatcher cadence, up to the one-hour backfill retry window. Under sustained saturation the lease behaves as dispatcher-paced retry, not as a queue. Each cycle also costs two checkpoint writes, a project-lock acquire, and up to 60 polls of every slot key. A budget of 0 turns the lease off for that key space. The key is the storage name. Under Praefect it covers a set of Gitaly nodes, so the budget is stricter than needed.
 

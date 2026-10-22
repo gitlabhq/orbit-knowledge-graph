@@ -1,0 +1,36 @@
+id: log-safe-field-is-plain
+valid:
+  - 'info!(safe(GL_PROJECT_ID) = id, safe(KIND) = kind.as_str(), "ok");'
+  - 'info!(expanded(ERROR_MESSAGE) = %e, expanded(ADDITIONAL_DETAILS) = ?d, "ok");'
+  - 'info_span!("x", safe(GL_PROJECT_ID) = tracing::field::Empty);'
+  - 'info!(expanded(FILE_PATH) = format!("{a}/{b}"), "expanded may be formatted");'
+  - 'span.record(expanded::BRANCH, tracing::field::display(&branch));'
+  - 'info!(safe(TCP_ADDRESS) = addr, "plain");'
+  - 'info!(safe(COUNT) = items.iter().map(|i| i.to_string()).count(), "nested is fine");'
+  - |
+    #[cfg(test)]
+    mod t {
+        #[instrument(skip_all, fields({ safe::REASON } = %x))]
+        fn f() {}
+    }
+  - 'info!(safe(RESPONSE_FORMAT) = req.format, "field access");'
+invalid:
+  - 'info!(safe(KIND) = %kind, "display");'
+  - 'info!(safe(OUTCOME) = ?state, "debug");'
+  - 'info!(safe(OUTCOME) = tracing::field::debug(&state), "debug fn");'
+  - 'info_span!("x", safe(OUTCOME) = %state);'
+  - 'info!(safe(KIND) = format!("{path}"), "format");'
+  - |
+    #[instrument(skip_all, fields({ safe::REASON } = %self.path))]
+    fn f(&self) {}
+  - 'span.record(safe::REASON, tracing::field::display(path));'
+  - 'span.record(safe::KIND, format!("{x}"));'
+  - 'info!(safe(TCP_ADDRESS) = addr.to_string(), "to_string");'
+  - 'warn!(safe(REASON) = e.to_string().as_str(), "to_string then as_str");'
+  - 'info!(safe(KIND) = format_args!("{x}"), "format_args");'
+  - 'span.record(safe::REASON, error.to_string().as_str());'
+  - |
+    span.record(
+        safe::REASON,
+        tracing::field::display(path),
+    );

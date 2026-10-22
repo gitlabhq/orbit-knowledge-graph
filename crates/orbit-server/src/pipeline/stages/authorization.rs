@@ -1,11 +1,11 @@
 use std::time::Instant;
 
+use orbit_log_fields::info;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
-use tracing::info;
 
 use crate::proto::ExecuteQueryMessage;
-use crate::redaction::RedactionService;
+use crate::redaction::{RedactionExchangeError, RedactionService};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -55,7 +55,7 @@ impl PipelineStage for AuthorizationStage {
                 .inspect_err(|e| obs.record_error(e))?;
             RedactionService::request_authorization(&resources_to_check, &tx, stream)
                 .await
-                .map_err(|e| PipelineError::Authorization(format!("{e:?}")))
+                .map_err(RedactionExchangeError::into_pipeline_error)
                 .inspect_err(|e| obs.record_error(e))?
                 .authorizations
         };

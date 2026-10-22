@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Run unit tests: --lib tests from all workspace crates plus --bin tests
 # for binary-only crates that contain test modules, plus the integration
-# test targets of code-graph-incremental (one --test per file in its tests/).
+# test targets of code-graph-incremental (one --test per file in its tests/),
+# plus the log field macro tests and their compile-fail doc tests.
 #
 # integration-tests targets (local, containers, cli) run in their own CI
 # jobs to avoid pulling the entire dependency graph into this job.
@@ -21,11 +22,16 @@ args=(cargo nextest run --workspace \
   --lib --bin xtask --bin orbit \
   --test vfs_paths --test safe_fs \
   --test budgets --test export --test link --test parse --test pipeline \
-  --test resolve --test rewrite --test snapshot --test tree_storage)
+  --test resolve --test rewrite --test snapshot --test tree_storage \
+  --test macros)
 
 # Append caller's arguments last (e.g. --profile ci) so they can
 # override defaults.
 args+=("$@")
 
 echo "+ ${args[*]}"
-exec "${args[@]}"
+"${args[@]}"
+
+doc_tests=(cargo test --doc -p orbit-log-fields)
+echo "+ ${doc_tests[*]}"
+exec "${doc_tests[@]}"

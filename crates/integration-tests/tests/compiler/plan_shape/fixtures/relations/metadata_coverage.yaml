@@ -1,0 +1,85 @@
+cases:
+  - name: Uncovered endpoint filters join current node rows
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000],"columns":["title"]},{"id":"p","entity":"Project","filters":{"full_path":"gitlab-org/orbit"},"columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/orbit'})
+        RETURN mr.title, p.name
+    logical:
+      expect: ["(Filter p.full_path = 'gitlab-org/orbit' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Join ON p.id = mr.project_id (_) (Bind p (Filter p.full_path = 'gitlab-org/orbit', p._deleted = false (Deduplicate LimitBy ... (_)))))
+
+  - name: Filtered aggregation endpoints use exact reusable keys
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","filters":{"username":"alice"}},{"id":"mr","entity":"MergeRequest","node_ids":[2000]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"aggregations":[{"count":"mr","as":"n"}]}
+      gql: |
+        MATCH (u:User {username: 'alice'})-[:AUTHORED]->(mr:MergeRequest {id: 2000})
+        RETURN count(mr) AS n
+    logical:
+      expect: ["(Aggregate COUNT(mr) AS n (_))"]
+    physical:
+      clickhouse:
+        planned:
+          bind:
+            - (CTE $users (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
+          expect:
+            - (Filter mr.author_id IN $users.id, ... (_))
+            - (Scan Table(gl_merge_request) AS mr)
+
+  - name: FK holder filters use the current holder row
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged"},"columns":["title"]},{"id":"p","entity":"Project","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
+      gql: |
+        MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+        RETURN mr.title, p.name
+    logical:
+      expect: ["(Filter mr.state = 'merged' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter mr.state = 'merged', mr._deleted = false, ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
+            - (Project _id_source.project_id AS id (Bind _id_source (_)))
+            - (Filter p.id IN ?.id (_))
+          reject:
+            - (Scan Table(gl_edge) ...)
+            - (Deduplicate Final (Scan Table(gl_project) AS p))
+
+  - name: Uncovered numeric filters join current node rows
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["title"]},{"id":"p","entity":"Project","filters":{"star_count":1},"columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}]}
+      gql: |
+        MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {star_count: 1})
+        RETURN mr.title, p.name
+    logical:
+      expect: ["(Filter p.star_count = 1 (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter p.star_count = 1, p._deleted = false (Deduplicate LimitBy ... (_)))
+
+  - name: Low-cardinality endpoint filters do not create candidate relations
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition","filters":{"definition_type":"function"}},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b"},{"type":"CALLS","from":"b","to":"c"}]}
+      gql: |
+        MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition {definition_type: 'function'})-[:CALLS]->(c:Definition)
+        RETURN a.id, b.id, c.id
+    logical:
+      expect: ["(Filter b.definition_type = 'function' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter _orbit_edge_0.target_tags HAS ANY ['definition_type:function'], ... (_))
+          reject:
+            - (CTE ? (Project b.id AS id (_)))

@@ -177,12 +177,12 @@ Query scenarios are the main test surface for query correctness. They live in [`
 
 Each scenario runs the full query pipeline: compile, execute, redact, hydrate, paginate, and format. Then it checks the response. A scenario can also check the generated SQL and the skip indexes that ClickHouse uses. Scenarios give the same query in JSON and in GQL, so both frontends must return the same result.
 
-The runner validates response schemas and cursor metadata. Repeated queries must
+The runner validates response schemas and page metadata. Repeated queries must
 preserve node order within each entity type, properties, edges, and aggregation rows. Pagination
 scenarios can compare their combined results with an unpaginated query.
 
-Four [Rust-only exceptions](../../crates/integration-tests/README.md#rust-only-data-correctness-tests)
-cover cursor encoding, excerpt length, raw path rows, and constructed compiler ASTs.
+Three [Rust-only exceptions](../../crates/integration-tests/README.md#rust-only-data-correctness-tests)
+cover excerpt length, raw path rows, and constructed compiler ASTs.
 The remaining query correctness cases use YAML.
 
 The format reference is in the [`integration-testkit` README](../../crates/integration-testkit/README.md).
@@ -264,7 +264,7 @@ The first suite makes an administrator bot, turns on feature flags, and indexes 
 
 The `e2e` job runs on every main commit and is manual on MRs. It saves diagnostics when it fails and always removes the stack. Two more jobs use the same suites:
 
-- `e2e-ha` runs the suites on a ClickHouse cluster with replicas, and kills replicas during the run. It runs on a daily schedule and is manual on MRs.
+- `e2e-ha` runs the suites on a ClickHouse cluster with replicas, and kills replicas during the run. It runs in the post-merge pipeline and on a daily schedule. It is manual on MRs.
 - `e2e-pin-bump` runs on a daily schedule. It moves the pins in `versions.yaml` to their latest versions and updates one MR. On that MR, `e2e` runs automatically and must pass before the MR can merge.
 
 For setup, debugging, and the list of key files, see [E2E testing harness](../dev/e2e-testing.md).
@@ -273,7 +273,9 @@ For setup, debugging, and the list of key files, see [E2E testing harness](../de
 
 ### Indexing benchmarks
 
-[`code-indexing-benchmark.yaml`](../../code-indexing-benchmark.yaml) lists real repositories, grouped by language. When an MR changes an indexing crate, CI uses [`gitlab-xtasks`](https://gitlab.com/gitlab-org/rust/gitlab-xtasks) and hyperfine to time `orbit index` on them. Then it posts the results as an MR comment. A slower result does not fail the MR.
+[`code-indexing-benchmark.yaml`](../../code-indexing-benchmark.yaml) lists real repositories, grouped by language. The local xtask reads this file, downloads pinned revisions, builds Orbit, and writes the timing results. Use `mise bench:run` for measured runs and `mise bench:smoke` for one indexing pass per repository.
+
+Repositories, Cargo output, and result JSON stay under `/tmp/orbit-code-indexing-benchmark` on Unix or `%TEMP%\orbit-code-indexing-benchmark` on Windows. Each invocation gets an isolated data directory and one database per repository. Set `ORBIT_BENCH_ROOT` to use another location. Shared CI runners do not produce stable timing results, so code-indexing benchmarks do not run in CI. Automated backfill measurements belong in a dedicated E2E cluster with controlled compute and Gitaly.
 
 ### Synthetic query load
 

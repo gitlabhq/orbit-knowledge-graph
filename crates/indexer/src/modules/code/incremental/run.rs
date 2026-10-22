@@ -26,11 +26,9 @@ pub(in crate::modules::code) fn run(
     let started = std::time::Instant::now();
     let dropped = repository.usage().dropped_listed;
     if dropped > 0 {
-        tracing::warn!(
-            project_id = envelope.project_id,
-            branch = %envelope.branch,
-            dropped,
-            reason = "file_limit",
+        orbit_log_fields::warn!(
+            safe(SKIPPED_COUNT) = dropped,
+            safe(REASON) = "file_limit",
             "listed-only files past the repository file limit have no File row"
         );
     }

@@ -3,27 +3,26 @@ mod schema_contract;
 
 use crate::error::Result;
 use crate::input::Input;
-use crate::passes::{cursor, validate};
+use crate::passes::validate;
 use query_data_model::OrbitQueryModel;
 
-pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<(Input, u64)> {
+pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<Input> {
     let value: serde_json::Value = serde_json::from_str(json)?;
-    validate::collect_schema_errors(validate::base_validator(), &value)?;
+    validate::collect_schema_errors(validate::base_validator(), validate::base_schema(), &value)?;
     let schema = derive_json_schema(model)?;
     let validator = jsonschema::validator_for(&schema).map_err(|error| {
         crate::error::QueryError::Validation(format!("invalid derived schema: {error}"))
     })?;
-    validate::collect_schema_errors(&validator, &value).map_err(|error| match error {
+    validate::collect_schema_errors(&validator, &schema, &value).map_err(|error| match error {
         crate::error::QueryError::Validation(message) => {
             crate::error::QueryError::AllowlistRejected(message)
         }
         other => other,
     })?;
-    let query_hash = cursor::canonical_hash(&value);
     let mut input: Input = serde_json::from_value(value)?;
     input.lift_negated_filters()?;
     input.promote_id_filters()?;
-    Ok((input, query_hash))
+    Ok(input)
 }
 
 fn derive_json_schema(model: &impl OrbitQueryModel) -> Result<serde_json::Value> {

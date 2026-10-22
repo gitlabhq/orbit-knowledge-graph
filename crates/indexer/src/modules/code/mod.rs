@@ -57,7 +57,7 @@ pub async fn register_handlers(
     resources: &orbit_server_config::ContainerResources,
 ) -> Result<(), HandlerInitError> {
     let Some(gitlab_config) = &config.gitlab else {
-        tracing::info!("Code handlers disabled (GitLab client not configured)");
+        orbit_log_fields::info!("Code handlers disabled (GitLab client not configured)");
         return Ok(());
     };
 
@@ -86,7 +86,10 @@ pub async fn register_handlers(
         metrics.clone(),
     );
     if let Err(error) = local_cache.purge_all().await {
-        tracing::warn!(%error, "failed to purge repository cache on startup");
+        orbit_log_fields::warn!(
+            expanded(ERROR_MESSAGE) = %error,
+            "failed to purge repository cache on startup"
+        );
     }
     let cache: Arc<dyn repository::RepositoryCache> = Arc::new(local_cache);
 

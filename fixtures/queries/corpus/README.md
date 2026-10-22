@@ -7,7 +7,7 @@ Each YAML file groups queries by origin suite; every entry is self-describing:
 mrs_open_in_project:
   desc: Open merge requests in a project
   category: traversal        # query shape: traversal | aggregation | time_series |
-                             #   path_finding | neighbors | search | code_graph | cursor
+                             #   path_finding | neighbors | search | code_graph
   suite: sdlc                # origin grouping (one file per suite)
   expect: rows               # optional: rows (default) | empty | error
   query: |

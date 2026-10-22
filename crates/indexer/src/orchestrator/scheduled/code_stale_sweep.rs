@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Utc;
-use tracing::{debug, info, warn};
+use orbit_log_fields::{debug, info, info_span, safe, warn};
+use tracing::Instrument;
 
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use crate::clickhouse::ArrowClickHouseClient;
@@ -40,7 +41,16 @@ impl CodeStaleSweep {
         let mut statements: Vec<(String, String)> = table_names
             .node_tables()
             .iter()
-            .map(|table| (table.to_string(), node_sweep(table, &checkpoint_table)))
+            .map(|table| {
+                (
+                    table.to_string(),
+                    node_sweep(
+                        table,
+                        &checkpoint_table,
+                        table_names.immutable_columns(table),
+                    ),
+                )
+            })
             .collect();
         statements.extend(
             table_names
@@ -78,15 +88,29 @@ impl CodeStaleSweep {
         let attempted = pending.len().min(self.sweeps_per_tick);
         let mut failed = 0usize;
         for path in pending.iter().take(attempted) {
-            if let Err(error) = self.sweep_namespace(path).await {
-                failed += 1;
-                warn!(%path, %error, "post-backfill stale sweep failed, retrying on a later tick");
+            let span = info_span!(
+                "code_stale_sweep_namespace",
+                safe(GL_ROOT_NAMESPACE_ID) = path.top_level_namespace_id(),
+                safe(TRAVERSAL_PATH) = tracing::field::Empty,
+            );
+            if path.is_valid() {
+                span.record(safe::TRAVERSAL_PATH, path.as_str());
             }
+            let sweep = async {
+                if let Err(error) = self.sweep_namespace(path).await {
+                    failed += 1;
+                    warn!(
+                        expanded(ERROR_MESSAGE) = %error,
+                        "post-backfill stale sweep failed, retrying on a later tick"
+                    );
+                }
+            };
+            sweep.instrument(span).await;
         }
         if pending.len() > self.sweeps_per_tick {
             info!(
-                pending = pending.len(),
-                cap = self.sweeps_per_tick,
+                safe(COUNT) = pending.len(),
+                safe(LIMIT) = self.sweeps_per_tick,
                 "post-backfill stale sweeps deferred to later ticks"
             );
         }
@@ -111,9 +135,8 @@ impl CodeStaleSweep {
                     TaskError::new(format!("stale sweep on {table} for {traversal_path}: {e}"))
                 })?;
             debug!(
-                table,
-                %traversal_path,
-                duration_ms = statement_start.elapsed().as_millis() as u64,
+                safe(TABLE) = table.as_str(),
+                safe(DURATION_S) = statement_start.elapsed().as_secs_f64(),
                 "stale sweep statement complete"
             );
         }
@@ -126,21 +149,29 @@ impl CodeStaleSweep {
             )
             .await
             .map_err(TaskError::new)?;
-        info!(%traversal_path, "post-backfill stale sweep complete");
+        info!("post-backfill stale sweep complete");
         Ok(())
     }
 }
 
-fn node_sweep(table: &str, checkpoint_table: &str) -> String {
+fn node_sweep(table: &str, checkpoint_table: &str, carried_columns: &[String]) -> String {
+    let insert_carried = carried_columns
+        .iter()
+        .map(|column| format!(", {column}"))
+        .collect::<String>();
+    let select_carried = carried_columns
+        .iter()
+        .map(|column| format!("s.{column},\n            "))
+        .collect::<String>();
     format!(
         r#"
-        INSERT INTO {table} (traversal_path, project_id, branch, id, _version, _deleted)
+        INSERT INTO {table} (traversal_path, project_id, branch, id{insert_carried}, _version, _deleted)
         SELECT
             s.traversal_path,
             s.project_id,
             s.branch,
             s.id,
-            cp.indexed_at - toIntervalMicrosecond(1) AS _version,
+            {select_carried}cp.indexed_at - toIntervalMicrosecond(1) AS _version,
             true AS _deleted
         FROM {table} AS s FINAL
         INNER JOIN {checkpoint_table} AS cp FINAL
@@ -228,7 +259,7 @@ mod tests {
 
     #[test]
     fn node_sweep_tombstones_only_final_survivors() {
-        let sql = node_sweep("v9_gl_file", "v9_code_indexing_checkpoint");
+        let sql = node_sweep("v9_gl_file", "v9_code_indexing_checkpoint", &[]);
         assert!(
             sql.contains("FROM v9_gl_file AS s FINAL"),
             "a raw-parts scan emits a no-op tombstone per superseded part row \
@@ -244,9 +275,21 @@ mod tests {
     }
 
     #[test]
+    fn node_sweep_carries_the_unchanging_columns() {
+        let names = table_names();
+        let carried = names.immutable_columns(&names.file);
+        assert!(carried.iter().any(|c| c == "path"), "{carried:?}");
+        let sql = node_sweep(&names.file, "v9_cp", carried);
+        for column in carried {
+            assert!(sql.contains(&format!(", {column}")), "{sql}");
+            assert!(sql.contains(&format!("s.{column},")), "{sql}");
+        }
+    }
+
+    #[test]
     fn sweeps_scope_to_the_namespace_path_for_pk_pruning() {
         for sql in [
-            node_sweep("v9_gl_file", "v9_cp"),
+            node_sweep("v9_gl_file", "v9_cp", &[]),
             edge_sweep("v9_gl_code_edge", "v9_cp"),
             edge_sweep("v9_gl_edge", "v9_cp"),
         ] {

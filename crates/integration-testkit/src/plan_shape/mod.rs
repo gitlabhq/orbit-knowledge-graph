@@ -4,12 +4,12 @@ mod pattern;
 mod terms;
 
 use query_engine::compiler;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
 use compiler::input::Input;
-use compiler::passes::{frontend, lower, normalize, plan};
+use compiler::passes::{frontend, lower, normalize, page, plan, response_policy};
 use query_data_model::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};
 use serde::Deserialize;
 
@@ -232,7 +232,8 @@ fn check<M: OrbitQueryModel>(
     backend: &str,
     path: &Path,
     build: impl Fn(&Input, plan::HydrationCompileOptions) -> compiler::Result<plan::QueryPlan>,
-) {
+) -> Result<(), Vec<String>> {
+    let mut failures = Vec::new();
     for (language, raw) in &scenario.query {
         let label = format!(
             "{}: {} [{language}/{backend}]",
@@ -240,22 +241,28 @@ fn check<M: OrbitQueryModel>(
             scenario.name
         );
         let input = match language.as_str() {
-            "json" => frontend::json_dsl::parse(raw, model).map(|(input, _)| input),
+            "json" => frontend::json_dsl::parse(raw, model),
             "gql" => frontend::gql::parse(raw),
-            _ => panic!("{label}: unknown frontend"),
-        }
-        .unwrap_or_else(|error| panic!("{label}: {error}"));
-        let mut input =
-            normalize::normalize(input, model).unwrap_or_else(|error| panic!("{label}: {error}"));
+            _ => {
+                failures.push(format!("{label}: unknown frontend"));
+                continue;
+            }
+        };
+        let mut input = match input.and_then(|input| normalize::normalize(input, model)) {
+            Ok(input) => input,
+            Err(error) => {
+                failures.push(format!("{label}: {error}"));
+                continue;
+            }
+        };
         let mut options = plan::HydrationCompileOptions::default();
         if let Some(hydration) = &scenario.hydration {
             input.query_type = compiler::input::QueryType::Hydration;
             for (alias, paths) in &hydration.paths {
-                let node = input
-                    .nodes
-                    .iter_mut()
-                    .find(|node| &node.id == alias)
-                    .unwrap_or_else(|| panic!("{label}: unknown hydration node '{alias}'"));
+                let Some(node) = input.nodes.iter_mut().find(|node| &node.id == alias) else {
+                    failures.push(format!("{label}: unknown hydration node '{alias}'"));
+                    continue;
+                };
                 node.traversal_paths = paths
                     .iter()
                     .map(|path| {
@@ -268,42 +275,84 @@ fn check<M: OrbitQueryModel>(
                 path_segment_budget: hydration.path_segment_budget,
             };
         }
-        scenario
+        if let Err(error) = scenario
             .logical
             .check(&explain::logical(&input), &format!("{label}.logical"))
-            .unwrap_or_else(|error| panic!("{error}"));
-        let plan = build(&input, options).unwrap_or_else(|error| panic!("{label}: {error}"));
-        let lowered = lower::emit(&plan, &input).unwrap_or_else(|error| panic!("{label}: {error}"));
+        {
+            failures.push(error);
+            continue;
+        }
+        let plan = match build(&input, options) {
+            Ok(plan) => plan,
+            Err(error) => {
+                failures.push(format!("{label}: {error}"));
+                continue;
+            }
+        };
+        let mut lowered = match lower::emit(&plan, &input) {
+            Ok(lowered) => lowered,
+            Err(error) => {
+                failures.push(format!("{label}: {error}"));
+                continue;
+            }
+        };
+        if backend == "clickhouse" {
+            response_policy::apply_text_excerpts(&mut lowered.ast, &input, model);
+        }
+        if scenario.hydration.is_none() {
+            page::apply(&mut lowered.ast, &input, &lowered.metadata);
+        }
         let (planned, emitted) = explain::physical(&plan, &lowered.ast);
         let assertions = &scenario.physical[backend];
-        assert!(
-            assertions.planned.is_some() || assertions.emitted.is_some(),
-            "{label}: missing assertion targets"
-        );
+        if assertions.planned.is_none() && assertions.emitted.is_none() {
+            failures.push(format!("{label}: missing assertion targets"));
+            continue;
+        }
         for (phase, assertions, actual) in [
             ("planned", &assertions.planned, planned),
             ("emitted", &assertions.emitted, emitted),
         ] {
-            if let Some(assertions) = assertions {
-                assertions
-                    .check(&actual, &format!("{label}.physical.{backend}.{phase}"))
-                    .unwrap_or_else(|error| panic!("{error}"));
+            if let Some(assertions) = assertions
+                && let Err(error) =
+                    assertions.check(&actual, &format!("{label}.physical.{backend}.{phase}"))
+            {
+                failures.push(error);
             }
         }
         match backend {
             "clickhouse" => {
-                compiler::emit_simple_query(&lowered.ast).unwrap();
+                if let Err(error) = compiler::emit_simple_query(&lowered.ast) {
+                    failures.push(format!("{label}: {error}"));
+                }
             }
             "duckdb" => {
-                compiler::passes::codegen::duckdb::codegen(&lowered.ast, Default::default())
-                    .unwrap();
+                if let Err(error) =
+                    compiler::passes::codegen::duckdb::codegen(&lowered.ast, Default::default())
+                {
+                    failures.push(format!("{label}: {error}"));
+                }
             }
             _ => unreachable!(),
         }
     }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures)
+    }
 }
 
 pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
+    if let Err(failures) = check_dir(directory, ontology) {
+        panic!(
+            "{} plan fixture failure(s):\n\n{}",
+            failures.len(),
+            failures.join("\n\n")
+        );
+    }
+}
+
+fn check_dir(directory: &Path, ontology: Arc<ontology::Ontology>) -> Result<(), Vec<String>> {
     let remote = ClickHouseDataModel::derive(ontology.clone()).unwrap();
     let local = DuckDbDataModel::derive(ontology.clone()).unwrap();
     let mut paths = Vec::new();
@@ -311,20 +360,25 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
     paths.sort();
     assert!(!paths.is_empty());
     let mut cases = 0;
+    let mut passed = 0;
+    let mut failures = Vec::new();
     for (path, scenario) in paths.iter().flat_map(|path| {
         crate::scenario::read_cases::<Scenario>(path)
             .into_iter()
             .map(move |(_, scenario)| (path, scenario))
     }) {
         cases += 1;
-        assert!(
-            !scenario.physical.is_empty() && !scenario.query.is_empty(),
-            "{}: missing query arms or backend assertions",
-            path.display()
-        );
-        scenario
-            .validate_frontends()
-            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        if scenario.physical.is_empty() || scenario.query.is_empty() {
+            failures.push(format!(
+                "{}: missing query arms or backend assertions",
+                path.display()
+            ));
+            continue;
+        }
+        if let Err(error) = scenario.validate_frontends() {
+            failures.push(format!("{}: {error}", path.display()));
+            continue;
+        }
         let overlay = scenario.ontology_overlay.as_ref().map(|name| {
             let ontology = Arc::new(crate::load_ontology_overlay(name));
             (
@@ -335,20 +389,39 @@ pub fn run_dir(directory: &Path, ontology: Arc<ontology::Ontology>) {
         let (remote, local) = overlay
             .as_ref()
             .map_or((&remote, &local), |(remote, local)| (remote, local));
+        let failure_count = failures.len();
         for backend in scenario.physical.keys() {
             match backend.as_str() {
-                "clickhouse" => check(&scenario, remote, backend, path, |input, options| {
-                    plan::plan_clickhouse(input, remote, options, &HashSet::new())
-                }),
-                "duckdb" => check(&scenario, local, backend, path, |input, options| {
-                    plan::plan_duckdb(input, local, options, &HashSet::new())
-                }),
-                _ => panic!("unknown backend {backend}"),
+                "clickhouse" => {
+                    if let Err(errors) =
+                        check(&scenario, remote, backend, path, |input, options| {
+                            plan::plan_clickhouse(input, remote, options)
+                        })
+                    {
+                        failures.extend(errors);
+                    }
+                }
+                "duckdb" => {
+                    if let Err(errors) = check(&scenario, local, backend, path, |input, options| {
+                        plan::plan_duckdb(input, local, options)
+                    }) {
+                        failures.extend(errors);
+                    }
+                }
+                _ => failures.push(format!("{}: unknown backend {backend}", path.display())),
             }
         }
-        println!("PASS {}", scenario.name);
+        if failures.len() == failure_count {
+            passed += 1;
+            println!("PASS {}", scenario.name);
+        }
     }
-    println!("{cases} plan fixtures passed");
+    println!("{passed}/{cases} plan fixtures passed");
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures)
+    }
 }
 
 #[test]
@@ -381,6 +454,66 @@ fn yaml_requires_both_frontends_or_an_explicit_exception() {
         let scenario: Scenario = orbit_utils::yaml::from_str(&yaml).unwrap();
         assert_eq!(scenario.validate_frontends().is_ok(), valid, "{yaml}");
     }
+}
+
+#[test]
+fn directory_runner_reports_every_fixture_failure() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("failures.yaml"),
+        r#"
+cases:
+  - name: first failure
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]}]}'
+      gql: 'MATCH (u:User {id: 1}) RETURN u'
+    logical:
+      expect: ['(Input neighbors (...))']
+    physical:
+      clickhouse:
+        planned:
+          expect: ['(Scan Table(gl_user) AS u)']
+  - name: second failure
+    query:
+      json: '{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]}]}'
+      gql: 'MATCH (p:Project {id: 1}) RETURN p'
+    logical:
+      expect: ['(Input neighbors (...))']
+    physical:
+      clickhouse:
+        planned:
+          expect: ['(Scan Table(gl_project) AS p)']
+"#,
+    )
+    .unwrap();
+
+    let failures = check_dir(
+        directory.path(),
+        Arc::new(ontology::Ontology::new().with_nodes(["User", "Project"])),
+    )
+    .unwrap_err();
+
+    assert_eq!(failures.len(), 4);
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.contains("first failure [gql/clickhouse]"))
+    );
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.contains("first failure [json/clickhouse]"))
+    );
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.contains("second failure [gql/clickhouse]"))
+    );
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.contains("second failure [json/clickhouse]"))
+    );
 }
 
 #[test]
@@ -648,7 +781,7 @@ reject:
 #[test]
 fn hydration_planning_selects_paths_before_sql_rendering() {
     use compiler::input::{InputNode, QueryType};
-    use compiler::passes::plan::hydration::HydrationPathFilter;
+    use compiler::passes::plan::query_types::hydration::HydrationPathFilter;
     use orbit_utils::traversal_path::TraversalPath;
 
     let model = ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
@@ -679,7 +812,6 @@ fn hydration_planning_selects_paths_before_sql_rendering() {
                 dynamic,
                 path_segment_budget: budget,
             },
-            &HashSet::new(),
         )
         .unwrap();
         let plan::QueryPlan::Hydration(hydration) = &plan else {

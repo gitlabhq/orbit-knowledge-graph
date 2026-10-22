@@ -7,17 +7,20 @@ use std::time::{Duration, Instant};
 use arrow::record_batch::RecordBatch;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
+use orbit_log_fields::{debug, info, warn};
 use serde_json::Value;
-use tracing::{debug, info, warn};
+use thiserror::Error;
 
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::IndexingObserver;
-use crate::retry::{Backoff, LocalRetry, Step, drive_with};
+use crate::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive_with};
 
-use super::datalake::{DatalakeQuery, FetchedPage, ScanStats, is_arrow_string_overflow};
+use super::datalake::{
+    DatalakeError, DatalakeQuery, FetchedPage, ScanStats, is_arrow_string_overflow,
+};
 use super::metrics::SdlcMetrics;
-use super::paging::{block_size_for, next_page_limit};
+use super::paging::{block_size_for, first_page_limit, next_page_limit};
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore, WindowBounds};
@@ -36,6 +39,40 @@ const DATALAKE_EXTRACT_RETRY: LocalRetry = LocalRetry {
     ]),
     max_attempts: MAX_RETRIES + 1,
 };
+
+#[derive(Debug, Error)]
+pub(in crate::modules::sdlc) enum PipelineError {
+    #[error("source unavailable: {0}")]
+    SourceUnavailable(String),
+    #[error(transparent)]
+    Failed(#[from] HandlerError),
+}
+
+impl From<DatalakeError> for PipelineError {
+    fn from(err: DatalakeError) -> Self {
+        match err {
+            DatalakeError::SourceUnavailable(reason) => Self::SourceUnavailable(reason),
+            other => HandlerError::Processing(format!("datalake query failed: {other}")).into(),
+        }
+    }
+}
+
+impl From<RetryExhausted> for PipelineError {
+    fn from(err: RetryExhausted) -> Self {
+        HandlerError::from(err).into()
+    }
+}
+
+impl From<PipelineError> for HandlerError {
+    fn from(err: PipelineError) -> Self {
+        match err {
+            PipelineError::Failed(err) => err,
+            PipelineError::SourceUnavailable(reason) => {
+                HandlerError::Processing(format!("source unavailable: {reason}"))
+            }
+        }
+    }
+}
 
 /// `read_*` count the rows/bytes actually returned from the datalake; `scanned_*`
 /// ClickHouse's storage-scan cost from the summary; `written_*` the transformed
@@ -132,15 +169,15 @@ impl Pipeline {
         position_key: &str,
         mut checkpoint: Checkpoint,
         window: WindowBounds,
-    ) -> Result<PipelineStats, HandlerError> {
+    ) -> Result<PipelineStats, PipelineError> {
         let started_at = Instant::now();
         let durability = RunDurability::for_mode(window.indexing_mode());
         let mut cursor = Cursor::from_checkpoint(&checkpoint);
 
         if !cursor.is_first_page() && cursor.values().len() != plan.sort_key.len() {
             warn!(
-                saved = cursor.values().len(),
-                expected = plan.sort_key.len(),
+                safe(CURSOR_LENGTH) = cursor.values().len(),
+                safe(SORT_KEY_LENGTH) = plan.sort_key.len(),
                 "saved cursor does not match the plan sort key, restarting from the first page"
             );
             cursor = Cursor::default();
@@ -152,6 +189,7 @@ impl Pipeline {
         let outputs = transform.outputs().to_vec();
         let params = base_query.params();
         let plan_limit = base_query.batch_size();
+        base_query.set_batch_size(first_page_limit(plan_limit));
         let mut stats = PipelineStats::default();
         let mut block_size = None;
 
@@ -263,22 +301,22 @@ impl Pipeline {
 
             if page_number > 1 {
                 info!(
-                    page = page_number,
-                    rows = rows_in_page,
-                    scanned_rows = page.scan_stats.scanned_rows,
-                    extract_ms = page.extract_elapsed.as_millis() as u64,
-                    transform_ms = transform_elapsed.as_millis() as u64,
-                    write_ms = write_elapsed.as_millis() as u64,
+                    safe(PAGE_NUMBER) = page_number,
+                    safe(ROW_COUNT) = rows_in_page,
+                    safe(SCANNED_ROWS) = page.scan_stats.scanned_rows,
+                    safe(EXTRACT_DURATION_S) = page.extract_elapsed.as_secs_f64(),
+                    safe(TRANSFORM_DURATION_S) = transform_elapsed.as_secs_f64(),
+                    safe(WRITE_DURATION_S) = write_elapsed.as_secs_f64(),
                     "page indexed"
                 );
             } else {
                 debug!(
-                    page = page_number,
-                    rows = rows_in_page,
-                    scanned_rows = page.scan_stats.scanned_rows,
-                    extract_ms = page.extract_elapsed.as_millis() as u64,
-                    transform_ms = transform_elapsed.as_millis() as u64,
-                    write_ms = write_elapsed.as_millis() as u64,
+                    safe(PAGE_NUMBER) = page_number,
+                    safe(ROW_COUNT) = rows_in_page,
+                    safe(SCANNED_ROWS) = page.scan_stats.scanned_rows,
+                    safe(EXTRACT_DURATION_S) = page.extract_elapsed.as_secs_f64(),
+                    safe(TRANSFORM_DURATION_S) = transform_elapsed.as_secs_f64(),
+                    safe(WRITE_DURATION_S) = write_elapsed.as_secs_f64(),
                     "page indexed"
                 );
             }
@@ -325,18 +363,18 @@ impl Pipeline {
 
         if stats.written_rows > 0 || stats.read_rows > 0 {
             info!(
-                read_rows = stats.read_rows,
-                scanned_rows = stats.scanned_rows,
-                written_rows = stats.written_rows,
-                duration_ms = stats.duration_ms,
-                extract_ms = stats.extract_ms,
-                transform_ms = stats.transform_ms,
-                write_ms = stats.write_ms,
+                safe(READ_ROWS) = stats.read_rows,
+                safe(SCANNED_ROWS) = stats.scanned_rows,
+                safe(WRITTEN_ROWS) = stats.written_rows,
+                safe(DURATION_S) = elapsed.as_secs_f64(),
+                safe(EXTRACT_DURATION_S) = stats.extract_ms as f64 / 1000.0,
+                safe(TRANSFORM_DURATION_S) = stats.transform_ms as f64 / 1000.0,
+                safe(WRITE_DURATION_S) = stats.write_ms as f64 / 1000.0,
                 "pipeline completed"
             );
         } else {
             debug!(
-                duration_ms = stats.duration_ms,
+                safe(DURATION_S) = elapsed.as_secs_f64(),
                 "pipeline completed with no data"
             );
         }
@@ -367,7 +405,7 @@ impl Pipeline {
         sql: &str,
         params: Value,
         block_size: Option<u64>,
-    ) -> Result<Page, HandlerError> {
+    ) -> Result<Page, PipelineError> {
         drive_with(
             &DATALAKE_EXTRACT_RETRY,
             block_size,
@@ -399,12 +437,13 @@ impl Pipeline {
                                 truncated,
                             })
                         }
+                        Err(err @ DatalakeError::SourceUnavailable(_)) => Step::GiveUp(err.into()),
                         Err(err) => {
                             warn!(
-                                attempt,
-                                max_retries = MAX_RETRIES,
-                                max_block_size = ?block_size,
-                                %err,
+                                safe(ATTEMPT) = attempt + 1,
+                                safe(MAX_ATTEMPTS) = DATALAKE_EXTRACT_RETRY.max_attempts,
+                                safe(BATCH_SIZE) = block_size,
+                                expanded(ERROR_MESSAGE) = %err,
                                 "datalake query failed, retrying with smaller block size"
                             );
                             // An overflow only clears once blocks are small, and each halving step
@@ -419,11 +458,7 @@ impl Pipeline {
                                     None => retry_config.halving_initial_block_size,
                                 }
                             };
-                            DATALAKE_EXTRACT_RETRY.retry_or_give_up(
-                                attempt,
-                                Some(next),
-                                HandlerError::Processing(format!("datalake query failed: {err}")),
-                            )
+                            DATALAKE_EXTRACT_RETRY.retry_or_give_up(attempt, Some(next), err.into())
                         }
                     }
                 }
@@ -878,11 +913,11 @@ mod tests {
 
     struct RecordingDatalake {
         calls: Mutex<Vec<Option<u64>>>,
-        responses: Mutex<Vec<Result<Vec<RecordBatch>, &'static str>>>,
+        responses: Mutex<Vec<Result<Vec<RecordBatch>, DatalakeError>>>,
     }
 
     impl RecordingDatalake {
-        fn with_responses(responses: Vec<Result<Vec<RecordBatch>, &'static str>>) -> Self {
+        fn with_responses(responses: Vec<Result<Vec<RecordBatch>, DatalakeError>>) -> Self {
             Self {
                 calls: Mutex::new(Vec::new()),
                 responses: Mutex::new(responses),
@@ -916,11 +951,41 @@ mod tests {
             if responses.is_empty() {
                 return Ok(vec![]);
             }
-            match responses.remove(0) {
-                Ok(batches) => Ok(batches),
-                Err(msg) => Err(DatalakeError::Query(msg.to_string())),
-            }
+            responses.remove(0)
         }
+    }
+
+    fn transient_failure() -> DatalakeError {
+        DatalakeError::Query("simulated transient failure".to_string())
+    }
+
+    #[tokio::test]
+    async fn a_missing_source_table_gives_up_without_a_retry() {
+        let datalake = Arc::new(RecordingDatalake::with_responses(vec![Err(
+            DatalakeError::SourceUnavailable("UNKNOWN_TABLE".to_string()),
+        )]));
+        let pipeline = Pipeline::new(
+            datalake.clone(),
+            Arc::new(RecordingCheckpointStore::new()),
+            test_metrics(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
+        );
+
+        let plan = simple_plan("Missing");
+        let result = pipeline
+            .run_plan(
+                &noop_context(),
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                Checkpoint::new(test_watermark()),
+                test_window(),
+            )
+            .await;
+
+        assert!(matches!(result, Err(PipelineError::SourceUnavailable(_))));
+        assert_eq!(datalake.observed_block_sizes().len(), 1);
     }
 
     #[tokio::test]
@@ -959,9 +1024,9 @@ mod tests {
     #[tokio::test]
     async fn extract_halves_max_block_size_on_each_retry() {
         let datalake = Arc::new(RecordingDatalake::with_responses(vec![
-            Err("simulated transient failure"),
-            Err("simulated transient failure"),
-            Err("simulated transient failure"),
+            Err(transient_failure()),
+            Err(transient_failure()),
+            Err(transient_failure()),
             Ok(vec![test_batch(1)]),
         ]));
         let pipeline = Pipeline::new(
@@ -999,9 +1064,9 @@ mod tests {
     #[tokio::test]
     async fn extract_halving_respects_min_block_size_floor() {
         let datalake = Arc::new(RecordingDatalake::with_responses(vec![
-            Err("simulated transient failure"),
-            Err("simulated transient failure"),
-            Err("simulated transient failure"),
+            Err(transient_failure()),
+            Err(transient_failure()),
+            Err(transient_failure()),
             Ok(vec![test_batch(1)]),
         ]));
         let pipeline = Pipeline::new(

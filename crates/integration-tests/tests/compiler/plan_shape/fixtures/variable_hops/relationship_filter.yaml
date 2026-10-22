@@ -1,0 +1,25 @@
+name: Variable-hop relationship filters apply to every physical hop
+
+missing_frontends:
+  gql: GQL does not support property filters on variable-length relationships.
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1]},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","hops":[2,2],"filters":{"project_id":9}}]}
+
+logical:
+  expect:
+    - (EdgeScan CALLS a->b AS e0 HOPS 2..2)
+    - (Filter e0.project_id = 9 (_))
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Filter e1.relationship_kind = 'CALLS', e1.project_id = 9, ... (_))
+        - (Filter e2.relationship_kind = 'CALLS', e2.project_id = 9, ... (_))
+  duckdb:
+    planned:
+      expect:
+        - (Filter e1._deleted = false, e1.project_id = 9 (Bind e1 (Filter ..., e1.relationship_kind = 'CALLS' (_))))
+        - (Filter e2._deleted = false, e2.project_id = 9 (Bind e2 (Filter ..., e2.relationship_kind = 'CALLS' (_))))

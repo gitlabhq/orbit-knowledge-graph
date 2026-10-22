@@ -1,0 +1,49 @@
+description: Approval counts across a non-adjacent branch drop by one when an approval edge is tombstoned
+
+cases:
+  - name: live_approval
+    description: A second live approval doubles the count for every contained project
+    config:
+      unmerged_seed: true
+      extra_seed:
+        gl_edge:
+          - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: APPROVED, target_id: 2001, target_kind: MergeRequest, source_tags: [], target_tags: ["state:opened"], _version: "2024-01-01 00:00:00" }
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project),
+              (u)-[:APPROVED]->(mr:MergeRequest)
+        RETURN g{.id, .name}, count(mr) AS approval_count LIMIT 20
+    expect:
+      skip_requirements: ["node_ids"]
+      groups:
+        g:
+          entity: Group
+          count: 2
+          ids: [100, 102]
+          rows:
+            - { entity: Group, id: 100, values: { approval_count: 4 } }
+            - { entity: Group, id: 102, values: { approval_count: 2 } }
+
+  - name: tombstoned_approval
+    description: The same approval with a newer tombstone is not counted
+    config:
+      unmerged_seed: true
+      extra_seed:
+        gl_edge:
+          - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: APPROVED, target_id: 2001, target_kind: MergeRequest, source_tags: [], target_tags: ["state:opened"], _version: "2024-01-01 00:00:00" }
+          - { traversal_path: "1/100/1000/", source_id: 1, source_kind: User, relationship_kind: APPROVED, target_id: 2001, target_kind: MergeRequest, _version: "2024-06-01 00:00:00", _deleted: true }
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(g:Group)-[:CONTAINS]->(p:Project),
+              (u)-[:APPROVED]->(mr:MergeRequest)
+        RETURN g{.id, .name}, count(mr) AS approval_count LIMIT 20
+    expect:
+      skip_requirements: ["node_ids"]
+      groups:
+        g:
+          entity: Group
+          count: 2
+          ids: [100, 102]
+          rows:
+            - { entity: Group, id: 100, values: { approval_count: 2 } }
+            - { entity: Group, id: 102, values: { approval_count: 1 } }

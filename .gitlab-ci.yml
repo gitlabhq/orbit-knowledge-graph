@@ -361,6 +361,16 @@ rust-toolchain-sync-check:
   script:
     - mise run toolchain:check
 
+log-safety-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .mr-and-main-rules
+    - .no-cargo-home-cache
+  needs: []
+  script:
+    - mise run lint:logs
+
 metrics-catalog-check:
   stage: lint
   extends:
@@ -765,6 +775,37 @@ unit-test:
     - ./scripts/dev/run-unit-tests.sh --profile ci
     - sccache --show-stats || true
 
+# No --all-targets: some tests are unix-only.
+windows-cli-check:
+  stage: test
+  extends:
+    - .job-template
+    - .sccache-template
+  needs: []
+  variables:
+    CC_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang
+    CXX_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang++
+    AR_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-ar
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      interruptible: true
+      changes:
+        - "**/*.rs"
+        - "**/Cargo.toml"
+        - Cargo.lock
+        - rust-toolchain.toml
+        - .cargo/config.toml
+        - .gitlab-ci.yml
+        - scripts/ci/install-llvm-mingw.sh
+  before_script:
+    - !reference [.sccache-template, before_script]
+    - ./scripts/ci/install-llvm-mingw.sh
+    - export PATH="/opt/llvm-mingw/bin:$PATH"
+    - rustup target add x86_64-pc-windows-gnullvm
+  script:
+    - cargo check --locked --target x86_64-pc-windows-gnullvm -p orbit-cli --bin orbit --features duckdb-client/bundled
+    - sccache --show-stats || true
+
 compiler-integration-test:
   stage: test
   extends:
@@ -830,153 +871,6 @@ integration-test:
   script:
     - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --test indexer_containers
     - sccache --show-stats || true
-
-# Benchmark Stage
-#
-# Runs code indexing benchmarks when indexing crates change.
-# Repos are auto-downloaded by gitlab-xtasks from the benchmark config.
-
-.code-indexing-benchmark-rules:
-  rules:
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
-      when: never
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      changes:
-        - crates/orbit-cli/**/*
-        - crates/code-graph/**/*
-        - crates/ontology/**/*
-        - crates/duckdb-client/**/*
-        - crates/utils/**/*
-        - code-indexing-benchmark.yaml
-        - .gitlab-ci.yml
-
-code-indexing-benchmark-build:
-  stage: benchmark
-  needs: []
-  extends:
-    - .job-template
-    - .sccache-template
-    - .code-indexing-benchmark-rules
-  interruptible: true
-  tags:
-    - ${RUNNER_LARGE}
-  script:
-    - cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled
-    # The CLI ships without the FIPS module; a workspace-level build would pull it in.
-    - '! nm --defined-only target/release/orbit | grep -q " _\?aws_lc_fips_"'
-  artifacts:
-    paths:
-      - target/release/orbit
-    expire_in: 1 day
-
-.code-indexing-benchmark-template:
-  stage: benchmark
-  needs:
-    - code-indexing-benchmark-build
-  extends:
-    - .code-indexing-benchmark-rules
-  interruptible: true
-  cache:
-    key: "benchmark-repos-${GROUP}"
-    paths:
-      - temp/
-    policy: pull-push
-    when: always
-  variables:
-    SCENARIO: index
-  script:
-    - |
-      OUTPUT_FILE="gkg-benchmark-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}-${ARCH}-${SCENARIO}-${GROUP}.json"
-
-      for attempt in 1 2 3; do
-        if mise exec -- gitlab-xtasks benchmark download-repos \
-          --config code-indexing-benchmark.yaml \
-          --output-dir temp \
-          --group "$GROUP"; then
-          break
-        fi
-
-        if [ "$attempt" = "3" ]; then
-          exit 1
-        fi
-
-        delay="$((attempt * 30))"
-        echo "Repository download failed; retrying in ${delay}s."
-        sleep "$delay"
-      done
-
-      mise exec -- gitlab-xtasks benchmark hyperfine \
-        --config code-indexing-benchmark.yaml \
-        --architecture "$ARCH" \
-        --scenario "$SCENARIO" \
-        --group "$GROUP" \
-        --output-file "$OUTPUT_FILE"
-  artifacts:
-    paths:
-      - gkg-benchmark-*.json
-    expire_in: 3 weeks
-
-code-indexing-benchmark-v2-linux:
-  extends:
-    - .job-template
-    - .no-cargo-home-cache
-    - .code-indexing-benchmark-template
-  tags:
-    - ${RUNNER_LARGE}
-  variables:
-    ARCH: "linux-x86_64"
-    SCENARIO: v2
-  parallel:
-    matrix:
-      - GROUP: [python, java, kotlin, csharp, ruby, go, rust, c, cpp, php]
-
-.code-indexing-benchmark-analyze-template:
-  stage: benchmark
-  extends:
-    - .job-template
-    - .code-indexing-benchmark-rules
-    - .no-cargo-home-cache
-  interruptible: true
-  script:
-    - |
-      mise exec -- gitlab-xtasks benchmark analyze \
-        --pattern "gkg-benchmark-*-${SCENARIO}-*.json" \
-        --output-format markdown \
-        --pipeline-url "$CI_PIPELINE_URL" \
-        --job-url "$CI_JOB_URL" \
-        --branch "$CI_COMMIT_REF_NAME" \
-        --output-file "gkg-benchmark-${SCENARIO}-results.md"
-
-      mise exec -- gitlab-xtasks benchmark analyze \
-        --pattern "gkg-benchmark-*-${SCENARIO}-*.json" \
-        --output-format json \
-        --pipeline-url "$CI_PIPELINE_URL" \
-        --job-url "$CI_JOB_URL" \
-        --branch "$CI_COMMIT_REF_NAME" \
-        --output-file "gkg-benchmark-${SCENARIO}-results.json"
-
-      if [[ -n "$CI_MERGE_REQUEST_IID" && -n "$BENCHMARK_GITLAB_TOKEN" ]]; then
-        mise exec -- gitlab-xtasks comment post \
-          --type add-or-edit \
-          --unique-id "code-indexing-benchmark-${SCENARIO}-comment" \
-          --token "$BENCHMARK_GITLAB_TOKEN" \
-          --file-path "gkg-benchmark-${SCENARIO}-results.md"
-      else
-        echo "Skipping benchmark comment: BENCHMARK_GITLAB_TOKEN unavailable (expected for fork MRs)."
-      fi
-  artifacts:
-    paths:
-      - gkg-benchmark-*-results.md
-      - gkg-benchmark-*-results.json
-      - gkg-benchmark-*.json
-    expire_in: 1 week
-
-code-indexing-benchmark-v2-analyze:
-  extends: .code-indexing-benchmark-analyze-template
-  needs:
-    - code-indexing-benchmark-v2-linux
-  variables:
-    SCENARIO: v2
 
 # Build Stage
 
@@ -1469,6 +1363,25 @@ e2e-ha:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "e2e-ha"
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+
+e2e-gitlab-stable:
+  extends: e2e
+  parallel:
+    matrix:
+      - E2E_GITLAB_LANE: ["19-5"]
+  variables:
+    E2E_SUFFIX: "-gl${E2E_GITLAB_LANE}"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "e2e-gitlab-stable"
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == 'automation/e2e-pin-bump'
+      allow_failure: true
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true

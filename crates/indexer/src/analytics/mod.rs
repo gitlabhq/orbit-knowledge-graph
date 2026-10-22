@@ -69,7 +69,7 @@ fn build_tracker(
         return Ok(None);
     }
     if config.collector_url.trim().is_empty() {
-        tracing::warn!(
+        orbit_log_fields::warn!(
             "analytics.enabled=true but analytics.collector_url is empty; indexing analytics disabled"
         );
         return Ok(None);

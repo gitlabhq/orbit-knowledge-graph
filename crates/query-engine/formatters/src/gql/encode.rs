@@ -84,7 +84,14 @@ fn relationship_cell(
         .edges()
         .iter()
         .find(|edge| edge.relationship == column.relationship)
-        .and_then(|edge| row.get_column_string(&edge.type_column))
+        .and_then(|edge| {
+            row.get_column_string(&edge.type_column).or_else(|| {
+                let [kind] = edge.rel_types.as_slice() else {
+                    return None;
+                };
+                Some(kind.clone())
+            })
+        })
         .map_or_else(null, |kind| match column.kind {
             RelationshipColumnKind::Type => quote_escaped(&kind),
             RelationshipColumnKind::Relationship => format!("[:{kind}]"),
@@ -291,11 +298,8 @@ fn render(columns: &[String], rows: &[Vec<String>], page: Option<&PaginationMeta
         "{border}\n\n{count} row{}",
         if count == 1 { "" } else { "s" }
     );
-    if let Some(page) = page.filter(|page| page.has_more) {
+    if page.is_some_and(|page| page.has_more) {
         out += ", more available";
-        if let Some(cursor) = &page.next_cursor {
-            let _ = write!(out, "\nnext_cursor: {}", quote_escaped(cursor));
-        }
     }
     out + "\n"
 }
