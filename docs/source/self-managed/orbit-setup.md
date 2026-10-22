@@ -278,7 +278,7 @@ GitLab Self-Managed.
 GitLab connects to the gRPC endpoint over TLS on port 50054. Both Rails and Workhorse open their own
 connections, so both require a route to the endpoint.
 
-TLS can terminate in one of two places: a load balancer in front of the `gkg-webserver` service, or the
+TLS can terminate in one of two places: a load balancer in front of the `orbit-webserver` service, or the
 webserver itself with `tls.enabled` and `tls.existingSecret`. Only the webserver case needs the certificate
 inside the cluster.
 
@@ -288,7 +288,7 @@ information, see
 [Install custom public certificates](https://docs.gitlab.com/omnibus/settings/ssl/#install-custom-public-certificates).
 
 If GitLab runs in the same cluster, `ClusterIP` is enough and the endpoint is
-`tls://gkg-webserver.gitlab-orbit.svc.cluster.local:50054`. The certificate must be valid for the host name
+`tls://orbit-webserver.gitlab-orbit.svc.cluster.local:50054`. The certificate must be valid for the host name
 GitLab connects to. Otherwise, expose the service with a method your cluster supports, and keep the address
 on a private network.
 
@@ -309,7 +309,7 @@ To use a plaintext connection:
 1. In `orbit-values.yaml`, set `tls.enabled` to `false`.
    This value is the default.
 1. In the GitLab configuration, set the gRPC endpoint without a scheme.
-   For example, `gkg-webserver.gitlab-orbit.svc.cluster.local:50054`.
+   For example, `orbit-webserver.gitlab-orbit.svc.cluster.local:50054`.
 
 If the host name resolves to an address outside these ranges, GitLab does not send the authorization token.
 All requests to GitLab Orbit then fail authentication.
