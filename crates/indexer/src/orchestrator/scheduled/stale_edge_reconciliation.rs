@@ -129,7 +129,7 @@ impl StaleEdgeReconciliation {
                         safe(OUTCOME) = "error",
                         safe(ERROR_TYPE) = "reconcile",
                         expanded(ERROR_MESSAGE) = %error,
-                        "reconcile completed",
+                        "reconcile failed",
                     );
                 }
             }
