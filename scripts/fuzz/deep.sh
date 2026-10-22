@@ -34,9 +34,10 @@ export RUSTUP_TOOLCHAIN=nightly
 
 failed=()
 for target in "${targets[@]}"; do
-  echo "+ cargo bolero test $target -p orbit-fuzz --toolchain nightly --engine libfuzzer --sanitizer $sanitizer -T ${seconds}s"
-  cargo bolero test "$target" -p orbit-fuzz --toolchain nightly --engine libfuzzer --sanitizer "$sanitizer" -T "${seconds}s" ||
-    failed+=("$target")
+  args=(bolero test "$target" -p orbit-fuzz --toolchain nightly --engine libfuzzer --sanitizer "$sanitizer"
+    --corpus-dir "$tests/$target/corpus" --crashes-dir "$tests/$target/crashes" -T "${seconds}s")
+  echo "+ cargo ${args[*]}"
+  cargo "${args[@]}" || failed+=("$target")
 done
 
 if ((${#failed[@]})); then

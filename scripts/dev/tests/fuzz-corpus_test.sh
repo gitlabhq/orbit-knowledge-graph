@@ -50,12 +50,12 @@ chmod +x "$work/bin/cargo" "$work/bin/rustup"
 
 PATH="$work/bin:$PATH" CARGO_CALLS="$work/calls" FUZZ_BUDGET_SECONDS=60 CI_NODE_INDEX=2 CI_NODE_TOTAL=2 \
   bash "$work/scripts/fuzz/deep.sh" > /dev/null
-test "$(cat "$work/calls")" = "/nightly/rustc nightly bolero test fuzz_b -p orbit-fuzz --toolchain nightly --engine libfuzzer --sanitizer address -T 60s"
+test "$(cat "$work/calls")" = "/nightly/rustc nightly bolero test fuzz_b -p orbit-fuzz --toolchain nightly --engine libfuzzer --sanitizer address --corpus-dir $tests/fuzz_b/corpus --crashes-dir $tests/fuzz_b/crashes -T 60s"
 
 rm "$work/calls"
 if PATH="$work/bin:$PATH" CARGO_CALLS="$work/calls" FUZZ_BUDGET_SECONDS=60 CI_NODE_INDEX=1 CI_NODE_TOTAL=2 \
   bash "$work/scripts/fuzz/deep.sh" > /dev/null 2> "$work/err"; then
   exit 1
 fi
-test "$(cut -d' ' -f5,15 "$work/calls" | tr '\n' ' ')" = "fuzz_a 30s fuzz_c 30s "
+test "$(cut -d' ' -f5,19 "$work/calls" | tr '\n' ' ')" = "fuzz_a 30s fuzz_c 30s "
 grep -q 'fuzz targets failed: fuzz_a' "$work/err"
