@@ -46,7 +46,6 @@ fn map_phase(phase: Phase) -> IndexingPhase {
         Phase::Syncing => IndexingPhase::Syncing,
         Phase::Ready => IndexingPhase::Ready,
         Phase::Error => IndexingPhase::Error,
-        Phase::SourceUnavailable => IndexingPhase::SourceUnavailable,
     }
 }
 

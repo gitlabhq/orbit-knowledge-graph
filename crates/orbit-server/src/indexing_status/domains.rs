@@ -24,7 +24,7 @@ pub fn get_domain_statuses(
 ) -> Vec<DomainStatus> {
     ontology
         .domains()
-        .map(|domain| {
+        .filter_map(|domain| {
             let nodes: Vec<&NodeEntity> = domain
                 .node_names
                 .iter()
@@ -37,7 +37,7 @@ pub fn get_domain_statuses(
                 .filter(|(plan, _)| plan_belongs_to_domain(ontology, plan, domain))
                 .map(|(_, phase)| *phase);
             let code = code_phase.filter(|_| has_code_nodes);
-            let phase = combine_phases(feeding_plans.chain(code)).unwrap_or(Phase::Unknown);
+            let phase = combine_phases(feeding_plans.chain(code))?;
 
             let entities = nodes
                 .iter()
@@ -47,12 +47,12 @@ pub fn get_domain_statuses(
                 })
                 .collect();
 
-            DomainStatus {
+            Some(DomainStatus {
                 name: domain.name.clone(),
                 phase,
                 has_code_nodes,
                 entities,
-            }
+            })
         })
         .collect()
 }

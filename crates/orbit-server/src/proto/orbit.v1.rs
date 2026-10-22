@@ -935,7 +935,6 @@ pub enum IndexingPhase {
     Ready = 3,
     /// indexing is done, but some data failed to index
     Error = 4,
-    SourceUnavailable = 5,
 }
 impl IndexingPhase {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -949,7 +948,6 @@ impl IndexingPhase {
             Self::Syncing => "INDEXING_PHASE_SYNCING",
             Self::Ready => "INDEXING_PHASE_READY",
             Self::Error => "INDEXING_PHASE_ERROR",
-            Self::SourceUnavailable => "INDEXING_PHASE_SOURCE_UNAVAILABLE",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -960,7 +958,6 @@ impl IndexingPhase {
             "INDEXING_PHASE_SYNCING" => Some(Self::Syncing),
             "INDEXING_PHASE_READY" => Some(Self::Ready),
             "INDEXING_PHASE_ERROR" => Some(Self::Error),
-            "INDEXING_PHASE_SOURCE_UNAVAILABLE" => Some(Self::SourceUnavailable),
             _ => None,
         }
     }

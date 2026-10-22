@@ -19,7 +19,6 @@ async fn indexing_status_response() {
         not_started_at_every_level_without_checkpoints,
         project_path_gets_its_root_phases_and_its_own_projects,
         organization_path_is_unknown,
-        source_unavailable_reaches_the_proto,
         error_and_project_gaps_reach_the_proto,
         last_completed_at_reaches_the_proto,
     );
@@ -136,18 +135,6 @@ async fn organization_path_is_unknown(ctx: &TestContext) {
     let status = respond(ctx, &["1/"]).await.remove(0);
 
     assert_eq!(phase_of(status.phase), IndexingPhase::Unknown);
-}
-
-async fn source_unavailable_reaches_the_proto(ctx: &TestContext) {
-    let status = respond(ctx, &["1/141/"]).await.remove(0);
-
-    assert_eq!(phase_of(status.phase), IndexingPhase::Ready);
-    let agents = status
-        .domains
-        .iter()
-        .find(|domain| domain.name == "agents")
-        .expect("agents domain");
-    assert_eq!(phase_of(agents.phase), IndexingPhase::SourceUnavailable);
 }
 
 async fn error_and_project_gaps_reach_the_proto(ctx: &TestContext) {

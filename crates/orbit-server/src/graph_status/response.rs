@@ -68,6 +68,5 @@ fn map_phase_to_indexing_state(phase: Phase) -> IndexingState {
         Phase::NotStarted => IndexingState::NotIndexed,
         Phase::Unknown => IndexingState::Unknown,
         Phase::Error => IndexingState::Error,
-        Phase::SourceUnavailable => IndexingState::NotIndexed,
     }
 }

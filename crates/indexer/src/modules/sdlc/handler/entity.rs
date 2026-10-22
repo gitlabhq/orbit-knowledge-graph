@@ -183,23 +183,82 @@ impl EntityHandler {
                 column: &self.plan.deleted_column,
             }));
 
-        let result = match self
-            .run(
-                &request,
-                &pipeline_context,
-                base_query,
-                &checkpoint_key,
-                checkpoint,
-                window,
-            )
-            .await
-        {
-            Ok(stats) => Ok(stats),
-            Err(PipelineError::SourceUnavailable(reason)) => {
-                self.complete_without_source(&checkpoint_key, synced_until, &reason)
-                    .await
+        let ranges = match &self.partition_strategy {
+            Some(strategy) if checkpoint.is_first_pass_before_paging() => {
+                strategy
+                    .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_ref())
+                    .await?
             }
-            Err(PipelineError::Failed(error)) => Err(error),
+            _ => Vec::new(),
+        };
+
+        let result = if ranges.is_empty() {
+            match self
+                .pipeline
+                .run_plan(
+                    &pipeline_context,
+                    &self.plan,
+                    base_query,
+                    &checkpoint_key,
+                    checkpoint,
+                    window,
+                )
+                .await
+            {
+                Err(PipelineError::SourceUnavailable(reason)) => {
+                    self.complete_without_source(&checkpoint_key, synced_until, &reason)
+                        .await
+                }
+                result => result.map_err(HandlerError::from),
+            }
+        } else {
+            info!(
+                safe(PARTITION_COUNT) = ranges.len(),
+                "running partitioned initial load"
+            );
+
+            let partition_result = self
+                .run_partitions(
+                    base_query.into_partitions(ranges),
+                    &checkpoint_key,
+                    window,
+                    &context,
+                    &pipeline_context,
+                )
+                .await;
+
+            match partition_result {
+                Ok(stats) => {
+                    let partition_checkpoints = self
+                        .checkpoint_store
+                        .load_by_prefix(&format!(
+                            "{checkpoint_key}{}",
+                            PartitionAssignment::CHECKPOINT_PREFIX
+                        ))
+                        .await
+                        .map_err(|err| HandlerError::Processing(err.to_string()))?;
+
+                    match consolidated_watermark(&partition_checkpoints, request.watermark) {
+                        Ok(watermark) => self
+                            .checkpoint_store
+                            .consolidate(&checkpoint_key, &watermark)
+                            .await
+                            .map(|()| stats)
+                            .map_err(|err| HandlerError::Processing(err.to_string())),
+                        // A parent still at its first-pass start re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
+                        Err(incomplete) => {
+                            info!(
+                                expanded(KV_KEY) = checkpoint_key.as_str(),
+                                safe(PARTITION_COUNT) = incomplete.len(),
+                                expanded(ADDITIONAL_DETAILS) = %incomplete.join(", "),
+                                "partitions still in progress; deferring consolidation to next dispatch"
+                            );
+                            Ok(stats)
+                        }
+                    }
+                }
+                Err(e) => Err(e),
+            }
         };
 
         match &result {
@@ -233,78 +292,6 @@ impl EntityHandler {
         result
     }
 
-    async fn run(
-        &self,
-        request: &IndexingRequest,
-        pipeline_context: &PipelineContext,
-        base_query: PreparedQuery,
-        checkpoint_key: &str,
-        checkpoint: Checkpoint,
-        window: WindowBounds,
-    ) -> Result<PipelineStats, PipelineError> {
-        let ranges = match &self.partition_strategy {
-            Some(strategy) if checkpoint.is_first_pass_before_paging() => {
-                strategy
-                    .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_ref())
-                    .await?
-            }
-            _ => Vec::new(),
-        };
-
-        if ranges.is_empty() {
-            return self
-                .pipeline
-                .run_plan(
-                    pipeline_context,
-                    &self.plan,
-                    base_query,
-                    checkpoint_key,
-                    checkpoint,
-                    window,
-                )
-                .await;
-        }
-
-        info!(
-            safe(PARTITION_COUNT) = ranges.len(),
-            "running partitioned initial load"
-        );
-        let stats = self
-            .run_partitions(
-                base_query.into_partitions(ranges),
-                checkpoint_key,
-                window,
-                pipeline_context,
-            )
-            .await?;
-        let partition_checkpoints = self
-            .checkpoint_store
-            .load_by_prefix(&format!(
-                "{checkpoint_key}{}",
-                PartitionAssignment::CHECKPOINT_PREFIX
-            ))
-            .await
-            .map_err(|err| HandlerError::Processing(err.to_string()))?;
-
-        match consolidated_watermark(&partition_checkpoints, request.watermark) {
-            Ok(watermark) => self
-                .checkpoint_store
-                .consolidate(checkpoint_key, &watermark)
-                .await
-                .map_err(|err| HandlerError::Processing(err.to_string()))?,
-            // A parent still at its first-pass start re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
-            Err(incomplete) => {
-                info!(
-                    expanded(KV_KEY) = checkpoint_key,
-                    safe(PARTITION_COUNT) = incomplete.len(),
-                    expanded(ADDITIONAL_DETAILS) = %incomplete.join(", "),
-                    "partitions still in progress; deferring consolidation to next dispatch"
-                );
-            }
-        }
-        Ok(stats)
-    }
-
     async fn complete_without_source(
         &self,
         checkpoint_key: &str,
@@ -334,6 +321,7 @@ impl EntityHandler {
         )>,
         checkpoint_key: &str,
         window: WindowBounds,
+        context: &HandlerContext,
         parent_pipeline_context: &PipelineContext,
     ) -> Result<PipelineStats, HandlerError> {
         let mut set: JoinSet<Result<PipelineStats, PipelineError>> = JoinSet::new();
@@ -361,7 +349,7 @@ impl EntityHandler {
             let pipeline = Arc::clone(&self.pipeline);
             let partition_context = PipelineContext {
                 writer: Arc::clone(&self.writer),
-                progress: parent_pipeline_context.progress.clone(),
+                progress: context.progress.clone(),
                 observer: Arc::clone(&parent_pipeline_context.observer),
             };
 

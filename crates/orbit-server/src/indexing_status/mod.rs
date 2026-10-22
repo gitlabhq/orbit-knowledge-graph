@@ -110,17 +110,23 @@ fn build_scope_status(
         .top_level_namespace_id()
         .and_then(|root| checkpoints.get(&root));
 
+    let plans: Vec<&PipelineDescriptor> = plans
+        .iter()
+        .filter(|plan| {
+            !root_checkpoints.is_some_and(|by_plan| by_plan.is_source_unavailable(&plan.name))
+        })
+        .collect();
     let plan_phases: Vec<(&PipelineDescriptor, Phase)> = plans
         .iter()
         .map(|plan| {
             let phase = root_checkpoints
                 .map(|by_plan| by_plan.get_plan_phase(&plan.name, now))
                 .unwrap_or(Phase::Unknown);
-            (plan, phase)
+            (*plan, phase)
         })
         .collect();
     let last_completed_at =
-        root_checkpoints.and_then(|by_plan| by_plan.get_last_completed_at(plans));
+        root_checkpoints.and_then(|by_plan| by_plan.get_last_completed_at(&plans));
 
     // The Project plan writes the project list, so the code total is final only once it settles.
     let project_list_phase = combine_phases(

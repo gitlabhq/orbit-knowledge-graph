@@ -63,6 +63,17 @@ impl From<RetryExhausted> for PipelineError {
     }
 }
 
+impl From<PipelineError> for HandlerError {
+    fn from(err: PipelineError) -> Self {
+        match err {
+            PipelineError::Failed(err) => err,
+            PipelineError::SourceUnavailable(reason) => {
+                HandlerError::Processing(format!("source unavailable: {reason}"))
+            }
+        }
+    }
+}
+
 /// `read_*` count the rows/bytes actually returned from the datalake; `scanned_*`
 /// ClickHouse's storage-scan cost from the summary; `written_*` the transformed
 /// rows/bytes inserted.

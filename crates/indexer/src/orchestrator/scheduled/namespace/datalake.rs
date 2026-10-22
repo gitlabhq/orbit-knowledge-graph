@@ -95,12 +95,10 @@ impl DatalakeChangeDetector {
         upper: &str,
         combined_err: &ClickHouseError,
     ) -> Result<Vec<RecordBatch>, TaskError> {
-        if !combined_err.is_unknown_table() {
-            warn!(
-                expanded(ERROR_MESSAGE) = %combined_err,
-                "combined change detection query failed; retrying one branch per source table"
-            );
-        }
+        warn!(
+            expanded(ERROR_MESSAGE) = %combined_err,
+            "combined change detection query failed; retrying one branch per source table"
+        );
 
         let mut stream = futures::stream::iter(0..self.query.branches.len())
             .map(|index| async move {
@@ -119,14 +117,6 @@ impl DatalakeChangeDetector {
         while let Some((branch, result)) = stream.next().await {
             match result {
                 Ok(branch_batches) => batches.extend(branch_batches),
-                Err(err) if err.is_unknown_table() => {
-                    failed += 1;
-                    warn!(
-                        safe(TABLE) = branch.table.as_str(),
-                        safe(ENTITY) = branch.target.as_str(),
-                        "change detection source table does not exist; skipping it until it appears"
-                    );
-                }
                 Err(err) => {
                     failed += 1;
                     self.metrics

@@ -32,10 +32,6 @@ pub const SOURCE_UNAVAILABLE: CheckpointRow = CheckpointRow {
     watermark: "'1970-01-01 00:00:00'",
     ..COMPLETED
 };
-pub const BACKFILL_AFTER_SOURCE_UNAVAILABLE: CheckpointRow = CheckpointRow {
-    cursor: FIRST_PASS_CURSOR,
-    ..COMPLETED
-};
 pub const COMPLETED_ON_NEW_YEAR: CheckpointRow = CheckpointRow {
     indexed_at: "'2026-01-01 00:00:00'",
     ..COMPLETED
@@ -159,12 +155,6 @@ pub async fn seed_namespaces(ctx: &TestContext) {
                 SOURCE_UNAVAILABLE,
             ),
         ],
-    )
-    .await;
-    seed_plans(
-        ctx,
-        142,
-        &[("AgentSession", BACKFILL_AFTER_SOURCE_UNAVAILABLE)],
     )
     .await;
     insert_checkpoints(ctx, &[("ns.106.Project".to_string(), COMPLETED)]).await;

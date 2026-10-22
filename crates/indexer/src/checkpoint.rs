@@ -111,15 +111,6 @@ impl Checkpoint {
         }
     }
 
-    /// A finished run that indexed nothing because the source table does not exist.
-    pub fn is_source_unavailable(&self) -> bool {
-        self.indexed_at.is_some() && self.indexed_nothing()
-    }
-
-    fn indexed_nothing(&self) -> bool {
-        self.watermark == DateTime::<Utc>::UNIX_EPOCH
-    }
-
     pub fn resume_cursor(&self) -> &[String] {
         self.cursor_values.as_deref().unwrap_or_default()
     }
@@ -165,28 +156,11 @@ impl Checkpoint {
         self.indexed_at = Some(Utc::now());
     }
 
-    /// Rebuilds a checkpoint from the columns of its `checkpoint` table row.
-    pub fn decode(
-        watermark: DateTime<Utc>,
-        cursor_json: &str,
-        attempts: i64,
-        indexed_at: Option<DateTime<Utc>>,
-    ) -> Result<Self, CheckpointError> {
-        let decoded = decode_cursor_column(cursor_json)?;
-        Ok(Self {
-            watermark,
-            cursor_values: decoded.as_ref().map(|c| c.cursor.clone()),
-            resume_floor: decoded.and_then(|c| c.floor),
-            attempts,
-            indexed_at,
-        })
-    }
-
     fn progress(&self) -> Progress {
         match (&self.cursor_values, self.indexed_at) {
             (Some(_), _) => Progress::Paging,
-            (None, Some(_)) if !self.indexed_nothing() => Progress::Completed,
-            (None, _) => Progress::FirstPass,
+            (None, Some(_)) => Progress::Completed,
+            (None, None) => Progress::FirstPass,
         }
     }
 }
@@ -288,7 +262,7 @@ impl ClickHouseCheckpointStore {
             .zip(indexed_ats)
             .map(
                 |((((key, watermark), cursor_json), attempts), indexed_at)| {
-                    Checkpoint::decode(watermark, &cursor_json, attempts, indexed_at)
+                    decode_checkpoint(watermark, &cursor_json, attempts, indexed_at)
                         .map(|checkpoint| (key, checkpoint))
                 },
             )
@@ -367,6 +341,22 @@ fn decode_cursor_column(raw: &str) -> Result<Option<CursorColumn>, CheckpointErr
         return Ok(None);
     }
     serde_json::from_str(raw).map_err(checkpoint_store_error)
+}
+
+fn decode_checkpoint(
+    watermark: DateTime<Utc>,
+    cursor_json: &str,
+    attempts: i64,
+    indexed_at: Option<DateTime<Utc>>,
+) -> Result<Checkpoint, CheckpointError> {
+    let decoded = decode_cursor_column(cursor_json)?;
+    Ok(Checkpoint {
+        watermark,
+        cursor_values: decoded.as_ref().map(|c| c.cursor.clone()),
+        resume_floor: decoded.and_then(|c| c.floor),
+        attempts,
+        indexed_at,
+    })
 }
 
 fn checkpoint_store_error<E: std::fmt::Display>(err: E) -> CheckpointError {
@@ -551,31 +541,6 @@ mod tests {
                 floor: Some(ts("2026-06-07T21:59:30Z")),
             }
         );
-    }
-
-    #[test]
-    fn source_unavailable_counts_as_a_run_but_keeps_the_first_pass_window() {
-        let now = ts("2026-06-07T22:00:00Z");
-        let mut checkpoint = Checkpoint::new(ts("2026-06-07T21:00:00Z"));
-        checkpoint.start_attempt();
-        checkpoint.complete(DateTime::<Utc>::UNIX_EPOCH);
-
-        assert!(checkpoint.is_source_unavailable());
-        assert!(checkpoint.indexed_at.is_some());
-        assert_eq!(checkpoint.attempts, 0);
-        assert!(checkpoint.is_first_pass_before_paging());
-        assert_eq!(checkpoint.synced_until(), None);
-        assert_eq!(
-            checkpoint.pull_window(now),
-            WindowBounds {
-                target: now,
-                floor: None
-            }
-        );
-
-        checkpoint.complete(now);
-        assert!(!checkpoint.is_source_unavailable());
-        assert!(checkpoint.is_completed());
     }
 
     #[test]
