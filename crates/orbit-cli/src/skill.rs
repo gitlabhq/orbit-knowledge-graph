@@ -238,7 +238,10 @@ fn resolve(name_or_path: Option<&str>, path: Option<&str>) -> Result<Request> {
 
 fn ensure_skill_name(name: &str) -> Result<()> {
     if !is_skill_name(name) {
-        bail!("invalid skill name {name:?}: use lowercase letters, digits and hyphens");
+        bail!(
+            "invalid skill name {name:?}: use lowercase letters, digits and hyphens.\n\nUse `{} skills get <name> [path]`.",
+            crate::commands::setup::spec::launcher()
+        );
     }
     Ok(())
 }
@@ -444,7 +447,7 @@ fn degradation_warning(response: &SkillHttpResponse) -> String {
     } else {
         format!(" ({excerpt})")
     };
-    format!("Orbit skill request returned HTTP {status}{detail}{hint}")
+    format!("Orbit skills API returned HTTP {status}{detail}{hint}")
 }
 
 fn body_excerpt(body: &str) -> String {

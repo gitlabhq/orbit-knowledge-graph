@@ -1051,7 +1051,8 @@ fn invalid_skill_names_fail_without_sending_a_request() {
         let output = run_orbit(Some("http://127.0.0.1:1"), &cache, &["skills", "get", name]);
         assert!(!output.status.success());
         assert!(
-            stderr(&output).contains("invalid skill name"),
+            stderr(&output).contains("invalid skill name")
+                && stderr(&output).contains("skills get <name> [path]"),
             "{}",
             stderr(&output)
         );
