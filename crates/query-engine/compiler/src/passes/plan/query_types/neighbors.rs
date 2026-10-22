@@ -146,15 +146,16 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
                     false => variant.source == center_entity_id,
                 }) {
                     found = true;
+                    let source = &model.graph().entity(variant.source).name;
+                    let target = &model.graph().entity(variant.target).name;
                     carries &= model
-                        .variant_scope(
-                            relationship,
-                            &model.graph().entity(variant.source).name,
-                            &model.graph().entity(variant.target).name,
-                        )
-                        .is_some_and(|scope| {
-                            scope.is_scope_preserving()
-                                || !center_is_target && scope.edge_path_is_source_path()
+                        .variant_scope(relationship, source, target)
+                        .is_some_and(|scope| match center_is_target {
+                            true => scope.is_scope_preserving(),
+                            false => {
+                                scope.propagates_to_source(relationship, source)
+                                    || scope.edge_path_is_source_path()
+                            }
                         });
                 }
             }
