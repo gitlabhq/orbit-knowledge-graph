@@ -1,0 +1,45 @@
+cases:
+  - name: An unbounded holder reached by ids reads the keyed edge table
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1]},{"id":"mr","entity":"MergeRequest"},{"id":"pipe","entity":"Pipeline"},{"id":"j","entity":"Job","columns":["name"]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_HEAD_PIPELINE","from":"mr","to":"pipe"},{"type":"HAS_JOB","from":"pipe","to":"j"}]}
+      gql: |
+        MATCH (p:Project {id: 1})<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pipe:Pipeline)-[:HAS_JOB]->(j:Job) RETURN j.name
+    logical:
+      expect: ["(EdgeScan HAS_JOB pipe->j AS e2)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter _orbit_edge_2.relationship_kind = 'HAS_JOB', _orbit_edge_2.source_kind = 'Pipeline', _orbit_edge_2.target_kind = 'Job', _orbit_edge_2.source_id IN ?.id (Scan Table(gl_ci_edge) AS _orbit_edge_2))
+          reject: ["(Filter j.pipeline_id IN ?.id, ... (_))"]
+
+  - name: A pinned endpoint keeps the foreign key shortcut
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"pipe","entity":"Pipeline","node_ids":[7]},{"id":"j","entity":"Job","columns":["name"]}],"relationships":[{"type":"HAS_JOB","from":"pipe","to":"j"}]}
+      gql: |
+        MATCH (pipe:Pipeline {id: 7})-[:HAS_JOB]->(j:Job) RETURN j.name
+    logical:
+      expect: ["(EdgeScan HAS_JOB pipe->j AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Scan Table(gl_job) AS j)
+          reject: ["(Scan Table(gl_ci_edge) ...)"]
+
+  - name: A mutable foreign key keeps the shortcut because its edge rows can be stale
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["id"]},{"id":"d","entity":"MergeRequestDiff"},{"id":"f","entity":"MergeRequestDiffFile","node_ids":[7]}],"relationships":[{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}]}
+      gql: |
+        MATCH (mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile {id: 7}) RETURN mr.id
+    logical:
+      expect: ["(EdgeScan HAS_FILE d->f AS e1)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Scan Table(gl_merge_request) AS mr)
+          reject: ["(Scan Table(gl_diff_edge) ...)"]

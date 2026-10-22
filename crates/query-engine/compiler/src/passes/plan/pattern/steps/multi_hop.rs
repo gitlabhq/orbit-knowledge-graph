@@ -25,7 +25,9 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         let reverse = relation.direction != Direction::Both
             && !pattern.endpoint_is_selective(&relation.from_node)
             && (pattern.endpoint_is_selective(&relation.to_node)
-                || !anchored(&relation.from_node) && anchored(&relation.to_node));
+                || source_ids.is_none()
+                    && !anchored(&relation.from_node)
+                    && anchored(&relation.to_node));
         if reverse {
             expansion = expansion.reversed();
             std::mem::swap(&mut source_ids, &mut target_ids);
@@ -65,7 +67,7 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
     let (start_id, end_id) = relation.direction.edge_columns();
     let path_id = if reverse_output { start_id } else { end_id };
     let from = &pattern.nodes[&relation.from_node];
-    let routes = hop_routes(
+    let hops = hop_routes(
         pattern.model,
         &relation.rel_types,
         relation.direction,
@@ -75,6 +77,13 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
         ],
         relation.max_hops,
     );
+    let hop = |depth: u32| hops.as_ref().map(|hops| &hops[depth as usize - 1]);
+    let hop_relation = |depth: u32| {
+        hop(depth).map_or_else(
+            || relation.clone(),
+            |hop| relation.narrowed_to(&hop.tables, pattern.model),
+        )
+    };
 
     let mut first_predicates = vec![live("e1")];
     first_predicates.extend(pattern.entity_kind("e1", &relation.from_node, start_id));
@@ -92,7 +101,7 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
             .iter()
             .map(|(property, filter)| property_filter("e1", property, filter)),
     );
-    let first = hop_rows(graph, pattern, relation, "e1", first_predicates)?;
+    let first = hop_rows(graph, pattern, &hop_relation(1), "e1", first_predicates)?;
     let first_path = OutputValue::Path(vec![(
         Column::new("e1", path_id),
         Column::new("e1", kind_column(path_id)),
@@ -122,17 +131,19 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
                 (previous, end_id.to_string()),
             ),
         ];
-        if let Some(kinds) = routes
-            .as_ref()
-            .map(|routes| &routes.start_kinds[depth as usize - 1])
-            .filter(|kinds| !kinds.is_empty())
-        {
+        if let Some(hop) = hop(depth).filter(|hop| !hop.start_kinds.is_empty()) {
             predicates.push(Predicate::EntityKind {
                 column: Column::new(&current_alias, kind_column(start_id)),
-                entities: kinds.clone(),
+                entities: hop.start_kinds.clone(),
             });
         }
-        let current = hop_rows(graph, pattern, relation, &current_alias, predicates)?;
+        let current = hop_rows(
+            graph,
+            pattern,
+            &hop_relation(depth),
+            &current_alias,
+            predicates,
+        )?;
         let joined = graph.join(
             previous.alias(&previous_alias),
             current.alias(&current_alias),

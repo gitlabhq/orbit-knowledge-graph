@@ -4,6 +4,7 @@
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use ontology::constants::RELATIONSHIP_KIND_COLUMN;
 use query_data_model::OrbitQueryModel;
 
 use super::{EdgeRelation, Fk, NodePlan};
@@ -14,6 +15,23 @@ use crate::passes::normalize::is_wildcard;
 use crate::passes::plan::filters::{FilterOwner, ordered_filters};
 
 impl EdgeRelation {
+    pub(super) fn narrowed_to(
+        &self,
+        tables: &[String],
+        model: &(impl OrbitQueryModel + ?Sized),
+    ) -> Self {
+        let mut relation = self.clone();
+        relation.edge_tables.retain(|table| {
+            tables
+                .iter()
+                .any(|hop| hop == table || model.equivalent_layouts(hop).contains(&table.as_str()))
+        });
+        if relation.edge_tables.is_empty() {
+            relation.edge_tables = self.edge_tables.clone();
+        }
+        relation
+    }
+
     pub(super) fn reversed(&self) -> Self {
         let mut relation = self.clone();
         std::mem::swap(&mut relation.from_node, &mut relation.to_node);
@@ -95,9 +113,12 @@ where
                     ],
                     relationship.hops.max,
                 )
-                .map(|routes| routes.tables.into_iter().collect::<Vec<_>>())
-                .filter(|tables| !tables.is_empty())
-                .unwrap_or_else(|| model.relationship_tables(&relationship.types))
+                .map(|hops| {
+                    let tables: BTreeSet<String> =
+                        hops.into_iter().flat_map(|hop| hop.tables).collect();
+                    tables.into_iter().collect()
+                })
+                .unwrap_or_default()
             } else {
                 let mut tables =
                     model.relationship_tables_between(&relationship.types, source, target);
@@ -141,12 +162,12 @@ where
                         query_data_model::Endpoint::Target => target_node.clone(),
                     };
                     model.entity_table(input.entity_of(&node)?)?;
-                    Some(Fk { node, column })
+                    let key = Fk { node, column };
+                    (model.property_mutable(foreign_key.property)
+                        || prefer_foreign_key(input, model, nodes, input_index, &key, &edge_tables))
+                    .then_some(key)
                 })
-                .flatten()
-                .filter(|key| {
-                    prefer_foreign_key(input, model, nodes, relationship, key, &edge_tables)
-                });
+                .flatten();
             let filters = ordered_filters(
                 &relationship.filters,
                 FilterOwner::Tables(&edge_tables),
@@ -176,55 +197,51 @@ where
         .collect()
 }
 
-/// Keeps the foreign-key shortcut unless it would filter an unbounded holder by a column outside its sort key
-/// with ids reached through another relation, while an edge table can look that endpoint up by key.
+/// An FK filter outside the holder's sort key scans the holder's namespace; a keyed edge table reads only reached rows.
 fn prefer_foreign_key<M: OrbitQueryModel + ?Sized>(
     input: &Input,
     model: &M,
     nodes: &HashMap<String, NodePlan>,
-    relationship: &InputRelationship,
+    input_index: usize,
     key: &Fk,
     edge_tables: &[String],
 ) -> bool {
-    let other = if key.node == relationship.from {
-        &relationship.to
+    let relationship = &input.relationships[input_index];
+    let (start, end) = relationship.direction.edge_columns();
+    let (other, other_column) = if key.node == relationship.from {
+        (&relationship.to, end)
     } else {
-        &relationship.from
-    };
-    let other_column = if relationship
-        .direction
-        .stored_order(&relationship.from, &relationship.to)
-        .0
-        == other
-    {
-        ontology::constants::SOURCE_ID_COLUMN
-    } else {
-        ontology::constants::TARGET_ID_COLUMN
+        (&relationship.from, start)
     };
     let holder_keyed = input
         .entity_of(&key.node)
         .and_then(|entity| model.entity_table(entity))
-        .is_none_or(|table| model.in_sort_key(table, &key.column));
-    let edge_keyed = !edge_tables.is_empty()
-        && edge_tables.iter().all(|table| {
-            std::iter::once(table.as_str())
-                .chain(model.equivalent_layouts(table))
-                .any(|layout| model.in_sort_key(layout, other_column))
-        });
-    let bounded = bounded_without(input, nodes, relationship);
-    holder_keyed
+        .is_some_and(|table| model.in_sort_key(table, &key.column));
+    let edge_keyed = edge_tables.iter().all(|table| {
+        std::iter::once(table.as_str())
+            .chain(model.equivalent_layouts(table))
+            .filter_map(|layout| model.table_sort_key(layout))
+            .any(|sort_key| {
+                sort_key
+                    .windows(2)
+                    .any(|pair| pair == [RELATIONSHIP_KIND_COLUMN, other_column])
+            })
+    });
+    if holder_keyed
         || model.anchor_foreign_keys().contains_key(&key.column)
-        || bounded.contains(key.node.as_str())
-        || !bounded.contains(other.as_str())
         || nodes.get(other.as_str()).is_some_and(NodePlan::is_pinned)
         || !edge_keyed
+    {
+        return true;
+    }
+    let bounded = bounded_without(input, nodes, input_index);
+    bounded.contains(key.node.as_str()) || !bounded.contains(other.as_str())
 }
 
-/// Nodes bounded by their own filters, or reached from one through relations other than `skip`.
 fn bounded_without<'a>(
     input: &'a Input,
     nodes: &HashMap<String, NodePlan>,
-    skip: &InputRelationship,
+    skip: usize,
 ) -> HashSet<&'a str> {
     let mut bounded: HashSet<&str> = input
         .nodes
@@ -234,10 +251,11 @@ fn bounded_without<'a>(
         .collect();
     loop {
         let before = bounded.len();
-        for relationship in input
+        for (_, relationship) in input
             .relationships
             .iter()
-            .filter(|r| !std::ptr::eq(*r, skip))
+            .enumerate()
+            .filter(|(i, _)| *i != skip)
         {
             let ends = [relationship.from.as_str(), relationship.to.as_str()];
             if ends.iter().any(|end| bounded.contains(end)) {
@@ -250,12 +268,10 @@ fn bounded_without<'a>(
     }
 }
 
-/// The variants a variable-length walk can use: their edge tables, and per hop the kinds the walk can
-/// stand on and still end on the target kind within the remaining hops.
-#[derive(Default)]
-pub(super) struct HopRoutes {
-    pub tables: BTreeSet<String>,
-    pub start_kinds: Vec<Vec<String>>,
+/// The tables and start kinds of the variants that can still reach the target kind in the remaining hops.
+pub(super) struct Hop {
+    pub tables: Vec<String>,
+    pub start_kinds: Vec<String>,
 }
 
 pub(super) fn hop_routes<M: OrbitQueryModel + ?Sized>(
@@ -264,7 +280,7 @@ pub(super) fn hop_routes<M: OrbitQueryModel + ?Sized>(
     direction: Direction,
     [from, to]: [Option<&str>; 2],
     max_hops: u32,
-) -> Option<HopRoutes> {
+) -> Option<Vec<Hop>> {
     if direction == Direction::Both || from.is_none() && to.is_none() || is_wildcard(rel_types) {
         return None;
     }
@@ -291,36 +307,40 @@ pub(super) fn hop_routes<M: OrbitQueryModel + ?Sized>(
     let hops = max_hops as usize;
     let mut finishing: Vec<HashSet<&str>> = vec![to.into_iter().collect()];
     for _ in 1..hops {
-        let mut kinds = finishing.last().expect("seeded").clone();
+        let last = finishing.last().expect("seeded");
+        let mut kinds = last.clone();
         kinds.extend(
             steps
                 .iter()
-                .filter(|(_, next, _)| finishing.last().expect("seeded").contains(next))
+                .filter(|(_, next, _)| last.contains(next))
                 .map(|(start, _, _)| *start),
         );
         finishing.push(kinds);
     }
     let mut standing: Option<HashSet<&str>> = from.map(|kind| HashSet::from([kind]));
-    let mut routes = HopRoutes::default();
-    for remaining in (0..hops).rev() {
-        let usable: Vec<_> = steps
-            .iter()
-            .filter(|(start, next, _)| {
-                standing.as_ref().is_none_or(|kinds| kinds.contains(start))
-                    && (to.is_none() || finishing[remaining].contains(next))
+    let sorted = |values: Vec<&str>| -> Vec<String> {
+        let unique: BTreeSet<&str> = values.into_iter().collect();
+        unique.into_iter().map(str::to_string).collect()
+    };
+    Some(
+        (0..hops)
+            .rev()
+            .map(|remaining| {
+                let usable: Vec<_> = steps
+                    .iter()
+                    .filter(|(start, next, _)| {
+                        standing.as_ref().is_none_or(|kinds| kinds.contains(start))
+                            && (to.is_none() || finishing[remaining].contains(next))
+                    })
+                    .collect();
+                standing = Some(usable.iter().map(|(_, next, _)| *next).collect());
+                Hop {
+                    tables: sorted(usable.iter().map(|(_, _, table)| *table).collect()),
+                    start_kinds: sorted(usable.iter().map(|(start, _, _)| *start).collect()),
+                }
             })
-            .collect();
-        routes
-            .tables
-            .extend(usable.iter().map(|(_, _, table)| table.to_string()));
-        let kinds: BTreeSet<String> = usable
-            .iter()
-            .map(|(start, _, _)| start.to_string())
-            .collect();
-        routes.start_kinds.push(kinds.into_iter().collect());
-        standing = Some(usable.iter().map(|(_, next, _)| *next).collect());
-    }
-    Some(routes)
+            .collect(),
+    )
 }
 
 /// Swaps each table for the equivalent layout whose sort key reaches a pinned endpoint column soonest.

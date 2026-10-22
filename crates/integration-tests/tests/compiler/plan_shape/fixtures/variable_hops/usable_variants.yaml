@@ -42,3 +42,34 @@ cases:
         planned:
           expect:
             - (Filter e1.relationship_kind = 'CONTAINS', e1.source_kind = 'WorkItem', e1.source_id IN ?.id (_))
+
+  - name: Each hop reads only the tables and start kinds of its own variants
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[1]},{"id":"f","entity":"File","columns":["id"]}],"relationships":[{"type":"CONTAINS","from":"g","to":"f","hops":[1,3]}]}
+      gql: |
+        MATCH (g:Group {id: 1})-[:CONTAINS*1..3]->(f:File) RETURN f.id
+    logical:
+      expect: ["(EdgeScan CONTAINS g->f AS e0 HOPS 1..3)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Scan Table(gl_edge) AS e1)
+            - (Filter e2.relationship_kind = 'CONTAINS', e2.source_kind = 'Project', e2.source_id IN ?.target_id (Scan Table(gl_code_edge) AS e2))
+            - (Filter e3.relationship_kind = 'CONTAINS', e3.source_kind = 'Branch', e3.source_id IN ?.target_id (Scan Table(gl_code_edge) AS e3))
+          reject: ["(Scan Table(gl_edge) AS e2)", "(Scan Table(gl_edge) AS e3)", "(Scan Table(gl_code_edge) AS e1)"]
+
+  - name: An anchored far end does not replace ids the walk already reached
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"l","entity":"Label","node_ids":[1]},{"id":"m","entity":"MergeRequest"},{"id":"w","entity":"WorkItem","filters":{"project_id":5},"columns":["id"]}],"relationships":[{"type":"HAS_LABEL","from":"m","to":"l"},{"type":"MENTIONS","from":"m","to":"w","hops":[1,2]}]}
+      gql: |
+        MATCH (l:Label {id: 1})<-[:HAS_LABEL]-(m:MergeRequest)-[:MENTIONS*1..2]->(w:WorkItem) WHERE w.project_id = 5 RETURN w.id
+    logical:
+      expect: ["(EdgeScan MENTIONS m->w AS e1 HOPS 1..2)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter e1.relationship_kind = 'MENTIONS', e1.source_kind = 'MergeRequest', e1.source_id IN ?.id (_))
