@@ -65,7 +65,7 @@ When a project or subgroup is transferred or reparented, Rails rewrites its `tra
 
 The `Project` and `Group` extracts collapse that join with `argMax(traversal_path, version)` scoped to the root being indexed. A move within a root then stops emitting the old path. Moves across roots and rows written before the collapse still reach the reconciler.
 
-On the same cadence as the deletion scheduler, `reconcile_moved_entities` runs one pass per enabled root namespace. For each root it reuses the deletion `INSERT INTO ... SELECT`. It appends one predicate that narrows the scan. The scan goes from "all rows under the root" to "rows whose `traversal_path` is no longer a current route under the root":
+On the same cadence as the deletion scheduler, `reconcile_moved_entities` runs one pass per enabled root namespace. For each root it reads the current routes under the root from the datalake. For each graph table it then reads the distinct live `traversal_path` values under the root. The paths that are not current routes are stale. The pass reuses the deletion `INSERT INTO ... SELECT` with one more predicate, so it tombstones only the rows at those stale paths:
 
 ```sql
 INSERT INTO {table} ({sort_key_columns}, _deleted, _version)
@@ -73,11 +73,12 @@ SELECT {sort_key_columns}, true, now64(6)
 FROM {table}
 WHERE startsWith(traversal_path, {traversal_path:String})
   AND _deleted = false
-  AND (SELECT count() FROM (current routes under root)) > 0
-  AND traversal_path NOT IN (current routes under root)
+  AND traversal_path IN {stale_paths:Array(String)}
 ```
 
-A row at the entity's current path is always present in the route set. The ETL joins those same tables to write it, so it is never matched. Only old-path rows match. The `count() > 0` guard skips reconcile for a freshly-enabled root whose route tables have not replicated yet. So a transient empty-route window can never tombstone a just-indexed namespace. The pass is idempotent. A tombstoned row has `_deleted = true` and is filtered out. A still-stale row re-inserts an identical tombstone that ReplacingMergeTree collapses.
+The datalake and the graph can be separate ClickHouse services, so any set the reconciler compares must travel as a query parameter. The `clickhouse` crate puts parameters in the request URI, and `http` caps the URI at about 64 KiB. The pass therefore sends only the stale paths, in chunks that fit (`strings_per_array_param`).
+
+A row at the entity's current path is always present in the route set. The ETL joins those same tables to write it, so it is never matched. Only old-path rows match. An empty route set skips reconcile for a freshly-enabled root whose route tables have not replicated yet. So a transient empty-route window can never tombstone a just-indexed namespace. The pass is idempotent. A tombstoned row has `_deleted = true` and is filtered out. A still-stale row re-inserts an identical tombstone that ReplacingMergeTree collapses.
 
 ## Data model
 

@@ -302,6 +302,53 @@ async fn reconcile_tombstones_old_path_after_move() {
     assert_active_id_count(&context, CONTROL_PROJECT_ID, 1).await;
 }
 
+const LARGE_ROOT_PATH: &str = "1/400/";
+const LARGE_ROOT_CURRENT_PREFIX: &str = "1/400/10/";
+const LARGE_ROOT_STALE_PREFIX: &str = "1/400/20/";
+
+#[tokio::test]
+async fn reconcile_handles_route_sets_larger_than_a_request_uri() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+
+    context
+        .execute(&format!(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path, deleted) VALUES \
+             (400, '{LARGE_ROOT_PATH}', false)"
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO project_namespace_traversal_paths (id, traversal_path, deleted) \
+             SELECT number, concat('{LARGE_ROOT_CURRENT_PREFIX}', toString(1000000000 + number), '/'), false \
+             FROM numbers(3000)"
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, id, _version, _deleted) \
+             SELECT concat('{LARGE_ROOT_CURRENT_PREFIX}', toString(1000000000 + number), '/'), number, \
+                    '2024-01-01 00:00:00.000000', false \
+             FROM numbers(3000)",
+            t("gl_project")
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, id, _version, _deleted) \
+             SELECT concat('{LARGE_ROOT_STALE_PREFIX}', toString(1000000000 + number), '/'), 10000 + number, \
+                    '2024-01-01 00:00:00.000000', false \
+             FROM numbers(2000)",
+            t("gl_project")
+        ))
+        .await;
+
+    reconcile_root(&context, &ontology, LARGE_ROOT_PATH).await;
+
+    assert_active_row_count(&context, &t("gl_project"), LARGE_ROOT_STALE_PREFIX, 0).await;
+    assert_active_row_count(&context, &t("gl_project"), LARGE_ROOT_CURRENT_PREFIX, 3000).await;
+}
+
 async fn seed_duplicated_across_old_and_new_path(context: &TestContext) {
     context
         .execute(&format!(
@@ -424,7 +471,7 @@ async fn assert_active_row_count(
         ))
         .await;
 
-    let actual = result.first().map_or(0, |batch| batch.num_rows());
+    let actual: usize = result.iter().map(|batch| batch.num_rows()).sum();
     assert_eq!(
         actual, expected,
         "{table}: expected {expected} active rows for traversal_path '{traversal_path}', got {actual}"

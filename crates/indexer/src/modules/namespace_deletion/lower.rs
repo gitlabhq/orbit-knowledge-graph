@@ -24,13 +24,30 @@ pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionS
     build_statements(ontology, None)
 }
 
-pub fn build_reconcile_statements(ontology: &ontology::Ontology) -> Vec<DeletionStatement> {
-    build_statements(ontology, Some(MOVED_ROW_PREDICATE))
+pub struct ReconcileStatement {
+    pub live_paths_sql: String,
+    pub tombstone: DeletionStatement,
 }
 
-const MOVED_ROW_PREDICATE: &str = "\
-AND length({current_paths:Array(String)}) > 0 \
-AND traversal_path NOT IN {current_paths:Array(String)}";
+/// A large root's route set does not fit in a request URI, so only stale paths are sent.
+pub fn build_reconcile_statements(ontology: &ontology::Ontology) -> Vec<ReconcileStatement> {
+    build_statements(ontology, Some(STALE_PATH_PREDICATE))
+        .into_iter()
+        .map(|tombstone| {
+            let prefixed = prefixed_table_name(&tombstone.table, *SCHEMA_VERSION);
+            ReconcileStatement {
+                live_paths_sql: format!(
+                    "SELECT DISTINCT {TRAVERSAL_PATH_COLUMN} FROM {prefixed} \
+                     WHERE startsWith({TRAVERSAL_PATH_COLUMN}, {{{TRAVERSAL_PATH_COLUMN}:String}}) \
+                     AND {DELETED_COLUMN} = false"
+                ),
+                tombstone,
+            }
+        })
+        .collect()
+}
+
+const STALE_PATH_PREDICATE: &str = "AND traversal_path IN {stale_paths:Array(String)}";
 
 #[expect(
     clippy::expect_used,
@@ -283,39 +300,37 @@ mod tests {
 
         assert_eq!(deletion.len(), reconcile.len());
         for statement in &reconcile {
-            assert!(deletion.contains(&statement.table));
+            assert!(deletion.contains(&statement.tombstone.table));
         }
     }
 
     #[test]
-    fn reconcile_scopes_to_rows_absent_from_current_routes() {
+    fn reconcile_tombstones_only_the_stale_paths_it_reads() {
         let ontology = load_ontology();
         let statements = build_reconcile_statements(&ontology);
-        let statement = find_statement(&statements, "gl_project");
+        let statement = statements
+            .iter()
+            .find(|s| s.tombstone.table == "gl_project")
+            .expect("expected reconcile statement for gl_project");
+        let (live_paths_sql, sql) = (&statement.live_paths_sql, &statement.tombstone.sql);
 
         assert!(
-            statement.sql.contains("(_deleted = false)"),
-            "should keep the FINAL-safe non-deleted filter: {}",
-            statement.sql
+            live_paths_sql.starts_with("SELECT DISTINCT traversal_path FROM ")
+                && live_paths_sql.contains("startsWith(traversal_path, {traversal_path:String})")
+                && live_paths_sql.contains("_deleted = false"),
+            "should read the live paths under the root: {live_paths_sql}"
         );
         assert!(
-            statement
-                .sql
-                .contains("traversal_path NOT IN {current_paths:Array(String)}"),
-            "should exclude rows still present in the route set: {}",
-            statement.sql
+            sql.contains("(_deleted = false)"),
+            "should keep the FINAL-safe non-deleted filter: {sql}"
         );
         assert!(
-            statement
-                .sql
-                .contains("length({current_paths:Array(String)}) > 0"),
-            "should no-op when the root has no current routes yet: {}",
-            statement.sql
+            sql.contains("traversal_path IN {stale_paths:Array(String)}"),
+            "should tombstone only the stale paths: {sql}"
         );
         assert!(
-            !statement.sql.contains("traversal_paths"),
-            "should not embed a datalake route subquery in a graph-side query: {}",
-            statement.sql
+            !sql.contains("traversal_paths") && !live_paths_sql.contains("traversal_paths"),
+            "should not embed a datalake route subquery in a graph-side query: {sql}"
         );
     }
 }
