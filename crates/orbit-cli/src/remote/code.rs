@@ -120,6 +120,7 @@ fn definition_query(project_id: i64, branch: &str, name: &str) -> Value {
             "filters": filters,
             "columns": ["fqn", "definition_type", "file_path", "start_line", "end_line", "content"],
         }],
+        "limit": 5,
     })
 }
 
@@ -132,6 +133,7 @@ fn file_query(project_id: i64, branch: &str, path: &str) -> Value {
             "filters": {"project_id": project_id, "branch": branch, "path": {"ends_with": path}},
             "columns": ["path", "content"],
         }],
+        "limit": 5,
     })
 }
 

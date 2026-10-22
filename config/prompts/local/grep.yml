@@ -1,5 +1,5 @@
 name: grep
-version: 2.8.0
+version: 2.9.0
 short: Search every line in local code, tests, config, and docs
 description: >-
   Search every line in local code, tests, config, and docs, like ripgrep.
@@ -22,11 +22,10 @@ description: >-
   words before it. `file:x` keeps paths containing x, and alone lists them.
   `repo:group/project` searches that GitLab project. `-F` reads the query literally.
   A plain search without paths or file filters also searches the GitLab group
-  behind `origin`. Its issues, merge requests, commits, notes, and other projects'
-  code print after local results, with tokens for `context`. Name a GitLab project,
-  group, URL, `Project[id]`, or `Group[id]` as a path to search it instead,
-  including its code when it has no local checkout. An indexed checkout of that
-  project is searched locally.
+  behind `origin`. Its issues, merge requests, and notes print after local results,
+  with tokens for `context`. Name a GitLab project, group, URL, `Project[id]`, or
+  `Group[id]` as a path to search it instead. An indexed checkout of that project
+  is searched locally; read another project's code with `context repo:group/project`.
   `mr:`, `issue:`, `commit:`, `comment:`, and `milestone:` search only GitLab;
   `user:`, `project:`, and `group:` add scopes a plain search skips.
   `branch:` finds branches by words from their names, with their merge requests

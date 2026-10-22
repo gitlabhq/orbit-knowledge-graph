@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.28.0
+version: 0.29.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -72,7 +72,8 @@ words before it. `file:x` keeps paths containing x, and alone lists them.
 Unknown names such as `std::io` stay literal, and `-F` turns qualifiers off.
 
 A plain search with no paths or file filters also searches the GitLab group
-behind `origin`. It finds issues, merge requests, commits, notes, and code in other projects.
+behind `origin`. It finds issues, merge requests, and notes; `commit:words` searches commits, and
+`orbit context repo:group/project symbol:Name` reads another project's code.
 Those results print after the local ones as tokens such as `MergeRequest[42]`.
 Name `group/project`, `Project[id]`, or `Group[id]` as a path to search another
 project or group, including its code when there is no local checkout.
