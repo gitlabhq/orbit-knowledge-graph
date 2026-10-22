@@ -107,7 +107,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         enforce {
             reads_env: [data_model]
-            reads_state: [input]
+            reads_state: [input, scope_proofs]
             mutates: [node, lowered_metadata, result_ctx]
         }
         enforce_local {
@@ -322,9 +322,10 @@ where
     let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
-    enforce::enforce_role_scans(&mut node, &input, &metadata, ctx.data_model())?;
+    let scope = ctx.scope_proofs().as_ref();
+    enforce::enforce_role_scans(&mut node, &input, &metadata, ctx.data_model(), scope)?;
     let result_context =
-        enforce::enforce_lowered_return(&mut node, &input, &metadata, ctx.data_model())?;
+        enforce::enforce_lowered_return(&mut node, &input, &metadata, ctx.data_model(), scope)?;
     ctx.set_node(node);
     ctx.set_lowered_metadata(metadata);
     ctx.set_result_ctx(result_context);
