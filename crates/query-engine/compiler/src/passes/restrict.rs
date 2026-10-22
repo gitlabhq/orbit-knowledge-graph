@@ -85,7 +85,10 @@ fn enforce_traversal_path_filters(
         let Some(entity) = node.entity.as_deref() else {
             continue;
         };
-        let Some(min_role) = model.entity_minimum_access_level(entity) else {
+        let Some(min_role) = model
+            .entity_minimum_access_level(entity)
+            .filter(|level| *level > DEFAULT_PATH_ACCESS_LEVEL)
+        else {
             continue;
         };
         if security_ctx.paths_at_least(min_role).is_empty() {
