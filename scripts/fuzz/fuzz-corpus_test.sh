@@ -9,7 +9,18 @@ mkdir -p "$work/scripts/fuzz" "$work/bin" "$work/archive"
 cp "$root"/scripts/fuzz/corpus.sh "$root"/scripts/fuzz/run.sh "$work/scripts/fuzz/"
 tests="$work/crates/fuzz/tests"
 mkdir -p "$tests/fuzz_a" "$tests/fuzz_b" "$tests/fuzz_c"
-printf 'fuzz_a: ["seed a", "line one\\nline two\\n"]\nfuzz_b: ["seed b"]\n' > "$work/crates/fuzz/seeds.yaml"
+cat > "$work/crates/fuzz/seeds.yaml" <<'EOF'
+fuzz_a:
+  - labels: [one]
+    input: seed a
+  - labels: [two, lines]
+    input: |
+      line one
+      line two
+fuzz_b:
+  - labels: [one]
+    input: seed b
+EOF
 corpus="$work/scripts/fuzz/corpus.sh"
 run="$work/scripts/fuzz/run.sh"
 unset FUZZ_CORPUS_TOKEN FUZZ_CORPUS_JWT FUZZ_CORPUS_WIF_PROVIDER

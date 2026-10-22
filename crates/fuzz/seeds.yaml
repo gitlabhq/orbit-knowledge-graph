@@ -1,176 +1,226 @@
-fuzz_compile:
-  - |-
-    {"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"traversal_path": {"starts_with": "1/"}}}], "limit": 1}
-  - |-
-    {"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"traversal_path": {"starts_with": 1}}}], "limit": 1}
-  - |-
-    {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}], "limit": 10}
-  - |-
-    {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "p", "entity": "Project"}], "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "filters": {"target_id": 2}}]}
 fuzz_csharp:
-  - |
-    class Broken { void F( {
-  - |
-    record R(int A);
-    struct S { public int X { get; init; } }
-    static async Task<int> F() { await Task.Yield(); return 1; }
-  - |
-    using System;
-    namespace Example;
+  - labels: [syntax_error]
+    input: |
+      class Broken { void F( {
+  - labels: [valid, records, async]
+    input: |
+      record R(int A);
+      struct S { public int X { get; init; } }
+      static async Task<int> F() { await Task.Yield(); return 1; }
+  - labels: [valid, class, generics]
+    input: |
+      using System;
+      namespace Example;
 
-    public class Greeter<T> : Base, INamed where T : Base
-    {
-        private readonly string _name;
-        public Greeter(string name) => _name = name;
-        public string Greet(Greeter<T>? other = null) => other is null ? "hi" : $"hi {other._name}";
-    }
+      public class Greeter<T> : Base, INamed where T : Base
+      {
+          private readonly string _name;
+          public Greeter(string name) => _name = name;
+          public string Greet(Greeter<T>? other = null) => other is null ? "hi" : $"hi {other._name}";
+      }
 fuzz_gql:
-  - |
-    MATCH (p:Project)-[:CONTAINS|IN_PROJECT]-(n)
-    WHERE p.id IN [1, 2]
-    RETURN n
-    LIMIT 20
-  - |
-    MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
-    WHERE mr.merged_at >= '2026-03-01T00:00:00Z' AND p.id IN [1, 2]
-    RETURN *
-    ORDER BY mr.merged_at DESC
-    LIMIT 20
-  - |
-    MATCH (f:File)-[:DEFINES]->(d:Definition)
-    WHERE f.path ENDS WITH '.rb' AND d.name STARTS WITH 'process'
-    RETURN *
-    LIMIT 20
-  - |
-    MATCH (u:User {username: 'stanhu'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
-    WHERE p.id IN [1, 2]
-    RETURN *
-    ORDER BY mr.merged_at DESC
-    LIMIT 10
-  - |
-    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
-    WHERE p.id IN [1, 2]
-    RETURN u, count(mr) AS mr_count
-    ORDER BY mr_count DESC
-    LIMIT 20
-  - |
-    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
-    WHERE p.id IN [1, 2]
-    RETURN p, count(mr) AS mr_count
-    LIMIT 10
+  - labels: [aggregation, order_by]
+    input: |
+      MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+      WHERE p.id IN [1, 2]
+      RETURN u, count(mr) AS mr_count
+      ORDER BY mr_count DESC
+      LIMIT 20
+  - labels: [aggregation]
+    input: |
+      MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+      WHERE p.id IN [1, 2]
+      RETURN p, count(mr) AS mr_count
+      LIMIT 10
+  - labels: [code_graph, string_match]
+    input: |
+      MATCH (f:File)-[:DEFINES]->(d:Definition)
+      WHERE f.path ENDS WITH '.rb' AND d.name STARTS WITH 'process'
+      RETURN *
+      LIMIT 20
+  - labels: [neighbors]
+    input: |
+      MATCH (p:Project)-[:CONTAINS|IN_PROJECT]-(n)
+      WHERE p.id IN [1, 2]
+      RETURN n
+      LIMIT 20
+  - labels: [pagination, order_by, skip]
+    input: |
+      MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+      WHERE p.id IN [1, 2]
+      RETURN mr.iid, mr.title
+      ORDER BY mr.iid
+      SKIP 20
+      LIMIT 10
+  - labels: [path_finding, variable_length]
+    input: |
+      MATCH path = ANY SHORTEST (src:Group)-[:CONTAINS*1..2]->(dst:Group)
+      WHERE src.id IN [1, 2] AND dst.id IN [3, 4]
+      RETURN path
+      LIMIT 5
+  - labels: [search, projection]
+    input: |
+      MATCH (pipe:Pipeline {status: 'failed'})
+      RETURN pipe{.id, .status, .ref}
+      LIMIT 50
+  - labels: [time_series, date_trunc]
+    input: |
+      MATCH (w:WorkItem {work_item_type: 'issue', state: 'closed'})
+      WHERE w.closed_at >= '2026-07-19'
+      RETURN date_trunc('week', w.closed_at) AS wk, count(w) AS n
+      ORDER BY wk
+  - labels: [traversal, datetime_filter, order_by]
+    input: |
+      MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+      WHERE mr.merged_at >= '2026-03-01T00:00:00Z' AND p.id IN [1, 2]
+      RETURN *
+      ORDER BY mr.merged_at DESC
+      LIMIT 20
+  - labels: [traversal, multi_hop, order_by]
+    input: |
+      MATCH (u:User {username: 'stanhu'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project)
+      WHERE p.id IN [1, 2]
+      RETURN *
+      ORDER BY mr.merged_at DESC
+      LIMIT 10
 fuzz_indexer_messages:
-  - |-
-    {"task_id": 1, "project_id": 2, "branch": "main", "commit_sha": "0123456789abcdef0123456789abcdef01234567", "traversal_path": "1/9/", "repository_storage": "default"}
-  - |-
-    {"watermark": "2026-01-01T00:00:00Z", "dispatch_id": "00000000-0000-0000-0000-000000000001", "campaign_id": "c1", "targets": ["sdlc"]}
-  - |-
-    {"namespace_id": -1, "traversal_path": ""}
-  - |-
-    {"namespace": 9, "traversal_path": "1/9/", "watermark": "2026-01-01T00:00:00Z", "targets": []}
-  - |-
-    {"watermark": "2026-13-45T99:00:00Z"}
-  - |-
-    {"namespace_id": 9, "traversal_path": "1/9/"}
-  - |-
-    {"watermark": "2026-01-01T00:00:00Z"}
+  - labels: [code_indexing_task]
+    input: |-
+      {"task_id": 1, "project_id": 2, "branch": "main", "commit_sha": "0123456789abcdef0123456789abcdef01234567", "traversal_path": "1/9/", "repository_storage": "default"}
+  - labels: [global_indexing]
+    input: |-
+      {"watermark": "2026-01-01T00:00:00Z", "dispatch_id": "00000000-0000-0000-0000-000000000001", "campaign_id": "c1", "targets": ["sdlc"]}
+  - labels: [global_indexing, invalid]
+    input: |-
+      {"watermark": "2026-13-45T99:00:00Z"}
+  - labels: [global_indexing, minimal]
+    input: |-
+      {"watermark": "2026-01-01T00:00:00Z"}
+  - labels: [namespace_deletion, edge_values]
+    input: |-
+      {"namespace_id": -1, "traversal_path": ""}
+  - labels: [namespace_deletion]
+    input: |-
+      {"namespace_id": 9, "traversal_path": "1/9/"}
+  - labels: [namespace_indexing]
+    input: |-
+      {"namespace": 9, "traversal_path": "1/9/", "watermark": "2026-01-01T00:00:00Z", "targets": []}
 fuzz_java:
-  - |
-    interface I { default int f() { return switch (1) { case 1 -> 2; default -> 3; }; } }
-    record R(int a) {}
-    enum E { A, B }
-  - |
-    package com.example;
+  - labels: [syntax_error]
+    input: |
+      class Broken { void f( {
+  - labels: [valid, switch_expression, records, enums]
+    input: |
+      interface I { default int f() { return switch (1) { case 1 -> 2; default -> 3; }; } }
+      record R(int a) {}
+      enum E { A, B }
+  - labels: [valid, class, generics]
+    input: |
+      package com.example;
 
-    import java.util.List;
+      import java.util.List;
 
-    public class Greeter<T extends Base> extends Base implements Named {
-      private final String name;
-      public Greeter(String name) { this.name = name; }
-      @Override public String greet(List<? super T> others) { return others.isEmpty() ? "hi" : "hi " + name; }
-    }
-  - |
-    class Broken { void f( {
+      public class Greeter<T extends Base> extends Base implements Named {
+        private final String name;
+        public Greeter(String name) { this.name = name; }
+        @Override public String greet(List<? super T> others) { return others.isEmpty() ? "hi" : "hi " + name; }
+      }
 fuzz_kotlin:
-  - |
-    package com.example
+  - labels: [syntax_error]
+    input: |
+      fun broken( {
+  - labels: [valid, class, companion_object]
+    input: |
+      package com.example
 
-    import kotlin.collections.List
+      import kotlin.collections.List
 
-    class Greeter(private val name: String) : Base(), Named {
-        override fun greet(other: Greeter? = null): String = other?.let { "hi ${it.name}" } ?: "hi"
-        companion object { const val X = 1 }
-    }
-  - |
-    fun broken( {
-  - |
-    data class P(val a: Int)
-    sealed interface S
-    object O : S
-    suspend fun <T> List<T>.f(block: (T) -> Unit) = forEach(block)
+      class Greeter(private val name: String) : Base(), Named {
+          override fun greet(other: Greeter? = null): String = other?.let { "hi ${it.name}" } ?: "hi"
+          companion object { const val X = 1 }
+      }
+  - labels: [valid, data_class, sealed, extension_function]
+    input: |
+      data class P(val a: Int)
+      sealed interface S
+      object O : S
+      suspend fun <T> List<T>.f(block: (T) -> Unit) = forEach(block)
 fuzz_python:
-  - |
-    def broken(:
-        pass
-  - |
-    @decorator(1)
-    def f(*args, **kwargs):
-        yield from (x for x in args if x)
-  - |
-    import os
-    from typing import Optional
+  - labels: [syntax_error]
+    input: |
+      def broken(:
+          pass
+  - labels: [valid, decorator, generator]
+    input: |
+      @decorator(1)
+      def f(*args, **kwargs):
+          yield from (x for x in args if x)
+  - labels: [valid, class, async, type_hints]
+    input: |
+      import os
+      from typing import Optional
 
-    class Greeter(Base):
-        def __init__(self, name: str) -> None:
-            self.name = name
+      class Greeter(Base):
+          def __init__(self, name: str) -> None:
+              self.name = name
 
-        async def greet(self, other: Optional['Greeter'] = None) -> str:
-            return f"hi {other.name}" if other else "hi"
+          async def greet(self, other: Optional['Greeter'] = None) -> str:
+              return f"hi {other.name}" if other else "hi"
 fuzz_ruby:
-  - |
-    module A::B
-      def self.call(*args, **opts, &blk) = blk&.call(args, opts)
-    end
-  - |
-    class Greeter < Base
-      include Comparable
-      attr_reader :name
-
-      def initialize(name)
-        @name = name
+  - labels: [syntax_error]
+    input: |
+      def broken(
+        if x
+  - labels: [valid, module, endless_method]
+    input: |
+      module A::B
+        def self.call(*args, **opts, &blk) = blk&.call(args, opts)
       end
+  - labels: [valid, class, mixin]
+    input: |
+      class Greeter < Base
+        include Comparable
+        attr_reader :name
 
-      def greet(other = nil)
-        other ? "hi #{other.name}" : "hi"
+        def initialize(name)
+          @name = name
+        end
+
+        def greet(other = nil)
+          other ? "hi #{other.name}" : "hi"
+        end
       end
-    end
-  - |
-    def broken(
-      if x
 fuzz_rust_parser:
-  - |
-    fn broken( {
-  - |
-    macro_rules! m { ($x:expr) => { $x + 1 }; }
-    async fn f<'a>(x: &'a [u8]) -> impl Iterator<Item = &'a u8> + 'a { x.iter() }
-  - |
-    use std::fmt;
+  - labels: [syntax_error]
+    input: |
+      fn broken( {
+  - labels: [valid, macro, async, lifetimes]
+    input: |
+      macro_rules! m { ($x:expr) => { $x + 1 }; }
+      async fn f<'a>(x: &'a [u8]) -> impl Iterator<Item = &'a u8> + 'a { x.iter() }
+  - labels: [valid, struct, generics, impl]
+    input: |
+      use std::fmt;
 
-    pub struct Greeter<T: fmt::Display> { name: T }
+      pub struct Greeter<T: fmt::Display> { name: T }
 
-    impl<T: fmt::Display> Greeter<T> {
-        pub fn greet(&self, other: Option<&Self>) -> String {
-            other.map_or_else(|| "hi".into(), |o| format!("hi {}", o.name))
-        }
-    }
+      impl<T: fmt::Display> Greeter<T> {
+          pub fn greet(&self, other: Option<&Self>) -> String {
+              other.map_or_else(|| "hi".into(), |o| format!("hi {}", o.name))
+          }
+      }
 fuzz_typescript:
-  - |
-    function broken( {
-  - |
-    import { a, type B } from './mod';
-    export class Greeter<T extends B> extends Base implements I {
-      constructor(private readonly name: string) { super(); }
-      greet(other?: Greeter<T>): string { return other ? `hi ${other.name}` : 'hi'; }
-    }
-  - |
-    export default async function* gen(...xs: number[]) { for await (const x of xs) yield x as unknown as string; }
-    const f = (a = 1) => ({ a });
+  - labels: [syntax_error]
+    input: |
+      function broken( {
+  - labels: [valid, class, generics, imports]
+    input: |
+      import { a, type B } from './mod';
+      export class Greeter<T extends B> extends Base implements I {
+        constructor(private readonly name: string) { super(); }
+        greet(other?: Greeter<T>): string { return other ? `hi ${other.name}` : 'hi'; }
+      }
+  - labels: [valid, async_generator, arrow_function]
+    input: |
+      export default async function* gen(...xs: number[]) { for await (const x of xs) yield x as unknown as string; }
+      const f = (a = 1) => ({ a });

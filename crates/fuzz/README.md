@@ -71,7 +71,7 @@ On macOS, use `FUZZ_SANITIZER=NONE mise fuzz:deep` because AddressSanitizer does
 
 ## Corpus and CI
 
-Seeds are in `seeds.yaml`. The grown corpus and crashes are in private GCS buckets ([infra](../../scripts/ci/fuzz/infra/README.md)). To add the grown corpus locally, run `FUZZ_CORPUS_BUCKET=<bucket> FUZZ_CORPUS_TOKEN="$(gcloud auth print-access-token)" mise fuzz:corpus-pull`.
+Seeds are in `seeds.yaml`, each with `labels` that start with its query class or input kind. The grown corpus and crashes are in private GCS buckets ([infra](../../scripts/ci/fuzz/infra/README.md)). To add the grown corpus locally, run `FUZZ_CORPUS_BUCKET=<bucket> FUZZ_CORPUS_TOKEN="$(gcloud auth print-access-token)" mise fuzz:corpus-pull`.
 
 - `fuzz-smoke` replays the corpus on every MR.
 - `fuzz-deep` fuzzes daily and writes the corpus back.
