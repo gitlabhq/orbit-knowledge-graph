@@ -67,32 +67,19 @@ cargo +nightly bolero test <target_name> -p orbit-fuzz
 
 If your default toolchain is nightly, you can omit `+nightly`.
 
-On macOS, AddressSanitizer fails to link. Use `FUZZ_SANITIZER=NONE mise fuzz:deep`.
+On macOS, AddressSanitizer doesn't link, so use `FUZZ_SANITIZER=NONE mise fuzz:deep`.
 
 ## Corpus
 
-Each target's corpus is `tests/<target>/corpus.tar.gz` in Git LFS, unpacked to a gitignored `corpus/`. Run `git lfs install --skip-repo` once.
-
-```sh
-mise fuzz:corpus-unpack   # wipe and re-extract every corpus/
-mise fuzz:corpus-pack     # pack every corpus/ into its archive
-```
-
-Unpacking wipes `corpus/`, so pack a grown corpus before the next run.
+Corpora live in Git LFS as `tests/<target>/corpus.tar.gz`. Run `git lfs install --skip-repo` once. `mise fuzz:corpus-unpack` extracts them and replaces any local `corpus/`, and `mise fuzz:corpus-pack` writes them back.
 
 ## CI
 
-| Job | When | Runs |
-|---|---|---|
-| `fuzz-smoke` | Every MR and main commit, allowed to fail | `mise test:fuzz` |
-| `fuzz-deep` | Daily `SCHEDULE_ONLY=fuzz-deep` schedule, manual on MRs | `scripts/fuzz/deep.sh` in 3 shards |
+- `fuzz-smoke` replays the corpora on every MR and is allowed to fail.
+- `fuzz-deep` runs `mise fuzz:deep` daily in 3 shards and keeps grown corpora and crashes as artifacts for 30 days.
 
-Each shard splits `FUZZ_BUDGET_SECONDS` (2700) across its targets and must finish within the 90-minute timeout, or its artifacts are lost. Grown corpora and crashes are kept as artifacts for 30 days.
+To promote a corpus, copy the artifact `corpus/` directories into `tests/<target>/` and run `mise fuzz:corpus-pack`. To reproduce a crash, add the input to the target's `corpus/` and run `cargo test -p orbit-fuzz --test <target>`.
 
-**Promote a corpus:** copy the artifact `corpus/` directories over `tests/<target>/corpus/`, run `mise fuzz:corpus-pack`, and commit.
-
-**Triage a crash:** copy the input from the `crashes/` artifact into `tests/<target>/corpus/`, reproduce with `cargo test -p orbit-fuzz --test <target>`, fix it, and pack the input so it stays as a regression test.
-
-**Add a target:** add `tests/<target>/fuzz_target.rs`, a `[[test]]` block with `harness = false`, a `mise fuzz:<target>` task, and a few seed inputs, then run `scripts/fuzz/pack-corpus.sh <target>`.
+A new target needs a `[[test]]` block with `harness = false`, a mise task, and packed seed inputs.
 
 See [Fuzzing](../../docs/design-documents/testing.md#fuzzing).
