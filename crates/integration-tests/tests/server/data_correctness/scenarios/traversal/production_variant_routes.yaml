@@ -623,7 +623,8 @@ cases:
           - { from: Pipeline, from_id: 1101, to: Branch, to_id: 2601 }
       edge_count: { CONTAINS: 0 }
       referential_integrity: true
-      sql_contains: [gl_ci_edge, gl_code_edge, gl_edge]
+      sql_contains: [gl_ci_edge, gl_code_edge]
+      sql_not_contains: [gl_edge]
 
   - name: Mixed-table aggregation excludes another namespace
     description: Aggregation across CI and code tables counts only the branch in the authorized namespace

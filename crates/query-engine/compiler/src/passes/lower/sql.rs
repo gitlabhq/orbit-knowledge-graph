@@ -295,6 +295,22 @@ pub fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
     }
 }
 
+pub fn entity_kind_filter(alias: &str, column: &str, entities: &[String]) -> Expr {
+    match entities {
+        [entity] => Expr::eq(Expr::col(alias, column), Expr::string(entity)),
+        _ => Expr::col_in(
+            alias,
+            column,
+            SqlType::String,
+            entities
+                .iter()
+                .map(|entity| serde_json::Value::String(entity.clone()))
+                .collect(),
+        )
+        .unwrap_or_else(|| Expr::lit(false)),
+    }
+}
+
 /// Returns `None` for unsupported filter ops.
 pub fn denorm_tag_expr(
     edge_alias: &str,

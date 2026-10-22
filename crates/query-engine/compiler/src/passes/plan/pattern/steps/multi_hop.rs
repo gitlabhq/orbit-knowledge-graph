@@ -4,7 +4,7 @@
 use ontology::constants::*;
 use query_data_model::OrbitQueryModel;
 
-use super::super::relations::select_edge_layouts;
+use super::super::relations::{hop_routes, select_edge_layouts};
 use super::super::{EdgeRelation, Pattern};
 use super::edge::current_edge_rows;
 use super::{IdSet, RelationBuilder};
@@ -21,12 +21,19 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         let mut expansion = relation.clone();
         let mut source_ids = self.ids(&relation.from_node).cloned();
         let mut target_ids = self.ids(&relation.to_node).cloned();
+        let bounded = |node: &str| {
+            pattern.endpoint_is_selective(node) || pattern.nodes[node].is_namespace_anchored()
+        };
         let reverse = relation.direction != Direction::Both
             && !pattern.endpoint_is_selective(&relation.from_node)
-            && pattern.endpoint_is_selective(&relation.to_node);
+            && (pattern.endpoint_is_selective(&relation.to_node)
+                || !bounded(&relation.from_node) && bounded(&relation.to_node));
         if reverse {
             expansion = expansion.reversed();
             std::mem::swap(&mut source_ids, &mut target_ids);
+        }
+        if source_ids.is_none() && pattern.nodes[&expansion.from_node].is_namespace_anchored() {
+            source_ids = Some(self.node_ids(&expansion.from_node)?);
         }
         select_edge_layouts(
             pattern.model,
@@ -60,6 +67,16 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
     let (start_id, end_id) = relation.direction.edge_columns();
     let path_id = if reverse_output { start_id } else { end_id };
     let from = &pattern.nodes[&relation.from_node];
+    let routes = hop_routes(
+        pattern.model,
+        &relation.rel_types,
+        relation.direction,
+        [
+            from.entity.as_deref(),
+            pattern.nodes[&relation.to_node].entity.as_deref(),
+        ],
+        relation.max_hops,
+    );
 
     let mut first_predicates = vec![live("e1")];
     first_predicates.extend(pattern.entity_kind("e1", &relation.from_node, start_id));
@@ -100,19 +117,24 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
     for depth in 2..=relation.max_hops {
         let previous_alias = format!("_depth_{}", depth - 1);
         let current_alias = format!("e{depth}");
-        let current = hop_rows(
-            graph,
-            pattern,
-            relation,
-            &current_alias,
-            vec![
-                live(&current_alias),
-                membership(
-                    Column::new(&current_alias, start_id),
-                    (previous, end_id.to_string()),
-                ),
-            ],
-        )?;
+        let mut predicates = vec![
+            live(&current_alias),
+            membership(
+                Column::new(&current_alias, start_id),
+                (previous, end_id.to_string()),
+            ),
+        ];
+        if let Some(kinds) = routes
+            .as_ref()
+            .and_then(|routes| routes.start_kinds.get(depth as usize - 1))
+            .filter(|kinds| !kinds.is_empty())
+        {
+            predicates.push(Predicate::EntityKind {
+                column: Column::new(&current_alias, kind_column(start_id)),
+                entities: kinds.clone(),
+            });
+        }
+        let current = hop_rows(graph, pattern, relation, &current_alias, predicates)?;
         let joined = graph.join(
             previous.alias(&previous_alias),
             current.alias(&current_alias),

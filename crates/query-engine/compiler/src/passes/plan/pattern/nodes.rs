@@ -70,6 +70,15 @@ impl NodePlan {
         })
     }
 
+    /// An equality on a namespace anchor (`project_id`, `namespace_id`) bounds the node read to one namespace's traversal path.
+    pub fn is_namespace_anchored(&self) -> bool {
+        self.filters.iter().any(|(_, filter)| {
+            filter.namespace_anchor
+                && filter.filter.rhs_column.is_none()
+                && matches!(filter.filter.op, None | Some(FilterOp::Eq | FilterOp::In))
+        })
+    }
+
     pub fn is_id_pinned_only(&self) -> bool {
         !self.node_ids.is_empty() && self.filters.is_empty() && self.id_range.is_none()
     }

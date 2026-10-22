@@ -620,11 +620,17 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             format!("{} <= {end}", planned_column(column)),
         ],
         Predicate::Live { alias } => vec![format!("{alias}._deleted = false")],
-        Predicate::EntityKind { column, entity } => vec![format!(
-            "{} = {}",
-            planned_column(column),
-            text_literal(entity)
-        )],
+        Predicate::EntityKind { column, entities } => match entities.as_slice() {
+            [entity] => vec![format!(
+                "{} = {}",
+                planned_column(column),
+                text_literal(entity)
+            )],
+            _ => vec![membership(
+                planned_column(column),
+                entities.iter().map(|entity| text_literal(entity)).collect(),
+            )],
+        },
         Predicate::ColumnEq { left, right } => vec![format!(
             "{} = {}",
             planned_column(left),

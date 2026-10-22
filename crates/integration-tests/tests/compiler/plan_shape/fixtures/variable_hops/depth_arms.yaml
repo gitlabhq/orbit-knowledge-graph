@@ -23,8 +23,8 @@ physical:
       expect:
         - (Union ALL AS _orbit_edge_0 (_) (_) (_))
         - (Project 1 AS depth, ... (Filter e1._deleted = false (Deduplicate LimitBy ... (Filter e1.relationship_kind = 'CALLS', e1.source_kind = 'Definition', e1.source_id = 1 (_)))))
-        - (Filter e2._deleted = false (Deduplicate LimitBy ... (Filter e2.relationship_kind = 'CALLS', e2.source_id IN ?.target_id (_))))
-        - (Filter e3._deleted = false (Deduplicate LimitBy ... (Filter e3.relationship_kind = 'CALLS', e3.source_id IN ?.target_id (_))))
+        - (Filter e2._deleted = false (Deduplicate LimitBy ... (Filter e2.relationship_kind = 'CALLS', e2.source_kind = 'Definition', e2.source_id IN ?.target_id (_))))
+        - (Filter e3._deleted = false (Deduplicate LimitBy ... (Filter e3.relationship_kind = 'CALLS', e3.source_kind = 'Definition', e3.source_id IN ?.target_id (_))))
         - (Project 1 AS depth, ... (_))
         - (Project 2 AS depth, ... (_))
         - (Project 3 AS depth, ... (_))

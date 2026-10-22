@@ -57,8 +57,8 @@ pub(super) fn predicate(value: &Predicate) -> Expr {
         Predicate::Live { alias } => sql::deleted_false(alias),
         Predicate::EntityKind {
             column: value,
-            entity,
-        } => Expr::eq(column(value), Expr::string(entity)),
+            entities,
+        } => sql::entity_kind_filter(&value.source, &value.name, entities),
         Predicate::ColumnEq { left, right } => Expr::eq(column(left), column(right)),
         Predicate::RelationshipKinds { alias, kinds } => {
             sql::rel_kind_filter(alias, kinds).unwrap_or_else(|| Expr::lit(true))

@@ -33,12 +33,12 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Join ON u.id = mr.author_id (_) (_))
-            - (Join ON j.pipeline_id = mr.head_pipeline_id (_) (_))
+            - (Join ON u.id = _orbit_edge_0.source_id (_) (_))
+            - (Join ON mr.head_pipeline_id = _orbit_edge_2.source_id (_) (_))
+            - (Filter _orbit_edge_2._deleted = false, _orbit_edge_2.target_tags HAS ANY ['status:failed'] (_))
+            - (Filter _orbit_edge_2.relationship_kind = 'HAS_JOB', _orbit_edge_2.source_kind = 'Pipeline', _orbit_edge_2.target_kind = 'Job', _orbit_edge_2.source_id IN ?.id (Scan Table(gl_ci_edge) AS _orbit_edge_2))
             - (Scan Table(gl_merge_request) AS mr)
-            - (Scan Table(gl_job) AS j)
-            - (Project mr.author_id AS e0_src, mr.id AS e0_dst, mr.id AS e1_src, mr.head_pipeline_id AS e1_dst, j.pipeline_id AS e2_src, j.id AS e2_dst, ... (_))
-          reject: ["(Scan Table(gl_edge) ...)", "(Scan Table(gl_ci_edge) ...)"]
+          reject: ["(Scan Table(gl_job) ...)"]
 
   - name: Stored relationship families compose through shared endpoints
     query:

@@ -93,7 +93,7 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
     fn entity_kind(&self, edge_alias: &str, node: &str, id_column: &str) -> Option<Predicate> {
         Some(Predicate::EntityKind {
             column: Column::new(edge_alias, kind_column(id_column)),
-            entity: self.nodes[node].entity.clone()?,
+            entities: vec![self.nodes[node].entity.clone()?],
         })
     }
 }

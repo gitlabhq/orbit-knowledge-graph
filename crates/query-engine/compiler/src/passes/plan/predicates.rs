@@ -49,7 +49,7 @@ pub enum Predicate {
     },
     EntityKind {
         column: Column,
-        entity: String,
+        entities: Vec<String>,
     },
     ColumnEq {
         left: Column,
