@@ -46,6 +46,7 @@ async fn indexing_status() {
         no_last_completed_at_while_a_first_pass_pages,
         phase_reads_a_checkpoint_written_after_the_previous_read,
         source_unavailable_when_a_plan_completed_with_nothing_indexed,
+        syncing_while_the_first_pass_after_a_missing_table_pages,
     );
 }
 
@@ -328,6 +329,13 @@ async fn source_unavailable_when_a_plan_completed_with_nothing_indexed(ctx: &Tes
     assert_eq!(status.sdlc_phase, Phase::Ready);
     assert_eq!(status.phase, Phase::Ready);
     assert!(status.last_completed_at.is_some());
+}
+
+async fn syncing_while_the_first_pass_after_a_missing_table_pages(ctx: &TestContext) {
+    let status = read_one(ctx, "1/142/").await;
+
+    assert_eq!(entity_phase(&status, "AgentSession"), Some(Phase::Syncing));
+    assert_eq!(status.sdlc_phase, Phase::Syncing);
 }
 
 async fn plan_with_all_attempts_used_is_a_gap(ctx: &TestContext) {

@@ -165,6 +165,23 @@ impl Checkpoint {
         self.indexed_at = Some(Utc::now());
     }
 
+    /// Rebuilds a checkpoint from the columns of its `checkpoint` table row.
+    pub fn decode(
+        watermark: DateTime<Utc>,
+        cursor_json: &str,
+        attempts: i64,
+        indexed_at: Option<DateTime<Utc>>,
+    ) -> Result<Self, CheckpointError> {
+        let decoded = decode_cursor_column(cursor_json)?;
+        Ok(Self {
+            watermark,
+            cursor_values: decoded.as_ref().map(|c| c.cursor.clone()),
+            resume_floor: decoded.and_then(|c| c.floor),
+            attempts,
+            indexed_at,
+        })
+    }
+
     fn progress(&self) -> Progress {
         match (&self.cursor_values, self.indexed_at) {
             (Some(_), _) => Progress::Paging,
@@ -271,7 +288,7 @@ impl ClickHouseCheckpointStore {
             .zip(indexed_ats)
             .map(
                 |((((key, watermark), cursor_json), attempts), indexed_at)| {
-                    decode_checkpoint(watermark, &cursor_json, attempts, indexed_at)
+                    Checkpoint::decode(watermark, &cursor_json, attempts, indexed_at)
                         .map(|checkpoint| (key, checkpoint))
                 },
             )
@@ -350,22 +367,6 @@ fn decode_cursor_column(raw: &str) -> Result<Option<CursorColumn>, CheckpointErr
         return Ok(None);
     }
     serde_json::from_str(raw).map_err(checkpoint_store_error)
-}
-
-fn decode_checkpoint(
-    watermark: DateTime<Utc>,
-    cursor_json: &str,
-    attempts: i64,
-    indexed_at: Option<DateTime<Utc>>,
-) -> Result<Checkpoint, CheckpointError> {
-    let decoded = decode_cursor_column(cursor_json)?;
-    Ok(Checkpoint {
-        watermark,
-        cursor_values: decoded.as_ref().map(|c| c.cursor.clone()),
-        resume_floor: decoded.and_then(|c| c.floor),
-        attempts,
-        indexed_at,
-    })
 }
 
 fn checkpoint_store_error<E: std::fmt::Display>(err: E) -> CheckpointError {

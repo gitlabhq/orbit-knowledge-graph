@@ -24,6 +24,7 @@ SELECT root, plan, \
        maxIf(indexed_at, NOT _deleted AND _version >= tombstoned_at) AS last_completed_at, \
        argMax(attempts, _version) AS attempts, \
        argMax(watermark, _version) AS watermark, \
+       argMax(cursor_values, _version) AS cursor_values, \
        max(_version) AS written_at \
   FROM (SELECT *, \
                toInt64OrZero(splitByChar('.', key)[2]) AS root, \
@@ -58,7 +59,7 @@ impl PlanCheckpoints {
 
         if checkpoint.is_source_unavailable() {
             Phase::SourceUnavailable
-        } else if checkpoint.indexed_at.is_some() {
+        } else if checkpoint.synced_until().is_some() {
             Phase::Ready
         } else if checkpoint.attempts >= MAX_SDLC_ATTEMPTS || now - *written_at > STALE_AFTER {
             Phase::Error
@@ -114,20 +115,21 @@ pub async fn read_plan_checkpoints(
     let attempts = i64::extract_column(&batches, 3).map_err(map_column_extraction_error)?;
     let watermarks =
         DateTime::<Utc>::extract_column(&batches, 4).map_err(map_column_extraction_error)?;
+    let cursors = String::extract_column(&batches, 5).map_err(map_column_extraction_error)?;
     let written_at =
-        DateTime::<Utc>::extract_column(&batches, 5).map_err(map_column_extraction_error)?;
+        DateTime::<Utc>::extract_column(&batches, 6).map_err(map_column_extraction_error)?;
 
-    for (((((root, plan), indexed_at), attempts), watermark), written_at) in roots
+    for ((((((root, plan), indexed_at), attempts), watermark), cursor), written_at) in roots
         .into_iter()
         .zip(plans)
         .zip(indexed_at)
         .zip(attempts)
         .zip(watermarks)
+        .zip(cursors)
         .zip(written_at)
     {
-        let mut checkpoint = Checkpoint::new(watermark);
-        checkpoint.attempts = attempts;
-        checkpoint.indexed_at = indexed_at;
+        let checkpoint = Checkpoint::decode(watermark, &cursor, attempts, indexed_at)
+            .map_err(map_column_extraction_error)?;
         checkpoints.entry(root).or_default().by_plan.insert(
             plan,
             PlanCheckpoint {
