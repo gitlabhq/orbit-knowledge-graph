@@ -812,6 +812,27 @@ fn self_seeded_node_shares_its_lookup_with_its_neighbours() {
 }
 
 #[test]
+fn scoped_id_pinned_pipeline_injects_tight_prefix() {
+    let orbit_query = "MATCH (pl:Pipeline {id: 7})-[:HAS_JOB]->(j:Job) RETURN j.name LIMIT 100";
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "pl", "entity": "Pipeline", "node_ids": [7]},
+            {"id": "j", "entity": "Job", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "HAS_JOB", "from": "pl", "to": "j"}],
+        "limit": 100
+    }"#;
+    let sql = render_scoped(json, orbit_query);
+    assert!(
+        sql.contains("startsWith(j.traversal_path, (SELECT")
+            && sql.contains("FROM gl_pipeline AS _scope WHERE")
+            && sql.contains("(_scope.id = 7)"),
+        "the job read must carry the pinned pipeline's prefix: {sql}"
+    );
+}
+
+#[test]
 fn scoped_aggregation_injects_tight_prefix() {
     let orbit_query = "MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project) WHERE p.id = 1 RETURN p, count(wi) AS c LIMIT 100";
     let json = r#"{

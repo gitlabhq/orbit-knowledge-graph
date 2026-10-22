@@ -3222,12 +3222,24 @@ properties:
             "Definition",
             "File",
             "Directory",
+            "Pipeline",
+            "WorkItem",
+            "Note",
         ] {
             assert!(o.is_anchor(entity), "{entity} declares a lookup");
         }
-        for entity in ["WorkItem", "User", "Nonexistent"] {
+        for entity in ["User", "Runner", "Nonexistent"] {
             assert!(!o.is_anchor(entity), "{entity} declares no lookup");
         }
+        let unscoped: Vec<_> = o
+            .nodes()
+            .filter(|node| o.is_path_scopable(&node.name) && !o.is_anchor(&node.name))
+            .map(|node| node.name.as_str())
+            .collect();
+        assert!(
+            unscoped.is_empty(),
+            "path-scoped nodes without an id lookup: {unscoped:?}"
+        );
         assert!(
             o.traversal_path_lookups()
                 .iter()

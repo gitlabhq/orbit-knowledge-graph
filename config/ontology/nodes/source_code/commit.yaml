@@ -24,6 +24,10 @@ properties:
     nullable: false
     mutable: false
     description: "Synthetic id: sipHash64(target_project_id, sha). Edges must derive target_id with the same formula."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_commit
+      key_column: id
 
   sha:
     type: string
