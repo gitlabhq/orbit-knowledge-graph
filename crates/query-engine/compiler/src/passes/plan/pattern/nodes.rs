@@ -154,7 +154,7 @@ where
     M: OrbitQueryModel + ?Sized,
 {
     let narrowing = narrowing_nodes(pattern);
-    let access: HashMap<String, (bool, bool)> = pattern
+    let access: HashMap<String, (bool, bool, bool)> = pattern
         .nodes
         .values()
         .map(|node| {
@@ -165,7 +165,11 @@ where
         })
         .collect();
     for node in pattern.nodes.values_mut() {
-        (node.joined, node.narrowed) = access[&node.alias];
+        let authorization_only;
+        (node.joined, node.narrowed, authorization_only) = access[&node.alias];
+        if authorization_only {
+            node.columns = Some(ColumnSelection::List(vec![]));
+        }
     }
 }
 
@@ -200,7 +204,7 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
     node: &NodePlan,
     condition_nodes: &HashSet<String>,
     narrowing: &HashSet<String>,
-) -> (bool, bool) {
+) -> (bool, bool, bool) {
     let input = pattern.input;
     let group_target = input
         .aggregation
@@ -241,14 +245,14 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
         && !metric_target
         && !ordered
         && !local_predicate;
-    let joined = input.relationships.is_empty()
+    let joined_as_rows = input.relationships.is_empty()
         || !pattern.model.supports_deferred_node_loading()
         || group_target
         || metric_target
         || ordered
         || local_predicate
-        || authorized_from_table
         || uncovered_filter && !filter_only;
+    let joined = joined_as_rows || authorized_from_table;
     let narrowed = !joined && narrowing.contains(&node.alias) && !node.uses_default_pk();
-    (joined || narrowed, narrowed)
+    (joined || narrowed, narrowed, joined && !joined_as_rows)
 }
