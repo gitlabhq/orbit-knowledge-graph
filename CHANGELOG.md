@@ -1,3 +1,9 @@
+## [0.154.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.153.0...v0.154.0) (2026-10-22)
+
+### Features
+
+* **dashboards:** indexer at a glance overview ([5f7a593](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5f7a5935c0ea78bc6008d8831d2a3f3fa65faee4)) by Bohdan Parkhomchuk
+
 ## [0.153.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.152.0...v0.153.0) (2026-10-22)
 
 ### Features
