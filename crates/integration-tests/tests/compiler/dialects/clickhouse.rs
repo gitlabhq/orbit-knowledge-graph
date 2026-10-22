@@ -779,6 +779,39 @@ fn scoped_traversal_injects_tight_prefix() {
 }
 
 #[test]
+fn self_seeded_node_keeps_its_own_read_plain() {
+    let orbit_query = "MATCH (mr:MergeRequest {id: 7}) RETURN mr LIMIT 1";
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [7]}],
+        "limit": 1
+    }"#;
+    let sql = render_scoped(json, orbit_query);
+    assert!(!sql.contains(SCOPED_LOOKUP), "{sql}");
+}
+
+#[test]
+fn self_seeded_node_still_scopes_its_neighbours() {
+    let orbit_query = "MATCH (mr:MergeRequest {id: 7})-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff) RETURN d.id LIMIT 10";
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "node_ids": [7]},
+            {"id": "d", "entity": "MergeRequestDiff", "columns": ["id"]}
+        ],
+        "relationships": [{"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"}],
+        "limit": 10
+    }"#;
+    let sql = render_scoped(json, orbit_query);
+    assert!(
+        sql.contains("startsWith(d.traversal_path, (SELECT")
+            && sql.contains("FROM gl_merge_request AS _scope WHERE")
+            && !sql.contains("startsWith(mr.traversal_path, (SELECT"),
+        "{sql}"
+    );
+}
+
+#[test]
 fn scoped_aggregation_injects_tight_prefix() {
     let orbit_query = "MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project) WHERE p.id = 1 RETURN p, count(wi) AS c LIMIT 100";
     let json = r#"{

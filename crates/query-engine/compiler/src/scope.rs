@@ -8,6 +8,7 @@ pub use application::apply_plan;
 pub struct QueryScope {
     nodes: HashMap<String, ScopeProof>,
     relationships: Vec<Option<ScopeProof>>,
+    self_seeded: HashSet<String>,
 }
 
 impl QueryScope {
@@ -21,13 +22,31 @@ impl QueryScope {
             .iter()
             .map(|relationship| relationship_proof(input, relationship, &nodes, model))
             .collect();
+        let anchors = anchor_fks(model);
+        let self_seeded = input
+            .nodes
+            .iter()
+            .filter(|node| {
+                let keys = scope_keys(node, &anchors);
+                !keys.is_empty()
+                    && keys
+                        .iter()
+                        .all(|key| Some(key.entity.as_str()) == node.entity.as_deref())
+            })
+            .map(|node| node.id.clone())
+            .collect();
         Self {
             nodes,
             relationships,
+            self_seeded,
         }
     }
 
+    /// A node seeded only by its own id keeps its read plain: the lookup would repeat the id probe.
     pub fn node(&self, alias: &str) -> Option<&ScopeProof> {
+        if self.self_seeded.contains(alias) {
+            return None;
+        }
         self.nodes.get(alias)
     }
 
@@ -160,11 +179,7 @@ pub fn derive_scope_proofs(
     ) {
         return HashMap::new();
     }
-    let anchor_fks: Vec<_> = model
-        .anchor_foreign_keys()
-        .iter()
-        .map(|(column, entity)| (column.as_str(), model.graph().entity(*entity).name.as_str()))
-        .collect();
+    let anchor_fks = anchor_fks(model);
     let seed: HashMap<String, ScopeProof> = input
         .nodes
         .iter()
@@ -187,6 +202,14 @@ pub fn derive_scope_proofs(
         })
         .collect();
     propagate_scope_proofs(input, model, &seed)
+}
+
+fn anchor_fks(model: &(impl query_data_model::OrbitQueryModel + ?Sized)) -> Vec<(&str, &str)> {
+    model
+        .anchor_foreign_keys()
+        .iter()
+        .map(|(column, entity)| (column.as_str(), model.graph().entity(*entity).name.as_str()))
+        .collect()
 }
 
 fn propagate_scope_proofs(
