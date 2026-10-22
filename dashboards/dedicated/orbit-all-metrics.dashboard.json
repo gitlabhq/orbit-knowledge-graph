@@ -3527,7 +3527,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
+      "description": "Duration of a full handler invocation across all its pipelines.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -3546,126 +3546,6 @@
         "y": 180
       },
       "id": 66,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p50 {{entity}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p95 {{entity}}",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m])))",
-          "legendFormat": "p99 {{entity}}",
-          "refId": "C"
-        }
-      ],
-      "title": "gkg_indexer_sdlc_freshness_lag_seconds — p50/p95/p99",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 180
-      },
-      "id": 67,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "sum by (entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[5m]))",
-          "legendFormat": "{{entity}}",
-          "refId": "A"
-        }
-      ],
-      "title": "gkg_indexer_sdlc_freshness_lag_seconds — observation rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "Duration of a full handler invocation across all its pipelines.",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "showPoints": "auto"
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 180
-      },
-      "id": 68,
       "options": {
         "legend": {
           "calcs": [
@@ -3731,10 +3611,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
-        "y": 188
+        "x": 8,
+        "y": 180
       },
-      "id": 69,
+      "id": 67,
       "options": {
         "legend": {
           "calcs": [
@@ -3782,10 +3662,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
-        "y": 188
+        "x": 16,
+        "y": 180
       },
-      "id": 70,
+      "id": 68,
       "options": {
         "legend": {
           "calcs": [
@@ -3851,10 +3731,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
+        "x": 0,
         "y": 188
       },
-      "id": 71,
+      "id": 69,
       "options": {
         "legend": {
           "calcs": [
@@ -3902,10 +3782,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
-        "y": 196
+        "x": 8,
+        "y": 188
       },
-      "id": 72,
+      "id": 70,
       "options": {
         "legend": {
           "calcs": [
@@ -3953,10 +3833,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
-        "y": 196
+        "x": 16,
+        "y": 188
       },
-      "id": 73,
+      "id": 71,
       "options": {
         "legend": {
           "calcs": [
@@ -4004,10 +3884,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 16,
+        "x": 0,
         "y": 196
       },
-      "id": 74,
+      "id": 72,
       "options": {
         "legend": {
           "calcs": [
@@ -4073,10 +3953,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 0,
-        "y": 204
+        "x": 8,
+        "y": 196
       },
-      "id": 75,
+      "id": 73,
       "options": {
         "legend": {
           "calcs": [
@@ -4124,10 +4004,10 @@
       "gridPos": {
         "h": 8,
         "w": 8,
-        "x": 8,
-        "y": 204
+        "x": 16,
+        "y": 196
       },
-      "id": 76,
+      "id": 74,
       "options": {
         "legend": {
           "calcs": [
@@ -4153,6 +4033,126 @@
         }
       ],
       "title": "gkg_indexer_sdlc_watermark_lag_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 204
+      },
+      "id": 75,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p50 {{entity}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p95 {{entity}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[5m])))",
+          "legendFormat": "p99 {{entity}}",
+          "refId": "C"
+        }
+      ],
+      "title": "gkg_indexer_sdlc_freshness_lag_seconds — p50/p95/p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$ORBIT_DS"
+      },
+      "description": "One observation per enabled namespace and plan on the served schema version: seconds since it was last fully in sync with the datalake, 0 when in sync.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 204
+      },
+      "id": 76,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "expr": "sum by (entity) (rate(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[5m]))",
+          "legendFormat": "{{entity}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gkg_indexer_sdlc_freshness_lag_seconds — observation rate",
       "type": "timeseries"
     },
     {
