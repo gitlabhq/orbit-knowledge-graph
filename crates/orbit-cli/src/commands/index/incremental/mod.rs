@@ -276,7 +276,13 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
         let output = match snapshot {
             true => project.index_changed().or_else(|error| match cancelled() {
                 true => Err(error),
-                false => project.index_all(),
+                false => {
+                    orbit_log_fields::warn!(
+                        expanded(ERROR_MESSAGE) = %format_args!("{error:#}"),
+                        "incremental index failed; falling back to full index"
+                    );
+                    project.index_all()
+                }
             }),
             false => project.index_all(),
         }
