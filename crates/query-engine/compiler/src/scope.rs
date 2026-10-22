@@ -59,7 +59,7 @@ use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
 use crate::ast::{Expr, Function, Op, Query, SelectExpr, SqlType, TableRef};
-use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode};
+use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
 
 const LOOKUP_ALIAS: &str = "_scope";
 const UNRESOLVED_PATH: &str = "0/";
@@ -176,6 +176,12 @@ pub fn derive_scope_proofs(
                 .then(|| (node.id.clone(), ScopeProof::from_sources(lookups)))
         })
         .collect();
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return HashMap::new();
+    }
     let mut proofs = propagate_scope_proofs(input, model, &seed);
     proofs.retain(|alias, _| {
         input

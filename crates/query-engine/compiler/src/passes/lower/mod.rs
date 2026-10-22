@@ -159,7 +159,7 @@ pub fn emit(plan: &QueryPlan, input: &Input, scope: Option<&QueryScope>) -> Resu
         QueryPlan::Traversal(plan) => query_types::traversal::emit(plan, input, scope)?,
         QueryPlan::Aggregation(plan) => query_types::aggregation::emit(plan, input, scope)?,
         QueryPlan::Neighbors(plan) => query_types::neighbors::emit(plan, input)?,
-        QueryPlan::PathFinding(plan) => query_types::pathfinding::emit(plan, input, scope)?,
+        QueryPlan::PathFinding(plan) => query_types::pathfinding::emit(plan, input)?,
         QueryPlan::Hydration(plan) => query_types::hydration::emit(plan)?,
     };
     let edges = plan
