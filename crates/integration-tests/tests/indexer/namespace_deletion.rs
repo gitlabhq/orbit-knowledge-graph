@@ -5,12 +5,20 @@ use super::common;
 use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
-use common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, handler_context};
+use common::{
+    GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, create_namespace_with_path, create_project,
+    handler_context, namespace_envelope, namespace_handler,
+};
+use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::handler::Handler;
 use indexer::modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, DeletionMetrics, NamespaceDeletionHandler,
     NamespaceDeletionStore,
 };
+use indexer::orchestrator::scheduled::{
+    NamespaceDeletionScheduler, ScheduledTask, ScheduledTaskMetrics,
+};
+use indexer::testkit::MockNatsServices;
 use indexer::topic::NamespaceDeletionRequest;
 use indexer::types::{Envelope, Event};
 use orbit_utils::traversal_path::TraversalPath;
@@ -302,6 +310,151 @@ async fn reconcile_tombstones_old_path_after_move() {
     assert_active_id_count(&context, CONTROL_PROJECT_ID, 1).await;
 }
 
+const LARGE_ROOT_PATH: &str = "1/400/";
+const LARGE_ROOT_CURRENT_PREFIX: &str = "1/400/10/";
+const LARGE_ROOT_STALE_PREFIX: &str = "1/400/20/";
+
+#[tokio::test]
+async fn reconcile_handles_route_sets_larger_than_a_request_uri() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+
+    context
+        .execute(&format!(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path, deleted) VALUES \
+             (400, '{LARGE_ROOT_PATH}', false)"
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO project_namespace_traversal_paths (id, traversal_path, deleted) \
+             SELECT number, concat('{LARGE_ROOT_CURRENT_PREFIX}', toString(1000000000 + number), '/'), false \
+             FROM numbers(3000)"
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, id, _version, _deleted) \
+             SELECT concat('{LARGE_ROOT_CURRENT_PREFIX}', toString(1000000000 + number), '/'), number, \
+                    '2024-01-01 00:00:00.000000', false \
+             FROM numbers(3000)",
+            t("gl_project")
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, id, _version, _deleted) \
+             SELECT concat('{LARGE_ROOT_STALE_PREFIX}', toString(1000000000 + number), '/'), 10000 + number, \
+                    '2024-01-01 00:00:00.000000', false \
+             FROM numbers(2000)",
+            t("gl_project")
+        ))
+        .await;
+
+    reconcile_root(&context, &ontology, LARGE_ROOT_PATH).await;
+
+    assert_active_row_count(&context, &t("gl_project"), LARGE_ROOT_STALE_PREFIX, 0).await;
+    assert_active_row_count(&context, &t("gl_project"), LARGE_ROOT_CURRENT_PREFIX, 3000).await;
+}
+
+const MOVED_ROOT_ID: i64 = 500;
+const MOVED_ROOT_PATH: &str = "1/500/";
+const MOVED_FROM_PATH: &str = "1/500/510/5000/";
+const MOVED_TO_PATH: &str = "1/500/520/5000/";
+
+#[tokio::test]
+async fn scheduled_reconcile_removes_a_moved_project_under_a_root_over_the_uri_cap() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
+
+    create_namespace_with_path(&context, MOVED_ROOT_ID, None, 20, MOVED_ROOT_PATH, None).await;
+    create_namespace_with_path(&context, 510, Some(MOVED_ROOT_ID), 20, "1/500/510/", None).await;
+    create_namespace_with_path(&context, 520, Some(MOVED_ROOT_ID), 20, "1/500/520/", None).await;
+    create_project(&context, 5000, 510, 1, 20, MOVED_FROM_PATH).await;
+    context
+        .execute(&format!(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path) \
+             SELECT 100000 + number, concat('{MOVED_ROOT_PATH}', toString(1000000000 + number), '/') \
+             FROM numbers(3000)"
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO siphon_knowledge_graph_enabled_namespaces \
+             (id, root_namespace_id, traversal_path) VALUES \
+             ({MOVED_ROOT_ID}, {MOVED_ROOT_ID}, '{MOVED_ROOT_PATH}')"
+        ))
+        .await;
+
+    index_moved_root(&context).await;
+    assert_active_row_count(&context, &t("gl_project"), MOVED_FROM_PATH, 1).await;
+
+    context
+        .execute(&format!(
+            "INSERT INTO {} (key, watermark, cursor_values, indexed_at) VALUES \
+             ('ns.{MOVED_ROOT_ID}.Project', '2024-01-20 12:00:00.000000', 'null', '2024-01-20 12:00:00.000000')",
+            t("checkpoint")
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO project_namespace_traversal_paths (id, traversal_path, version) VALUES \
+             (5000, '{MOVED_TO_PATH}', '2030-01-01 00:00:00')"
+        ))
+        .await;
+    context
+        .execute(
+            "INSERT INTO siphon_projects \
+             (id, name, description, visibility_level, path, namespace_id, creator_id, \
+              created_at, updated_at, archived, star_count, last_activity_at, _siphon_replicated_at) \
+             VALUES (5000, 'project-5000', NULL, 20, 'project-5000', 520, 1, \
+                     '2023-01-01', '2024-01-20', false, 0, '2024-01-20', '2024-01-20 18:00:00')",
+        )
+        .await;
+
+    index_moved_root(&context).await;
+    assert_active_row_count(&context, &t("gl_project"), MOVED_FROM_PATH, 1).await;
+    assert_active_row_count(&context, &t("gl_project"), MOVED_TO_PATH, 1).await;
+
+    run_namespace_deletion_scheduler(&context).await;
+
+    for table in [t("gl_project"), t("gl_edge")] {
+        assert_active_row_count(&context, &table, MOVED_FROM_PATH, 0).await;
+    }
+    assert_active_row_count(&context, &t("gl_project"), MOVED_TO_PATH, 1).await;
+    assert_active_row_count(&context, &t("gl_group"), MOVED_ROOT_PATH, 3).await;
+}
+
+async fn index_moved_root(context: &TestContext) {
+    namespace_handler(context)
+        .await
+        .handle(handler_context(), namespace_envelope(1, MOVED_ROOT_ID))
+        .await
+        .expect("namespace indexing must succeed");
+}
+
+async fn run_namespace_deletion_scheduler(context: &TestContext) {
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let graph = Arc::new(context.config.build_client("graph"));
+    let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
+        Arc::new(context.config.build_client("graph")),
+        graph.clone(),
+        &ontology,
+    ));
+    NamespaceDeletionScheduler::new(
+        store,
+        Arc::new(ClickHouseCheckpointStore::new(graph)),
+        Arc::new(MockNatsServices::new()),
+        ScheduledTaskMetrics::new(),
+        orbit_server_config::AppConfig::embedded_defaults()
+            .schedule
+            .tasks
+            .namespace_deletion,
+    )
+    .run()
+    .await
+    .expect("namespace deletion scheduler must succeed");
+}
+
 async fn seed_duplicated_across_old_and_new_path(context: &TestContext) {
     context
         .execute(&format!(
@@ -424,7 +577,7 @@ async fn assert_active_row_count(
         ))
         .await;
 
-    let actual = result.first().map_or(0, |batch| batch.num_rows());
+    let actual: usize = result.iter().map(|batch| batch.num_rows()).sum();
     assert_eq!(
         actual, expected,
         "{table}: expected {expected} active rows for traversal_path '{traversal_path}', got {actual}"
