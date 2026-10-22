@@ -10,7 +10,6 @@ use crate::passes::plan::graph::{
 use crate::passes::plan::predicates::Column;
 use crate::scope::{QueryScope, scope_predicate};
 
-/// What every read in the graph needs at emit time: the graph, which relations are CTEs, and the path bounds.
 pub(super) struct Reads<'a> {
     graph: &'a RelationGraph,
     materialized: HashSet<RelationId>,

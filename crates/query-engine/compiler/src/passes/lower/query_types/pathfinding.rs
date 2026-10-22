@@ -11,6 +11,7 @@ use crate::ast::*;
 use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
+use crate::scope::{QueryScope, scope_predicate};
 
 use super::Emitted;
 use crate::passes::lower::sql::{
@@ -19,7 +20,11 @@ use crate::passes::lower::sql::{
 };
 use crate::passes::plan::{NodePlan, PathFinding, Plan};
 
-pub(crate) fn emit(plan: &Plan<PathFinding>, input: &Input) -> Result<Emitted> {
+pub(crate) fn emit(
+    plan: &Plan<PathFinding>,
+    input: &Input,
+    scope: Option<&QueryScope>,
+) -> Result<Emitted> {
     let path_text = |column: &str| {
         OrderExpr::asc(Expr::func(
             Function::ToString,
@@ -28,12 +33,21 @@ pub(crate) fn emit(plan: &Plan<PathFinding>, input: &Input) -> Result<Emitted> {
     };
     Ok(Emitted {
         stable_order: vec![path_text(path_column()), path_text(edge_kinds_column())],
-        ..Emitted::new(emit_pathfinding(plan, input)?)
+        ..Emitted::new(emit_pathfinding(plan, input, scope)?)
     })
 }
 
-fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
+fn emit_pathfinding(
+    plan: &Plan<PathFinding>,
+    input: &Input,
+    scope: Option<&QueryScope>,
+) -> Result<Node> {
     let pf = &plan.operation;
+    let anchor_bound = |alias: &str, carries: bool| {
+        carries
+            .then(|| scope?.node(alias).map(|proof| scope_predicate(proof, "e1")))
+            .flatten()
+    };
     let start_np = &plan.nodes[&pf.start];
     let end_np = &plan.nodes[&pf.end];
 
@@ -76,7 +90,10 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
     let forward_cte = Cte::new(
         FORWARD_CTE,
         build_frontier(
-            start_anchor.edge_filter,
+            Expr::and_all([
+                start_anchor.edge_filter,
+                anchor_bound(&pf.start, pf.forward_first_hop_carries_path),
+            ]),
             pf.forward_depth,
             FDir::Forward,
             &frontier_opts,
@@ -86,7 +103,10 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
         Some(Cte::new(
             BACKWARD_CTE,
             build_frontier(
-                end_anchor.edge_filter.clone(),
+                Expr::and_all([
+                    end_anchor.edge_filter.clone(),
+                    anchor_bound(&pf.end, pf.backward_first_hop_carries_path),
+                ]),
                 pf.backward_depth,
                 FDir::Backward,
                 &FrontierOpts {

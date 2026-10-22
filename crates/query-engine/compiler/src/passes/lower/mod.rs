@@ -50,23 +50,6 @@ impl NodeBinding {
         }
     }
 
-    pub fn role_identity(&self) -> Result<Option<&Expr>> {
-        Ok(match self {
-            Self::Values {
-                identity,
-                table_alias: None,
-                ..
-            } => Some(identity),
-            Self::Projected { role_identity } => role_identity.as_ref(),
-            Self::Filtered => {
-                return Err(QueryError::Lowering(
-                    "protected filtered node requires a visible identity".into(),
-                ));
-            }
-            _ => None,
-        })
-    }
-
     fn identity(&self) -> &Expr {
         let Self::Values { identity, .. } = self else {
             unreachable!("projected bindings supply their own ordering")
@@ -176,7 +159,7 @@ pub fn emit(plan: &QueryPlan, input: &Input, scope: Option<&QueryScope>) -> Resu
         QueryPlan::Traversal(plan) => query_types::traversal::emit(plan, input, scope)?,
         QueryPlan::Aggregation(plan) => query_types::aggregation::emit(plan, input, scope)?,
         QueryPlan::Neighbors(plan) => query_types::neighbors::emit(plan, input)?,
-        QueryPlan::PathFinding(plan) => query_types::pathfinding::emit(plan, input)?,
+        QueryPlan::PathFinding(plan) => query_types::pathfinding::emit(plan, input, scope)?,
         QueryPlan::Hydration(plan) => query_types::hydration::emit(plan)?,
     };
     let edges = plan

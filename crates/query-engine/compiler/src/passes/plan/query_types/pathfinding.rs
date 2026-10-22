@@ -18,6 +18,8 @@ pub struct PathFinding {
     pub forward_first_hop_filter: Option<Vec<String>>,
     pub backward_first_hop_filter: Option<Vec<String>>,
     pub scoped_by_tp: bool,
+    pub forward_first_hop_carries_path: bool,
+    pub backward_first_hop_carries_path: bool,
 }
 
 pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
@@ -58,6 +60,59 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
         .as_deref()
         .and_then(|entity| endpoint_kinds(entity, false));
 
+    let carries_path = |entity: Option<&str>, kinds: Option<&Vec<String>>, source: bool| {
+        let Some(entity) = entity else {
+            return false;
+        };
+        let kinds = kinds
+            .or(Some(&path.rel_types))
+            .filter(|kinds| !crate::passes::normalize::is_wildcard(kinds) && !kinds.is_empty());
+        let Some(kinds) = kinds else {
+            return false;
+        };
+        let graph = model.graph();
+        let mut found = false;
+        let carries = kinds.iter().all(|kind| {
+            model.relationship_routes(kind).iter().all(|route| {
+                route
+                    .variants()
+                    .filter(|variant| {
+                        let end = if source {
+                            variant.source
+                        } else {
+                            variant.target
+                        };
+                        graph.entity(end).name == entity
+                    })
+                    .all(|variant| {
+                        found = true;
+                        model
+                            .variant_scope(
+                                kind,
+                                &graph.entity(variant.source).name,
+                                &graph.entity(variant.target).name,
+                            )
+                            .is_some_and(|scope| {
+                                scope.is_scope_preserving()
+                                    || source && scope.edge_path_is_source_path()
+                                    || !source && scope.edge_path_is_target_path()
+                            })
+                    })
+            })
+        });
+        found && carries
+    };
+    let forward_first_hop_carries_path = carries_path(
+        start_node.entity.as_deref(),
+        forward_first_hop_filter.as_ref(),
+        true,
+    );
+    let backward_first_hop_carries_path = carries_path(
+        end_node.entity.as_deref(),
+        backward_first_hop_filter.as_ref(),
+        false,
+    );
+
     let max_depth = path.max_depth;
     let mut plan = Plan::new(PathFinding {
         start: start.alias.clone(),
@@ -69,6 +124,8 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
         forward_first_hop_filter,
         backward_first_hop_filter,
         scoped_by_tp: start.has_traversal_path && end.has_traversal_path,
+        forward_first_hop_carries_path,
+        backward_first_hop_carries_path,
     });
     plan.nodes.insert(start.alias.clone(), start);
     plan.nodes.insert(end.alias.clone(), end);

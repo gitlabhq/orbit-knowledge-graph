@@ -223,6 +223,18 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
         .is_some_and(|order| order.node == node.alias);
     let local_predicate = condition_nodes.contains(&node.alias) && !pattern.holds_fk(&node.alias);
     let uncovered_filter = pattern.has_uncovered_filter(node);
+    let selectable = !pattern.aggregate()
+        || input
+            .aggregation_row_nodes(pattern.model)
+            .contains(node.alias.as_str());
+    let authorized_from_table = selectable
+        && (!node.uses_default_pk()
+            || node.entity.as_deref().is_some_and(|entity| {
+                pattern
+                    .model
+                    .entity_minimum_access_level(entity)
+                    .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
+            }));
     let filter_only = pattern.aggregate()
         && uncovered_filter
         && !group_target
@@ -235,6 +247,7 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
         || metric_target
         || ordered
         || local_predicate
+        || authorized_from_table
         || uncovered_filter && !filter_only;
     let narrowed = !joined && narrowing.contains(&node.alias) && !node.uses_default_pk();
     (joined || narrowed, narrowed)
