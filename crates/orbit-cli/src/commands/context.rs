@@ -286,7 +286,7 @@ fn print_anchored(repo: Option<std::path::PathBuf>, db: Option<std::path::PathBu
         && !code.trim().is_empty()
     {
         println!(
-            "\ncode this refers to (read one with `{launcher} context <path>:<lines>`):\n{}",
+            "\ncode this refers to, from the local checkout (edit it directly; `{launcher} context <path>:<lines>` reads more):\n{}",
             code.trim_end()
         );
     }
