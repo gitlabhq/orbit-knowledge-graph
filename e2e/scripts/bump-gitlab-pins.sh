@@ -41,6 +41,12 @@ fi
 
 command -v yq >/dev/null 2>&1 || { echo "yq (mikefarah v4+) required"; exit 1; }
 
+IMAGE_REPOSITORY=$(yq -r "$GITLAB_PINS.repository // \"\"" "$VERSIONS")
+if [[ -n "$IMAGE_REPOSITORY" ]]; then
+  log "Skipping $GITLAB_PINS: its images are pinned by hand from $IMAGE_REPOSITORY"
+  exit 0
+fi
+
 # The devel repo publishes a fresh chart every few hours tagged with the
 # source pipeline ID. We pick the one with the newest `created` timestamp.
 log "Finding latest chart version in $CHART_INDEX"

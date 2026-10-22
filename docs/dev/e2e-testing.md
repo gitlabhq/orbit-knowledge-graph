@@ -106,6 +106,7 @@ The `e2e-pin-bump` job runs on a daily schedule. It runs these scripts:
 
 - `bump-gitlab-pins.sh`: the newest devel chart, the `gitlab-org/gitlab` ref, and the four CNG image digests.
   It runs again for each lane in `gitlab_lanes`, with the release chart, stable branch, and `<lane>-stable` images of that version.
+  It skips a lane that sets `repository`, because that lane's images are pinned by hand from another registry.
 - `bump-siphon-pins.sh`: the newest Siphon chart in the `stable` channel and the newest `0.0.N-beta` image.
 - `bump-orbit-pins.sh`: the latest Orbit release tag. You change the chart pin manually.
 
