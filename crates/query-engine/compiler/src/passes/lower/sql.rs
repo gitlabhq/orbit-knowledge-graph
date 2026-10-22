@@ -277,37 +277,22 @@ pub fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
     if crate::passes::normalize::is_wildcard(types) {
         return None;
     }
-    if types.len() == 1 {
-        Some(Expr::eq(
-            Expr::col(alias, RELATIONSHIP_KIND_COLUMN),
-            Expr::string(&types[0]),
-        ))
-    } else {
-        Expr::col_in(
-            alias,
-            RELATIONSHIP_KIND_COLUMN,
-            SqlType::String,
-            types
-                .iter()
-                .map(|t| serde_json::Value::String(t.clone()))
-                .collect(),
-        )
-    }
+    string_filter(alias, RELATIONSHIP_KIND_COLUMN, types)
 }
 
-pub fn entity_kind_filter(alias: &str, column: &str, entities: &[String]) -> Expr {
-    match entities {
-        [entity] => Expr::eq(Expr::col(alias, column), Expr::string(entity)),
+pub fn string_filter(alias: &str, column: &str, values: &[String]) -> Option<Expr> {
+    match values {
+        [value] => Some(Expr::eq(Expr::col(alias, column), Expr::string(value))),
         _ => Expr::col_in(
             alias,
             column,
             SqlType::String,
-            entities
+            values
                 .iter()
-                .map(|entity| serde_json::Value::String(entity.clone()))
+                .cloned()
+                .map(serde_json::Value::String)
                 .collect(),
-        )
-        .unwrap_or_else(|| Expr::lit(false)),
+        ),
     }
 }
 

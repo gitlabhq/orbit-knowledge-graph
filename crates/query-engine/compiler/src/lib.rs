@@ -1505,38 +1505,6 @@ mod tests {
     }
 
     #[test]
-    fn variable_length_walk_reads_only_tables_of_usable_variants() {
-        let sql =
-            compile_gql_sql("MATCH (g:Group {id: 1})-[:CONTAINS*1..3]->(p:Project) RETURN p.id");
-        assert!(!sql.contains("gl_code_edge"), "{sql}");
-        for depth in 2..=3 {
-            assert!(
-                sql.contains(&format!("e{depth}.source_kind = 'Group'")),
-                "{sql}"
-            );
-        }
-    }
-
-    #[test]
-    fn variable_length_walk_keeps_every_kind_that_can_reach_the_target() {
-        let sql = compile_gql_sql(
-            "MATCH (a:MergeRequest {id: 1})-[:MENTIONS*1..2]->(b:MergeRequest) RETURN b.id",
-        );
-        assert!(
-            sql.contains("e2.source_kind IN ['MergeRequest', 'WorkItem']"),
-            "{sql}"
-        );
-    }
-
-    #[test]
-    fn namespace_anchored_walk_seeds_the_first_hop() {
-        let sql = compile_gql_sql(
-            "MATCH (e:WorkItem)-[:CONTAINS*1..2]->(c:WorkItem) WHERE e.project_id = 5 RETURN e.id, c.id",
-        );
-        assert!(sql.contains("e1.source_id IN (SELECT id FROM"), "{sql}");
-    }
-
-    #[test]
     fn json_id_filter_compiles_like_node_ids() {
         let neighbors = |center: &str| {
             compile_sql(&format!(

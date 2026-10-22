@@ -2,7 +2,7 @@
 //! shortcut), ordered most selective first along a connected chain.
 
 use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use query_data_model::OrbitQueryModel;
 
@@ -10,6 +10,7 @@ use super::{EdgeRelation, Fk, NodePlan};
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::*;
+use crate::passes::normalize::is_wildcard;
 use crate::passes::plan::filters::{FilterOwner, ordered_filters};
 
 impl EdgeRelation {
@@ -94,7 +95,7 @@ where
                     ],
                     relationship.hops.max,
                 )
-                .map(|routes| routes.tables)
+                .map(|routes| routes.tables.into_iter().collect::<Vec<_>>())
                 .filter(|tables| !tables.is_empty())
                 .unwrap_or_else(|| model.relationship_tables(&relationship.types))
             } else {
@@ -144,7 +145,7 @@ where
                 })
                 .flatten()
                 .filter(|key| {
-                    fk_beats_edge_scan(input, model, nodes, relationship, key, &edge_tables)
+                    prefer_foreign_key(input, model, nodes, relationship, key, &edge_tables)
                 });
             let filters = ordered_filters(
                 &relationship.filters,
@@ -175,11 +176,9 @@ where
         .collect()
 }
 
-/// The foreign-key shortcut filters the holder table by its key column. When that column is outside the
-/// holder's sort key and is not a namespace anchor (the scope proof bounds those), nothing else bounds the
-/// holder, and the other endpoint arrives as an id set through another relation, the filter reads the
-/// holder's whole namespace; an edge table keyed on that endpoint reads only the reached rows.
-fn fk_beats_edge_scan<M: OrbitQueryModel + ?Sized>(
+/// Keeps the foreign-key shortcut unless it would filter an unbounded holder by a column outside its sort key
+/// with ids reached through another relation, while an edge table can look that endpoint up by key.
+fn prefer_foreign_key<M: OrbitQueryModel + ?Sized>(
     input: &Input,
     model: &M,
     nodes: &HashMap<String, NodePlan>,
@@ -187,41 +186,41 @@ fn fk_beats_edge_scan<M: OrbitQueryModel + ?Sized>(
     key: &Fk,
     edge_tables: &[String],
 ) -> bool {
-    let Some(holder_table) = input
-        .entity_of(&key.node)
-        .and_then(|e| model.entity_table(e))
-    else {
-        return true;
-    };
     let other = if key.node == relationship.from {
         &relationship.to
     } else {
         &relationship.from
     };
-    let bounded = bounded_without(input, nodes, relationship);
-    let (source_node, _) = relationship
+    let other_column = if relationship
         .direction
-        .stored_order(&relationship.from, &relationship.to);
-    let other_column = if source_node == other {
+        .stored_order(&relationship.from, &relationship.to)
+        .0
+        == other
+    {
         ontology::constants::SOURCE_ID_COLUMN
     } else {
         ontology::constants::TARGET_ID_COLUMN
     };
+    let holder_keyed = input
+        .entity_of(&key.node)
+        .and_then(|entity| model.entity_table(entity))
+        .is_none_or(|table| model.in_sort_key(table, &key.column));
     let edge_keyed = !edge_tables.is_empty()
         && edge_tables.iter().all(|table| {
             std::iter::once(table.as_str())
                 .chain(model.equivalent_layouts(table))
                 .any(|layout| model.in_sort_key(layout, other_column))
         });
-    model.in_sort_key(holder_table, &key.column)
+    let bounded = bounded_without(input, nodes, relationship);
+    holder_keyed
         || model.anchor_foreign_keys().contains_key(&key.column)
         || bounded.contains(key.node.as_str())
-        || nodes.get(other.as_str()).is_some_and(NodePlan::is_pinned)
         || !bounded.contains(other.as_str())
+        || nodes.get(other.as_str()).is_some_and(NodePlan::is_pinned)
         || !edge_keyed
 }
 
-/// Nodes bounded by their own filters, or reached from a bounded node through relations other than `skip`.
+/// Nodes bounded by their own filters, or reached from one through relations other than `skip`.
 fn bounded_without<'a>(
     input: &'a Input,
     nodes: &HashMap<String, NodePlan>,
@@ -231,13 +230,7 @@ fn bounded_without<'a>(
         .nodes
         .iter()
         .map(|node| node.id.as_str())
-        .filter(|node| {
-            nodes.get(*node).is_some_and(|plan| {
-                plan.is_pinned()
-                    || plan.is_namespace_anchored()
-                    || plan.filters.iter().any(|(_, filter)| filter.is_selective())
-            })
-        })
+        .filter(|node| nodes.get(*node).is_some_and(NodePlan::is_bounded))
         .collect();
     loop {
         let before = bounded.len();
@@ -246,9 +239,9 @@ fn bounded_without<'a>(
             .iter()
             .filter(|r| !std::ptr::eq(*r, skip))
         {
-            let (from, to) = (relationship.from.as_str(), relationship.to.as_str());
-            if bounded.contains(from) || bounded.contains(to) {
-                bounded.extend([from, to]);
+            let ends = [relationship.from.as_str(), relationship.to.as_str()];
+            if ends.iter().any(|end| bounded.contains(end)) {
+                bounded.extend(ends);
             }
         }
         if bounded.len() == before {
@@ -257,15 +250,14 @@ fn bounded_without<'a>(
     }
 }
 
-/// The ontology variants a variable-length walk can use: the edge tables they live in, and per hop the
-/// entity kinds the walk can stand on before that hop and still end on the target kind.
+/// The variants a variable-length walk can use: their edge tables, and per hop the kinds the walk can
+/// stand on and still end on the target kind within the remaining hops.
+#[derive(Default)]
 pub(super) struct HopRoutes {
-    pub tables: Vec<String>,
+    pub tables: BTreeSet<String>,
     pub start_kinds: Vec<Vec<String>>,
 }
 
-/// Plans the variants of a walk from `from` to `to` (entity names; `None` is any kind) in walk order.
-/// Returns `None` when the walk is unconstrained (`Both`, wildcard types, or no endpoint kinds).
 pub(super) fn hop_routes<M: OrbitQueryModel + ?Sized>(
     model: &M,
     rel_types: &[String],
@@ -273,72 +265,62 @@ pub(super) fn hop_routes<M: OrbitQueryModel + ?Sized>(
     [from, to]: [Option<&str>; 2],
     max_hops: u32,
 ) -> Option<HopRoutes> {
-    if direction == Direction::Both
-        || from.is_none() && to.is_none()
-        || rel_types.is_empty()
-        || rel_types.iter().any(|kind| kind == "*")
-    {
+    if direction == Direction::Both || from.is_none() && to.is_none() || is_wildcard(rel_types) {
         return None;
     }
     let graph = model.graph();
-    let mut steps: Vec<(&str, &str, &str)> = Vec::new();
-    for kind in rel_types {
-        for route in model.relationship_routes(kind) {
-            for variant in route.variants() {
-                let (source, target) = (
-                    graph.entity(variant.source).name.as_str(),
-                    graph.entity(variant.target).name.as_str(),
-                );
-                steps.push(match direction {
-                    Direction::Incoming => (target, source, route.table),
-                    _ => (source, target, route.table),
-                });
-            }
-        }
-    }
-    let hops = usize::try_from(max_hops).ok()?;
-    let mut reach_back: Vec<HashSet<&str>> = vec![to.into_iter().collect()];
+    let steps: Vec<(&str, &str, &str)> = rel_types
+        .iter()
+        .flat_map(|kind| model.relationship_routes(kind))
+        .flat_map(|route| {
+            route
+                .variants()
+                .map(|variant| {
+                    let (source, target) = (
+                        graph.entity(variant.source).name.as_str(),
+                        graph.entity(variant.target).name.as_str(),
+                    );
+                    match direction {
+                        Direction::Incoming => (target, source, route.table),
+                        _ => (source, target, route.table),
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let hops = max_hops as usize;
+    let mut finishing: Vec<HashSet<&str>> = vec![to.into_iter().collect()];
     for _ in 1..hops {
-        let previous = reach_back.last().expect("seeded");
-        let next = steps
-            .iter()
-            .filter(|(_, next, _)| to.is_none() || previous.contains(next))
-            .map(|(start, _, _)| *start)
-            .collect();
-        reach_back.push(next);
+        let mut kinds = finishing.last().expect("seeded").clone();
+        kinds.extend(
+            steps
+                .iter()
+                .filter(|(_, next, _)| finishing.last().expect("seeded").contains(next))
+                .map(|(start, _, _)| *start),
+        );
+        finishing.push(kinds);
     }
-    let mut standing: HashSet<&str> = from.into_iter().collect();
-    let mut tables = HashSet::new();
-    let mut start_kinds = Vec::with_capacity(hops);
-    for depth in 1..=hops {
-        let finishes = |kind: &str| {
-            to.is_none()
-                || reach_back[..=hops - depth]
-                    .iter()
-                    .any(|kinds| kinds.contains(kind))
-        };
+    let mut standing: Option<HashSet<&str>> = from.map(|kind| HashSet::from([kind]));
+    let mut routes = HopRoutes::default();
+    for remaining in (0..hops).rev() {
         let usable: Vec<_> = steps
             .iter()
             .filter(|(start, next, _)| {
-                (from.is_none() && depth == 1 || standing.contains(start)) && finishes(next)
+                standing.as_ref().is_none_or(|kinds| kinds.contains(start))
+                    && (to.is_none() || finishing[remaining].contains(next))
             })
             .collect();
-        tables.extend(usable.iter().map(|(_, _, table)| table.to_string()));
-        let mut kinds: Vec<String> = usable
+        routes
+            .tables
+            .extend(usable.iter().map(|(_, _, table)| table.to_string()));
+        let kinds: BTreeSet<String> = usable
             .iter()
             .map(|(start, _, _)| start.to_string())
             .collect();
-        kinds.sort();
-        kinds.dedup();
-        start_kinds.push(kinds);
-        standing = usable.iter().map(|(_, next, _)| *next).collect();
+        routes.start_kinds.push(kinds.into_iter().collect());
+        standing = Some(usable.iter().map(|(_, next, _)| *next).collect());
     }
-    let mut tables: Vec<String> = tables.into_iter().collect();
-    tables.sort();
-    Some(HopRoutes {
-        tables,
-        start_kinds,
-    })
+    Some(routes)
 }
 
 /// Swaps each table for the equivalent layout whose sort key reaches a pinned endpoint column soonest.

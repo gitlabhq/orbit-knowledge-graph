@@ -21,18 +21,16 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
         let mut expansion = relation.clone();
         let mut source_ids = self.ids(&relation.from_node).cloned();
         let mut target_ids = self.ids(&relation.to_node).cloned();
-        let bounded = |node: &str| {
-            pattern.endpoint_is_selective(node) || pattern.nodes[node].is_namespace_anchored()
-        };
+        let anchored = |node: &str| pattern.nodes[node].is_namespace_anchored();
         let reverse = relation.direction != Direction::Both
             && !pattern.endpoint_is_selective(&relation.from_node)
             && (pattern.endpoint_is_selective(&relation.to_node)
-                || !bounded(&relation.from_node) && bounded(&relation.to_node));
+                || !anchored(&relation.from_node) && anchored(&relation.to_node));
         if reverse {
             expansion = expansion.reversed();
             std::mem::swap(&mut source_ids, &mut target_ids);
         }
-        if source_ids.is_none() && pattern.nodes[&expansion.from_node].is_namespace_anchored() {
+        if source_ids.is_none() && anchored(&expansion.from_node) {
             source_ids = Some(self.node_ids(&expansion.from_node)?);
         }
         select_edge_layouts(
@@ -126,7 +124,7 @@ fn multi_hop<M: OrbitQueryModel + ?Sized>(
         ];
         if let Some(kinds) = routes
             .as_ref()
-            .and_then(|routes| routes.start_kinds.get(depth as usize - 1))
+            .map(|routes| &routes.start_kinds[depth as usize - 1])
             .filter(|kinds| !kinds.is_empty())
         {
             predicates.push(Predicate::EntityKind {
