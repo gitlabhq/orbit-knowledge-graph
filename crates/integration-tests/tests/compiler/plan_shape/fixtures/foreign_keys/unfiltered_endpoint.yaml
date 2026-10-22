@@ -49,7 +49,7 @@ cases:
           expect:
             - (Project _id_source.merge_user_id AS id (Bind _id_source (_)))
             - (Filter u.id IN ?.id (Scan Table(gl_user) AS u))
-            - (Filter mr.merge_user_id IN ?.id (_))
+            - (Filter mr.state = 'merged', mr._deleted = false, mr.merge_user_id IN ?.id (_))
           reject:
             - (Deduplicate Final (Scan Table(gl_user) AS u))
 
@@ -80,3 +80,30 @@ cases:
             - (Filter mr.project_id IN ?.id, ... (Scan Table(gl_merge_request) AS mr))
           reject:
             - (Deduplicate Final (Scan Table(gl_merge_request) AS mr))
+
+  - name: An unbounded FINAL holder read is not shared through a CTE
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "j", "entity": "Job", "filters": {"status": {"in": ["success", "failed", "running", "pending"]}}, "columns": ["id", "status"]},
+            {"id": "pipe", "entity": "Pipeline", "columns": ["id"]}
+          ],
+          "relationships": [{"type": "IN_PIPELINE", "from": "j", "to": "pipe"}],
+          "limit": 500
+        }
+      gql: |
+        MATCH (j:Job)-[:IN_PIPELINE]->(pipe:Pipeline)
+        WHERE j.status IN ['success', 'failed', 'running', 'pending']
+        RETURN j.id, j.status, pipe.id
+        LIMIT 500
+    logical:
+      expect: ["(Filter j.status IN ['success', 'failed', 'running', 'pending'] (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter j.pipeline_id IN ?.id, ... (_))
+          reject:
+            - (CTE ? (Filter ... (Deduplicate Final (Scan Table(gl_job) AS j))))
