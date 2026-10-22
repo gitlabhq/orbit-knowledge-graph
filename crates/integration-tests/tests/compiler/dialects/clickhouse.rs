@@ -787,7 +787,7 @@ fn self_seeded_node_keeps_its_own_read_plain() {
         "limit": 1
     }"#;
     let sql = render_scoped(json, orbit_query);
-    assert!(!sql.contains(SCOPED_LOOKUP), "{sql}");
+    assert!(!sql.contains("AS _scope"), "{sql}");
 }
 
 #[test]
