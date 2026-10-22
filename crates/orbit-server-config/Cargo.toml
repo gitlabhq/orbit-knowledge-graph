@@ -17,6 +17,7 @@ orbit-log-fields = { workspace = true }
 prost = { workspace = true }
 
 [dev-dependencies]
+labkit-config = { workspace = true }
 orbit-utils = { path = "../utils" }
 tempfile = { workspace = true }
 
