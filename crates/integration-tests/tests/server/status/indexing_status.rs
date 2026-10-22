@@ -46,6 +46,7 @@ async fn indexing_status() {
         no_last_completed_at_while_a_first_pass_pages,
         phase_reads_a_checkpoint_written_after_the_previous_read,
         a_plan_whose_source_table_is_missing_is_left_out,
+        a_domain_stays_listed_until_every_plan_is_source_unavailable,
     );
 }
 
@@ -324,6 +325,16 @@ async fn a_plan_whose_source_table_is_missing_is_left_out(ctx: &TestContext) {
     assert_eq!(status.sdlc_phase, Phase::Ready);
     assert_eq!(status.phase, Phase::Ready);
     assert!(status.last_completed_at.is_some());
+}
+
+async fn a_domain_stays_listed_until_every_plan_is_source_unavailable(ctx: &TestContext) {
+    let no_checkpoints = read_one(ctx, "1/102/").await;
+    assert_eq!(domain_phase(&no_checkpoints, "agents"), Phase::NotStarted);
+
+    let one_plan_left = read_one(ctx, "1/143/").await;
+    assert_eq!(domain_phase(&one_plan_left, "agents"), Phase::Ready);
+    assert_eq!(entity_phase(&one_plan_left, "AgentSession"), None);
+    assert_eq!(one_plan_left.phase, Phase::Ready);
 }
 
 async fn plan_with_all_attempts_used_is_a_gap(ctx: &TestContext) {

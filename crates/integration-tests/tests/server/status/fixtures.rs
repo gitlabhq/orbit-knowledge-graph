@@ -157,6 +157,7 @@ pub async fn seed_namespaces(ctx: &TestContext) {
         ],
     )
     .await;
+    seed_plans(ctx, 143, &[("AgentSession", SOURCE_UNAVAILABLE)]).await;
     insert_checkpoints(ctx, &[("ns.106.Project".to_string(), COMPLETED)]).await;
 
     ctx.optimize_all().await;
