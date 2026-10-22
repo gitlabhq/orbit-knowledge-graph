@@ -24,8 +24,3 @@ pub const MAX_FILTER_STRING_LEN: usize = 1024;
     reason = "consumed by the compiler; build.rs has no predicate schema"
 )]
 pub const MAX_PREDICATE_DEPTH: usize = 32;
-#[allow(
-    dead_code,
-    reason = "consumed by the compiler; build.rs has no predicate schema"
-)]
-pub const MAX_PREDICATE_LEAVES: usize = 256;
