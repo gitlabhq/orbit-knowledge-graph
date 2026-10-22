@@ -14,17 +14,27 @@ fn accepts(rule: Rule, input: &str) -> bool {
         .is_some_and(|pair| pair.as_span().end() == input.len())
 }
 
-fn joined(count: usize, separator: &str, item: impl Fn(usize) -> String) -> String {
-    (0..count).map(item).collect::<Vec<_>>().join(separator)
+fn repeated(prefix: &str, item: &str, separator: &str, count: usize, suffix: &str) -> String {
+    format!("{prefix}{}{suffix}", vec![item; count].join(separator))
 }
 
-fn assert_limit(rule: Rule, maximum: usize, value: impl Fn(usize) -> String) {
+fn assert_limit(
+    rule: Rule,
+    maximum: usize,
+    prefix: &str,
+    item: &str,
+    separator: &str,
+    suffix: &str,
+) {
     assert!(
-        accepts(rule, &value(maximum)),
+        accepts(rule, &repeated(prefix, item, separator, maximum, suffix)),
         "{rule:?} must accept {maximum}"
     );
     assert!(
-        !accepts(rule, &value(maximum + 1)),
+        !accepts(
+            rule,
+            &repeated(prefix, item, separator, maximum + 1, suffix)
+        ),
         "{rule:?} must reject {}",
         maximum + 1
     );
@@ -45,37 +55,51 @@ fn identifier_rules_match_the_shared_limit() {
 
 #[test]
 fn collection_rules_match_shared_limits() {
-    let list = |count| format!("[{}]", joined(count, ",", |_| "1".into()));
-    let types = |count| joined(count, "|", |i| format!(":R{i}"));
-    let projection = |count| format!("n{{{}}}", joined(count, ",", |i| format!(".p{i}")));
-
-    assert_limit(Rule::InListLiteral, MAX_IN_VALUES, list);
+    assert_limit(Rule::InListLiteral, MAX_IN_VALUES, "[", "1", ",", "]");
     assert!(!accepts(Rule::InListLiteral, "[]"));
-    assert_limit(Rule::ListLiteral, MAX_NODE_IDS, list);
+    assert_limit(Rule::ListLiteral, MAX_NODE_IDS, "[", "1", ",", "]");
     assert!(!accepts(Rule::ListLiteral, "[]"));
-    assert_limit(Rule::RelationshipTypes, MAX_REL_TYPES, types);
-    assert_limit(Rule::NodeProjection, MAX_COLUMNS, projection);
-    assert_limit(Rule::AndExpression, MAX_PREDICATES, |count| {
-        joined(count, " AND ", |i| format!("n.p{i} = {i}"))
-    });
-    assert_limit(Rule::PatternElement, MAX_RELS_CAP, |count| {
-        format!("(n0){}", joined(count, "", |i| format!("-->(n{})", i + 1)))
-    });
-    assert_limit(Rule::NodeMapLiteral, MAX_FILTERS_PER_NODE, |count| {
-        format!("{{{}}}", joined(count, ",", |i| format!("p{i}:{i}")))
-    });
-    assert_limit(Rule::RelationshipMapLiteral, MAX_FILTERS_PER_REL, |count| {
-        format!("{{{}}}", joined(count, ",", |i| format!("p{i}:{i}")))
-    });
-    assert_limit(Rule::NotExpression, MAX_PREDICATE_DEPTH, |count| {
-        format!("{}n.p = 1", "NOT ".repeat(count))
-    });
+    assert_limit(Rule::RelationshipTypes, MAX_REL_TYPES, "", ":R", "|", "");
+    assert_limit(Rule::NodeProjection, MAX_COLUMNS, "n{", ".p", ",", "}");
+    assert_limit(
+        Rule::AndExpression,
+        MAX_PREDICATES,
+        "",
+        "n.p = 1",
+        " AND ",
+        "",
+    );
+    assert_limit(Rule::PatternElement, MAX_RELS_CAP, "(n)", "-->(n)", "", "");
+    assert_limit(
+        Rule::NodeMapLiteral,
+        MAX_FILTERS_PER_NODE,
+        "{",
+        "p:1",
+        ",",
+        "}",
+    );
+    assert_limit(
+        Rule::RelationshipMapLiteral,
+        MAX_FILTERS_PER_REL,
+        "{",
+        "p:1",
+        ",",
+        "}",
+    );
+    assert_limit(
+        Rule::NotExpression,
+        MAX_PREDICATE_DEPTH,
+        "",
+        "NOT ",
+        "",
+        "n.p = 1",
+    );
 }
 
 #[test]
 fn gql_rejects_the_101st_id_in_both_list_spellings() {
     for count in [MAX_NODE_IDS, MAX_NODE_IDS + 1] {
-        let ids = joined(count, ",", |i| i.to_string());
+        let ids = vec!["1"; count].join(",");
         for query in [
             format!("MATCH (n:Project {{id: [{ids}]}}) RETURN n"),
             format!("MATCH (n:Project) WHERE n.id IN [{ids}] RETURN n"),
@@ -99,24 +123,12 @@ fn strings_reject_raw_controls_and_match_the_shared_limit() {
 
 #[test]
 fn numeric_clause_rules_match_shared_limits() {
-    for (valid, invalid) in [
-        (
-            format!("MATCH (n:Project) RETURN n LIMIT {MAX_LIMIT}"),
-            format!("MATCH (n:Project) RETURN n LIMIT {}", MAX_LIMIT + 1),
-        ),
-        (
-            format!("MATCH (n:Project) RETURN n SKIP {MAX_SKIP}"),
-            format!("MATCH (n:Project) RETURN n SKIP {}", MAX_SKIP + 1),
-        ),
-        (
-            format!("MATCH (a:Project)-[*1..{MAX_HOPS_CAP}]->(b:Project) RETURN b"),
-            format!(
-                "MATCH (a:Project)-[*1..{}]->(b:Project) RETURN b",
-                MAX_HOPS_CAP + 1
-            ),
-        ),
+    for (rule, maximum) in [
+        (Rule::LimitCount, MAX_LIMIT),
+        (Rule::SkipCount, MAX_SKIP),
+        (Rule::HopCount, MAX_HOPS_CAP),
     ] {
-        assert!(parse_query(&valid).is_ok(), "{valid}");
-        assert!(parse_query(&invalid).is_err(), "{invalid}");
+        assert!(accepts(rule, &maximum.to_string()));
+        assert!(!accepts(rule, &(maximum + 1).to_string()));
     }
 }
