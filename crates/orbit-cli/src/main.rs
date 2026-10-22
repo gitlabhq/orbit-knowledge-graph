@@ -487,7 +487,7 @@ struct SkillsArgs {
 enum SkillsCommands {
     #[command(
         about = "Print an instance-matched agent skill file.",
-        long_about = "Print a file from the selected instance's agent skill, composed with local CLI guidance."
+        long_about = "Print a file from an agent skill served by the selected instance. The orbit skill is composed with local CLI guidance; other skills are printed as the server returns them."
     )]
     Get {
         /// Skill name.
