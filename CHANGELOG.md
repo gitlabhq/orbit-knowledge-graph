@@ -1,3 +1,24 @@
+## [0.153.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.152.0...v0.153.0) (2026-10-22)
+
+### Features
+
+* **named-queries:** add context_for_issue, context_for_review, and context_for_job ([8013854](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8013854530fe780eab83f158d267a25cb3f10e6c)) by Aaron Algutifan
+* **orbit-cli:** index with the incremental engine ([25d825d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/25d825db5355359e1606f2bc503426dd92fa50fc)) by Aaron Algutifan
+
+### Fixes
+
+* **code-graph-incremental:** leave class members out of the names a package shares ([eb5a9c8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/eb5a9c811c2373ba3a2f4ab340fd6a57d2a9389c)) by Aaron Algutifan
+* **indexer:** count only top-level groups as enabled roots ([056c136](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/056c136cb1426a1d29c998f50e34dc2774694c71)) by Bohdan Parkhomchuk
+* **indexer:** write tombstones with unchanged columns and drop the planner's tombstone guard ([352f83a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/352f83a24bd314bb114ac9e72f5f18dc66294b47)) by Michael Usachenko
+
+### Performance
+
+* **compiler:** bound unfiltered FK endpoints by the keys their holder reached ([cad715a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cad715abe45f7376f81b7868b76977b6f28956ed)) by Jean-Gabriel Doyon
+
+### Other
+
+* update docs review app URL for Cloudflare Workers ([ecbd716](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ecbd716fee180f39a55757ddf6c5176bf56b77e8)) by Marcel Amirault
+
 ## [0.152.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.151.1...v0.152.0) (2026-10-21)
 
 ### Features
