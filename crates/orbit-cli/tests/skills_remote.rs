@@ -958,7 +958,9 @@ fn another_remote_skill_is_listed_and_fetched_without_local_composition() {
     assert!(output.status.success(), "{}", stderr(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("name: registry") && !stdout.contains("orbit-cli"),
+        stdout.contains("name: registry")
+            && stdout.contains("orbit:include local:quick-start")
+            && !stdout.contains("## Query and map"),
         "{stdout}"
     );
     let output = run_orbit(
@@ -974,6 +976,11 @@ fn another_remote_skill_is_listed_and_fetched_without_local_composition() {
         &["skills", "get", "registry", "references/local/cli.md"],
     );
     assert!(!local_file.status.success());
+    assert!(
+        stderr(&local_file).contains("unknown skill file"),
+        "{}",
+        stderr(&local_file)
+    );
     let requests = server.join().unwrap();
     assert_eq!(
         requests[0].line,
@@ -1063,6 +1070,11 @@ fn misconfigured_url_reports_its_own_reason_for_another_skill() {
     assert!(!output.status.success());
     assert!(
         !stderr(&output).contains("no GitLab credential"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("ORBIT_API_BASE_URL"),
         "{}",
         stderr(&output)
     );
