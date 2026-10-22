@@ -83,6 +83,13 @@ impl Checkpoint {
         }
     }
 
+    pub fn indexing_mode(&self) -> IndexingMode {
+        match self.indexed_at {
+            Some(_) => IndexingMode::Incremental,
+            None => IndexingMode::Full,
+        }
+    }
+
     pub fn is_first_pass_before_paging(&self) -> bool {
         matches!(self.progress(), Progress::FirstPass)
     }
