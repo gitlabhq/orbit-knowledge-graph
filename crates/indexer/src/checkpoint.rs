@@ -113,11 +113,11 @@ impl Checkpoint {
 
     /// A finished run that indexed nothing because the source table does not exist.
     pub fn is_source_unavailable(&self) -> bool {
-        self.indexed_at.is_some() && !self.has_indexed_rows()
+        self.indexed_at.is_some() && self.indexed_nothing()
     }
 
-    fn has_indexed_rows(&self) -> bool {
-        self.watermark != DateTime::<Utc>::UNIX_EPOCH
+    fn indexed_nothing(&self) -> bool {
+        self.watermark == DateTime::<Utc>::UNIX_EPOCH
     }
 
     pub fn resume_cursor(&self) -> &[String] {
@@ -165,14 +165,10 @@ impl Checkpoint {
         self.indexed_at = Some(Utc::now());
     }
 
-    pub fn complete_without_source(&mut self) {
-        self.complete(DateTime::<Utc>::UNIX_EPOCH);
-    }
-
     fn progress(&self) -> Progress {
         match (&self.cursor_values, self.indexed_at) {
             (Some(_), _) => Progress::Paging,
-            (None, Some(_)) if self.has_indexed_rows() => Progress::Completed,
+            (None, Some(_)) if !self.indexed_nothing() => Progress::Completed,
             (None, _) => Progress::FirstPass,
         }
     }
@@ -561,7 +557,7 @@ mod tests {
         let now = ts("2026-06-07T22:00:00Z");
         let mut checkpoint = Checkpoint::new(ts("2026-06-07T21:00:00Z"));
         checkpoint.start_attempt();
-        checkpoint.complete_without_source();
+        checkpoint.complete(DateTime::<Utc>::UNIX_EPOCH);
 
         assert!(checkpoint.is_source_unavailable());
         assert!(checkpoint.indexed_at.is_some());

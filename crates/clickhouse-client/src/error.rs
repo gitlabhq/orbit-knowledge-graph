@@ -59,7 +59,7 @@ fn is_server_unavailable(error: &clickhouse::error::Error) -> bool {
     }
 }
 
-const UNKNOWN_TABLE_CODE: &str = "UNKNOWN_TABLE";
+const UNKNOWN_TABLE_CODE: &str = "(UNKNOWN_TABLE)";
 
 impl ClickHouseError {
     pub(crate) fn is_retryable(&self) -> bool {

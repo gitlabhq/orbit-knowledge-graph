@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::{Checkpoint, CheckpointStore, WindowBounds, namespace_position_key};
 
-use crate::durability::{RunDurability, WriteDurability};
+use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
@@ -292,6 +292,7 @@ impl EntityHandler {
                 .consolidate(checkpoint_key, &watermark)
                 .await
                 .map_err(|err| HandlerError::Processing(err.to_string()))?,
+            // A parent still at its first-pass start re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
             Err(incomplete) => {
                 info!(
                     expanded(KV_KEY) = checkpoint_key,
@@ -315,15 +316,11 @@ impl EntityHandler {
             expanded(ERROR_MESSAGE) = reason,
             "source table does not exist; the plan is complete with nothing new indexed until it appears"
         );
-        self.metrics
-            .record_pipeline_error(&self.plan.name, "source_unavailable");
-        let mut checkpoint = Checkpoint::new(DateTime::<Utc>::UNIX_EPOCH);
-        match synced_until {
-            Some(watermark) => checkpoint.complete(watermark),
-            None => checkpoint.complete_without_source(),
-        }
         self.checkpoint_store
-            .save(checkpoint_key, &checkpoint, WriteDurability::Durable)
+            .consolidate(
+                checkpoint_key,
+                &synced_until.unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+            )
             .await
             .map_err(|err| HandlerError::Processing(err.to_string()))?;
         Ok(PipelineStats::default())
