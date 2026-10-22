@@ -43,6 +43,8 @@ Fuzz testing for Orbit with [Bolero](https://github.com/camshaft/bolero).
 With mise (recommended):
 
 ```sh
+mise test:fuzz                 # replay every corpus, then 1s of random inputs
+mise fuzz:deep                 # libFuzzer + AddressSanitizer over every target
 mise fuzz:compile              # fuzz the query compiler (unstructured)
 mise fuzz:compile-structured   # fuzz the query compiler (structured)
 mise fuzz:gql                  # fuzz the Orbit query frontend (unstructured)
@@ -65,4 +67,14 @@ cargo +nightly bolero test <target_name> -p orbit-fuzz
 
 If your default toolchain is nightly, you can omit `+nightly`.
 
-CI compiles these targets but does not run them. See [Fuzzing](../../docs/design-documents/testing.md#fuzzing).
+On macOS, use `FUZZ_SANITIZER=NONE mise fuzz:deep` because AddressSanitizer doesn't link.
+
+## Corpus and CI
+
+Seeds are in `seeds.yaml`, each with `labels` that start with its query class or input kind. The grown corpus and crashes are in private GCS buckets ([infra](../../scripts/ci/fuzz/infra/README.md)). To add the grown corpus locally, run `FUZZ_CORPUS_BUCKET=<bucket> FUZZ_CORPUS_TOKEN="$(gcloud auth print-access-token)" mise fuzz:corpus-pull`. Pulls add to `tests/<target>/corpus/` and keep what earlier local runs found. Delete that directory to start over.
+
+- `fuzz-smoke` replays the corpus on every MR.
+- `fuzz-deep` fuzzes daily and writes the corpus back.
+- Fuzzer output goes to `tests/<target>/fuzz.log`, not the public job log. Crashes upload to the crash bucket.
+
+See [Fuzzing](../../docs/design-documents/testing.md#fuzzing).

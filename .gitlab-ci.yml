@@ -927,6 +927,55 @@ corpus-smoke-test:
     - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --no-capture -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
 
+.fuzz-corpus:
+  id_tokens:
+    FUZZ_CORPUS_JWT:
+      aud: gkg-fuzz
+
+fuzz-smoke:
+  stage: test
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+    - .fuzz-corpus
+  needs: []
+  allow_failure: true
+  script:
+    - mise run test:fuzz
+    - sccache --show-stats || true
+
+fuzz-deep:
+  stage: test
+  extends:
+    - .job-template
+    - .fuzz-corpus
+  tags:
+    - ${RUNNER_LARGE}
+  needs: []
+  timeout: 90 minutes
+  parallel: 3
+  variables:
+    FUZZ_BUDGET_SECONDS: "2700"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "fuzz-deep"
+      variables:
+        FUZZ_CORPUS_PUSH: "1"
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  before_script:
+    - !reference [.job-template, before_script]
+    - rustup toolchain install nightly --profile minimal
+  script:
+    - ./scripts/fuzz/run.sh deep
+  artifacts:
+    when: always
+    access: developer
+    paths:
+      - crates/fuzz/tests/*/corpus/
+    expire_in: 30 days
+
 # Build Stage
 
 # Keyless signing needs a GitLab OIDC token with the sigstore audience; the
