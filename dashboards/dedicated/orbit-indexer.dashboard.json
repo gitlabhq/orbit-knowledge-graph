@@ -110,7 +110,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[$__range])) / sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__range]))",
+          "expr": "sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[$__range])) / (sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__range])) > 0)",
           "instant": true,
           "legendFormat": "Fresh",
           "range": false,
@@ -174,7 +174,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[15m])), 0) / scalar(max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m])))",
+          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[15m])), 0) / on () group_left () (max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m])) > 0)",
           "instant": true,
           "legendFormat": "Behind 1 h",
           "range": false,
@@ -310,7 +310,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "1 - (sum(increase(gkg_indexer_code_events_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\", outcome=\"error\"}[$__range])) or vector(0)) / sum(increase(gkg_indexer_code_events_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\", outcome=~\"indexed|empty_repository|error\"}[$__range]))",
+          "expr": "1 - (sum(increase(gkg_indexer_code_events_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\", outcome=\"error\"}[$__range])) or vector(0)) / (sum(increase(gkg_indexer_code_events_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\", outcome=~\"indexed|empty_repository|error\"}[$__range])) > 0)",
           "instant": true,
           "legendFormat": "Code OK",
           "range": false,
@@ -446,7 +446,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range])) / (sum(increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range])) + (sum(increase(gkg_indexer_sdlc_pipeline_errors_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range])) or vector(0)))",
+          "expr": "sum(increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range])) / ((sum(increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range])) + (sum(increase(gkg_indexer_sdlc_pipeline_errors_total{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[$__range])) or vector(0))) > 0)",
           "instant": true,
           "legendFormat": "SDLC OK",
           "range": false,
@@ -705,7 +705,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"60.0\"}[$__interval])) / sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval]))",
+          "expr": "sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"60.0\"}[$__interval])) / (sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) > 0)",
           "legendFormat": "in sync (≤ 1 min)",
           "refId": "A"
         },
@@ -714,7 +714,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[$__interval])) / sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval]))",
+          "expr": "sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[$__interval])) / (sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) > 0)",
           "legendFormat": "≤ 15 min",
           "refId": "B"
         },
@@ -723,7 +723,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[$__interval])) / sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval]))",
+          "expr": "sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[$__interval])) / (sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) > 0)",
           "legendFormat": "≤ 1 h",
           "refId": "C"
         }
@@ -2606,7 +2606,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[$__interval])), 0) / scalar(max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])))",
+          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[$__interval])), 0) / on () group_left () (max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) > 0)",
           "legendFormat": "15 min – 1 h",
           "refId": "A"
         },
@@ -2615,7 +2615,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"14400.0\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[$__interval])), 0) / scalar(max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])))",
+          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"14400.0\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[$__interval])), 0) / on () group_left () (max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) > 0)",
           "legendFormat": "1 – 4 h",
           "refId": "B"
         },
@@ -2624,7 +2624,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"57600.0\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"14400.0\"}[$__interval])), 0) / scalar(max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])))",
+          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"57600.0\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"14400.0\"}[$__interval])), 0) / on () group_left () (max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) > 0)",
           "legendFormat": "4 – 16 h",
           "refId": "C"
         },
@@ -2633,7 +2633,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"57600.0\"}[$__interval])), 0) / scalar(max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])))",
+          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"57600.0\"}[$__interval])), 0) / on () group_left () (max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) > 0)",
           "legendFormat": "> 16 h",
           "refId": "D"
         }
@@ -2686,7 +2686,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sort_desc(topk(10, clamp_min(sum by (entity)(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m])) - sum by (entity)(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[15m])), 0) / scalar(max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m]))) > 0))",
+          "expr": "sort_desc(topk(10, clamp_min(sum by (entity)(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m])) - sum by (entity)(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[15m])), 0) / on () group_left () (max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m])) > 0) > 0))",
           "instant": true,
           "legendFormat": "{{entity}}",
           "range": false,

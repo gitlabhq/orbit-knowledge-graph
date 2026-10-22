@@ -63,9 +63,10 @@ local FRESH = o.metric('gkg_indexer_sdlc_freshness_lag_seconds').prom_name;
 local freshBucket(le, range, by='') =
   'sum%s(increase(%s_bucket{%s, le="%s"}[%s]))' % [by, FRESH, DSP_SEL, le, range];
 local freshCount(range, by='') = 'sum%s(increase(%s_count{%s}[%s]))' % [by, FRESH, DSP_SEL, range];
-local freshShare(le, range) = '%s / %s' % [freshBucket(le, range), freshCount(range)];
+// A `> 0` guard turns a window with no data into no value instead of NaN.
+local freshShare(le, range) = '%s / (%s > 0)' % [freshBucket(le, range), freshCount(range)];
 // Each run moves the count once, so `changes` is the number of runs in the window.
-local freshRuns(range) = 'scalar(max(changes(%s_count{%s}[%s])))' % [FRESH, DSP_SEL, range];
+local freshRuns(range) = 'on () group_left () (max(changes(%s_count{%s}[%s])) > 0)' % [FRESH, DSP_SEL, range];
 local behind(le, range, by='') =
   'clamp_min(%s - %s, 0) / %s' % [freshCount(range, by), freshBucket(le, range, by), freshRuns(range)];
 local band(lo, hi, range) =
@@ -110,7 +111,7 @@ local glance = [
   tile(
     'Code OK',
     'Share of code indexing tasks that did not fail in the selected time range. Amber below 99%, red below 95%. Failed tasks are retried, so freshness shows the user impact.',
-    '1 - (sum(increase(%s{%s, outcome="error"}[$__range])) or vector(0)) / sum(increase(%s{%s, %s}[$__range]))' % [CODE, SEL, CODE, SEL, CODE_DONE],
+    '1 - (sum(increase(%s{%s, outcome="error"}[$__range])) or vector(0)) / (sum(increase(%s{%s, %s}[$__range])) > 0)' % [CODE, SEL, CODE, SEL, CODE_DONE],
     'percentunit', o.stepsDown(0.95, 0.99), 2,
   ),
   tile(
@@ -122,7 +123,7 @@ local glance = [
   tile(
     'SDLC OK',
     'Share of SDLC plan runs that did not fail in the selected time range. Amber below 99%, red below 95%. Failed runs are retried, so freshness shows the user impact.',
-    'sum(increase(%s{%s}[$__range])) / (sum(increase(%s{%s}[$__range])) + (sum(increase(%s{%s}[$__range])) or vector(0)))' % [SDLC_OK, SEL, SDLC_OK, SEL, SDLC_ERR, SEL],
+    'sum(increase(%s{%s}[$__range])) / ((sum(increase(%s{%s}[$__range])) + (sum(increase(%s{%s}[$__range])) or vector(0))) > 0)' % [SDLC_OK, SEL, SDLC_OK, SEL, SDLC_ERR, SEL],
     'percentunit', o.stepsDown(0.95, 0.99), 2,
   ),
   tile(
