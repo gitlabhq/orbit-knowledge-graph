@@ -5,8 +5,8 @@ use std::collections::HashSet;
 use ontology::constants::*;
 use ontology::{DataType, EnumType};
 use query_data_model::{
-    DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint, OrbitQueryModel,
-    PropertyId, RelationalMapping,
+    DenormalizedDirection, DenormalizedKey, DenormalizedProperty, EntityId, OrbitQueryModel,
+    PropertyId, RelationshipId,
 };
 
 use super::{EdgeRelation, NodePlan, Pattern};
@@ -40,21 +40,15 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         } else {
             DenormalizedDirection::Target
         };
-        let (source, target) = (relation.source_entity?, relation.target_entity?);
         self.denormalized
             .get(&DenormalizedKey {
                 property,
                 direction,
             })
-            .filter(|facts| {
-                relation
-                    .relationships
-                    .iter()
-                    .all(|relationship| facts.variants.contains(&(*relationship, source, target)))
-            })
+            .filter(|facts| covers_relation(relation, &facts.variants))
     }
 
-    /// The tag that the property holder writes on its own one-hop edge row, so grouping need not read the node.
+    /// The tag that the property holder writes on every row of a one-hop edge, so grouping need not read the node.
     pub fn group_tag(&self, group: &InputGroupByKey) -> Option<(Column, String)> {
         let InputGroupByKey::Property {
             node,
@@ -79,33 +73,16 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         }
         self.relations
             .iter()
-            .filter(|relation| relation.max_hops == 1 && self.holds_foreign_key(relation, node))
+            .filter(|relation| relation.max_hops == 1)
             .find_map(|relation| {
-                let facts = self.denorm_property(relation, node, stored.id)?;
+                let facts = self
+                    .denorm_property(relation, node, stored.id)
+                    .filter(|facts| covers_relation(relation, &facts.holder_variants))?;
                 Some((
                     Column::new(&relation.alias, &facts.edge_column),
                     facts.tag_key.clone(),
                 ))
             })
-    }
-
-    fn holds_foreign_key(&self, relation: &EdgeRelation, node: &str) -> bool {
-        let (Some(source), Some(target)) = (relation.source_entity, relation.target_entity) else {
-            return false;
-        };
-        let key = self.model.query_backend().foreign_key(
-            self.model.graph(),
-            &relation.relationships,
-            source,
-            target,
-        );
-        key.is_some_and(|key| {
-            relation.endpoint_column(node)
-                == Some(match key.holder {
-                    Endpoint::Source => SOURCE_ID_COLUMN,
-                    Endpoint::Target => TARGET_ID_COLUMN,
-                })
-        })
     }
 
     pub fn denorm_hop(
@@ -202,4 +179,17 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             .map(|(property, filter)| (property.as_str(), filter))
             .collect()
     }
+}
+
+fn covers_relation(
+    relation: &EdgeRelation,
+    variants: &HashSet<(RelationshipId, EntityId, EntityId)>,
+) -> bool {
+    let (Some(source), Some(target)) = (relation.source_entity, relation.target_entity) else {
+        return false;
+    };
+    relation
+        .relationships
+        .iter()
+        .all(|relationship| variants.contains(&(*relationship, source, target)))
 }

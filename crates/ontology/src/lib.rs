@@ -1590,6 +1590,19 @@ impl Ontology {
             })
     }
 
+    /// Whether only the FK holder's own pipeline writes this edge, so every row carries the holder's tags.
+    pub fn holder_writes_every_row(&self, edge: &EdgeEntity) -> bool {
+        edge.fk_column.is_some()
+            && self.get_edge_etl(&edge.relationship_kind).is_none()
+            && !self.derived_entities().any(|derived| {
+                derived
+                    .emits
+                    .iter()
+                    .flat_map(|kind| self.get_edge(kind).into_iter().flatten())
+                    .any(|route| route.destination_table == edge.destination_table)
+            })
+    }
+
     fn node_has_property(&self, node_kind: &str, property_name: &str) -> bool {
         self.get_node(node_kind)
             .is_some_and(|node| node.fields.iter().any(|field| field.name == property_name))

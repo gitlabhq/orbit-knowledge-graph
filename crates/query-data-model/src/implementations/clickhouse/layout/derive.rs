@@ -254,6 +254,7 @@ impl crate::Relational<ClickHouse> {
                 target: edge.target_kind.clone(),
                 table: edge.destination_table.clone(),
                 foreign_key: edge.fk_column.clone(),
+                holder_writes_every_row: ontology.holder_writes_every_row(edge),
             })
             .collect();
         let relationship_tables = ontology

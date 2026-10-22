@@ -66,3 +66,19 @@ cases:
           expect:
             - (Aggregate group u.state, u.state AS u_state, ... (_))
             - (Scan Table(gl_user) AS u)
+
+  - name: Tags on a table that a derived entity also writes keep the endpoint table
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"m","entity":"MergeRequest"}],"relationships":[{"type":"MERGED","from":"u","to":"m"}],"group_by":["m.merge_status"],"aggregations":[{"count":"m","as":"n"}]}
+      gql: |
+        MATCH (u:User {id: 1})-[:MERGED]->(m:MergeRequest)
+        RETURN m.merge_status, count(m) AS n
+    logical:
+      expect: ["(Aggregate group m.merge_status AS m_merge_status, COUNT(m) AS n (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Aggregate group m.merge_status, m.merge_status AS m_merge_status, ... (_))
+            - (Scan Table(gl_merge_request) AS m)

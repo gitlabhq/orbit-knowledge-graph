@@ -194,6 +194,7 @@ pub struct EdgeRoute {
     pub target: String,
     pub table: String,
     pub foreign_key: Option<String>,
+    pub holder_writes_every_row: bool,
 }
 
 #[derive(Debug)]

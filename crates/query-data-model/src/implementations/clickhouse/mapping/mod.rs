@@ -108,6 +108,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
 
         let mut relationships = vec![Vec::new(); graph.relationships().count()];
         let mut variant_routes = vec![None; graph.variants().count()];
+        let mut tag_holders = HashMap::new();
         for relationship in graph.relationships() {
             for edge in storage
                 .edge_routes()
@@ -149,6 +150,11 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                             .property_id(referenced, ontology::constants::DEFAULT_PRIMARY_KEY)?,
                     })
                 });
+                if edge.holder_writes_every_row
+                    && let Some(key) = foreign_key
+                {
+                    tag_holders.insert((relationship.id, source, target), key.holder);
+                }
                 variant_routes[variant_id.index()] = Some(VariantRoute {
                     table: edge.table.clone(),
                     foreign_key,
@@ -191,6 +197,15 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                 })
                 .map(|variant| (relationship, variant.source, variant.target))
                 .collect();
+            let holder = match property.direction {
+                ontology::DenormDirection::Source => Endpoint::Source,
+                ontology::DenormDirection::Target => Endpoint::Target,
+            };
+            let holder_variants: HashSet<_> = variants
+                .iter()
+                .filter(|variant| tag_holders.get(*variant) == Some(&holder))
+                .copied()
+                .collect();
             denormalized
                 .entry(DenormalizedKey {
                     property: property_id,
@@ -198,11 +213,13 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                 })
                 .and_modify(|layout: &mut DenormalizedProperty| {
                     layout.variants.extend(&variants);
+                    layout.holder_variants.extend(&holder_variants);
                 })
                 .or_insert_with(|| DenormalizedProperty {
                     edge_column: property.edge_column.clone(),
                     tag_key: property.tag_key.clone(),
                     variants,
+                    holder_variants,
                     nullable: property.nullable,
                 });
         }
