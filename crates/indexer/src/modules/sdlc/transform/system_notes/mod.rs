@@ -27,7 +27,6 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::Utc;
-use clickhouse_client::strings_per_array_param;
 use orbit_log_fields::{debug, warn};
 use serde_json::json;
 
@@ -39,6 +38,7 @@ use crate::modules::sdlc::transform::{
     BlockTransform, TableBatch, TransformFactory, TransformRegistry,
 };
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
 
 /// Registry key for this transform; also the `etl.transform` value in

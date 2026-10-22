@@ -29,7 +29,6 @@ pub struct ReconcileStatement {
     pub tombstone: DeletionStatement,
 }
 
-/// A large root's route set does not fit in a request URI, so only stale paths are sent.
 pub fn build_reconcile_statements(ontology: &ontology::Ontology) -> Vec<ReconcileStatement> {
     build_statements(ontology, Some(STALE_PATH_PREDICATE))
         .into_iter()

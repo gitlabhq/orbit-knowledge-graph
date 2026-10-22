@@ -8,8 +8,9 @@ use thiserror::Error;
 use arrow::record_batch::RecordBatch;
 
 use crate::clickhouse::ArrowClickHouseClient;
-use clickhouse_client::{FromArrowColumn, strings_per_array_param};
+use clickhouse_client::FromArrowColumn;
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
 
 use std::sync::LazyLock;
@@ -397,7 +398,6 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         &self,
         root_traversal_path: &TraversalPath,
     ) -> Vec<TableDeletionOutcome> {
-        // Read graph paths before routes, so a row indexed mid-pass is never seen as stale.
         let mut live_paths = Vec::with_capacity(self.reconcile_statements.len());
         for statement in &self.reconcile_statements {
             live_paths.push(
