@@ -49,7 +49,8 @@ impl RelationUsage {
 
     fn reusable(id: RelationId, graph: &RelationGraph) -> bool {
         match graph.get(id) {
-            RelationNode::Read { .. } | RelationNode::Owned { .. } => false,
+            RelationNode::Read { final_, .. } => *final_,
+            RelationNode::Owned { input, .. } => Self::reusable(input.id, graph),
             RelationNode::Filter { input, predicates } => {
                 let selective: Vec<_> = predicates.iter().filter(|p| p.is_selective()).collect();
                 if !selective.is_empty() && selective.iter().all(|p| p.is_point_lookup()) {
