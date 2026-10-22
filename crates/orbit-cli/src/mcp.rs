@@ -39,9 +39,6 @@ pub struct IndexArgs {
     /// Filesystem path to a repository, a folder inside one, or a directory
     /// containing one or more repositories. Each checkout revision has its own database.
     pub path: PathBuf,
-    /// Worker threads. 0 (default) auto-detects from CPU cores.
-    #[serde(default)]
-    pub threads: usize,
     /// If true, include per-file skip/error breakdowns in the result.
     #[serde(default)]
     pub stats: bool,
@@ -135,8 +132,7 @@ impl OrbitLocalServer {
         Parameters(args): Parameters<IndexArgs>,
     ) -> Result<CallToolResult, ErrorData> {
         self.timed_tool("index", move || {
-            let outputs =
-                crate::commands::index::collect(args.path, args.threads, args.stats, args.db)?;
+            let outputs = crate::commands::index::collect(args.path, args.stats, args.db)?;
             serde_json::to_string_pretty(&outputs).context("failed to serialise index output")
         })
         .await
