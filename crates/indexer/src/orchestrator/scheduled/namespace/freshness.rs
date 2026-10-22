@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
+use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
@@ -21,7 +22,7 @@ use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use crate::orchestrator::dispatch::enabled_namespaces::{
     ENABLED_NAMESPACE_TABLE, resolved_enabled_namespaces_sql,
 };
-use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
+use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 
 // The last sweep syncs idle entities; the margin keeps a late or slow sweep inside the scan.
 const SWEEP_MARGIN: TimeDelta = TimeDelta::minutes(15);
@@ -48,6 +49,7 @@ pub struct NamespaceFreshness {
     catalog: OntologyCatalog,
     scan_window: TimeDelta,
     lag: Histogram<f64>,
+    metrics: ScheduledTaskMetrics,
     config: NamespaceFreshnessConfig,
 }
 
@@ -74,6 +76,7 @@ impl NamespaceFreshness {
             catalog,
             scan_window: sweep_interval + SWEEP_MARGIN,
             lag: sdlc::FRESHNESS_LAG.build_histogram_f64(&orbit_observability::meter()),
+            metrics: ScheduledTaskMetrics::new(),
             config,
         }
     }
@@ -141,6 +144,17 @@ impl ScheduledTask for NamespaceFreshness {
     }
 
     async fn run(&self) -> Result<(), TaskError> {
+        let start = Instant::now();
+        let result = self.record_lag().await;
+        let outcome = if result.is_ok() { "success" } else { "error" };
+        self.metrics
+            .record_run(self.name(), outcome, start.elapsed().as_secs_f64());
+        result
+    }
+}
+
+impl NamespaceFreshness {
+    async fn record_lag(&self) -> Result<(), TaskError> {
         let Some(version) = read_active_version(&self.graph)
             .await
             .map_err(TaskError::new)?
