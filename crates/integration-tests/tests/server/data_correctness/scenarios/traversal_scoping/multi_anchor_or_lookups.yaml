@@ -1,4 +1,4 @@
-description: A node pinned to two projects keeps its own scan plain and scopes what it reaches with one lookup per anchor, OR-ed
+description: A node pinned to two projects scopes its own scan and what it reaches with one lookup per anchor, OR-ed
 
 query:
   json: |
@@ -20,5 +20,4 @@ expect:
     - "(_scope.id = 1000)"
     - "(_scope.id = 1002)"
     - ") OR startsWith(mr.traversal_path, (SELECT"
-  sql_not_contains:
-    - "startsWith(p.traversal_path, (SELECT"
+    - ") OR startsWith(p.traversal_path, (SELECT"

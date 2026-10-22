@@ -17,12 +17,16 @@ impl QueryScope {
         nodes: HashMap<String, ScopeProof>,
         model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     ) -> Self {
-        let relationships = input
+        let relationships: Vec<Option<ScopeProof>> = input
             .relationships
             .iter()
             .map(|relationship| relationship_proof(input, relationship, &nodes, model))
             .collect();
         let anchors = anchor_fks(model);
+        let shared = |alias: &str, proof: &ScopeProof| {
+            nodes.iter().any(|(other, p)| other != alias && p == proof)
+                || relationships.iter().flatten().any(|p| p == proof)
+        };
         let self_seeded = input
             .nodes
             .iter()
@@ -32,6 +36,9 @@ impl QueryScope {
                     && keys
                         .iter()
                         .all(|key| Some(key.entity.as_str()) == node.entity.as_deref())
+                    && nodes
+                        .get(&node.id)
+                        .is_some_and(|proof| !shared(&node.id, proof))
             })
             .map(|node| node.id.clone())
             .collect();
@@ -42,7 +49,8 @@ impl QueryScope {
         }
     }
 
-    /// A node seeded only by its own id keeps its read plain: the lookup would repeat the id probe.
+    /// A node seeded only by its own id keeps its read plain when nothing else shares the proof:
+    /// alone, the lookup repeats the id probe; shared, the scalar cache makes it a free key seek.
     pub fn node(&self, alias: &str) -> Option<&ScopeProof> {
         if self.self_seeded.contains(alias) {
             return None;

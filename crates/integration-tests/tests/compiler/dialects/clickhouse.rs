@@ -791,7 +791,7 @@ fn self_seeded_node_keeps_its_own_read_plain() {
 }
 
 #[test]
-fn self_seeded_node_still_scopes_its_neighbours() {
+fn self_seeded_node_shares_its_lookup_with_its_neighbours() {
     let orbit_query = "MATCH (mr:MergeRequest {id: 7})-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff) RETURN d.id LIMIT 10";
     let json = r#"{
         "query_type": "traversal",
@@ -806,8 +806,8 @@ fn self_seeded_node_still_scopes_its_neighbours() {
     assert!(
         sql.contains("startsWith(d.traversal_path, (SELECT")
             && sql.contains("FROM gl_merge_request AS _scope WHERE")
-            && !sql.contains("startsWith(mr.traversal_path, (SELECT"),
-        "{sql}"
+            && sql.contains("startsWith(mr.traversal_path, (SELECT"),
+        "the neighbour and the pinned node share one cached lookup: {sql}"
     );
 }
 
