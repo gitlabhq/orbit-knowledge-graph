@@ -4,22 +4,22 @@ fixtures:
   - path: Dockerfile
     content:
       - "FROM alpine AS s0\nENV E0=1\n"
-      - { repeat: 11, text: "FROM alpine AS s{i+1}\nENV E{i+1}=1\nCOPY --from=s{i} /a /b\n" }
+      - { repeat: 29, text: "FROM alpine AS s{i+1}\nENV E{i+1}=1\nCOPY --from=s{i} /a /b\n" }
 
 tests:
   - name: "the last stage owns its variable"
     query: |
       MATCH (s:Definition)-[:DEFINES]->(v:Definition)
-      WHERE s.name = 's11'
+      WHERE s.name = 's29'
       RETURN s.fqn AS stage, v.fqn AS variable
     assert:
       - { row_count: 1 }
-      - { row: { stage: "Dockerfile.s11", variable: "Dockerfile.s11.E11" } }
+      - { row: { stage: "Dockerfile.s29", variable: "Dockerfile.s29.E29" } }
 
-  - name: "a COPY --from chain links all twelve stages"
+  - name: "a COPY --from chain links all thirty stages"
     query: |
       MATCH (a:Definition)-[:CALLS]->(b:Definition)
       WHERE a.definition_type = 'Class' AND b.definition_type = 'Class'
       RETURN a.name AS from_stage, b.name AS to_stage
     assert:
-      - { row_count: 11 }
+      - { row_count: 29 }
