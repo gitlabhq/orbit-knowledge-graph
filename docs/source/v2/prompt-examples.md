@@ -34,7 +34,7 @@ another source to answer the question.
 Later prompts continue in the same conversation, so you don't need to repeat the phrase.
 
 Replace the values in `<angle brackets>`. The first two prompts, about code, also work on the
-[local graph](local/_index.md) of a repository on your machine.
+[local graph](cli.md#local-graph) of a repository on your machine.
 
 Each section also shows a [query](queries/query-language.md) that the agent can run.
 To check an answer, replace the example values in the query, then run it with `glab orbit query "<query>"`.

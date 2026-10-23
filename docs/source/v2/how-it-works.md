@@ -92,13 +92,13 @@ After 30 days, GitLab deletes all graph data of the group.
 ## The local graph
 
 The GitLab Orbit CLI also indexes repositories on your machine into a local graph of code only, with no authorization layer.
-For more information, see [the local graph](local/_index.md).
+For more information, see [local graph](cli.md#local-graph).
 
 ## Known issues
 
 - GitLab Orbit indexes code on the default branch only.
   An answer about code on another branch reflects the default branch.
-  For code that you have not merged, use the [local graph](local/_index.md).
+  For code that you have not merged, use the [local graph](cli.md#local-graph).
 - GitLab Orbit resolves imports and calls in one repository.
   It matches dependencies between repositories by name only.
 - GitLab Orbit does not run on a GitLab Geo secondary site.
@@ -110,5 +110,5 @@ For more information, see [the local graph](local/_index.md).
 - [Indexed data](schema.md)
 - [Security](security.md)
 - [Query language](queries/query-language.md)
-- [Local graph](local/_index.md)
+- [Local graph](cli.md#local-graph)
 - [Troubleshooting](troubleshooting.md)

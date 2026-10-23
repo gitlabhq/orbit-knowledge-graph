@@ -29,7 +29,7 @@ GitLab Orbit indexes two kinds of data into one graph:
 - Source code on the default branch of each project, such as files, directories, definitions, imports, and calls.
   Binary files get only a `File` node, with no definitions. GitLab Orbit does not index other branches.
 
-The [local graph](local/_index.md#local-tables) on your machine holds only code.
+The [local graph](cli.md#local-tables) on your machine holds only code.
 
 The graph links these objects. For example, a merge request belongs to a project, runs a pipeline,
 and fixes a vulnerability. A file is on a branch of the project and defines a definition.
@@ -304,6 +304,6 @@ Use these properties to read code without a separate call to the GitLab API.
 
 - [GitLab Orbit architecture](how-it-works.md)
 - [Query language](queries/query-language.md)
-- [Local graph](local/_index.md)
+- [Local graph](cli.md#local-graph)
 - [CLI](cli.md)
 - [Prompt examples](prompt-examples.md)

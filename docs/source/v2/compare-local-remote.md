@@ -1,11 +1,11 @@
 ---
-redirect_to: 'local/_index.md'
+redirect_to: 'cli.md#local-graph'
 remove_date: '2027-01-10'
 ---
 
 <!-- markdownlint-disable -->
 
-This document was moved to [another location](local/_index.md).
+This document was moved to [another location](cli.md#local-graph).
 
 <!-- This redirect file can be deleted after <2027-01-10>. -->
 <!-- Redirects that point to other docs in the same project expire in three months. -->
