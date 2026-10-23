@@ -20,6 +20,7 @@ pub mod metrics;
 pub mod nats;
 pub mod object_storage;
 pub mod probe_server;
+pub mod proto;
 pub mod query;
 pub mod resources;
 pub mod schema;
