@@ -21,18 +21,13 @@ title: Connect your agent to GitLab Orbit
 
 {{< /history >}}
 
-Connect the agents on your machine to GitLab Orbit with one command. Run it in a Git repository:
-
-```shell
-glab orbit setup
-```
-
-Setup tells your agents to search code with the [local graph](../cli.md#local-graph), indexes the repository,
-and installs the [GitLab Orbit skill](#gitlab-orbit-skill). The skill teaches your agent to query your GitLab data,
-such as merge requests, pipelines, and vulnerabilities.
+The GitLab Orbit CLI connects the agents on your machine to GitLab Orbit.
+One command, `glab orbit setup`, tells your agents to search code with the [local graph](../cli.md#local-graph),
+indexes the repository, and installs the [GitLab Orbit skill](#gitlab-orbit-skill).
+The skill teaches your agent to query your GitLab data, such as merge requests, pipelines, and vulnerabilities.
 For a short walkthrough, see the [quickstart](../quickstart.md).
 
-GitLab Duo Agent Platform has GitLab Orbit built in. See [GitLab Orbit in GitLab Duo](duo.md).
+GitLab Duo Agent Platform has GitLab Orbit built in. For more information, see [GitLab Orbit in GitLab Duo](duo.md).
 For agents that cannot run shell commands, use the [GitLab MCP endpoint](mcp.md).
 
 If you installed the standalone binary, run `orbit` in place of `glab orbit`.
@@ -41,7 +36,8 @@ If you installed the standalone binary, run `orbit` in place of `glab orbit`.
 
 Prerequisites:
 
-- [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) 1.120 or later. On first use, `glab` downloads the [GitLab Orbit CLI](../cli.md).
+- [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) 1.120 or later.
+  On first use, `glab` downloads the [GitLab Orbit CLI](../cli.md).
 - You are signed in with `glab auth login`.
 
 To set up your agents:
@@ -49,7 +45,7 @@ To set up your agents:
 1. Go to a Git repository on your machine.
 1. Run `glab orbit setup`.
 1. In the list of agents, keep or clear the selection, then press <kbd>Enter</kbd>.
-   The agents that setup detects on your machine are selected.
+   Setup selects the agents that it detects on your machine.
 
 Setup supports Claude Code (`claude`), Codex (`codex`), GitLab Duo (`duo`), OpenCode (`opencode`), and Pi (`pi`).
 Setup puts the skill in `~/.agents/skills/orbit`. Other agents that support the
@@ -76,15 +72,17 @@ glab orbit setup [<agent>...] [options]
 | `--dry-run` | Show the changes and write nothing. |
 | `--verbose`, `-v` | List every file that setup changes. |
 
-### What setup changes
+### Changes that setup makes
 
 By default, setup writes to your user configuration, so the changes affect only you.
 
-| Component | What it adds | Agents |
-|-----------|--------------|--------|
-| Instructions | A block between `<!-- orbit:setup:begin -->` and `<!-- orbit:setup:end -->` in the instruction file of the agent. The block tells the agent to search with `orbit grep` and to read code with `orbit context`. | All |
-| Hooks | A reminder to use `orbit grep`. For Claude Code, the reminder comes when the agent runs `grep`, `rg`, `ack`, or `ag` in an indexed repository, and never blocks the call. For OpenCode, it comes once each session. | Claude Code, OpenCode |
-| Skill | The `orbit` skill, in `~/.agents/skills/orbit`. For Claude Code, setup also links it in `~/.claude/skills/`, and allows the skill command in `settings.json` so that the skill loads without a prompt. | Claude Code, Codex, GitLab Duo, OpenCode |
+| Component | Agents | Changes |
+|-----------|--------|---------|
+| Instructions | All | A block between `<!-- orbit:setup:begin -->` and `<!-- orbit:setup:end -->` in the instruction file of the agent. The block tells the agent to search with `orbit grep` and to read code with `orbit context`. |
+| Hooks | Claude Code, OpenCode | A reminder to use `orbit grep`. For Claude Code, the reminder comes when the agent runs `grep`, `rg`, `ack`, or `ag` in an indexed repository, and never blocks the call. For OpenCode, the reminder comes once each session. |
+| Skill | Claude Code, Codex, GitLab Duo, OpenCode | The `orbit` skill, in `~/.agents/skills/orbit`. For Claude Code, setup also links the skill in `~/.claude/skills/`, and allows the skill command in `settings.json` so that the skill loads without a prompt. |
+
+Setup follows these rules:
 
 - Setup changes only the text between its markers and the entries that it marked as its own.
 - Before setup changes a file for the first time, it saves a copy as `<name>.orbit-backup`.
@@ -109,20 +107,23 @@ Prerequisites:
 - You are signed in with `glab auth login`.
 - GitLab Orbit is [turned on for your group](../quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
 
-By default, setup installs a wrapper skill. The wrapper loads the skill that your GitLab instance serves,
-so it always matches your instance. If the CLI cannot get the skill from your instance, it uses the copy built into the CLI.
+By default, setup installs a wrapper skill.
+The wrapper loads the skill that your GitLab instance serves, so it always matches your instance.
+If the CLI cannot get the skill from your instance, it uses the copy built into the CLI.
 
-With `--skill full`, or when GitLab Duo is set up, the `orbit` skill holds the skill files.
+With `--skill full`, or when you set up GitLab Duo, the `orbit` skill holds the skill files.
 To update them, run `glab orbit setup` again.
 
 ## Remove the setup
+
+To remove what setup wrote, including the `orbit` skill and the `~/.claude/skills/orbit` link, run:
 
 ```shell
 glab orbit uninstall
 ```
 
-`glab orbit uninstall` removes what setup wrote, including the `orbit` skill and the `~/.claude/skills/orbit` link.
-It leaves the rest of each file unchanged. If you edited a file after setup, it keeps the file and its backup.
+The command leaves the rest of each file unchanged.
+If you edited a file after setup, the command keeps the file and its backup.
 It accepts the same agent names and the `--yes`, `--dry-run`, `--verbose`, `--project`, and `--dir` options as setup.
 
 ## Related topics
