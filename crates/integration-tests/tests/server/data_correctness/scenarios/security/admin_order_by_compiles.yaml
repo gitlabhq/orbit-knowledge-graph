@@ -1,4 +1,4 @@
-description: Admin order_by on admin-only field compiles successfully
+description: Admin order_by on admin-only timestamp compiles successfully
 
 config:
   security: admin
@@ -7,12 +7,12 @@ query:
   json: |
     {
       "query_type": "traversal",
-      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]}],
-      "order_by": "-u.is_admin",
+      "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "updated_at"]}],
+      "order_by": "-u.updated_at",
       "limit": 10
     }
   gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.is_admin ORDER BY u.is_admin DESC LIMIT 10
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username, u.updated_at ORDER BY u.updated_at DESC LIMIT 10
 
 expect:
   compile_only: true

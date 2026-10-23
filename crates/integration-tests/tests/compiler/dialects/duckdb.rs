@@ -582,7 +582,7 @@ fn gql_typed_edge_traversal() {
 fn gql_order_by_across_traversal() {
     let r = compile_gql(
         "MATCH (u:User {id: 1})-[e:AUTHORED]->(n:Note) \
-         RETURN n.confidential ORDER BY n.confidential",
+         RETURN n.created_at ORDER BY n.created_at",
     );
     assert!(r.is_ok(), "{}", r.unwrap_err());
 }

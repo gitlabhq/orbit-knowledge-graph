@@ -41,7 +41,7 @@ pub mod data_model;
 pub mod error;
 pub mod input;
 pub mod metrics;
-pub(crate) mod query_limits;
+pub(crate) mod query_contract;
 
 pub mod scope;
 pub mod types;

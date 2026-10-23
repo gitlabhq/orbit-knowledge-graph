@@ -1,0 +1,49 @@
+limits:
+  max_hops: 3
+  max_depth: 3
+  max_nodes: 5
+  max_relationships: 5
+  max_node_ids: 100
+  max_in_values: 100
+  max_node_filters: 10
+  max_relationship_filters: 5
+  max_columns: 50
+  max_relationship_types: 10
+  max_aggregations: 10
+  max_group_by_keys: 4
+  max_filter_entries_per_property: 10
+  max_predicates: 16
+  max_limit: 1000
+  max_skip: 10000
+  max_identifier_length: 64
+  max_filter_string_length: 1024
+  max_predicate_depth: 32
+
+filter_operators:
+  eq: [string, integer, number, boolean, date, datetime, enum, uuid]
+  ne: [string, integer, number, boolean, date, datetime, enum, uuid]
+  gt: [string, integer, number, date, datetime, enum, uuid]
+  lt: [string, integer, number, date, datetime, enum, uuid]
+  gte: [string, integer, number, date, datetime, enum, uuid]
+  lte: [string, integer, number, date, datetime, enum, uuid]
+  in: [string, integer, number, boolean, date, datetime, enum, uuid]
+  contains: [string, enum, uuid]
+  starts_with: [string, enum, uuid]
+  ends_with: [string, enum, uuid]
+  is_null: [string, integer, number, boolean, date, datetime, enum, uuid]
+  is_not_null: [string, integer, number, boolean, date, datetime, enum, uuid]
+  token_match: [string, enum, uuid]
+  all_tokens: [string, enum, uuid]
+  any_tokens: [string, enum, uuid]
+
+aggregations:
+  count: [string, integer, number, boolean, date, datetime, enum, uuid]
+  sum: [integer, number]
+  avg: [integer, number]
+  min: [integer, number, date, datetime, enum]
+  max: [integer, number, date, datetime, enum]
+  collect: []
+
+ordering: [string, integer, number, date, datetime, enum, uuid]
+
+path_types: [shortest]

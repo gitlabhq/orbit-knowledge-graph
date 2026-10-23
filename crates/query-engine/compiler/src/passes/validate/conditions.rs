@@ -1,5 +1,5 @@
 use super::*;
-use crate::query_limits::{MAX_FILTERS_PER_NODE, MAX_FILTERS_PER_REL};
+use crate::query_contract::{MAX_FILTERS_PER_NODE, MAX_FILTERS_PER_REL};
 
 impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
     pub(super) fn check_predicate_shape(&self, input: &Input) -> Result<()> {

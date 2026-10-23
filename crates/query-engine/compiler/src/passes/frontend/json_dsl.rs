@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod schema_contract;
-
 use crate::error::Result;
 use crate::input::Input;
 use crate::passes::validate;

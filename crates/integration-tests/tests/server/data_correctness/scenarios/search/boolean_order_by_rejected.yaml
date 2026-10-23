@@ -1,0 +1,10 @@
+description: ORDER BY rejects boolean properties in both query languages
+
+query:
+  json: |
+    {"query_type":"traversal","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4001]}],"order_by":"w.confidential"}
+  gql: |
+    MATCH (w:WorkItem {id: 4001}) RETURN w.id ORDER BY w.confidential
+
+expect:
+  compile_error: does not support ordering

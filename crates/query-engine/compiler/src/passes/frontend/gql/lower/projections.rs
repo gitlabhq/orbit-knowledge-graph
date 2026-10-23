@@ -6,7 +6,7 @@ use crate::input::{
     InputGroupByKey, InputOrderBy, OrderDirection, PropertyRef, QueryType, RelationshipColumn,
     RelationshipColumnKind, RelationshipOrder, TargetRef,
 };
-use crate::query_limits::MAX_COLUMNS;
+use crate::query_contract::MAX_COLUMNS;
 
 use super::super::ast::{AggregateFunction, Expression, Name, Projections, Sort, SortKey, Target};
 use super::super::errors::invalid;

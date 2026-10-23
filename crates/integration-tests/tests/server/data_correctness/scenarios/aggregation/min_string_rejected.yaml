@@ -21,4 +21,4 @@ query:
     MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g{.id, .name}, min(u.username) AS first_username LIMIT 10
 
 expect:
-  compile_error: aggregates are restricted to scalars
+  compile_error: '"MIN" is not supported'

@@ -26,6 +26,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Ontology derived entity definitions | `config/ontology/derived/` |
 | Ontology extraction SQL | Generated from the pipeline (`query: generated`) for nodes and edges; a `.sql.j2` MiniJinja template next to the YAML only for complex nodes (`config/ontology/nodes/`) and derived entities (`config/ontology/derived/`) |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
+| Query limits and type-operation contract | `config/query_contract.yaml` (compiler build generates Rust checks and validates the JSON Schema and Pest grammar against it) |
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
 | YAML document type configs | `crates/code-graph/src/v2/langs/generic/yaml/document_types/` (one file per document type, embedded via rust-embed, interpreted by `document_types.rs`) |
 | YAML document type JSON schema | `config/schemas/yaml_document_type.schema.json` (configs validated against it when the code-graph YAML pipeline first loads them) |

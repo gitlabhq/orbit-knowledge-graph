@@ -14,10 +14,10 @@ use std::sync::OnceLock;
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::{
-    AggFunction, ColumnSelection, Condition, FilterOp, Input, InputFilter, InputGroupByKey,
-    InputNode, PredicateTarget, QueryType, group_by_output_names,
+    ColumnSelection, Condition, FilterOp, Input, InputFilter, InputGroupByKey, InputNode,
+    PredicateTarget, QueryType, group_by_output_names,
 };
-use crate::query_limits::{
+use crate::query_contract::{
     MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTER_STRING_LEN, MAX_HOPS_CAP,
     MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_LIMIT, MAX_PREDICATE_DEPTH, MAX_SKIP,
 };
@@ -216,18 +216,6 @@ fn wide_id_range_hint(wide: bool) -> String {
     } else {
         String::new()
     }
-}
-
-fn is_aggregate_scalar(data_type: DataType) -> bool {
-    matches!(
-        data_type,
-        DataType::Int
-            | DataType::Float
-            | DataType::Bool
-            | DataType::Date
-            | DataType::DateTime
-            | DataType::Enum
-    )
 }
 
 #[derive(Default)]
@@ -496,7 +484,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
 
     /// Enforce query limits for every frontend, including counts across input fields.
     pub fn check_depth(&self, input: &Input) -> Result<()> {
-        use crate::query_limits::{
+        use crate::query_contract::{
             MAX_AGGREGATIONS, MAX_COLUMNS, MAX_DEPTH_CAP, MAX_GROUP_BY_KEYS, MAX_HOPS_CAP,
             MAX_IN_VALUES, MAX_NODE_IDS, MAX_NODES_CAP, MAX_PREDICATES, MAX_REL_TYPES,
             MAX_RELS_CAP,
@@ -898,6 +886,13 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             return Ok(());
         }
 
+        if !crate::query_contract::filter_operator_accepts(op, data_type) {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: operator \"{}\" is not supported on {data_type}",
+                op.as_ref()
+            )));
+        }
+
         let is_like_op = op.is_like();
         let is_token_op = op.is_token();
 
@@ -1114,12 +1109,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             }
 
             let function = agg.expr.function();
-            if function == AggFunction::Collect {
-                return Err(QueryError::Validation(format!(
-                    "aggregation \"{alias}\": \"collect\" is not supported"
-                )));
-            }
-
             let target = agg.expr.node();
             if !node_ids.contains(&target) {
                 return Err(QueryError::ReferenceError(format!(
@@ -1146,32 +1135,17 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                     )));
                 }
 
-                if matches!(
-                    function,
-                    AggFunction::Sum | AggFunction::Avg | AggFunction::Min | AggFunction::Max
-                ) {
-                    let data_type = self.field_type(entity, prop).ok_or_else(|| {
-                        QueryError::AllowlistRejected(format!(
-                            "invalid property in aggregation \"{alias}\": {entity}.{prop}"
-                        ))
-                    })?;
+                let data_type = self.field_type(entity, prop).ok_or_else(|| {
+                    QueryError::AllowlistRejected(format!(
+                        "invalid property in aggregation \"{alias}\": {entity}.{prop}"
+                    ))
+                })?;
 
-                    if matches!(function, AggFunction::Sum | AggFunction::Avg)
-                        && !matches!(data_type, DataType::Int | DataType::Float)
-                    {
-                        return Err(QueryError::Validation(format!(
-                            "aggregation \"{alias}\": \"{}\" requires a numeric property, got {}.{} ({data_type})",
-                            function.to_string().to_uppercase(),
-                            entity,
-                            prop
-                        )));
-                    }
-
-                    if !is_aggregate_scalar(data_type) {
-                        return Err(QueryError::Validation(format!(
-                            "aggregation \"{alias}\": aggregates are restricted to scalars, got {entity}.{prop} ({data_type})"
-                        )));
-                    }
+                if !crate::query_contract::aggregation_accepts(function, data_type) {
+                    return Err(QueryError::Validation(format!(
+                        "aggregation \"{alias}\": \"{}\" is not supported on {entity}.{prop} ({data_type})",
+                        function.to_string().to_uppercase()
+                    )));
                 }
             }
         }
@@ -1264,6 +1238,21 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                     sort.column
                 )));
             }
+            if let Some(InputGroupByKey::Property { node, property, .. }) = input
+                .aggregation
+                .group_by
+                .iter()
+                .find(|group| group.output_name() == sort.column)
+                && let Some(entity) = input.entity_of(node)
+                && self
+                    .field_type(entity, property)
+                    .is_some_and(|data_type| !crate::query_contract::ordering_accepts(data_type))
+            {
+                return Err(QueryError::Validation(format!(
+                    "aggregation_sort column {} does not support ordering",
+                    sort.column
+                )));
+            }
         }
 
         Ok(())
@@ -1295,6 +1284,15 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         if self.virtual_source(entity, &order_by.property).is_some() {
             return Err(QueryError::Validation(format!(
                 "order_by property {}.{} is virtual and cannot be read in SQL",
+                order_by.node, order_by.property
+            )));
+        }
+        if self
+            .field_type(entity, &order_by.property)
+            .is_some_and(|data_type| !crate::query_contract::ordering_accepts(data_type))
+        {
+            return Err(QueryError::Validation(format!(
+                "order_by property {}.{} does not support ordering",
                 order_by.node, order_by.property
             )));
         }

@@ -8,7 +8,7 @@ use serde_json::{Number, Value};
 use super::ast::*;
 use super::{QueryParser, Rule};
 use crate::input::{BooleanExpression, Direction, FilterOp, OrderDirection, TruncateUnit};
-use crate::query_limits::MAX_FILTER_STRING_LEN;
+use crate::query_contract::MAX_FILTER_STRING_LEN;
 
 pub(super) type Node<'i> = pest_consume::Node<'i, Rule, ()>;
 pub(super) type Result<T> = std::result::Result<T, Error<Rule>>;

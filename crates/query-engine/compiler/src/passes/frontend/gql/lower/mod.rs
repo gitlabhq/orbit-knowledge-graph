@@ -7,7 +7,7 @@ use crate::input::{
     Direction, HopRange, InputNeighbors, InputPath, InputRelationship, PathType, PredicateTarget,
     PropertyRef, QueryType,
 };
-use crate::query_limits::MAX_NODES_CAP;
+use crate::query_contract::MAX_NODES_CAP;
 use crate::{Input, InputNode, QueryError, Result};
 
 use super::ast::{Name, NodePattern, Pattern, PatternElement, Query, Range, Relationship};

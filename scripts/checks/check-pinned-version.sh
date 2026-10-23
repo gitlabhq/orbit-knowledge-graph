@@ -19,7 +19,7 @@ fi
 
 # pin, regex of files that require a bump when changed
 COVERS='
-query_dsl          ^(config/schemas/graph_query\.schema\.json|crates/query-engine/compiler/src/(input\.rs|passes/validate\.rs))$
+query_dsl          ^(config/(query_contract\.yaml|schemas/graph_query\.schema\.json)|crates/query-engine/compiler/src/(input\.rs|passes/validate(\.rs|/[^/]+\.rs)))$
 raw_output_format  ^(crates/query-engine/formatters/src/(graph|lib)\.rs|config/schemas/query_response\.json)$
 toon_output_format ^(crates/query-engine/formatters/src/(toon|graph|lib|text)\.rs)$
 gql_output_format  ^(crates/query-engine/formatters/src/gql/[^/]+\.rs|crates/query-engine/formatters/src/(graph|lib|text)\.rs)$

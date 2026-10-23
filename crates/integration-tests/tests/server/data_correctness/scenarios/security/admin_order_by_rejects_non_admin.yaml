@@ -5,12 +5,12 @@ query:
     {
       "query_type": "traversal",
       "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]}],
-      "order_by": "-u.is_admin",
+      "order_by": "-u.updated_at",
       "limit": 10
     }
   gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.is_admin DESC LIMIT 10
+    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username ORDER BY u.updated_at DESC LIMIT 10
 
 expect:
   compile_error: true
-  compile_error_contains: [is_admin, order_by, administrator]
+  compile_error_contains: [updated_at, order_by, administrator]

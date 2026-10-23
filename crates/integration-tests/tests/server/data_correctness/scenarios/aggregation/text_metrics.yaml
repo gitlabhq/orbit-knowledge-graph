@@ -12,7 +12,7 @@ cases:
       gql: |
         MATCH (w:WorkItem {id: 9001}) RETURN min(w.description) AS v
     expect:
-      compile_error: aggregates are restricted to scalars
+      compile_error: '"MIN" is not supported'
 
   - name: grouped_max_text_rejected
     description: A node-grouped MAX rejects a text property
@@ -22,7 +22,7 @@ cases:
       gql: |
         MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000}) RETURN p, max(w.title) AS v
     expect:
-      compile_error: aggregates are restricted to scalars
+      compile_error: '"MAX" is not supported'
 
   - name: max_uuid_rejected
     description: MAX rejects a UUID
@@ -35,16 +35,26 @@ cases:
       gql: |
         MATCH (o:VulnerabilityOccurrence {id: 1}) RETURN max(o.uuid) AS v
     expect:
-      compile_error: aggregates are restricted to scalars
+      compile_error: '"MAX" is not supported'
 
   - name: scalar_metrics_compile
-    description: MIN and MAX still accept timestamps, integers, booleans, and enums
+    description: MIN and MAX accept timestamps, integers, and enums
     query:
       gql: |
         MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000})
-        RETURN p, min(w.created_at) AS first_created, max(w.weight) AS max_weight, max(w.confidential) AS any_confidential, min(w.state) AS min_state
+        RETURN p, min(w.created_at) AS first_created, max(w.weight) AS max_weight, min(w.state) AS min_state
     expect:
       compile_only: true
+
+  - name: boolean_min_max_rejected
+    description: MIN and MAX reject boolean properties in both query languages
+    query:
+      json: |
+        {"query_type":"aggregation","nodes":[{"id":"w","entity":"WorkItem","node_ids":[9001]}],"aggregations":[{"max":"w.confidential","as":"v"}]}
+      gql: |
+        MATCH (w:WorkItem {id: 9001}) RETURN max(w.confidential) AS v
+    expect:
+      compile_error: '"MAX" is not supported'
 
   - name: categorical_group_keys_compile
     description: Grouping still accepts enums, low-selectivity strings, and truncated timestamps

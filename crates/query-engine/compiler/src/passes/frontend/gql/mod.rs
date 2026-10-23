@@ -39,7 +39,7 @@ pub fn pair_outline(query: &str) -> Option<Vec<(usize, String)>> {
 }
 
 const MAX_QUERY_BYTES: usize = 32 * 1024;
-const MAX_NESTING: usize = crate::query_limits::MAX_PREDICATE_DEPTH;
+const MAX_NESTING: usize = crate::query_contract::MAX_PREDICATE_DEPTH;
 
 #[derive(Debug, Clone)]
 pub struct ParsedQuery {

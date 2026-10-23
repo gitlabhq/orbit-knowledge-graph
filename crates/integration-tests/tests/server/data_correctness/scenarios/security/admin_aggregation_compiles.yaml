@@ -1,4 +1,4 @@
-description: Admin MAX aggregation on admin-only field compiles successfully
+description: Admin MAX aggregation on admin-only timestamp compiles successfully
 
 config:
   security: admin
@@ -13,11 +13,11 @@ query:
       ],
       "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
       "group_by": ["g"],
-      "aggregations": [{"max": "u.is_admin", "as": "has_admin"}],
+      "aggregations": [{"max": "u.updated_at", "as": "latest_update"}],
       "limit": 10
     }
   gql: |
-    MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN g{.id, .name}, max(u.is_admin) AS has_admin LIMIT 10
+    MATCH (u:User)-[:MEMBER_OF]->(g:Group) WHERE u.id >= 1 AND u.id <= 10000 RETURN g{.id, .name}, max(u.updated_at) AS latest_update LIMIT 10
 
 expect:
   compile_only: true

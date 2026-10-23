@@ -5,7 +5,7 @@ cases:
       gql: |
         MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN min(f.path) AS v
     expect:
-      compile_error: aggregates are restricted to scalars
+      compile_error: '"MIN" is not supported'
 
   - name: max_definition_name_rejected
     description: MAX rejects a definition name
@@ -13,7 +13,7 @@ cases:
       gql: |
         MATCH (d:Definition) WHERE d.project_id = 1000 RETURN max(d.name) AS v
     expect:
-      compile_error: aggregates are restricted to scalars
+      compile_error: '"MAX" is not supported'
 
   - name: group_by_file_path_counts
     description: A free-text group key buckets each file

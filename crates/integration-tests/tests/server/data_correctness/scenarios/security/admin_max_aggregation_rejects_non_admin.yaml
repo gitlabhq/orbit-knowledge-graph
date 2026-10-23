@@ -10,12 +10,12 @@ query:
       ],
       "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
       "group_by": ["g"],
-      "aggregations": [{"max": "u.is_admin", "as": "has_admin"}],
+      "aggregations": [{"max": "u.updated_at", "as": "latest_update"}],
       "limit": 10
     }
   gql: |
-    MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g, max(u.is_admin) AS has_admin LIMIT 10
+    MATCH (g:Group)<-[:MEMBER_OF]-(u:User) WHERE g.id >= 1 AND g.id <= 10000 RETURN g, max(u.updated_at) AS latest_update LIMIT 10
 
 expect:
   compile_error: true
-  compile_error_contains: [is_admin, aggregation, administrator]
+  compile_error_contains: [updated_at, aggregation, administrator]

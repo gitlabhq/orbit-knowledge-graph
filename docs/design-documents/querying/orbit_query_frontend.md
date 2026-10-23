@@ -60,8 +60,8 @@ Schema preparation, result types, and resolution belong only to the GQL frontend
 `compiler::compile` remains query-only for both frontends. Its GQL path runs `gql_parse`, which rejects schema calls before metadata resolution.
 
 `validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
-Its limits are shared Rust constants in `query_limits` for both JSON and GQL.
-The compiler's build script checks matching constraints in the JSON schema.
+`config/query_contract.yaml` defines limits and the filter, aggregation, and ordering operations allowed for each property type.
+The compiler build generates Rust constants and operation checks from that contract. It also checks matching JSON Schema constraints and Pest bounds.
 The shared validator also enforces the total predicate count, which spans multiple input fields.
 `validate_relationships` checks each single-hop typed relationship between labeled nodes against the ontology's edge endpoints. It rejects a reversed arrow and names the valid direction. It also rejects a type that connects neither label pair. The pass reads only Input, so the JSON DSL pipelines can adopt it without frontend changes.
 JSON is therefore checked twice, once by schema and once natively; the redundancy is cheap and means every JSON test also exercises the shared validator.
@@ -223,6 +223,7 @@ Existing compiler limits still apply after lowering.
 Queries accept at most 16 input predicates across all MATCH clauses, including node filters, relationship filters, and cross-node comparisons.
 An ID selector or IN list counts as one predicate; an ID range counts as two.
 Explicit relationship-type lists are capped at 10 entries for traversal, path finding, and neighbors queries.
+Ordering comparisons, `ORDER BY`, `min`, and `max` reject boolean properties.
 
 Custom ID-property spellings remain outside the frontend.
 

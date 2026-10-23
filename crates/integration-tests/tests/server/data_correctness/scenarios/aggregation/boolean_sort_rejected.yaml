@@ -1,0 +1,10 @@
+description: Aggregation sorting rejects boolean group keys in both query languages
+
+query:
+  json: |
+    {"query_type":"aggregation","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4001]}],"group_by":["w.confidential"],"aggregations":[{"count":"w","as":"n"}],"aggregation_sort":"w_confidential"}
+  gql: |
+    MATCH (w:WorkItem {id: 4001}) RETURN w.confidential AS confidential, count(w) AS n ORDER BY confidential
+
+expect:
+  compile_error: does not support ordering
