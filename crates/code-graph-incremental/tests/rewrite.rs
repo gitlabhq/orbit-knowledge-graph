@@ -174,3 +174,42 @@ fn a_file_over_the_rewrite_budget_is_skipped_and_reported() {
         ("rewrite", "main.py")
     );
 }
+
+const GROUP_FUNCTIONS: &str = r#"
+stages:
+  - repeat: REPEAT
+    rules:
+      - match: '(module $$$PRE (function_definition $$$H) $$$BODY $G:function_definition $$$POST)'
+        replace: '(module @$ROOT $$$PRE (__group (function_definition $$$H) $$$BODY) $G $$$POST)'
+"#;
+
+fn groups_after_grouping(repeat: bool) -> usize {
+    let env = python_env(Limits::UNLIMITED);
+    let source =
+        "def a(): pass\nx = 1\ndef b(): pass\ny = 2\ndef c(): pass\nz = 3\ndef d(): pass\n";
+    let run = code_graph_incremental::Sentinel::new("test", "main.py", u64::MAX);
+    let (mut tree, _) = code_graph_incremental::treesitter::parse_with_sentinel(
+        source,
+        SupportLang::Python,
+        &env.lang,
+        "main.py",
+        &run,
+        usize::MAX,
+    )
+    .unwrap();
+    let yaml = GROUP_FUNCTIONS.replace("REPEAT", &repeat.to_string());
+    let stages = code_graph_incremental::rules::load_rules(&yaml, &env.lang).unwrap();
+    for stage in &stages {
+        code_graph_incremental::pattern::apply_stage(&mut tree, &env.lang, stage, &[]).unwrap();
+    }
+    tree.root()
+        .children()
+        .filter(|c| env.lang.kinds.resolve(c.kind() as u32) == "__group")
+        .count()
+}
+
+#[test]
+fn a_repeat_stage_runs_until_no_node_is_replaced() {
+    assert_eq!(groups_after_grouping(false), 1);
+    assert_eq!(groups_after_grouping(true), 3);
+}

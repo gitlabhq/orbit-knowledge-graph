@@ -342,7 +342,17 @@ struct ClimbSpec {
 struct Stage {
     #[allow(dead_code)]
     name: Option<String>,
+    /// Re-run the stage until a pass replaces nothing, for rewrites that
+    /// expose a new match each time they fire.
+    #[serde(default)]
+    repeat: bool,
     rules: Vec<Rule>,
+}
+
+/// One compiled rewrite stage.
+pub struct RewriteStage {
+    pub rules: Vec<Rewrite>,
+    pub repeat: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -376,7 +386,7 @@ fn read(yaml: &str) -> Result<RuleFile, LoadError> {
     Ok(orbit_utils::yaml::from_str(yaml)?)
 }
 
-fn compile_stages(stages: &[Stage], lang: &Lang) -> Result<Vec<Vec<Rewrite>>, LoadError> {
+fn compile_stages(stages: &[Stage], lang: &Lang) -> Result<Vec<RewriteStage>, LoadError> {
     stages
         .iter()
         .map(|stage| compile_stage(stage, lang))
@@ -384,14 +394,14 @@ fn compile_stages(stages: &[Stage], lang: &Lang) -> Result<Vec<Vec<Rewrite>>, Lo
 }
 
 /// Compile a YAML rule file into stages of rewrites.
-pub fn load_rules(yaml: &str, lang: &Lang) -> Result<Vec<Vec<Rewrite>>, LoadError> {
+pub fn load_rules(yaml: &str, lang: &Lang) -> Result<Vec<RewriteStage>, LoadError> {
     compile_stages(&read(yaml)?.stages, lang)
 }
 
 /// Everything a language YAML compiles to.
 #[derive(Default)]
 pub struct LangConfig {
-    pub rewrite_stages: Vec<Vec<Rewrite>>,
+    pub rewrite_stages: Vec<RewriteStage>,
     pub resolve_stages: Vec<ResolveStage>,
     pub config: Config,
     pub display_rules: Vec<Rewrite>,
@@ -406,7 +416,7 @@ pub fn load_lang(yaml: &str, lang: &Lang) -> Result<LangConfig, LoadError> {
     };
     let display_rules = compile_stages(file.display.as_deref().unwrap_or_default(), lang)?
         .into_iter()
-        .flatten()
+        .flat_map(|stage| stage.rules)
         .collect();
     Ok(LangConfig {
         rewrite_stages,
@@ -442,12 +452,16 @@ fn compile_resolve(section: &ResolveSection, lang: &Lang) -> Result<Vec<ResolveS
         .collect()
 }
 
-fn compile_stage(stage: &Stage, lang: &Lang) -> Result<Vec<Rewrite>, LoadError> {
-    stage
+fn compile_stage(stage: &Stage, lang: &Lang) -> Result<RewriteStage, LoadError> {
+    let rules = stage
         .rules
         .iter()
         .map(|rule| compile_rule(rule, lang))
-        .collect()
+        .collect::<Result<_, _>>()?;
+    Ok(RewriteStage {
+        rules,
+        repeat: stage.repeat,
+    })
 }
 
 fn compile_tags(
@@ -578,7 +592,7 @@ stages:
         let lang = Lang::new();
         let stages = load_rules(yaml, &lang).unwrap();
         assert_eq!(stages.len(), 1);
-        assert_eq!(stages[0].len(), 1);
+        assert_eq!(stages[0].rules.len(), 1);
     }
 
     #[test]

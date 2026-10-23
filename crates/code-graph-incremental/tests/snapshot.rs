@@ -130,7 +130,7 @@ stages:
         .map(|tree| {
             let mut tree: code_graph_incremental::tree::Tree = tree.into();
             for stage in &edits {
-                pattern::apply_rewrites(&mut tree, &env.lang, stage, &[]).unwrap();
+                pattern::apply_stage(&mut tree, &env.lang, stage, &[]).unwrap();
             }
             tree.prune();
             tree.into()
