@@ -34,7 +34,7 @@ Indexing
 : The process that reads GitLab data and code and writes the graph. GitLab indexes a group when you turn on GitLab Orbit for it, and keeps the graph current.
 
 Local graph
-: The graph that the GitLab Orbit CLI builds from a repository on your machine. It holds code only, works offline, and has no authorization layer.
+: The graph that the GitLab Orbit CLI builds from a repository on your machine. It holds code only and works offline.
 
 Model Context Protocol (MCP) endpoint
 : The GitLab server for the Model Context Protocol at `/api/v4/orbit/mcp`, for agents that cannot run shell commands.
