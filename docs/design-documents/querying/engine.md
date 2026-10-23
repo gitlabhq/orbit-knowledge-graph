@@ -13,7 +13,7 @@
 
 GitLab Orbit's query engine turns a graph query into parameterized SQL over typed node tables and adjacency-ordered edge tables.
 
-At a high level, here's how data flows through the engine:
+Data flows through the engine in these steps:
 
 1. A frontend like JSON or GQL parses a graph query into a shared input.
    The [Query languages](querying.md) doc describes the frontends.
@@ -24,15 +24,17 @@ At a high level, here's how data flows through the engine:
 1. A final validation pass is executed to ensure all authorization filters and redaction metadata are present.
 1. Code generation renders the syntax tree as SQL for a particular backend, like ClickHouse.
 
-ClickHouse allows Orbit to have the best of both worlds - fast aggregations for analytical queries, and property-graph semantics for traversals, paths, neighborhoods, and grouped counts.
-Orbit needs no separate graph database, see [ADR 000](../decisions/000_clickhouse_graph_storage.md) which details that decision.
+ClickHouse gives Orbit fast aggregations for analytical queries.
+The engine adds property-graph semantics on top: traversals, paths, neighborhoods, and grouped counts.
+Orbit needs no separate graph database.
+[ADR 000](../decisions/000_clickhouse_graph_storage.md) records that decision.
 
-A picture is worth a thousand words, so here's a side-by-side breakdown of our 4 query types: Traversal, Aggregation, Pathfinding, and Neighbors.
-It shows how each one goes from GQL to SQL.
+The engine supports four query types: traversal, aggregation, path finding, and neighbors.
+This table shows a GQL example of each one, and the SQL that it produces.
 
 > [!note]
-> We've trimmed the SQL down to the interesting parts.
-> The real SQL also carries authorization filters, page limits, and various settings.
+> These SQL fragments show only the core of each query.
+> The full SQL also has authorization filters, page limits, and query settings.
 
 | Query type | Example (GQL) | Meaning | SQL output fragment |
 | --- | --- | --- | --- |
@@ -43,30 +45,73 @@ It shows how each one goes from GQL to SQL.
 
 ---
 
-## Terms
+## Walkthrough
 
-- The **query data model** is the compiler's view of one schema version: the logical graph, its physical layout for one backend, and its authorization policy.
-- A **phase** is one engine step, such as `validate` or `plan`.
-- A **pipeline** is an ordered list of phases for one frontend and one backend.
-- A **relation** is one read of a node or edge table in the plan.
-- A **scope** is a narrow traversal path prefix that the compiler derives from the query, such as the path of one project.
-- A **tombstone** is the row version that marks a row as deleted.
+This section maps the parts of the engine, in the order that the rest of this document describes them.
+It starts with where the data lives and how the engine reads it.
+Then it follows one query through each phase, from text to SQL.
 
----
+| Theme | Component | What it does |Query Engine Phases |
+| --- | --- | --- | --- |
+| Data | [Storage model](#storage-model) | Typed node tables and shared edge tables in ClickHouse, all declared by the ontology | None |
+| Data | [Query data model](#query-data-model) | The engine's read-only view of one schema version: the graph, its tables, and its authorization rules | None |
+| Structure | [Pipelines](#pipelines) | Ordered lists of phases, built from reusable segments, one per frontend and backend | All |
+| Querying | [Frontends](querying.md) | Parse GQL or JSON into the shared input, in their own doc | `gql_parse`, `json_dsl_parse` |
+| Querying | [Validation](#validation) | Rejects bad queries early, then normalizes names and types | `validate`, `validate_relationships`, `normalize` |
+| Querying | [Restriction and scope](#restriction-and-scope) | Applies who is asking, and narrows the query to the namespaces it touches | `restrict` |
+| Querying | [Planning](#planning) | Picks how to read each node and relationship | `plan` |
+| Querying | [Current-state reads](#current-state-reads) | Makes sure every read sees the latest version of each row | `plan` |
+| Querying | [Lowering and code generation](#lowering-and-code-generation) | Turns the plan into a SQL syntax tree, then into SQL for one backend | `lower`, `response_policy`, `codegen` |
+| Querying | [Authorization](#authorization) | Adds authorization filters and redaction columns, then proves they are all there | `enforce`, `security`, `check` |
+| Querying | [Hydration](#hydration) | Plans a second, small query for the properties the main query didn't fetch | `hydrate_plan` |
+| Querying | [Pagination](#pagination) | Pages through results without keeping state between requests | `paginate` |
+| Querying | [Settings](#settings) | Picks time and memory limits for each query type | `settings` |
+| Summary | [Guarantees](#guarantees) | What the engine promises for every query | All |
 
-## Engine principles
+This diagram connects the components:
 
-- The compiler is the only path from a query to SQL.
-  Every safety rule lives in one place.
-- Phases are small and ordered.
-  Each phase declares the state it reads and writes, and cannot touch anything else.
-- Planning decides what to read.
-  Lowering decides how to spell it in SQL.
-  Code generation decides the dialect.
-- The planner may change how a query reads data, but never what the query returns.
-- A query reads the current version of each row.
-  Speed never comes at the cost of stale results.
-- When the engine cannot prove that a read is safe, it rejects the query.
+```mermaid
+flowchart TB
+    accTitle: How the graph query engine fits together
+    accDescr: Once per schema version, the ontology produces the ClickHouse storage model and the query data model. For each query, a frontend parses the text, then validation, restriction, planning, lowering, authorization, and the finishing phases turn it into parameterized SQL. ClickHouse runs the SQL, Rails redacts the rows, and hydration fetches the remaining properties before the response goes back.
+
+    subgraph schema_time["Once per schema version"]
+        ontology["Ontology"]
+        storage[("Storage model<br/>node and edge tables in ClickHouse")]
+        model["Query data model<br/>graph, layout, and policy"]
+        ontology --> storage
+        ontology --> model
+    end
+
+    subgraph query_time["Once per query: one pipeline"]
+        query_text["GQL or JSON query"]
+        frontend["Frontend<br/>parse into the shared input"]
+        validation["Validation<br/>shape, limits, names, types"]
+        restriction["Restriction and scope<br/>admin-only fields, paths, anchors"]
+        planning["Planning<br/>access paths and current-state reads"]
+        lowering["Lowering<br/>SQL syntax tree"]
+        authorization["Authorization<br/>enforce, security, check"]
+        finishing["Pagination, hydration plan,<br/>and settings"]
+        codegen["Code generation<br/>ClickHouse or DuckDB SQL"]
+        query_text --> frontend --> validation --> restriction --> planning --> lowering --> authorization --> finishing --> codegen
+    end
+
+    context["Security context<br/>caller paths and roles"]
+    context --> restriction
+    context --> authorization
+
+    model -. "names and types" .-> validation
+    model -. "tables, routes, and keys" .-> planning
+    model -. "role floors and redaction rules" .-> authorization
+
+    codegen --> sql["Parameterized SQL"]
+    sql --> storage
+    storage --> rows["Rows"]
+    rows --> redaction["Rails redaction<br/>outside the engine"]
+    redaction --> hydration["Hydration query<br/>through ch_hydration"]
+    hydration -.-> storage
+    hydration --> response["Response"]
+```
 
 ---
 
@@ -94,7 +139,7 @@ The ontology defines every table, sort key, and index.
 The query engine never reads the ontology directly.
 Instead, each schema version of Orbit derives one immutable query data model from its ontology, and every engine phase reads from that model.
 
-At a high level, the model splits the ontology into three kinds of facts:
+The model splits the ontology into three kinds of facts:
 
 - The **logical graph**: entities, properties, relationships, and relationship variants.
   A variant is one relationship between one pair of entity types, like `(User)-[:AUTHORED]->(MergeRequest)`.
@@ -148,23 +193,23 @@ flowchart TB
 ```
 
 The model builds its mapping from the graph and the schema it is given, so a mapping can never be paired with the wrong schema.
-A missing property in the mapping simply means that the backend cannot supply it.
+A missing property in the mapping means that the backend cannot supply it.
 
-Orbit ships two models today:
+Orbit has two models:
 
 | Model | Schema | Policy | Used by |
 | --- | --- | --- | --- |
 | `ClickHouseDataModel` | ClickHouse tables, engines, indexes, and views | GitLab authorization | Orbit Remote |
 | `DuckDbDataModel` | The local DuckDB tables | Trusted local, since a local graph has one user | The local graph schema and the code-graph test suites |
 
-A new backend, like a document store, brings its own schema and mapping.
+A new backend, like a document store, supplies its own schema and mapping.
 It does not have to look relational, and the graph catalog stays the same.
 
 ### Who reads the model
 
 The engine reads the model through the mapping.
-That's how the planner finds the edge table for each relationship variant and the column behind each property.
-It also finds sorted copies of a table that suit a lookup better.
+The planner uses the mapping to find the edge table for each relationship variant and the column behind each property.
+It also uses the mapping to find sorted copies of a table for a faster lookup.
 
 Schema management reads the physical schema directly.
 DDL, migrations, cleanup, and view lifecycle all come from the same ClickHouse schema that the engine queries, so the two cannot drift apart.
@@ -184,49 +229,13 @@ The code lives in `crates/query-data-model/`.
 
 ---
 
-## Compiler phases at a glance
-
-```plantuml
-@startuml
-left to right direction
-skinparam componentStyle rectangle
-component "Parse\nJSON or GQL" as parse
-component "Validate and\nnormalize" as check_input
-component "Restrict\nand scope" as restrict
-component "Plan" as plan
-component "Lower to\nSQL tree" as lower
-component "Enforce, secure,\nand check" as secure
-component "Paginate, hydrate,\nand settings" as finish
-component "Generate SQL" as codegen
-parse --> check_input
-check_input --> restrict
-restrict --> plan
-plan --> lower
-lower --> secure
-secure --> finish
-finish --> codegen
-@enduml
-```
-
-| Group | Phases | Responsibility |
-| --- | --- | --- |
-| Parse | `json_dsl_parse`, `gql_parse` | Turn query text into the shared input |
-| Understand | `validate`, `validate_relationships`, `normalize` | Check shape, limits, and ontology names, then resolve names and types |
-| Restrict | `restrict` | Remove admin-only fields, check requested paths, and derive the query scope |
-| Plan | `plan` | Choose access paths, join order, current-state reads, and hydration |
-| Lower | `lower`, `response_policy` | Build the SQL tree and cap the size of projected values |
-| Protect | `enforce`, `security`, `check` | Add role-gated reads and redaction columns, inject authorization filters, and verify them |
-| Finish | `paginate`, `hydrate_plan`, `settings`, `codegen` | Set the page window, plan hydration, pick query settings, and render SQL |
-
----
-
 ## Pipelines
 
-A pipeline is just an ordered list of phases.
+A pipeline is an ordered list of phases.
 `crates/query-engine/compiler/src/config.rs` declares every phase, the state it reads and writes, and every pipeline that uses it.
 Because each phase declares its inputs and outputs, the same run of phases can show up in several pipelines.
 
-Here are the reusable runs of phases, which we call segments:
+A segment is a run of phases that several pipelines share:
 
 | Segment | Phases |
 | --- | --- |
@@ -236,7 +245,7 @@ Here are the reusable runs of phases, which we call segments:
 | Remote finish | `paginate` → `check` → `hydrate_plan` → `settings` → `codegen` |
 | Local tail | `plan` → `lower` → `enforce_local` → `paginate` → `duckdb_codegen` |
 
-And here's how the pipelines snap those segments together.
+This diagram shows how each pipeline combines segments.
 Boxes with the same color are the same segment:
 
 ```plantuml
@@ -275,14 +284,14 @@ note top of gql_e : validate_normalize_gql
 @enduml
 ```
 
-A few things fall out of this:
+Segment reuse has these effects:
 
 - **Both remote languages share everything after parsing.** `clickhouse_gql` and `clickhouse_json_dsl` differ only in their front segment.
 - **Hydration reuses the remote core.** It starts from an input the server builds, so it skips parsing, but it runs the same restrict, plan, and security phases.
   Hydration queries can't bypass authorization.
 - **Local queries reuse the front.** The DuckDB pipelines parse and normalize the same way.
   Then they swap in a local tail with no security phases, because a local graph has a single user.
-- **A front on its own is useful too.** When a new schema version loads, the server runs every named query through `validate_normalize_gql` and `validate_normalize`, to prove each one still fits the new ontology.
+- **A front segment can run alone.** When a new schema version loads, the server runs every named query through `validate_normalize_gql` and `validate_normalize`, to prove each one still fits the new ontology.
 
 | Pipeline | Frontend | Backend | Used by |
 | --- | --- | --- | --- |
@@ -296,7 +305,8 @@ A few things fall out of this:
 
 ## Validation
 
-Validation catches a bad query before the engine spends any effort on it.
+Validation is the first phase after parsing.
+It rejects an invalid query before planning starts.
 Each check rejects a different kind of mistake, and every rejection is a client-safe error.
 
 ```plantuml
@@ -348,7 +358,7 @@ end note
 @enduml
 ```
 
-Here's the full set of checks, by category:
+Validation checks these categories:
 
 - **Syntax.** GQL must match the grammar.
   JSON must match the JSON schema.
@@ -376,8 +386,7 @@ The [query language reference](../../source/remote/queries/query-language.md#val
 
 ## Restriction and scope
 
-Restriction is the first phase that knows who is asking.
-It reads the caller's security context: their organization, plus each traversal path they can read and their role on it.
+Restriction is the first phase that reads the caller's security context: their organization, plus each traversal path they can read and their role on it.
 
 ```plantuml
 @startuml
@@ -411,7 +420,7 @@ Restriction does three things:
 ### How scope works
 
 A scope starts at an anchor: a node with a known ID or path, like a project, group, merge request, or file.
-The anchor's traversal path becomes a tight `startsWith` filter, which lets ClickHouse prune most of the primary index.
+The anchor's traversal path becomes a `startsWith` filter, which lets ClickHouse prune most of the primary index.
 
 ```plantuml
 @startuml
@@ -449,7 +458,7 @@ The rules for scope:
 - The anchor's current path is read in a subquery inside the same statement.
   There is no lookup before the query and no cache.
   A transferred project scopes to its new path as soon as its rows are indexed.
-- ClickHouse evaluates that subquery before index analysis, so it prunes just like a literal prefix.
+- ClickHouse evaluates that subquery before index analysis, so it prunes like a literal prefix.
 - The scope spreads along relationships that the ontology marks as staying in one namespace, like `IN_PROJECT` and `CONTAINS`.
 - It never spreads across relationships that can cross namespaces, like `CLOSES`, and never from a child namespace up to its parent.
 - A node with several anchors gets one `startsWith` per anchor, combined with `OR`.
@@ -464,7 +473,7 @@ The rules for scope:
 
 The planner decides how to read each node and relationship.
 It works from facts in the query data model, not from the shape of the query text.
-Here are a few of its strategies.
+These are some of its strategies.
 
 **Read edges first, and join nodes only when needed.** Edge tables already hold both endpoint IDs, so a query that only needs IDs never touches a node table.
 
@@ -550,92 +559,6 @@ A planner change that picks a different plan for one of them fails a test.
 
 ---
 
-## Lowering and code generation
-
-Lowering turns the plan into a SQL syntax tree.
-Code generation then renders that tree for one backend.
-Built-in functions are a closed vocabulary in the tree, so each backend spells them its own way.
-
-```plantuml
-@startuml
-left to right direction
-skinparam componentStyle rectangle
-component "Plan\nread gl_merge_request\nwithin path ?" as plan
-component "SQL tree\nFilter(StartsWith(mr.traversal_path, p0))" as tree
-component "ClickHouse\nstartsWith(mr.traversal_path, {p0:String})" as clickhouse #DBEAFE
-component "DuckDB\nstarts_with(mr.traversal_path, ?)" as duckdb #FCE7F3
-plan --> tree
-tree --> clickhouse
-tree --> duckdb
-@enduml
-```
-
-- Planning decides what to read.
-  Lowering decides how to express it as SQL.
-  Code generation decides the dialect.
-- Every query value stays a bound parameter, all the way to the database driver.
-- `response_policy` caps the size of large projected values, like long text, before the result leaves ClickHouse.
-- Date buckets keep their units until code generation picks the backend expression.
-- When a backend can't support an operation, it rejects the query.
-  DuckDB, for example, has no equivalent for ClickHouse's token search.
-
----
-
-## Authorization
-
-Three phases protect every remote query.
-`enforce` adds what redaction needs, `security` adds the authorization filters, and `check` proves that nothing was missed.
-
-```plantuml
-@startuml
-left to right direction
-skinparam componentStyle rectangle
-component "SQL tree\nreads gl_edge, gl_merge_request,\ngl_vulnerability, gl_user" as tree
-component "enforce" as enforce
-component "security" as security
-component "check" as check
-component "Safe SQL tree" as safe
-tree --> enforce
-enforce --> security
-security --> check
-check --> safe
-
-note bottom of enforce
-  adds an ID and type column
-  per node, so Rails can redact rows
-end note
-
-note bottom of security
-  gl_merge_request: startsWith on
-  1/9970/ and 1/22/ (Reporter floor)
-  gl_vulnerability: only paths where
-  the caller holds the higher role
-  gl_user: global, no path filter
-end note
-
-note bottom of check
-  every namespaced read has a filter?
-  yes: pass
-  no: reject the query
-end note
-@enduml
-```
-
-- Every namespaced node and edge read gets a `startsWith(traversal_path, ?)` filter at the role floor of its entity.
-  Most entities need Reporter, and security entities like vulnerabilities need a higher role.
-- When the caller holds no path at the right role, the read gets a filter that is always false.
-  Some queries are refused outright instead.
-  Either way, nothing leaks.
-- Global tables, like `gl_user`, have no traversal path.
-  Their rows rely on Rails redaction, and joins through namespaced relationships keep their path filters.
-- `check` walks the final SQL tree.
-  If any namespaced read lacks a valid filter, the engine rejects the query instead of running it.
-- `enforce` adds the columns that redaction needs, so Rails can check rows that SQL can't decide on its own, like confidential items.
-
-The [Security](../security.md) design document describes the full authorization model and the redaction layer.
-
----
-
 ## Current-state reads
 
 Node and edge tables keep several versions of a row until ClickHouse merges them.
@@ -708,6 +631,92 @@ Some more details:
 
 ---
 
+## Lowering and code generation
+
+Lowering turns the plan into a SQL syntax tree.
+Code generation then renders that tree for one backend.
+Built-in functions are a closed vocabulary in the tree, so each backend spells them its own way.
+
+```plantuml
+@startuml
+left to right direction
+skinparam componentStyle rectangle
+component "Plan\nread gl_merge_request\nwithin path ?" as plan
+component "SQL tree\nFilter(StartsWith(mr.traversal_path, p0))" as tree
+component "ClickHouse\nstartsWith(mr.traversal_path, {p0:String})" as clickhouse #DBEAFE
+component "DuckDB\nstarts_with(mr.traversal_path, ?)" as duckdb #FCE7F3
+plan --> tree
+tree --> clickhouse
+tree --> duckdb
+@enduml
+```
+
+- Planning decides what to read.
+  Lowering decides how to express it as SQL.
+  Code generation decides the dialect.
+- Every query value stays a bound parameter, all the way to the database driver.
+- `response_policy` caps the size of large projected values, like long text, before the result leaves ClickHouse.
+- Date buckets keep their units until code generation picks the backend expression.
+- When a backend can't support an operation, it rejects the query.
+  DuckDB, for example, has no equivalent for ClickHouse's token search.
+
+---
+
+## Authorization
+
+Three phases protect every remote query.
+`enforce` adds what redaction needs, `security` adds the authorization filters, and `check` verifies that every read has a filter.
+
+```plantuml
+@startuml
+left to right direction
+skinparam componentStyle rectangle
+component "SQL tree\nreads gl_edge, gl_merge_request,\ngl_vulnerability, gl_user" as tree
+component "enforce" as enforce
+component "security" as security
+component "check" as check
+component "Safe SQL tree" as safe
+tree --> enforce
+enforce --> security
+security --> check
+check --> safe
+
+note bottom of enforce
+  adds an ID and type column
+  per node, so Rails can redact rows
+end note
+
+note bottom of security
+  gl_merge_request: startsWith on
+  1/9970/ and 1/22/ (Reporter floor)
+  gl_vulnerability: only paths where
+  the caller holds the higher role
+  gl_user: global, no path filter
+end note
+
+note bottom of check
+  every namespaced read has a filter?
+  yes: pass
+  no: reject the query
+end note
+@enduml
+```
+
+- Every namespaced node and edge read gets a `startsWith(traversal_path, ?)` filter at the role floor of its entity.
+  Most entities need Reporter, and security entities like vulnerabilities need a higher role.
+- When the caller holds no path at the right role, the read gets a filter that is always false.
+  Some queries are refused outright instead.
+  In both cases, the caller gets no rows for that entity.
+- Global tables, like `gl_user`, have no traversal path.
+  Their rows rely on Rails redaction, and joins through namespaced relationships keep their path filters.
+- `check` walks the final SQL tree.
+  If any namespaced read lacks a valid filter, the engine rejects the query instead of running it.
+- `enforce` adds the columns that redaction needs, so Rails can check rows that SQL can't decide on its own, like confidential items.
+
+The [Security](../security.md) design document describes the full authorization model and the redaction layer.
+
+---
+
 ## Hydration
 
 The main query returns identities, plus the properties it already joined.
@@ -742,7 +751,7 @@ end note
 ## Pagination
 
 The engine pages without keeping any state between requests.
-Every page is a fresh, bounded query.
+Every page is a new, bounded query.
 
 ```plantuml
 @startuml
@@ -779,22 +788,39 @@ Server configuration can tighten these limits, but never raise them past the cei
 
 ---
 
-## Safety
+## Guarantees
 
-To sum up, the engine enforces these rules on every query:
+The engine guarantees these properties for every query:
 
-- Query values are bound parameters.
-  Names must match the ontology.
+- **One path to SQL.** The engine is the only path from a query to SQL.
+  Every safety rule lives in one place.
+- **Values never become SQL.** Query values are bound parameters, and names must match the ontology.
   The SQL tree accepts only a closed set of functions.
-- Every namespaced node and edge read carries an authorization filter at the role floor of its entity.
-- The `check` phase rejects any query with a namespaced read that lacks a valid filter.
-- Shape limits cap nodes, relationships, hops, path depth, predicates, ID lists, and result size.
-- The `settings` phase sets a time and memory limit for each query type.
-- The webserver connects to ClickHouse as a read-only user.
+- **Authorization fails closed.** Every namespaced node and edge read carries an authorization filter at the role floor of its entity.
+  The `check` phase rejects any query with a read that lacks one.
+- **Every query is bounded.** Shape limits cap nodes, relationships, hops, path depth, predicates, ID lists, and result size.
+  The `settings` phase adds a time and memory limit for each query type.
+- **Reads see current state.** A query reads the latest version of each row.
+  A faster plan never returns stale rows.
+- **The plan does not change the result.** The planner may change how a query reads data, but never what it returns.
+- **Phases declare their state.** A phase reads and writes only the state that it declares.
+- **The query tier is read-only.** The webserver connects to ClickHouse as a user that can only run `SELECT`.
 
 ---
 
 ## Appendix
+
+### Glossary
+
+- An **anchor** is a node with a known ID or path, like a project, that a query's scope starts from.
+- A **frontier** is the set of distinct endpoints that one hop hands to the next.
+- A **phase** is one engine step, such as `validate` or `plan`.
+- A **pipeline** is an ordered list of phases for one frontend and one backend.
+- The **query data model** is the engine's view of one schema version: the logical graph, its physical layout for one backend, and its authorization policy.
+- A **relation** is one read of a node or edge table in the plan.
+- A **scope** is a narrow traversal path prefix that the engine derives from the query, such as the path of one project.
+- A **segment** is a run of phases that several pipelines share.
+- A **tombstone** is the row version that marks a row as deleted.
 
 ### Observability
 

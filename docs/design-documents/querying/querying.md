@@ -5,7 +5,7 @@
 
 # GitLab Orbit: Query Languages
 
-**Two ways to ask, one engine to answer**
+**Two query languages, one engine**
 
 [Overview](README.md) · [Query languages](querying.md) · [Graph query engine](engine.md) · [Query language reference](../../source/remote/queries/query-language.md)
 
@@ -113,7 +113,7 @@ The [query language reference](../../source/remote/queries/query-language.md) do
 ## JSON Query DSL
 
 JSON is the default language.
-It suits LLMs and services:
+It is designed for LLMs and services:
 
 - LLMs produce valid JSON against a schema more reliably than free-form query text.
 - One machine-readable file, `config/schemas/graph_query.schema.json`, documents every field, type, and limit.
@@ -159,10 +159,10 @@ Its major version is part of the schema `$id`.
 ## GQL
 
 GQL is the text language.
-It suits agents that already know Cypher:
+It is designed for agents that know Cypher:
 
 - A short pattern costs fewer tokens than the same query in JSON.
-- A pattern reads like the graph it matches.
+- A pattern has the same shape as the graph it matches.
 - One statement form covers queries and schema discovery.
 
 GQL in Orbit is a restricted subset of openCypher 9 with a few extensions.
@@ -250,7 +250,7 @@ The default-off, per-user `orbit_gql_queries` flag in Rails selects it, and Rail
 
 ## Adding or retiring a language
 
-Every language-specific step lives in its frontend, so the cost of a language is one module:
+Every language-specific step lives in its frontend, so each language is one module:
 
 - A new language adds a frontend that lowers to the shared input, and a compiler pipeline that starts with its parse phase.
 - Retiring the JSON Query DSL deletes its frontend, its parse phase, and its schema file.

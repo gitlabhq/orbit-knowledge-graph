@@ -47,7 +47,7 @@ Orbit answers a graph question with one bounded, authorized ClickHouse query.
 - Queries see current state.
   A query never matches a stale version of a row or a deleted row.
 - The webserver is stateless.
-  Each request, including each page, is a fresh query.
+  Each request, including each page, is a new query.
 - All query types share one response contract, so a caller can render a graph, a table, or a chart from one format.
 
 ---
