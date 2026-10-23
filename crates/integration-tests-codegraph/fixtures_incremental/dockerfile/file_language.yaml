@@ -1,0 +1,39 @@
+name: "Dockerfile: unparsed files keep their own language label"
+
+fixtures:
+  - path: Dockerfile
+    content: "FROM alpine AS a\n"
+
+  - path: tools/app.Dockerfile
+    content: "FROM alpine AS b\n"
+
+  - path: README.md
+    content: "# readme\n"
+
+  - path: Makefile
+    content: "all:\n"
+
+  - path: package.json
+    content: "{}\n"
+
+  - path: Dockerfile.erb
+    content: "FROM <%= base %>\n"
+
+  - path: Dockerfile.dockerignore
+    content: "node_modules\n"
+
+tests:
+  - name: "only Dockerfile-shaped files are labelled dockerfile"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.language AS language
+      ORDER BY path
+    assert:
+      - { row_count: 7 }
+      - { row: { path: "Dockerfile", language: "dockerfile" } }
+      - { row: { path: "tools/app.Dockerfile", language: "dockerfile" } }
+      - { row: { path: "README.md", language: "md" } }
+      - { row: { path: "Makefile", language: "Makefile" } }
+      - { row: { path: "package.json", language: "json" } }
+      - { row: { path: "Dockerfile.erb", language: "erb" } }
+      - { row: { path: "Dockerfile.dockerignore", language: "dockerignore" } }

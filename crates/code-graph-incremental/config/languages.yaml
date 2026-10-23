@@ -34,7 +34,7 @@ languages:
       prefixes: ["dockerfile.", "containerfile."]
       suffixes: [".dockerfile", ".containerfile"]
       ignored_extensions: [
-        tt, erb, template, tmpl, tpl, j2, jinja, jinja2, in, diff, patch, md, txt, bak, orig,
+        tt, erb, template, tmpl, tpl, j2, jinja, jinja2, in, diff, patch, md, txt, bak, orig, dockerignore, yml, yaml, json, toml, lock,
       ]
     aliases: [docker, containerfile]
     grammar: tree-sitter-containerfile

@@ -19,6 +19,15 @@ fixtures:
       ENV MODE=$MODE-fast
       ENV QUOTED="/x:$QUOTED"
       ENV GOPATH=$PATH
+      ENV BIN=/opt/bin
+      ENV PATH="${BIN}/x:${PATH}"
+      ENV TOOLS=$GOPATH/bin:$TOOLS
+
+  - path: d/Dockerfile
+    content: |
+      ARG GO_VERSION=1.22
+      FROM golang:${GO_VERSION} AS golang
+      FROM golang AS final
 
   - path: c/Dockerfile
     content: |
@@ -32,8 +41,9 @@ tests:
       WHERE a.definition_type = 'Class' AND b.definition_type = 'Class'
       RETURN a.name AS from_stage, a.file_path AS from_file, b.name AS to_stage, b.file_path AS to_file
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
       - { row: { from_stage: "app", from_file: "c/Dockerfile", to_stage: "base", to_file: "c/Dockerfile" } }
+      - { row: { from_stage: "final", from_file: "d/Dockerfile", to_stage: "golang", to_file: "d/Dockerfile" } }
 
   - name: "base images stay unresolved imports"
     query: |
@@ -56,5 +66,25 @@ tests:
       WHERE a.definition_type = 'Variable'
       RETURN a.name AS user, b.name AS variable
     assert:
-      - { row_count: 1 }
+      - { row_count: 3 }
       - { row: { user: "GOPATH", variable: "PATH" } }
+      - { row: { user: "PATH", variable: "BIN" } }
+      - { row: { user: "TOOLS", variable: "GOPATH" } }
+
+  - name: "a same-named stage keeps its tag variable and its base image call"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.name = 'golang'
+      RETURN b.name AS variable
+    assert:
+      - { row_count: 1 }
+      - { row: { variable: "GO_VERSION" } }
+
+  - name: "a same-named stage still calls its base image import"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(i:ImportedSymbol)
+      WHERE a.name = 'golang' AND a.file_path = 'd/Dockerfile'
+      RETURN i.identifier_name AS image
+    assert:
+      - { row_count: 1 }
+      - { row: { image: "golang" } }
