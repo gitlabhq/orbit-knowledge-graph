@@ -229,7 +229,12 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         let read = self.pattern.node_read(&mut self.graph, node)?;
         let state = self.nodes.entry(node.alias.clone()).or_default();
         state.read = Some(read);
-        if node.conditions().iter().any(Predicate::is_selective) {
+        if self
+            .pattern
+            .node_conditions(node)
+            .iter()
+            .any(Predicate::is_selective)
+        {
             state.bounded_read = Some(read);
         }
         Ok(read)
