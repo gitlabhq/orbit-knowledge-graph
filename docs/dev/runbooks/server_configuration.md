@@ -137,7 +137,7 @@ Two separate ClickHouse connections are required: one for the datalake (Siphon-r
 | `graph.database` | `default` | Database name |
 | `graph.username` | `default` | Auth user |
 | `graph.password` | None | Auth password |
-| `graph.session_settings` | `{}` | ClickHouse session-level settings (e.g., `optimize_on_insert`, `max_query_size`) |
+| `graph.session_settings` | See `config/default.yaml` | ClickHouse session-level settings sent on every graph query. The defaults set `max_query_size`, `distributed_cache_discard_connection_if_unread_data`, and `use_text_index_postings_cache`. Overlay keys add to the defaults. |
 | `graph.insert_settings` | See `config/default.yaml` | Settings applied to INSERT operations only. Quorum clusters drop `async_insert` and `wait_for_async_insert`; set a key here to override its default. |
 | `graph.replicated` | `false` | Self-managed replicated cluster; see [Self-managed replicated clusters](#self-managed-replicated-clusters) |
 
