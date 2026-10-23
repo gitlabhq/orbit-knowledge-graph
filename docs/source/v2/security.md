@@ -43,12 +43,12 @@ For a user with the Reporter role, the response leaves out security entities, ev
 
 Queries from administrators and auditors return data from each group where GitLab Orbit is on, not only their own groups.
 
-## How GitLab enforces access
+## How GitLab Orbit enforces access
 
 GitLab authorizes every query.
 GitLab Orbit adds no permissions of its own, and stores no permission data.
 
-GitLab enforces access in two layers:
+GitLab Orbit enforces access in two layers:
 
 - Namespace scope. Results include only the groups where you have the required role, directly or through a shared group,
   and their subgroups and projects.
