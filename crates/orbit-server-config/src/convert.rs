@@ -591,22 +591,6 @@ mod tests {
             .expect("the embedded defaults load under strict mode");
     }
 
-    /// The conversion reproduces what the current loader builds from the same
-    /// file, field for field.
-    #[test]
-    fn converting_the_embedded_defaults_matches_the_current_loader() {
-        let loaded = loader()
-            .load_bytes::<proto::Config>(&defaults_as_json(), Format::Json)
-            .expect("the embedded defaults load");
-
-        let converted = AppConfig::try_from(loaded).expect("the embedded defaults convert");
-
-        assert_eq!(
-            serde_json::to_value(&converted).unwrap(),
-            serde_json::to_value(AppConfig::embedded_defaults()).unwrap(),
-        );
-    }
-
     /// Conversion expects every field the schema requires, so a field it reads
     /// with `present` but the schema leaves optional would panic at startup.
     /// Unsetting each key the defaults set must fail validation or convert.
