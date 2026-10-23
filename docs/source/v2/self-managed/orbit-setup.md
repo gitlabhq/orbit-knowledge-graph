@@ -388,7 +388,7 @@ finishes.
 
 ## Next steps
 
-Tell your developers to follow the [quickstart](../quickstart.md#step-2-sign-in-and-set-up-your-agent),
+Tell your developers to follow the [quickstart](../quickstart.md#use-gitlab-orbit-with-your-agent),
 and to sign in with `glab auth login --hostname <gitlab.example.com>`.
 
 ## Related topics
