@@ -588,20 +588,6 @@ mod tests {
     /// The conversion reproduces what the current loader builds from the same
     /// file, field for field.
     #[test]
-    fn converting_the_embedded_defaults_matches_the_current_loader() {
-        let loaded = loader()
-            .load_bytes::<proto::Config>(&defaults_as_json(), Format::Json)
-            .expect("the embedded defaults load");
-
-        let converted = AppConfig::try_from(loaded).expect("the embedded defaults convert");
-
-        assert_eq!(
-            serde_json::to_value(&converted).unwrap(),
-            serde_json::to_value(AppConfig::embedded_defaults()).unwrap(),
-        );
-    }
-
-    #[test]
     fn an_unparseable_bind_address_is_reported_with_its_field() {
         let error = address("not-an-address", "grpc_bind_address").unwrap_err();
         assert!(

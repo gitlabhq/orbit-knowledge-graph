@@ -74,18 +74,22 @@ impl AppConfig {
     /// The embedded `config/default.yaml` alone: no overlay or secrets. The
     /// fixture every test that needs a config starts from.
     pub fn embedded_defaults() -> Self {
-        config::Config::builder()
-            .add_source(embedded_defaults_source())
-            .build()
-            .and_then(config::Config::try_deserialize)
-            .expect("embedded config/default.yaml must deserialize into AppConfig")
+        Self::decode(embedded_document()).expect("the embedded config/default.yaml loads")
+    }
+
+    /// The embedded defaults with one overlay over them, and no secrets.
+    #[cfg(test)]
+    pub(crate) fn with_overlay(yaml: &str) -> Result<Self, ConfigError> {
+        let mut document = embedded_document();
+        merge(
+            &mut document,
+            parse_yaml(yaml.as_bytes(), Path::new("overlay.yaml"))?,
+        );
+        Self::decode(document)
     }
 
     pub fn load_from(overlay: Option<&Path>, secret_dir: &Path) -> Result<Self, ConfigError> {
-        let mut document = parse_yaml(
-            EMBEDDED_DEFAULTS.as_bytes(),
-            Path::new("config/default.yaml"),
-        )?;
+        let mut document = embedded_document();
 
         if let Some(path) = overlay_path(overlay) {
             let data = std::fs::read(&path).map_err(|source| ConfigError::ReadOverlay {
@@ -95,6 +99,10 @@ impl AppConfig {
             merge(&mut document, parse_yaml(&data, &path)?);
         }
         merge(&mut document, secrets::tree(secret_dir)?);
+        Self::decode(document)
+    }
+
+    fn decode(document: serde_json::Value) -> Result<Self, ConfigError> {
         let errors = undeclared(&document);
         if !errors.is_empty() {
             return Err(ConfigError::Undeclared(errors));
@@ -141,8 +149,12 @@ impl AppConfig {
     }
 }
 
-fn embedded_defaults_source() -> config::File<config::FileSourceString, config::FileFormat> {
-    config::File::from_str(EMBEDDED_DEFAULTS, config::FileFormat::Yaml)
+fn embedded_document() -> serde_json::Value {
+    parse_yaml(
+        EMBEDDED_DEFAULTS.as_bytes(),
+        Path::new("config/default.yaml"),
+    )
+    .expect("the embedded config/default.yaml is valid YAML")
 }
 
 /// An explicit `--config` path must exist; the conventional overlay is used
@@ -174,8 +186,6 @@ pub type SharedAppConfig = Arc<AppConfig>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("configuration error: {0}")]
-    Config(#[from] config::ConfigError),
     #[error("failed to read the config overlay {}: {source}", path.display())]
     ReadOverlay {
         path: PathBuf,
@@ -224,10 +234,6 @@ gitlab:
     verifying_key: "overlay-secret-at-least-32-bytes-long"
 "#;
 
-    fn builder_with_defaults() -> config::ConfigBuilder<config::builder::DefaultState> {
-        config::Config::builder().add_source(embedded_defaults_source())
-    }
-
     #[test]
     fn embedded_defaults_declare_every_setting() {
         let config = AppConfig::embedded_defaults();
@@ -245,12 +251,7 @@ graph:
   insert_settings:
     wait_for_async_insert: "0"
 "#;
-        let config: AppConfig = builder_with_defaults()
-            .add_source(config::File::from_str(yaml, config::FileFormat::Yaml))
-            .build()
-            .unwrap()
-            .try_deserialize()
-            .unwrap();
+        let config: AppConfig = AppConfig::with_overlay(yaml).unwrap();
         let mut expected = AppConfig::embedded_defaults().graph.insert_settings;
         expected.insert("wait_for_async_insert".to_string(), "0".to_string());
         assert_eq!(config.graph.insert_settings, expected);
@@ -598,11 +599,7 @@ engine:
         write_max_flush_age_secs: 5
 "#;
 
-        let config: AppConfig = builder_with_defaults()
-            .add_source(config::File::from_str(yaml, config::FileFormat::Yaml))
-            .build()
-            .unwrap()
-            .try_deserialize()
+        let config: AppConfig = AppConfig::with_overlay(yaml)
             .expect("a deployed overlay may still carry keys a release removed");
 
         assert_eq!(
@@ -651,12 +648,8 @@ engine:
         max_concurrent_languages: 3
 "#;
 
-        let config: AppConfig = builder_with_defaults()
-            .add_source(config::File::from_str(yaml, config::FileFormat::Yaml))
-            .build()
-            .unwrap()
-            .try_deserialize()
-            .expect("engine overlay should deserialize");
+        let config: AppConfig =
+            AppConfig::with_overlay(yaml).expect("engine overlay should deserialize");
         let engine: EngineConfiguration = config.engine;
 
         assert_eq!(
