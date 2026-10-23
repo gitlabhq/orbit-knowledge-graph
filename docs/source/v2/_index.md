@@ -47,7 +47,7 @@ Your agent answers with a few graph queries in place of many file reads and API 
 - [Get only the data that you can access](security.md#how-gitlab-orbit-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions, on GitLab.com, GitLab Self-Managed, and GitLab Dedicated.
 {.product-cards}
 
-## What you can ask
+## Questions that GitLab Orbit can answer
 
 - [Change a class hierarchy safely](prompt-examples.md#change-a-class-hierarchy-safely)
 - [See what shipped to production this week](prompt-examples.md#see-what-shipped-to-production-this-week)
@@ -55,7 +55,7 @@ Your agent answers with a few graph queries in place of many file reads and API 
 - [Find the right reviewer for a file](prompt-examples.md#find-the-right-reviewer-for-a-file)
 - [Unblock a release](prompt-examples.md#unblock-a-release)
 - [Find out if a failed job is flaky](prompt-examples.md#find-out-if-a-failed-job-is-flaky)
-{.product-cards .product-cards-2 .product-prompts}
+{.product-cards .product-cards-2}
 
 ## The query language
 
@@ -134,12 +134,9 @@ For more information, see [local graph](cli.md#local-graph).
 
 ## Learn more
 
-- [Watch the deep dive video](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>GitLab Orbit Technical Deep Dive: The AI Context Graph Layer, on the GitLab YouTube channel.
 - [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
 - [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work that the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
 {.product-cards .product-cards-2}
-
-<!-- Video published on 2026-06-26 -->
 
 ## Reference
 
@@ -279,7 +276,6 @@ body:has(.product-landing) .docs-content .language-plaintext {
   transition: all 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .docs-content ul.product-cards > li:hover { background-color: var(--gl-background-color-subtle); }
-.docs-content ul.product-prompts > li { color: var(--gl-text-color-subtle); }
 .docs-content ul.product-cards > li > a {
   display: inline-block;
   padding-bottom: var(--gl-spacing-scale-3);
