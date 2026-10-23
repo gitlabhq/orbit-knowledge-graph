@@ -2494,4 +2494,20 @@ namespace MyApp {
             .collect();
         assert!(outside_span.is_empty(), "{outside_span:#?}");
     }
+
+    #[test]
+    fn dockerfiles_form_their_own_family_and_keep_their_language() {
+        let inventory = [FileInventoryEntry {
+            path: "svc/Dockerfile".into(),
+            size: 10,
+            decision: Decision::Parse,
+            label: Default::default(),
+        }];
+
+        let (groups, languages) = group_parseable_inventory(&inventory, 0);
+
+        let family = LanguageFamily::Standalone(Language::Dockerfile);
+        assert_eq!(groups[&family].len(), 1);
+        assert_eq!(languages["svc/Dockerfile"], Language::Dockerfile);
+    }
 }
