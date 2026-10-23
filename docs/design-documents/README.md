@@ -8,7 +8,7 @@ Today, the repository includes the following major components:
 
 - Orbit Remote's `gkg-server` binary, which runs in five modes: `Webserver`, `Indexer`, `DispatchIndexing`, `HealthCheck`, and `ClickhouseSetup`.
 - A ClickHouse-backed remote graph runtime with ontology-driven schema, ETL, authorization metadata, and Query DSL validation. The authoritative ontology lives in `config/ontology/`.
-- Remote HTTP, gRPC, REST, and MCP query surfaces accept JSON Query DSL or GQL text. The Rails rollout flag selects the language, and the [query compiler](querying/compiler.md) compiles it into parameterized ClickHouse SQL.
+- Remote HTTP, gRPC, REST, and MCP query surfaces accept JSON Query DSL or GQL text. The Rails rollout flag selects the language, and the [graph query engine](querying/engine.md) compiles it into parameterized ClickHouse SQL.
 - A distributed remote indexing pipeline that consumes Siphon CDC through NATS JetStream, dispatches indexing work, and writes SDLC and code graph data into ClickHouse.
 - Orbit Local's standalone `orbit` CLI, which indexes a repository into DuckDB and supports direct SQL, schema inspection, repository maps, and a stateless stdio MCP server.
 - Shared crates for indexing, query compilation, formatting, ontology loading, database access, GitLab API access, health checks, and integration testing.
@@ -152,7 +152,7 @@ flowchart TD
 
 ### Database & Database Ops
 
-Orbit Remote's [query compiler](querying/compiler.md) validates queries against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. Both frontends share the same compiler and authorization pipeline.
+Orbit Remote's [Graph Query Engine](querying/engine.md) validates queries against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. Both frontends share the same compiler and authorization pipeline.
 
 The current implementation uses ClickHouse for remote graph storage and query execution. In the current repository state:
 
@@ -177,7 +177,7 @@ Files order defining code first, then other code, tests, and text files.
 
 ClickHouse was chosen over dedicated graph databases (Neo4j, FalkorDB, Memgraph, Neptune, SpannerGraph) after KuzuDB was archived in October 2025. The full evaluation, benchmarking results, and legal/procurement context are recorded in [ADR 000: ClickHouse as graph storage](decisions/000_clickhouse_graph_storage.md).
 
-View the [query compiler](querying/compiler.md) design document for more details.
+View the [Graph Query Engine](querying/engine.md) design document for more details.
 
 ## Motivation
 

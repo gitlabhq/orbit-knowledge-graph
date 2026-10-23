@@ -1,8 +1,8 @@
-# Query compiler
+# Graph query engine
 
 ## Overview
 
-The query compiler turns a graph query into parameterized SQL over typed node tables and adjacency-ordered edge tables.
+The graph query engine turns a graph query into parameterized SQL over typed node tables and adjacency-ordered edge tables.
 
 1. A frontend parses the query into the shared input. [Query languages](querying.md) describes the frontends.
 2. The compiler checks the input against the ontology and the caller's access.
@@ -13,14 +13,14 @@ The query compiler turns a graph query into parameterized SQL over typed node ta
 
 ClickHouse gives OLAP throughput, and the compiler adds property-graph semantics on top: traversals, paths, neighborhoods, and grouped counts. Orbit needs no separate graph database. [ADR 000](../decisions/000_clickhouse_graph_storage.md) records that choice.
 
-## Compiler principles
+## Engine principles
 
 - The compiler is the only path from a query to SQL. Every safety rule lives in one place.
 - Phases are small and ordered. Each phase declares the state it reads and writes, and cannot touch anything else.
 - Planning decides what to read. Lowering decides how to spell it in SQL. Code generation decides the dialect.
 - The planner may change how a query reads data, but never what the query returns.
 - A query reads the current version of each row. Speed never comes at the cost of stale results.
-- When the compiler cannot prove that a read is safe, it rejects the query.
+- When the engine cannot prove that a read is safe, it rejects the query.
 
 ## Terms
 

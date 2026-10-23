@@ -7,7 +7,7 @@ Orbit Remote accepts two query languages. Both compile through one shared compil
 1. The JSON Query DSL is a JSON object that follows a published schema. It is the default.
 2. GQL is read-only text based on openCypher 9 syntax, such as `MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)`.
 3. Each language has its own frontend. The frontend parses the query and lowers it into the shared input.
-4. From the shared input on, the [compiler](compiler.md) treats every query the same way. It validates, secures, plans, and renders it.
+4. From the shared input on, the [graph query engine](engine.md) treats every query the same way. It validates, secures, plans, and renders it.
 
 A language changes how a caller writes a query, not what the engine can do. Authorization, limits, and results are the same in both languages.
 

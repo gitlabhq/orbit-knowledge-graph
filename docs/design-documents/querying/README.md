@@ -119,5 +119,5 @@ The same result can render as raw JSON, as [TOON](https://github.com/toon-format
 | Document | Covers |
 | --- | --- |
 | [Query languages](querying.md) | The JSON Query DSL and GQL: why each exists, how each lowers to the shared input, and how Rails picks one |
-| [Compiler](compiler.md) | Storage model, compiler phases, planning, current-state reads, and safety |
+| [Graph query engine](engine.md) | Storage model, compiler phases, planning, current-state reads, and safety |
 | [Duo and Orbit prompt routing](../duo_orbit_prompt_routing.md) | When Duo agents reach the Orbit MCP tools |
