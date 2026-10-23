@@ -39,7 +39,7 @@ grep-regex = { workspace = true }
 grep-searcher = { workspace = true }
 ignore = { workspace = true }
 globset = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["gzip", "brotli", "zstd"] }
 rmcp = { workspace = true }
 rust-embed = { workspace = true }
 rustls = { workspace = true }
@@ -59,6 +59,7 @@ rustix = { workspace = true }
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 
 [dev-dependencies]
+flate2 = { workspace = true }
 jsonschema = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 tempfile = { workspace = true }
