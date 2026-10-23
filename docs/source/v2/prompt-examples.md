@@ -31,7 +31,9 @@ touch their files right now?
 ```
 
 ```gql orbit-query
-MATCH (child:Definition)-[:EXTENDS*1..3]->(parent:Definition {fqn: 'BasePolicy', project_id: 278964, branch: 'master'})
+MATCH (child:Definition)
+  -[:EXTENDS*1..3]->(parent:Definition {
+    fqn: 'BasePolicy', project_id: 278964, branch: 'master'})
 RETURN child.fqn, child.file_path
 ORDER BY child.file_path
 LIMIT 100
@@ -46,13 +48,16 @@ LIMIT 100
 Find the issues, tasks, and incidents that production deployments closed.
 
 ```plaintext
-Using GitLab Orbit, which issues, tasks, and incidents did the merge requests
-deployed to <production> in <my-group>/<my-project> close this week? How many
-of them are bugs?
+Using GitLab Orbit, which issues, tasks, and incidents did the merge
+requests deployed to <production> in <my-group>/<my-project> close this
+week? How many of them are bugs?
 ```
 
 ```gql orbit-query
-MATCH (wi:WorkItem)<-[:CLOSES]-(mr:MergeRequest)-[:DEPLOYED_TO]->(d:Deployment)-[:IN_ENVIRONMENT]->(e:Environment {name: 'production'})
+MATCH (wi:WorkItem)
+  <-[:CLOSES]-(mr:MergeRequest)
+  -[:DEPLOYED_TO]->(d:Deployment)
+  -[:IN_ENVIRONMENT]->(e:Environment {name: 'production'})
 WHERE mr.project_id = 278964 AND d.created_at >= '2026-10-16T00:00:00Z'
 RETURN wi.work_item_type, count(wi) AS shipped
 ORDER BY shipped DESC
@@ -68,14 +73,16 @@ LIMIT 10
 Find how the merge requests that agents create perform, from the head pipeline to production.
 
 ```plaintext
-Using GitLab Orbit, for <my-group>/<my-project> in the last <30 days>: - How
-many merge requests did agents create, by flow type? - How many merged or
-closed, and what did their head pipelines do? - How many of them reached
-<production>, and were any reverted?
+Using GitLab Orbit, for <my-group>/<my-project> in the last <30 days>: -
+How many merge requests did agents create, by flow type? - How many merged
+or closed, and what did their head pipelines do? - How many of them
+reached <production>, and were any reverted?
 ```
 
 ```gql orbit-query
-MATCH (a:AgentSession)-[:CREATED_MR]->(mr:MergeRequest)-[:HAS_HEAD_PIPELINE]->(pl:Pipeline)
+MATCH (a:AgentSession)
+  -[:CREATED_MR]->(mr:MergeRequest)
+  -[:HAS_HEAD_PIPELINE]->(pl:Pipeline)
 WHERE mr.project_id = 278964 AND mr.created_at >= '2026-09-01T00:00:00Z'
 RETURN a.flow_type, mr.state, pl.status, count(mr) AS mrs
 ORDER BY mrs DESC
@@ -97,7 +104,11 @@ reviewers say about <N+1 queries> on merge requests that changed the file?
 ```
 
 ```gql orbit-query
-MATCH (u:User)-[:APPROVED]->(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(df:MergeRequestDiffFile {project_id: 278964, old_path: 'app/models/ability.rb'})
+MATCH (u:User)
+  -[:APPROVED]->(mr:MergeRequest)
+  -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
+  -[:HAS_FILE]->(df:MergeRequestDiffFile {
+    project_id: 278964, old_path: 'app/models/ability.rb'})
 WHERE mr.state = 'merged' AND mr.merged_at >= '2026-04-23T00:00:00Z'
 RETURN u.username, count(mr) AS approved
 ORDER BY approved DESC
@@ -113,13 +124,16 @@ LIMIT 10
 Find the open merge requests in a milestone that have a failed pipeline, and their owners.
 
 ```plaintext
-Using GitLab Orbit, in <my-group>/<my-project>: - Which open merge requests in
-milestone <19.6> have a failed head pipeline, and who is assigned to them? -
-Which open merge requests fail the job <unit-tests>, and who authored them?
+Using GitLab Orbit, in <my-group>/<my-project>: - Which open merge
+requests in milestone <19.6> have a failed head pipeline, and who is
+assigned to them? - Which open merge requests fail the job <unit-tests>,
+and who authored them?
 ```
 
 ```gql orbit-query
-MATCH (u:User)-[:ASSIGNED]->(mr:MergeRequest)-[:IN_MILESTONE]->(m:Milestone {title: '19.6'})
+MATCH (u:User)
+  -[:ASSIGNED]->(mr:MergeRequest)
+  -[:IN_MILESTONE]->(m:Milestone {title: '19.6'})
 MATCH (mr)-[:HAS_HEAD_PIPELINE]->(pl:Pipeline {status: 'failed'})
 WHERE mr.state = 'opened' AND mr.project_id = 278964
 RETURN u.username, count(mr) AS red_mrs
@@ -141,8 +155,10 @@ markdown> in the last <seven days>, and how many times each?
 ```
 
 ```gql orbit-query
-MATCH (j:Job {status: 'failed', name: 'docs-lint markdown'})-[:IN_PROJECT]->(p:Project)
-WHERE p.full_path STARTS WITH 'my-group/' AND j.created_at >= '2026-10-16T00:00:00Z'
+MATCH (j:Job {status: 'failed', name: 'docs-lint markdown'})
+  -[:IN_PROJECT]->(p:Project)
+WHERE p.full_path STARTS WITH 'my-group/'
+  AND j.created_at >= '2026-10-16T00:00:00Z'
 RETURN p.full_path, count(j) AS failures
 ORDER BY failures DESC
 LIMIT 20
@@ -157,12 +173,15 @@ LIMIT 20
 Find the vulnerabilities whose fix reached production, and if they are resolved.
 
 ```plaintext
-Using GitLab Orbit, which vulnerabilities of <my-group>/<my-project> have a
-fix that was deployed to <production>, and are they resolved?
+Using GitLab Orbit, which vulnerabilities of <my-group>/<my-project> have
+a fix that was deployed to <production>, and are they resolved?
 ```
 
 ```gql orbit-query
-MATCH (v:Vulnerability)<-[:FIXES]-(mr:MergeRequest)-[:DEPLOYED_TO]->(d:Deployment)-[:IN_ENVIRONMENT]->(e:Environment {name: 'production'})
+MATCH (v:Vulnerability)
+  <-[:FIXES]-(mr:MergeRequest)
+  -[:DEPLOYED_TO]->(d:Deployment)
+  -[:IN_ENVIRONMENT]->(e:Environment {name: 'production'})
 WHERE v.project_id = 278964
 RETURN v.severity, v.state, count(v) AS vulns
 ORDER BY vulns DESC
@@ -179,12 +198,15 @@ Find the most called definitions in a file, and read the source of one.
 
 ```plaintext
 Using GitLab Orbit, in <my-group>/<my-project>, which definitions in
-<app/models/ability.rb> have the most callers? Show me the source of the most
-called one.
+<app/models/ability.rb> have the most callers? Show me the source of the
+most called one.
 ```
 
 ```gql orbit-query
-MATCH (caller:Definition)-[:CALLS]->(d:Definition)<-[:DEFINES]-(f:File {path: 'app/models/ability.rb', project_id: 278964, branch: 'master'})
+MATCH (caller:Definition)
+  -[:CALLS]->(d:Definition)
+  <-[:DEFINES]-(f:File {
+    path: 'app/models/ability.rb', project_id: 278964, branch: 'master'})
 RETURN d.fqn, count(caller) AS callers
 ORDER BY callers DESC
 LIMIT 30
@@ -205,8 +227,13 @@ sites does each have?
 ```
 
 ```gql orbit-query
-MATCH (s:ImportedSymbol)<-[:IMPORTS]-(f:File)-[:ON_BRANCH]->(b:Branch)<-[:CONTAINS]-(p:Project)
-WHERE s.import_path STARTS WITH 'gitlab.com/my-group/my-sdk' AND p.full_path STARTS WITH 'my-group/' AND b.is_default = true
+MATCH (s:ImportedSymbol)
+  <-[:IMPORTS]-(f:File)
+  -[:ON_BRANCH]->(b:Branch)
+  <-[:CONTAINS]-(p:Project)
+WHERE s.import_path STARTS WITH 'gitlab.com/my-group/my-sdk'
+  AND p.full_path STARTS WITH 'my-group/'
+  AND b.is_default = true
 RETURN p.full_path, count(s) AS import_sites
 ORDER BY import_sites DESC
 LIMIT 30
