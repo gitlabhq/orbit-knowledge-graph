@@ -21,3 +21,7 @@ invalid:
   - 'info!("done {}", n);'
   - 'orbit_log_fields::__tracing::info!("parsed {path}");'
   - '__tracing::info!("parsed {path}");'
+  - |
+    tokio::select! {
+        _ = a => { warn!("lost {e}"); }
+    }

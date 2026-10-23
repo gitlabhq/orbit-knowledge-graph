@@ -32,7 +32,8 @@ struct CheckpointSeed {
     pipelines: InvalidatedPipelines,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum MigrationError {
     #[error("invalid layout: {0}")]
     Layout(#[from] query_data_model::DataModelError),

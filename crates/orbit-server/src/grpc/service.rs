@@ -248,6 +248,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                     .snapshot()
                     .inspect_err(|error| {
                         warn!(
+                            safe(ERROR_TYPE) = "schema_unavailable",
                             expanded(ERROR_MESSAGE) = %error.message(),
                             "Inlining the command catalog without relationship patterns"
                         );
@@ -472,7 +473,11 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
                 match result {
                     Ok(()) => {}
                     Err(e @ PipelineError::Streaming(_)) if tx.is_closed() => {
-                        info!(expanded(ERROR_MESSAGE) = %e, "Client left before the query result");
+                        info!(
+                            safe(ERROR_TYPE) = e.code(),
+                            expanded(ERROR_MESSAGE) = %e,
+                            "Client left before the query result"
+                        );
                     }
                     Err(e @ PipelineError::Timeout) => {
                         send_query_error(&tx, e).await;

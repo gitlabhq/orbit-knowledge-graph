@@ -196,6 +196,7 @@ fn log_result(result: &ExecutionResult) {
     } else {
         orbit_log_fields::warn!(
             safe(QUERY_NAME) = result.query_name.as_str(),
+            safe(ERROR_TYPE) = "query_failed",
             expanded(ERROR_MESSAGE) = result.error.as_deref().unwrap_or("unknown error"),
             "query failed"
         );

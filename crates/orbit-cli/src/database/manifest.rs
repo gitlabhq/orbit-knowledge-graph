@@ -149,7 +149,11 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
     let _lock = match lock_database(db_path) {
         Ok(lock) => lock,
         Err(error) => {
-            orbit_log_fields::warn!(expanded(ERROR_MESSAGE) = %error, "failed to lock manifest");
+            orbit_log_fields::warn!(
+                safe(ERROR_TYPE) = "manifest_lock",
+                expanded(ERROR_MESSAGE) = %error,
+                "failed to lock manifest"
+            );
             return;
         }
     };
@@ -158,6 +162,7 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
         Err(e) => {
             orbit_log_fields::warn!(
                 expanded(LOCAL_PATH) = %key,
+                safe(ERROR_TYPE) = "manifest_open",
                 expanded(ERROR_MESSAGE) = %e,
                 "failed to open DuckDB to record git failure"
             );
@@ -175,6 +180,7 @@ pub fn record_git_info_failure(db_path: &Path, repo_path: &Path, error: &str) {
     ) {
         orbit_log_fields::warn!(
             expanded(LOCAL_PATH) = %key,
+            safe(ERROR_TYPE) = "manifest_record",
             expanded(ERROR_MESSAGE) = %e,
             "failed to record git failure status"
         );

@@ -95,6 +95,7 @@ impl MaxDeliveriesReconciler {
             Ok(advisory) => advisory,
             Err(error) => {
                 warn!(
+                    safe(ERROR_TYPE) = "decode_advisory",
                     expanded(ERROR_MESSAGE) = %error,
                     "failed to decode max-deliveries advisory payload"
                 );
@@ -111,6 +112,7 @@ impl MaxDeliveriesReconciler {
             Err(error) => {
                 warn!(
                     safe(NATS_STREAM) = advisory.stream.as_str(),
+                    safe(ERROR_TYPE) = "get_stream",
                     expanded(ERROR_MESSAGE) = %error,
                     "failed to look up stream for exhausted max-deliveries advisory"
                 );
@@ -129,6 +131,7 @@ impl MaxDeliveriesReconciler {
                 warn!(
                     safe(NATS_STREAM) = advisory.stream.as_str(),
                     safe(NATS_STREAM_SEQUENCE) = advisory.stream_seq,
+                    safe(ERROR_TYPE) = "get_raw_message",
                     expanded(ERROR_MESSAGE) = %error,
                     "failed to fetch exhausted message for logging; proceeding with deletion"
                 );
@@ -159,6 +162,7 @@ impl MaxDeliveriesReconciler {
                     warn!(
                         safe(NATS_STREAM) = advisory.stream.as_str(),
                         safe(NATS_STREAM_SEQUENCE) = advisory.stream_seq,
+                        safe(ERROR_TYPE) = "delete_message",
                         expanded(ERROR_MESSAGE) = %error,
                         "failed to delete exhausted message"
                     );
@@ -190,6 +194,7 @@ impl Trigger for MaxDeliveriesReconciler {
                 Ok(subscription) => subscription,
                 Err(error) => {
                     warn!(
+                        safe(ERROR_TYPE) = "subscribe",
                         expanded(ERROR_MESSAGE) = %error,
                         "failed to subscribe to max-deliveries advisories, retrying"
                     );

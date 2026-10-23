@@ -238,6 +238,7 @@ impl Engine {
                     if let Err(error) = result {
                         warn!(
                             safe(NATS_SUBSCRIPTION) = topic_name.as_str(),
+                            safe(ERROR_TYPE) = join_error_type(&error),
                             expanded(ERROR_MESSAGE) = %error,
                             "message processing task panicked"
                         );
@@ -251,6 +252,7 @@ impl Engine {
             if let Err(error) = result {
                 warn!(
                     safe(NATS_SUBSCRIPTION) = topic_name.as_str(),
+                    safe(ERROR_TYPE) = join_error_type(&error),
                     expanded(ERROR_MESSAGE) = %error,
                     "message processing task panicked"
                 );
@@ -355,7 +357,11 @@ async fn process_message(
     let outcome_label = match outcome {
         HandlersOutcome::Success => {
             if let Err(error) = message.ack().await {
-                warn!(expanded(ERROR_MESSAGE) = %error, "failed to ack message");
+                warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&error),
+                    expanded(ERROR_MESSAGE) = %error,
+                    "failed to ack message"
+                );
             }
             "ack"
         }
@@ -366,17 +372,23 @@ async fn process_message(
                 None => message.nack().await,
             };
             if let Err(error) = nack_result {
-                warn!(expanded(ERROR_MESSAGE) = %error, "failed to nack message");
+                warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&error),
+                    expanded(ERROR_MESSAGE) = %error,
+                    "failed to nack message"
+                );
             }
             "nack"
         }
         HandlersOutcome::Dropped { error } => {
             warn!(
+                safe(ERROR_TYPE) = "permanent",
                 expanded(ERROR_MESSAGE) = %error,
                 "permanent failure, message dropped"
             );
             if let Err(term_error) = message.term_ack().await {
                 warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&term_error),
                     expanded(ERROR_MESSAGE) = %term_error,
                     "failed to term-ack dropped message"
                 );
@@ -392,6 +404,7 @@ async fn process_message(
             } else {
                 if let Err(term_error) = message.term_ack().await {
                     warn!(
+                        safe(ERROR_TYPE) = <&str>::from(&term_error),
                         expanded(ERROR_MESSAGE) = %term_error,
                         "failed to term-ack exhausted message"
                     );
@@ -548,7 +561,11 @@ async fn run_handlers(
                 dropped_error.get_or_insert(error);
             }
             Err(join_error) => {
-                warn!(expanded(ERROR_MESSAGE) = %join_error, "handler task panicked");
+                warn!(
+                    safe(ERROR_TYPE) = join_error_type(&join_error),
+                    expanded(ERROR_MESSAGE) = %join_error,
+                    "handler task panicked"
+                );
                 exhausted_error.get_or_insert_with(|| format!("handler panicked: {join_error}"));
             }
         }
@@ -594,6 +611,15 @@ async fn run_handlers(
     HandlersOutcome::Success
 }
 
+/// A task can end in a panic or, when its set is aborted, a cancellation.
+pub(crate) fn join_error_type(error: &tokio::task::JoinError) -> &'static str {
+    if error.is_panic() {
+        "panic"
+    } else {
+        "cancelled"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,6 +631,19 @@ mod tests {
     use handler::{HandlerError, PermanentAction};
     use orbit_server_config::SubscriptionConfig;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn join_error_type_tells_a_panic_from_a_cancellation() {
+        let panicked = tokio::spawn(async { panic!("customer text") })
+            .await
+            .unwrap_err();
+        let pending = tokio::spawn(std::future::pending::<()>());
+        pending.abort();
+        let cancelled = pending.await.unwrap_err();
+
+        assert_eq!(join_error_type(&panicked), "panic");
+        assert_eq!(join_error_type(&cancelled), "cancelled");
+    }
 
     fn test_context() -> HandlerContext {
         let mock = Arc::new(MockNatsServices::new());

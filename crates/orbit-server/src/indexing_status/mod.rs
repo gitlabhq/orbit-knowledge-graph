@@ -67,6 +67,7 @@ impl IndexingStatusService {
         let checkpoints = checkpoints
             .inspect_err(|error| {
                 warn!(
+                    safe(ERROR_TYPE) = "clickhouse_query",
                     expanded(ERROR_MESSAGE) = %error,
                     "Indexing status could not read plan checkpoints"
                 )
@@ -75,6 +76,7 @@ impl IndexingStatusService {
         let coverage = coverage
             .inspect_err(|error| {
                 warn!(
+                    safe(ERROR_TYPE) = "clickhouse_query",
                     expanded(ERROR_MESSAGE) = %error,
                     "Indexing status could not read project coverage"
                 )

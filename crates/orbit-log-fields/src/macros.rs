@@ -5,6 +5,18 @@
 /// ```compile_fail
 /// orbit_log_fields::info!(safe(KIND) = %"x", "rejected");
 /// ```
+///
+/// `ERROR_TYPE` takes only a `&'static str`, so it cannot hold error text:
+///
+/// ```compile_fail
+/// let error = String::from("customer text");
+/// orbit_log_fields::warn!(safe(ERROR_TYPE) = error.as_str(), "rejected");
+/// ```
+///
+/// ```compile_fail
+/// let error = String::from("customer text");
+/// orbit_log_fields::warn!(safe(ERROR_TYPE) = <&str>::from(&*error), "rejected");
+/// ```
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __rewrite {
@@ -13,6 +25,9 @@ macro_rules! __rewrite {
     };
     ($mac:ident $prefix:tt [$($out:tt)*] safe($name:ident) = % $($rest:tt)*) => {
         compile_error!(concat!("safe field ", stringify!($name), " takes a plain value, not `%`"))
+    };
+    ($mac:ident $prefix:tt [$($out:tt)*] safe(ERROR_TYPE) = $($rest:tt)*) => {
+        $crate::__static_value!($mac $prefix [$($out)* { $crate::safe::ERROR_TYPE } =] $($rest)*)
     };
     ($mac:ident $prefix:tt [$($out:tt)*] safe($name:ident) = $($rest:tt)*) => {
         $crate::__value!($mac $prefix [$($out)* { $crate::safe::$name } =] $($rest)*)
@@ -39,6 +54,14 @@ macro_rules! __value {
     };
     ($mac:ident $prefix:tt [$($out:tt)*] $value:expr $(, $($rest:tt)*)?) => {
         $crate::__rewrite!($mac $prefix [$($out)* $value,] $($($rest)*)?)
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __static_value {
+    ($mac:ident $prefix:tt [$($out:tt)*] $value:expr $(, $($rest:tt)*)?) => {
+        $crate::__rewrite!($mac $prefix [$($out)* $crate::__static_str($value),] $($($rest)*)?)
     };
 }
 

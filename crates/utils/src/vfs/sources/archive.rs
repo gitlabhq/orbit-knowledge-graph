@@ -26,6 +26,7 @@ impl<R: Read> Source for Archive<R> {
                 Ok(entry) => entry,
                 Err(e) if !any_entry_seen && e.kind() == std::io::ErrorKind::UnexpectedEof => {
                     warn!(
+                        safe(ERROR_TYPE) = "archive_truncated",
                         expanded(ERROR_MESSAGE) = %e,
                         "archive stream truncated before first entry; treating as empty"
                     );

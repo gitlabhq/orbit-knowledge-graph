@@ -75,6 +75,7 @@ impl BillingObserver {
         };
         serde_json::to_value(&metadata).unwrap_or_else(|e| {
             orbit_log_fields::warn!(
+                safe(ERROR_TYPE) = "serialize",
                 expanded(ERROR_MESSAGE) = %e,
                 "failed to serialize billing metadata"
             );
@@ -161,6 +162,7 @@ impl BillingObserver {
             Ok(event) => Some(event),
             Err(e) => {
                 orbit_log_fields::error!(
+                    safe(ERROR_TYPE) = e.kind(),
                     expanded(ERROR_MESSAGE) = %e,
                     safe(GL_USER_ID) = self.inputs.user_id,
                     safe(REALM) = realm,
@@ -246,6 +248,7 @@ impl PipelineObserver for BillingObserver {
                 }
                 Err(e) => {
                     orbit_log_fields::error!(
+                        safe(ERROR_TYPE) = e.kind(),
                         expanded(ERROR_MESSAGE) = %e,
                         safe(GL_USER_ID) = self.inputs.user_id,
                         safe(REALM) = realm,

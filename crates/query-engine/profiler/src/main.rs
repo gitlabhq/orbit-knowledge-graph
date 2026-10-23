@@ -495,7 +495,11 @@ async fn main() -> Result<()> {
         match client.fetch_instance_health().await {
             Ok(health) => Some(serde_json::to_value(&health).unwrap_or_default()),
             Err(e) => {
-                orbit_log_fields::warn!(expanded(ERROR_MESSAGE) = %e, "failed to fetch instance health");
+                orbit_log_fields::warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&e),
+                    expanded(ERROR_MESSAGE) = %e,
+                    "failed to fetch instance health"
+                );
                 None
             }
         }

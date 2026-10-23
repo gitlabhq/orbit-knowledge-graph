@@ -135,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
     signal_task.abort();
     if let Err(error) = &result {
         orbit_log_fields::error!(
+            safe(ERROR_TYPE) = orbit_server::expanded_logs::anyhow_error_type(error),
             expanded(ERROR_MESSAGE) = %format_args!("{error:#}"),
             "server stopped with an error"
         );

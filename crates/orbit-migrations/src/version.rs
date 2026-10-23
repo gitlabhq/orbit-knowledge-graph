@@ -38,8 +38,10 @@ const LIST_VERSION_ENTITIES: &str = "\
 SELECT name, engine FROM system.tables \
 WHERE database = {database:String} AND startsWith(name, {prefix:String})";
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum SchemaVersionError {
+    #[strum(serialize = "clickhouse")]
     #[error("ClickHouse error: {0}")]
     ClickHouse(#[from] clickhouse_client::ClickHouseError),
 

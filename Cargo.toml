@@ -53,10 +53,10 @@ members = [
 [workspace.dependencies]
 orbit-observability = { path = "crates/orbit-observability" }
 orbit-log-fields = { path = "crates/orbit-log-fields" }
-labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "f28afb0ddf507e859923f56bb5a35a3d6325663c" }
-labkit-fields = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "f28afb0ddf507e859923f56bb5a35a3d6325663c" }
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "b437fcee2067ac71f00523ebb0e9cf604fa06391" }
+labkit-fields = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "b437fcee2067ac71f00523ebb0e9cf604fa06391" }
 # No bundled ring provider: every binary installs its rustls provider before building a Tracker.
-labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "f28afb0ddf507e859923f56bb5a35a3d6325663c", default-features = false }
+labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "b437fcee2067ac71f00523ebb0e9cf604fa06391", default-features = false }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"

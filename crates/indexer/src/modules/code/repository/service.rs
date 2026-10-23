@@ -10,7 +10,8 @@ use moka::future::Cache;
 pub type ByteStream =
     Pin<Box<dyn Stream<Item = Result<bytes::Bytes, RepositoryServiceError>> + Send>>;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum RepositoryServiceError {
     #[error("GitLab API error: {0}")]
     GitlabApi(#[from] GitlabClientError),
