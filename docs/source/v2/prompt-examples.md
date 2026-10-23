@@ -14,12 +14,14 @@ title: GitLab Orbit prompt examples
 {{< /details >}}
 
 Send these prompts to GitLab Duo Chat, or to an agent that uses the [GitLab Orbit CLI](cli.md)
-or a [Model Context Protocol (MCP) server](agents/mcp.md).
+or the [GitLab Model Context Protocol (MCP) endpoint](agents/mcp.md).
 Start the first prompt with `Using GitLab Orbit`, and replace the values in `<angle brackets>`.
 To check an answer, run the [query](queries/query-language.md) with `glab orbit query "<query>"`.
 The queries run on GitLab.com, in the `gitlab-org` group and the `gitlab-org/gitlab` project
 (`project_id: 278964`), where the production environment is `gprd`.
 To find your project ID, see [bounded nodes](queries/query-language.md#bounded-nodes).
+Each **Without GitLab Orbit** line counts REST API calls.
+With the GraphQL API, some of these lookups take fewer calls.
 
 ## Change a class hierarchy safely
 
@@ -43,7 +45,7 @@ LIMIT 100
 
 `MergeRequestDiffFile` connects to `Project`, not to `File` or `Definition`.
 For the open merge requests, the agent runs a second query on the file paths that the first query returns.
-The query filters on `old_path`, because `new_path` is `null` when a merge request changes a file
+The query filters on `old_path`, because `new_path` is empty when a merge request changes a file
 but does not rename the file.
 
 ```gql orbit-query
@@ -192,7 +194,6 @@ The agent groups the rows by `j.name`, so a job that fails on many merge request
 - **Without GitLab Orbit:** about 1,500 REST API calls for a milestone with about 1,250 open merge requests,
   one for the head pipeline of each and one for the failed jobs of each failed pipeline.
   You then compare the jobs across merge requests.
-  In the worst case, with no milestone filter, about 10,000 calls for about 2,300 open merge requests.
 
 ## Find out if a failed job is flaky
 
@@ -261,16 +262,18 @@ ORDER BY open_vulnerabilities DESC
 LIMIT 50
 ```
 
-To follow the fixes, the agent runs a second query,
-with `v.id IN [...]` and the IDs of the vulnerabilities that it found.
-`FIXES` covers only the merge requests that are linked to a vulnerability.
-A project from the first answer with no fix in production needs manual work.
+To follow the fixes, the agent runs a second query.
+This query lists the linked fixes in the group that reached a production environment.
+To limit it to the CVE, the agent adds `AND v.id IN [...]` with the IDs of the vulnerabilities that it found.
+`FIXES` covers only the merge requests that are linked to a vulnerability,
+so tell your agent to link each fix to its vulnerability.
+A project from the first answer with no linked fix in production needs manual work.
 
 ```gql orbit-query
 MATCH (v:Vulnerability)
   <-[:FIXES]-(mr:MergeRequest)
   -[:DEPLOYED_TO]->(d:Deployment)
-  -[:IN_ENVIRONMENT]->(e:Environment {name: 'gprd'})
+  -[:IN_ENVIRONMENT]->(e:Environment {tier: 'production'})
 MATCH (v)-[:IN_PROJECT]->(p:Project)
 WHERE p.full_path STARTS WITH 'gitlab-org/'
 RETURN p.full_path, v.state, d.status, count(v) AS vulns
