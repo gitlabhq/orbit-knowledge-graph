@@ -489,6 +489,33 @@ graph:
     }
 
     #[test]
+    fn a_null_or_unrecognised_value_is_rejected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = write_overlay(
+            dir.path(),
+            "nulled.yaml",
+            "jwt_clock_skew_secs: null\nnats:\n  connection_timeout_secs: null\nbilling:\n  quota:\n    auth_mode: licence_checksum\n",
+        );
+
+        let error = AppConfig::load_from(Some(&overlay), dir.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("- jwt_clock_skew_secs: value is required"),
+            "{error}"
+        );
+        assert!(
+            error.contains("- nats.connection_timeout_secs: value is required"),
+            "{error}"
+        );
+        assert!(
+            error.contains("- billing.quota.auth_mode: value is required"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn explicit_overlay_file_must_exist() {
         let dir = tempfile::TempDir::new().unwrap();
         let missing = dir.path().join("missing.yaml");

@@ -57,10 +57,10 @@ pub enum ConvertError {
 
 type Result<T> = std::result::Result<T, ConvertError>;
 
-/// The schema marks every section required and the loader validates before
-/// conversion, so a missing one means the two have drifted apart.
+/// The loader validates before conversion, so an unset field the schema marks
+/// required means the schema and the Rust types have drifted apart.
 fn present<T>(value: Option<T>) -> T {
-    value.expect("a section the schema marks required is set")
+    value.expect("a field the schema marks required is set")
 }
 
 fn address(value: &str, field: &'static str) -> Result<SocketAddr> {
@@ -80,8 +80,8 @@ impl TryFrom<proto::Config> for AppConfig {
 
     fn try_from(config: proto::Config) -> Result<Self> {
         Ok(Self {
-            grpc_bind_address: address(&config.grpc_bind_address, "grpc_bind_address")?,
-            jwt_clock_skew_secs: config.jwt_clock_skew_secs,
+            grpc_bind_address: address(&present(config.grpc_bind_address), "grpc_bind_address")?,
+            jwt_clock_skew_secs: present(config.jwt_clock_skew_secs),
             health_check_url: config.health_check_url,
             nats: nats(present(config.nats))?,
             datalake: clickhouse(present(config.datalake)),
@@ -107,53 +107,53 @@ impl TryFrom<proto::Config> for AppConfig {
 
 fn nats(value: proto::Nats) -> Result<NatsConfiguration> {
     Ok(NatsConfiguration {
-        url: value.url,
+        url: present(value.url),
         username: value.username,
         password: value.password,
         tls_ca_cert_path: value.tls_ca_cert_path,
         tls_cert_path: value.tls_cert_path,
         tls_key_path: value.tls_key_path,
-        connection_timeout_secs: value.connection_timeout_secs,
-        request_timeout_secs: value.request_timeout_secs,
-        ack_wait_secs: value.ack_wait_secs,
+        connection_timeout_secs: present(value.connection_timeout_secs),
+        request_timeout_secs: present(value.request_timeout_secs),
+        ack_wait_secs: present(value.ack_wait_secs),
         max_deliver: value.max_deliver,
-        subscription_buffer_size: value.subscription_buffer_size as usize,
+        subscription_buffer_size: present(value.subscription_buffer_size) as usize,
         consumer_name: value.consumer_name,
-        batch_size: value.batch_size as usize,
-        auto_create_streams: value.auto_create_streams,
-        stream_replicas: value.stream_replicas as usize,
+        batch_size: present(value.batch_size) as usize,
+        auto_create_streams: present(value.auto_create_streams),
+        stream_replicas: present(value.stream_replicas) as usize,
         stream_max_age_secs: value.stream_max_age_secs,
         stream_max_bytes: value.stream_max_bytes,
         stream_max_messages: value.stream_max_messages,
-        fetch_expires_secs: value.fetch_expires_secs,
-        consumer_inactive_threshold_secs: value.consumer_inactive_threshold_secs,
-        release_gc_idle_threshold_secs: value.release_gc_idle_threshold_secs,
+        fetch_expires_secs: present(value.fetch_expires_secs),
+        consumer_inactive_threshold_secs: present(value.consumer_inactive_threshold_secs),
+        release_gc_idle_threshold_secs: present(value.release_gc_idle_threshold_secs),
     })
 }
 
 fn clickhouse(value: proto::ClickHouse) -> ClickHouseConfiguration {
     let profiling = present(value.profiling);
     ClickHouseConfiguration {
-        database: value.database,
-        url: value.url,
-        username: value.username,
+        database: present(value.database),
+        url: present(value.url),
+        username: present(value.username),
         password: value.password,
         session_settings: value.session_settings,
-        replicated: value.replicated,
+        replicated: present(value.replicated),
         insert_settings: value.insert_settings,
         profiling: ProfilingConfig {
-            enabled: profiling.enabled,
-            explain: profiling.explain,
-            query_log: profiling.query_log,
-            processors: profiling.processors,
-            instance_health: profiling.instance_health,
+            enabled: present(profiling.enabled),
+            explain: present(profiling.explain),
+            query_log: present(profiling.query_log),
+            processors: present(profiling.processors),
+            instance_health: present(profiling.instance_health),
         },
     }
 }
 
 fn clickhouse_setup(value: proto::ClickHouseSetup) -> ClickHouseSetupConfig {
     ClickHouseSetupConfig {
-        admin_username: value.admin_username,
+        admin_username: present(value.admin_username),
         admin_password: value.admin_password,
         writer_password: value.writer_password,
         reader_password: value.reader_password,
@@ -179,7 +179,7 @@ fn tls(value: proto::Tls) -> TlsConfig {
         cert_path: value.cert_path,
         key_path: value.key_path,
         internal: ListenerTlsConfig {
-            enabled: internal.enabled,
+            enabled: present(internal.enabled),
             cert_path: internal.cert_path,
             key_path: internal.key_path,
         },
@@ -220,17 +220,17 @@ fn engine(value: proto::Engine) -> Result<EngineConfiguration> {
             entity_handler: EntityHandlerConfig {
                 datalake_batch_size: entity.datalake_batch_size,
                 batch_size_overrides: entity.batch_size_overrides,
-                system_notes_resolve_lookup_batch_size: entity
-                    .system_notes_resolve_lookup_batch_size
-                    as usize,
+                system_notes_resolve_lookup_batch_size: present(
+                    entity.system_notes_resolve_lookup_batch_size,
+                ) as usize,
             },
             code_indexing_task: CodeIndexingTaskHandlerConfig {
                 pipeline: code_indexing_pipeline(pipeline),
             },
         },
         datalake_retry: DatalakeRetryConfig {
-            halving_initial_block_size: retry.halving_initial_block_size,
-            halving_min_block_size: retry.halving_min_block_size,
+            halving_initial_block_size: present(retry.halving_initial_block_size),
+            halving_min_block_size: present(retry.halving_min_block_size),
         },
         modules: value
             .modules
@@ -254,32 +254,32 @@ fn indexer_module(value: i32) -> Result<IndexerModule> {
 
 fn code_indexing_pipeline(value: proto::CodeIndexingPipeline) -> CodeIndexingPipelineConfig {
     CodeIndexingPipelineConfig {
-        max_file_size_bytes: value.max_file_size_bytes,
-        max_files: value.max_files as usize,
-        max_total_bytes: value.max_total_bytes,
-        max_repository_files: value.max_repository_files as usize,
-        source_memory_budget_bytes: value.source_memory_budget_bytes,
-        source_compress_spill: value.source_compress_spill,
-        worker_threads: value.worker_threads as usize,
-        max_concurrent_languages: value.max_concurrent_languages as usize,
-        per_file_timeout_ms: value.per_file_timeout_ms,
-        per_file_parse_timeout_ms: value.per_file_parse_timeout_ms,
-        per_file_walk_timeout_ms: value.per_file_walk_timeout_ms,
-        per_file_ssa_timeout_ms: value.per_file_ssa_timeout_ms,
-        cross_file_resolve_timeout_ms: value.cross_file_resolve_timeout_ms,
-        max_tree_depth: value.max_tree_depth as usize,
-        max_cross_file_names: value.max_cross_file_names as usize,
-        max_manifest_bytes: value.max_manifest_bytes,
-        max_file_edges: value.max_file_edges as usize,
-        job_timeout_secs: value.job_timeout_secs,
-        fetch_concurrency: value.fetch_concurrency as usize,
-        archive_storage_budget: value.archive_storage_budget as usize,
-        archive_tenant_budget: value.archive_tenant_budget as usize,
-        archive_lease_ttl_secs: value.archive_lease_ttl_secs,
-        archive_lease_max_wait_secs: value.archive_lease_max_wait_secs,
-        write_slice_rows: value.write_slice_rows as usize,
-        write_max_concurrent: value.write_max_concurrent as usize,
-        small_repo_max_files: value.small_repo_max_files as usize,
+        max_file_size_bytes: present(value.max_file_size_bytes),
+        max_files: present(value.max_files) as usize,
+        max_total_bytes: present(value.max_total_bytes),
+        max_repository_files: present(value.max_repository_files) as usize,
+        source_memory_budget_bytes: present(value.source_memory_budget_bytes),
+        source_compress_spill: present(value.source_compress_spill),
+        worker_threads: present(value.worker_threads) as usize,
+        max_concurrent_languages: present(value.max_concurrent_languages) as usize,
+        per_file_timeout_ms: present(value.per_file_timeout_ms),
+        per_file_parse_timeout_ms: present(value.per_file_parse_timeout_ms),
+        per_file_walk_timeout_ms: present(value.per_file_walk_timeout_ms),
+        per_file_ssa_timeout_ms: present(value.per_file_ssa_timeout_ms),
+        cross_file_resolve_timeout_ms: present(value.cross_file_resolve_timeout_ms),
+        max_tree_depth: present(value.max_tree_depth) as usize,
+        max_cross_file_names: present(value.max_cross_file_names) as usize,
+        max_manifest_bytes: present(value.max_manifest_bytes),
+        max_file_edges: present(value.max_file_edges) as usize,
+        job_timeout_secs: present(value.job_timeout_secs),
+        fetch_concurrency: present(value.fetch_concurrency) as usize,
+        archive_storage_budget: present(value.archive_storage_budget) as usize,
+        archive_tenant_budget: present(value.archive_tenant_budget) as usize,
+        archive_lease_ttl_secs: present(value.archive_lease_ttl_secs),
+        archive_lease_max_wait_secs: present(value.archive_lease_max_wait_secs),
+        write_slice_rows: present(value.write_slice_rows) as usize,
+        write_max_concurrent: present(value.write_max_concurrent) as usize,
+        small_repo_max_files: present(value.small_repo_max_files) as usize,
         small_indexing_slots: value.small_indexing_slots.map(|slots| slots as usize),
         big_indexing_slots: value.big_indexing_slots.map(|slots| slots as usize),
     }
@@ -295,36 +295,39 @@ fn schedule_config(value: proto::Schedule) -> Result<ScheduleConfig> {
     Ok(ScheduleConfig {
         tasks: ScheduledTasksConfiguration {
             global: GlobalDispatcherConfig {
-                schedule: cron(present(tasks.global).cron, "global")?,
+                schedule: cron(present(present(tasks.global).cron), "global")?,
             },
             namespace: NamespaceDispatcherConfig {
-                schedule: cron(namespace.cron, "namespace")?,
-                sweep_interval_secs: namespace.sweep_interval_secs,
+                schedule: cron(present(namespace.cron), "namespace")?,
+                sweep_interval_secs: present(namespace.sweep_interval_secs),
             },
             siphon: SiphonRouterConfig {
-                events_stream_name: siphon.events_stream_name,
-                batch_size: siphon.batch_size as usize,
+                events_stream_name: present(siphon.events_stream_name),
+                batch_size: present(siphon.batch_size) as usize,
             },
             code_backfill: CodeBackfillSweepConfig {
-                schedule: cron(code_backfill.cron, "code-backfill")?,
-                publish_window: code_backfill.publish_window as usize,
-                stale_sweeps_per_tick: code_backfill.stale_sweeps_per_tick as usize,
+                schedule: cron(present(code_backfill.cron), "code-backfill")?,
+                publish_window: present(code_backfill.publish_window) as usize,
+                stale_sweeps_per_tick: present(code_backfill.stale_sweeps_per_tick) as usize,
             },
             table_cleanup: TableCleanupConfig {
-                schedule: cron(present(tasks.table_cleanup).cron, "table-cleanup")?,
+                schedule: cron(present(present(tasks.table_cleanup).cron), "table-cleanup")?,
             },
             namespace_deletion: NamespaceDeletionSchedulerConfig {
-                schedule: cron(present(tasks.namespace_deletion).cron, "namespace-deletion")?,
+                schedule: cron(
+                    present(present(tasks.namespace_deletion).cron),
+                    "namespace-deletion",
+                )?,
             },
             migration_completion: MigrationCompletionConfig {
                 schedule: cron(
-                    present(tasks.migration_completion).cron,
+                    present(present(tasks.migration_completion).cron),
                     "migration-completion",
                 )?,
             },
             stale_edge_reconciliation: StaleEdgeReconciliationConfig {
-                schedule: cron(stale_edge.cron, "stale-edge-reconciliation")?,
-                lookback_secs: stale_edge.lookback_secs,
+                schedule: cron(present(stale_edge.cron), "stale-edge-reconciliation")?,
+                lookback_secs: present(stale_edge.lookback_secs),
             },
         },
     })
@@ -332,12 +335,12 @@ fn schedule_config(value: proto::Schedule) -> Result<ScheduleConfig> {
 
 fn health_check(value: proto::HealthCheck) -> Result<HealthCheckConfig> {
     Ok(HealthCheckConfig {
-        bind_address: address(&value.bind_address, "health_check.bind_address")?,
+        bind_address: address(&present(value.bind_address), "health_check.bind_address")?,
         targets: value
             .targets
             .into_iter()
             .map(|target| NamespaceTarget {
-                namespace: target.namespace,
+                namespace: present(target.namespace),
                 deployments: target.deployments,
                 stateful_sets: target.stateful_sets,
             })
@@ -353,15 +356,15 @@ fn metrics(value: proto::Metrics) -> Result<MetricsConfig> {
     Ok(MetricsConfig {
         log_level: value.log_level,
         expanded_logs: ExpandedLogsConfig {
-            global_override: expanded.global_override,
+            global_override: present(expanded.global_override),
             root_namespace_ids: expanded.root_namespace_ids,
         },
         otel: OtelConfig {
-            enabled: otel.enabled,
-            endpoint: otel.endpoint,
+            enabled: present(otel.enabled),
+            endpoint: present(otel.endpoint),
         },
         prometheus: PrometheusConfig {
-            enabled: prometheus.enabled,
+            enabled: present(prometheus.enabled),
             port: prometheus
                 .port
                 .map(|port| u16::try_from(port).map_err(|_| ConvertError::PortRange(port)))
@@ -408,54 +411,56 @@ fn query_config(value: proto::QueryConfig) -> QueryConfig {
 
 fn grpc(value: proto::Grpc) -> Result<GrpcConfig> {
     Ok(GrpcConfig {
-        keepalive_interval_secs: value.keepalive_interval_secs,
-        keepalive_timeout_secs: value.keepalive_timeout_secs,
-        tcp_keepalive_secs: value.tcp_keepalive_secs,
-        connection_window_size: value.connection_window_size,
-        stream_window_size: value.stream_window_size,
-        concurrency_limit: value.concurrency_limit as usize,
-        max_connection_age_secs: value.max_connection_age_secs,
-        max_connection_age_grace_secs: value.max_connection_age_grace_secs,
-        stream_timeout_secs: value.stream_timeout_secs,
-        max_header_list_size_bytes: value.max_header_list_size_bytes,
-        result_chunk_bytes: value.result_chunk_bytes as usize,
-        max_result_bytes: value.max_result_bytes as usize,
+        keepalive_interval_secs: present(value.keepalive_interval_secs),
+        keepalive_timeout_secs: present(value.keepalive_timeout_secs),
+        tcp_keepalive_secs: present(value.tcp_keepalive_secs),
+        connection_window_size: present(value.connection_window_size),
+        stream_window_size: present(value.stream_window_size),
+        concurrency_limit: present(value.concurrency_limit) as usize,
+        max_connection_age_secs: present(value.max_connection_age_secs),
+        max_connection_age_grace_secs: present(value.max_connection_age_grace_secs),
+        stream_timeout_secs: present(value.stream_timeout_secs),
+        max_header_list_size_bytes: present(value.max_header_list_size_bytes),
+        result_chunk_bytes: present(value.result_chunk_bytes) as usize,
+        max_result_bytes: present(value.max_result_bytes) as usize,
     })
 }
 
 fn schema(value: proto::Schema) -> SchemaConfig {
     SchemaConfig {
-        max_retained_versions: value.max_retained_versions,
-        version_poll_interval_secs: value.version_poll_interval_secs,
-        indexer_schema_wait_timeout_secs: value.indexer_schema_wait_timeout_secs,
+        max_retained_versions: present(value.max_retained_versions),
+        version_poll_interval_secs: present(value.version_poll_interval_secs),
+        indexer_schema_wait_timeout_secs: present(value.indexer_schema_wait_timeout_secs),
     }
 }
 
 fn analytics(value: proto::Analytics) -> Result<AnalyticsConfig> {
     let deployment = present(value.deployment);
     Ok(AnalyticsConfig {
-        enabled: value.enabled,
-        collector_url: value.collector_url,
+        enabled: present(value.enabled),
+        collector_url: present(value.collector_url),
         deployment: DeploymentConfig {
-            kind: match proto::DeploymentKind::try_from(deployment.r#type) {
+            kind: match proto::DeploymentKind::try_from(present(deployment.r#type)) {
                 Ok(proto::DeploymentKind::SelfManaged) => DeploymentKind::SelfManaged,
                 Ok(proto::DeploymentKind::Com) => DeploymentKind::Com,
                 Ok(proto::DeploymentKind::Dedicated) => DeploymentKind::Dedicated,
                 Err(_) => {
                     return Err(ConvertError::UnknownEnum {
                         field: "analytics.deployment.type",
-                        value: deployment.r#type,
+                        value: present(deployment.r#type),
                     });
                 }
             },
-            environment: match proto::DeploymentEnvironment::try_from(deployment.environment) {
+            environment: match proto::DeploymentEnvironment::try_from(present(
+                deployment.environment,
+            )) {
                 Ok(proto::DeploymentEnvironment::Development) => DeploymentEnvironment::Development,
                 Ok(proto::DeploymentEnvironment::Staging) => DeploymentEnvironment::Staging,
                 Ok(proto::DeploymentEnvironment::Production) => DeploymentEnvironment::Production,
                 Err(_) => {
                     return Err(ConvertError::UnknownEnum {
                         field: "analytics.deployment.environment",
-                        value: deployment.environment,
+                        value: present(deployment.environment),
                     });
                 }
             },
@@ -466,35 +471,35 @@ fn analytics(value: proto::Analytics) -> Result<AnalyticsConfig> {
 fn billing(value: proto::Billing) -> Result<BillingConfig> {
     let quota = present(value.quota);
     Ok(BillingConfig {
-        enabled: value.enabled,
-        collector_url: value.collector_url,
-        auth_mode: match proto::BillingAuthMode::try_from(value.auth_mode) {
+        enabled: present(value.enabled),
+        collector_url: present(value.collector_url),
+        auth_mode: match proto::BillingAuthMode::try_from(present(value.auth_mode)) {
             Ok(proto::BillingAuthMode::Oidc) => BillingAuthMode::Oidc,
             Ok(proto::BillingAuthMode::CloudConnector) => BillingAuthMode::CloudConnector,
             Err(_) => {
                 return Err(ConvertError::UnknownEnum {
                     field: "billing.auth_mode",
-                    value: value.auth_mode,
+                    value: present(value.auth_mode),
                 });
             }
         },
         quota: QuotaConfig {
-            enabled: quota.enabled,
-            customers_dot_url: quota.customers_dot_url,
-            auth_mode: match proto::QuotaAuthMode::try_from(quota.auth_mode) {
+            enabled: present(quota.enabled),
+            customers_dot_url: present(quota.customers_dot_url),
+            auth_mode: match proto::QuotaAuthMode::try_from(present(quota.auth_mode)) {
                 Ok(proto::QuotaAuthMode::AdminToken) => QuotaAuthMode::AdminToken,
                 Ok(proto::QuotaAuthMode::LicenseChecksum) => QuotaAuthMode::LicenseChecksum,
                 Err(_) => {
                     return Err(ConvertError::UnknownEnum {
                         field: "billing.quota.auth_mode",
-                        value: quota.auth_mode,
+                        value: present(quota.auth_mode),
                     });
                 }
             },
             api_user: quota.api_user,
             api_token: quota.api_token,
-            request_timeout_ms: quota.request_timeout_ms,
-            fallback_cache_ttl_secs: quota.fallback_cache_ttl_secs,
+            request_timeout_ms: present(quota.request_timeout_ms),
+            fallback_cache_ttl_secs: present(quota.fallback_cache_ttl_secs),
         },
     })
 }
@@ -508,7 +513,7 @@ fn features(value: HashMap<String, proto::FeatureScope>) -> Result<FeaturesConfi
             Ok((
                 feature,
                 FeatureScope {
-                    enabled: scope.enabled,
+                    enabled: present(scope.enabled),
                     namespaces: scope.namespaces,
                 },
             ))
@@ -518,34 +523,34 @@ fn features(value: HashMap<String, proto::FeatureScope>) -> Result<FeaturesConfi
 
 fn object_storage(value: proto::ObjectStorage) -> Result<ObjectStorageConfig> {
     Ok(ObjectStorageConfig {
-        enabled: value.enabled,
-        provider: match proto::ObjectStorageProvider::try_from(value.provider) {
+        enabled: present(value.enabled),
+        provider: match proto::ObjectStorageProvider::try_from(present(value.provider)) {
             Ok(proto::ObjectStorageProvider::S3) => ObjectStorageProvider::S3,
             Ok(proto::ObjectStorageProvider::Gcs) => ObjectStorageProvider::Gcs,
             Ok(proto::ObjectStorageProvider::Local) => ObjectStorageProvider::Local,
             Err(_) => {
                 return Err(ConvertError::UnknownEnum {
                     field: "object_storage.provider",
-                    value: value.provider,
+                    value: present(value.provider),
                 });
             }
         },
-        bucket: value.bucket,
-        prefix: value.prefix,
-        auth: match proto::ObjectStorageAuth::try_from(value.auth) {
+        bucket: present(value.bucket),
+        prefix: present(value.prefix),
+        auth: match proto::ObjectStorageAuth::try_from(present(value.auth)) {
             Ok(proto::ObjectStorageAuth::Identity) => ObjectStorageAuth::Identity,
             Ok(proto::ObjectStorageAuth::Static) => ObjectStorageAuth::Static,
             Err(_) => {
                 return Err(ConvertError::UnknownEnum {
                     field: "object_storage.auth",
-                    value: value.auth,
+                    value: present(value.auth),
                 });
             }
         },
         region: value.region,
         endpoint: value.endpoint,
-        path_style: value.path_style,
-        allow_http: value.allow_http,
+        path_style: present(value.path_style),
+        allow_http: present(value.allow_http),
         ca_cert_path: value.ca_cert_path,
         access_key_id: value.access_key_id,
         secret_access_key: value.secret_access_key,
