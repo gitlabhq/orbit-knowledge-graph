@@ -31,6 +31,28 @@ GitLab Orbit indexes two kinds of data into one graph:
 
 The [local graph](local/_index.md#local-tables) on your machine holds only code.
 
+The graph links these objects. For example, a merge request belongs to a project, runs a pipeline,
+and fixes a vulnerability. A file is on a branch of the project and defines a definition.
+
+<img class="orbit-graph-figure orbit-graph-light" src="img/orbit-graph-hub-light-v19_6.svg" alt="A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition." width="680" height="272">
+<img class="orbit-graph-figure orbit-graph-dark" src="img/orbit-graph-hub-dark-v19_6.svg" alt="A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition." width="680" height="272">
+
+<style>
+.docs-content .orbit-graph-figure {
+  display: block;
+  width: 100%;
+  max-width: 42.5rem;
+  height: auto;
+  margin: 0 auto var(--gl-spacing-scale-7);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+.docs-content .orbit-graph-dark { display: none; }
+.gl-dark .docs-content .orbit-graph-light { display: none; }
+.gl-dark .docs-content .orbit-graph-dark { display: block; }
+</style>
+
 ## Get the live schema
 
 The schema changes between releases. To list the current node types by domain, run:
