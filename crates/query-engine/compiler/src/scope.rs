@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 pub struct QueryScope {
     nodes: HashMap<String, ScopeProof>,
     relationships: Vec<Option<ScopeProof>>,
+    self_seeded: HashSet<String>,
 }
 
 impl QueryScope {
@@ -12,18 +13,42 @@ impl QueryScope {
         nodes: HashMap<String, ScopeProof>,
         model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     ) -> Self {
-        let relationships = input
+        let relationships: Vec<Option<ScopeProof>> = input
             .relationships
             .iter()
             .map(|relationship| relationship_proof(input, relationship, &nodes, model))
             .collect();
+        let anchors = anchor_fks(model);
+        let shared = |alias: &str, proof: &ScopeProof| {
+            nodes.iter().any(|(other, p)| other != alias && p == proof)
+                || relationships.iter().flatten().any(|p| p == proof)
+        };
+        let self_seeded = input
+            .nodes
+            .iter()
+            .filter(|node| {
+                let keys = scope_keys(node, &anchors);
+                !keys.is_empty()
+                    && keys
+                        .iter()
+                        .all(|key| Some(key.entity.as_str()) == node.entity.as_deref())
+                    && nodes
+                        .get(&node.id)
+                        .is_some_and(|proof| !shared(&node.id, proof))
+            })
+            .map(|node| node.id.clone())
+            .collect();
         Self {
             nodes,
             relationships,
+            self_seeded,
         }
     }
 
     pub fn node(&self, alias: &str) -> Option<&ScopeProof> {
+        if self.self_seeded.contains(alias) {
+            return None;
+        }
         self.nodes.get(alias)
     }
 
@@ -150,11 +175,7 @@ pub fn derive_scope_proofs(
     input: &Input,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> HashMap<String, ScopeProof> {
-    let anchor_fks: Vec<_> = model
-        .anchor_foreign_keys()
-        .iter()
-        .map(|(column, entity)| (column.as_str(), model.graph().entity(*entity).name.as_str()))
-        .collect();
+    let anchor_fks = anchor_fks(model);
     let seed: HashMap<String, ScopeProof> = input
         .nodes
         .iter()
@@ -189,6 +210,14 @@ pub fn derive_scope_proofs(
             .is_some_and(|entity| model.entity_has_traversal_path(entity))
     });
     proofs
+}
+
+fn anchor_fks(model: &(impl query_data_model::OrbitQueryModel + ?Sized)) -> Vec<(&str, &str)> {
+    model
+        .anchor_foreign_keys()
+        .iter()
+        .map(|(column, entity)| (column.as_str(), model.graph().entity(*entity).name.as_str()))
+        .collect()
 }
 
 fn propagate_scope_proofs(

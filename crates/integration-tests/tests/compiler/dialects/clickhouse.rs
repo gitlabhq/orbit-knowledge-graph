@@ -846,7 +846,7 @@ fn scoped_count_condition_excludes_the_scope_lookup() {
 }
 
 #[test]
-fn cross_namespace_related_to_edge_stays_unscoped() {
+fn cross_namespace_related_to_edge_scans_only_the_source_namespace() {
     let orbit_query = "MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem) WHERE p.id = 1 RETURN p, wi.id, rel.id, rel.title LIMIT 100";
     let json = r#"{
         "query_type": "traversal",
@@ -867,7 +867,11 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
 
     let related_scan = sql.split("FROM gl_edge AS _orbit_edge_1").nth(1).unwrap();
     let related_scope = related_scan.split(" ON ").next().unwrap();
-    assert!(!related_scope.contains(SCOPED_LOOKUP), "{sql}");
+    assert!(
+        related_scope.contains(SCOPED_LOOKUP)
+            && !sql.contains("startsWith(rel.traversal_path, (SELECT"),
+        "the RELATED_TO rows carry the source's path, the target may live anywhere: {sql}"
+    );
 
     let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
         panic!("expected static hydration");
@@ -2074,4 +2078,58 @@ fn cte_statements_carry_the_ctes_they_read() {
             );
         }
     }
+}
+
+#[test]
+fn self_seeded_node_keeps_its_own_read_plain() {
+    let orbit_query = "MATCH (mr:MergeRequest {id: 7}) RETURN mr LIMIT 1";
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [7]}],
+        "limit": 1
+    }"#;
+    let sql = render_scoped(json, orbit_query);
+    assert!(!sql.contains("AS _scope"), "{sql}");
+}
+
+#[test]
+fn self_seeded_node_shares_its_lookup_with_its_neighbours() {
+    let orbit_query = "MATCH (mr:MergeRequest {id: 7})-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff) RETURN d.id LIMIT 10";
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "node_ids": [7]},
+            {"id": "d", "entity": "MergeRequestDiff", "columns": ["id"]}
+        ],
+        "relationships": [{"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"}],
+        "limit": 10
+    }"#;
+    let sql = render_scoped(json, orbit_query);
+    assert!(
+        sql.contains("startsWith(d.traversal_path, (SELECT")
+            && sql.contains("FROM gl_merge_request AS _scope WHERE")
+            && sql.contains("startsWith(mr.traversal_path, (SELECT"),
+        "the neighbour and the pinned node share one cached lookup: {sql}"
+    );
+}
+
+#[test]
+fn id_pinned_pipeline_bounds_its_jobs_by_path() {
+    let orbit_query = "MATCH (pl:Pipeline {id: 7})-[:HAS_JOB]->(j:Job) RETURN j.name LIMIT 100";
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "pl", "entity": "Pipeline", "node_ids": [7]},
+            {"id": "j", "entity": "Job", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "HAS_JOB", "from": "pl", "to": "j"}],
+        "limit": 100
+    }"#;
+    let sql = render_scoped(json, orbit_query);
+    assert!(
+        sql.contains("startsWith(j.traversal_path, (SELECT")
+            && sql.contains("FROM gl_pipeline AS _scope WHERE")
+            && sql.contains("(_scope.id = 7)"),
+        "the job read must carry the pinned pipeline's prefix: {sql}"
+    );
 }

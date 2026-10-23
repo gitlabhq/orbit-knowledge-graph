@@ -24,10 +24,6 @@ properties:
     nullable: false
     mutable: false
     description: "Unique ID."
-    traversal_path_lookup:
-      kind: id
-      source_table: gl_merge_request
-      key_column: id
 
   iid:
     type: int64

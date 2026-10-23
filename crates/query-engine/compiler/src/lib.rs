@@ -1140,13 +1140,13 @@ mod tests {
             ),
             (
                 "MATCH (p:Project {id: 100}) RETURN p LIMIT 20",
-                true,
+                false,
                 "p",
                 true,
             ),
             (
                 "MATCH (p:Project {full_path: 'parent/project'}) RETURN p LIMIT 20",
-                true,
+                false,
                 "p",
                 true,
             ),

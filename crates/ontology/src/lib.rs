@@ -3222,12 +3222,24 @@ properties:
             "Definition",
             "File",
             "Directory",
+            "Pipeline",
+            "WorkItem",
+            "Note",
         ] {
             assert!(o.is_anchor(entity), "{entity} declares a lookup");
         }
-        for entity in ["WorkItem", "User", "Nonexistent"] {
+        for entity in ["User", "Runner", "Nonexistent"] {
             assert!(!o.is_anchor(entity), "{entity} declares no lookup");
         }
+        let unscoped: Vec<_> = o
+            .nodes()
+            .filter(|node| o.is_path_scopable(&node.name) && !o.is_anchor(&node.name))
+            .map(|node| node.name.as_str())
+            .collect();
+        assert!(
+            unscoped.is_empty(),
+            "path-scoped nodes without an id lookup: {unscoped:?}"
+        );
         assert!(
             o.traversal_path_lookups()
                 .iter()
@@ -3290,11 +3302,18 @@ properties:
             "FIXES",
             "MENTIONS",
             "SOURCE_PROJECT",
-            "IMPORTS",
         ] {
             assert!(
                 !o.has_scope_preserving_variant(kind),
                 "{kind} should NOT be same-namespace"
+            );
+        }
+        for kind in ["CLOSES", "RELATED_TO", "SOURCE_PROJECT"] {
+            assert!(
+                o.edges[kind]
+                    .iter()
+                    .all(|v| v.scope == Some(EdgeVariantScope::PruneToSource)),
+                "{kind} rows carry the source's path"
             );
         }
     }
@@ -3341,8 +3360,8 @@ properties:
             .find(|v| v.source_kind == "User" && v.target_kind == "Project");
         assert_eq!(
             user_project.and_then(|v| v.scope),
-            None,
-            "User→Project crosses global/namespaced boundary"
+            Some(EdgeVariantScope::PruneToTarget),
+            "User→Project: the member edge lives in the project, the user is global"
         );
         let wi_wi = contains
             .iter()
@@ -3355,16 +3374,20 @@ properties:
     }
 
     #[test]
-    fn calls_imported_symbol_variant_not_scope_preserving() {
+    fn imported_symbol_edges_stop_propagation_at_the_resolved_definition() {
         let o = Ontology::load_embedded().unwrap();
-        let calls = o.edges.get("CALLS").expect("CALLS");
-        let def_import = calls
-            .iter()
-            .find(|v| v.target_kind == "ImportedSymbol")
-            .expect("Definition→ImportedSymbol variant");
+        assert!(
+            o.is_scope_preserving_triple("CALLS", "Definition", "ImportedSymbol"),
+            "a call site and its imported symbol live in one repository"
+        );
+        assert!(
+            o.is_scope_preserving_triple("IMPORTS", "File", "ImportedSymbol"),
+            "an import site and its imported symbol live in one repository"
+        );
         assert_eq!(
-            def_import.scope, None,
-            "ImportedSymbol is the cross-repo resolution boundary"
+            o.edge_scope_for("IMPORTS", "ImportedSymbol", "Definition"),
+            Some(EdgeVariantScope::PruneToSource),
+            "the resolved definition may live in another repository"
         );
     }
 
@@ -3386,7 +3409,9 @@ properties:
         assert!(!o.is_scope_preserving_triple("CONTAINS", "User", "Project"));
         assert!(!o.is_scope_preserving_triple("CONTAINS", "WorkItem", "WorkItem"));
         assert!(o.is_scope_preserving_triple("CALLS", "Definition", "Definition"));
-        assert!(!o.is_scope_preserving_triple("CALLS", "Definition", "ImportedSymbol"));
+        assert!(o.is_scope_preserving_triple("CALLS", "Definition", "ImportedSymbol"));
+        assert!(!o.is_scope_preserving_triple("CLOSES", "MergeRequest", "WorkItem"));
+        assert!(!o.is_scope_preserving_triple("HAS_NOTE", "MergeRequest", "Note"));
     }
 
     #[test]

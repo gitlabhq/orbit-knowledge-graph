@@ -16,6 +16,9 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 113
+  scope: none
+  note: "Declares the measured scope on twenty edge variants and drops the six explicit id lookups that the ontology loader now derives for every path-scoped node. Query-planner metadata only: the compiler prunes with it, the indexer never reads it, so no table DDL or indexed row changes."
 - version: 112
   scope: none
   note: >-

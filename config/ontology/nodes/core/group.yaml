@@ -23,10 +23,6 @@ properties:
     nullable: false
     mutable: false
     description: "Unique ID."
-    traversal_path_lookup:
-      kind: id
-      source_table: gl_group
-      key_column: id
 
   full_path:
     type: string
