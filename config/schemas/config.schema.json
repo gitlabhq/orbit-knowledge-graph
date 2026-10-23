@@ -66,7 +66,13 @@
       "$ref": "#/$defs/BillingConfig"
     },
     "features": {
-      "$ref": "#/$defs/FeaturesConfig"
+      "type": "object",
+      "properties": {
+        "code_graph_incremental": {
+          "$ref": "#/$defs/FeatureScope"
+        }
+      },
+      "additionalProperties": false
     },
     "object_storage": {
       "$ref": "#/$defs/ObjectStorageConfig"
@@ -227,13 +233,13 @@
           "minimum": 0
         },
         "consumer_inactive_threshold_secs": {
-          "description": "Inactive threshold for versioned durable consumers in seconds.\nAfter this duration with no activity, NATS auto-deletes the consumer.\nApplied to Siphon dispatch consumers and to subscribe consumers on the\nversioned work streams, so a retired release's consumers reap\nthemselves and stop vetoing release GC. A connected consumer's fetch\nloop keeps it active. Clamped to a minimum of 60 seconds.",
+          "description": "Inactive threshold for versioned durable consumers in seconds.\nAfter this duration with no activity, NATS auto-deletes the consumer.\nApplied to Siphon dispatch consumers and to subscribe consumers on the\nversioned work streams, so a retired release's consumers reap\nthemselves and stop vetoing release GC. A connected consumer's fetch\nloop keeps it active. At least 60 seconds.",
           "type": "integer",
           "format": "uint64",
           "minimum": 60
         },
         "release_gc_idle_threshold_secs": {
-          "description": "How long another release's streams must show no activity (creation,\npublishes, attached consumers) before a starting dispatcher deletes\nthem. A live release's dispatcher publishes every minute, so activity\ndoubles as liveness. Clamped to a minimum of 600 seconds.",
+          "description": "How long another release's streams must show no activity (creation,\npublishes, attached consumers) before a starting dispatcher deletes\nthem. A live release's dispatcher publishes every minute, so activity\ndoubles as liveness. At least 600 seconds.",
           "type": "integer",
           "format": "uint64",
           "minimum": 600
@@ -1593,16 +1599,6 @@
           "const": "license_checksum"
         }
       ]
-    },
-    "FeaturesConfig": {
-      "description": "An unrecognized key fails deserialization as an unknown [`Feature`] variant,\nrather than being silently ignored.",
-      "type": "object",
-      "properties": {
-        "code_graph_incremental": {
-          "$ref": "#/$defs/FeatureScope"
-        }
-      },
-      "additionalProperties": false
     },
     "FeatureScope": {
       "description": "A feature flag scoped to root namespaces: `enabled` toggles it, an empty\n`namespaces` list means every namespace, otherwise only those ids.",

@@ -38,8 +38,6 @@ impl FeatureScope {
     }
 }
 
-/// An unrecognized key fails deserialization as an unknown [`Feature`] variant,
-/// rather than being silently ignored.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(transparent)]
 pub struct FeaturesConfig(HashMap<Feature, FeatureScope>);
