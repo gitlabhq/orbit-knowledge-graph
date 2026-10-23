@@ -43,7 +43,7 @@ the GitLab Orbit Remote REST API. `graph-status` calls the GitLab GraphQL API.
 provides guided onboarding and configures supported AI agents.
 
 With a GitLab Duo Agent Platform token, `graph-status` needs the GitLab release
-that includes [gitlab-org/gitlab!264673](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/264673).
+that includes [GitLab merge request 264673](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/264673).
 
 ## Prerequisites
 
