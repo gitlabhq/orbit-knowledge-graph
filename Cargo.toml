@@ -194,6 +194,7 @@ sqlparser = { version = "0.62.0", features = ["visitor"] }
 prost = "0.14.3"
 prost-build = "0.14.3"
 prost-protovalidate-types = "0.6.0"
+prost-reflect = "0.16.5"
 prost-types = "0.14.3"
 protoc-bin-vendored = "3.2.0"
 tar = "0.4.44"

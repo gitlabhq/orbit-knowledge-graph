@@ -2,6 +2,7 @@ syntax = "proto3";
 package orbit.config.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/descriptor.proto";
 
 // Schema for the Orbit server configuration. config/default.yaml declares a
 // deployment default for every field here, and the loader merges the overlay
@@ -13,6 +14,11 @@ import "buf/validate/validate.proto";
 // Not a wire format. These messages are only ever decoded from a merged
 // configuration document, so the field numbers carry no compatibility
 // guarantee.
+
+extend google.protobuf.MessageOptions {
+  // A key a closed message does not declare is an error, not ignored.
+  bool closed = 50000;
+}
 
 message Config {
   optional string grpc_bind_address = 1 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
@@ -97,12 +103,16 @@ message Jwt {
 }
 
 message Tls {
+  option (closed) = true;
+
   optional string cert_path = 1;
   optional string key_path = 2;
   ListenerTls internal = 3 [(buf.validate.field).required = true];
 }
 
 message ListenerTls {
+  option (closed) = true;
+
   optional bool enabled = 1 [(buf.validate.field).required = true];
   optional string cert_path = 2;
   optional string key_path = 3;
@@ -374,6 +384,8 @@ message Billing {
 }
 
 message FeatureScope {
+  option (closed) = true;
+
   optional bool enabled = 1 [(buf.validate.field).required = true];
   repeated int64 namespaces = 2;
 }

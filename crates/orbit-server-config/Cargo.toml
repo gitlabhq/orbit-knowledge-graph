@@ -16,6 +16,7 @@ thiserror = { workspace = true }
 orbit-log-fields = { workspace = true }
 labkit-config = { workspace = true }
 prost = { workspace = true }
+prost-reflect = { workspace = true }
 serde-saphyr = { workspace = true }
 
 [dev-dependencies]

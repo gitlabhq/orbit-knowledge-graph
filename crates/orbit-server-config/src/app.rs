@@ -28,6 +28,7 @@ use crate::query::QuerySettings;
 use crate::schema::SchemaConfig;
 use crate::secrets;
 use crate::tls::TlsConfig;
+use crate::undeclared::undeclared;
 
 pub const SECRET_FILE_DIR: &str = "/etc/secrets";
 pub const OVERLAY_CONFIG_FILE: &str = "config/config.yaml";
@@ -94,7 +95,10 @@ impl AppConfig {
             merge(&mut document, parse_yaml(&data, &path)?);
         }
         merge(&mut document, secrets::tree(secret_dir)?);
-        reject_unknown_keys(&document)?;
+        let errors = undeclared(&document);
+        if !errors.is_empty() {
+            return Err(ConfigError::Undeclared(errors));
+        }
 
         let json = serde_json::to_vec(&document).expect("a parsed document re-serialises");
         let loaded = Loader::new()
@@ -150,24 +154,6 @@ fn overlay_path(overlay: Option<&Path>) -> Option<PathBuf> {
     }
 }
 
-/// Loading ignores unknown keys, but a typo in these sections would leave a
-/// listener plaintext or a feature off with nothing to notice it.
-fn reject_unknown_keys(document: &serde_json::Value) -> Result<(), ConfigError> {
-    serde_json::from_value::<TlsConfig>(document["tls"].clone()).map_err(|source| {
-        ConfigError::StrictSection {
-            section: "tls",
-            source,
-        }
-    })?;
-    serde_json::from_value::<FeaturesConfig>(document["features"].clone()).map_err(|source| {
-        ConfigError::StrictSection {
-            section: "features",
-            source,
-        }
-    })?;
-    Ok(())
-}
-
 fn parse_yaml(data: &[u8], path: &Path) -> Result<serde_json::Value, ConfigError> {
     let document: serde_json::Value = serde_saphyr::from_slice_with_options(
         data,
@@ -202,12 +188,8 @@ pub enum ConfigError {
         #[source]
         source: Box<serde_saphyr::Error>,
     },
-    #[error("{section}: {source}")]
-    StrictSection {
-        section: &'static str,
-        #[source]
-        source: serde_json::Error,
-    },
+    #[error("config: not declared by the schema:\n  - {}", .0.join("\n  - "))]
+    Undeclared(Vec<String>),
     #[error(transparent)]
     Secrets(#[from] crate::secrets::SecretError),
     #[error(transparent)]
@@ -439,17 +421,13 @@ graph:
             "features:\n  code_graph_incremental:\n    enabeld: true\n",
         );
 
-        let err = AppConfig::load_from(Some(&overlay), dir.path()).unwrap_err();
+        let error = AppConfig::load_from(Some(&overlay), dir.path())
+            .unwrap_err()
+            .to_string();
 
         assert!(
-            matches!(
-                err,
-                ConfigError::StrictSection {
-                    section: "features",
-                    ..
-                }
-            ),
-            "{err}"
+            error.contains("- features.code_graph_incremental.enabeld: unknown field"),
+            "{error}"
         );
     }
 
@@ -474,7 +452,7 @@ graph:
         let overlay = write_overlay(
             dir.path(),
             "nulled.yaml",
-            "grpc: null\nengine:\n  handlers:\n    entity-handler: null\n",
+            "grpc: null\ntls:\n  internal: null\nengine:\n  handlers:\n    entity-handler: null\n",
         );
 
         let error = AppConfig::load_from(Some(&overlay), dir.path())
@@ -483,18 +461,22 @@ graph:
 
         assert!(error.contains("- grpc: value is required"), "{error}");
         assert!(
+            error.contains("- tls.internal: value is required"),
+            "{error}"
+        );
+        assert!(
             error.contains("- engine.handlers.entity_handler: value is required"),
             "{error}"
         );
     }
 
     #[test]
-    fn a_null_or_unrecognised_value_is_rejected() {
+    fn a_null_value_is_rejected() {
         let dir = tempfile::TempDir::new().unwrap();
         let overlay = write_overlay(
             dir.path(),
             "nulled.yaml",
-            "jwt_clock_skew_secs: null\nnats:\n  connection_timeout_secs: null\nbilling:\n  quota:\n    auth_mode: licence_checksum\n",
+            "jwt_clock_skew_secs: null\nnats:\n  connection_timeout_secs: null\n",
         );
 
         let error = AppConfig::load_from(Some(&overlay), dir.path())
@@ -509,8 +491,27 @@ graph:
             error.contains("- nats.connection_timeout_secs: value is required"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn an_undeclared_enum_name_is_rejected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = write_overlay(
+            dir.path(),
+            "enums.yaml",
+            "billing:\n  quota:\n    auth_mode: licence_checksum\nengine:\n  modules: [sdlc, cod]\n",
+        );
+
+        let error = AppConfig::load_from(Some(&overlay), dir.path())
+            .unwrap_err()
+            .to_string();
+
         assert!(
-            error.contains("- billing.quota.auth_mode: value is required"),
+            error.contains("- billing.quota.auth_mode: unknown value \"licence_checksum\""),
+            "{error}"
+        );
+        assert!(
+            error.contains("- engine.modules[1]: unknown value \"cod\""),
             "{error}"
         );
     }
