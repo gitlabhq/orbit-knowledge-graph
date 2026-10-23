@@ -246,6 +246,21 @@ Confirm that the tag exists in the
 [`gitlab-siphon-tables` container registry](https://gitlab.com/gitlab-org/build/CNG/container_registry/11611957).
 A missing tag prevents pods from starting.
 
+CNG publishes no tag for GitLab versions earlier than 19.3.4, or for GitLab 19.4.0 and 19.4.1. For these
+versions, use the deprecated `registry.gitlab.com/gitlab-org/gitlab/gitlab-siphon-tables` image, which GitLab
+publishes with `vX.Y.Z-ee` tags. Add this block to `siphon-values.yaml`:
+
+```yaml
+splitTables:
+  image:
+    repository: gitlab-org/gitlab/gitlab-siphon-tables
+    tag: '{{ include "siphon.gitlabVersion" . }}-ee'
+```
+
+For more information, see
+[Using the legacy tables image](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts#using-the-legacy-tables-image).
+Switch to the CNG image after you upgrade GitLab.
+
 1. Save the following as `siphon-values.yaml` and replace the placeholders:
 
    ```yaml
