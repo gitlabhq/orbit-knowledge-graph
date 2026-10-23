@@ -59,7 +59,11 @@ impl SnowplowAnalyticsTracker {
 impl AnalyticsTracker for SnowplowAnalyticsTracker {
     fn track(&self, event: StructuredEvent) {
         if let Err(e) = self.tracker.track_structured_event(event) {
-            orbit_log_fields::error!(expanded(ERROR_MESSAGE) = %e, "failed to track analytics event");
+            orbit_log_fields::error!(
+                safe(ERROR_TYPE) = e.kind(),
+                expanded(ERROR_MESSAGE) = %e,
+                "failed to track analytics event"
+            );
         }
     }
 }

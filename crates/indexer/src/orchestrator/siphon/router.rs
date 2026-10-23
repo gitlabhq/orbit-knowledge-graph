@@ -139,7 +139,11 @@ impl Trigger for Siphon {
                 }
                 Ok(_) => {}
                 Err(error) => {
-                    warn!(expanded(ERROR_MESSAGE) = %error, "siphon drain pass failed");
+                    warn!(
+                        safe(ERROR_TYPE) = "siphon_drain",
+                        expanded(ERROR_MESSAGE) = %error,
+                        "siphon drain pass failed"
+                    );
                 }
             }
 

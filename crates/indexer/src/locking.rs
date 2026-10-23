@@ -13,7 +13,8 @@ pub const INDEXING_LOCKS_BUCKET: &str = "indexing_locks";
 
 pub type LockRevision = u64;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum LockError {
     #[error("lock operation failed: {0}")]
     Backend(String),
@@ -137,6 +138,7 @@ impl Drop for LockGuard {
                 if let Err(e) = service.release(&key).await {
                     warn!(
                         expanded(KV_KEY) = key.as_str(),
+                        safe(ERROR_TYPE) = <&str>::from(&e),
                         expanded(ERROR_MESSAGE) = %e,
                         "lock release on guard drop failed"
                     );

@@ -14,12 +14,11 @@ Config is loaded in layers, each overriding the previous:
    every key the Helm ConfigMap does not set. So the file holds no local-development tuning. Its
    maps stay empty unless an entry is a genuine universal default. The reason: config-rs
    deep-merges maps. Any entry here that a partial ConfigMap does not set would leak into production.
-2. **On-disk `config/default.yaml`**, relative to the working directory, when present. This is
-   the key the Helm chart's ConfigMap currently uses; treat it as a partial overlay.
-3. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
+2. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
    An explicit `--config` path must exist; the default overlay is optional and Git ignores it.
+   The Helm chart renders each component's ConfigMap as this file and passes it explicitly.
    The mise dev tasks pass a generated file built from `config/dev.yaml`; see the layering below.
-4. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
+3. **Secrets**: Files in `/etc/secrets/` (Kubernetes secret mounts)
 
 There is no environment-variable layer. Every override is a YAML overlay or a secret file.
 
@@ -747,10 +746,10 @@ kubectl -n gkg logs deployment/gkg-indexer -f | grep '"gl_project_id":<id>'
 
 ### Inspect running configuration
 
-The chart mounts its ConfigMap at `/app/config/default.yaml`; every key absent from it runs on the embedded default.
+The chart mounts its ConfigMap at `/app/config/config.yaml`; every key absent from it runs on the embedded default.
 
 ```shell
-kubectl -n gkg exec deployment/gkg-indexer -- cat /app/config/default.yaml
+kubectl -n gkg exec deployment/gkg-indexer -- cat /app/config/config.yaml
 ```
 
 ### Troubleshoot NATS with nats-box

@@ -475,6 +475,7 @@ fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
     if let Err(e) = ws.index_repositories() {
         orbit_log_fields::warn!(
             expanded(LOCAL_PATH) = %workspace_path.display(),
+            safe(ERROR_TYPE) = "repository_discovery",
             expanded(ERROR_MESSAGE) = %e,
             "repository discovery failed"
         );

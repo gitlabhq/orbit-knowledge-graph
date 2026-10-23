@@ -22,7 +22,8 @@ pub trait StaleDataCleaner: Send + Sync {
     ) -> Result<(), StaleDataCleanerError>;
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum StaleDataCleanerError {
     #[error(
         "failed to delete stale rows from {table} (traversal_path={traversal_path}, project_id={project_id}, branch={branch}): {reason}"

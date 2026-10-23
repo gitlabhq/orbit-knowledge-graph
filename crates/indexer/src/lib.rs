@@ -244,7 +244,11 @@ pub async fn run_dispatcher(
     )
     .await
     {
-        warn!(expanded(ERROR_MESSAGE) = %error, "release GC failed, will retry next startup");
+        warn!(
+            safe(ERROR_TYPE) = "nats_cleanup",
+            expanded(ERROR_MESSAGE) = %error,
+            "release GC failed, will retry next startup"
+        );
     }
 
     let datalake = clients.datalake.clone();
@@ -271,6 +275,7 @@ pub async fn run_dispatcher(
     .await?;
     if let Err(error) = catalog.sync_active_version(&graph).await {
         warn!(
+            safe(ERROR_TYPE) = <&str>::from(&error),
             expanded(ERROR_MESSAGE) = %error,
             "active version not mirrored at startup; retried every completion tick"
         );
@@ -289,6 +294,7 @@ pub async fn run_dispatcher(
                         .await
                 {
                     warn!(
+                        safe(ERROR_TYPE) = <&str>::from(&error),
                         expanded(ERROR_MESSAGE) = %error,
                         "failed to create unversioned tables at startup"
                     );
@@ -301,6 +307,7 @@ pub async fn run_dispatcher(
         Ok(_) => {}
         Err(error) => {
             warn!(
+                safe(ERROR_TYPE) = <&str>::from(&error),
                 expanded(ERROR_MESSAGE) = %error,
                 "failed to read active version for auxiliary tables and refreshable views"
             )

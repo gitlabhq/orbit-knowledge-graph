@@ -180,6 +180,7 @@ async fn fetch_mr_raw_diff(client: &GitlabClient, key: &MrKey) -> Option<String>
                 warn!(
                     safe(GL_PROJECT_ID) = key.project_id,
                     safe(IID) = key.iid,
+                    safe(ERROR_TYPE) = <&str>::from(&e),
                     expanded(ERROR_MESSAGE) = %e,
                     "mr_raw_diff stream error; diff will be None"
                 );
@@ -234,6 +235,7 @@ async fn fetch_raw_diff(client: &GitlabClient, key: &DiffKey) -> Option<String> 
                 warn!(
                     safe(GL_PROJECT_ID) = key.project_id,
                     safe(DIFF_ID) = key.diff_id,
+                    safe(ERROR_TYPE) = <&str>::from(&e),
                     expanded(ERROR_MESSAGE) = %e,
                     "raw_diff stream error; diff will be None"
                 );

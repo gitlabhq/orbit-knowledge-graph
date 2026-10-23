@@ -71,7 +71,7 @@ To create the database and the identities:
 
    ```shell
    docker run --rm --entrypoint cat \
-     registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:0.134.0 \
+     registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:0.154.1 \
      /usr/share/gkg/clickhouse-setup.sql
    ```
 
@@ -176,7 +176,7 @@ are expected.
 ## Make the credentials available to GitLab Orbit
 
 GitLab Orbit reads each credential from its own key in a Kubernetes Secret. The namespace must exist before
-you create the Secret. The values file in the following section expects one Secret named `gkg-secrets` in
+you create the Secret. The values file in the following section expects one Secret named `orbit-secrets` in
 the GitLab Orbit namespace, with these keys:
 
 | Key | Holds |
@@ -201,15 +201,15 @@ For more information, see [TLS and network requirements](#tls-and-network-requir
 
    ```yaml
    image:
-     tag: "0.134.0"
+     tag: "0.154.1"
 
    secrets:
      perKey:
-       gitlabJwtVerifyingKey: {secretName: gkg-secrets}
-       gitlabJwtSigningKey: {secretName: gkg-secrets}
-       datalakePassword: {secretName: gkg-secrets}
-       graphPassword: {secretName: gkg-secrets}
-       graphReadPassword: {secretName: gkg-secrets}
+       gitlabJwtVerifyingKey: {secretName: orbit-secrets}
+       gitlabJwtSigningKey: {secretName: orbit-secrets}
+       datalakePassword: {secretName: orbit-secrets}
+       graphPassword: {secretName: orbit-secrets}
+       graphReadPassword: {secretName: orbit-secrets}
 
    # Off by default. Creates the graph schema on first run and schedules indexing.
    dispatcher:
@@ -246,15 +246,15 @@ For more information, see [TLS and network requirements](#tls-and-network-requir
    # balancer terminates in front of it.
    tls:
      enabled: true
-     existingSecret: gkg-webserver-tls
+     existingSecret: orbit-webserver-tls
    ```
 
 1. Install the chart:
 
    ```shell
-   helm upgrade --install gkg \
-     oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/gkg \
-     --version 3.0.0 \
+   helm upgrade --install orbit \
+     oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit \
+     --version 5.0.0 \
      --namespace gitlab-orbit \
      --create-namespace \
      --values orbit-values.yaml
@@ -278,7 +278,7 @@ GitLab Self-Managed.
 GitLab connects to the gRPC endpoint on port 50054.
 Both Rails and Workhorse open their own connections, so both require a route to the endpoint.
 
-TLS can terminate in one of two places: a load balancer in front of the `gkg-webserver` service, or the
+TLS can terminate in one of two places: a load balancer in front of the `orbit-webserver` service, or the
 webserver itself with `tls.enabled` and `tls.existingSecret`. Only the webserver case needs the certificate
 inside the cluster.
 
@@ -288,7 +288,7 @@ information, see
 [Install custom public certificates](https://docs.gitlab.com/omnibus/settings/ssl/#install-custom-public-certificates).
 
 If GitLab runs in the same cluster, `ClusterIP` is enough and the endpoint is
-`tls://gkg-webserver.gitlab-orbit.svc.cluster.local:50054`. The certificate must be valid for the host name
+`tls://orbit-webserver.gitlab-orbit.svc.cluster.local:50054`. The certificate must be valid for the host name
 GitLab connects to. Otherwise, expose the service with a method your cluster supports, and keep the address
 on a private network.
 
@@ -309,7 +309,7 @@ To use a plaintext connection:
 1. In `orbit-values.yaml`, set `tls.enabled` to `false`.
    This value is the default.
 1. In the GitLab configuration, set the gRPC endpoint without a scheme.
-   For example, `gkg-webserver.gitlab-orbit.svc.cluster.local:50054`.
+   For example, `orbit-webserver.gitlab-orbit.svc.cluster.local:50054`.
 
 If the host name resolves to an address outside these ranges, GitLab does not send the authorization token.
 All requests to GitLab Orbit then fail authentication.

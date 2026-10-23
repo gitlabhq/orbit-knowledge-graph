@@ -127,6 +127,7 @@ pub async fn drop_entities(
                 orbit_log_fields::warn!(
                     safe(SCHEMA_VERSION) = entity.version,
                     safe(TABLE) = entity.name.as_str(),
+                    safe(ERROR_TYPE) = <&str>::from(&error),
                     expanded(ERROR_MESSAGE) = %error,
                     "GC: drop failed"
                 );
@@ -148,6 +149,7 @@ pub async fn mark_dropped_versions(graph: &ArrowClickHouseClient, versions: &[u3
         if let Err(error) = mark_version_dropped(graph, version).await {
             orbit_log_fields::warn!(
                 safe(SCHEMA_VERSION) = version,
+                safe(ERROR_TYPE) = <&str>::from(&error),
                 expanded(ERROR_MESSAGE) = %error,
                 "GC: failed to mark version as dropped"
             );
@@ -170,6 +172,7 @@ fn compile_preserve_patterns(raw_patterns: &[String]) -> Vec<regex::Regex> {
                 .inspect_err(|error| {
                     orbit_log_fields::warn!(
                         expanded(ADDITIONAL_DETAILS) = pattern.as_str(),
+                        safe(ERROR_TYPE) = "invalid_regex",
                         expanded(ERROR_MESSAGE) = %error,
                         "gc_preserve_patterns: invalid regex, skipping"
                     )

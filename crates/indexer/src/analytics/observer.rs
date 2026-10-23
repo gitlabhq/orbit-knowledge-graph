@@ -130,6 +130,7 @@ impl SnowplowIndexingObserver {
             Ok(context) => context,
             Err(error) => {
                 orbit_log_fields::warn!(
+                    safe(ERROR_TYPE) = error.kind(),
                     expanded(ERROR_MESSAGE) = %error,
                     "failed to build orbit_common context, skipping indexing event"
                 );
@@ -194,6 +195,7 @@ impl SnowplowIndexingObserver {
             Ok(event) => self.tracker.track(event),
             Err(error) => {
                 orbit_log_fields::warn!(
+                    safe(ERROR_TYPE) = error.kind(),
                     expanded(ERROR_MESSAGE) = %error,
                     "failed to build indexing analytics event"
                 )

@@ -68,6 +68,7 @@ impl ScheduledTask for CodeBackfillSweep {
                     .await
                 {
                     warn!(
+                        safe(ERROR_TYPE) = "stale_sweep",
                         expanded(ERROR_MESSAGE) = %error,
                         "post-backfill stale sweep failed, retrying next tick"
                     );
@@ -75,6 +76,7 @@ impl ScheduledTask for CodeBackfillSweep {
             }
             Err(error) => {
                 warn!(
+                    safe(ERROR_TYPE) = "backfill_sweep",
                     expanded(ERROR_MESSAGE) = %error,
                     "active code backfill sweep failed, retrying next tick"
                 );

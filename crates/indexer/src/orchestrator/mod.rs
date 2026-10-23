@@ -23,7 +23,8 @@ use orbit_log_fields::{info, warn};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum TriggerError {
     #[error(transparent)]
     Scheduler(#[from] scheduled::SchedulerError),
@@ -69,6 +70,7 @@ pub async fn launch(
             Ok((name, Err(error))) => {
                 warn!(
                     safe(TRIGGER) = name.as_str(),
+                    safe(ERROR_TYPE) = <&str>::from(&error),
                     expanded(ERROR_MESSAGE) = %error,
                     "trigger failed"
                 );
@@ -76,7 +78,11 @@ pub async fn launch(
                 first_error.get_or_insert(error);
             }
             Err(error) => {
-                warn!(expanded(ERROR_MESSAGE) = %error, "trigger task panicked");
+                warn!(
+                    safe(ERROR_TYPE) = crate::engine::join_error_type(&error),
+                    expanded(ERROR_MESSAGE) = %error,
+                    "trigger task panicked"
+                );
                 cancel.cancel();
                 panicked += 1;
             }

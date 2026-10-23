@@ -105,7 +105,11 @@ impl RedactionService {
         let redaction_msg = match stream.next().await {
             Some(Ok(msg)) => msg,
             Some(Err(e)) => {
-                error!(expanded(ERROR_MESSAGE) = %e, "Failed to receive redaction response");
+                error!(
+                    safe(ERROR_TYPE) = labkit::grpc::grpc_code_name(e.code().into()),
+                    expanded(ERROR_MESSAGE) = %e,
+                    "Failed to receive redaction response"
+                );
                 return Err(RedactionExchangeError::ReceiveFailed(e));
             }
             None => {

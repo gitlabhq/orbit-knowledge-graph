@@ -317,7 +317,7 @@ nats stream ls
 
 The `events_stream_name` in `schedule.tasks.siphon` must match the Siphon stream name exactly. For example, staging Siphon may publish to `stg_siphon_event_stream` while GKG defaults to `siphon_stream_main_db`.
 
-Fix it in the dispatcher's configuration overlay (the Helm chart renders it into the ConfigMap mounted at `/app/config/default.yaml`):
+Fix it in the dispatcher's configuration overlay (the Helm chart renders it into the ConfigMap mounted at `/app/config/config.yaml`):
 
 ```yaml
 schedule:

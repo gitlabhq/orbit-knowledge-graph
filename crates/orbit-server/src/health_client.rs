@@ -7,7 +7,8 @@ pub struct InfrastructureHealthClient {
     client: reqwest::Client,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum Error {
     #[error("HTTP request failed: {0}")]
     Request(#[from] reqwest::Error),
@@ -37,7 +38,11 @@ impl InfrastructureHealthClient {
         match self.check().await {
             Ok(status) => status,
             Err(e) => {
-                warn!(expanded(ERROR_MESSAGE) = %e, "Failed to reach health-check service");
+                warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&e),
+                    expanded(ERROR_MESSAGE) = %e,
+                    "Failed to reach health-check service"
+                );
                 HealthStatus {
                     status: health_check::Status::Unhealthy,
                     services: vec![],

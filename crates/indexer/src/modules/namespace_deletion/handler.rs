@@ -99,6 +99,7 @@ impl Handler for NamespaceDeletionHandler {
                 self.metrics.record_table_error();
                 warn!(
                     safe(TABLE) = outcome.table.as_str(),
+                    safe(ERROR_TYPE) = "clickhouse_query",
                     expanded(ERROR_MESSAGE) = error.as_str(),
                     "failed to delete namespace data from table"
                 );

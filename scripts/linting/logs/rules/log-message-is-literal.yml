@@ -16,7 +16,9 @@ rule:
       - regex: '^,$'
   inside:
     kind: token_tree
-    inside:
-      matches: tracing-macro
+    any:
+      - inside:
+          matches: tracing-macro
+      - matches: nested-tracing-args
   not:
     matches: test-code
