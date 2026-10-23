@@ -69,7 +69,8 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             Some(key) => key.node == node,
             None => {
                 self.denorm_facts(relation, node, filter).is_some()
-                    || relation.max_hops == 1
+                    || filter.filter.rhs_column.is_none()
+                        && relation.max_hops == 1
                         && relation.endpoint_column(node).is_some()
                         && self
                             .edge_columns(relation)
@@ -120,8 +121,9 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         [&relation.from_node, &relation.to_node]
             .into_iter()
             .flat_map(|node| &self.nodes[node].filters)
-            .filter(|(property, _)| {
-                columns.contains(property)
+            .filter(|(property, filter)| {
+                filter.filter.rhs_column.is_none()
+                    && columns.contains(property)
                     && !EDGE_RESERVED_COLUMNS.contains(&property.as_str())
                     && seen.insert(property)
             })
@@ -129,7 +131,8 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             .collect()
     }
 
-    /// Edge-column filters of the single-hop relations around a node, bound to the columns its own table shares.
+    /// Non-selective edge-column filters of the single-hop relations around a node, bound to the
+    /// columns its own table shares, so they prune the read without changing its access path.
     pub fn shared_column_predicates(&self, node: &NodePlan) -> Vec<Predicate> {
         let entity = node
             .entity
@@ -156,10 +159,10 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             })
             .flat_map(|relation| self.edge_column_filters(relation))
             .filter(|(property, _)| columns.contains(*property) && seen.insert(property))
-            .map(|(property, filter)| {
+            .filter_map(|(property, filter)| {
                 let owner = FilterOwner::Entity(entity);
                 let bound = bind_filter(property, filter.filter.clone(), &owner, self.model);
-                property_filter(&node.alias, property, &bound)
+                (!bound.is_selective()).then(|| property_filter(&node.alias, property, &bound))
             })
             .collect()
     }
