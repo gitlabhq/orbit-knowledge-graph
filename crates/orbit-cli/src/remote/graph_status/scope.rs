@@ -1,7 +1,14 @@
 use std::fmt;
 use std::process::Command;
 
+use serde_json::{Value, json};
+
+use crate::remote::client::OrbitClient;
 use crate::remote::error::{EXIT_GENERIC, RemoteError};
+
+const ORBIT_STATUS_FIELDS: &str = "orbit { \
+     indexing { state areas { name state } projects { indexed totalKnown gaps } lastCompletedAt } \
+     itemCounts { domains { name entities { name count } } } }";
 
 pub(super) enum Scope {
     FullPath(String),
@@ -36,13 +43,38 @@ impl Scope {
         Ok(Scope::FullPath(full_path))
     }
 
-    pub(super) fn to_query_param(&self) -> (&'static str, String) {
-        match self {
-            Scope::FullPath(path) => ("full_path", path.clone()),
-            Scope::NamespaceId(id) => ("namespace_id", id.to_string()),
-            Scope::ProjectId(id) => ("project_id", id.to_string()),
-        }
+    pub(super) async fn resolve_full_path(
+        &self,
+        client: &OrbitClient,
+    ) -> Result<String, RemoteError> {
+        let (path, params, field) = match self {
+            Scope::FullPath(path) => return Ok(path.clone()),
+            Scope::NamespaceId(id) => (
+                format!("/api/v4/groups/{id}"),
+                vec![("with_projects", "false".to_string())],
+                "full_path",
+            ),
+            Scope::ProjectId(id) => (
+                format!("/api/v4/projects/{id}"),
+                Vec::new(),
+                "path_with_namespace",
+            ),
+        };
+        let body = client.get_bytes(&path, &params).await?;
+        serde_json::from_slice::<Value>(&body)
+            .ok()
+            .and_then(|resource| Some(resource.get(field)?.as_str()?.to_string()))
+            .ok_or_else(|| RemoteError::new(EXIT_GENERIC, format!("no `{field}` in {path}")))
     }
+}
+
+pub(super) fn build_graphql_request(full_path: &str) -> Value {
+    let query = "query($fullPath: ID!) { \
+         group(fullPath: $fullPath) { STATUS } project(fullPath: $fullPath) { STATUS } }";
+    json!({
+        "query": query.replace("STATUS", ORBIT_STATUS_FIELDS),
+        "variables": { "fullPath": full_path },
+    })
 }
 
 impl fmt::Display for Scope {

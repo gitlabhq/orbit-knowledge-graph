@@ -17,61 +17,82 @@ fn serve_once(
     response_body: &'static str,
     content_type: &'static str,
 ) -> (String, thread::JoinHandle<CapturedRequest>) {
+    let (listener, base_url) = bind_mock_server();
+    let handle = thread::spawn(move || answer_request(&listener, response_body, content_type));
+    (base_url, handle)
+}
+
+fn serve_in_order(
+    response_bodies: &'static [&'static str],
+) -> (String, thread::JoinHandle<Vec<CapturedRequest>>) {
+    let (listener, base_url) = bind_mock_server();
+    let handle = thread::spawn(move || {
+        response_bodies
+            .iter()
+            .map(|body| answer_request(&listener, body, "application/json"))
+            .collect()
+    });
+    (base_url, handle)
+}
+
+fn bind_mock_server() -> (TcpListener, String) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let addr = listener.local_addr().expect("mock addr");
-    let base_url = format!("http://{addr}");
+    (listener, format!("http://{addr}"))
+}
 
-    let handle = thread::spawn(move || {
-        let mut stream = accept_within(&listener, ACCEPT_TIMEOUT);
-        let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+fn answer_request(
+    listener: &TcpListener,
+    response_body: &str,
+    content_type: &str,
+) -> CapturedRequest {
+    let mut stream = accept_within(listener, ACCEPT_TIMEOUT);
+    let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
 
-        let mut request_line = String::new();
-        reader
-            .read_line(&mut request_line)
-            .expect("read request line");
+    let mut request_line = String::new();
+    reader
+        .read_line(&mut request_line)
+        .expect("read request line");
 
-        let mut auth_header = None;
-        let mut content_length = 0usize;
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).expect("read header line");
-            let trimmed = line.trim_end();
-            if trimmed.is_empty() {
-                break;
+    let mut auth_header = None;
+    let mut content_length = 0usize;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("read header line");
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = trimmed.split_once(':') {
+            let name = name.trim().to_ascii_lowercase();
+            let value = value.trim().to_string();
+            if name == "private-token" {
+                auth_header = Some(value.clone());
+            } else if name == "content-length" {
+                content_length = value.parse().expect("parse content-length");
             }
-            if let Some((name, value)) = trimmed.split_once(':') {
-                let name = name.trim().to_ascii_lowercase();
-                let value = value.trim().to_string();
-                if name == "private-token" {
-                    auth_header = Some(value.clone());
-                } else if name == "content-length" {
-                    content_length = value.parse().expect("parse content-length");
-                }
-            }
         }
+    }
 
-        let mut body = vec![0u8; content_length];
-        if content_length > 0 {
-            reader.read_exact(&mut body).expect("read request body");
-        }
+    let mut body = vec![0u8; content_length];
+    if content_length > 0 {
+        reader.read_exact(&mut body).expect("read request body");
+    }
 
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
-            response_body.len()
-        );
-        stream
-            .write_all(response.as_bytes())
-            .expect("write response");
-        stream.flush().expect("flush response");
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+        response_body.len()
+    );
+    stream
+        .write_all(response.as_bytes())
+        .expect("write response");
+    stream.flush().expect("flush response");
 
-        CapturedRequest {
-            request_line: request_line.trim_end().to_string(),
-            auth_header,
-            body: String::from_utf8(body).expect("utf8 body"),
-        }
-    });
-
-    (base_url, handle)
+    CapturedRequest {
+        request_line: request_line.trim_end().to_string(),
+        auth_header,
+        body: String::from_utf8(body).expect("utf8 body"),
+    }
 }
 
 fn accept_within(listener: &TcpListener, timeout: Duration) -> std::net::TcpStream {
@@ -168,9 +189,17 @@ fn dsl_endpoint_is_get_orbit_schema_dsl() {
     );
 }
 
+const GRAPH_STATUS_RESPONSE: &str =
+    r#"{"data":{"group":null,"project":{"orbit":{"indexing":{"state":"READY"}}}}}"#;
+
+fn graphql_variables(request: &CapturedRequest) -> serde_json::Value {
+    let body: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
+    body["variables"].clone()
+}
+
 #[test]
-fn graph_status_sends_full_path_query() {
-    let (base_url, handle) = serve_once(r#"{"projects":{"indexed":1}}"#, "application/json");
+fn graph_status_asks_graphql_for_the_full_path() {
+    let (base_url, handle) = serve_once(GRAPH_STATUS_RESPONSE, "application/json");
     let output = run_orbit(
         &base_url,
         &["graph-status", "--full-path", "gitlab-org/gitlab"],
@@ -182,10 +211,13 @@ fn graph_status_sends_full_path_query() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert_eq!(request.request_line, "POST /api/graphql HTTP/1.1");
     assert_eq!(
-        request.request_line,
-        "GET /api/v4/orbit/graph_status?full_path=gitlab-org%2Fgitlab HTTP/1.1"
+        graphql_variables(&request),
+        serde_json::json!({"fullPath": "gitlab-org/gitlab"})
     );
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(stdout, serde_json::json!({"indexing": {"state": "READY"}}));
 }
 
 #[test]
@@ -196,7 +228,7 @@ fn graph_status_without_scope_inspects_the_origin_remote_project() {
         "ssh://git@localhost:2222/my-group/my-project.git",
         "https://localhost/my-group/my-project",
     ] {
-        let (base_url, handle) = serve_once(r#"{"projects":{"indexed":1}}"#, "application/json");
+        let (base_url, handle) = serve_once(GRAPH_STATUS_RESPONSE, "application/json");
         let base_url = base_url.replace("127.0.0.1", "localhost");
         let clone = tempfile::tempdir().expect("tempdir");
         for args in [
@@ -220,19 +252,17 @@ fn graph_status_without_scope_inspects_the_origin_remote_project() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            request.request_line,
-            "GET /api/v4/orbit/graph_status?full_path=my-group%2Fmy-project HTTP/1.1",
+            graphql_variables(&request),
+            serde_json::json!({"fullPath": "my-group/my-project"}),
             "{remote}"
         );
     }
 }
 
 #[test]
-fn graph_status_llm_format_prints_the_formatted_text() {
-    let (base_url, handle) = serve_once(
-        r#"{"formatted_text":"projects:\n  indexed: 1"}"#,
-        "application/json",
-    );
+fn graph_status_llm_format_prints_the_namespace_status_as_toon() {
+    let (base_url, handle) =
+        serve_in_order(&[r#"{"full_path":"gsd-alpha"}"#, GRAPH_STATUS_RESPONSE]);
     let output = run_orbit(
         &base_url,
         &[
@@ -243,16 +273,37 @@ fn graph_status_llm_format_prints_the_formatted_text() {
             "llm",
         ],
     );
-    let request = handle.join().expect("join mock");
+    let requests = handle.join().expect("join mock");
 
     assert!(output.status.success());
     assert_eq!(
-        request.request_line,
-        "GET /api/v4/orbit/graph_status?namespace_id=9970&response_format=llm HTTP/1.1"
+        requests[0].request_line,
+        "GET /api/v4/groups/9970?with_projects=false HTTP/1.1"
+    );
+    assert_eq!(
+        graphql_variables(&requests[1]),
+        serde_json::json!({"fullPath": "gsd-alpha"})
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "projects:\n  indexed: 1\n"
+        "indexing:\n  state: READY\n"
+    );
+}
+
+#[test]
+fn graph_status_resolves_a_project_id_to_its_full_path() {
+    let (base_url, handle) = serve_in_order(&[
+        r#"{"path_with_namespace":"gsd-alpha/app"}"#,
+        r#"{"data":{"group":null,"project":null}}"#,
+    ]);
+    let output = run_orbit(&base_url, &["graph-status", "--project-id", "2"]);
+    let requests = handle.join().expect("join mock");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(requests[0].request_line, "GET /api/v4/projects/2 HTTP/1.1");
+    assert_eq!(
+        graphql_variables(&requests[1]),
+        serde_json::json!({"fullPath": "gsd-alpha/app"})
     );
 }
 

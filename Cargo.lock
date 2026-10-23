@@ -5672,6 +5672,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml_edit 0.25.11+spec-1.1.0",
+ "toon-format",
  "tracing",
  "tracing-subscriber",
  "uuid",

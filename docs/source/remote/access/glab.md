@@ -37,9 +37,9 @@ query GitLab Orbit from the command line.
 binary, which `glab` downloads, verifies, and keeps up to date for you. Run
 `glab orbit <command> --help` for the binary's own command reference.
 
-Hosted commands such as `query`, `status`, `ontology`, `dsl`, `tools`, and
-`graph-status` call the GitLab Orbit Remote REST API. `glab` injects your GitLab
-credential automatically. `glab orbit setup` provides guided onboarding and
+Hosted commands such as `query`, `status`, `ontology`, `dsl`, and `tools` call
+the GitLab Orbit Remote REST API. `graph-status` calls the GitLab GraphQL API.
+`glab` injects your GitLab credential automatically. `glab orbit setup` provides guided onboarding and
 configures supported AI agents.
 
 ## Prerequisites
@@ -82,7 +82,7 @@ confirmations in scripts. Put it before the subcommand, as in
 | `glab orbit dsl` | `GET orbit/schema/dsl` | Query DSL JSON Schema. The source of truth for the query body shape. |
 | `glab orbit tools` | `GET orbit/tools` | MCP tool manifest with the full DSL JSON Schema. |
 | `glab orbit query <query>` | `POST orbit/query` | Run query text, or a request envelope with `--file <file\|->`. |
-| `glab orbit graph-status` | `GET orbit/graph_status` | Indexing progress for a namespace, project, or full path. |
+| `glab orbit graph-status` | `POST /api/graphql` (`orbit` field) | Indexing progress and item counts for a namespace, project, or full path. |
 
 ### Discover the schema
 
@@ -143,8 +143,9 @@ glab orbit graph-status --project-id 2
 
 In a terminal, `graph-status` shows a summary of the indexing state and the
 largest entity counts in each domain. When the output goes to a pipe or a
-file, it prints the full JSON response. Use `--response-format raw` for JSON
-or `--response-format llm` for compact text in a terminal.
+file, it prints the `orbit` object of the GraphQL response as JSON. Use
+`--response-format raw` for JSON or `--response-format llm` for compact text in a
+terminal.
 
 ## Exit codes
 
