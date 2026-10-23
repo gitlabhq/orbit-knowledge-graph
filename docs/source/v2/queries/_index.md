@@ -15,7 +15,7 @@ title: GitLab Orbit queries
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
@@ -26,13 +26,6 @@ A query asks the graph one exact question and returns exact rows, with only the 
 Your agent writes queries for you. Write them yourself for scripts, scheduled reports, and custom tools.
 Queries use the GitLab Orbit [query language](query-language.md).
 
-{{< cards >}}
-
-- [Query language](query-language.md)
-- [REST API](api.md)
-
-{{< /cards >}}
-
 ## Run a query
 
 Pass the query text to the [GitLab Orbit CLI](../cli.md):
@@ -42,10 +35,10 @@ glab orbit query "MATCH (p:Project {full_path: '<my-group/my-project>'}) RETURN 
 ```
 
 The CLI prints compact [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text. For JSON, add `--response-format raw`.
-From a script, use the [query endpoint](api.md#query-endpoint). Agents on the [MCP endpoint](../agents/mcp.md)
-send the same text with the `query_graph` command.
+From a script, [run a query](api.md#run-a-query) with the REST API.
+Agents on the [Model Context Protocol (MCP) endpoint](../agents/mcp.md) send the same text with the `query_graph` command.
 
-## Choose a query shape
+## Query shapes
 
 | Use case | Query shape |
 |----------|-------------|
@@ -56,10 +49,10 @@ send the same text with the `query_graph` command.
 | Find what is connected to one bounded node | `MATCH (a:Label {id: 1})--(n) RETURN n` |
 
 To search, filter one node type with `WHERE`, for example with `CONTAINS` or `all_tokens`.
-For the syntax, see the [query language](query-language.md).
+For the syntax, see [filters](query-language.md#filters).
 
 The examples use numeric IDs. To find the ID of a merge request or a project, see
-[anchor at least one node](query-language.md#anchor-at-least-one-node).
+[bounded nodes](query-language.md#bounded-nodes).
 
 ## Examples
 
@@ -101,8 +94,6 @@ LIMIT 5
 
 ## Related topics
 
-- [Query language](query-language.md)
-- [REST API](api.md)
 - [GitLab Orbit API reference](https://docs.gitlab.com/api/orbit/)
 - [GraphQL API: `Query.orbit`](https://docs.gitlab.com/api/graphql/reference/#queryorbit)
 - [Prompt examples](../prompt-examples.md)
