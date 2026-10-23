@@ -165,7 +165,8 @@ To sign in:
 1. Optional. On GitLab Self-Managed or GitLab Dedicated, to use `glab orbit` outside a clone of a project on your instance,
    run `glab config set --global host <gitlab.example.com>`.
 
-`glab orbit` gives your sign-in to the CLI on every run.
+`glab orbit` passes your `glab` credential to the CLI on every run.
+The standalone `orbit` binary uses `GITLAB_TOKEN` if you set it, otherwise your `glab` credential.
 
 ### Run a query
 
@@ -320,23 +321,15 @@ The local tables differ from the remote graph in these ways:
 - `File.reason` tells why the indexer skipped a file or could not parse it, such as `skip_excluded_extension`.
 - `Definition.definition_type` and `ImportedSymbol.import_type` values are specific to the language, such as `Class`, `Method`, or `NamedImport`.
 
-### Storage and privacy
+## Settings, storage, and telemetry
 
-The CLI keeps the local graph in `~/.gitlab/orbit/local/`: one DuckDB file for each indexed commit under `revisions/`,
-and a `manifest.duckdb` file that lists them.
+The CLI keeps its settings and the local graph in `~/.gitlab/orbit/`.
+The local graph is one DuckDB file for each indexed commit under `local/revisions/`,
+and a `local/manifest.duckdb` file that lists them.
 
-- To keep the local graph in a different directory, set `ORBIT_DATA_DIR`.
 - Local commands accept `--db <path>` for a different graph file.
 - When an update of the CLI changes the format of the local graph, the next `index` rebuilds the graph file.
   Index your other repositories again after you update.
-
-The local graph has no authorization layer. Anyone who can read its files can read all data in them.
-Index and query commands send no code, file paths, or query text off your machine.
-Each command sends one [telemetry](#settings-and-telemetry) event unless you turn telemetry off.
-
-## Settings and telemetry
-
-The CLI keeps its settings and the [local graph](#storage-and-privacy) in `~/.gitlab/orbit/`.
 
 The CLI sends usage events to GitLab product analytics, such as the command, the result, the duration, and the CLI version.
 It never sends repository content, file paths, or query text.
@@ -351,6 +344,7 @@ The CLI reads these environment variables:
 | Variable | Purpose |
 |----------|---------|
 | `GITLAB_TOKEN`, `GITLAB_URL` | Token and instance for remote commands when you run the CLI without `glab`. Default URL: `https://gitlab.com`. Without `GITLAB_TOKEN`, the CLI gets the token and instance of your `glab` sign-in from `glab auth credential-helper`. |
+| `ORBIT_DATA_DIR` | A directory for the settings and the local graph, instead of `~/.gitlab/orbit/`. |
 | `ORBIT_TELEMETRY_ENABLED` | `false` or `true`. Overrides the saved telemetry setting, for example in CI. |
 
 ## Exit codes

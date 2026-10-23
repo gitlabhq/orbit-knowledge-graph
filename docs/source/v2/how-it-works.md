@@ -88,8 +88,6 @@ On GitLab Dedicated, GitLab runs GitLab Orbit for your instance.
 On GitLab Self-Managed, you run GitLab Orbit yourself.
 For more information, see [GitLab Orbit on GitLab Self-Managed](self-managed/_index.md).
 
-The GitLab Orbit CLI also indexes repositories on your machine into a local graph of code only, with no authorization layer.
-
 ## Data retention and deletion
 
 When you turn off GitLab Orbit for a group, GitLab keeps the indexed data for 30 days.
