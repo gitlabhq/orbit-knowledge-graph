@@ -44,10 +44,14 @@ faster.
 
 ## Read the agent skill
 
-`orbit skills` lists the agent skills deployed by the selected GitLab instance.
+`orbit skills` (or `orbit skills list`) lists the agent skills deployed by the
+selected GitLab instance.
 `orbit skills get orbit [path]` validates and caches the instance's whole remote
 tree, composes it with local CLI guidance, and prints `SKILL.md` when `path` is
-omitted. The cache uses the operating system's user cache directory and keeps
+omitted. `orbit skills get <name> [path]` fetches any other skill the instance
+lists as the server serves it, with no local composition. Only `orbit` has an
+embedded copy, so another skill needs a credential and fails when the fetch
+does. The cache uses the operating system's user cache directory and keeps
 instance origins isolated.
 
 The command finds credentials like the other remote commands: the Orbit API

@@ -146,6 +146,11 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
         .map(|plan| lag_buckets(&metrics, plan).iter().sum::<u64>())
         .sum();
     assert_eq!(observations, 4 * plans.len() as u64);
+    assert_eq!(
+        task_runs(&metrics, "namespace_freshness", "success"),
+        1,
+        "a stopped or failing task must be visible without its samples"
+    );
 }
 
 async fn complete(
@@ -186,4 +191,28 @@ fn lag_buckets(metrics: &[ResourceMetrics], entity: &str) -> Vec<u64> {
             _ => panic!("freshness lag is not an f64 histogram"),
         })
         .collect()
+}
+
+fn task_runs(metrics: &[ResourceMetrics], task: &str, outcome: &str) -> u64 {
+    metrics
+        .iter()
+        .flat_map(|resource| resource.scope_metrics())
+        .flat_map(|scope| scope.metrics())
+        .filter(|metric| metric.name() == "gkg.scheduler.task.runs")
+        .flat_map(|metric| match metric.data() {
+            AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
+                .data_points()
+                .filter(|point| {
+                    let has = |key: &str, value: &str| {
+                        point
+                            .attributes()
+                            .any(|kv| kv.key.as_str() == key && kv.value.as_str() == value)
+                    };
+                    has("task", task) && has("outcome", outcome)
+                })
+                .map(|point| point.value())
+                .collect::<Vec<_>>(),
+            _ => panic!("scheduler task runs is not a u64 sum"),
+        })
+        .sum()
 }

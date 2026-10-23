@@ -30,12 +30,12 @@ command -v docker >/dev/null || { echo "docker required"; exit 1; }
 command -v yq >/dev/null || { echo "yq (mikefarah v4+) required"; exit 1; }
 
 SIPHON_IMAGE="$(yq -r '.siphon.image.repository + ":" + .siphon.image.tag' "$VERSIONS")"
-GITLAB_REF="$(yq -r '.gitlab.ref' "$VERSIONS")"
+GITLAB_REF="$(yq -r "$GITLAB_PINS.ref" "$VERSIONS")"
 
 [[ "$SIPHON_IMAGE" == *":null"* || "$SIPHON_IMAGE" == "null:"* ]] \
   && { echo "siphon.image.{repository,tag} missing in $VERSIONS"; exit 1; }
 [[ -z "$GITLAB_REF" || "$GITLAB_REF" == "null" ]] \
-  && { echo "gitlab.ref missing in $VERSIONS"; exit 1; }
+  && { echo "$GITLAB_PINS.ref missing in $VERSIONS"; exit 1; }
 
 log "siphon image: $SIPHON_IMAGE"
 log "gitlab ref:   $GITLAB_REF"

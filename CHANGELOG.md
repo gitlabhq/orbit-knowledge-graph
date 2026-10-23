@@ -1,3 +1,20 @@
+## [0.154.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.154.0...v0.154.1) (2026-10-22)
+
+### Fixes
+
+* **compiler:** explain a failed oneOf with its schema description ([701cc5d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/701cc5debe7b38f3484d6b43f42ab528f2cbcfae)) by ANBUCHELVAN GANESAN CSE
+* **indexer:** complete a plan whose source table does not exist ([fc46ccf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fc46ccf750a5c8d0ac4c7cf7e52de353fb99781c)) by Michael Angelo Rivera
+* **indexer:** log a missing change-detection source table as a warning ([afc20b3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/afc20b3089139109cb336ecb09aebe91ec783376)) by Michael Angelo Rivera
+
+### Performance
+
+* **compiler:** scope the authorization join by the node's resolved prefix ([0e7479b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0e7479b514283e5694d3928bfe1de72ae9e6c58d)) by Michael Usachenko
+
+### Other
+
+* **code-graph:** remove [secure]-runner benchmarks ([0e90ac6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0e90ac667f1c989fcd549026c06b3ea9756ecb51)) by Michael Usachenko
+* **e2e:** run the e2e suites against released GitLab versions ([2300ba3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2300ba3ca2d5a7922fc2175a9d16764e8fe8c7cc)) by Jean-Gabriel Doyon
+
 ## [0.154.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.153.0...v0.154.0) (2026-10-22)
 
 ### Features

@@ -95,10 +95,12 @@ impl DatalakeChangeDetector {
         upper: &str,
         combined_err: &ClickHouseError,
     ) -> Result<Vec<RecordBatch>, TaskError> {
-        warn!(
-            expanded(ERROR_MESSAGE) = %combined_err,
-            "combined change detection query failed; retrying one branch per source table"
-        );
+        if !combined_err.is_unknown_table() {
+            warn!(
+                expanded(ERROR_MESSAGE) = %combined_err,
+                "combined change detection query failed; retrying one branch per source table"
+            );
+        }
 
         let mut stream = futures::stream::iter(0..self.query.branches.len())
             .map(|index| async move {
@@ -117,6 +119,14 @@ impl DatalakeChangeDetector {
         while let Some((branch, result)) = stream.next().await {
             match result {
                 Ok(branch_batches) => batches.extend(branch_batches),
+                Err(err) if err.is_unknown_table() => {
+                    failed += 1;
+                    warn!(
+                        safe(TABLE) = branch.table.as_str(),
+                        safe(ENTITY) = branch.target.as_str(),
+                        "change detection source table does not exist; skipping it until it appears"
+                    );
+                }
                 Err(err) => {
                     failed += 1;
                     self.metrics
@@ -367,16 +377,30 @@ mod tests {
         vec![batch]
     }
 
-    fn branch_error() -> ClickHouseError {
+    #[derive(Clone, Copy)]
+    enum StubError {
+        Branch,
+        UnknownTable,
+    }
+
+    fn stub_error(error: StubError) -> ClickHouseError {
+        let body = match error {
+            StubError::Branch => {
+                "Code: 47. DB::Exception: Unknown expression or function identifier"
+            }
+            StubError::UnknownTable => {
+                "Code: 60. DB::Exception: Unknown table expression identifier 'siphon_notes' (UNKNOWN_TABLE)"
+            }
+        };
         ClickHouseError::BadResponse {
             status: 404,
-            body: "Code: 47. DB::Exception: Unknown expression or function identifier".to_string(),
+            body: body.to_string(),
         }
     }
 
     struct StubClient {
-        combined: Result<Vec<RecordBatch>, ()>,
-        branches: BTreeMap<&'static str, Result<Vec<RecordBatch>, ()>>,
+        combined: Result<Vec<RecordBatch>, StubError>,
+        branches: BTreeMap<&'static str, Result<Vec<RecordBatch>, StubError>>,
         calls: AtomicUsize,
     }
 
@@ -398,7 +422,7 @@ mod tests {
                     .map(|(_, result)| result)
                     .expect("branch query names a known table")
             };
-            result.clone().map_err(|()| branch_error())
+            result.clone().map_err(stub_error)
         }
     }
 
@@ -441,10 +465,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_missing_source_table_is_skipped_and_the_other_branches_still_count() {
+        let client = Arc::new(StubClient {
+            combined: Err(StubError::UnknownTable),
+            branches: BTreeMap::from([
+                ("work_items", Ok(change_batches(&[(9, "1/9/", "WorkItem")]))),
+                ("siphon_notes", Err(StubError::UnknownTable)),
+            ]),
+            calls: AtomicUsize::new(0),
+        });
+        let detector = detector(
+            client.clone(),
+            [column_source("work_items"), column_source("siphon_notes")],
+        );
+
+        let namespaces = detect(&detector).await;
+
+        assert_eq!(client.calls.load(Ordering::SeqCst), 3);
+        assert_eq!(namespaces.len(), 1);
+        assert_eq!(namespaces[0].namespace_id, 9);
+    }
+
+    #[tokio::test]
     async fn all_branches_failing_is_an_error() {
         let client = Arc::new(StubClient {
-            combined: Err(()),
-            branches: BTreeMap::from([("work_items", Err(())), ("siphon_notes", Err(()))]),
+            combined: Err(StubError::Branch),
+            branches: BTreeMap::from([
+                ("work_items", Err(StubError::Branch)),
+                ("siphon_notes", Err(StubError::Branch)),
+            ]),
             calls: AtomicUsize::new(0),
         });
         let detector = detector(

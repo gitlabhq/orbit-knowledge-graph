@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -9,11 +10,12 @@ use arrow::record_batch::RecordBatch;
 use crate::clickhouse::ArrowClickHouseClient;
 use clickhouse_client::FromArrowColumn;
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
 
 use std::sync::LazyLock;
 
-use super::lower::{self, DeletionStatement};
+use super::lower::{self, DeletionStatement, ReconcileStatement};
 use crate::checkpoint::namespace_position_key;
 
 static IS_NAMESPACE_STILL_DELETED: LazyLock<String> = LazyLock::new(|| {
@@ -151,6 +153,21 @@ pub struct TableDeletionOutcome {
     pub error: Option<String>,
 }
 
+impl TableDeletionOutcome {
+    async fn timed<E: std::fmt::Display>(
+        table: &str,
+        run: impl Future<Output = Result<(), E>>,
+    ) -> Self {
+        let started_at = Instant::now();
+        let error = run.await.err().map(|e| e.to_string());
+        Self {
+            table: table.to_string(),
+            duration_seconds: started_at.elapsed().as_secs_f64(),
+            error,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct NamespaceScheduleEntry {
     pub namespace_id: i64,
@@ -229,7 +246,7 @@ pub struct ClickHouseNamespaceDeletionStore {
     datalake: Arc<ArrowClickHouseClient>,
     graph: Arc<ArrowClickHouseClient>,
     deletion_statements: Vec<DeletionStatement>,
-    reconcile_statements: Vec<DeletionStatement>,
+    reconcile_statements: Vec<ReconcileStatement>,
 }
 
 impl ClickHouseNamespaceDeletionStore {
@@ -250,54 +267,65 @@ impl ClickHouseNamespaceDeletionStore {
         &self,
         statements: &[DeletionStatement],
         traversal_path: &TraversalPath,
-        current_paths: Option<&[TraversalPath]>,
     ) -> Vec<TableDeletionOutcome> {
         let mut outcomes = Vec::with_capacity(statements.len());
 
         for statement in statements {
-            let started_at = Instant::now();
-
-            let mut query = self
+            let tombstone = self
                 .graph
                 .insert_query(&statement.sql)
-                .param("traversal_path", traversal_path.as_str());
-            if let Some(current_paths) = current_paths {
-                query = query.param("current_paths", current_paths);
-            }
-
-            let error = query.execute().await.err().map(|e| e.to_string());
-
-            outcomes.push(TableDeletionOutcome {
-                table: statement.table.clone(),
-                duration_seconds: started_at.elapsed().as_secs_f64(),
-                error,
-            });
+                .param("traversal_path", traversal_path.as_str())
+                .execute();
+            outcomes.push(TableDeletionOutcome::timed(&statement.table, tombstone).await);
         }
 
         outcomes
     }
 
-    async fn current_routes_under_root(
+    async fn tombstone_stale_paths(
         &self,
+        statement: &ReconcileStatement,
         root_traversal_path: &TraversalPath,
-    ) -> Result<Vec<TraversalPath>, NamespaceDeletionStoreError> {
-        let batches = self
-            .datalake
-            .query(CURRENT_ROUTES_UNDER_ROOT)
-            .param("traversal_path", root_traversal_path.as_str())
-            .fetch_arrow()
-            .await
-            .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
+        live_paths: Result<Vec<String>, NamespaceDeletionStoreError>,
+        current_paths: &HashSet<String>,
+    ) -> Result<(), NamespaceDeletionStoreError> {
+        let live_paths = live_paths?;
+        if current_paths.is_empty() {
+            return Ok(());
+        }
+        let stale_paths: Vec<String> = live_paths
+            .into_iter()
+            .filter(|path| !current_paths.contains(path))
+            .collect();
 
-        String::extract_column(&batches, 0)
-            .map(|paths| {
-                paths
-                    .into_iter()
-                    .map(TraversalPath::new_unchecked)
-                    .collect()
-            })
-            .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))
+        for stale_paths in stale_paths.chunks(strings_per_array_param(&stale_paths)) {
+            self.graph
+                .insert_query(&statement.tombstone.sql)
+                .param("traversal_path", root_traversal_path.as_str())
+                .param("stale_paths", stale_paths)
+                .execute()
+                .await
+                .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
+        }
+
+        Ok(())
     }
+}
+
+async fn fetch_paths(
+    client: &ArrowClickHouseClient,
+    sql: &str,
+    root_traversal_path: &TraversalPath,
+) -> Result<Vec<String>, NamespaceDeletionStoreError> {
+    let batches = client
+        .query(sql)
+        .param("traversal_path", root_traversal_path.as_str())
+        .fetch_arrow()
+        .await
+        .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
+
+    String::extract_column(&batches, 0)
+        .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))
 }
 
 #[async_trait]
@@ -346,7 +374,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         &self,
         traversal_path: &TraversalPath,
     ) -> Vec<TableDeletionOutcome> {
-        self.tombstone(&self.deletion_statements, traversal_path, None)
+        self.tombstone(&self.deletion_statements, traversal_path)
             .await
     }
 
@@ -374,8 +402,21 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         &self,
         root_traversal_path: &TraversalPath,
     ) -> Vec<TableDeletionOutcome> {
-        let current_paths = match self.current_routes_under_root(root_traversal_path).await {
-            Ok(paths) => paths,
+        let mut live_paths = Vec::with_capacity(self.reconcile_statements.len());
+        for statement in &self.reconcile_statements {
+            live_paths.push(
+                fetch_paths(&self.graph, &statement.live_paths_sql, root_traversal_path).await,
+            );
+        }
+
+        let current_paths = match fetch_paths(
+            &self.datalake,
+            CURRENT_ROUTES_UNDER_ROOT,
+            root_traversal_path,
+        )
+        .await
+        {
+            Ok(paths) => HashSet::<String>::from_iter(paths),
             Err(error) => {
                 return vec![TableDeletionOutcome {
                     table: "current_routes".to_string(),
@@ -385,12 +426,18 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
             }
         };
 
-        self.tombstone(
-            &self.reconcile_statements,
-            root_traversal_path,
-            Some(&current_paths),
-        )
-        .await
+        let mut outcomes = Vec::with_capacity(self.reconcile_statements.len());
+        for (statement, live_paths) in self.reconcile_statements.iter().zip(live_paths) {
+            let reconcile = self.tombstone_stale_paths(
+                statement,
+                root_traversal_path,
+                live_paths,
+                &current_paths,
+            );
+            outcomes.push(TableDeletionOutcome::timed(&statement.tombstone.table, reconcile).await);
+        }
+
+        outcomes
     }
 
     async fn mark_deletion_complete(

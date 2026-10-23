@@ -14,6 +14,7 @@ const INCREMENTAL_CURSOR: &str = r#"{"c":["1/100/","42"],"f":"2026-09-22T00:00:0
 
 #[derive(Clone, Copy)]
 pub struct CheckpointRow {
+    watermark: &'static str,
     cursor: &'static str,
     indexed_at: &'static str,
     attempts: i64,
@@ -21,10 +22,15 @@ pub struct CheckpointRow {
 }
 
 pub const COMPLETED: CheckpointRow = CheckpointRow {
+    watermark: "now()",
     cursor: NO_CURSOR,
     indexed_at: "now()",
     attempts: 0,
     written_at: "now64(6)",
+};
+pub const SOURCE_UNAVAILABLE: CheckpointRow = CheckpointRow {
+    watermark: "'1970-01-01 00:00:00'",
+    ..COMPLETED
 };
 pub const COMPLETED_ON_NEW_YEAR: CheckpointRow = CheckpointRow {
     indexed_at: "'2026-01-01 00:00:00'",
@@ -35,6 +41,7 @@ pub const INCREMENTAL: CheckpointRow = CheckpointRow {
     ..COMPLETED
 };
 pub const PAGING_FIRST_PASS: CheckpointRow = CheckpointRow {
+    watermark: "now()",
     cursor: FIRST_PASS_CURSOR,
     indexed_at: "NULL",
     attempts: 1,
@@ -138,6 +145,19 @@ pub async fn seed_namespaces(ctx: &TestContext) {
     seed_plans(ctx, 109, &[("MergeRequest", STARTED_FIRST_PASS)]).await;
     seed_plans(ctx, 112, &[]).await;
     seed_plans(ctx, 113, &[("MergeRequest", COMPLETED_ON_NEW_YEAR)]).await;
+    seed_plans(
+        ctx,
+        141,
+        &[
+            ("AgentSession", SOURCE_UNAVAILABLE),
+            (
+                "CREATED_MR_siphon_duo_workflows_workflow_merge_requests",
+                SOURCE_UNAVAILABLE,
+            ),
+        ],
+    )
+    .await;
+    seed_plans(ctx, 143, &[("AgentSession", SOURCE_UNAVAILABLE)]).await;
     insert_checkpoints(ctx, &[("ns.106.Project".to_string(), COMPLETED)]).await;
 
     ctx.optimize_all().await;
@@ -164,8 +184,8 @@ pub async fn insert_checkpoints(ctx: &TestContext, rows: &[(String, CheckpointRo
         .iter()
         .map(|(key, row)| {
             format!(
-                "('{key}', now(), '{}', {}, {}, {})",
-                row.cursor, row.indexed_at, row.attempts, row.written_at
+                "('{key}', {}, '{}', {}, {}, {})",
+                row.watermark, row.cursor, row.indexed_at, row.attempts, row.written_at
             )
         })
         .collect();

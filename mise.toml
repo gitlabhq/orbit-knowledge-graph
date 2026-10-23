@@ -49,7 +49,6 @@ lefthook = "2.1.3"
 protoc = "34.1"
 jq = "1.7"
 yq = "4.52.5"
-hyperfine = "1.20.0"
 "aqua:gitleaks/gitleaks" = "8.30.1"
 "github:google/go-jsonnet" = "0.22.0"
 # aws-lc-fips-sys compiles the AWS-LC FIPS module from source and needs cmake and go.
@@ -61,52 +60,64 @@ glab = "1.123.0"
 run = ["lefthook install --force", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
 description = "Install git hooks (lefthook + worktree support)"
 
+[tasks."fuzz:corpus-pull"]
+run = "scripts/fuzz/corpus.sh pull"
+description = "Add crates/fuzz/seeds.yaml and, with a token, the grown corpus in GCS to every fuzz target's corpus/"
+
+[tasks."fuzz:deep"]
+run = "scripts/fuzz/run.sh deep"
+description = "Run libFuzzer with AddressSanitizer over every fuzz target, sharing FUZZ_BUDGET_SECONDS (default 600)"
+
+[tasks."test:fuzz"]
+run = "scripts/fuzz/run.sh smoke"
+description = "Replay each fuzz target's corpus, then a second of random inputs, on stable Rust"
+
 [tasks."fuzz:compile"]
-run = "cargo +nightly bolero test fuzz_compile -p orbit-fuzz"
+run = ["scripts/fuzz/corpus.sh pull fuzz_compile", "cargo +nightly bolero test fuzz_compile -p orbit-fuzz"]
 description = "Fuzz the query compiler (compile JSON → SQL pipeline)"
 
 [tasks."fuzz:compile-structured"]
-run = "cargo +nightly bolero test fuzz_compile_structured -p orbit-fuzz"
+run = ["scripts/fuzz/corpus.sh pull fuzz_compile_structured", "cargo +nightly bolero test fuzz_compile_structured -p orbit-fuzz"]
 description = "Fuzz the query compiler with structured JSON query generation"
 
 [tasks."fuzz:gql"]
-run = "cargo +nightly bolero test fuzz_gql -p orbit-fuzz"
+run = ["scripts/fuzz/corpus.sh pull fuzz_gql", "cargo +nightly bolero test fuzz_gql -p orbit-fuzz"]
 description = "Fuzz the Orbit query frontend with unstructured text"
 
 [tasks."fuzz:gql-grammar"]
-run = "cargo +nightly bolero test fuzz_gql_grammar -p orbit-fuzz"
+run = ["scripts/fuzz/corpus.sh pull fuzz_gql_grammar", "cargo +nightly bolero test fuzz_gql_grammar -p orbit-fuzz"]
 description = "Fuzz the Orbit query frontend with derivations of its own grammar"
 
 [tasks."fuzz:ruby"]
-run = "cargo +nightly bolero test fuzz_ruby -p orbit-fuzz"
+run = ["scripts/fuzz/corpus.sh pull fuzz_ruby", "cargo +nightly bolero test fuzz_ruby -p orbit-fuzz"]
 description = "Fuzz the Ruby code parser"
 
 [tasks."fuzz:python"]
-run = "cargo +nightly bolero test fuzz_python -p orbit-fuzz"
+run = ["scripts/fuzz/corpus.sh pull fuzz_python", "cargo +nightly bolero test fuzz_python -p orbit-fuzz"]
 description = "Fuzz the Python code parser"
 
 [tasks."fuzz:typescript"]
-run = "cargo +nightly bolero test fuzz_typescript -p orbit-fuzz"
+run = ["scripts/fuzz/corpus.sh pull fuzz_typescript", "cargo +nightly bolero test fuzz_typescript -p orbit-fuzz"]
 description = "Fuzz the TypeScript/JavaScript code parser"
 
 [tasks."fuzz:java"]
-run = "cargo +nightly bolero test fuzz_java -p orbit-fuzz"
+run = ["scripts/fuzz/corpus.sh pull fuzz_java", "cargo +nightly bolero test fuzz_java -p orbit-fuzz"]
 description = "Fuzz the Java code parser"
 
 [tasks."fuzz:kotlin"]
-run = "cargo +nightly bolero test fuzz_kotlin -p orbit-fuzz"
+run = ["scripts/fuzz/corpus.sh pull fuzz_kotlin", "cargo +nightly bolero test fuzz_kotlin -p orbit-fuzz"]
 description = "Fuzz the Kotlin code parser"
 
 [tasks."fuzz:csharp"]
-run = "cargo +nightly bolero test fuzz_csharp -p orbit-fuzz"
+run = ["scripts/fuzz/corpus.sh pull fuzz_csharp", "cargo +nightly bolero test fuzz_csharp -p orbit-fuzz"]
 description = "Fuzz the C# code parser"
 
 [tasks."fuzz:rust-parser"]
-run = "cargo +nightly bolero test fuzz_rust_parser -p orbit-fuzz"
+run = ["scripts/fuzz/corpus.sh pull fuzz_rust_parser", "cargo +nightly bolero test fuzz_rust_parser -p orbit-fuzz"]
 description = "Fuzz the Rust code parser"
 
 [tasks."fuzz:indexer-messages"]
-run = "cargo +nightly bolero test fuzz_indexer_messages -p orbit-fuzz"
+run = ["scripts/fuzz/corpus.sh pull fuzz_indexer_messages", "cargo +nightly bolero test fuzz_indexer_messages -p orbit-fuzz"]
 description = "Fuzz indexer message deserialization"
 
 # The workspace step shares the unit-test features; the second relinks `orbit` without the server's FIPS module.
@@ -132,7 +143,7 @@ run = "cargo nextest run --test local"
 description = "Run local integration tests — compiler + querying pipeline (no Docker)"
 
 [tasks."test:scripts"]
-run = "for t in scripts/dev/tests/*_test.sh; do bash \"$t\" || exit 1; done"
+run = "for t in scripts/dev/tests/*_test.sh scripts/fuzz/*_test.sh; do bash \"$t\" || exit 1; done"
 description = "Run the shell tests for the local development scripts (no cluster needed)"
 
 [tasks."test:plan-shape"]
@@ -273,34 +284,18 @@ arg "<repo_path>"
 arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
 
-[tasks."bench:download-repos"]
-run = "gitlab-xtasks benchmark download-repos --config code-indexing-benchmark.yaml"
-description = "Download benchmark repositories"
+[task_templates."bench:engine"]
+vars = { action = "run" }
+run = 'cargo xtask code-indexing-benchmark {{ vars.action }}'
 
 [tasks."bench:run"]
-depends = ["bench:download-repos"]
-run = "cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled && gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local"
-description = "Run code indexing benchmark"
+extends = "bench:engine"
+description = "Run a measured code indexing benchmark"
 
-[tasks."bench:v2"]
-depends = ["bench:download-repos"]
-run = """
-cargo build -p orbit-cli --bin orbit --release --features duckdb-client/bundled
-for repo in output/repos/*/; do
-  name=$(basename "$repo")
-  echo "=== Indexing $name with v2 ==="
-  ./target/release/orbit index "$repo" --stats 2>&1 || echo "FAILED: $name"
-done
-"""
-description = "Run v2 pipeline against all downloaded benchmark repos"
-
-[tasks."bench:list-repos"]
-run = "gitlab-xtasks benchmark list-repos --config code-indexing-benchmark.yaml"
-description = "List benchmark repositories"
-
-[tasks."bench:list-groups"]
-run = "gitlab-xtasks benchmark list-groups --config code-indexing-benchmark.yaml"
-description = "List benchmark repo groups"
+[tasks."bench:smoke"]
+extends = "bench:engine"
+vars = { action = "smoke" }
+description = "Run one code indexing pass against each benchmark repository"
 
 [tasks."proto:go"]
 run = "scripts/dev/proto-go.sh generate"

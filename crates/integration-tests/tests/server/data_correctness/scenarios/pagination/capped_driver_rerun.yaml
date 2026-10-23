@@ -1,0 +1,50 @@
+description: |
+  A capped driving read that joins to nothing must not shorten the page. Twenty files match the
+  path filter and only the last one in key order has a DEFINES edge. The cap is eight rows for a
+  page of one, so the capped query returns nothing and the executor reruns the uncapped plan.
+
+config:
+  security:
+    paths: ["1/100/1000/"]
+  extra_seed:
+    gl_file:
+      - { id: 98001, path: "spec/capped/a01_rerun_controller.rb", name: a01_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98002, path: "spec/capped/a02_rerun_controller.rb", name: a02_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98003, path: "spec/capped/a03_rerun_controller.rb", name: a03_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98004, path: "spec/capped/a04_rerun_controller.rb", name: a04_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98005, path: "spec/capped/a05_rerun_controller.rb", name: a05_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98006, path: "spec/capped/a06_rerun_controller.rb", name: a06_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98007, path: "spec/capped/a07_rerun_controller.rb", name: a07_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98008, path: "spec/capped/a08_rerun_controller.rb", name: a08_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98009, path: "spec/capped/a09_rerun_controller.rb", name: a09_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98010, path: "spec/capped/a10_rerun_controller.rb", name: a10_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98011, path: "spec/capped/a11_rerun_controller.rb", name: a11_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98012, path: "spec/capped/a12_rerun_controller.rb", name: a12_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98013, path: "spec/capped/a13_rerun_controller.rb", name: a13_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98014, path: "spec/capped/a14_rerun_controller.rb", name: a14_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98015, path: "spec/capped/a15_rerun_controller.rb", name: a15_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98016, path: "spec/capped/a16_rerun_controller.rb", name: a16_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98017, path: "spec/capped/a17_rerun_controller.rb", name: a17_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98018, path: "spec/capped/a18_rerun_controller.rb", name: a18_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98019, path: "spec/capped/a19_rerun_controller.rb", name: a19_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+      - { id: 98020, path: "spec/capped/a20_rerun_controller.rb", name: a20_rerun_controller.rb, project_id: 1000, branch: main, traversal_path: "1/100/1000/" }
+    gl_definition:
+      - { id: 98120, traversal_path: "1/100/1000/", project_id: 1000, branch: main, name: rerun_target, fqn: rerun_target, definition_type: function }
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 98020, source_kind: File, relationship_kind: DEFINES, target_id: 98120, target_kind: Definition }
+
+query:
+  gql: |
+    MATCH (f:File)-[:DEFINES]->(d:Definition)
+    WHERE f.path ENDS WITH 'rerun_controller.rb'
+    RETURN f.id, d.id LIMIT 1
+
+expect:
+  skip_requirements: ["filter:path", "relationship:DEFINES"]
+  node_count: 2
+  nodes:
+    File:
+      ids: [98020]
+    Definition:
+      ids: [98120]
+  has_more: false
