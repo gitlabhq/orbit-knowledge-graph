@@ -54,6 +54,7 @@ impl GraphStatusService {
             .into_iter()
             .next()
             .ok_or_else(|| Status::internal("indexing status returned no scope"))?;
+        let counts = counts.into_iter().next().unwrap_or_default();
 
         info!(
             safe(PHASE) = <&str>::from(status.phase),

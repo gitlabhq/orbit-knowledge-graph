@@ -31,12 +31,30 @@ pub(crate) async fn fetch_status_query_batches(
 pub(crate) fn build_prefix_match_condition(
     column: &str,
     param: &str,
-    prefix_count: usize,
+    indices: impl IntoIterator<Item = usize>,
 ) -> String {
-    let conditions: Vec<String> = (0..prefix_count)
-        .map(|index| format!("startsWith({column}, {{{param}_{index}:String}})"))
+    let conditions: Vec<String> = indices
+        .into_iter()
+        .map(|index| {
+            format!(
+                "startsWith({column}, {})",
+                build_prefix_placeholder(param, index)
+            )
+        })
         .collect();
     format!("({})", conditions.join(" OR "))
+}
+
+pub(crate) fn build_prefix_array(param: &str, indices: impl IntoIterator<Item = usize>) -> String {
+    let placeholders: Vec<String> = indices
+        .into_iter()
+        .map(|index| build_prefix_placeholder(param, index))
+        .collect();
+    format!("[{}]", placeholders.join(", "))
+}
+
+fn build_prefix_placeholder(param: &str, index: usize) -> String {
+    format!("{{{param}_{index}:String}}")
 }
 
 pub(crate) fn bind_prefix_parameters(

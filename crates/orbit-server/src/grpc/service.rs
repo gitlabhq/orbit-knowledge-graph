@@ -744,23 +744,35 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         request: Request<GetItemCountsRequest>,
     ) -> Result<Response<GetItemCountsResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        let path = parse_authorized_path(&ctx.claims, &request.get_ref().traversal_path)?;
+        let req = request.get_ref();
+        let single_path = req.traversal_paths.is_empty();
+        let requested_paths = if single_path {
+            slice::from_ref(&req.traversal_path)
+        } else {
+            req.traversal_paths.as_slice()
+        };
+        let paths = parse_authorized_paths(&ctx.claims, requested_paths)?;
         let security_context = build_security_context(&ctx.claims)
             .map_err(|e| Status::unauthenticated(e.to_string()))?;
 
         info!(
-            safe(TRAVERSAL_PATH) = path.as_str(),
-            "Fetching item counts for user"
+            safe(COUNT) = paths.len(),
+            "Fetching item counts of traversal paths for user"
         );
         let schema = self.active_schema.snapshot()?;
         let counts = self
             .item_counts
-            .count_items(&schema.ontology, &security_context, slice::from_ref(&path))
+            .count_items(&schema.ontology, &security_context, &paths)
             .await;
-        Ok(Response::new(build_item_counts_response(
-            &schema.ontology,
-            &counts,
-        )))
+        let mut response = build_item_counts_response(&schema.ontology, &paths, &counts);
+        if single_path {
+            response.domains = response
+                .namespaces
+                .pop()
+                .map(|namespace| namespace.domains)
+                .unwrap_or_default();
+        }
+        Ok(Response::new(response))
     }
 }
 

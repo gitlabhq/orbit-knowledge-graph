@@ -4107,10 +4107,11 @@ func (x *DomainIndexingStatus) GetProjects() *ProjectsStatus {
 }
 
 type GetItemCountsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TraversalPath string                 `protobuf:"bytes,1,opt,name=traversal_path,json=traversalPath,proto3" json:"traversal_path,omitempty"` // one group or project path (e.g. "1/2/")
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	TraversalPath  string                 `protobuf:"bytes,1,opt,name=traversal_path,json=traversalPath,proto3" json:"traversal_path,omitempty"`    // one group or project path (e.g. "1/2/"), read when traversal_paths is empty
+	TraversalPaths []string               `protobuf:"bytes,2,rep,name=traversal_paths,json=traversalPaths,proto3" json:"traversal_paths,omitempty"` // 1 to 100 group or project paths
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetItemCountsRequest) Reset() {
@@ -4150,9 +4151,17 @@ func (x *GetItemCountsRequest) GetTraversalPath() string {
 	return ""
 }
 
+func (x *GetItemCountsRequest) GetTraversalPaths() []string {
+	if x != nil {
+		return x.TraversalPaths
+	}
+	return nil
+}
+
 type GetItemCountsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Domains       []*DomainItemCount     `protobuf:"bytes,1,rep,name=domains,proto3" json:"domains,omitempty"` // only domains with an entity the caller can see
+	Domains       []*DomainItemCount     `protobuf:"bytes,1,rep,name=domains,proto3" json:"domains,omitempty"`       // set for a traversal_path request
+	Namespaces    []*NamespaceItemCounts `protobuf:"bytes,2,rep,name=namespaces,proto3" json:"namespaces,omitempty"` // set for a traversal_paths request, in request order
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4194,6 +4203,65 @@ func (x *GetItemCountsResponse) GetDomains() []*DomainItemCount {
 	return nil
 }
 
+func (x *GetItemCountsResponse) GetNamespaces() []*NamespaceItemCounts {
+	if x != nil {
+		return x.Namespaces
+	}
+	return nil
+}
+
+type NamespaceItemCounts struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TraversalPath string                 `protobuf:"bytes,1,opt,name=traversal_path,json=traversalPath,proto3" json:"traversal_path,omitempty"`
+	Domains       []*DomainItemCount     `protobuf:"bytes,2,rep,name=domains,proto3" json:"domains,omitempty"` // only domains with an entity the caller can see
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NamespaceItemCounts) Reset() {
+	*x = NamespaceItemCounts{}
+	mi := &file_orbit_proto_msgTypes[59]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NamespaceItemCounts) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NamespaceItemCounts) ProtoMessage() {}
+
+func (x *NamespaceItemCounts) ProtoReflect() protoreflect.Message {
+	mi := &file_orbit_proto_msgTypes[59]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NamespaceItemCounts.ProtoReflect.Descriptor instead.
+func (*NamespaceItemCounts) Descriptor() ([]byte, []int) {
+	return file_orbit_proto_rawDescGZIP(), []int{59}
+}
+
+func (x *NamespaceItemCounts) GetTraversalPath() string {
+	if x != nil {
+		return x.TraversalPath
+	}
+	return ""
+}
+
+func (x *NamespaceItemCounts) GetDomains() []*DomainItemCount {
+	if x != nil {
+		return x.Domains
+	}
+	return nil
+}
+
 type DomainItemCount struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -4204,7 +4272,7 @@ type DomainItemCount struct {
 
 func (x *DomainItemCount) Reset() {
 	*x = DomainItemCount{}
-	mi := &file_orbit_proto_msgTypes[59]
+	mi := &file_orbit_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4216,7 +4284,7 @@ func (x *DomainItemCount) String() string {
 func (*DomainItemCount) ProtoMessage() {}
 
 func (x *DomainItemCount) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[59]
+	mi := &file_orbit_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4229,7 +4297,7 @@ func (x *DomainItemCount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DomainItemCount.ProtoReflect.Descriptor instead.
 func (*DomainItemCount) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{59}
+	return file_orbit_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *DomainItemCount) GetName() string {
@@ -4256,7 +4324,7 @@ type EntityItemCount struct {
 
 func (x *EntityItemCount) Reset() {
 	*x = EntityItemCount{}
-	mi := &file_orbit_proto_msgTypes[60]
+	mi := &file_orbit_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4268,7 +4336,7 @@ func (x *EntityItemCount) String() string {
 func (*EntityItemCount) ProtoMessage() {}
 
 func (x *EntityItemCount) ProtoReflect() protoreflect.Message {
-	mi := &file_orbit_proto_msgTypes[60]
+	mi := &file_orbit_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4281,7 +4349,7 @@ func (x *EntityItemCount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntityItemCount.ProtoReflect.Descriptor instead.
 func (*EntityItemCount) Descriptor() ([]byte, []int) {
-	return file_orbit_proto_rawDescGZIP(), []int{60}
+	return file_orbit_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *EntityItemCount) GetName() string {
@@ -4572,11 +4640,18 @@ const file_orbit_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12-\n" +
 	"\x05phase\x18\x02 \x01(\x0e2\x17.orbit.v1.IndexingPhaseR\x05phase\x129\n" +
 	"\bprojects\x18\x03 \x01(\v2\x18.orbit.v1.ProjectsStatusH\x00R\bprojects\x88\x01\x01B\v\n" +
-	"\t_projects\"=\n" +
+	"\t_projects\"f\n" +
 	"\x14GetItemCountsRequest\x12%\n" +
-	"\x0etraversal_path\x18\x01 \x01(\tR\rtraversalPath\"L\n" +
+	"\x0etraversal_path\x18\x01 \x01(\tR\rtraversalPath\x12'\n" +
+	"\x0ftraversal_paths\x18\x02 \x03(\tR\x0etraversalPaths\"\x8b\x01\n" +
 	"\x15GetItemCountsResponse\x123\n" +
-	"\adomains\x18\x01 \x03(\v2\x19.orbit.v1.DomainItemCountR\adomains\"\\\n" +
+	"\adomains\x18\x01 \x03(\v2\x19.orbit.v1.DomainItemCountR\adomains\x12=\n" +
+	"\n" +
+	"namespaces\x18\x02 \x03(\v2\x1d.orbit.v1.NamespaceItemCountsR\n" +
+	"namespaces\"q\n" +
+	"\x13NamespaceItemCounts\x12%\n" +
+	"\x0etraversal_path\x18\x01 \x01(\tR\rtraversalPath\x123\n" +
+	"\adomains\x18\x02 \x03(\v2\x19.orbit.v1.DomainItemCountR\adomains\"\\\n" +
 	"\x0fDomainItemCount\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x125\n" +
 	"\bentities\x18\x02 \x03(\v2\x19.orbit.v1.EntityItemCountR\bentities\";\n" +
@@ -4651,7 +4726,7 @@ func file_orbit_proto_rawDescGZIP() []byte {
 }
 
 var file_orbit_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
-var file_orbit_proto_msgTypes = make([]protoimpl.MessageInfo, 63)
+var file_orbit_proto_msgTypes = make([]protoimpl.MessageInfo, 64)
 var file_orbit_proto_goTypes = []any{
 	(ResponseFormat)(0),                // 0: orbit.v1.ResponseFormat
 	(FormatName)(0),                    // 1: orbit.v1.FormatName
@@ -4720,10 +4795,11 @@ var file_orbit_proto_goTypes = []any{
 	(*DomainIndexingStatus)(nil),       // 64: orbit.v1.DomainIndexingStatus
 	(*GetItemCountsRequest)(nil),       // 65: orbit.v1.GetItemCountsRequest
 	(*GetItemCountsResponse)(nil),      // 66: orbit.v1.GetItemCountsResponse
-	(*DomainItemCount)(nil),            // 67: orbit.v1.DomainItemCount
-	(*EntityItemCount)(nil),            // 68: orbit.v1.EntityItemCount
-	nil,                                // 69: orbit.v1.ResourceAuthorization.AuthorizedEntry
-	nil,                                // 70: orbit.v1.ComponentHealth.MetricsEntry
+	(*NamespaceItemCounts)(nil),        // 67: orbit.v1.NamespaceItemCounts
+	(*DomainItemCount)(nil),            // 68: orbit.v1.DomainItemCount
+	(*EntityItemCount)(nil),            // 69: orbit.v1.EntityItemCount
+	nil,                                // 70: orbit.v1.ResourceAuthorization.AuthorizedEntry
+	nil,                                // 71: orbit.v1.ComponentHealth.MetricsEntry
 }
 var file_orbit_proto_depIdxs = []int32{
 	9,  // 0: orbit.v1.ExecuteQueryMessage.request:type_name -> orbit.v1.ExecuteQueryRequest
@@ -4758,7 +4834,7 @@ var file_orbit_proto_depIdxs = []int32{
 	40, // 29: orbit.v1.RedactionExchange.response:type_name -> orbit.v1.RedactionResponse
 	39, // 30: orbit.v1.RedactionRequired.resources:type_name -> orbit.v1.ResourceToAuthorize
 	41, // 31: orbit.v1.RedactionResponse.authorizations:type_name -> orbit.v1.ResourceAuthorization
-	69, // 32: orbit.v1.ResourceAuthorization.authorized:type_name -> orbit.v1.ResourceAuthorization.AuthorizedEntry
+	70, // 32: orbit.v1.ResourceAuthorization.authorized:type_name -> orbit.v1.ResourceAuthorization.AuthorizedEntry
 	3,  // 33: orbit.v1.ListToolsRequest.language:type_name -> orbit.v1.QueryLanguage
 	44, // 34: orbit.v1.ListToolsResponse.tools:type_name -> orbit.v1.ToolDefinition
 	0,  // 35: orbit.v1.ListAgentCommandsRequest.format:type_name -> orbit.v1.ResponseFormat
@@ -4771,7 +4847,7 @@ var file_orbit_proto_depIdxs = []int32{
 	52, // 42: orbit.v1.StructuredClusterHealth.components:type_name -> orbit.v1.ComponentHealth
 	4,  // 43: orbit.v1.ComponentHealth.status:type_name -> orbit.v1.ClusterStatus
 	53, // 44: orbit.v1.ComponentHealth.replicas:type_name -> orbit.v1.ReplicaStatus
-	70, // 45: orbit.v1.ComponentHealth.metrics:type_name -> orbit.v1.ComponentHealth.MetricsEntry
+	71, // 45: orbit.v1.ComponentHealth.metrics:type_name -> orbit.v1.ComponentHealth.MetricsEntry
 	5,  // 46: orbit.v1.GetGraphStatusRequest.source_type:type_name -> orbit.v1.SourceType
 	0,  // 47: orbit.v1.GetGraphStatusRequest.format:type_name -> orbit.v1.ResponseFormat
 	6,  // 48: orbit.v1.IndexingStatus.state:type_name -> orbit.v1.IndexingState
@@ -4788,41 +4864,43 @@ var file_orbit_proto_depIdxs = []int32{
 	64, // 59: orbit.v1.NamespaceIndexingStatus.domains:type_name -> orbit.v1.DomainIndexingStatus
 	7,  // 60: orbit.v1.DomainIndexingStatus.phase:type_name -> orbit.v1.IndexingPhase
 	58, // 61: orbit.v1.DomainIndexingStatus.projects:type_name -> orbit.v1.ProjectsStatus
-	67, // 62: orbit.v1.GetItemCountsResponse.domains:type_name -> orbit.v1.DomainItemCount
-	68, // 63: orbit.v1.DomainItemCount.entities:type_name -> orbit.v1.EntityItemCount
-	42, // 64: orbit.v1.OrbitService.ListTools:input_type -> orbit.v1.ListToolsRequest
-	45, // 65: orbit.v1.OrbitService.ListAgentCommands:input_type -> orbit.v1.ListAgentCommandsRequest
-	47, // 66: orbit.v1.OrbitService.InvokeAgentCommand:input_type -> orbit.v1.InvokeAgentCommandRequest
-	8,  // 67: orbit.v1.OrbitService.ExecuteQuery:input_type -> orbit.v1.ExecuteQueryMessage
-	14, // 68: orbit.v1.OrbitService.GetGraphSchema:input_type -> orbit.v1.GetGraphSchemaRequest
-	23, // 69: orbit.v1.OrbitService.GetQueryDsl:input_type -> orbit.v1.GetQueryDslRequest
-	25, // 70: orbit.v1.OrbitService.ListSkills:input_type -> orbit.v1.ListSkillsRequest
-	28, // 71: orbit.v1.OrbitService.GetSkill:input_type -> orbit.v1.GetSkillRequest
-	34, // 72: orbit.v1.OrbitService.ListNamedQueries:input_type -> orbit.v1.ListNamedQueriesRequest
-	31, // 73: orbit.v1.OrbitService.GetResponseFormat:input_type -> orbit.v1.GetResponseFormatRequest
-	49, // 74: orbit.v1.OrbitService.GetClusterHealth:input_type -> orbit.v1.GetClusterHealthRequest
-	54, // 75: orbit.v1.OrbitService.GetGraphStatus:input_type -> orbit.v1.GetGraphStatusRequest
-	61, // 76: orbit.v1.OrbitService.GetIndexingStatus:input_type -> orbit.v1.GetIndexingStatusRequest
-	65, // 77: orbit.v1.OrbitService.GetItemCounts:input_type -> orbit.v1.GetItemCountsRequest
-	43, // 78: orbit.v1.OrbitService.ListTools:output_type -> orbit.v1.ListToolsResponse
-	46, // 79: orbit.v1.OrbitService.ListAgentCommands:output_type -> orbit.v1.ListAgentCommandsResponse
-	48, // 80: orbit.v1.OrbitService.InvokeAgentCommand:output_type -> orbit.v1.InvokeAgentCommandResponse
-	8,  // 81: orbit.v1.OrbitService.ExecuteQuery:output_type -> orbit.v1.ExecuteQueryMessage
-	15, // 82: orbit.v1.OrbitService.GetGraphSchema:output_type -> orbit.v1.GetGraphSchemaResponse
-	24, // 83: orbit.v1.OrbitService.GetQueryDsl:output_type -> orbit.v1.GetQueryDslResponse
-	26, // 84: orbit.v1.OrbitService.ListSkills:output_type -> orbit.v1.ListSkillsResponse
-	29, // 85: orbit.v1.OrbitService.GetSkill:output_type -> orbit.v1.GetSkillResponse
-	35, // 86: orbit.v1.OrbitService.ListNamedQueries:output_type -> orbit.v1.ListNamedQueriesResponse
-	32, // 87: orbit.v1.OrbitService.GetResponseFormat:output_type -> orbit.v1.GetResponseFormatResponse
-	50, // 88: orbit.v1.OrbitService.GetClusterHealth:output_type -> orbit.v1.GetClusterHealthResponse
-	56, // 89: orbit.v1.OrbitService.GetGraphStatus:output_type -> orbit.v1.GetGraphStatusResponse
-	62, // 90: orbit.v1.OrbitService.GetIndexingStatus:output_type -> orbit.v1.GetIndexingStatusResponse
-	66, // 91: orbit.v1.OrbitService.GetItemCounts:output_type -> orbit.v1.GetItemCountsResponse
-	78, // [78:92] is the sub-list for method output_type
-	64, // [64:78] is the sub-list for method input_type
-	64, // [64:64] is the sub-list for extension type_name
-	64, // [64:64] is the sub-list for extension extendee
-	0,  // [0:64] is the sub-list for field type_name
+	68, // 62: orbit.v1.GetItemCountsResponse.domains:type_name -> orbit.v1.DomainItemCount
+	67, // 63: orbit.v1.GetItemCountsResponse.namespaces:type_name -> orbit.v1.NamespaceItemCounts
+	68, // 64: orbit.v1.NamespaceItemCounts.domains:type_name -> orbit.v1.DomainItemCount
+	69, // 65: orbit.v1.DomainItemCount.entities:type_name -> orbit.v1.EntityItemCount
+	42, // 66: orbit.v1.OrbitService.ListTools:input_type -> orbit.v1.ListToolsRequest
+	45, // 67: orbit.v1.OrbitService.ListAgentCommands:input_type -> orbit.v1.ListAgentCommandsRequest
+	47, // 68: orbit.v1.OrbitService.InvokeAgentCommand:input_type -> orbit.v1.InvokeAgentCommandRequest
+	8,  // 69: orbit.v1.OrbitService.ExecuteQuery:input_type -> orbit.v1.ExecuteQueryMessage
+	14, // 70: orbit.v1.OrbitService.GetGraphSchema:input_type -> orbit.v1.GetGraphSchemaRequest
+	23, // 71: orbit.v1.OrbitService.GetQueryDsl:input_type -> orbit.v1.GetQueryDslRequest
+	25, // 72: orbit.v1.OrbitService.ListSkills:input_type -> orbit.v1.ListSkillsRequest
+	28, // 73: orbit.v1.OrbitService.GetSkill:input_type -> orbit.v1.GetSkillRequest
+	34, // 74: orbit.v1.OrbitService.ListNamedQueries:input_type -> orbit.v1.ListNamedQueriesRequest
+	31, // 75: orbit.v1.OrbitService.GetResponseFormat:input_type -> orbit.v1.GetResponseFormatRequest
+	49, // 76: orbit.v1.OrbitService.GetClusterHealth:input_type -> orbit.v1.GetClusterHealthRequest
+	54, // 77: orbit.v1.OrbitService.GetGraphStatus:input_type -> orbit.v1.GetGraphStatusRequest
+	61, // 78: orbit.v1.OrbitService.GetIndexingStatus:input_type -> orbit.v1.GetIndexingStatusRequest
+	65, // 79: orbit.v1.OrbitService.GetItemCounts:input_type -> orbit.v1.GetItemCountsRequest
+	43, // 80: orbit.v1.OrbitService.ListTools:output_type -> orbit.v1.ListToolsResponse
+	46, // 81: orbit.v1.OrbitService.ListAgentCommands:output_type -> orbit.v1.ListAgentCommandsResponse
+	48, // 82: orbit.v1.OrbitService.InvokeAgentCommand:output_type -> orbit.v1.InvokeAgentCommandResponse
+	8,  // 83: orbit.v1.OrbitService.ExecuteQuery:output_type -> orbit.v1.ExecuteQueryMessage
+	15, // 84: orbit.v1.OrbitService.GetGraphSchema:output_type -> orbit.v1.GetGraphSchemaResponse
+	24, // 85: orbit.v1.OrbitService.GetQueryDsl:output_type -> orbit.v1.GetQueryDslResponse
+	26, // 86: orbit.v1.OrbitService.ListSkills:output_type -> orbit.v1.ListSkillsResponse
+	29, // 87: orbit.v1.OrbitService.GetSkill:output_type -> orbit.v1.GetSkillResponse
+	35, // 88: orbit.v1.OrbitService.ListNamedQueries:output_type -> orbit.v1.ListNamedQueriesResponse
+	32, // 89: orbit.v1.OrbitService.GetResponseFormat:output_type -> orbit.v1.GetResponseFormatResponse
+	50, // 90: orbit.v1.OrbitService.GetClusterHealth:output_type -> orbit.v1.GetClusterHealthResponse
+	56, // 91: orbit.v1.OrbitService.GetGraphStatus:output_type -> orbit.v1.GetGraphStatusResponse
+	62, // 92: orbit.v1.OrbitService.GetIndexingStatus:output_type -> orbit.v1.GetIndexingStatusResponse
+	66, // 93: orbit.v1.OrbitService.GetItemCounts:output_type -> orbit.v1.GetItemCountsResponse
+	80, // [80:94] is the sub-list for method output_type
+	66, // [66:80] is the sub-list for method input_type
+	66, // [66:66] is the sub-list for extension type_name
+	66, // [66:66] is the sub-list for extension extendee
+	0,  // [0:66] is the sub-list for field type_name
 }
 
 func init() { file_orbit_proto_init() }
@@ -4879,7 +4957,7 @@ func file_orbit_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_orbit_proto_rawDesc), len(file_orbit_proto_rawDesc)),
 			NumEnums:      8,
-			NumMessages:   63,
+			NumMessages:   64,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

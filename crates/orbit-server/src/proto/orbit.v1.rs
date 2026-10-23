@@ -681,14 +681,28 @@ pub struct DomainIndexingStatus {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetItemCountsRequest {
-    /// one group or project path (e.g. "1/2/")
+    /// one group or project path (e.g. "1/2/"), read when traversal_paths is empty
     #[prost(string, tag = "1")]
     pub traversal_path: ::prost::alloc::string::String,
+    /// 1 to 100 group or project paths
+    #[prost(string, repeated, tag = "2")]
+    pub traversal_paths: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetItemCountsResponse {
-    /// only domains with an entity the caller can see
+    /// set for a traversal_path request
     #[prost(message, repeated, tag = "1")]
+    pub domains: ::prost::alloc::vec::Vec<DomainItemCount>,
+    /// set for a traversal_paths request, in request order
+    #[prost(message, repeated, tag = "2")]
+    pub namespaces: ::prost::alloc::vec::Vec<NamespaceItemCounts>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NamespaceItemCounts {
+    #[prost(string, tag = "1")]
+    pub traversal_path: ::prost::alloc::string::String,
+    /// only domains with an entity the caller can see
+    #[prost(message, repeated, tag = "2")]
     pub domains: ::prost::alloc::vec::Vec<DomainItemCount>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
