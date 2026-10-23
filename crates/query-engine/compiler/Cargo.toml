@@ -21,6 +21,7 @@ pest_consume = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 jsonschema = { workspace = true }
+minijinja = { workspace = true }
 
 [build-dependencies]
 pest_meta = "2.9.1"

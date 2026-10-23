@@ -23,33 +23,103 @@ limits:
   max_path_anchor_rows: 500
   min_search_pattern_length: 3
 
-query_types:
-  traversal:
-    nodes: [1, 5]
-    relationships: [0, 4]
-    path: forbidden
-    neighbors: forbidden
-    aggregations: forbidden
-    relationship_shape: tree
-  aggregation:
-    nodes: [1, 5]
-    relationships: [0, 5]
-    path: forbidden
-    neighbors: forbidden
-    aggregations: required
-    relationship_directions: [outgoing, incoming]
-  path_finding:
-    nodes: [2, 2]
-    relationships: [0, 0]
-    path: required
-    neighbors: forbidden
-    aggregations: forbidden
-  neighbors:
-    nodes: [1, 1]
-    relationships: [0, 0]
-    path: forbidden
-    neighbors: required
-    aggregations: forbidden
+input_rules:
+  - code: query_type.internal
+    reject: input.query_type == "hydration"
+    message: a public query cannot request internal hydration
+  - code: nodes.count
+    reject: input.nodes|length < 1 or input.nodes|length > limits.max_nodes
+    message: nodes count ({{ input.nodes|length }}) must be between 1 and {{ limits.max_nodes }}
+  - code: relationships.count
+    reject: input.relationships|length > limits.max_relationships
+    message: relationships count ({{ input.relationships|length }}) must not exceed {{ limits.max_relationships }}
+  - code: traversal.relationships
+    reject: input.query_type == "traversal" and input.nodes|length > 1 and input.relationships|length + 1 != input.nodes|length
+    message: traversal requires exactly n-1 relationships for n nodes (got {{ input.nodes|length }} nodes, {{ input.relationships|length }} relationships)
+  - code: aggregation.path
+    reject: input.query_type == "aggregation" and input.path is not none
+    message: aggregation over shortest paths is not supported
+  - code: aggregation.neighbors
+    reject: input.query_type == "aggregation" and input.neighbors is not none
+    message: aggregation does not support neighbors
+  - code: aggregation.metrics
+    reject: input.query_type == "aggregation" and input.aggregations|length == 0
+    message: aggregation requires aggregations
+  - code: aggregation.direction
+    reject: input.query_type == "aggregation" and input.relationships|selectattr("direction", "eq", "both")|list|length > 0
+    message: "aggregation does not support direction: both"
+  - code: path_finding.nodes
+    reject: input.query_type == "path_finding" and input.nodes|length != 2
+    message: nodes count ({{ input.nodes|length }}) must be between 2 and 2
+  - code: path_finding.relationships
+    reject: input.query_type == "path_finding" and input.relationships|length > 0
+    message: relationships count ({{ input.relationships|length }}) must be between 0 and 0
+  - code: path_finding.path
+    reject: input.query_type == "path_finding" and input.path is none
+    message: path_finding requires path
+  - code: neighbors.nodes
+    reject: input.query_type == "neighbors" and input.nodes|length != 1
+    message: nodes count ({{ input.nodes|length }}) must be between 1 and 1
+  - code: neighbors.relationships
+    reject: input.query_type == "neighbors" and input.relationships|length > 0
+    message: relationships count ({{ input.relationships|length }}) must be between 0 and 0
+  - code: neighbors.config
+    reject: input.query_type == "neighbors" and input.neighbors is none
+    message: neighbors requires neighbors
+  - code: query.path
+    reject: input.query_type != "path_finding" and input.path is not none
+    message: "{{ input.query_type }} does not support path"
+  - code: query.neighbors
+    reject: input.query_type != "neighbors" and input.neighbors is not none
+    message: "{{ input.query_type }} does not support neighbors"
+  - code: query.aggregations
+    reject: input.query_type != "aggregation" and input.aggregations|length > 0
+    message: "{{ input.query_type }} does not support aggregations"
+  - code: predicates.count
+    reject: predicate_count > limits.max_predicates
+    message: Query has {{ predicate_count }} predicates; the maximum is {{ limits.max_predicates }} across the entire query. Remove redundant conditions or simplify the query.
+  - code: pagination.limit
+    reject: input.limit < 1 or input.limit > limits.max_limit
+    message: limit must be between 1 and {{ limits.max_limit }}
+  - code: pagination.skip
+    reject: input.skip is not none and input.skip > limits.max_skip
+    message: skip must be at most {{ limits.max_skip }}; to page deeper, ORDER BY a unique key such as id and filter past the last value from the previous page
+  - code: aggregations.count
+    reject: input.aggregations|length > limits.max_aggregations
+    message: aggregations ({{ input.aggregations|length }}) must not exceed {{ limits.max_aggregations }}
+  - code: group_by.count
+    reject: input.group_by|length > limits.max_group_by_keys
+    message: group_by ({{ input.group_by|length }}) must not exceed {{ limits.max_group_by_keys }}
+  - code: relationships.hops
+    reject: input.relationships|map(attribute="hops.max")|select("gt", limits.max_hops)|list|length > 0
+    message: hops upper bound exceeds {{ limits.max_hops }}
+  - code: relationships.types
+    reject: input.relationships|map(attribute="type")|map("length")|select("gt", limits.max_relationship_types)|list|length > 0
+    message: relationship type count must not exceed {{ limits.max_relationship_types }}
+  - code: path.depth
+    reject: input.path is not none and input.path.max_depth > limits.max_depth
+    message: max_depth ({{ input.path.max_depth }}) must not exceed {{ limits.max_depth }}
+  - code: path.types
+    reject: input.path is not none and input.path.rel_types|length > limits.max_relationship_types
+    message: path rel_types count ({{ input.path.rel_types|length }}) must not exceed {{ limits.max_relationship_types }}
+  - code: neighbors.types
+    reject: input.neighbors is not none and input.neighbors.rel_types|length > limits.max_relationship_types
+    message: neighbors rel_types count ({{ input.neighbors.rel_types|length }}) must not exceed {{ limits.max_relationship_types }}
+  - code: nodes.ids
+    reject: input.nodes|map(attribute="node_ids")|map("length")|select("gt", limits.max_node_ids)|list|length > 0
+    message: node_ids count must not exceed {{ limits.max_node_ids }}
+  - code: nodes.columns
+    reject: input.nodes|rejectattr("columns", "none")|map(attribute="columns")|reject("eq", "*")|map("length")|select("gt", limits.max_columns)|list|length > 0
+    message: columns count must not exceed {{ limits.max_columns }}
+  - code: filters.in
+    reject: input.nodes|map(attribute="filters")|map("values")|flatten|flatten|selectattr("op", "eq", "in")|map(attribute="value")|map("length")|select("gt", limits.max_in_values)|list|length > 0
+    message: IN filter value count must not exceed {{ limits.max_in_values }}
+  - code: filters.properties
+    reject: filter_owners|select("owner_above_limit")|list|length > 0
+    message: filter property count ({{ (filter_owners|first_owner_above_limit).property_count }}) for {{ (filter_owners|first_owner_above_limit).owner }} must not exceed {{ (filter_owners|first_owner_above_limit).property_limit }}
+  - code: filters.entries
+    reject: filter_owners|map(attribute="entries")|flatten|selectattr("count", "gt", limits.max_filter_entries_per_property)|list|length > 0
+    message: filter entry count ({{ (filter_owners|map(attribute="entries")|flatten|first_above_limit(limits.max_filter_entries_per_property)).count }}) on property "{{ (filter_owners|map(attribute="entries")|flatten|first_above_limit(limits.max_filter_entries_per_property)).property }}" must not exceed {{ limits.max_filter_entries_per_property }}
 
 filter_operators:
   eq: [string, integer, number, boolean, date, datetime, enum, uuid]
@@ -79,3 +149,41 @@ aggregations:
 ordering: [string, integer, number, date, datetime, enum, uuid]
 
 path_types: [shortest]
+
+schema_limits:
+  /$defs/RelationshipSelector/properties/hops/items/maximum: [{limit: max_hops}]
+  /$defs/PathConfig/properties/max_depth/maximum: [{limit: max_depth}]
+  /properties/limit/maximum: [{limit: max_limit}]
+  /$defs/Identifier/maxLength: [{limit: max_identifier_length}]
+  /$defs/SearchPattern/maxLength: [{limit: max_filter_string_length}]
+  /$defs/FilterValue/oneOf: [{limit: max_filter_string_length, branch: string}, {limit: max_in_values, branch: array}]
+  /properties/nodes/maxItems: [{limit: max_nodes}]
+  /properties/relationships/maxItems: [{limit: max_relationships}]
+  /properties/aggregations/maxItems: [{limit: max_aggregations}]
+  /properties/group_by/maxItems: [{limit: max_group_by_keys}]
+  /$defs/NodeSelector/properties/node_ids/maxItems: [{limit: max_node_ids}]
+  /$defs/NodeSelector/properties/filters/maxProperties: [{limit: max_node_filters}]
+  /$defs/NodeSelector/properties/not/maxProperties: [{limit: max_node_filters}]
+  /$defs/RelationshipSelector/properties/filters/maxProperties: [{limit: max_relationship_filters}]
+  /$defs/ColumnSelection/oneOf: [{limit: max_columns, branch: array}]
+  /$defs/RelationshipType/oneOf: [{limit: max_relationship_types, branch: array}]
+  /$defs/PathConfig/properties/rel_types/maxItems: [{limit: max_relationship_types}]
+  /$defs/NeighborsConfig/properties/rel_types/maxItems: [{limit: max_relationship_types}]
+  /$defs/OperatorFilter/properties/in/maxItems: [{limit: max_in_values}]
+  /$defs/FilterEntry/oneOf: [{limit: max_filter_entries_per_property, branch: array}]
+
+grammar_limits:
+  - {rule: UnescapedSymbolicName, repeated: IdentifierPart, limit: max_identifier_length}
+  - {rule: EscapedSymbolicName, repeated: IdentifierPart, limit: max_identifier_length}
+  - {rule: NodeProjection, repeated: ProjectionProperty, limit: max_columns}
+  - {rule: RelationshipTypes, repeated: SchemaName, limit: max_relationship_types}
+  - {rule: InListLiteral, repeated: Value, limit: max_in_values}
+  - {rule: ListLiteral, repeated: Value, limit: max_node_ids}
+  - {rule: PatternElement, repeated: PatternElementChain, limit: max_relationships}
+  - {rule: AndExpression, repeated: NotExpression, limit: max_predicates}
+  - {rule: NodeMapLiteral, repeated: MapEntry, limit: max_node_filters}
+  - {rule: RelationshipMapLiteral, repeated: MapEntry, limit: max_relationship_filters}
+  - {rule: NotExpression, repeated: Negation, limit: max_predicate_depth, offset: 1}
+  - {rule: HopCount, limit: max_hops, offset: 1}
+  - {rule: LimitCount, limit: max_limit, offset: 1}
+  - {rule: SkipCount, limit: max_skip, offset: 1}

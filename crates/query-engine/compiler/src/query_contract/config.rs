@@ -1,19 +1,56 @@
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueryContract {
     pub limits: Limits,
-    pub query_types: QueryTypes,
+    pub input_rules: Vec<InputRule>,
     pub filter_operators: BTreeMap<String, Vec<ValueType>>,
     pub aggregations: BTreeMap<String, Vec<ValueType>>,
     pub ordering: Vec<ValueType>,
     pub path_types: Vec<String>,
+    #[allow(dead_code)]
+    pub schema_limits: BTreeMap<String, Vec<SchemaLimit>>,
+    #[allow(dead_code)]
+    pub grammar_limits: Vec<GrammarLimit>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputRule {
+    pub code: String,
+    pub reject: String,
+    pub message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SchemaLimit {
+    #[allow(dead_code)]
+    pub limit: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub branch: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GrammarLimit {
+    #[allow(dead_code)]
+    pub rule: String,
+    #[allow(dead_code)]
+    pub limit: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub repeated: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub offset: u64,
+}
+
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Limits {
     pub max_hops: u32,
@@ -41,41 +78,36 @@ pub struct Limits {
     pub min_search_pattern_length: usize,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct QueryTypes {
-    pub traversal: QueryTypeContract,
-    pub aggregation: QueryTypeContract,
-    pub path_finding: QueryTypeContract,
-    pub neighbors: QueryTypeContract,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct QueryTypeContract {
-    pub nodes: [usize; 2],
-    pub relationships: [usize; 2],
-    pub path: Presence,
-    pub neighbors: Presence,
-    pub aggregations: Presence,
-    #[serde(default)]
-    pub relationship_directions: Vec<Direction>,
-    pub relationship_shape: Option<String>,
-}
-
-#[derive(Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Presence {
-    Required,
-    Forbidden,
-}
-
-#[derive(Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Direction {
-    Outgoing,
-    Incoming,
-    Both,
+impl Limits {
+    #[allow(dead_code)]
+    pub fn get(&self, name: &str) -> Option<u64> {
+        match name {
+            "max_hops" => Some(self.max_hops.into()),
+            "max_depth" => Some(self.max_depth.into()),
+            "max_nodes" => Some(self.max_nodes as u64),
+            "max_relationships" => Some(self.max_relationships as u64),
+            "max_node_ids" => Some(self.max_node_ids as u64),
+            "max_in_values" => Some(self.max_in_values as u64),
+            "max_node_filters" => Some(self.max_node_filters as u64),
+            "max_relationship_filters" => Some(self.max_relationship_filters as u64),
+            "max_columns" => Some(self.max_columns as u64),
+            "max_relationship_types" => Some(self.max_relationship_types as u64),
+            "max_aggregations" => Some(self.max_aggregations as u64),
+            "max_group_by_keys" => Some(self.max_group_by_keys as u64),
+            "max_filter_entries_per_property" => Some(self.max_filter_entries_per_property as u64),
+            "max_predicates" => Some(self.max_predicates as u64),
+            "max_limit" => Some(self.max_limit.into()),
+            "max_skip" => Some(self.max_skip.into()),
+            "max_identifier_length" => Some(self.max_identifier_length as u64),
+            "max_filter_string_length" => Some(self.max_filter_string_length as u64),
+            "max_predicate_depth" => Some(self.max_predicate_depth as u64),
+            "max_id_range_span" => u64::try_from(self.max_id_range_span).ok(),
+            "max_path_anchor_range" => u64::try_from(self.max_path_anchor_range).ok(),
+            "max_path_anchor_rows" => u64::try_from(self.max_path_anchor_rows).ok(),
+            "min_search_pattern_length" => Some(self.min_search_pattern_length as u64),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]

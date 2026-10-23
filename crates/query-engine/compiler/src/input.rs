@@ -4,7 +4,7 @@ use ontology::constants::{
     DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TRAVERSAL_PATH_COLUMN,
 };
 use orbit_utils::traversal_path::TraversalPath;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use strum::VariantNames;
@@ -14,7 +14,9 @@ pub use predicates::{BooleanExpression, Condition, PredicateTarget};
 
 /// Controls which columns are fetched for dynamically-discovered entities
 /// during hydration (PathFinding, Neighbors).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, strum::IntoStaticStr)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, strum::IntoStaticStr,
+)]
 #[strum(serialize_all = "lowercase")]
 pub enum DynamicColumnMode {
     #[serde(rename = "*")]
@@ -26,7 +28,7 @@ pub enum DynamicColumnMode {
 
 /// Optional presentation hints that control response shape without affecting query
 /// semantics. Only `dynamic_columns` and `include_debug_sql` are recognized.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct QueryOptions {
     #[serde(default)]
     pub dynamic_columns: DynamicColumnMode,
@@ -74,7 +76,7 @@ pub struct RelationshipOrder {
     pub direction: OrderDirection,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Input {
     pub query_type: QueryType,
     pub nodes: Vec<InputNode>,
@@ -87,7 +89,7 @@ pub struct Input {
     pub neighbors: Option<InputNeighbors>,
     #[serde(default = "default_limit")]
     pub limit: u32,
-    #[serde(skip)]
+    #[serde(skip_deserializing)]
     pub skip: Option<u32>,
     pub order_by: Option<InputOrderBy>,
     #[serde(default)]
@@ -165,6 +167,7 @@ fn default_limit() -> u32 {
     PartialEq,
     Eq,
     Deserialize,
+    Serialize,
     strum::Display,
     strum::IntoStaticStr,
     strum::VariantNames,
@@ -179,7 +182,7 @@ pub enum QueryType {
     /// Internal-only: consolidated hydration for multiple entity types.
     /// Generates a UNION ALL of search-like arms, one per node. Skips
     /// security context injection (IDs are pre-authorized by the pipeline).
-    #[serde(skip)]
+    #[serde(skip_deserializing)]
     Hydration,
 }
 
@@ -187,7 +190,7 @@ pub enum QueryType {
 // Nodes
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct InputNode {
     pub id: String,
@@ -227,8 +230,10 @@ impl Default for InputNode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
 pub enum ColumnSelection {
+    #[serde(rename = "*")]
     All,
     List(Vec<String>),
 }
@@ -258,7 +263,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InputIdRange {
     #[serde(deserialize_with = "deserialize_id")]
     pub start: i64,
@@ -298,7 +303,7 @@ where
         .collect()
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,
@@ -313,7 +318,9 @@ impl InputFilter {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr, strum::VariantNames)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, strum::AsRefStr, strum::VariantNames,
+)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum FilterOp {
@@ -417,7 +424,7 @@ fn parse_operator_object(obj: serde_json::Map<String, Value>) -> Result<Vec<Inpu
         .collect()
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InputRelationship {
     #[serde(rename = "type", deserialize_with = "deserialize_rel_types")]
     pub types: Vec<String>,
@@ -431,7 +438,7 @@ pub struct InputRelationship {
     pub filters: HashMap<String, Vec<InputFilter>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct HopRange {
     pub min: u32,
     pub max: u32,
@@ -501,7 +508,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Direction {
     #[default]
@@ -527,7 +534,7 @@ impl Direction {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct InputAggregation {
     #[serde(rename = "aggregations")]
@@ -538,7 +545,7 @@ pub struct InputAggregation {
     pub sort: Option<InputAggSort>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InputAggregationMetric {
     #[serde(flatten)]
     pub expr: AggExpr,
@@ -554,7 +561,7 @@ impl InputAggregationMetric {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, strum::EnumDiscriminants)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, strum::EnumDiscriminants)]
 #[serde(rename_all = "lowercase")]
 #[strum_discriminants(
     name(AggFunction),
@@ -631,7 +638,7 @@ impl AggExpr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TargetRef {
     pub node: String,
     pub property: Option<String>,
@@ -657,7 +664,7 @@ impl<'de> Deserialize<'de> for TargetRef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PropertyRef {
     pub node: String,
     pub property: String,
@@ -684,7 +691,7 @@ impl<'de> Deserialize<'de> for PropertyRef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum InputGroupByKey {
     Node {
         node: String,
@@ -793,7 +800,7 @@ fn parse_group_by_object(
     parse_group_by_spec(&spec, truncate, alias)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, strum::VariantNames)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum TruncateUnit {
@@ -890,7 +897,7 @@ pub fn group_by_kind(group: &InputGroupByKey) -> &'static str {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InputPath {
     #[serde(rename = "type")]
     pub path_type: PathType,
@@ -901,14 +908,14 @@ pub struct InputPath {
     pub rel_types: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::VariantNames)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, strum::VariantNames)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum PathType {
     Shortest,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InputNeighbors {
     #[serde(default)]
     pub direction: Direction,
@@ -920,7 +927,7 @@ pub struct InputNeighbors {
 // Ordering
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct InputOrderBy {
     pub node: String,
     pub property: String,
@@ -953,7 +960,7 @@ impl<'de> Deserialize<'de> for InputOrderBy {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum OrderDirection {
     #[default]
@@ -961,7 +968,7 @@ pub enum OrderDirection {
     Desc,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct InputAggSort {
     pub column: String,
     pub direction: OrderDirection,

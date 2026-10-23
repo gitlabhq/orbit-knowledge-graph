@@ -1523,6 +1523,7 @@ version = "0.1.0"
 dependencies = [
  "compiler-pipeline-macros",
  "jsonschema",
+ "minijinja",
  "ontology",
  "opentelemetry",
  "orbit-observability",
