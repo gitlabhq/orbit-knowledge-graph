@@ -14,26 +14,14 @@ title: ClickHouse for GitLab Orbit
 
 {{< /details >}}
 
-{{< history >}}
-
-- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.2.2.
-
-{{< /history >}}
-
-> [!note]
-> GitLab Orbit on GitLab Self-Managed is in
-> [beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
-> This feature is available for testing, but not ready for production use.
-
 GitLab Orbit stores the data lake and the graph in ClickHouse.
 GitLab Orbit connects over HTTP on port 8123, or port 8443 with TLS.
 Siphon connects over the native protocol on port 9000.
 
 ## Supported versions
 
-GitLab Orbit requires ClickHouse 26.4 or later, and GitLab supports ClickHouse up to 26.6.
-To use ClickHouse 26.7 or later, see
-[ClickHouse 26.7 and later](https://docs.gitlab.com/integration/clickhouse/#clickhouse-267-and-later).
+GitLab Orbit requires ClickHouse 26.4 or later.
+For the releases that GitLab supports, see [Supported ClickHouse versions](https://docs.gitlab.com/integration/clickhouse/#supported-clickhouse-versions).
 
 ## Databases
 
@@ -126,10 +114,8 @@ Drop those tables to free the disk.
 
 ## Create the users manually
 
-The Helm chart creates the GitLab Orbit users for you.
-For more information, see [Install GitLab Orbit](orbit-setup.md#install-gitlab-orbit).
-Create the users yourself when the data lake and the graph are on separate ClickHouse instances.
-Also create them yourself when you cannot give the chart an administrator account.
+Create the users yourself when the data lake and the graph are on separate ClickHouse instances, or when the chart cannot use an administrator account.
+Otherwise, the chart creates them when you [install GitLab Orbit](orbit-setup.md#install-gitlab-orbit).
 
 GitLab Orbit uses three users:
 
@@ -149,8 +135,10 @@ To create the users:
      /usr/share/gkg/clickhouse-setup.sql
    ```
 
-1. Replace `<orbit_version>` with the GitLab Orbit release that you deploy.
-1. In the statements, replace the database names and set a password for each user.
-1. Run the statements as a ClickHouse administrator.
-   Run the data lake statements on the data lake instance, and the graph statements on the graph instance.
-1. In `orbit-values.yaml`, leave `clickhouseSetup.enabled` set to `false`.
+   Replace `<orbit_version>` with the GitLab Orbit release that you deploy.
+
+1. In the statements, replace the database names.
+1. Set a password for each user.
+1. As a ClickHouse administrator, run the data lake statements on the data lake instance.
+1. Run the graph statements on the graph instance.
+1. In `orbit-values.yaml`, remove the `clickhouseSetup` block.
