@@ -34,8 +34,8 @@ The [local graph](local/_index.md#local-tables) on your machine holds only code.
 The graph links these objects. For example, a merge request belongs to a project, runs a pipeline,
 and fixes a vulnerability. A file is on a branch of the project and defines a definition.
 
-<img class="orbit-graph-figure orbit-graph-light" src="img/orbit-graph-hub-light-v19_6.svg" alt="A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition." width="680" height="272">
-<img class="orbit-graph-figure orbit-graph-dark" src="img/orbit-graph-hub-dark-v19_6.svg" alt="A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition." width="680" height="272">
+<img class="orbit-graph-figure orbit-graph-light" src="../img/orbit-graph-hub-light-v19_6.svg" alt="A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition." width="680" height="272">
+<img class="orbit-graph-figure orbit-graph-dark" src="../img/orbit-graph-hub-dark-v19_6.svg" alt="A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition." width="680" height="272">
 
 <style>
 .docs-content .orbit-graph-figure {
