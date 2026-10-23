@@ -104,6 +104,10 @@ fn validate_contract(contract: &QueryContract) {
         contract.limits.max_node_ids, contract.limits.max_in_values,
         "GQL general and IN lists share one bound"
     );
+    assert_eq!(
+        contract.limits.max_hops, contract.limits.max_depth,
+        "GQL uses one numeric rule for traversal hops and path depth"
+    );
 }
 
 fn check_schema(schema: &Value, contract: &QueryContract) {
@@ -159,6 +163,11 @@ fn check_schema(schema: &Value, contract: &QueryContract) {
     );
     check_max_properties(
         schema,
+        "/$defs/NodeSelector/properties/not",
+        limits.max_node_filters,
+    );
+    check_max_properties(
+        schema,
         "/$defs/RelationshipSelector/properties/filters",
         limits.max_relationship_filters,
     );
@@ -168,6 +177,7 @@ fn check_schema(schema: &Value, contract: &QueryContract) {
         "/$defs/RelationshipType/oneOf",
         limits.max_relationship_types,
     );
+    check_identifier_patterns(schema, limits.max_identifier_length);
     check_max_items(
         schema,
         "/$defs/PathConfig/properties/rel_types",
@@ -348,6 +358,25 @@ fn numeric_max(rule: &Rule) -> u32 {
     let mut maximum = 0;
     visit(&rule.expr, &mut maximum);
     maximum
+}
+
+fn check_identifier_patterns(schema: &Value, maximum: usize) {
+    let expected = format!("{{0,{}}}", maximum - 1);
+    for pointer in [
+        "/properties/order_by/pattern",
+        "/properties/aggregation_sort/pattern",
+        "/$defs/NodeOrPropertyRef/pattern",
+        "/$defs/NodePropertyRef/pattern",
+    ] {
+        let pattern = schema
+            .pointer(pointer)
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("graph_query.schema.json is missing `{pointer}`"));
+        assert!(
+            pattern.contains(&expected),
+            "`{pointer}` must contain `{expected}` from query_contract.yaml"
+        );
+    }
 }
 
 fn generate_rust(contract: &QueryContract) -> String {

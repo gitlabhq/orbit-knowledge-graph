@@ -93,7 +93,9 @@ pre-commit:
       glob:
         - "crates/query-engine/formatters/src/**/*.rs"
         - "crates/query-engine/compiler/src/input.rs"
-        - "crates/query-engine/compiler/src/passes/validate.rs"
+        - "crates/query-engine/compiler/build.rs"
+        - "crates/query-engine/compiler/src/passes/validate/**/*.rs"
+        - "config/query_contract.yaml"
         - "config/schemas/query_response.json"
         - "config/schemas/graph_query.schema.json"
     - name: metrics-catalog-check

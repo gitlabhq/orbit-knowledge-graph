@@ -116,6 +116,7 @@ impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
         input: &Input,
         lhs: (&str, &str),
         rhs: (&str, &str),
+        op: FilterOp,
     ) -> Result<()> {
         let mut types = Vec::new();
         for (node_id, prop) in [lhs, rhs] {
@@ -139,6 +140,14 @@ impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
             return Err(QueryError::Validation(format!(
                 "type mismatch in join predicate: {}.{} is {lt:?} but {}.{} is {rt:?}",
                 lhs.0, lhs.1, rhs.0, rhs.1
+            )));
+        }
+        if let [Some(data_type), Some(_)] = types[..]
+            && !crate::query_contract::filter_operator_accepts(op, data_type)
+        {
+            return Err(QueryError::Validation(format!(
+                "operator \"{}\" is not supported on {data_type}",
+                op.as_ref()
             )));
         }
         Ok(())

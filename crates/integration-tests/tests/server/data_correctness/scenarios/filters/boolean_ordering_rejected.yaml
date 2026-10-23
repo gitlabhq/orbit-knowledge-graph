@@ -1,10 +1,18 @@
-description: Ordering operators reject boolean properties in both query languages
+cases:
+  - name: literal
+    description: Ordering operators reject boolean literals in both query languages
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4001],"filters":{"confidential":{"gt":false}}}]}
+      gql: |
+        MATCH (w:WorkItem {id: 4001}) WHERE w.confidential > false RETURN w.id
+    expect:
+      compile_error: operator "gt" is not supported on Bool
 
-query:
-  json: |
-    {"query_type":"traversal","nodes":[{"id":"w","entity":"WorkItem","node_ids":[4001],"filters":{"confidential":{"gt":false}}}]}
-  gql: |
-    MATCH (w:WorkItem {id: 4001}) WHERE w.confidential > false RETURN w.id
-
-expect:
-  compile_error: operator "gt" is not supported on Bool
+  - name: property
+    description: Ordering operators reject boolean property comparisons
+    query:
+      gql: |
+        MATCH (a:WorkItem {id: 4001})-[:RELATED_TO]->(b:WorkItem) WHERE a.confidential > b.confidential RETURN a.id
+    expect:
+      compile_error: operator "gt" is not supported on Bool

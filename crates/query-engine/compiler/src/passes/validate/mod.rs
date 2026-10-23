@@ -751,7 +751,12 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 )?;
             }
             if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
-                self.check_property_comparison(input, (&node.id, prop), (rhs_node, rhs_prop))?;
+                self.check_property_comparison(
+                    input,
+                    (&node.id, prop),
+                    (rhs_node, rhs_prop),
+                    filter.op.unwrap_or(FilterOp::Eq),
+                )?;
                 continue;
             }
             self.check_one_filter(entity, prop, filter, data_type)?;
@@ -886,13 +891,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             return Ok(());
         }
 
-        if !crate::query_contract::filter_operator_accepts(op, data_type) {
-            return Err(QueryError::Validation(format!(
-                "filter on \"{prop}\" for {entity}: operator \"{}\" is not supported on {data_type}",
-                op.as_ref()
-            )));
-        }
-
         let is_like_op = op.is_like();
         let is_token_op = op.is_token();
 
@@ -925,6 +923,13 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
                  token operators (token_match/all_tokens/any_tokens) require a text index on the field"
+            )));
+        }
+
+        if !crate::query_contract::filter_operator_accepts(op, data_type) {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: operator \"{}\" is not supported on {data_type}",
+                op.as_ref()
             )));
         }
 
@@ -1109,6 +1114,11 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             }
 
             let function = agg.expr.function();
+            if function == crate::input::AggFunction::Collect {
+                return Err(QueryError::Validation(format!(
+                    "aggregation \"{alias}\": \"collect\" is not supported"
+                )));
+            }
             let target = agg.expr.node();
             if !node_ids.contains(&target) {
                 return Err(QueryError::ReferenceError(format!(
@@ -1140,6 +1150,19 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                         "invalid property in aggregation \"{alias}\": {entity}.{prop}"
                     ))
                 })?;
+
+                if matches!(
+                    function,
+                    crate::input::AggFunction::Sum | crate::input::AggFunction::Avg
+                ) && !matches!(data_type, DataType::Int | DataType::Float)
+                {
+                    return Err(QueryError::Validation(format!(
+                        "aggregation \"{alias}\": \"{}\" requires a numeric property, got {}.{} ({data_type})",
+                        function.to_string().to_uppercase(),
+                        entity,
+                        prop
+                    )));
+                }
 
                 if !crate::query_contract::aggregation_accepts(function, data_type) {
                     return Err(QueryError::Validation(format!(
