@@ -1508,7 +1508,7 @@ e2e-gitlab-stable:
   extends: e2e
   parallel:
     matrix:
-      - E2E_GITLAB_LANE: ["19-5"]
+      - E2E_GITLAB_LANE: ["19-4", "19-5"]
   variables:
     E2E_SUFFIX: "-gl${E2E_GITLAB_LANE}"
   rules:
