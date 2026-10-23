@@ -29,6 +29,7 @@ pub mod schema;
 pub mod secret_file_source;
 pub mod secrets;
 pub mod tls;
+pub mod undeclared;
 
 pub use analytics::{AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind};
 pub use app::{AppConfig, ConfigError, EMBEDDED_DEFAULTS, SECRET_FILE_DIR, SharedAppConfig};
