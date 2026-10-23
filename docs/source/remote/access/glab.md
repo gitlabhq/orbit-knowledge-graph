@@ -72,7 +72,7 @@ Requires `glab` 1.117 or later.
 
 `glab` resolves your credential and passes it to the binary, so no extra
 authentication step is needed. Use `--hostname` to target a specific GitLab
-instance, and `--yes` to skip the one-time run confirmation in scripts.
+instance, and `--yes` to skip the one-time run confirmation in scripts. Put `--yes` right after `orbit`, as in `glab orbit --yes query ...`.
 
 | Subcommand | Endpoint | Purpose |
 |------------|----------|---------|
