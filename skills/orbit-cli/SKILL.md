@@ -27,13 +27,13 @@ read-only aggregations. `repo-map` orients you at the directory level. For
 production data, use the `orbit` skill.
 
 The binary is `orbit`, or `glab orbit` through the wrapper. In non-interactive
-shells, put glab's `--yes` right after `orbit` so glab can install the binary
-without a prompt: `glab orbit --yes sql "..."`. The binary rejects `--yes` after
+shells, put glab's `--yes` before the subcommand so glab skips its install and
+run prompts: `glab orbit --yes sql "..."`. The binary rejects `--yes` after
 other subcommands. Only `setup` and `uninstall` take their own `--yes`
-(`glab orbit --yes setup --yes`). Run `orbit <command> --help` before you guess a flag.
-Run `orbit skills` to list available skills. Use `orbit skills get orbit [path]`
-to print the composed skill (`SKILL.md` by default), or specify a path to print
-a file from the skill tree.
+(`glab orbit --yes setup --yes`). Run `orbit <command> --help` before you guess
+a flag. Run `orbit skills` to list available skills. Use
+`orbit skills get orbit [path]` to print the composed skill (`SKILL.md` by
+default), or specify a path to print a file from the skill tree.
 
 Wrapper details: [`references/local/cli.md`](references/local/cli.md).
 
