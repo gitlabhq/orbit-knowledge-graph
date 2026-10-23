@@ -141,6 +141,9 @@ pub async fn run(
             "indexing analytics enabled"
         );
     }
+    if let Some(gitlab) = &config.gitlab {
+        analytics.resolve_instance_identity(gitlab);
+    }
 
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {
         info!("initializing SDLC handlers");

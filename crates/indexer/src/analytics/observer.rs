@@ -5,8 +5,9 @@
 //! the cost-attribution dataset, and no-op runs (idle incremental polls that
 //! read and wrote nothing) are skipped so they don't flood the collector.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+use gitlab_client::InstanceIdentity;
 use labkit_events::StructuredEvent;
 use orbit_analytics::AnalyticsTracker;
 use orbit_server_config::AnalyticsConfig;
@@ -22,6 +23,7 @@ const ACTION_INDEXING_COMPLETED: &str = "gkg_indexing_completed";
 pub struct SnowplowIndexingObserver {
     tracker: Arc<dyn AnalyticsTracker>,
     config: Arc<AnalyticsConfig>,
+    instance: Arc<OnceLock<InstanceIdentity>>,
 
     pipeline_type: Option<PipelineType>,
     dispatch_id: Option<Uuid>,
@@ -57,10 +59,15 @@ pub struct SnowplowIndexingObserver {
 }
 
 impl SnowplowIndexingObserver {
-    pub fn new(tracker: Arc<dyn AnalyticsTracker>, config: Arc<AnalyticsConfig>) -> Self {
+    pub fn new(
+        tracker: Arc<dyn AnalyticsTracker>,
+        config: Arc<AnalyticsConfig>,
+        instance: Arc<OnceLock<InstanceIdentity>>,
+    ) -> Self {
         Self {
             tracker,
             config,
+            instance,
             pipeline_type: None,
             dispatch_id: None,
             campaign_id: None,
@@ -126,7 +133,7 @@ impl SnowplowIndexingObserver {
         };
         let (namespace_id, root_namespace_id) = self.namespace_ids();
 
-        let common = match build_common(&self.config, root_namespace_id) {
+        let common = match build_common(&self.config, self.instance.get(), root_namespace_id) {
             Ok(context) => context,
             Err(error) => {
                 orbit_log_fields::warn!(
@@ -335,10 +342,27 @@ mod tests {
     }
 
     fn observer(tracker: &Arc<InMemoryAnalyticsTracker>) -> SnowplowIndexingObserver {
+        observer_on_instance(tracker, OnceLock::new())
+    }
+
+    fn observer_on_instance(
+        tracker: &Arc<InMemoryAnalyticsTracker>,
+        instance: OnceLock<InstanceIdentity>,
+    ) -> SnowplowIndexingObserver {
         SnowplowIndexingObserver::new(
             tracker.clone() as Arc<dyn AnalyticsTracker>,
             analytics_config(),
+            Arc::new(instance),
         )
+    }
+
+    fn finish_global_sdlc_run(mut obs: SnowplowIndexingObserver) {
+        obs.set_dispatch_id(Uuid::nil());
+        obs.set_pipeline_type(PipelineType::Sdlc);
+        obs.set_entity_type("User");
+        obs.set_indexing_mode(IndexingMode::Full);
+        obs.record_graph_write("gl_user", 10, 500);
+        obs.finish();
     }
 
     fn validator(schema_name: &str) -> jsonschema::Validator {
@@ -475,19 +499,42 @@ mod tests {
     #[test]
     fn global_sdlc_run_has_null_namespaces() {
         let tracker = Arc::new(InMemoryAnalyticsTracker::new());
-        let mut obs = observer(&tracker);
-        obs.set_dispatch_id(Uuid::nil());
-        obs.set_pipeline_type(PipelineType::Sdlc);
-        obs.set_entity_type("User");
-        obs.set_indexing_mode(IndexingMode::Full);
-        obs.record_graph_write("gl_user", 10, 500);
-        obs.finish();
+        finish_global_sdlc_run(observer(&tracker));
 
         let events = tracker.drain();
         let data = &events[0].contexts()[1].data;
         assert!(data["namespace_id"].is_null());
         assert!(data["root_namespace_id"].is_null());
         assert_valid("orbit_sdlc_indexing", data);
+    }
+
+    #[test]
+    fn run_carries_the_resolved_instance_identity() {
+        let tracker = Arc::new(InMemoryAnalyticsTracker::new());
+        let instance = OnceLock::from(InstanceIdentity {
+            instance_id: Some("a1b2".to_string()),
+            unique_instance_id: Some("c3d4".to_string()),
+            host_name: Some("gitlab.example.com".to_string()),
+        });
+        finish_global_sdlc_run(observer_on_instance(&tracker, instance));
+
+        let events = tracker.drain();
+        let common = &events[0].contexts()[0].data;
+        assert_eq!(common["instance_id"], "a1b2");
+        assert_eq!(common["unique_instance_id"], "c3d4");
+        assert_eq!(common["host_name"], "gitlab.example.com");
+    }
+
+    #[test]
+    fn run_before_the_instance_identity_resolves_has_null_instance_fields() {
+        let tracker = Arc::new(InMemoryAnalyticsTracker::new());
+        finish_global_sdlc_run(observer(&tracker));
+
+        let events = tracker.drain();
+        let common = &events[0].contexts()[0].data;
+        assert!(common["instance_id"].is_null());
+        assert!(common["unique_instance_id"].is_null());
+        assert!(common["host_name"].is_null());
     }
 
     #[test]

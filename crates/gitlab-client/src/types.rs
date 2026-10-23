@@ -6,6 +6,13 @@ pub struct ProjectInfo {
     pub repository_storage: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+pub struct InstanceIdentity {
+    pub instance_id: Option<String>,
+    pub unique_instance_id: Option<String>,
+    pub host_name: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CloudConnectorToken {
     pub token: String,

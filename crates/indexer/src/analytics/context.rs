@@ -1,11 +1,13 @@
 //! Builders that turn accumulated indexing stats into typed Snowplow
 //! contexts. Mirrors the webserver's `analytics::context` but sources its
-//! dimensions from the indexer config and dispatch rather than JWT claims.
+//! dimensions from the indexer config, dispatch, and the instance identity
+//! Rails serves, rather than JWT claims.
 
+use gitlab_client::InstanceIdentity;
 use labkit_events::Error as LabkitError;
 use orbit_analytics::{
     OrbitCodeIndexingContext, OrbitCommonContext, OrbitSdlcIndexingContext, orbit_code_indexing,
-    orbit_common, orbit_sdlc_indexing, validation,
+    orbit_common, orbit_sdlc_indexing, parse_opt, validation,
 };
 use orbit_server_config::AnalyticsConfig;
 
@@ -28,9 +30,11 @@ fn saturating_i64(value: u64) -> i64 {
 
 pub(crate) fn build_common(
     config: &AnalyticsConfig,
+    instance: Option<&InstanceIdentity>,
     root_namespace_id: Option<i64>,
 ) -> Result<OrbitCommonContext, LabkitError> {
     let environment: &'static str = config.deployment.environment.into();
+    let instance = instance.cloned().unwrap_or_default();
 
     Ok(OrbitCommonContext::new(orbit_common::OrbitCommon {
         deployment_type: Some(config.deployment.kind.into()),
@@ -41,9 +45,9 @@ pub(crate) fn build_common(
                 .map_err(validation("environment"))?,
         ),
         correlation_id: None,
-        instance_id: None,
-        unique_instance_id: None,
-        host_name: None,
+        instance_id: parse_opt(&instance.instance_id, "instance_id")?,
+        unique_instance_id: parse_opt(&instance.unique_instance_id, "unique_instance_id")?,
+        host_name: parse_opt(&instance.host_name, "host_name")?,
         organization_id: None,
         root_namespace_ids: root_namespace_id.map(|id| vec![id]),
         coding_agent: None,
