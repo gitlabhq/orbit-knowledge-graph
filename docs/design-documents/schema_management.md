@@ -86,12 +86,6 @@ changes neither the stored data nor the DDL.
 
 A delete is a row with `_deleted = true` and a newer `_version`. It carries the full sort key and every column the ontology marks `mutable: false`. Those values are copied from the row it deletes. The SDLC pipelines get this by projecting the datalake row. The code stale sweeps and namespace deletion select those columns from the live row. The query planner relies on it. A filter on an unchanging column runs before the latest-row pick because the tombstone passes the same filter.
 
-### Time columns
-
-No node time column is `Nullable`. A nullable time property stores its NULL as the epoch, `1970-01-01 00:00:00`. ClickHouse writes that column default when the indexer sends a null. The Date32 columns declare the default explicitly because their type zero is 1900. Every time column therefore gets the automatic minmax index from `add_minmax_index_for_temporal_columns`, which skips Nullable columns.
-
-The compiler reads the storage type from the active archive and translates at the query boundary. Filters compare the stored column so the minmax index still prunes. `IS NULL` becomes `= epoch`, and `<`, `<=` and `!=` also exclude the epoch. Filter values on or before 1970-01-01 are rejected, so `=`, `>` and `>=` need no guard. Under a NOT, and in outputs, ordering and aggregates, the column reads as `nullIf(column, epoch)`. The ontology JSON schema rejects a `Nullable(Date...)` storage type.
-
 ### `gkg_schema_version` control table
 
 The Indexer and DispatchIndexing modes create this table on startup if it does not exist.
