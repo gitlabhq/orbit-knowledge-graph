@@ -23,6 +23,10 @@ properties:
     nullable: false
     mutable: false
     description: "Unique ID."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_environment
+      key_column: id
 
   project_id:
     type: int64

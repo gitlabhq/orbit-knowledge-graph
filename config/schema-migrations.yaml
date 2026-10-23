@@ -18,7 +18,7 @@
 migrations:
 - version: 113
   scope: none
-  note: "Declares the measured scope on twenty edge variants and drops the six explicit id lookups that the ontology loader now derives for every path-scoped node. Query-planner metadata only: the compiler prunes with it, the indexer never reads it, so no table DDL or indexed row changes."
+  note: "Declares the measured scope on twenty edge variants and an id traversal_path lookup on every path-scoped node, 31 in all. Query-planner metadata only: the compiler prunes with it, the indexer never reads it, so no table DDL or indexed row changes."
 - version: 112
   scope: none
   note: >-

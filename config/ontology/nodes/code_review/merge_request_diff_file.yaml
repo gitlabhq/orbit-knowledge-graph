@@ -23,6 +23,10 @@ properties:
     nullable: false
     mutable: false
     description: "Synthetic identifier: sipHash64(merge_request_diff_id, relative_order)."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_merge_request_diff_file
+      key_column: id
 
   merge_request_id:
     type: int64

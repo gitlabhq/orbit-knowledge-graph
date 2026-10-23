@@ -5,7 +5,6 @@ mod schema;
 
 use rust_embed::Embed;
 use serde::Deserialize;
-use std::collections::HashSet;
 use std::path::Path;
 
 use crate::entities::{DomainInfo, EdgeColumn, EnumType};
@@ -815,28 +814,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             })
         })
         .collect();
-    let implicit_id_lookups: Vec<_> = {
-        let declared: HashSet<&str> = ontology
-            .traversal_path_lookups
-            .iter()
-            .filter(|lookup| lookup.kind == crate::entities::TraversalPathKind::Id)
-            .map(|lookup| lookup.entity.as_str())
-            .collect();
-        ontology
-            .nodes
-            .values()
-            .filter(|node| {
-                ontology.is_path_scopable(&node.name) && !declared.contains(node.name.as_str())
-            })
-            .map(|node| crate::entities::TraversalPathLookup {
-                entity: node.name.clone(),
-                kind: crate::entities::TraversalPathKind::Id,
-                source_table: node.destination_table.clone(),
-                key_column: crate::constants::DEFAULT_PRIMARY_KEY.into(),
-            })
-            .collect()
-    };
-    ontology.traversal_path_lookups.extend(implicit_id_lookups);
 
     ontology.gc_preserve_patterns = schema.settings.gc_preserve_patterns;
 
