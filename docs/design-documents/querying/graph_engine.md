@@ -241,6 +241,7 @@ Filter placement rules for current-row reads:
 - **Mutable filters** (`state`, `status`, `draft`) evaluate after latest-row resolution, preventing stale row versions from matching. The selective form also uses them to find candidate keys.
 - **`_deleted = false`** is always applied after latest-row resolution, either on the `FINAL` scan or outside a wrapping subquery.
 - **Exact edge metadata** can enforce a node filter only when every selected relationship variant carries the current value.
+- **Shared edge columns** (`project_id` and `branch` on `gl_code_edge`) hold the same value as the matching columns on both endpoint rows. A filter on one endpoint is emitted on the edge scan. When the filter is not selective, it is also emitted on every single-hop endpoint read whose own table stores the column. `project_id` is a namespace anchor, so it is never selective and always stays a pin. The local catalog does not expose node table columns, so it emits no pin.
 - **Pinned endpoint IDs** remain predicates on the edge relation and any required current node read.
 
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
@@ -295,6 +296,7 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 - Restriction derives immutable node and relationship proofs. Planning does not consume them.
 - Scope application runs after planning and before lowering. It wraps each owned relation read with its scope predicate.
 - Lowering emits these predicates with the read. Security injection then adds caller authorization filters.
+- Security injection folds the filter when the scope predicate shares its WHERE and every lookup carries the read's own filter. It then emits `(<every lookup> != '0/') OR <authorization filter>` instead of the bare filter. A resolved anchor already proves authorization, so ClickHouse folds the scalars and drops the prefix chain from index analysis. The post-check accepts that shape only beside the matching scope predicate. It also requires each lookup's own filter to stay inside the read's eligible paths (`scope::resolved_condition`). FINAL reads keep the full chain: their scope predicate sits outside the `SELECT *` wrapper, and copying it inside measured slower on production.
 
 **Propagation** (`Ontology::propagate_scope_prefixes`)
 
