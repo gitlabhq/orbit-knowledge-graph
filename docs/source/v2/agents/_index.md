@@ -27,7 +27,7 @@ Connect the agents on your machine to GitLab Orbit with one command. Run it in a
 glab orbit setup
 ```
 
-Setup tells your agents to search code with the [local graph](../local/_index.md), indexes the repository,
+Setup tells your agents to search code with the [local graph](../cli.md#local-graph), indexes the repository,
 and installs the [GitLab Orbit skill](#gitlab-orbit-skill). The skill teaches your agent to query your GitLab data,
 such as merge requests, pipelines, and vulnerabilities.
 For a short walkthrough, see the [quickstart](../quickstart.md).

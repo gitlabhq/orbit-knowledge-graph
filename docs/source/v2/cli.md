@@ -28,7 +28,7 @@ title: GitLab Orbit CLI
 
 The GitLab Orbit CLI (`orbit`) queries GitLab Orbit on your GitLab instance from the terminal.
 Your agent runs the same commands for you.
-The CLI also indexes the code on your machine into a [local graph](local/_index.md).
+The CLI also indexes the code on your machine into a [local graph](#local-graph).
 
 ## Install the GitLab Orbit CLI
 
@@ -119,7 +119,7 @@ On Linux, the package always uses the static musl binary, which runs on all dist
 
 Remote commands query the remote graph on your GitLab instance.
 They need a GitLab credential and GitLab Orbit [turned on for your group](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
-Local commands use the [local graph](local/_index.md) on your machine. They need no GitLab account and no network.
+Local commands use the [local graph](#local-graph) on your machine. They need no GitLab account and no network.
 
 | Command | Purpose | Graph |
 |---------|---------|-------|
@@ -142,7 +142,7 @@ Local commands use the [local graph](local/_index.md) on your machine. They need
 | `version` | Print the version. | None |
 
 For all flags, run `glab orbit <command> --help`.
-To index, search, and run SQL on your machine, see [the local graph](local/_index.md).
+To index, search, and run SQL on your machine, see [local graph](#local-graph).
 
 ## Query the remote graph
 
@@ -207,9 +207,130 @@ In a terminal, it prints a summary. In a pipe or a file, it prints JSON.
 
 Use only one of `--full-path`, `--namespace-id`, and `--project-id`.
 
+## Local graph
+
+The local graph holds the code on your machine, so your agent can find definitions, callers, and imports
+in code that you committed but have not pushed. It works offline and needs no GitLab account.
+For merge requests, pipelines, work items, and vulnerabilities, use the [remote graph](#query-the-remote-graph).
+
+| Attribute | Local graph | Remote graph |
+|-----------|-------------|--------------|
+| Data | Code only | GitLab data and code |
+| Code version | The checkout on your machine, including commits that you have not pushed | The default branch of each project |
+| Refresh | You run `glab orbit index` again | Automatic |
+| Query with | `grep`, `context`, `repo-map`, and `sql` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
+
+Your agent can use both graphs in the same conversation.
+
+### Index a repository
+
+`glab orbit setup` indexes the current repository for you. To index a repository yourself, run this command in it:
+
+```shell
+glab orbit index .
+```
+
+The CLI parses the files in the working tree, skips the files that `.gitignore` excludes,
+and writes definitions, imports, and cross-file references to the graph.
+The parser and [supported languages](schema.md#supported-languages) are the same as for the remote graph.
+
+- To index each repository in a directory, give the path of the directory.
+- Each indexed commit keeps its own graph. Indexing the same commit again replaces its graph.
+- After you switch branches, `grep` and `context` index the new commit for you.
+  Run `glab orbit index .` before you use `repo-map` or `sql` on it.
+
+### Search and read code
+
+`grep` searches every line of every file in the working tree, like `rg`, and adds definitions, callers, and callees from the graph:
+
+```shell
+glab orbit grep read_file
+```
+
+The output is similar to:
+
+```plaintext
+grep "read_file" @ 779e8c44: 3 lines in 2 files
+Function read_file — src/utils.py:3-4 ←run
+  3|def read_file(path):
+  4|    return open(path).read()
+
+  src/utils.py │ Function read_file:3-4 ←run :3 def read_file(path):
+  src/main.py │ :1 from utils import read_file │ Method run:11-13 →hello,read_file :13         read_file('x')
+```
+
+- If the term names a definition, its source prints first. Then each file is one row, with each match under its enclosing definition.
+  A definition shows as `Kind name:start-end`, with `←` callers and `→` callees.
+- Plain words ignore case, `_`, `-`, and spaces, so `read_file` also matches `ReadFile`.
+  Patterns with regular expression characters are regular expressions. For an exact string, use `-F`.
+- Common `rg` options such as `-A`, `-B`, `-C`, `-w`, `-l`, `-c`, `-g`, and `-t` work. To filter by definition type, use `--kind`, such as `--kind Class,Method`.
+- A file that differs from the last commit shows `(edited since index)` and no definitions. Commit the change to index it.
+
+To read the source of a definition, and its callers and callees, pass its name to `context`:
+
+```shell
+glab orbit context read_file
+```
+
+`context` also takes fully qualified names, file paths, `path:start-end` ranges, and directories, several at a time.
+If a name matches more than five definitions, `context` lists them so you can pick one.
+
+To orient yourself in a repository, run `glab orbit repo-map`. The subcommands `tree`, `api`, `class`, `extends`,
+and `imports` show more detail.
+
+### Run SQL on the local graph
+
+```shell
+glab orbit sql -F json "SELECT count(*) AS n FROM gl_definition"
+```
+
+The SQL is read-only and runs directly on the graph tables.
+
+- By default, the query reads every indexed commit of every repository.
+  To query only the indexed commit of a checkout, use `--repo <path>`, for example `--repo .`.
+- To join across repositories, join the node tables to `_orbit_manifest` on `project_id`.
+- `-F` accepts `table` (default), `json`, `ndjson`, and `csv`. `-f <file>` or `-` reads the SQL from a file or stdin.
+
+To list the tables and columns, run `glab orbit schema`. To list the indexed repositories, run `glab orbit list`.
+
+#### Local tables
+
+| Table | Node type or content |
+|-------|----------------------|
+| `gl_directory` | `Directory` |
+| `gl_file` | `File` |
+| `gl_definition` | `Definition` |
+| `gl_imported_symbol` | `ImportedSymbol` |
+| `gl_edge` | All relationships, with `source_kind`, `relationship_kind`, and `target_kind` columns |
+| `_orbit_manifest` | One row for each indexed commit of each repository, with its path (`repo_path`), branch, commit, and status |
+
+The local graph uses these relationships: `CONTAINS`, `DEFINES`, `IMPORTS`, `CALLS`, and `EXTENDS`.
+It has no `Branch`, `Project`, or other software development lifecycle (SDLC) nodes.
+
+The local tables differ from the remote graph in these ways:
+
+- `project_id` comes from the absolute path of the checkout. It is not a GitLab project ID.
+- A `Definition` ID comes from the file path. The same function in two indexed repositories has two different IDs.
+- `File.reason` tells why the indexer skipped a file or could not parse it, such as `skip_excluded_extension`.
+- `Definition.definition_type` and `ImportedSymbol.import_type` values are specific to the language, such as `Class`, `Method`, or `NamedImport`.
+
+### Storage and privacy
+
+The CLI keeps the local graph in `~/.gitlab/orbit/local/`: one DuckDB file for each indexed commit under `revisions/`,
+and a `manifest.duckdb` file that lists them.
+
+- To keep the local graph in a different directory, set `ORBIT_DATA_DIR`.
+- Local commands accept `--db <path>` for a different graph file.
+- When an update of the CLI changes the format of the local graph, the next `index` rebuilds the graph file.
+  Index your other repositories again after you update.
+
+The local graph has no authorization layer. Anyone who can read its files can read all data in them.
+Index and query commands send no code, file paths, or query text off your machine.
+Each command sends one [telemetry](#settings-and-telemetry) event unless you turn telemetry off.
+
 ## Settings and telemetry
 
-The CLI keeps its settings and the [local graph](local/_index.md#storage-and-privacy) in `~/.gitlab/orbit/`.
+The CLI keeps its settings and the [local graph](#storage-and-privacy) in `~/.gitlab/orbit/`.
 
 The CLI sends usage events to GitLab product analytics, such as the command, the result, the duration, and the CLI version.
 It never sends repository content, file paths, or query text.
@@ -240,6 +361,5 @@ glab orbit config set telemetry.enabled false
 
 - [`glab orbit` reference](https://docs.gitlab.com/cli/orbit/)
 - [Connect your agent](agents/_index.md)
-- [Local graph](local/_index.md)
 - [Query language](queries/query-language.md)
 - [Troubleshooting](troubleshooting.md)
