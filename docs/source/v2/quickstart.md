@@ -75,7 +75,7 @@ If your agent already runs on your machine, paste this prompt instead of followi
 ```plaintext
 Install the GitLab Orbit CLI and connect it to this agent. Follow https://docs.gitlab.com/orbit/quickstart/
 (the GitLab Orbit documentation index is https://docs.gitlab.com/llms.txt). Run `glab orbit --install`,
-then `glab orbit setup` in this repository, then `glab skills install --global orbit`. When you finish, run
+then `glab orbit setup` in this repository. When you finish, run
 `glab orbit graph-status --full-path <my-group>` and show me the result.
 ```
 
