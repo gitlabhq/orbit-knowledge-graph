@@ -199,13 +199,12 @@ body:has(.product-landing) .docs-content .language-plaintext {
   overflow-wrap: anywhere;
 }
 
-/* Hero: a bordered panel on the subtle surface, like the availability box and code blocks. */
+/* Hero: a flat bordered panel. */
 .docs-content .product-hero {
   margin: var(--gl-spacing-scale-5) 0 var(--gl-spacing-scale-6);
   padding: var(--gl-spacing-scale-6);
   border: 1px solid var(--gl-border-color-default);
   border-radius: var(--gl-border-radius-lg);
-  background: var(--gl-background-color-subtle);
 }
 .docs-content .product-hero p { margin: 0; }
 .docs-content .product-hero img {
