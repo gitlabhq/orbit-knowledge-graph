@@ -181,4 +181,4 @@ storage:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
-    - {name: idx_head_commit_sha, column: head_commit_sha, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_head_commit_sha, column: head_commit_sha, type: text, granularity: 1}

@@ -541,7 +541,8 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
     INDEX idx_id id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_merge_request_id merge_request_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_head_commit_sha head_commit_sha TYPE bloom_filter(0.0001) GRANULARITY 1
+    INDEX idx_head_commit_sha lower(head_commit_sha) TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_head_commit_sha_ngram lower(head_commit_sha) TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1, add_minmax_index_for_temporal_columns = 1;
