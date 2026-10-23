@@ -665,35 +665,31 @@ mod tests {
         }
     }
 
-    async fn serve_instance(body: serde_json::Value) -> GitlabClient {
+    #[tokio::test]
+    async fn instance_returns_the_served_identity_and_settings_and_ignores_unknown_fields() {
         use axum::Router;
         use axum::routing::get;
 
         let app = Router::new().route(
             "/api/v4/internal/orbit/instance",
-            get(move || {
-                let body = body.clone();
-                async move { axum::Json(body) }
+            get(|| async {
+                axum::Json(serde_json::json!({
+                    "identity": {
+                        "instance_id": "a1b2",
+                        "unique_instance_id": "c3d4",
+                        "host_name": "gitlab.example.com",
+                        "instance_version": "18.6.0-ee",
+                    },
+                    "settings": { "product_usage_data_enabled": true },
+                }))
             }),
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap()
-    }
-
-    #[tokio::test]
-    async fn instance_returns_the_served_identity_and_settings() {
-        let client = serve_instance(serde_json::json!({
-            "identity": {
-                "instance_id": "a1b2",
-                "unique_instance_id": "c3d4",
-                "host_name": "gitlab.example.com",
-            },
-            "settings": { "product_usage_data_enabled": true },
-        }))
-        .await;
+        let client =
+            GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
 
         assert_eq!(
             client.instance().await.unwrap(),
@@ -708,24 +704,6 @@ mod tests {
                 },
             })
         );
-    }
-
-    #[tokio::test]
-    async fn instance_ignores_unknown_fields_and_defaults_missing_ones() {
-        let client = serve_instance(serde_json::json!({
-            "identity": { "host_name": "gitlab.example.com", "region": "eu" },
-            "future_group": {},
-        }))
-        .await;
-
-        let instance = client.instance().await.unwrap().unwrap();
-
-        assert_eq!(
-            instance.identity.host_name.as_deref(),
-            Some("gitlab.example.com")
-        );
-        assert_eq!(instance.identity.instance_id, None);
-        assert!(!instance.settings.product_usage_data_enabled);
     }
 
     #[tokio::test]

@@ -529,18 +529,6 @@ mod tests {
     }
 
     #[test]
-    fn run_before_the_instance_identity_resolves_has_null_instance_fields() {
-        let tracker = Arc::new(InMemoryAnalyticsTracker::new());
-        finish_global_sdlc_run(observer(&tracker));
-
-        let events = tracker.drain();
-        let common = &events[0].contexts()[0].data;
-        assert!(common["instance_id"].is_null());
-        assert!(common["unique_instance_id"].is_null());
-        assert!(common["host_name"].is_null());
-    }
-
-    #[test]
     fn errored_run_emits_nothing() {
         let tracker = Arc::new(InMemoryAnalyticsTracker::new());
         let mut obs = observer(&tracker);

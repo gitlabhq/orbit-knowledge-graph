@@ -19,10 +19,6 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 orbit-log-fields = { workspace = true }
 
-[dev-dependencies]
-axum = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
-
 [build-dependencies]
 orbit-versions = { path = "../orbit-versions" }
 prettyplease = { workspace = true }

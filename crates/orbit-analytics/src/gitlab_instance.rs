@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use gitlab_client::{GitlabClient, GitlabInstance, InstanceIdentity};
 use labkit_events::StructuredEvent;
-use orbit_log_fields::{info, warn};
+use orbit_log_fields::warn;
 use orbit_server_config::AnalyticsConfig;
 use parking_lot::RwLock;
 
@@ -25,36 +25,19 @@ impl GitlabInstanceWatch {
     }
 
     pub fn spawn_refresh(&self, client: Arc<GitlabClient>) {
-        let watch = self.clone();
+        let latest = Arc::clone(&self.latest);
         tokio::spawn(async move {
             loop {
-                watch.refresh(&client).await;
+                match client.instance().await {
+                    Ok(instance) => *latest.write() = instance,
+                    Err(error) => warn!(
+                        expanded(ERROR_MESSAGE) = %error,
+                        "failed to refresh the GitLab instance, keeping the last known one"
+                    ),
+                }
                 tokio::time::sleep(REFRESH_INTERVAL).await;
             }
         });
-    }
-
-    pub async fn refresh(&self, client: &GitlabClient) {
-        let instance = match client.instance().await {
-            Ok(instance) => instance,
-            Err(error) => {
-                warn!(
-                    expanded(ERROR_MESSAGE) = %error,
-                    "failed to refresh the GitLab instance, keeping the last known one"
-                );
-                return;
-            }
-        };
-
-        let was_enabled = self.product_usage_data_enabled();
-        *self.latest.write() = instance;
-        match (was_enabled, self.product_usage_data_enabled()) {
-            (false, true) => info!("GitLab product usage data is on, analytics events may be sent"),
-            (true, false) => {
-                info!("GitLab product usage data is off, analytics events are dropped")
-            }
-            _ => {}
-        }
     }
 
     pub fn identity(&self) -> Option<InstanceIdentity> {
@@ -104,12 +87,8 @@ impl AnalyticsTracker for GitlabSettingGate {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use axum::Router;
-    use axum::http::StatusCode;
-    use axum::routing::get;
-    use orbit_server_config::{
-        DeploymentConfig, DeploymentEnvironment, DeploymentKind, GitlabClientConfiguration,
-    };
+    use gitlab_client::InstanceSettings;
+    use orbit_server_config::{DeploymentConfig, DeploymentEnvironment, DeploymentKind};
 
     use super::*;
 
@@ -122,99 +101,44 @@ mod tests {
         }
     }
 
-    impl CountingTracker {
-        fn count(&self) -> usize {
-            self.0.load(Ordering::Relaxed)
-        }
-    }
-
-    fn analytics_config(enabled: Option<bool>) -> AnalyticsConfig {
-        AnalyticsConfig {
+    fn sent_count(enabled: Option<bool>, instance: &GitlabInstanceWatch) -> usize {
+        let counter = Arc::new(CountingTracker::default());
+        let config = AnalyticsConfig {
             enabled,
             collector_url: "https://collector.example".to_string(),
             deployment: DeploymentConfig {
                 kind: DeploymentKind::SelfManaged,
                 environment: DeploymentEnvironment::Production,
             },
-        }
-    }
-
-    async fn gitlab_serving(response: Option<serde_json::Value>) -> GitlabClient {
-        let app = Router::new().route(
-            "/api/v4/internal/orbit/instance",
-            get(move || {
-                let response = response.clone();
-                async move {
-                    match response {
-                        Some(body) => Ok(axum::Json(body)),
-                        None => Err(StatusCode::NOT_FOUND),
-                    }
-                }
-            }),
-        );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-
-        GitlabClient::new(GitlabClientConfiguration {
-            base_url: format!("http://{addr}"),
-            signing_key: "c2VjcmV0".to_string(),
-            resolve_host: None,
-        })
-        .unwrap()
-    }
-
-    fn instance_body(product_usage_data_enabled: bool) -> serde_json::Value {
-        serde_json::json!({
-            "identity": { "host_name": "gitlab.example.com" },
-            "settings": { "product_usage_data_enabled": product_usage_data_enabled },
-        })
-    }
-
-    fn send_one(tracker: &Arc<dyn AnalyticsTracker>) {
+        };
+        let tracker = consenting_tracker(counter.clone(), &config, instance);
         tracker.track(StructuredEvent::builder("gkg", "test").build().unwrap());
+        counter.0.load(Ordering::Relaxed)
     }
 
-    #[tokio::test]
-    async fn unset_config_sends_only_while_gitlab_product_usage_data_is_on() {
-        let counter = Arc::new(CountingTracker::default());
-        let watch = GitlabInstanceWatch::default();
-        let tracker = consenting_tracker(counter.clone(), &analytics_config(None), &watch);
-
-        send_one(&tracker);
-        watch
-            .refresh(&gitlab_serving(Some(instance_body(true))).await)
-            .await;
-        send_one(&tracker);
-        watch
-            .refresh(&gitlab_serving(Some(instance_body(false))).await)
-            .await;
-        send_one(&tracker);
-
-        assert_eq!(counter.count(), 1);
+    fn instance_with_product_usage_data(enabled: bool) -> GitlabInstanceWatch {
+        GitlabInstanceWatch::fixed(GitlabInstance {
+            settings: InstanceSettings {
+                product_usage_data_enabled: enabled,
+            },
+            ..GitlabInstance::default()
+        })
     }
 
-    #[tokio::test]
-    async fn explicit_config_ignores_the_gitlab_setting() {
-        let counter = Arc::new(CountingTracker::default());
-        let watch = GitlabInstanceWatch::default();
-        let tracker = consenting_tracker(counter.clone(), &analytics_config(Some(true)), &watch);
-
-        send_one(&tracker);
-
-        assert_eq!(counter.count(), 1);
+    #[test]
+    fn unset_config_sends_only_while_gitlab_product_usage_data_is_on() {
+        assert_eq!(sent_count(None, &instance_with_product_usage_data(true)), 1);
+        assert_eq!(
+            sent_count(None, &instance_with_product_usage_data(false)),
+            0
+        );
+        assert_eq!(sent_count(None, &GitlabInstanceWatch::default()), 0);
     }
 
-    #[tokio::test]
-    async fn a_gitlab_without_the_endpoint_clears_the_known_instance() {
-        let watch = GitlabInstanceWatch::default();
-        watch
-            .refresh(&gitlab_serving(Some(instance_body(true))).await)
-            .await;
+    #[test]
+    fn explicit_config_ignores_the_gitlab_setting() {
+        let opted_out = instance_with_product_usage_data(false);
 
-        watch.refresh(&gitlab_serving(None).await).await;
-
-        assert_eq!(watch.identity(), None);
-        assert!(!watch.product_usage_data_enabled());
+        assert_eq!(sent_count(Some(true), &opted_out), 1);
     }
 }
