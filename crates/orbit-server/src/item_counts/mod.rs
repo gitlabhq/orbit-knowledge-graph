@@ -37,10 +37,7 @@ impl ItemCountService {
         scopes: &[TraversalPath],
     ) -> Result<Vec<ScopeItemCounts>, Status> {
         let plan = CountPlan::new(ontology, security_context, scopes);
-        let counts = self
-            .read_counts(&plan)
-            .await
-            .map_err(|_| Status::internal("item counts could not be read"))?;
+        let counts = self.read_counts(&plan).await?;
         Ok(plan.answer(scopes, &counts))
     }
 
@@ -51,8 +48,7 @@ impl ItemCountService {
         scopes: &[TraversalPath],
     ) -> Vec<ScopeItemCounts> {
         let plan = CountPlan::new(ontology, security_context, scopes);
-        let counts = self.read_counts(&plan).await.unwrap_or_default();
-        plan.answer(scopes, &counts)
+        plan.answer(scopes, &self.read_counts(&plan).await.unwrap_or_default())
     }
 
     async fn read_counts(&self, plan: &CountPlan<'_>) -> Result<ScopeCounts, Status> {
@@ -61,11 +57,12 @@ impl ItemCountService {
         }
         counts::count_visible_entities(&self.client, &plan.scopes, &plan.visibility)
             .await
-            .inspect_err(|error| {
+            .map_err(|error| {
                 warn!(
                     expanded(ERROR_MESSAGE) = %error,
                     "Item counts could not be read"
-                )
+                );
+                Status::internal("item counts could not be read")
             })
     }
 }

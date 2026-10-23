@@ -24,7 +24,12 @@ pub async fn count_visible_entities(
     scopes: &[&TraversalPath],
     visibility: &Visibility,
 ) -> Result<ScopeCounts, Status> {
-    let sql = build_count_query(scopes, visibility);
+    let sql = visibility
+        .entities
+        .iter()
+        .map(|entity| build_entity_count_query(entity, visibility.scope_indexes(entity), scopes))
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ");
     let batches = fetch_status_query_batches(
         client,
         &sql,
@@ -34,15 +39,6 @@ pub async fn count_visible_entities(
     )
     .await?;
     group_counts_by_scope(&batches)
-}
-
-fn build_count_query(scopes: &[&TraversalPath], visibility: &Visibility) -> String {
-    visibility
-        .entities
-        .iter()
-        .map(|entity| build_entity_count_query(entity, visibility.scope_indexes(entity), scopes))
-        .collect::<Vec<_>>()
-        .join(" UNION ALL ")
 }
 
 fn build_entity_count_query(

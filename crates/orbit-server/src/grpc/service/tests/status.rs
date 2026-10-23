@@ -1,5 +1,4 @@
 use super::*;
-use crate::auth::claims::TraversalPathClaim;
 
 async fn indexing_status_error(paths: &[&str]) -> tonic::Code {
     let request = GetIndexingStatusRequest {
@@ -19,19 +18,9 @@ fn item_counts_request(path: &str, paths: &[&str]) -> GetItemCountsRequest {
     }
 }
 
-fn member_of(group: &str) -> Claims {
-    Claims {
-        group_traversal_ids: vec![TraversalPathClaim {
-            path: TraversalPath::new_unchecked(group),
-            access_levels: vec![20],
-        }],
-        ..test_claims()
-    }
-}
-
 async fn item_counts_error(request: GetItemCountsRequest) -> tonic::Code {
     test_service()
-        .get_item_counts(signed_request(request, member_of("1/22/")))
+        .get_item_counts(authed_request(request))
         .await
         .unwrap_err()
         .code()
@@ -110,7 +99,7 @@ async fn status_rpcs_deny_a_path_outside_the_callers_groups() {
         tonic::Code::PermissionDenied
     );
     assert_eq!(
-        item_counts_error(item_counts_request("1/33/", &[])).await,
+        item_counts_error(item_counts_request("1/22/", &[])).await,
         tonic::Code::PermissionDenied
     );
 }

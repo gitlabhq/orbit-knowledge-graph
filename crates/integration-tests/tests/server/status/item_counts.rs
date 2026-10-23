@@ -40,19 +40,10 @@ async fn count(
     security_context: &SecurityContext,
     scope: &str,
 ) -> HashMap<String, i64> {
-    count_many(ctx, security_context, &[scope]).await.remove(0)
-}
-
-async fn count_many(
-    ctx: &TestContext,
-    security_context: &SecurityContext,
-    scopes: &[&str],
-) -> Vec<HashMap<String, i64>> {
-    count_items(ctx, security_context, scopes)
+    count_items(ctx, security_context, &[scope])
         .await
-        .into_iter()
-        .map(|scope_counts| scope_counts.counts)
-        .collect()
+        .remove(0)
+        .counts
 }
 
 fn role_on(paths: &[(&str, u32)]) -> SecurityContext {
@@ -164,8 +155,8 @@ async fn each_scope_gets_its_own_cache_entry(ctx: &TestContext) {
 async fn one_scope_counts_skip_the_array_join(ctx: &TestContext) {
     let db = ctx.fork("item_counts_query_shape").await;
 
-    count_many(&db, &admin_context(), &["1/100/"]).await;
-    count_many(&db, &admin_context(), &["1/100/", "1/101/"]).await;
+    count(&db, &admin_context(), "1/100/").await;
+    count_items(&db, &admin_context(), &["1/100/", "1/101/"]).await;
 
     let array_joins = read_cached_query_log(
         &db,
@@ -177,25 +168,25 @@ async fn one_scope_counts_skip_the_array_join(ctx: &TestContext) {
 }
 
 async fn nested_scopes_count_rows_at_each_scope_once(ctx: &TestContext) {
-    let counts = count_many(ctx, &admin_context(), &["1/", "1/100/", "1/100/1000/"]).await;
+    let counts = count_items(ctx, &admin_context(), &["1/", "1/100/", "1/100/1000/"]).await;
 
-    let projects: Vec<i64> = counts.iter().map(|c| c["Project"]).collect();
-    let groups: Vec<i64> = counts.iter().map(|c| c["Group"]).collect();
+    let projects: Vec<i64> = counts.iter().map(|c| c.counts["Project"]).collect();
+    let groups: Vec<i64> = counts.iter().map(|c| c.counts["Group"]).collect();
     assert_eq!((projects, groups), (vec![5, 2, 1], vec![2, 1, 0]));
 }
 
 async fn each_scope_needs_its_own_role(ctx: &TestContext) {
     let security_context = role_on(&[("1/100/", 25), ("1/101/", 20)]);
 
-    let counts = count_many(ctx, &security_context, &["1/100/", "1/101/", "1/107/"]).await;
+    let counts = count_items(ctx, &security_context, &["1/100/", "1/101/", "1/107/"]).await;
 
     let vulnerabilities: Vec<Option<i64>> = counts
         .iter()
-        .map(|c| c.get("Vulnerability").copied())
+        .map(|c| c.counts.get("Vulnerability").copied())
         .collect();
     assert_eq!(vulnerabilities, [Some(0), None, None]);
-    assert_eq!(counts[1]["MergeRequest"], 1);
-    assert!(counts[2].is_empty(), "counts: {:?}", counts[2]);
+    assert_eq!(counts[1].counts["MergeRequest"], 1);
+    assert!(counts[2].counts.is_empty());
 }
 
 async fn a_hundred_scopes_are_counted_in_one_query(ctx: &TestContext) {
@@ -203,9 +194,9 @@ async fn a_hundred_scopes_are_counted_in_one_query(ctx: &TestContext) {
     let scopes: Vec<String> = (0..100).map(|id| format!("1/{}/", 100 + id)).collect();
     let scopes: Vec<&str> = scopes.iter().map(String::as_str).collect();
 
-    let counts = count_many(&db, &admin_context(), &scopes).await;
+    let counts = count_items(&db, &admin_context(), &scopes).await;
 
-    let projects: Vec<i64> = counts.iter().take(3).map(|c| c["Project"]).collect();
+    let projects: Vec<i64> = counts.iter().take(3).map(|c| c.counts["Project"]).collect();
     assert_eq!((counts.len(), projects), (100, vec![2, 1, 0]));
     assert_eq!(query_cache_usage(&db).await, ["Write"]);
 }

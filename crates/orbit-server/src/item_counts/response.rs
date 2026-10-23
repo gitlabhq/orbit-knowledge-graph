@@ -20,16 +20,13 @@ pub fn build_item_counts_response(
             domains: build_domain_item_counts(ontology, &scope_counts.counts),
         })
         .collect();
-    if request.traversal_paths.is_empty() {
-        let domains = namespaces.pop().map(|namespace| namespace.domains);
-        return GetItemCountsResponse {
-            domains: domains.unwrap_or_default(),
-            ..Default::default()
-        };
-    }
+    let domains = match request.traversal_paths.is_empty() {
+        true => namespaces.pop().map(|namespace| namespace.domains),
+        false => None,
+    };
     GetItemCountsResponse {
+        domains: domains.unwrap_or_default(),
         namespaces,
-        ..Default::default()
     }
 }
 
