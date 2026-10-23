@@ -295,7 +295,6 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 - Restriction derives immutable node and relationship proofs. Planning does not consume them.
 - Scope application runs after planning and before lowering. It wraps each owned relation read with its scope predicate.
 - Lowering emits these predicates with the read. Security injection then adds caller authorization filters.
-- Security injection folds the filter when the scope predicate shares its WHERE and every lookup carries the read's own filter. It then emits `(<every lookup> != '0/') OR <authorization filter>` instead of the bare filter. A resolved anchor already proves authorization, so ClickHouse folds the scalars and drops the prefix chain from index analysis. The post-check accepts that shape only beside the matching scope predicate. It also requires each lookup's own filter to stay inside the read's eligible paths (`scope::resolved_condition`). FINAL reads keep the full chain: their scope predicate sits outside the `SELECT *` wrapper, and copying it inside measured slower on production.
 
 **Propagation** (`Ontology::propagate_scope_prefixes`)
 
