@@ -166,7 +166,7 @@ impl IndexingState {
     fn label(self) -> &'static str {
         match self {
             IndexingState::NotStarted => "not indexed",
-            IndexingState::Indexing => "backfilling",
+            IndexingState::Indexing => "indexing",
             IndexingState::Ready => "indexed",
             IndexingState::Failed => "error",
             IndexingState::Unknown => "unknown",
@@ -223,7 +223,7 @@ mod tests {
         assert_eq!(
             status.format_indexing(),
             "ci            indexed\n\
-             source_code   backfilling\n\
+             source_code   indexing\n\
              Projects      40 of 1,200 indexed · 3 failed"
         );
         assert_eq!(

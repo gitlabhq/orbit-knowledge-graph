@@ -22,14 +22,13 @@ Read this when a command fails with "command not found", an auth error, or a fea
    glab auth login    # if not authenticated
    ```
 
-3. Orbit Remote: the feature flag is on for your namespace:
+3. Orbit Remote: Orbit is on for your group:
 
    ```sh
    glab orbit graph-status --full-path GROUP_NAMESPACE
    ```
 
-   Exit 0 means ready to query. Exit 2 means Orbit is not turned on for that group or project,
-   or you cannot read it; ask your GitLab admin.
+   Exit 0 means ready to query. For other exit codes, see [graph-status exit codes](#graph-status-exit-codes).
 
 4. Orbit Local: no server needed:
 
@@ -52,6 +51,10 @@ Read this when a command fails with "command not found", an auth error, or a fea
 | `5`  | 429  | Rate limited.                                                |
 
 `glab orbit query --response-format raw` prints the full JSON error payload when the exit code alone is not enough.
+
+## graph-status exit codes
+
+`graph-status` reads the GitLab GraphQL API. Exit 2 means Orbit is not available for your user, or the group or project does not exist. Exit 4 means Orbit is not turned on for that group or project, or your role is below Reporter. Exit 4 also means that the token cannot read Orbit status on this GitLab version. Fix: an Owner of the top-level group turns Orbit on under **Orbit > Configuration**. A GraphQL rate limit arrives as a field error. The command prints the fields that resolved, writes the message to stderr, and exits 1, not 5. Back off when stderr has that message.
 
 ## Exit 2: feature flag off, or old glab
 

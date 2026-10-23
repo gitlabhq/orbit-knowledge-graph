@@ -13,19 +13,30 @@ struct CapturedRequest {
     body: String,
 }
 
+fn serve_once(
+    response_body: &'static str,
+    content_type: &'static str,
+) -> (String, thread::JoinHandle<CapturedRequest>) {
+    serve_with(move |listener| answer_request(&listener, response_body, content_type))
+}
+
 fn serve_in_order(
     response_bodies: &'static [&'static str],
-    content_type: &'static str,
 ) -> (String, thread::JoinHandle<Vec<CapturedRequest>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
-    let base_url = format!("http://{}", listener.local_addr().expect("mock addr"));
-    let handle = thread::spawn(move || {
+    serve_with(move |listener| {
         response_bodies
             .iter()
-            .map(|body| answer_request(&listener, body, content_type))
+            .map(|body| answer_request(&listener, body, "application/json"))
             .collect()
-    });
-    (base_url, handle)
+    })
+}
+
+fn serve_with<T: Send + 'static>(
+    answer: impl FnOnce(TcpListener) -> T + Send + 'static,
+) -> (String, thread::JoinHandle<T>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let base_url = format!("http://{}", listener.local_addr().expect("mock addr"));
+    (base_url, thread::spawn(move || answer(listener)))
 }
 
 fn answer_request(
@@ -126,9 +137,9 @@ fn run_orbit_in(dir: &Path, base_url: &str, args: &[&str]) -> std::process::Outp
 
 #[test]
 fn ontology_sends_get_with_expand_and_auth_header() {
-    let (base_url, handle) = serve_in_order(&[r#"{"schema_version":"1"}"#], "application/json");
+    let (base_url, handle) = serve_once(r#"{"schema_version":"1"}"#, "application/json");
     let output = run_orbit(&base_url, &["ontology", "User", "Project"]);
-    let request = handle.join().expect("join mock").remove(0);
+    let request = handle.join().expect("join mock");
 
     assert!(
         output.status.success(),
@@ -147,9 +158,9 @@ fn ontology_sends_get_with_expand_and_auth_header() {
 
 #[test]
 fn status_endpoint_is_get_orbit_status() {
-    let (base_url, handle) = serve_in_order(&[r#"{"status":"healthy"}"#], "application/json");
+    let (base_url, handle) = serve_once(r#"{"status":"healthy"}"#, "application/json");
     let output = run_orbit(&base_url, &["status"]);
-    let request = handle.join().expect("join mock").remove(0);
+    let request = handle.join().expect("join mock");
 
     assert!(
         output.status.success(),
@@ -161,9 +172,9 @@ fn status_endpoint_is_get_orbit_status() {
 
 #[test]
 fn dsl_endpoint_is_get_orbit_schema_dsl() {
-    let (base_url, handle) = serve_in_order(&[r#"{"$schema":"draft"}"#], "application/json");
+    let (base_url, handle) = serve_once(r#"{"$schema":"draft"}"#, "application/json");
     let output = run_orbit(&base_url, &["dsl"]);
-    let request = handle.join().expect("join mock").remove(0);
+    let request = handle.join().expect("join mock");
 
     assert!(
         output.status.success(),
@@ -186,12 +197,12 @@ fn graphql_variables(request: &CapturedRequest) -> serde_json::Value {
 
 #[test]
 fn graph_status_asks_graphql_for_the_full_path() {
-    let (base_url, handle) = serve_in_order(&[GRAPH_STATUS_RESPONSE], "application/json");
+    let (base_url, handle) = serve_once(GRAPH_STATUS_RESPONSE, "application/json");
     let output = run_orbit(
         &base_url,
         &["graph-status", "--full-path", "gitlab-org/gitlab"],
     );
-    let request = handle.join().expect("join mock").remove(0);
+    let request = handle.join().expect("join mock");
 
     assert!(
         output.status.success(),
@@ -215,7 +226,7 @@ fn graph_status_without_scope_inspects_the_origin_remote_project() {
         "ssh://git@localhost:2222/my-group/my-project.git",
         "https://localhost/my-group/my-project",
     ] {
-        let (base_url, handle) = serve_in_order(&[GRAPH_STATUS_RESPONSE], "application/json");
+        let (base_url, handle) = serve_once(GRAPH_STATUS_RESPONSE, "application/json");
         let base_url = base_url.replace("127.0.0.1", "localhost");
         let clone = tempfile::tempdir().expect("tempdir");
         for args in [
@@ -231,7 +242,7 @@ fn graph_status_without_scope_inspects_the_origin_remote_project() {
         }
 
         let output = run_orbit_in(clone.path(), &base_url, &["graph-status"]);
-        let request = handle.join().expect("join mock").remove(0);
+        let request = handle.join().expect("join mock");
 
         assert!(
             output.status.success(),
@@ -248,10 +259,8 @@ fn graph_status_without_scope_inspects_the_origin_remote_project() {
 
 #[test]
 fn graph_status_llm_format_prints_the_namespace_status_as_toon() {
-    let (base_url, handle) = serve_in_order(
-        &[r#"{"full_path":"gsd-alpha"}"#, GRAPH_STATUS_RESPONSE],
-        "application/json",
-    );
+    let (base_url, handle) =
+        serve_in_order(&[r#"{"full_path":"gsd-alpha"}"#, GRAPH_STATUS_RESPONSE]);
     let output = run_orbit(
         &base_url,
         &[
@@ -281,18 +290,15 @@ fn graph_status_llm_format_prints_the_namespace_status_as_toon() {
 
 #[test]
 fn graph_status_resolves_a_project_id_to_its_full_path() {
-    let (base_url, handle) = serve_in_order(
-        &[
-            r#"{"path_with_namespace":"gsd-alpha/app"}"#,
-            r#"{"data":{"group":null,"project":null}}"#,
-        ],
-        "application/json",
-    );
+    let (base_url, handle) = serve_in_order(&[
+        r#"{"path_with_namespace":"gsd-alpha/app"}"#,
+        r#"{"data":{"group":null,"project":null}}"#,
+    ]);
     let output = run_orbit(&base_url, &["graph-status", "--project-id", "2"]);
     let requests = handle.join().expect("join mock");
 
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("project 2 not found"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Group or project not found"));
     assert_eq!(requests[0].request_line, "GET /api/v4/projects/2 HTTP/1.1");
     assert_eq!(
         graphql_variables(&requests[1]),
@@ -300,36 +306,68 @@ fn graph_status_resolves_a_project_id_to_its_full_path() {
     );
 }
 
-#[test]
-fn graph_status_without_orbit_asks_the_status_endpoint_why() {
-    let (base_url, handle) = serve_in_order(
-        &[
-            r#"{"data":{"group":{"orbit":{"indexing":null,"itemCounts":null}},"project":null}}"#,
-            r#"{"status":"healthy"}"#,
-        ],
-        "application/json",
-    );
+const STATUS_WITHOUT_ORBIT: &str =
+    r#"{"data":{"group":{"orbit":{"indexing":null,"itemCounts":null}},"project":null}}"#;
+
+fn run_graph_status_without_orbit(bodies: &'static [&'static str]) -> std::process::Output {
+    let (base_url, handle) = serve_in_order(bodies);
     let output = run_orbit(&base_url, &["graph-status", "--full-path", "gsd-alpha"]);
     let requests = handle.join().expect("join mock");
-
-    assert_eq!(output.status.code(), Some(2));
     assert_eq!(
         requests[1].request_line,
         "GET /api/v4/orbit/status HTTP/1.1"
     );
+    output
+}
+
+#[test]
+fn graph_status_without_orbit_for_the_scope_exits_forbidden() {
+    let output = run_graph_status_without_orbit(&[
+        STATUS_WITHOUT_ORBIT,
+        r#"{"user":{"available":true},"system":{"status":"healthy"}}"#,
+    ]);
+
+    assert_eq!(output.status.code(), Some(4));
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("Orbit is not turned on for gsd-alpha")
+        String::from_utf8_lossy(&output.stderr)
+            .contains("Orbit is not turned on for gsd-alpha, or your role is below Reporter.")
     );
     assert!(output.stdout.is_empty());
 }
 
 #[test]
+fn graph_status_without_orbit_for_the_user_exits_unavailable() {
+    let output = run_graph_status_without_orbit(&[
+        STATUS_WITHOUT_ORBIT,
+        r#"{"user":{"available":false},"system":null}"#,
+    ]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Orbit is not available for your user")
+    );
+}
+
+#[test]
+fn graph_status_with_a_token_that_cannot_read_orbit_exits_forbidden() {
+    let (base_url, handle) = serve_once(
+        r#"{"data":{"group":{"orbit":null},"project":null}}"#,
+        "application/json",
+    );
+    let output = run_orbit(&base_url, &["graph-status", "--full-path", "gsd-alpha"]);
+    handle.join().expect("join mock");
+
+    assert_eq!(output.status.code(), Some(4));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("This token cannot read Orbit status")
+    );
+}
+
+#[test]
 fn graph_status_prints_the_data_and_fails_on_a_field_error() {
-    let (base_url, handle) = serve_in_order(
-        &[
-            r#"{"data":{"group":{"orbit":{"indexing":{"state":"READY"},"itemCounts":null}},"project":null},
-              "errors":[{"message":"requested too many times","path":["group","orbit","itemCounts"]}]}"#,
-        ],
+    let (base_url, handle) = serve_once(
+        r#"{"data":{"group":{"orbit":{"indexing":{"state":"READY"},"itemCounts":null}},"project":null},
+            "errors":[{"message":"requested too many times","path":["group","orbit","itemCounts"]}]}"#,
         "application/json",
     );
     let output = run_orbit(&base_url, &["graph-status", "--full-path", "gsd-alpha"]);
@@ -343,10 +381,8 @@ fn graph_status_prints_the_data_and_fails_on_a_field_error() {
 
 #[test]
 fn graph_status_prints_nothing_on_a_query_error() {
-    let (base_url, handle) = serve_in_order(
-        &[
-            r#"{"errors":[{"message":"Field 'unknownField' doesn't exist on type 'OrbitIndexing'"}]}"#,
-        ],
+    let (base_url, handle) = serve_once(
+        r#"{"errors":[{"message":"Field 'unknownField' doesn't exist on type 'OrbitIndexing'"}]}"#,
         "application/json",
     );
     let output = run_orbit(&base_url, &["graph-status", "--full-path", "gsd-alpha"]);
@@ -359,7 +395,7 @@ fn graph_status_prints_nothing_on_a_query_error() {
 
 #[test]
 fn query_posts_envelope_with_resolved_response_format() {
-    let (base_url, handle) = serve_in_order(&["@ok"], "text/plain");
+    let (base_url, handle) = serve_once("@ok", "text/plain");
     let output = {
         use std::process::Stdio;
         let mut child = Command::new(env!("CARGO_BIN_EXE_orbit"))
@@ -381,7 +417,7 @@ fn query_posts_envelope_with_resolved_response_format() {
             .expect("write stdin");
         child.wait_with_output().expect("wait orbit query")
     };
-    let request = handle.join().expect("join mock").remove(0);
+    let request = handle.join().expect("join mock");
 
     assert!(
         output.status.success(),
@@ -399,9 +435,9 @@ fn query_posts_envelope_with_resolved_response_format() {
 
 #[test]
 fn query_posts_positional_text_as_query_string() {
-    let (base_url, handle) = serve_in_order(&["@ok"], "text/plain");
+    let (base_url, handle) = serve_once("@ok", "text/plain");
     let output = run_orbit(&base_url, &["query", "CALL db.schema()"]);
-    let request = handle.join().expect("join mock").remove(0);
+    let request = handle.join().expect("join mock");
 
     assert!(
         output.status.success(),

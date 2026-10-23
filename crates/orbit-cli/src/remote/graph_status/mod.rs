@@ -10,7 +10,8 @@ use toon_format::{EncodeOptions, encode};
 use self::scope::Scope;
 use self::summary::GraphStatus;
 use super::client::OrbitClient;
-use super::error::{EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError};
+use super::error::{EXIT_FORBIDDEN, EXIT_GENERIC, RemoteError, build_not_found_error};
+use super::status::select_status_output;
 use super::{ResponseFormat, pretty_value, write_stdout};
 use crate::tui;
 
@@ -20,7 +21,8 @@ const GRAPH_STATUS_QUERY: &str = "query($fullPath: ID!) { \
      fragment status on OrbitNamespace { \
      indexing { state areas { name state } projects { indexed totalKnown gaps } } \
      itemCounts { domains { name entities { name count } } } }";
-const ORBIT_STATUS_POINTERS: [&str; 2] = ["/group/orbit", "/project/orbit"];
+const SCOPE_POINTERS: [&str; 2] = ["/group", "/project"];
+const DAP_SCOPES_RELEASE: &str = "the GitLab release that includes gitlab MR 0";
 
 #[derive(Deserialize)]
 struct GraphqlResponse {
@@ -55,14 +57,20 @@ pub(crate) async fn run_graph_status(
 
     let status = match (format, std::io::stdout().is_terminal()) {
         (None, true) => show_summary(&client, &scope).await?,
-        (Some(ResponseFormat::Llm), _) => {
+        (format, _) => {
             let status = read_orbit_status(&client, &scope).await?;
-            write_stdout(encode_toon(&status.status)?.as_bytes())?;
-            status
-        }
-        _ => {
-            let status = read_orbit_status(&client, &scope).await?;
-            write_stdout(&pretty_value(&status.status))?;
+            let output = match format {
+                Some(ResponseFormat::Llm) => encode(&status.status, &EncodeOptions::default())
+                    .map_err(|error| {
+                        RemoteError::new(
+                            EXIT_GENERIC,
+                            format!("could not format graph status: {error}"),
+                        )
+                    })?
+                    .into_bytes(),
+                _ => pretty_value(&status.status),
+            };
+            write_stdout(&output)?;
             status
         }
     };
@@ -109,14 +117,21 @@ async fn read_orbit_status(
         .query_graphql(request.to_string().into_bytes())
         .await?;
     let mut response: GraphqlResponse = serde_json::from_slice(&body).map_err(map_parse_error)?;
-    let status = ORBIT_STATUS_POINTERS.iter().find_map(|pointer| {
-        response
-            .data
-            .pointer_mut(pointer)
-            .filter(|status| !status.is_null())
-            .map(Value::take)
-    });
-    let field_errors = response.errors.iter().all(is_orbit_field_error);
+    let scope_data = SCOPE_POINTERS
+        .into_iter()
+        .find(|pointer| {
+            response
+                .data
+                .pointer(pointer)
+                .is_some_and(|data| !data.is_null())
+        })
+        .and_then(|pointer| response.data.pointer_mut(pointer));
+    let scope_found = scope_data.is_some();
+    let status = scope_data
+        .and_then(|data| data.get_mut("orbit"))
+        .filter(|status| !status.is_null())
+        .map(Value::take);
+    let all_under_orbit = response.errors.iter().all(is_orbit_field_error);
     let messages: Vec<String> = response
         .errors
         .into_iter()
@@ -124,7 +139,7 @@ async fn read_orbit_status(
         .collect();
 
     match status {
-        Some(status) if messages.is_empty() || field_errors => {
+        Some(status) if all_under_orbit => {
             if messages.is_empty() && status["indexing"].is_null() {
                 return Err(explain_missing_status(client, scope).await);
             }
@@ -137,14 +152,14 @@ async fn read_orbit_status(
             EXIT_GENERIC,
             format!("graph status query failed: {}", messages.join("; ")),
         )),
-        _ => Err(RemoteError::new(
-            EXIT_UNAVAILABLE,
+        None if scope_found => Err(RemoteError::new(
+            EXIT_FORBIDDEN,
             format!(
-                "{scope} not found\n\n\
-                 The Orbit API found no group or project with this path or ID, or you\n\
-                 are not a member of it."
+                "This token cannot read Orbit status on this GitLab version. \
+                 Duo Agent Platform tokens need {DAP_SCOPES_RELEASE}."
             ),
         )),
+        _ => Err(build_not_found_error("Group or project")),
     }
 }
 
@@ -156,20 +171,14 @@ fn is_orbit_field_error(error: &GraphqlError) -> bool {
 }
 
 async fn explain_missing_status(client: &OrbitClient, scope: &Scope) -> RemoteError {
-    match client.get_status().await {
-        Err(error) => error,
-        Ok(_) => RemoteError::new(
-            EXIT_UNAVAILABLE,
-            format!("Orbit is not turned on for {scope}, or you cannot read it."),
-        ),
-    }
-}
-
-fn encode_toon(status: &Value) -> Result<String, RemoteError> {
-    encode(status, &EncodeOptions::default()).map_err(|error| {
+    let unavailable = match client.get_status().await {
+        Ok(body) => select_status_output(&body).err(),
+        Err(error) => Some(error),
+    };
+    unavailable.unwrap_or_else(|| {
         RemoteError::new(
-            EXIT_GENERIC,
-            format!("could not format graph status: {error}"),
+            EXIT_FORBIDDEN,
+            format!("Orbit is not turned on for {scope}, or your role is below Reporter."),
         )
     })
 }
