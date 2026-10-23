@@ -25,8 +25,9 @@ To find your project ID, see [bounded nodes](queries/query-language.md#bounded-n
 Find every class that inherits from a base class, before you change the base class.
 
 ```plaintext
-Using GitLab Orbit, in <my-group>/<my-project>, which classes inherit from <BasePolicy>,
-directly or through other classes? Which open merge requests touch their files right now?
+Using GitLab Orbit, in <my-group>/<my-project>, which classes inherit from
+<BasePolicy>, directly or through other classes? Which open merge requests
+touch their files right now?
 ```
 
 ```gql orbit-query
@@ -45,8 +46,9 @@ LIMIT 100
 Find the issues, tasks, and incidents that production deployments closed.
 
 ```plaintext
-Using GitLab Orbit, which issues, tasks, and incidents did the merge requests deployed to
-<production> in <my-group>/<my-project> close this week? How many of them are bugs?
+Using GitLab Orbit, which issues, tasks, and incidents did the merge requests
+deployed to <production> in <my-group>/<my-project> close this week? How many
+of them are bugs?
 ```
 
 ```gql orbit-query
@@ -66,10 +68,10 @@ LIMIT 10
 Find how the merge requests that agents create perform, from the head pipeline to production.
 
 ```plaintext
-Using GitLab Orbit, for <my-group>/<my-project> in the last <30 days>:
-- How many merge requests did agents create, by flow type?
-- How many merged or closed, and what did their head pipelines do?
-- How many of them reached <production>, and were any reverted?
+Using GitLab Orbit, for <my-group>/<my-project> in the last <30 days>: - How
+many merge requests did agents create, by flow type? - How many merged or
+closed, and what did their head pipelines do? - How many of them reached
+<production>, and were any reverted?
 ```
 
 ```gql orbit-query
@@ -89,9 +91,9 @@ LIMIT 30
 Find who approves changes to a file, and what reviewers said about earlier changes.
 
 ```plaintext
-Using GitLab Orbit, in <my-group>/<my-project>:
-- Who approved the merged changes to <app/models/ability.rb> in the last six months?
-- What did reviewers say about <N+1 queries> on merge requests that changed the file?
+Using GitLab Orbit, in <my-group>/<my-project>: - Who approved the merged
+changes to <app/models/ability.rb> in the last six months? - What did
+reviewers say about <N+1 queries> on merge requests that changed the file?
 ```
 
 ```gql orbit-query
@@ -111,9 +113,9 @@ LIMIT 10
 Find the open merge requests in a milestone that have a failed pipeline, and their owners.
 
 ```plaintext
-Using GitLab Orbit, in <my-group>/<my-project>:
-- Which open merge requests in milestone <19.6> have a failed head pipeline, and who is assigned to them?
-- Which open merge requests fail the job <unit-tests>, and who authored them?
+Using GitLab Orbit, in <my-group>/<my-project>: - Which open merge requests in
+milestone <19.6> have a failed head pipeline, and who is assigned to them? -
+Which open merge requests fail the job <unit-tests>, and who authored them?
 ```
 
 ```gql orbit-query
@@ -134,8 +136,8 @@ LIMIT 10
 Find the projects in a group where a job from a shared CI/CD template fails.
 
 ```plaintext
-Using GitLab Orbit, which projects in <my-group> failed the job <docs-lint markdown>
-in the last <seven days>, and how many times each?
+Using GitLab Orbit, which projects in <my-group> failed the job <docs-lint
+markdown> in the last <seven days>, and how many times each?
 ```
 
 ```gql orbit-query
@@ -155,8 +157,8 @@ LIMIT 20
 Find the vulnerabilities whose fix reached production, and if they are resolved.
 
 ```plaintext
-Using GitLab Orbit, which vulnerabilities of <my-group>/<my-project> have a fix that was
-deployed to <production>, and are they resolved?
+Using GitLab Orbit, which vulnerabilities of <my-group>/<my-project> have a
+fix that was deployed to <production>, and are they resolved?
 ```
 
 ```gql orbit-query
@@ -176,8 +178,9 @@ LIMIT 10
 Find the most called definitions in a file, and read the source of one.
 
 ```plaintext
-Using GitLab Orbit, in <my-group>/<my-project>, which definitions in <app/models/ability.rb>
-have the most callers? Show me the source of the most called one.
+Using GitLab Orbit, in <my-group>/<my-project>, which definitions in
+<app/models/ability.rb> have the most callers? Show me the source of the most
+called one.
 ```
 
 ```gql orbit-query
@@ -196,8 +199,9 @@ LIMIT 30
 Find the projects in a group that import a library, before you change its interface.
 
 ```plaintext
-Using GitLab Orbit, which projects in <my-group> import <gitlab.com/my-group/my-sdk>
-on their default branch, and how many import sites does each have?
+Using GitLab Orbit, which projects in <my-group> import
+<gitlab.com/my-group/my-sdk> on their default branch, and how many import
+sites does each have?
 ```
 
 ```gql orbit-query
