@@ -38,12 +38,8 @@ pub enum SupportLang {
 #[derive(serde::Deserialize)]
 pub struct LangEntry {
     extensions: Vec<String>,
-    /// Exact file names (`Dockerfile`) for languages whose files carry no extension.
     #[serde(default)]
-    filenames: Vec<String>,
-    /// File-name prefixes (`Dockerfile.`) matched before any extension.
-    #[serde(default)]
-    filename_prefixes: Vec<String>,
+    file_names: Option<FileNames>,
     #[serde(default)]
     aliases: Vec<String>,
     grammar: String,
@@ -55,6 +51,36 @@ pub struct LangEntry {
     index_names: Vec<String>,
     #[serde(default, rename = "source_root")]
     _source_root: Option<String>,
+}
+
+/// Case-insensitive file-name rules for languages whose files often carry no
+/// language extension (`Dockerfile`, `app.Dockerfile`, `Dockerfile.dev`).
+/// They apply only when the file's extension names no language.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileNames {
+    #[serde(default)]
+    exact: Vec<String>,
+    #[serde(default)]
+    prefixes: Vec<String>,
+    #[serde(default)]
+    suffixes: Vec<String>,
+    /// Extensions that mark a template or backup, never the language itself.
+    #[serde(default)]
+    ignored_extensions: Vec<String>,
+}
+
+impl FileNames {
+    fn matches(&self, name: &str) -> bool {
+        let name = name.to_ascii_lowercase();
+        let ignored = name
+            .rsplit_once('.')
+            .is_some_and(|(_, ext)| self.ignored_extensions.iter().any(|i| i == ext));
+        !ignored
+            && (self.exact.contains(&name)
+                || self.prefixes.iter().any(|p| name.starts_with(p.as_str()))
+                || self.suffixes.iter().any(|s| name.ends_with(s.as_str())))
+    }
 }
 
 impl LangEntry {
@@ -121,21 +147,18 @@ impl SupportLang {
     }
 
     pub fn from_path(path: &str) -> Option<Self> {
-        let name = path.rsplit('/').next().unwrap_or(path);
-        let by_name = LANG_CONFIG.languages.iter().find(|(_, entry)| {
-            entry.filenames.iter().any(|f| f == name)
-                || entry
-                    .filename_prefixes
-                    .iter()
-                    .any(|p| name.starts_with(p.as_str()))
-        });
-        if let Some((lang, _)) = by_name {
-            return Some(*lang);
-        }
-        let ext = std::path::Path::new(path)
+        let extension = std::path::Path::new(path)
             .extension()
-            .and_then(|e| e.to_str())?;
-        Self::from_extension(ext)
+            .and_then(|e| e.to_str());
+        if let Some(lang) = extension.and_then(Self::from_extension) {
+            return Some(lang);
+        }
+        let name = path.rsplit('/').next().unwrap_or(path);
+        LANG_CONFIG
+            .languages
+            .iter()
+            .find(|(_, entry)| entry.file_names.as_ref().is_some_and(|f| f.matches(name)))
+            .map(|(lang, _)| *lang)
     }
 
     /// The family this language indexes with, from `families:` in

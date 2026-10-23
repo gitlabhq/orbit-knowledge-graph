@@ -18,25 +18,14 @@ fn detect_language_from_extension(extension: &str) -> Option<Language> {
 }
 
 pub fn detect_language_from_path(path: &str) -> Option<Language> {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    if is_container_build_file(name) {
-        return Some(Language::Dockerfile);
-    }
-    let ext = std::path::Path::new(path)
+    let extension = std::path::Path::new(path)
         .extension()
-        .and_then(|e| e.to_str())?;
-    detect_language_from_extension(ext)
-}
-
-/// `Dockerfile`, `Containerfile` and their dotted variants (`Dockerfile.dev`)
-/// carry no language extension.
-fn is_container_build_file(name: &str) -> bool {
-    ["Dockerfile", "Containerfile"].iter().any(|base| {
-        name == *base
-            || name
-                .strip_prefix(base)
-                .is_some_and(|rest| rest.starts_with('.'))
-    })
+        .and_then(|e| e.to_str());
+    if let Some(language) = extension.and_then(detect_language_from_extension) {
+        return Some(language);
+    }
+    let name = path.rsplit('/').next().unwrap_or(path);
+    Language::iter().find(|lang| lang.file_names().is_some_and(|f| f.matches(name)))
 }
 
 #[cfg(test)]
@@ -51,6 +40,11 @@ mod tests {
             "Dockerfile.dev",
             "svc/Containerfile.prod",
             "build/app.dockerfile",
+            "dockerfile",
+            "DOCKERFILE",
+            "app.Dockerfile",
+            "build.Containerfile",
+            "Dockerfile.mri.release",
         ] {
             assert_eq!(
                 detect_language_from_path(path),
@@ -58,7 +52,21 @@ mod tests {
                 "{path}"
             );
         }
-        assert_eq!(detect_language_from_path("docs/Dockerfile-notes.md"), None);
+        for path in [
+            "docs/Dockerfile-notes.md",
+            "MyDockerfile",
+            "Dockerfile.md",
+            "Dockerfile.tt",
+            "Dockerfile.mri.erb",
+            "Containerfile.template",
+            "Dockerfile.wip.diff",
+        ] {
+            assert_eq!(detect_language_from_path(path), None, "{path}");
+        }
+        assert_eq!(
+            detect_language_from_path("Dockerfile.py"),
+            Some(Language::Python)
+        );
     }
 
     #[test]

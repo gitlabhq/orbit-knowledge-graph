@@ -29,8 +29,13 @@ languages:
 
   dockerfile:
     extensions: [dockerfile, containerfile]
-    filenames: [Dockerfile, Containerfile]
-    filename_prefixes: ["Dockerfile.", "Containerfile."]
+    file_names:
+      exact: [dockerfile, containerfile]
+      prefixes: ["dockerfile.", "containerfile."]
+      suffixes: [".dockerfile", ".containerfile"]
+      ignored_extensions: [
+        tt, erb, template, tmpl, tpl, j2, jinja, jinja2, in, diff, patch, md, txt, bak, orig,
+      ]
     aliases: [docker, containerfile]
     grammar: tree-sitter-containerfile
 

@@ -37,13 +37,56 @@ impl std::fmt::Display for LanguageFamily {
     }
 }
 
+/// Case-insensitive file-name rules for languages whose files often carry no
+/// language extension. They apply only when the extension names no language.
+pub struct FileNames {
+    pub exact: &'static [&'static str],
+    pub prefixes: &'static [&'static str],
+    pub suffixes: &'static [&'static str],
+    /// Extensions that mark a template or backup, never the language itself.
+    pub ignored_extensions: &'static [&'static str],
+}
+
+impl FileNames {
+    pub fn matches(&self, name: &str) -> bool {
+        let ignored = name.rsplit_once('.').is_some_and(|(_, ext)| {
+            self.ignored_extensions
+                .iter()
+                .any(|i| i.eq_ignore_ascii_case(ext))
+        });
+        !ignored
+            && (self.exact.iter().any(|n| n.eq_ignore_ascii_case(name))
+                || self.prefixes.iter().any(|p| {
+                    name.as_bytes()
+                        .get(..p.len())
+                        .is_some_and(|head| head.eq_ignore_ascii_case(p.as_bytes()))
+                })
+                || self.suffixes.iter().any(|s| {
+                    name.len()
+                        .checked_sub(s.len())
+                        .is_some_and(|at| name.as_bytes()[at..].eq_ignore_ascii_case(s.as_bytes()))
+                }))
+    }
+}
+
+const DOCKERFILE_NAMES: FileNames = FileNames {
+    exact: &["dockerfile", "containerfile"],
+    prefixes: &["dockerfile.", "containerfile."],
+    suffixes: &[".dockerfile", ".containerfile"],
+    ignored_extensions: &[
+        "tt", "erb", "template", "tmpl", "tpl", "j2", "jinja", "jinja2", "in", "diff", "patch",
+        "md", "txt", "bak", "orig",
+    ],
+};
+
 macro_rules! define_languages {
     ($(
         $variant:ident => {
             $(support_lang: $sl:ident,)?
             extensions: [$($ext:literal),+ $(,)?],
             separator: $sep:literal,
-            names: [$($name:literal),+ $(,)?] $(,)?
+            names: [$($name:literal),+ $(,)?]
+            $(, file_names: $file_names:expr)? $(,)?
         }
     ),+ $(,)?) => {
         #[derive(
@@ -78,6 +121,12 @@ macro_rules! define_languages {
                 }
             }
 
+            pub const fn file_names(&self) -> Option<&'static FileNames> {
+                match self {
+                    $(Self::$variant => define_languages!(@file_names $($file_names)?),)+
+                }
+            }
+
             pub const fn family(&self) -> LanguageFamily {
                 match self {
                     Self::C | Self::Cpp => LanguageFamily::CFamily,
@@ -108,6 +157,8 @@ macro_rules! define_languages {
     };
     (@support_lang $sl:ident) => { Some(SupportLang::$sl) };
     (@support_lang) => { None };
+    (@file_names $names:expr) => { Some(&$names) };
+    (@file_names) => { None };
 }
 
 define_languages! {
@@ -224,6 +275,7 @@ define_languages! {
         extensions: ["dockerfile", "containerfile"],
         separator: ".",
         names: ["dockerfile", "containerfile", "docker"],
+        file_names: DOCKERFILE_NAMES,
     },
     Swift => {
         support_lang: Swift,
