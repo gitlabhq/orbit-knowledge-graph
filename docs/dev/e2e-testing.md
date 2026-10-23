@@ -92,7 +92,7 @@ The `e2e-ha` job extends `e2e` and runs the same suites on a ClickHouse cluster 
 
 ### GitLab versions
 
-The `e2e-gitlab-stable` job runs the `e2e` suites against each GitLab EE version in its `E2E_GITLAB_LANE` matrix, pinned under `gitlab_lanes` in `versions.yaml`. It runs in the post-merge pipeline and on its schedule. It is manual on MRs other than the pin-bump MR.
+The `e2e-gitlab-stable` job runs the `e2e` suites against each GitLab EE version in its `E2E_GITLAB_LANE` matrix, pinned under `gitlab_lanes` in `versions.yaml`.
 
 ### Pin bump
 
