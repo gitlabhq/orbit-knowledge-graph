@@ -7,8 +7,8 @@ use query_data_model::{DenormalizedDirection, DenormalizedProperty, OrbitQueryMo
 
 use super::{EdgeRelation, NodePlan, Pattern};
 use crate::passes::normalize::is_wildcard;
-use crate::passes::plan::filters::{BoundFilter, lowerable_denorm};
-use crate::passes::plan::predicates::{Predicate, tag_filter};
+use crate::passes::plan::filters::{BoundFilter, FilterOwner, bind_filter, lowerable_denorm};
+use crate::passes::plan::predicates::{Predicate, property_filter, tag_filter};
 
 impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
     pub fn denorm_facts(
@@ -126,6 +126,41 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
                     && seen.insert(property)
             })
             .map(|(property, filter)| (property.as_str(), filter))
+            .collect()
+    }
+
+    /// Edge-column filters of the single-hop relations around a node, bound to the columns its own table shares.
+    pub fn shared_column_predicates(&self, node: &NodePlan) -> Vec<Predicate> {
+        let entity = node
+            .entity
+            .as_deref()
+            .and_then(|entity| self.model.graph().entity_id(entity));
+        let columns = node
+            .table
+            .as_deref()
+            .and_then(|table| self.model.table_columns(table));
+        let (Some(entity), Some(columns)) = (entity, columns) else {
+            return vec![];
+        };
+        let mut seen: HashSet<&str> = node
+            .filters
+            .iter()
+            .map(|(property, _)| property.as_str())
+            .collect();
+        self.relations
+            .iter()
+            .filter(|relation| {
+                relation.fk.is_none()
+                    && relation.max_hops == 1
+                    && relation.endpoint_column(&node.alias).is_some()
+            })
+            .flat_map(|relation| self.edge_column_filters(relation))
+            .filter(|(property, _)| columns.contains(*property) && seen.insert(property))
+            .map(|(property, filter)| {
+                let owner = FilterOwner::Entity(entity);
+                let bound = bind_filter(property, filter.filter.clone(), &owner, self.model);
+                property_filter(&node.alias, property, &bound)
+            })
             .collect()
     }
 }
