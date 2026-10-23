@@ -28,7 +28,7 @@ The skill teaches your agent to query your GitLab data, such as merge requests, 
 For a short walkthrough, see the [quickstart](../quickstart.md).
 
 GitLab Duo Agent Platform has GitLab Orbit built in. For more information, see [GitLab Orbit in GitLab Duo](duo.md).
-For agents that cannot run shell commands, use the [GitLab MCP endpoint](mcp.md).
+For agents that cannot run shell commands or prefer MCP, use the [GitLab MCP endpoint](mcp.md).
 
 If you installed the standalone binary, run `orbit` in place of `glab orbit`.
 
