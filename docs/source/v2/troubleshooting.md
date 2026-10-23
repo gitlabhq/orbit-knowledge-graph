@@ -153,7 +153,7 @@ LIMIT 1
 
 The query fails with HTTP `402`, and `glab orbit query` exits with code 1.
 
-This issue occurs when the free trial of the top-level group ended.
+This issue occurs when no GitLab Credits are left for the top-level group, for example after the free trial ends.
 
 To resolve this issue, [contact sales](https://about.gitlab.com/sales/).
 For more information, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
