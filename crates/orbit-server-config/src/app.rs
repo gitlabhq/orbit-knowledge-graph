@@ -1,8 +1,10 @@
 //! Top-level application configuration.
 
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use labkit_config::{Format, Loader};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -16,17 +18,20 @@ use crate::features::FeaturesConfig;
 use crate::gitlab::{GitlabClientConfiguration, GitlabConfig};
 use crate::grpc::GrpcConfig;
 use crate::health_check::HealthCheckConfig;
+use crate::merge::merge;
 use crate::metrics::MetricsConfig;
 use crate::nats::NatsConfiguration;
 use crate::object_storage::ObjectStorageConfig;
 use crate::probe_server::{ProbeServerConfig, bind_address_for_port, default_bind_address};
+use crate::proto;
 use crate::query::QuerySettings;
 use crate::schema::SchemaConfig;
-use crate::secret_file_source::SecretFileSource;
+use crate::secrets;
 use crate::tls::TlsConfig;
+use crate::undeclared::undeclared;
 
 pub const SECRET_FILE_DIR: &str = "/etc/secrets";
-pub const OVERLAY_CONFIG_FILE: &str = "config/config";
+pub const OVERLAY_CONFIG_FILE: &str = "config/config.yaml";
 
 /// `config/default.yaml`, compiled in as the lowest configuration layer.
 pub const EMBEDDED_DEFAULTS: &str =
@@ -77,18 +82,34 @@ impl AppConfig {
     }
 
     pub fn load_from(overlay: Option<&Path>, secret_dir: &Path) -> Result<Self, ConfigError> {
-        let overlay_file = match overlay {
-            Some(path) => config::File::from(path.to_path_buf()).required(true),
-            None => config::File::with_name(OVERLAY_CONFIG_FILE).required(false),
-        };
-        let config = config::Config::builder()
-            .add_source(embedded_defaults_source())
-            .add_source(overlay_file)
-            .add_source(SecretFileSource::new(secret_dir))
-            .build()
-            .map_err(ConfigError::Config)?;
+        let mut document = parse_yaml(
+            EMBEDDED_DEFAULTS.as_bytes(),
+            Path::new("config/default.yaml"),
+        )?;
 
-        config.try_deserialize().map_err(ConfigError::Config)
+        if let Some(path) = overlay_path(overlay) {
+            let data = std::fs::read(&path).map_err(|source| ConfigError::ReadOverlay {
+                path: path.clone(),
+                source,
+            })?;
+            merge(&mut document, parse_yaml(&data, &path)?);
+        }
+        merge(&mut document, secrets::tree(secret_dir)?);
+        Self::decode(document)
+    }
+
+    fn decode(document: serde_json::Value) -> Result<Self, ConfigError> {
+        let errors = undeclared(&document);
+        if !errors.is_empty() {
+            return Err(ConfigError::Undeclared(errors));
+        }
+
+        let json = serde_json::to_vec(&document).expect("a parsed document re-serialises");
+        let loaded = Loader::new()
+            .with_descriptors(proto::FILE_DESCRIPTOR_SET)?
+            .load_bytes::<proto::Config>(&json, Format::Json)?;
+
+        Ok(Self::try_from(loaded)?)
     }
 
     pub fn jwt_secret(&self) -> Result<&str, ConfigError> {
@@ -128,12 +149,57 @@ fn embedded_defaults_source() -> config::File<config::FileSourceString, config::
     config::File::from_str(EMBEDDED_DEFAULTS, config::FileFormat::Yaml)
 }
 
+/// An explicit `--config` path must exist; the conventional overlay is used
+/// only when it is there.
+fn overlay_path(overlay: Option<&Path>) -> Option<PathBuf> {
+    match overlay {
+        Some(path) => Some(path.to_path_buf()),
+        None => Some(PathBuf::from(OVERLAY_CONFIG_FILE)).filter(|path| path.is_file()),
+    }
+}
+
+fn parse_yaml(data: &[u8], path: &Path) -> Result<serde_json::Value, ConfigError> {
+    let document: serde_json::Value = serde_saphyr::from_slice_with_options(
+        data,
+        serde_saphyr::options! { strict_booleans: true },
+    )
+    .map_err(|source| ConfigError::Parse {
+        path: path.to_path_buf(),
+        source: Box::new(source),
+    })?;
+    // An empty or comment-only file parses to null, which would replace every layer beneath it.
+    Ok(match document {
+        serde_json::Value::Null => serde_json::Value::Object(serde_json::Map::new()),
+        document => document,
+    })
+}
+
 pub type SharedAppConfig = Arc<AppConfig>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("configuration error: {0}")]
     Config(#[from] config::ConfigError),
+    #[error("failed to read the config overlay {}: {source}", path.display())]
+    ReadOverlay {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("{} is not valid YAML: {source}", path.display())]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: Box<serde_saphyr::Error>,
+    },
+    #[error("config: not declared by the schema:\n  - {}", .0.join("\n  - "))]
+    Undeclared(Vec<String>),
+    #[error(transparent)]
+    Secrets(#[from] crate::secrets::SecretError),
+    #[error(transparent)]
+    Load(#[from] labkit_config::Error),
+    #[error(transparent)]
+    Convert(#[from] crate::convert::ConvertError),
     #[error(
         "gitlab.jwt.verifying_key is required (set it in a config overlay or mount it at /etc/secrets/gitlab/jwt/verifying_key)"
     )]
@@ -291,13 +357,14 @@ graph:
         let yaml = EMBEDDED_DEFAULTS.replace("jwt_clock_skew_secs: 60\n", "");
         assert_ne!(yaml, EMBEDDED_DEFAULTS);
 
-        let err = config::Config::builder()
-            .add_source(config::File::from_str(&yaml, config::FileFormat::Yaml))
-            .build()
-            .and_then(config::Config::try_deserialize::<AppConfig>)
-            .unwrap_err();
+        let document = parse_yaml(yaml.as_bytes(), Path::new("config/default.yaml")).unwrap();
+        let err = AppConfig::decode(document).unwrap_err();
 
-        assert!(err.to_string().contains("jwt_clock_skew_secs"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("- jwt_clock_skew_secs: value is required"),
+            "{err}"
+        );
     }
 
     fn write_overlay(dir: &Path, name: &str, yaml: &str) -> std::path::PathBuf {
@@ -322,13 +389,144 @@ graph:
     }
 
     #[test]
+    fn the_committed_dev_overlay_loads() {
+        let overlay = Path::new(env!("ORBIT_CONFIG_DIR")).join("dev.yaml");
+        let secrets = tempfile::TempDir::new().unwrap();
+
+        let config = AppConfig::load_from(Some(&overlay), secrets.path()).unwrap();
+
+        assert_eq!(config.query.overrides.len(), 1);
+        assert!(!config.query.default.use_query_cache.unwrap());
+    }
+
+    #[test]
+    fn a_misspelled_feature_scope_key_is_rejected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = write_overlay(
+            dir.path(),
+            "features.yaml",
+            "features:\n  code_graph_incremental:\n    enabeld: true\n",
+        );
+
+        let error = AppConfig::load_from(Some(&overlay), dir.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("- features.code_graph_incremental.enabeld: unknown field"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn an_overlay_with_nothing_in_it_changes_nothing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let defaults = serde_json::to_value(AppConfig::embedded_defaults()).unwrap();
+
+        for (name, yaml) in [
+            ("empty.yaml", ""),
+            ("comments.yaml", "# nothing set here\n"),
+        ] {
+            let overlay = write_overlay(dir.path(), name, yaml);
+            let config = AppConfig::load_from(Some(&overlay), dir.path()).unwrap();
+            assert_eq!(serde_json::to_value(config).unwrap(), defaults, "{name}");
+        }
+    }
+
+    #[test]
+    fn every_missing_section_is_reported_at_once() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = write_overlay(
+            dir.path(),
+            "nulled.yaml",
+            "grpc: null\ntls:\n  internal: null\nengine:\n  handlers:\n    entity-handler: null\n",
+        );
+
+        let error = AppConfig::load_from(Some(&overlay), dir.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("- grpc: value is required"), "{error}");
+        assert!(
+            error.contains("- tls.internal: value is required"),
+            "{error}"
+        );
+        assert!(
+            error.contains("- engine.handlers.entity_handler: value is required"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_null_value_is_rejected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = write_overlay(
+            dir.path(),
+            "nulled.yaml",
+            "jwt_clock_skew_secs: null\nnats:\n  connection_timeout_secs: null\n",
+        );
+
+        let error = AppConfig::load_from(Some(&overlay), dir.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("- jwt_clock_skew_secs: value is required"),
+            "{error}"
+        );
+        assert!(
+            error.contains("- nats.connection_timeout_secs: value is required"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_feature_is_rejected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = write_overlay(
+            dir.path(),
+            "features.yaml",
+            "features:\n  not_a_real_flag:\n    enabled: true\n",
+        );
+
+        let error = AppConfig::load_from(Some(&overlay), dir.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("- features[\"not_a_real_flag\"]"), "{error}");
+    }
+
+    #[test]
+    fn an_undeclared_enum_name_is_rejected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = write_overlay(
+            dir.path(),
+            "enums.yaml",
+            "billing:\n  quota:\n    auth_mode: licence_checksum\nengine:\n  modules: [sdlc, cod]\n",
+        );
+
+        let error = AppConfig::load_from(Some(&overlay), dir.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("- billing.quota.auth_mode: unknown value \"licence_checksum\""),
+            "{error}"
+        );
+        assert!(
+            error.contains("- engine.modules[1]: unknown value \"cod\""),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn explicit_overlay_file_must_exist() {
         let dir = tempfile::TempDir::new().unwrap();
         let missing = dir.path().join("missing.yaml");
 
         let err = AppConfig::load_from(Some(&missing), dir.path()).unwrap_err();
 
-        assert!(matches!(err, ConfigError::Config(_)), "{err}");
+        assert!(matches!(err, ConfigError::ReadOverlay { .. }), "{err}");
     }
 
     #[test]

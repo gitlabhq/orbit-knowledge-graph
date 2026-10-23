@@ -5899,6 +5899,7 @@ dependencies = [
  "prost-reflect",
  "schemars 1.2.1",
  "serde",
+ "serde-saphyr 1.1.0",
  "serde_json",
  "strum 0.28.0",
  "sysinfo",
