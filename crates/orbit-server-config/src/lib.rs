@@ -26,6 +26,7 @@ pub mod query;
 pub mod resources;
 pub mod schema;
 pub mod secret_file_source;
+pub mod secrets;
 pub mod tls;
 
 pub use analytics::{AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind};
