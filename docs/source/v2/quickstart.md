@@ -38,7 +38,7 @@ use GitLab Orbit in GitLab Duo, or connect your own coding agent and ask your fi
 <!-- vale orbit.StandaloneProductName = NO -->
 
 To check whether GitLab Orbit is on, in the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
-If the page shows **Orbit is not turned on for your groups yet**, ask an Owner of the group to turn it on.
+If the page shows **Orbit is not turned on for your groups yet**, ask a user with the Owner role for the group to turn it on.
 
 ## Step 1: Turn on GitLab Orbit for your group
 
@@ -84,17 +84,24 @@ then `glab orbit setup` in this repository, then `glab skills install --global o
 <!-- vale orbit.StandaloneProductName = NO -->
 
 1. Install the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) 1.120 or later. To check your version, run `glab version`.
-1. Install the GitLab Orbit CLI. `glab` keeps the binary in its own directory, so you run it as `glab orbit`.
+1. Install the GitLab Orbit CLI:
 
    ```shell
    glab orbit --install
    ```
 
-1. Sign in to GitLab. On GitLab Self-Managed or GitLab Dedicated, add `--hostname <gitlab.example.com>`,
-   then run `glab config set --global host <gitlab.example.com>` so that `glab orbit` uses your instance in any directory.
+1. Sign in to GitLab:
 
    ```shell
    glab auth login
+   ```
+
+   On GitLab Self-Managed or GitLab Dedicated, sign in to your instance, and make it the default host
+   so that `glab orbit` uses your instance in any directory:
+
+   ```shell
+   glab auth login --hostname <gitlab.example.com>
+   glab config set --global host <gitlab.example.com>
    ```
 
 1. Check the indexing progress. When indexing is complete, the summary ends with `Ready.`
@@ -105,7 +112,7 @@ then `glab orbit setup` in this repository, then `glab skills install --global o
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
-For other install methods, see [the GitLab Orbit CLI](cli.md#install-the-cli).
+For more information, see [other install methods](cli.md#other-install-methods).
 
 ### Step 3: Connect your agent
 
@@ -121,18 +128,6 @@ Setup also indexes a repository on your machine for code search. Any repository 
 
    ```shell
    glab orbit setup
-   ```
-
-1. Install the GitLab Orbit skill, so your agent can query your GitLab data:
-
-   ```shell
-   glab skills install --global orbit
-   ```
-
-1. If you use Claude Code, link the skill. Claude Code does not read `~/.agents/skills`.
-
-   ```shell
-   mkdir -p ~/.claude/skills && ln -s ~/.agents/skills/orbit ~/.claude/skills/orbit
    ```
 
 For the setup options and what setup changes, see [Connect your agent](agents/_index.md).

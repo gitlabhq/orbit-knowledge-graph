@@ -154,7 +154,7 @@ The agent finds the critical and high vulnerabilities in a project:
 MATCH (v:Vulnerability)-[:IN_PROJECT]->(p:Project {full_path: 'my-group/my-project'})
 WHERE v.severity IN ['critical', 'high'] AND v.state = 'detected'
 RETURN v.title, v.severity, v.state, v.report_type, p.full_path
-ORDER BY v.severity DESC
+ORDER BY v.severity ASC
 LIMIT 50
 ```
 
@@ -194,13 +194,11 @@ MATCH (pkg:Package)-[:HAS_VULNERABILITY]->(v:Vulnerability)
 MATCH (pkg)-[:IN_PROJECT]->(p:Project)
 WHERE p.full_path STARTS WITH 'my-group/'
 RETURN p.full_path, pkg.name, pkg.version, v.title, v.severity
-ORDER BY v.severity DESC
+ORDER BY v.severity ASC
 LIMIT 50
 ```
 
 ## Read source code without a checkout
-
-Get the code into the conversation without a checkout.
 
 ```plaintext
 Using GitLab Orbit, show me the source of <app/models/project.rb> and the

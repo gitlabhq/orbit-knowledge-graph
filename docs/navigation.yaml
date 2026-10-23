@@ -101,7 +101,7 @@
           url: 'orbit/v2/local/'
         - title: Glossary
           url: 'orbit/v2/glossary/'
-    - title: Configure GitLab Orbit
+    - title: GitLab Self-Managed
       url: 'orbit/v2/self-managed/'
       submenu:
         - title: Get started

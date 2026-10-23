@@ -45,7 +45,7 @@ Your agent can use both graphs in the same conversation.
 
 Prerequisites:
 
-- The [GitLab Orbit CLI](../cli.md#install-the-cli) is installed.
+- The [GitLab Orbit CLI](../cli.md#install-the-gitlab-orbit-cli) is installed.
 
 `glab orbit setup` indexes the current repository for you. To index a repository yourself, run this command in it:
 

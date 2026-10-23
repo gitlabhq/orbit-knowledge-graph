@@ -3,13 +3,12 @@ stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Configure PostgreSQL logical replication and install Siphon so GitLab data reaches ClickHouse.
-title: Set up data replication
+title: Set up data replication for GitLab Orbit
 ---
 
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Add-on: GitLab Orbit
 - Offering: GitLab Self-Managed
 
 {{< /details >}}
@@ -239,10 +238,12 @@ Do not store the plaintext elsewhere.
 ## Install Siphon
 
 With `configMode: split`, Siphon reads its table list from the `gitlab-siphon-tables` image at pod startup,
-so the list matches your GitLab version without manual updates. GitLab publishes the image,
-`registry.gitlab.com/gitlab-org/gitlab/gitlab-siphon-tables`, for every release, starting at `v19.2.0-ee`.
-`global.gitlabVersion` selects its tag. Confirm that the tag exists in the
-[`gitlab-siphon-tables` container registry](https://gitlab.com/gitlab-org/gitlab/container_registry/11634641).
+so the list matches your GitLab version without manual updates. The GitLab cloud native images (CNG) build
+publishes the image, `registry.gitlab.com/gitlab-org/build/cng/gitlab-siphon-tables`, for every release from
+GitLab 19.5.0, and for some earlier patch releases. `global.gitlabVersion` selects its tag. The chart converts
+the version to the CNG tag format, `vX.Y.Z`, so `19.5.0`, `v19.5.0`, and `v19.5.0-ee` all select the `v19.5.0` tag.
+Confirm that the tag exists in the
+[`gitlab-siphon-tables` container registry](https://gitlab.com/gitlab-org/build/CNG/container_registry/11611957).
 A missing tag prevents pods from starting.
 
 1. Save the following as `siphon-values.yaml` and replace the placeholders:
@@ -251,9 +252,9 @@ A missing tag prevents pods from starting.
    configMode: split
 
    global:
-     # Tag of registry.gitlab.com/gitlab-org/gitlab/gitlab-siphon-tables.
+     # Selects the tag of registry.gitlab.com/gitlab-org/build/cng/gitlab-siphon-tables.
      # Must match your GitLab version exactly, patch level included.
-     gitlabVersion: v19.2.2-ee
+     gitlabVersion: v19.5.0
 
    image:
      repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
@@ -357,7 +358,7 @@ A missing tag prevents pods from starting.
    helm repo update
 
    helm upgrade --install siphon siphon/siphon \
-     --version 1.22.1 \
+     --version 2.0.0 \
      --namespace siphon \
      --create-namespace \
      --values siphon-values.yaml
