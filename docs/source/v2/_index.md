@@ -23,77 +23,332 @@ title: GitLab Orbit
 
 {{< /history >}}
 
+<section class="product-landing product-hero">
+
+<p class="product-hero-brand"><img src="img/orbit-logo-v19_6.svg" alt="GitLab Orbit logo" width="48" height="48"> GitLab Orbit</p>
+
+Software lifecycle context graph for AI agents
+{.product-hero-title}
+
 GitLab Orbit indexes your GitLab data and code into a graph that your agent can query.
 Ask what breaks if you change a service, who should review a file, or why pipelines fail.
 Your agent answers with a few graph queries in place of many file reads and API calls.
+{.product-hero-lead}
 
-{{< cards >}}
+[Quickstart](quickstart.md) [{{< icon name="play" >}} Watch the deep dive video](https://www.youtube.com/watch?v=wddpf0rDGnA)
+{.product-hero-actions}
 
-- [Quickstart](quickstart.md)
-- [Prompt examples](prompt-examples.md)
-- [GitLab Orbit architecture](how-it-works.md)
+</section>
 
-{{< /cards >}}
+- [Ask across code and lifecycle](prompt-examples.md)<br>One graph holds your projects, merge requests, pipelines, vulnerabilities, files, and definitions, so one question can cross all of them.
+- [One query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
+- [Sees only what you can access](security.md)<br>Every answer is filtered by your GitLab permissions, on GitLab.com, GitLab Self-Managed, and GitLab Dedicated.
+{.product-cards}
+
+GitLab Orbit links your GitLab data and code in one graph:
+{.product-diagram-lead}
+
+<img class="product-diagram product-light-only" src="img/orbit-graph-hub-light-v19_6.svg" alt="A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition." width="680" height="272">
+<img class="product-diagram product-dark-only" src="img/orbit-graph-hub-dark-v19_6.svg" alt="A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition." width="680" height="272">
 
 ## What you can ask
 
-| Goal | Example prompt |
-|------|----------------|
-| [Understand a codebase](prompt-examples.md#understand-a-codebase) | `I'm new to <my-group/my-project>. Using GitLab Orbit, give me a tour.` |
-| [Assess the impact of changing a shared library](prompt-examples.md#assess-the-impact-of-changing-a-shared-library) | `Using GitLab Orbit, what breaks if I change the public interface of <shared-payments-lib>?` |
-| [Review the history of a project](prompt-examples.md#review-the-history-of-a-project) | `Using GitLab Orbit, who changed <app/models/project.rb> most, and who should review my change to it?` |
-| [Keep your pipelines healthy](prompt-examples.md#keep-your-pipelines-healthy) | `Using GitLab Orbit, which CI/CD jobs fail most often in <my-group>?` |
-| [Find where vulnerabilities come from](prompt-examples.md#find-where-vulnerabilities-come-from) | `Using GitLab Orbit, which projects in <my-group> have critical vulnerabilities?` |
+- **[Understand a codebase](prompt-examples.md#understand-a-codebase)**<br>`I'm new to <my-group/my-project>. Using GitLab Orbit, give me a tour.`
+- **[Assess the impact of changing a shared library](prompt-examples.md#assess-the-impact-of-changing-a-shared-library)**<br>`Using GitLab Orbit, what breaks if I change the public interface of <shared-payments-lib>?`
+- **[Review the history of a project](prompt-examples.md#review-the-history-of-a-project)**<br>`Using GitLab Orbit, who changed <app/models/project.rb> most, and who should review my change to it?`
+- **[Keep your pipelines healthy](prompt-examples.md#keep-your-pipelines-healthy)**<br>`Using GitLab Orbit, which CI/CD jobs fail most often in <my-group>?`
+- **[Find where vulnerabilities come from](prompt-examples.md#find-where-vulnerabilities-come-from)**<br>`Using GitLab Orbit, which projects in <my-group> have critical vulnerabilities?`
 
 ## See an answer
 
-Ask your agent:
+1. Ask your agent:
 
-```plaintext
-Using GitLab Orbit, which projects in <my-group> have the most failed pipelines?
-```
+   ```plaintext
+   Using GitLab Orbit, which projects in <my-group> have the most failed pipelines?
+   ```
 
-The agent runs one graph query:
+1. The agent runs one graph query:
 
-```gql orbit-query
-MATCH (pl:Pipeline)-[:IN_PROJECT]->(p:Project)
-WHERE pl.status = 'failed' AND p.full_path STARTS WITH 'my-group/'
-RETURN p.full_path, count(pl) AS failed_pipelines
-ORDER BY failed_pipelines DESC
-LIMIT 3
-```
+   ```gql orbit-query
+   MATCH (pl:Pipeline)-[:IN_PROJECT]->(p:Project)
+   WHERE pl.status = 'failed' AND p.full_path STARTS WITH 'my-group/'
+   RETURN p.full_path, count(pl) AS failed_pipelines
+   ORDER BY failed_pipelines DESC
+   LIMIT 3
+   ```
 
-Then it answers from the rows. The answer is similar to:
+1. The agent answers from the rows. The answer is similar to:
 
-```plaintext
-1. my-group/payments-api: 47 failed pipelines
-2. my-group/web-frontend: 31 failed pipelines
-3. my-group/auth-service: 12 failed pipelines
-```
+   ```plaintext
+   1. my-group/payments-api: 47 failed pipelines
+   2. my-group/web-frontend: 31 failed pipelines
+   3. my-group/auth-service: 12 failed pipelines
+   ```
+
+## Why GitLab Orbit uses a query language
+
+GitLab Orbit queries use [GQL](queries/query-language.md), a graph query language that large language models
+already know from their training data. A short GQL pattern describes connections, for example from a merge request
+to its pipelines and to the files that it changed.
+
+Your agent reads the [schema](queries/query-language.md#discover-the-schema), then writes its own query for each question.
+A retrieval-augmented generation (RAG) system gives the agent only the text that a search selected.
+With GitLab Orbit, the agent selects the exact data that it needs.
+One query replaces a chain of API calls, so the agent puts less load on your GitLab instance and makes fewer errors.
 
 ## Connect your agent
 
-| Connect with | Use it when |
-|--------------|-------------|
-| [GitLab Orbit CLI and skill](agents/_index.md) | You use Claude Code, Codex, OpenCode, or another agent that runs shell commands. |
-| [GitLab Duo](agents/duo.md) | You use GitLab Duo Agent Platform. You do not install anything. |
-| [MCP endpoint](agents/mcp.md) | Your agent supports MCP and cannot run shell commands. |
-| [REST API](queries/api.md) | You build a script, a scheduled report, or a custom tool on the graph. |
+GitLab Orbit is available on Premium and Ultimate. To get it, [contact sales](https://about.gitlab.com/sales/).
+On GitLab.com, you can also [start a free trial](trial.md). For costs, see [billing and credit usage](billing.md).
+
+For agents that run shell commands, the GitLab Orbit CLI is the recommended method.
+
+{{< tabs >}}
+
+{{< tab title="Claude Code, Codex, OpenCode" >}}
+
+Sign in with `glab auth login`, then run one command in a Git repository:
+
+```shell
+glab orbit setup
+```
+
+`glab orbit setup` tells your agent to search code with the graph and installs the GitLab Orbit skill,
+which teaches your agent to query your GitLab data.
+For the full steps, see the [quickstart](quickstart.md#step-2-sign-in-and-set-up-your-agent).
+For the setup options, see [connect your agent](agents/_index.md).
+
+{{< /tab >}}
+
+{{< tab title="GitLab Duo" >}}
+
+GitLab Duo Agent Platform has GitLab Orbit built in. You do not install anything.
+Agents call the GitLab Orbit tools when the graph can answer a question.
+For more information, see [GitLab Orbit in GitLab Duo](agents/duo.md).
+
+{{< /tab >}}
+
+{{< tab title="MCP" >}}
+
+If your agent supports MCP and cannot run shell commands, add the GitLab MCP endpoint.
+For example, in Claude Code:
+
+```shell
+claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
+```
+
+On GitLab Self-Managed and GitLab Dedicated, replace `gitlab.com` with the hostname of your instance.
+For other clients, see [GitLab MCP endpoint](agents/mcp.md#gitlab-mcp-endpoint).
+
+{{< /tab >}}
+
+{{< tab title="REST API" >}}
+
+To build a script, a scheduled report, or a custom tool on the graph, query it over HTTP.
+For the endpoints, authentication, and examples, see the [REST API](queries/api.md).
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 ## Code on your machine
 
 The GitLab Orbit CLI also indexes repositories on your machine, so your agent can search code that you have not pushed,
 offline and with no GitLab account. For more information, see [the local graph](local/_index.md).
 
+## Learn more
+
+- [Watch the deep dive video](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>GitLab Orbit Technical Deep Dive: The AI Context Graph Layer. On the GitLab YouTube channel.
+- [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
+{.product-cards .product-cards-2}
+
 ## Reference
 
 {{< cards >}}
 
 - [GitLab Orbit CLI](cli.md)
+- [GitLab Orbit dashboard](dashboard.md)
 - [Indexed data](schema.md)
 - [Queries](queries/_index.md)
 - [Security](security.md)
 - [GitLab Self-Managed](self-managed/_index.md)
+- [Glossary](glossary.md)
 - [Troubleshooting](troubleshooting.md)
 
 {{< /cards >}}
+
+<style>
+/* Product landing page. Visual wrappers only, with GitLab UI design tokens; the content above is Markdown. */
+body:has(.product-landing) h1#skipTarget {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+body:has(.product-landing) .docs-content .language-plaintext {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Hero: a bordered panel on the subtle surface, like the availability box and code blocks. */
+.docs-content .product-hero {
+  margin: var(--gl-spacing-scale-5) 0 var(--gl-spacing-scale-6);
+  padding: var(--gl-spacing-scale-6);
+  border: 1px solid var(--gl-border-color-default);
+  border-radius: var(--gl-border-radius-lg);
+  background: var(--gl-background-color-subtle);
+}
+.docs-content .product-hero p { margin: 0; }
+.docs-content .product-hero img {
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+}
+.docs-content .product-hero-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--gl-spacing-scale-4);
+  font-size: var(--gl-text-size-h1);
+  line-height: 1.15;
+  font-weight: 600;
+  color: var(--gl-text-color-heading);
+}
+.docs-content .product-hero-title {
+  margin-top: var(--gl-spacing-scale-4) !important;
+  font-size: var(--gl-text-size-h3);
+  line-height: 1.25;
+  font-weight: 500;
+  color: var(--gl-text-color-default);
+}
+.docs-content .product-hero-lead {
+  margin-top: var(--gl-spacing-scale-4) !important;
+  max-width: 68ch;
+}
+.docs-content .product-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gl-spacing-scale-3);
+  margin-top: var(--gl-spacing-scale-5) !important;
+}
+/* Same metrics and tokens as .btn.gl-button.btn-md: 2rem tall, 0.875rem text, 8px radius. */
+.docs-content .product-hero-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gl-spacing-scale-2);
+  min-height: 2rem;
+  padding: 0 var(--gl-spacing-scale-4);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: var(--gl-font-size-md);
+  line-height: 1rem;
+  font-weight: 400;
+  text-decoration: none !important;
+  transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+}
+.docs-content .product-hero-actions a:first-child {
+  background-color: var(--gl-button-confirm-primary-background-color-default);
+  border-color: var(--gl-button-confirm-primary-border-color-default);
+  color: var(--gl-button-confirm-primary-foreground-color-default) !important;
+}
+.docs-content .product-hero-actions a:first-child:hover {
+  background-color: var(--gl-button-confirm-primary-background-color-hover);
+  border-color: var(--gl-button-confirm-primary-border-color-hover);
+  color: var(--gl-button-confirm-primary-foreground-color-hover) !important;
+}
+.docs-content .product-hero-actions a:nth-child(2) {
+  background-color: var(--gl-button-default-primary-background-color-default);
+  border-color: var(--gl-button-default-primary-border-color-default);
+  color: var(--gl-button-default-primary-foreground-color-default) !important;
+}
+.docs-content .product-hero-actions a:nth-child(2):hover {
+  background-color: var(--gl-button-default-primary-background-color-hover);
+  border-color: var(--gl-button-default-primary-border-color-hover);
+  color: var(--gl-button-default-primary-foreground-color-hover) !important;
+}
+.docs-content .product-hero-actions a span { display: inline-flex; }
+.docs-content .product-hero-actions a svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+.docs-content .product-diagram {
+  display: block;
+  width: 100%;
+  max-width: 42.5rem;
+  height: auto;
+  margin: 0 auto var(--gl-spacing-scale-7);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+.docs-content .product-diagram-lead {
+  margin-top: 0 !important;
+  margin-bottom: var(--gl-spacing-scale-5) !important;
+}
+.docs-content .product-dark-only { display: none; }
+.gl-dark .docs-content .product-light-only { display: none; }
+.gl-dark .docs-content .product-dark-only { display: block; }
+@media (max-width: 640px) {
+  .docs-content .product-hero { padding: var(--gl-spacing-scale-5); }
+  .docs-content .product-diagram,
+  .docs-content .product-diagram-lead { display: none !important; }
+}
+
+/* Cards: same metrics as the cards shortcode (.card-body.card.gl-rounded-lg): 1.25rem padding, 8px radius, neutral-100 border, subtle hover. */
+.docs-content ul.product-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 1.25rem;
+  margin: 0 0 var(--gl-spacing-scale-6);
+  padding: 0;
+  list-style: none;
+}
+.docs-content ul.product-cards-2 { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+.docs-content ul.product-cards > li {
+  position: relative;
+  margin: 0;
+  padding: 1.25rem;
+  border: 1px solid var(--gl-color-neutral-100);
+  border-radius: var(--gl-border-radius-lg);
+  background-color: var(--gl-background-color-default);
+  color: var(--gl-text-color-default);
+  line-height: 1.5rem;
+  transition: all 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.docs-content ul.product-cards > li:hover { background-color: var(--gl-background-color-subtle); }
+.docs-content ul.product-cards > li > a {
+  display: inline-block;
+  padding-bottom: var(--gl-spacing-scale-3);
+  font-weight: 600;
+  color: var(--gl-text-color-default) !important;
+  text-decoration: none !important;
+}
+.docs-content ul.product-cards > li > a::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+/* Capitalised CSS function on purpose: markdownlint MD044 reads the lowercase form as the proper name URL. */
+.docs-content ul.product-cards > li > a::after {
+  content: "";
+  position: relative;
+  top: 0.15rem;
+  left: 0.25rem;
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  mask: URL("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M10.159%2010.72a.75.75%200%201%200%201.06%201.06l3.25-3.25L15%208l-.53-.53-3.25-3.25a.75.75%200%200%200-1.061%201.06l1.97%201.97H1.75a.75.75%200%201%200%200%201.5h10.379l-1.97%201.97z'/%3E%3C/svg%3E") center no-repeat;
+  background-color: transparent;
+  translate: -50% 0;
+  transition: all 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.docs-content ul.product-cards > li:hover > a::after {
+  background-color: var(--gl-text-color-default);
+  translate: 0 0;
+}
+</style>
