@@ -20,6 +20,7 @@ async fn item_counts_response() {
     );
 }
 
+#[allow(deprecated)]
 async fn respond(
     ctx: &TestContext,
     security_context: &SecurityContext,

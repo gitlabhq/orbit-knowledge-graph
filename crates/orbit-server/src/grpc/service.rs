@@ -745,19 +745,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
     ) -> Result<Response<GetItemCountsResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
         let req = request.get_ref();
-        let requested_paths = match (
-            req.traversal_path.is_empty(),
-            req.traversal_paths.is_empty(),
-        ) {
-            (false, false) => {
-                return Err(Status::invalid_argument(
-                    "set traversal_path or traversal_paths, not both",
-                ));
-            }
-            (_, true) => slice::from_ref(&req.traversal_path),
-            (true, false) => req.traversal_paths.as_slice(),
-        };
-        let paths = parse_authorized_paths(&ctx.claims, requested_paths)?;
+        let paths = parse_authorized_paths(&ctx.claims, read_item_count_paths(req)?)?;
         let security_context = build_security_context(&ctx.claims)
             .map_err(|e| Status::unauthenticated(e.to_string()))?;
 
@@ -940,6 +928,20 @@ fn named_query_definitions(
 }
 
 const MAX_STATUS_PATHS: usize = 100;
+
+#[allow(deprecated)]
+fn read_item_count_paths(req: &GetItemCountsRequest) -> Result<&[String], Status> {
+    match (
+        req.traversal_path.is_empty(),
+        req.traversal_paths.is_empty(),
+    ) {
+        (false, false) => Err(Status::invalid_argument(
+            "set traversal_path or traversal_paths, not both",
+        )),
+        (_, true) => Ok(slice::from_ref(&req.traversal_path)),
+        (true, false) => Ok(req.traversal_paths.as_slice()),
+    }
+}
 
 fn parse_authorized_paths(claims: &Claims, paths: &[String]) -> Result<Vec<TraversalPath>, Status> {
     if paths.is_empty() || paths.len() > MAX_STATUS_PATHS {

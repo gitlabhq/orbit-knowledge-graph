@@ -11,6 +11,7 @@ async fn indexing_status_error(paths: &[&str]) -> tonic::Code {
         .code()
 }
 
+#[allow(deprecated)]
 fn item_counts_request(path: &str, paths: &[&str]) -> GetItemCountsRequest {
     GetItemCountsRequest {
         traversal_path: path.to_string(),

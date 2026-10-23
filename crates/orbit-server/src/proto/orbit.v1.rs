@@ -681,7 +681,8 @@ pub struct DomainIndexingStatus {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetItemCountsRequest {
-    /// one group or project path (e.g. "1/2/"), read when traversal_paths is empty
+    /// deprecated: use traversal_paths; one path, read when traversal_paths is empty
+    #[deprecated]
     #[prost(string, tag = "1")]
     pub traversal_path: ::prost::alloc::string::String,
     /// 1 to 100 group or project paths

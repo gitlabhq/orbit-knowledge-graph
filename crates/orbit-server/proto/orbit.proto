@@ -590,7 +590,7 @@ message DomainIndexingStatus {
 // ---------------------------------------------------------------------------
 
 message GetItemCountsRequest {
-  string traversal_path = 1;  // one group or project path (e.g. "1/2/"), read when traversal_paths is empty
+  string traversal_path = 1 [deprecated = true];  // deprecated: use traversal_paths; one path, read when traversal_paths is empty
   repeated string traversal_paths = 2;  // 1 to 100 group or project paths
 }
 
