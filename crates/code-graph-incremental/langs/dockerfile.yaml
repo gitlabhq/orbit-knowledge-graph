@@ -1,4 +1,4 @@
-# Dockerfile / Containerfile rewrite rules (POC).
+# Dockerfile / Containerfile rewrite rules.
 # Handles: FROM stages as class-like definitions (the base image is an
 # ImportedSymbol inside the stage), ARG and ENV pairs as variable definitions,
 # COPY --from=<stage> and FROM <stage> as calls to the stage, $VAR / ${VAR}
@@ -13,23 +13,37 @@ stages:
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
 
-  # `ENV PATH=/bin:$PATH` reads the previous value; drop the self-reference so
-  # it does not become a call from the variable to itself.
+  # `ENV PATH=$GOPATH/bin:$PATH` reads the previous value. Each pass drops the
+  # first expansion that names the variable itself, or sets aside the first
+  # one that does not, so a self-reference is found in any position and never
+  # becomes a call from the variable to itself.
   - name: drop-self-expansions
     repeat: true
     rules:
       - match: '(env_pair name: $N value: (unquoted_string $$$A (expansion $X:variable) $$$B))'
         where: '$N == $X'
         replace: '(env_pair name: $N value: (unquoted_string $$$A $$$B))'
+      - match: '(env_pair name: $N value: (unquoted_string $$$A (expansion $X:variable) $$$B))'
+        where: '$N != $X'
+        replace: '(env_pair name: $N value: (unquoted_string $$$A (__expansion $X) $$$B))'
       - match: '(env_pair name: $N value: (double_quoted_string $$$A (expansion $X:variable) $$$B))'
         where: '$N == $X'
         replace: '(env_pair name: $N value: (double_quoted_string $$$A $$$B))'
+      - match: '(env_pair name: $N value: (double_quoted_string $$$A (expansion $X:variable) $$$B))'
+        where: '$N != $X'
+        replace: '(env_pair name: $N value: (double_quoted_string $$$A (__expansion $X) $$$B))'
       - match: '(arg_pair name: $N default: (unquoted_string $$$A (expansion $X:variable) $$$B))'
         where: '$N == $X'
         replace: '(arg_pair name: $N default: (unquoted_string $$$A $$$B))'
+      - match: '(arg_pair name: $N default: (unquoted_string $$$A (expansion $X:variable) $$$B))'
+        where: '$N != $X'
+        replace: '(arg_pair name: $N default: (unquoted_string $$$A (__expansion $X) $$$B))'
       - match: '(arg_pair name: $N default: (double_quoted_string $$$A (expansion $X:variable) $$$B))'
         where: '$N == $X'
         replace: '(arg_pair name: $N default: (double_quoted_string $$$A $$$B))'
+      - match: '(arg_pair name: $N default: (double_quoted_string $$$A (expansion $X:variable) $$$B))'
+        where: '$N != $X'
+        replace: '(arg_pair name: $N default: (double_quoted_string $$$A (__expansion $X) $$$B))'
 
   - name: expansions
     rules:
@@ -45,9 +59,12 @@ stages:
 
   - name: from-heads
     rules:
-      - match: '(from_instruction (image_spec name: $N $$$T) as: $A)'
+      - match: '(from_instruction (image_spec name: $N tag: (image_tag $$$T)) as: $A)'
         where: '$N == $A'
-        replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))))'
+        replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) $$$T)'
+      - match: '(from_instruction (image_spec name: $N) as: $A)'
+        where: '$N == $A'
+        replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)))'
       - match: '(from_instruction (image_spec name: $N tag: (image_tag $$$T)) as: $A)'
         replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
       - match: '(from_instruction (image_spec name: $N) as: $A)'
@@ -118,7 +135,9 @@ display:
           entity: File
           fqn: '@$M|stem|split_last("/")'
           file_path: '@$M'
-          language: '@$M|regex_replace("^.*$", "dockerfile")'
+          # A name that is not a Dockerfile keeps its extension. The regexes
+          # mirror `file_names` in config/languages.yaml.
+          language: '@$M|split_last("/")|regex_replace("(?i)^(.*)\.(tt|erb|template|tmpl|tpl|j2|jinja|jinja2|in|diff|patch|md|txt|bak|orig|dockerignore|yml|yaml|json|toml|lock)$", "${1}_.${2}")|regex_replace("(?i)^((docker|container)file(\..*)?|.*\.(docker|container)file)$", "dockerfile.dockerfile")|split_last(".")'
       - match: '(__def !(__impl))'
         tag:
           entity: Definition
