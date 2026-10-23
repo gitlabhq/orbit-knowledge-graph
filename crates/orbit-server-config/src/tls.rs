@@ -98,16 +98,7 @@ mod tests {
     use crate::AppConfig;
 
     fn config_from(overlay: &str) -> AppConfig {
-        config::Config::builder()
-            .add_source(config::File::from_str(
-                crate::EMBEDDED_DEFAULTS,
-                config::FileFormat::Yaml,
-            ))
-            .add_source(config::File::from_str(overlay, config::FileFormat::Yaml))
-            .build()
-            .unwrap()
-            .try_deserialize()
-            .unwrap()
+        AppConfig::with_overlay(overlay).unwrap()
     }
 
     #[test]

@@ -104,7 +104,6 @@ typed-path = "0.12.3"
 anyhow = "1.0.100"
 # Keep this a different major than DataFusion's object_store so the cloud features stay off its build path.
 object_store = { version = "0.14.2", features = ["aws", "gcp"] }
-config = { version = "0.15", default-features = false, features = ["yaml"] }
 parquet = { version = "58", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
 tokio = { version = "1.49.0", features = ["full"] }
 strum = { version = "0.28.0", features = ["derive"] }
