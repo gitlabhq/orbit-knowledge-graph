@@ -91,7 +91,7 @@ The [query language reference](../../source/remote/queries/query-language.md) li
 
 The engine separates what a query means from where the data lives and how the caller writes it. Each part can change on its own.
 
-- **Query languages.** A frontend parses one language into the shared input. Adding a language adds one frontend. Retiring the JSON Query DSL removes one frontend, and the other phases do not change.
+- **Query languages.** A frontend parses one language into the shared input. Adding a language adds one frontend. Retiring the JSON Query DSL removes one frontend, and the other phases do not change. See [Query languages](querying.md).
 - **Storage backends.** The compiler reads a query data model, not table names. ClickHouse serves Orbit Remote. DuckDB compiles the same queries against the local graph schema, and the code-graph test suites use it.
 - **The graph.** A new entity, property, or relationship is an ontology change. Tables, validation, schema discovery, and redaction follow from it.
 - **Storage layout.** The ontology routes each relationship to an edge table and can declare pre-joined tables. The planner picks the access path, so queries do not change when the layout does.
@@ -106,7 +106,7 @@ The engine separates what a query means from where the data lives and how the ca
 - **Named queries.** `config/named_queries/` holds server-defined queries in both languages. Clients pass a name and parameters, and the server compiles the spelling for the active language. The Orbit dashboard and entity context expansion use them.
 - **Schema discovery.** Callers read the ontology, not the ClickHouse schema. The JSON mode uses `get_graph_schema`, and GQL uses `CALL db.schema()`.
 
-Each user has one active language. The default-off, per-user `orbit_gql_queries` flag in Rails selects it. Discovery describes only the active language, and a query in the other language fails. There is no fallback between languages.
+Each user has one active language, which a per-user flag in Rails selects. [Query languages](querying.md#language-selection) describes the rules.
 
 ## Responses
 
@@ -118,7 +118,6 @@ The same result can render as raw JSON, as [TOON](https://github.com/toon-format
 
 | Document | Covers |
 | --- | --- |
-| [Graph query engine](graph_engine.md) | Storage model, compiler phases, planning, current-state reads, and safety |
-| [JSON Query DSL](intermediary_llm_query_language.md) | Why Orbit has a JSON language for LLMs, and how it is validated |
-| [Orbit query frontend](orbit_query_frontend.md) | The GQL language: its scope, how it compiles, and what it rejects |
+| [Query languages](querying.md) | The JSON Query DSL and GQL: why each exists, how each lowers to the shared input, and how Rails picks one |
+| [Compiler](compiler.md) | Storage model, compiler phases, planning, current-state reads, and safety |
 | [Duo and Orbit prompt routing](../duo_orbit_prompt_routing.md) | When Duo agents reach the Orbit MCP tools |
