@@ -89,7 +89,6 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
         ))
     }
 
-    /// Every predicate a node's table read applies: its own conditions plus the shared edge columns.
     fn node_conditions(&self, node: &NodePlan) -> Vec<Predicate> {
         let mut conditions = node.conditions();
         conditions.extend(self.shared_column_predicates(node));

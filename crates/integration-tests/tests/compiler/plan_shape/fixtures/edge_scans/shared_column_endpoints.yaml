@@ -66,6 +66,7 @@ cases:
       clickhouse:
         emitted:
           expect:
+            - (Filter _orbit_edge_0.project_id = 42, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))
             - (Filter b.project_id = 42, ... (Scan Table(gl_branch) AS b))
             - (Scan Table(gl_project) AS p)
           reject:
