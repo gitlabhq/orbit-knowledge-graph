@@ -1,14 +1,15 @@
 # Single source of truth for every server setting. Compiled into gkg-server (include_str!) as the
 # lowest configuration layer, so the binary never depends on this file being present at runtime.
-# Every section and scalar the server reads is declared here; the Rust config structs carry no
-# fallback values, so removing a key from this file fails startup with a "missing field" error.
+# Every section and scalar the server reads is declared here; the schema
+# (crates/orbit-server-config/proto/orbit/config/v1/config.proto) marks each one required, so
+# removing a key from this file fails startup with a "value is required" error.
 #
 # Overrides, in increasing priority: the overlay file (--config <path>, else config/config.yaml
 # when present), and K8s secret files under /etc/secrets/.
 #
 # The values below are deployment defaults: what any environment gets when nothing overrides them.
 # They must equal the settings a production pod would run on, so this file can underlay a partial
-# Helm ConfigMap without changing behaviour. config-rs deep-merges maps, so a map entry here that
+# Helm ConfigMap without changing behaviour. The loader deep-merges maps, so a map entry here that
 # the ConfigMap does not set leaks into production; keep the maps below empty unless the entry is a
 # genuine universal default. Local-development-only tuning lives in config/dev.yaml, which the mise
 # dev tasks merge into the generated .dev/<mode>.yaml, not here.
