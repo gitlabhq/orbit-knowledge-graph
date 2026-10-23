@@ -9,7 +9,7 @@ use query_data_model::GitLabPolicy;
 use serde_json::Value;
 
 use crate::ast::visit::{visit_queries, visit_relations};
-use crate::ast::{Expr, Function, Node, Op, Query, TableRef};
+use crate::ast::{Expr, Function, Node, Op, Query, SelectExpr, TableRef};
 use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 use crate::scope;
@@ -55,26 +55,11 @@ fn check_query(
                     .and_then(|entity| model.query_authorization().required_access_level(entity))
                     .unwrap_or(ontology::RequiredRole::Reporter.as_access_level());
                 let eligible_paths = ctx.paths_at_least(access_level);
-                let resolved = scope::resolved_condition(
-                    q.where_clause.as_ref(),
-                    alias,
-                    &column.name,
-                    |authorization| {
-                        has_valid_path_filter(
-                            Some(authorization),
-                            scope::LOOKUP_ALIAS,
-                            TRAVERSAL_PATH_COLUMN,
-                            &eligible_paths,
-                            None,
-                        )
-                    },
-                );
                 if !has_valid_path_filter(
                     q.where_clause.as_ref(),
                     alias,
                     &column.name,
                     &eligible_paths,
-                    resolved.as_ref(),
                 ) {
                     error = Some(QueryError::Security(format!(
                         "post-check failed: column '{alias}.{}' missing valid traversal_path filter at access level {access_level}",
@@ -93,12 +78,11 @@ fn has_valid_path_filter(
     alias: &str,
     column: &str,
     eligible_paths: &[&TraversalPath],
-    resolved: Option<&Expr>,
 ) -> bool {
     let Some(expr) = expr else { return false };
-    if resolved == Some(expr) {
-        return true;
-    }
+    let restricts = |left: &Expr, path: &Expr| {
+        *left == Expr::col(alias, column) && authorized_path(path, eligible_paths)
+    };
     match expr {
         Expr::Literal(Value::Bool(false))
         | Expr::Param {
@@ -110,44 +94,53 @@ fn has_valid_path_filter(
             left,
             right,
         } => {
-            has_valid_path_filter(Some(left), alias, column, eligible_paths, resolved)
-                || has_valid_path_filter(Some(right), alias, column, eligible_paths, resolved)
+            has_valid_path_filter(Some(left), alias, column, eligible_paths)
+                || has_valid_path_filter(Some(right), alias, column, eligible_paths)
         }
         Expr::BinaryOp {
             op: Op::Or,
             left,
             right,
         } => {
-            has_valid_path_filter(Some(left), alias, column, eligible_paths, resolved)
-                && has_valid_path_filter(Some(right), alias, column, eligible_paths, resolved)
+            has_valid_path_filter(Some(left), alias, column, eligible_paths)
+                && has_valid_path_filter(Some(right), alias, column, eligible_paths)
         }
         Expr::FuncCall {
             name: Function::StartsWith,
             args,
-        } => {
-            let [
-                Expr::Column {
-                    table,
-                    column: actual,
-                },
-                path,
-            ] = args.as_slice()
-            else {
-                return false;
-            };
-            if table != alias || actual != column {
-                return false;
-            }
-            match path {
-                Expr::Literal(Value::String(path))
-                | Expr::Param {
-                    value: Value::String(path),
-                    ..
-                } => eligible_paths
-                    .iter()
-                    .any(|authorized| path.starts_with(authorized.as_str())),
-                _ => false,
-            }
+        } => matches!(args.as_slice(), [left, path] if restricts(left, path)),
+        Expr::BinaryOp {
+            op: Op::Eq,
+            left,
+            right,
+        } => restricts(left, right),
+        _ => false,
+    }
+}
+
+fn authorized_path(path: &Expr, eligible_paths: &[&TraversalPath]) -> bool {
+    match path {
+        Expr::Literal(Value::String(path))
+        | Expr::Param {
+            value: Value::String(path),
+            ..
+        } => eligible_paths
+            .iter()
+            .any(|authorized| path.starts_with(authorized.as_str())),
+        Expr::Scalar(lookup) => {
+            **lookup
+                == Query {
+                    select: vec![SelectExpr::new(scope::lookup_path(), TRAVERSAL_PATH_COLUMN)],
+                    from: lookup.from.clone(),
+                    where_clause: lookup.where_clause.clone(),
+                    ..Default::default()
+                }
+                && has_valid_path_filter(
+                    lookup.where_clause.as_ref(),
+                    scope::LOOKUP_ALIAS,
+                    TRAVERSAL_PATH_COLUMN,
+                    eligible_paths,
+                )
         }
         _ => false,
     }
@@ -156,7 +149,7 @@ fn has_valid_path_filter(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{SelectExpr, TableRef};
+    use crate::ast::TableRef;
 
     fn apply_security(node: &mut Node, context: &SecurityContext, ontology: &Ontology) {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
@@ -350,63 +343,73 @@ mod tests {
         }
     }
 
-    fn authorized_lookup(path: &str) -> Expr {
-        let Expr::Scalar(mut query) =
-            crate::scope::lookup_expr("gl_project", "id", &crate::scope::PathScopeId::Numeric(100))
-        else {
-            unreachable!()
-        };
-        let key = query.where_clause.take().unwrap();
-        query.where_clause = Some(Expr::and(
+    fn lookup(select: Expr, filter: Option<&str>) -> Expr {
+        let filter = filter.map(|path| {
             Expr::func(
                 Function::StartsWith,
                 vec![
-                    Expr::col(crate::scope::LOOKUP_ALIAS, TRAVERSAL_PATH_COLUMN),
+                    Expr::col(scope::LOOKUP_ALIAS, TRAVERSAL_PATH_COLUMN),
                     Expr::string(path),
                 ],
-            ),
-            key,
-        ));
-        Expr::Scalar(query)
+            )
+        });
+        let key = Expr::eq(Expr::col(scope::LOOKUP_ALIAS, "id"), Expr::int(100));
+        Expr::Scalar(Box::new(Query {
+            select: vec![SelectExpr::new(select, TRAVERSAL_PATH_COLUMN)],
+            from: TableRef::scan("gl_project", scope::LOOKUP_ALIAS),
+            where_clause: Expr::and_all([filter, Some(key)]),
+            ..Default::default()
+        }))
     }
 
     #[test]
-    fn folded_authorization_needs_its_scope_predicate_and_an_eligible_lookup() {
+    fn accepts_lookup_paths_filtered_at_the_eligible_paths() {
         let context = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let ontology = project_ontology();
         let column = Expr::col("p", TRAVERSAL_PATH_COLUMN);
-        let starts_with = |left, right| Expr::func(Function::StartsWith, vec![left, right]);
-        let authorized = starts_with(column.clone(), Expr::string("42/43/"));
-        let unresolved = |lookup: &Expr| Expr::eq(lookup.clone(), Expr::string("0/"));
-        let scoped = |lookup: &Expr| {
-            Expr::binary(
-                Op::Or,
-                starts_with(column.clone(), lookup.clone()),
-                unresolved(lookup),
-            )
+        let starts_with = |path| Expr::func(Function::StartsWith, vec![column.clone(), path]);
+        let Expr::Scalar(mut unioned) = lookup(scope::lookup_path(), Some("42/43/")) else {
+            unreachable!()
         };
-        let folded = |resolved: Expr| {
-            Expr::binary(
-                Op::Or,
-                Expr::binary(Op::Ne, resolved, Expr::string("0/")),
-                authorized.clone(),
-            )
+        unioned.union_all.push(Query::default());
+        let Expr::FuncCall { name, mut args } = scope::lookup_path() else {
+            unreachable!()
         };
-        let eligible = authorized_lookup("42/43/");
-        let wider = authorized_lookup("42/");
+        args[1] = Expr::string("1/");
+        let other_sentinel = Expr::FuncCall { name, args };
         for (predicate, valid) in [
-            (Expr::and(folded(eligible.clone()), scoped(&eligible)), true),
-            (folded(eligible.clone()), false),
-            (Expr::and(folded(wider.clone()), scoped(&wider)), false),
-            (Expr::and(folded(wider.clone()), scoped(&eligible)), false),
             (
-                Expr::and(folded(Expr::col("p", "id")), scoped(&eligible)),
-                false,
+                starts_with(lookup(scope::lookup_path(), Some("42/43/"))),
+                true,
             ),
             (
-                Expr::and(folded(Expr::Scalar(Box::default())), scoped(&eligible)),
+                Expr::eq(
+                    column.clone(),
+                    lookup(scope::lookup_path(), Some("42/43/5/")),
+                ),
+                true,
+            ),
+            (
+                starts_with(lookup(scope::lookup_path(), Some("42/"))),
                 false,
             ),
+            (starts_with(lookup(scope::lookup_path(), None)), false),
+            (
+                starts_with(lookup(
+                    Expr::col(scope::LOOKUP_ALIAS, TRAVERSAL_PATH_COLUMN),
+                    Some("42/43/"),
+                )),
+                false,
+            ),
+            (starts_with(Expr::Scalar(unioned)), false),
+            (starts_with(lookup(other_sentinel, Some("42/43/"))), false),
+            (starts_with(Expr::Scalar(Box::default())), false),
+            (starts_with(Expr::col("p", "id")), false),
+            (
+                Expr::eq(lookup(scope::lookup_path(), Some("42/43/")), column.clone()),
+                false,
+            ),
+            (Expr::eq(column.clone(), Expr::string("42/")), false),
         ] {
             let node = project_query(Some(predicate));
             assert_eq!(check(&node, &context, &ontology).is_ok(), valid, "{node:?}");

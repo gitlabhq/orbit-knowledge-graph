@@ -74,30 +74,26 @@ fn apply_to_query(
 ) -> Result<()> {
     let aliased_tables = collect_aliased_tables(&q.from, model);
     if !aliased_tables.is_empty() {
-        let where_clause = q.where_clause.take();
+        let mut where_clause = q.where_clause.take();
         let security_conds: Vec<Expr> = aliased_tables
             .iter()
-            .map(|(alias, table)| {
+            .filter_map(|(alias, table)| {
                 let min_role = model.table_minimum_access_level(table);
                 let eligible = ctx.paths_at_least(min_role);
-                let authorization = Expr::or_all([
-                    scope::resolved_condition(
-                        where_clause.as_ref(),
-                        alias,
-                        TRAVERSAL_PATH_COLUMN,
-                        |lookup_filter| {
-                            *lookup_filter == build_path_filter(scope::LOOKUP_ALIAS, &eligible)
-                        },
-                    ),
-                    Some(build_path_filter(alias, &eligible)),
+                let broad = build_path_filter(alias, &eligible);
+                let folded = !eligible.is_empty()
+                    && where_clause.as_mut().is_some_and(|where_clause| {
+                        let lookup_filter = build_path_filter(scope::LOOKUP_ALIAS, &eligible);
+                        scope::fold_authorization(where_clause, alias, &lookup_filter, &broad)
+                    });
+                let proof = ctx
+                    .scope_proofs
+                    .get(alias)
+                    .filter(|_| model.table_path_scopable(table));
+                Expr::and_all([
+                    (!folded).then_some(broad),
+                    proof.map(|proof| scope::scope_predicate(proof, alias)),
                 ])
-                .expect("authorization filter is present");
-                match ctx.scope_proofs.get(alias) {
-                    Some(proof) if model.table_path_scopable(table) => {
-                        Expr::and(authorization, scope::scope_predicate(proof, alias))
-                    }
-                    _ => authorization,
-                }
             })
             .collect();
         q.where_clause = Expr::and_all(

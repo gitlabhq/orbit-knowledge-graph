@@ -16,7 +16,7 @@ cases:
         MATCH (p:Project {id: 1000}) RETURN p.name LIMIT 10
     expect:
       sql_contains:
-        - "!= '0/') OR (startsWith(p.traversal_path, '1/100/') OR startsWith(p.traversal_path, '1/102/')))"
+        - "= '/') AND (startsWith(p.traversal_path, '1/100/') OR startsWith(p.traversal_path, '1/102/'))))"
         - "AS _scope WHERE ((startsWith(_scope.traversal_path, '1/100/') OR startsWith(_scope.traversal_path, '1/102/')) AND (_scope.id = 1000))"
       node_count: 1
       nodes:
@@ -29,7 +29,7 @@ cases:
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN mr.title LIMIT 10
     expect:
       sql_contains:
-        - "!= '0/') OR (startsWith(mr.traversal_path, '1/100/') OR startsWith(mr.traversal_path, '1/102/')))"
+        - "= '/') AND (startsWith(mr.traversal_path, '1/100/') OR startsWith(mr.traversal_path, '1/102/'))))"
       node_count: 5
       nodes:
         Project:
@@ -45,7 +45,7 @@ cases:
         MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) RETURN p.name LIMIT 10
     expect:
       sql_contains:
-        - "!= '0/') OR (startsWith(_orbit_edge_0.traversal_path, '1/100/') OR startsWith(_orbit_edge_0.traversal_path, '1/102/')))"
+        - "= '/') AND (startsWith(_orbit_edge_0.traversal_path, '1/100/') OR startsWith(_orbit_edge_0.traversal_path, '1/102/'))))"
       node_count: 3
       nodes:
         Group:
@@ -69,8 +69,8 @@ cases:
         MATCH (p:Project) WHERE p.id IN [1000, 1002] RETURN p.name LIMIT 10
     expect:
       sql_contains:
-        - "!= '0/') AND ((SELECT"
-        - "!= '0/')) OR (startsWith(p.traversal_path, '1/100/1000/') OR"
+        - "= '/') OR ((SELECT"
+        - "= '/')) AND (startsWith(p.traversal_path, '1/100/1000/') OR"
       node_count: 1
       nodes:
         Project:
@@ -90,7 +90,7 @@ cases:
     expect:
       sql_contains:
         - "AS mr FINAL WHERE (startsWith(mr.traversal_path, '1/100/') OR startsWith(mr.traversal_path, '1/102/'))) AS mr"
-      sql_not_contains: ["!= '0/'"]
+      sql_not_contains: ["= '/') AND (startsWith("]
       skip_requirements: ["filter:project_id"]
       node_count: 4
       nodes:

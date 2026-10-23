@@ -62,7 +62,7 @@ use crate::ast::{Expr, Function, Op, Query, SelectExpr, SqlType, TableRef};
 use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
 
 pub(crate) const LOOKUP_ALIAS: &str = "_scope";
-const UNRESOLVED_PATH: &str = "0/";
+const UNRESOLVED_PATH: &str = "/";
 const MAX_LOOKUPS_PER_ALIAS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -247,7 +247,7 @@ fn propagate_scope_proofs(
     result
 }
 
-pub(crate) fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
+fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
     let (key, from) = match value {
         PathScopeId::Numeric(id) => (
             Expr::param(SqlType::Int64, *id),
@@ -258,6 +258,15 @@ pub(crate) fn lookup_expr(source_table: &str, key_column: &str, value: &PathScop
             TableRef::scan_final(source_table, LOOKUP_ALIAS),
         ),
     };
+    Expr::Scalar(Box::new(Query {
+        select: vec![SelectExpr::new(lookup_path(), TRAVERSAL_PATH_COLUMN)],
+        from,
+        where_clause: Some(Expr::eq(Expr::col(LOOKUP_ALIAS, key_column), key)),
+        ..Default::default()
+    }))
+}
+
+pub(crate) fn lookup_path() -> Expr {
     let latest = |column: &str| {
         Expr::func(
             Function::ArgMaxOrNull,
@@ -267,7 +276,7 @@ pub(crate) fn lookup_expr(source_table: &str, key_column: &str, value: &PathScop
             ],
         )
     };
-    let path = Expr::func(
+    Expr::func(
         Function::Coalesce,
         vec![
             Expr::func(
@@ -280,105 +289,88 @@ pub(crate) fn lookup_expr(source_table: &str, key_column: &str, value: &PathScop
             ),
             Expr::string(UNRESOLVED_PATH),
         ],
-    );
-    Expr::Scalar(Box::new(Query {
-        select: vec![SelectExpr::new(path, TRAVERSAL_PATH_COLUMN)],
-        from,
-        where_clause: Some(Expr::eq(Expr::col(LOOKUP_ALIAS, key_column), key)),
-        ..Default::default()
-    }))
+    )
 }
 
-pub(crate) fn resolved_condition(
-    where_clause: Option<&Expr>,
+pub(crate) fn fold_authorization(
+    expr: &mut Expr,
     alias: &str,
-    column: &str,
-    authorized: impl Fn(&Expr) -> bool,
-) -> Option<Expr> {
-    let unresolved = Expr::string(UNRESOLVED_PATH);
-    where_clause?
-        .leaves(Op::And)
-        .into_iter()
-        .find_map(|conjunct| {
-            let lookups = scope_lookups(conjunct, alias, column)?;
-            lookups
-                .iter()
-                .all(|lookup| lookup_authorization(lookup).is_some_and(&authorized))
-                .then(|| {
-                    let resolved = |lookup: &&Expr| {
-                        Expr::binary(Op::Ne, (*lookup).clone(), unresolved.clone())
-                    };
-                    Expr::conjoin(lookups.iter().map(resolved).collect())
-                        .expect("scope predicate has at least one lookup")
-                })
-        })
-}
-
-fn scope_lookups<'a>(predicate: &'a Expr, alias: &str, column: &str) -> Option<Vec<&'a Expr>> {
-    let leaves = predicate.leaves(Op::Or);
-    if leaves.len() < 2 || !leaves.len().is_multiple_of(2) {
-        return None;
-    }
-    let (matches, unresolved) = leaves.split_at(leaves.len() / 2);
-    let column = Expr::col(alias, column);
-    matches
-        .iter()
-        .zip(unresolved)
-        .map(|(leaf, flag)| match flag {
-            Expr::BinaryOp {
-                op: Op::Eq,
-                left,
-                right,
-            } if matches!(**left, Expr::Scalar(_))
-                && **right == Expr::string(UNRESOLVED_PATH)
-                && restricts_to(leaf, &column, left) =>
-            {
-                Some(&**left)
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-fn restricts_to(leaf: &Expr, column: &Expr, path: &Expr) -> bool {
-    let first = leaf.leaves(Op::And)[0];
-    *first == Expr::eq(column.clone(), path.clone())
-        || *first == Expr::func(Function::StartsWith, vec![column.clone(), path.clone()])
-}
-
-fn lookup_authorization(lookup: &Expr) -> Option<&Expr> {
-    if let Expr::Scalar(query) = lookup
-        && let TableRef::Scan { table, .. } = &query.from
-        && let Some(Expr::BinaryOp {
+    lookup_filter: &Expr,
+    authorization: &Expr,
+) -> bool {
+    match expr {
+        Expr::BinaryOp {
             op: Op::And,
-            left: authorization,
-            right: key,
-        }) = &query.where_clause
-        && let Expr::BinaryOp {
-            op: Op::Eq,
-            left: key_column,
-            right: key_value,
-        } = key.as_ref()
-        && let Expr::Column {
-            column: key_column, ..
-        } = key_column.as_ref()
-        && let Expr::Param {
-            value: key_value, ..
-        } = key_value.as_ref()
-    {
-        let id = match key_value {
-            serde_json::Value::Number(id) => PathScopeId::Numeric(id.as_i64()?),
-            serde_json::Value::String(text) => PathScopeId::Text(text.clone()),
-            _ => return None,
-        };
-        let pristine = Query {
-            where_clause: Some((**key).clone()),
-            ..(**query).clone()
-        };
-        return (Expr::Scalar(Box::new(pristine)) == lookup_expr(table, key_column, &id))
-            .then_some(authorization);
+            left,
+            right,
+        } => {
+            fold_authorization(left, alias, lookup_filter, authorization)
+                || fold_authorization(right, alias, lookup_filter, authorization)
+        }
+        Expr::BinaryOp {
+            op: Op::Or,
+            left,
+            right,
+        } if scope_matches(left, &Expr::col(alias, TRAVERSAL_PATH_COLUMN))
+            .is_some_and(|lookups| unresolved_lookups(right, lookup_filter) == Some(lookups)) =>
+        {
+            **right = Expr::and((**right).clone(), authorization.clone());
+            true
+        }
+        _ => false,
     }
-    None
+}
+
+fn scope_matches<'a>(expr: &'a Expr, column: &Expr) -> Option<Vec<&'a Expr>> {
+    match expr {
+        Expr::BinaryOp {
+            op: Op::Or,
+            left,
+            right,
+        } => Some([scope_matches(left, column)?, scope_matches(right, column)?].concat()),
+        Expr::BinaryOp {
+            op: Op::And, left, ..
+        } => scope_matches(left, column),
+        Expr::BinaryOp {
+            op: Op::Eq,
+            left,
+            right,
+        } if **left == *column && matches!(**right, Expr::Scalar(_)) => Some(vec![&**right]),
+        Expr::FuncCall {
+            name: Function::StartsWith,
+            args,
+        } => match args.as_slice() {
+            [left, lookup @ Expr::Scalar(_)] if left == column => Some(vec![lookup]),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn unresolved_lookups<'a>(expr: &'a Expr, lookup_filter: &Expr) -> Option<Vec<&'a Expr>> {
+    match expr {
+        Expr::BinaryOp {
+            op: Op::Or,
+            left,
+            right,
+        } => Some(
+            [
+                unresolved_lookups(left, lookup_filter)?,
+                unresolved_lookups(right, lookup_filter)?,
+            ]
+            .concat(),
+        ),
+        Expr::BinaryOp {
+            op: Op::Eq,
+            left,
+            right,
+        } if **right == Expr::string(UNRESOLVED_PATH)
+            && matches!(&**left, Expr::Scalar(lookup) if matches!(&lookup.where_clause, Some(Expr::BinaryOp { op: Op::And, left, .. }) if **left == *lookup_filter)) =>
+        {
+            Some(vec![&**left])
+        }
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -530,6 +522,111 @@ mod tests {
             node_ids: vec![42],
             ..Default::default()
         }
+    }
+
+    fn lookup_proof(ids: &[i64]) -> ScopeProof {
+        ScopeProof::from_sources(
+            ids.iter()
+                .map(|id| ScopeSource::Lookup {
+                    source_table: "gl_project".into(),
+                    key_column: "id".into(),
+                    value: PathScopeId::Numeric(*id),
+                })
+                .collect(),
+        )
+    }
+
+    fn authorize(expr: &mut Expr, filter: &Expr) {
+        match expr {
+            Expr::Scalar(lookup) => {
+                let key = lookup.where_clause.take().unwrap();
+                lookup.where_clause = Some(Expr::and(filter.clone(), key));
+            }
+            Expr::BinaryOp { left, right, .. } => {
+                authorize(left, filter);
+                authorize(right, filter);
+            }
+            Expr::FuncCall { args, .. } => args.iter_mut().for_each(|arg| authorize(arg, filter)),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn fold_authorization_rewrites_only_the_matching_scope_predicate() {
+        let filter = |alias: &str, path: &str| {
+            Expr::func(
+                Function::StartsWith,
+                vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(path)],
+            )
+        };
+        let scoped = |proof: &ScopeProof, alias: &str, path: &str| {
+            let mut predicate = scope_predicate(proof, alias);
+            authorize(&mut predicate, &filter(LOOKUP_ALIAS, path));
+            predicate
+        };
+        let split = |predicate: &Expr| {
+            let Expr::BinaryOp { left, right, .. } = predicate.clone() else {
+                unreachable!()
+            };
+            (*left, *right)
+        };
+        let fold = |predicate: &Expr, alias: &str| {
+            let (matches, unresolved) = split(predicate);
+            Expr::binary(
+                Op::Or,
+                matches,
+                Expr::and(unresolved, filter(alias, "1/2/")),
+            )
+        };
+        let project = scoped(&lookup_proof(&[7, 8, 9]), "p", "1/2/");
+        let other = scoped(&lookup_proof(&[7]), "mr", "1/2/");
+        let user = Expr::eq(Expr::col("p", "id"), Expr::int(7));
+        let (matches, unresolved) = split(&scoped(&lookup_proof(&[7, 8]), "p", "1/2/"));
+        let (first_match, _) = split(&matches);
+        let (first_unresolved, second_unresolved) = split(&unresolved);
+        let mut mixed = ScopeProof::literal("1/2/3/");
+        mixed.sources.push(lookup_proof(&[7]).sources.remove(0));
+        for (mut predicate, expected) in [
+            (project.clone(), Some(fold(&project, "p"))),
+            (
+                Expr::and(user.clone(), Expr::and(other.clone(), project.clone())),
+                Some(Expr::and(
+                    user.clone(),
+                    Expr::and(other.clone(), fold(&project, "p")),
+                )),
+            ),
+            (Expr::and(other.clone(), user.clone()), None),
+            (scope_predicate(&ScopeProof::literal("1/2/3/"), "p"), None),
+            (scoped(&mixed, "p", "1/2/"), None),
+            (scoped(&lookup_proof(&[7]), "p", "1/"), None),
+            (
+                Expr::binary(
+                    Op::Or,
+                    Expr::binary(Op::Or, first_match.clone(), first_unresolved),
+                    second_unresolved.clone(),
+                ),
+                None,
+            ),
+            (Expr::binary(Op::Or, first_match, second_unresolved), None),
+        ] {
+            let before = predicate.clone();
+            let folded = fold_authorization(
+                &mut predicate,
+                "p",
+                &filter(LOOKUP_ALIAS, "1/2/"),
+                &filter("p", "1/2/"),
+            );
+            assert_eq!(folded, expected.is_some(), "{before:?}");
+            assert_eq!(predicate, expected.unwrap_or(before));
+        }
+        let mut both = Expr::and(other.clone(), project.clone());
+        assert!(fold_authorization(
+            &mut both,
+            "mr",
+            &filter(LOOKUP_ALIAS, "1/2/"),
+            &filter("mr", "1/2/"),
+        ));
+        assert_eq!(both, Expr::and(fold(&other, "mr"), project));
     }
 
     #[test]
