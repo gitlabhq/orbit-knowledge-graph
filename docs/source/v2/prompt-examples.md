@@ -38,6 +38,7 @@ Replace the values in `<angle brackets>`. The first two prompts, about code, als
 
 Each section also shows a [query](queries/query-language.md) that the agent can run.
 To check an answer, replace the example values in the query, then run it with `glab orbit query "<query>"`.
+Your agent can run any read-only query on the graph, including counts, averages, and trends over time.
 
 ## Understand a codebase
 
@@ -196,6 +197,36 @@ WHERE p.full_path STARTS WITH 'my-group/'
 RETURN p.full_path, pkg.name, pkg.version, v.title, v.severity
 ORDER BY v.severity ASC
 LIMIT 50
+```
+
+## Analyze trends across your group
+
+Measure how your group delivers over time.
+
+```plaintext
+Using GitLab Orbit, for <my-group>:
+- How many merge requests did we merge each month this year?
+- Which projects have the slowest successful pipelines?
+```
+
+The agent counts the merged merge requests by month:
+
+```gql orbit-query
+MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project)
+WHERE p.full_path STARTS WITH 'my-group/' AND mr.state = 'merged' AND mr.merged_at >= '2026-01-01T00:00:00Z'
+RETURN date_trunc('month', mr.merged_at) AS month, count(mr) AS merged
+ORDER BY month
+LIMIT 12
+```
+
+Then it ranks the projects by the average duration of successful pipelines, in seconds:
+
+```gql orbit-query
+MATCH (pl:Pipeline)-[:IN_PROJECT]->(p:Project)
+WHERE p.full_path STARTS WITH 'my-group/' AND pl.status = 'success'
+RETURN p.full_path, avg(pl.duration) AS avg_seconds, count(pl) AS pipelines
+ORDER BY avg_seconds DESC
+LIMIT 10
 ```
 
 ## Read source code without a checkout
