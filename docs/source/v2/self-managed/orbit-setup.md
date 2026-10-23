@@ -79,8 +79,8 @@ Turn on GitLab Orbit in GitLab first, so the key exists before you copy it into 
 
 Decide the gRPC endpoint before you start. If GitLab runs in the same cluster, the endpoint is
 `tls://orbit-webserver.gitlab-orbit.svc.cluster.local:50054`. Otherwise, see [TLS and network requirements](#tls-and-network-requirements).
-GitLab connects to the gRPC endpoint over TLS on port 50054. The endpoint setting must begin with `tls://`,
-because the scheme controls whether the connection is encrypted.
+GitLab connects to the gRPC endpoint on port 50054. An endpoint that begins with `tls://` uses TLS.
+To use a service mesh for encryption instead, see [Use a plaintext connection](#use-a-plaintext-connection).
 
 {{< tabs >}}
 
@@ -163,7 +163,7 @@ To take a key from a different Secret, set `secretName` and `key` for that crede
 Sync the values from the secret manager that you already run, for example with the External Secrets Operator.
 Do not store the plaintext elsewhere.
 
-You also need a TLS certificate for the gRPC endpoint. See [TLS and network requirements](#tls-and-network-requirements).
+If you use TLS, you also need a certificate for the gRPC endpoint. See [TLS and network requirements](#tls-and-network-requirements).
 
 ## Install GitLab Orbit
 
@@ -242,7 +242,7 @@ Leave them off on GitLab Self-Managed.
 
 | Connection | Requirement |
 |------------|-------------|
-| GitLab to GitLab Orbit | gRPC over TLS on port 50054. Rails and Workhorse open their own connections, so both need a route to the endpoint. |
+| GitLab to GitLab Orbit | gRPC on port 50054. Rails and Workhorse open their own connections, so both need a route to the endpoint. |
 | GitLab Orbit to GitLab | HTTP to the GitLab URL. GitLab Orbit never connects to Gitaly directly. |
 | GitLab Orbit to ClickHouse | The HTTP interface on port 8123, or 8443 with TLS. Siphon uses the native protocol on port 9000, so both ports must be reachable from the cluster. |
 
@@ -257,6 +257,27 @@ For a certificate from your own CA, add the CA certificate to the GitLab trust s
 If GitLab runs in the same cluster, `ClusterIP` is enough and the endpoint is
 `tls://orbit-webserver.gitlab-orbit.svc.cluster.local:50054`. Otherwise, expose the service with a method that
 your cluster supports, and keep the address on a private network.
+
+### Use a plaintext connection
+
+Use a plaintext connection when a service mesh, such as Istio, encrypts the traffic between GitLab and
+GitLab Orbit. The webserver then does not need a certificate.
+
+Prerequisites:
+
+- A service mesh or a network that encrypts the traffic between GitLab and GitLab Orbit.
+- An endpoint host name that resolves only to loopback or private addresses: `10.0.0.0/8`,
+  `172.16.0.0/12`, `192.168.0.0/16`, or `fc00::/7`.
+
+To use a plaintext connection:
+
+1. In `orbit-values.yaml`, set `tls.enabled` to `false`. This value is the default.
+1. In the GitLab configuration, set the gRPC endpoint without a scheme.
+   For example, `orbit-webserver.gitlab-orbit.svc.cluster.local:50054`.
+
+If the host name resolves to an address outside these ranges, GitLab does not send the authorization token.
+All requests to GitLab Orbit then fail authentication, and GitLab logs
+`Skipping authorization header on insecure non-private channel`.
 
 ### Resource requirements
 
@@ -280,20 +301,18 @@ storage requests and limits of the pool.
 
 GitLab Orbit indexes top-level groups. Subgroups and projects inherit indexing.
 
-<!-- vale orbit.StandaloneProductName = NO -->
-
 1. In the upper-right corner, select **Admin**.
-1. In the left sidebar, select **Orbit**.
+1. In the left sidebar, select **GitLab Orbit**.
 1. Under **Top-level groups**, select your group.
-1. Select **Actions** > **Turn on Orbit**.
+1. Select **Actions** > **Turn on GitLab Orbit**.
 
-The status of the group changes to **Indexing**, then **Indexed**.
+The **Index status** of the group changes to **Indexing**, then **Indexed**.
 
 To turn on every top-level group, including new ones, turn on the
-**Turn on Orbit for all top-level groups automatically** toggle, then select **Turn on for all groups**.
+**Turn on GitLab Orbit for all top-level groups automatically** toggle, then select
+**Turn on for all top-level groups**.
 To leave out a group, select it, then select **Actions** > **Exclude from automatic indexing**.
-
-<!-- vale orbit.StandaloneProductName = YES -->
+If GitLab Orbit is on for the group, select **Exclude** to confirm.
 
 To turn on indexing with the API instead, use a token with administrator access:
 
@@ -330,7 +349,7 @@ indexing, because both pass long before the first index finishes.
 
 ## Next steps
 
-Tell your developers to follow the [quickstart](../quickstart.md#step-2-install-the-cli-and-sign-in),
+Tell your developers to follow the [quickstart](../quickstart.md#step-2-sign-in-and-set-up-your-agent),
 and to sign in with `glab auth login --hostname <gitlab.example.com>`.
 
 ## Related topics

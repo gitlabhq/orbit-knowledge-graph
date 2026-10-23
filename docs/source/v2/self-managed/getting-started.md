@@ -48,7 +48,7 @@ Steps 1 to 3 do not depend on GitLab Orbit. You can verify each one on its own.
 
 ## ClickHouse
 
-GitLab Orbit requires ClickHouse 26.4 or later for full-text indexes and materialized common table expressions.
+GitLab Orbit requires ClickHouse 26.4 or later.
 The rest of GitLab also runs on 25.x releases, so check the version even if ClickHouse already serves GitLab.
 
 [Set up ClickHouse for GitLab](https://docs.gitlab.com/integration/clickhouse/) first, including
@@ -94,16 +94,9 @@ with sequential consistency, and retries transient quorum and Keeper errors.
 One replica can leave the cluster while indexing and queries continue.
 Leave the switch off on a single node and on ClickHouse Cloud.
 
-ClickHouse 26.7 and later reject the GitLab migrations that create `AggregatingMergeTree` tables with
-columns outside the sorting key. Until [issue 627691](https://gitlab.com/gitlab-org/gitlab/-/work_items/627691)
-updates those migrations, set `allow_dimensions_outside_sorting_key` in the server `merge_tree` settings
-before you run the GitLab migrations on those releases:
-
-```xml
-<merge_tree>
-  <allow_dimensions_outside_sorting_key>1</allow_dimensions_outside_sorting_key>
-</merge_tree>
-```
+ClickHouse 26.7 and later reject some GitLab migrations. Follow
+[ClickHouse 26.7 and later](https://docs.gitlab.com/integration/clickhouse/#clickhouse-267-and-later) in the
+GitLab ClickHouse documentation, which sets `compatibility` to `26.6`.
 
 ### Sizing and settings
 

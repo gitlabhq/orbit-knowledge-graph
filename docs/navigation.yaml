@@ -77,7 +77,7 @@
           url: 'orbit/v2/cli/'
         - title: GitLab Duo
           url: 'orbit/v2/agents/duo/'
-        - title: MCP servers
+        - title: GitLab Orbit MCP server
           url: 'orbit/v2/agents/mcp/'
     - title: GitLab Orbit dashboard
       url: 'orbit/v2/dashboard/'
@@ -88,7 +88,7 @@
           url: 'orbit/v2/queries/query-language/'
         - title: REST API
           url: 'orbit/v2/queries/api/'
-    - title: Architecture
+    - title: GitLab Orbit architecture
       url: 'orbit/v2/how-it-works/'
       submenu:
         - title: Indexed data
@@ -101,6 +101,8 @@
           url: 'orbit/v2/local/'
         - title: Glossary
           url: 'orbit/v2/glossary/'
+    # Cutover: the administration section also lists orbit/self-managed/.
+    # When you remove the v2/ prefix, keep only one of the two entries.
     - title: GitLab Self-Managed
       url: 'orbit/v2/self-managed/'
       submenu:
