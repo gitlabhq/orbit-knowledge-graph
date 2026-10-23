@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query the GitLab Orbit graph with the REST API. Reference for the endpoints, authentication, and example requests.
+description: REST API to query the GitLab Orbit graph from scripts, scheduled reports, and custom tools.
 title: GitLab Orbit REST API
 ---
 
@@ -15,16 +15,16 @@ title: GitLab Orbit REST API
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
 
 {{< /history >}}
 
-Use the GitLab Orbit REST API to query the graph from scripts, scheduled reports, and custom tools.
+Use this API to query the [GitLab Orbit](../_index.md) graph from scripts, scheduled reports, and custom tools.
 For the GitLab API reference, see [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
-For the GitLab Orbit data of the instance and of your groups in the GraphQL API, see
+For GitLab Orbit data about the instance and your groups in the GraphQL API, see
 [`Query.orbit`](https://docs.gitlab.com/api/graphql/reference/#queryorbit).
 
 ## Authentication
@@ -33,7 +33,7 @@ Send a personal access token with the `read_api` scope, or a
 [fine-grained personal access token](../security.md#fine-grained-personal-access-tokens), as a Bearer token:
 
 ```shell
---header "Authorization: Bearer <your_token>"
+--header "Authorization: Bearer <your_access_token>"
 ```
 
 Results include only what the token owner can access in GitLab.
@@ -44,7 +44,7 @@ For automation without a personal account, use a [service account](../security.m
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/v4/orbit/query` | Run a graph query |
-| `POST` | `/api/v4/orbit/query/:name` | Run a [named query](#named-queries) |
+| `POST` | `/api/v4/orbit/query/:name` | Run a [named query](#run-a-named-query) |
 | `GET` | `/api/v4/orbit/query/templates` | List the named queries that take no parameters |
 | `GET` | `/api/v4/orbit/schema` | Get the schema |
 | `GET` | `/api/v4/orbit/schema/dsl` | Get the JSON Schema of the deprecated JSON query domain-specific language (DSL). Returns `404` when you use GQL. Use `CALL db.schema()` instead. |
@@ -54,22 +54,28 @@ For automation without a personal account, use a [service account](../security.m
 | `GET` | `/api/v4/orbit/skills` | List the agent skills on the server |
 | `GET` | `/api/v4/orbit/skills/:name` | Get one agent skill |
 | `GET` | `/api/v4/orbit/skills/:name/*path` | Get one file of an agent skill |
-| `GET` | `/api/v4/orbit/tools` | List the MCP tool definitions |
+| `GET` | `/api/v4/orbit/tools` | List the Model Context Protocol (MCP) tool definitions |
 | `GET` | `/api/v4/orbit/agent/commands` | List the agent commands. The REST version of the MCP `list_commands` tool. |
 | `POST` | `/api/v4/orbit/agent/commands/:name` | Run an agent command. The REST version of the MCP `invoke_command` tool. |
 
-## Query endpoint
+## Run a query
 
-The request body contains:
+Run a graph query.
 
-- `query`: The query text in the [GitLab Orbit query language](query-language.md).
-- `response_format`: Optional. Use `raw` for structured JSON, `llm` for compact
-  [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text for agents, or `gql` for a text table.
-  Default: `raw`. The GitLab Orbit CLI sends `llm` by default.
+```plaintext
+POST /api/v4/orbit/query
+```
 
-### Example request
+Supported attributes:
 
-To find the projects in a group with the most failed pipelines, put this request body in `request.json`:
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | The query text in the [GitLab Orbit query language](query-language.md). |
+| `response_format` | string | No | The response shape: `raw` for structured JSON, `llm` for compact [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text for agents, or `gql` for a text table. Default: `raw`. The GitLab Orbit CLI sends `llm` by default. |
+
+Example request.
+The query finds the projects in a group with the most failed pipelines.
+Put the request body in `request.json`:
 
 ```json
 {
@@ -80,13 +86,13 @@ To find the projects in a group with the most failed pipelines, put this request
 
 ```shell
 curl --request POST \
-  --header "Authorization: Bearer <your_token>" \
+  --header "Authorization: Bearer <your_access_token>" \
   --header "Content-Type: application/json" \
   --data @request.json \
-  --url "https://gitlab.com/api/v4/orbit/query"
+  --url "https://gitlab.example.com/api/v4/orbit/query"
 ```
 
-An example response:
+Example response:
 
 ```json
 {
@@ -112,43 +118,77 @@ An example response:
 }
 ```
 
-## Named queries
+## Run a named query
 
-The server has a catalog of named queries. To run one, send its parameters:
+Run a named query from the server catalog.
+
+```plaintext
+POST /api/v4/orbit/query/:name
+```
+
+Supported attributes:
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | The name of the named query. |
+| `parameters` | hash | Conditional | The parameters of the named query. Required if the named query takes parameters. |
+| `response_format` | string | No | The response shape. For the values, see [Run a query](#run-a-query). |
+
+Example request:
 
 ```shell
 curl --request POST \
-  --header "Authorization: Bearer <your_token>" \
+  --header "Authorization: Bearer <your_access_token>" \
   --header "Content-Type: application/json" \
   --data '{"parameters": {"entity": "Project", "field": "full_path", "text": "my-group/my-project"}, "response_format": "raw"}' \
-  --url "https://gitlab.com/api/v4/orbit/query/search_nodes"
+  --url "https://gitlab.example.com/api/v4/orbit/query/search_nodes"
 ```
 
 `GET /api/v4/orbit/query/templates` lists the named queries that take no parameters, with their query text.
 No endpoint lists the named queries that take parameters.
 For their names and parameters, see the [named query definitions](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/config/named_queries).
 
-## Schema endpoint
+## Retrieve the schema
 
-Returns all node types and relationship types. To also get the properties and relationships of node types, pass their names in `expand`, for example `?expand=MergeRequest,Project`, or `?expand=*` for every node type.
+Retrieve all node types and relationship types.
 In a query, `CALL db.schema()` returns the same information.
 
-```shell
-curl --header "Authorization: Bearer <your_token>" \
-  "https://gitlab.com/api/v4/orbit/schema"
+```plaintext
+GET /api/v4/orbit/schema
 ```
 
-## Status endpoint
+Supported attributes:
 
-Returns your access to GitLab Orbit and the health of the service.
-For indexing progress, use the [graph status endpoint](#graph-status-endpoint).
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `expand` | string | No | Comma-separated node type names, for example `MergeRequest,Project`. The response then includes the properties and relationships of these node types. Use `*` for every node type. |
+
+Example request:
 
 ```shell
-curl --header "Authorization: Bearer <your_token>" \
-  "https://gitlab.com/api/v4/orbit/status"
+curl --request GET \
+  --header "Authorization: Bearer <your_access_token>" \
+  --url "https://gitlab.example.com/api/v4/orbit/schema"
 ```
 
-An example response, with most components removed:
+## Retrieve the status
+
+Retrieve your access to GitLab Orbit and the health of the service.
+For indexing progress, [retrieve the graph status](#retrieve-the-graph-status) instead.
+
+```plaintext
+GET /api/v4/orbit/status
+```
+
+Example request:
+
+```shell
+curl --request GET \
+  --header "Authorization: Bearer <your_access_token>" \
+  --url "https://gitlab.example.com/api/v4/orbit/status"
+```
+
+Example response, with most components removed:
 
 ```json
 {
@@ -168,20 +208,35 @@ An example response, with most components removed:
 }
 ```
 
-The endpoint always returns `200`. When you have no access, `user.available` is `false`
-and `system` is `null`.
+The endpoint always returns `200`.
+When you have no access, `user.available` is `false` and `system` is `null`.
 
-## Graph status endpoint
+## Retrieve the graph status
 
-Returns indexing progress and entity counts for one group or project.
+Retrieve indexing progress and entity counts for one group or project.
 Give exactly one of `namespace_id`, `project_id`, or `full_path`.
 
-```shell
-curl --header "Authorization: Bearer <your_token>" \
-  "https://gitlab.com/api/v4/orbit/graph_status?full_path=my-group/payments-api"
+```plaintext
+GET /api/v4/orbit/graph_status
 ```
 
-An example response, with most domains removed:
+Supported attributes:
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `full_path` | string | Conditional | The full path of the group or project. Required if `namespace_id` and `project_id` are not given. |
+| `namespace_id` | integer | Conditional | The ID of the group. Required if `project_id` and `full_path` are not given. |
+| `project_id` | integer | Conditional | The ID of the project. Required if `namespace_id` and `full_path` are not given. |
+
+Example request:
+
+```shell
+curl --request GET \
+  --header "Authorization: Bearer <your_access_token>" \
+  --url "https://gitlab.example.com/api/v4/orbit/graph_status?full_path=my-group/payments-api"
+```
+
+Example response, with most domains removed:
 
 ```json
 {
@@ -206,19 +261,23 @@ An example response, with most domains removed:
 }
 ```
 
-## Tools endpoint
+## List all tools
 
-Returns the MCP tool definitions of `list_commands` and `invoke_command`.
+List all MCP tool definitions: `list_commands` and `invoke_command`.
+
+```plaintext
+GET /api/v4/orbit/tools
+```
+
+Example request:
 
 ```shell
-curl --header "Authorization: Bearer <your_token>" \
-  "https://gitlab.com/api/v4/orbit/tools"
+curl --request GET \
+  --header "Authorization: Bearer <your_access_token>" \
+  --url "https://gitlab.example.com/api/v4/orbit/tools"
 ```
 
 ## Related topics
 
 - [Queries](_index.md)
-- [Query language](query-language.md)
-- [GitLab Orbit API reference](https://docs.gitlab.com/api/orbit/)
-- [GraphQL API: `Query.orbit`](https://docs.gitlab.com/api/graphql/reference/#queryorbit)
 - [Security](../security.md)
