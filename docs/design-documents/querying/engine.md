@@ -1,17 +1,27 @@
-# Graph query engine
+# GitLab Orbit: Graph Query Engine
 
-## Overview
+GitLab Orbit's query engine turns a graph query into parameterized SQL over typed node tables and adjacency-ordered edge tables.
 
-The graph query engine turns a graph query into parameterized SQL over typed node tables and adjacency-ordered edge tables.
+At a high level, here's how data flows through the engine:
 
-1. A frontend parses the query into the shared input. [Query languages](querying.md) describes the frontends.
-2. The compiler checks the input against the ontology and the caller's access.
-3. The planner picks how to read each node and relationship.
-4. Lowering builds a SQL syntax tree from the plan.
-5. Security passes add authorization filters, and a final check proves that every read carries one.
-6. Code generation renders the tree as SQL for one backend.
+1. A frontend like JSON or GQL parses a graph query into a shared input. The [Query languages](querying.md) doc describes the frontends.
+2. The engine validates the shared input against Orbit's GitLab ontology, GitLab permissions, and general querying limits.
+3. The query planner attempts to pick the most efficient way to execute a graph query.
+4. The selected query plan is turned into a SQL syntax tree.
+5. Additional engine passes add authorization filters, response formatting, and query settings.
+5. A final validation pass is executed to ensure all authorization filters and redaction metadata is present.
+6. Code generation renders the syntax tree as SQL for a particular backend, like Clickhouse.
 
-ClickHouse gives OLAP throughput, and the compiler adds property-graph semantics on top: traversals, paths, neighborhoods, and grouped counts. Orbit needs no separate graph database. [ADR 000](../decisions/000_clickhouse_graph_storage.md) records that choice.
+ClickHouse allows Orbit to have the best of both worlds - fast aggregations for analytical queries, and property-graph semantics for traversals, paths, neighborhoods, and grouped counts. Orbit needs no separate graph database, see [ADR 000](../decisions/000_clickhouse_graph_storage.md) which details that decision.
+
+## Terms
+
+- The **query data model** is the compiler's view of one schema version: the logical graph, its physical layout for one backend, and its authorization policy.
+- A **phase** is one engine step, such as `validate` or `plan`.
+- A **pipeline** is an ordered list of phases for one frontend and one backend.
+- A **relation** is one read of a node or edge table in the plan.
+- A **scope** is a narrow traversal path prefix that the compiler derives from the query, such as the path of one project.
+- A **tombstone** is the row version that marks a row as deleted.
 
 ## Engine principles
 
@@ -21,15 +31,6 @@ ClickHouse gives OLAP throughput, and the compiler adds property-graph semantics
 - The planner may change how a query reads data, but never what the query returns.
 - A query reads the current version of each row. Speed never comes at the cost of stale results.
 - When the engine cannot prove that a read is safe, it rejects the query.
-
-## Terms
-
-- The **query data model** is the compiler's view of one schema version: the logical graph, its physical layout for one backend, and its authorization policy.
-- A **phase** is one compiler step, such as `validate` or `plan`.
-- A **pipeline** is an ordered list of phases for one frontend and one backend.
-- A **relation** is one read of a node or edge table in the plan.
-- A **scope** is a narrow traversal path prefix that the compiler derives from the query, such as the path of one project.
-- A **tombstone** is the row version that marks a row as deleted.
 
 ## Storage model
 
