@@ -1,25 +1,53 @@
-# Query languages
+<!-- markdownlint-disable MD041 -->
+<div align="center">
 
-## Overview
+<img src="../../assets/orbit-logo.png" width="120" height="120" alt="GitLab Orbit logo">
 
-Orbit Remote accepts two query languages. Both compile through one shared compiler.
+# GitLab Orbit: Query Languages
 
-1. The JSON Query DSL is a JSON object that follows a published schema. It is the default.
-2. GQL is read-only text based on openCypher 9 syntax, such as `MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)`.
-3. Each language has its own frontend. The frontend parses the query and lowers it into the shared input.
-4. From the shared input on, the [graph query engine](engine.md) treats every query the same way. It validates, secures, plans, and renders it.
+**Two ways to ask, one engine to answer**
 
-A language changes how a caller writes a query, not what the engine can do. Authorization, limits, and results are the same in both languages.
+[Overview](README.md) · [Query languages](querying.md) · [Graph query engine](engine.md) · [Query language reference](../../source/remote/queries/query-language.md)
+
+</div>
+
+Orbit Remote accepts two query languages.
+Both compile through one shared compiler.
+
+1. The JSON Query DSL is a JSON object that follows a published schema.
+   It is the default.
+1. GQL is read-only text based on openCypher 9 syntax, such as `MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)`.
+1. Each language has its own frontend.
+   The frontend parses the query and lowers it into the shared input.
+1. From the shared input on, the [graph query engine](engine.md) treats every query the same way.
+   It validates, secures, plans, and renders it.
+
+A language changes how a caller writes a query, not what the engine can do.
+Authorization, limits, and results are the same in both languages.
+
+> [!note]
+> GQL is off by default.
+> Rails turns it on for each user with the `orbit_gql_queries` feature flag.
+
+---
 
 ## Language principles
 
-- Both languages lower to one input. A capability that exists in the input works in every language that can express it.
-- The same query returns the same result in both languages. Tests check both spellings against one expectation.
-- Query values never become SQL text. The compiler binds every value as a parameter, and every name must match the ontology.
-- A frontend rejects what it does not support. It never drops part of a query and runs the rest.
-- Errors are safe to show the caller. They name the problem without echoing the query text.
+- Both languages lower to one input.
+  A capability that exists in the input works in every language that can express it.
+- The same query returns the same result in both languages.
+  Tests check both spellings against one expectation.
+- Query values never become SQL text.
+  The compiler binds every value as a parameter, and every name must match the ontology.
+- A frontend rejects what it does not support.
+  It never drops part of a query and runs the rest.
+- Errors are safe to show the caller.
+  They name the problem without echoing the query text.
 - Callers discover the graph from the ontology, never from the ClickHouse schema.
-- Rails picks the language for each user. The server never guesses the language from the payload.
+- Rails picks the language for each user.
+  The server never guesses the language from the payload.
+
+---
 
 ## Terms
 
@@ -28,6 +56,8 @@ A language changes how a caller writes a query, not what the engine can do. Auth
 - A **node selector** names an entity type and a variable, with optional IDs, filters, and returned properties.
 - A **relationship selector** connects two node selectors, with a relationship type, a direction, and a hop range.
 - A **pattern** is the GQL form of node and relationship selectors, such as `(u:User)-[:AUTHORED]->(mr)`.
+
+---
 
 ## The languages at a glance
 
@@ -62,9 +92,12 @@ input --> compiler
 
 Both frontends live under `crates/query-engine/compiler/src/passes/frontend/`.
 
+---
+
 ## Query types
 
-Every query is one of four types. JSON names the type, and GQL infers it from the statement.
+Every query is one of four types.
+JSON names the type, and GQL infers it from the statement.
 
 | Query type | Answers | GQL form |
 | --- | --- | --- |
@@ -75,16 +108,20 @@ Every query is one of four types. JSON names the type, and GQL infers it from th
 
 The [query language reference](../../source/remote/queries/query-language.md) documents every field, operator, and limit.
 
+---
+
 ## JSON Query DSL
 
-JSON is the default language. It suits LLMs and services:
+JSON is the default language.
+It suits LLMs and services:
 
 - LLMs produce valid JSON against a schema more reliably than free-form query text.
 - One machine-readable file, `config/schemas/graph_query.schema.json`, documents every field, type, and limit.
 - Every value has its own field, so values never mix with query structure.
 - Services can build queries in code without a parser.
 
-A query names its type and its nodes. The other fields depend on the type:
+A query names its type and its nodes.
+The other fields depend on the type:
 
 | Part | Purpose |
 | --- | --- |
@@ -113,17 +150,26 @@ For example, this query returns merged merge requests with their authors:
 }
 ```
 
-The DSL has a version: the `query_dsl` pin in `config/versions.yaml`. Its major version is part of the schema `$id`. `get_query_dsl` returns the current schema.
+The DSL has a version: the `query_dsl` pin in `config/versions.yaml`.
+Its major version is part of the schema `$id`.
+`get_query_dsl` returns the current schema.
+
+---
 
 ## GQL
 
-GQL is the text language. It suits agents that already know Cypher:
+GQL is the text language.
+It suits agents that already know Cypher:
 
 - A short pattern costs fewer tokens than the same query in JSON.
 - A pattern reads like the graph it matches.
 - One statement form covers queries and schema discovery.
 
-GQL in Orbit is a restricted subset of openCypher 9 with a few extensions. It reads and never writes. It accepts one statement per request and has no query parameters, so callers keep untrusted values out of the query text. It is not a Neo4j-compatible driver. The grammar adapts productions from the official openCypher 9 M23 EBNF grammar, and the grammar module carries the Apache-2.0 license and the upstream attribution.
+GQL in Orbit is a restricted subset of openCypher 9 with a few extensions.
+It reads and never writes.
+It accepts one statement per request and has no query parameters, so callers keep untrusted values out of the query text.
+It is not a Neo4j-compatible driver.
+The grammar adapts productions from the official openCypher 9 M23 EBNF grammar, and the grammar module carries the Apache-2.0 license and the upstream attribution.
 
 A statement has this shape:
 
@@ -145,12 +191,15 @@ RETURN u.username, mr.title
 LIMIT 10
 ```
 
-The pattern must form one connected tree. Several `MATCH` clauses join into one pattern, and their `WHERE` predicates combine with `AND`. `RETURN` selects what the graph response includes. It is not a general table of expressions.
+The pattern must form one connected tree.
+Several `MATCH` clauses join into one pattern, and their `WHERE` predicates combine with `AND`.
+`RETURN` selects what the graph response includes.
+It is not a general table of expressions.
 
 The GQL frontend works in two steps:
 
 1. Parsing checks syntax: identifiers, strings, numbers, and the order of clauses.
-2. Lowering checks the whole statement: unique variables, a connected pattern, the query type, and the projections.
+1. Lowering checks the whole statement: unique variables, a connected pattern, the query type, and the projections.
 
 Orbit adds these extensions to openCypher 9:
 
@@ -162,36 +211,57 @@ Orbit adds these extensions to openCypher 9:
 
 The frontend rejects writes, `OPTIONAL MATCH`, `WITH`, `UNION`, `OR`, cycles, and other syntax outside this shape.
 
+---
+
 ## Validation
 
-Both languages end in the same shared validator. It checks the limits, then checks every entity, relationship, and property against the ontology. The limits are Rust constants, and a build script checks that the JSON schema states the same limits.
+Both languages end in the same shared validator.
+It checks the limits, then checks every entity, relationship, and property against the ontology.
+The limits are Rust constants, and a build script checks that the JSON schema states the same limits.
 
-A JSON query is checked twice: first by the JSON schema, then by the shared validator. Every JSON test therefore also tests the shared validator.
+A JSON query is checked twice: first by the JSON schema, then by the shared validator.
+Every JSON test therefore also tests the shared validator.
+
+---
 
 ## Schema discovery
 
-Callers read the graph schema before they write a query. Both languages read it from the ontology, sized for an LLM context window:
+Callers read the graph schema before they write a query.
+Both languages read it from the ontology, sized for an LLM context window:
 
-- In JSON mode, `get_graph_schema` lists node types by domain and relationship types with their endpoints. A caller expands the node types it needs to see their properties.
-- In GQL mode, `CALL db.schema()` lists the same types, and `CALL db.schema('MergeRequest')` expands one node type. A schema call runs no SQL and emits no billing event.
+- In JSON mode, `get_graph_schema` lists node types by domain and relationship types with their endpoints.
+  A caller expands the node types it needs to see their properties.
+- In GQL mode, `CALL db.schema()` lists the same types, and `CALL db.schema('MergeRequest')` expands one node type.
+  A schema call runs no SQL and emits no billing event.
+
+---
 
 ## Language selection
 
-Each user has one active language. The default-off, per-user `orbit_gql_queries` flag in Rails selects it, and Rails sets the language on the gRPC request.
+Each user has one active language.
+The default-off, per-user `orbit_gql_queries` flag in Rails selects it, and Rails sets the language on the gRPC request.
 
 - With the flag off, every surface accepts only JSON.
 - With the flag on, the query endpoint, named queries, and discovery use GQL, and JSON queries fail.
 - Discovery describes only the active language.
 - Agents and public callers cannot choose the language, and there is no fallback between languages.
 
+---
+
 ## Adding or retiring a language
 
 Every language-specific step lives in its frontend, so the cost of a language is one module:
 
 - A new language adds a frontend that lowers to the shared input, and a compiler pipeline that starts with its parse phase.
-- Retiring the JSON Query DSL deletes its frontend, its parse phase, and its schema file. The shared phases do not change.
-- A check that reads only the input works for every language. For example, the relationship-direction check runs on GQL today, and the JSON pipelines can add it without frontend changes.
+- Retiring the JSON Query DSL deletes its frontend, its parse phase, and its schema file.
+  The shared phases do not change.
+- A check that reads only the input works for every language.
+  For example, the relationship-direction check runs on GQL today, and the JSON pipelines can add it without frontend changes.
+
+---
 
 ## Testing
 
-Query scenarios state each query once in each language, and both spellings must return the same result. A grammar fuzz target generates statements from the GQL grammar, and other fuzz targets send arbitrary input through both frontends. [Testing](../testing.md) describes these layers.
+Query scenarios state each query once in each language, and both spellings must return the same result.
+A grammar fuzz target generates statements from the GQL grammar, and other fuzz targets send arbitrary input through both frontends.
+[Testing](../testing.md) describes these layers.
