@@ -45,12 +45,6 @@ Your agent answers with a few graph queries in place of many file reads and API 
 - [Sees only what you can access](security.md)<br>Every answer is filtered by your GitLab permissions, on GitLab.com, GitLab Self-Managed, and GitLab Dedicated.
 {.product-cards}
 
-GitLab Orbit links your GitLab data and code in one graph:
-{.product-diagram-lead}
-
-<img class="product-diagram product-light-only" src="img/orbit-graph-hub-light-v19_6.svg" alt="A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition." width="680" height="272">
-<img class="product-diagram product-dark-only" src="img/orbit-graph-hub-dark-v19_6.svg" alt="A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition." width="680" height="272">
-
 ## What you can ask
 
 - **[Understand a codebase](prompt-examples.md#understand-a-codebase)**<br>`I'm new to <my-group/my-project>. Using GitLab Orbit, give me a tour.`
@@ -275,27 +269,8 @@ body:has(.product-landing) .docs-content .language-plaintext {
   height: 1rem;
   fill: currentColor;
 }
-.docs-content .product-diagram {
-  display: block;
-  width: 100%;
-  max-width: 42.5rem;
-  height: auto;
-  margin: 0 auto var(--gl-spacing-scale-7);
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-}
-.docs-content .product-diagram-lead {
-  margin-top: 0 !important;
-  margin-bottom: var(--gl-spacing-scale-5) !important;
-}
-.docs-content .product-dark-only { display: none; }
-.gl-dark .docs-content .product-light-only { display: none; }
-.gl-dark .docs-content .product-dark-only { display: block; }
 @media (max-width: 640px) {
   .docs-content .product-hero { padding: var(--gl-spacing-scale-5); }
-  .docs-content .product-diagram,
-  .docs-content .product-diagram-lead { display: none !important; }
 }
 
 /* Cards: same metrics as the cards shortcode (.card-body.card.gl-rounded-lg): 1.25rem padding, 8px radius, neutral-100 border, subtle hover. */
