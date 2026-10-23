@@ -150,9 +150,9 @@ To ask your first question:
 1. Start a new session of your agent in the repository and ask about your GitLab data:
 
    ```plaintext
-   Using GitLab Orbit, which projects in <my-group> had the most failed pipelines
-   in the last 30 days? For the top three, show the failure reasons of the failed
-   jobs and the merge requests with the most failed pipelines.
+   Using GitLab Orbit, which open merge requests in <my-group>/<my-project> are blocked
+   by a failed job? Include only merge requests updated in the last 7 days.
+   Group them by job, and show who authored each one.
    ```
 
    The agent writes a graph query, runs it with `glab orbit query`, and answers with only the data that you can access.
