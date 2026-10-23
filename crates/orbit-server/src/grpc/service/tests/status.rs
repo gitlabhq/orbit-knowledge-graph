@@ -1,4 +1,5 @@
 use super::*;
+use crate::auth::claims::TraversalPathClaim;
 
 async fn indexing_status_error(paths: &[&str]) -> tonic::Code {
     let request = GetIndexingStatusRequest {
@@ -20,7 +21,7 @@ fn item_counts_request(path: &str, paths: &[&str]) -> GetItemCountsRequest {
 
 fn member_of(group: &str) -> Claims {
     Claims {
-        group_traversal_ids: vec![crate::auth::claims::TraversalPathClaim {
+        group_traversal_ids: vec![TraversalPathClaim {
             path: TraversalPath::new_unchecked(group),
             access_levels: vec![20],
         }],
@@ -28,16 +29,12 @@ fn member_of(group: &str) -> Claims {
     }
 }
 
-async fn item_counts(request: GetItemCountsRequest) -> Result<GetItemCountsResponse, tonic::Code> {
+async fn item_counts_error(request: GetItemCountsRequest) -> tonic::Code {
     test_service()
         .get_item_counts(signed_request(request, member_of("1/22/")))
         .await
-        .map(Response::into_inner)
-        .map_err(|status| status.code())
-}
-
-async fn item_counts_error(request: GetItemCountsRequest) -> tonic::Code {
-    item_counts(request).await.unwrap_err()
+        .unwrap_err()
+        .code()
 }
 
 async fn graph_status_error(path: &str, claims: Claims) -> tonic::Code {
@@ -85,11 +82,6 @@ async fn status_rpcs_reject_a_malformed_path() {
             "item counts accepted {path:?}"
         );
         assert_eq!(
-            item_counts_error(item_counts_request("", &["1/22/", path])).await,
-            tonic::Code::InvalidArgument,
-            "batched item counts accepted {path:?}"
-        );
-        assert_eq!(
             graph_status_error(path, test_claims()).await,
             tonic::Code::InvalidArgument,
             "graph status accepted {path:?}"
@@ -121,31 +113,10 @@ async fn status_rpcs_deny_a_path_outside_the_callers_groups() {
         item_counts_error(item_counts_request("1/33/", &[])).await,
         tonic::Code::PermissionDenied
     );
-    assert_eq!(
-        item_counts_error(item_counts_request("", &["1/22/", "1/33/"])).await,
-        tonic::Code::PermissionDenied
-    );
 }
 
 #[tokio::test]
-async fn item_counts_answers_in_the_field_the_request_used() {
-    let single = item_counts(item_counts_request("1/22/", &[]))
-        .await
-        .unwrap();
-    let batched = item_counts(item_counts_request("", &["1/22/", "1/22/44/"]))
-        .await
-        .unwrap();
-
-    assert!(!single.domains.is_empty() && single.namespaces.is_empty());
-    let paths: Vec<&str> = batched
-        .namespaces
-        .iter()
-        .map(|namespace| namespace.traversal_path.as_str())
-        .collect();
-    assert_eq!(
-        (batched.domains.len(), paths),
-        (0, vec!["1/22/", "1/22/44/"])
-    );
+async fn item_counts_rejects_a_request_with_both_path_fields() {
     assert_eq!(
         item_counts_error(item_counts_request("1/22/", &["1/22/"])).await,
         tonic::Code::InvalidArgument

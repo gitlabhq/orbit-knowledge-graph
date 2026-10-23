@@ -6,13 +6,16 @@ use orbit_utils::traversal_path::TraversalPath;
 use tonic::Status;
 
 use super::visibility::{Visibility, VisibleEntity};
+use orbit_server_config::QueryConfig;
+
 use crate::status_query::{
-    bind_prefix_parameters, build_prefix_match_condition, count_query_config,
-    fetch_status_query_batches, map_column_extraction_error,
+    bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
+    map_column_extraction_error,
 };
 
 const SCOPE_PARAMETER: &str = "scope";
 const SCOPE_GROUP_PARAMETER: &str = "scope_group";
+const COUNT_CACHE_TTL_SECONDS: u32 = 5;
 
 pub type ScopeCounts = HashMap<String, HashMap<String, i64>>;
 
@@ -37,23 +40,23 @@ fn build_count_query(scopes: &[&TraversalPath], visibility: &Visibility) -> Stri
     visibility
         .entities
         .iter()
-        .map(|entity| build_entity_count_query(entity, visibility.get_scopes(entity), scopes))
+        .map(|entity| build_entity_count_query(entity, visibility.scope_indexes(entity), scopes))
         .collect::<Vec<_>>()
         .join(" UNION ALL ")
 }
 
 fn build_entity_count_query(
     entity: &VisibleEntity,
-    entity_scopes: &[usize],
+    scope_indexes: &[usize],
     scopes: &[&TraversalPath],
 ) -> String {
     let (name, table) = (&entity.name, &entity.table);
     let in_scopes = build_prefix_match_condition(
         "d.traversal_path",
         SCOPE_PARAMETER,
-        entity_scopes.iter().copied(),
+        scope_indexes.iter().copied(),
     );
-    if let [scope] = entity_scopes {
+    if let [scope] = scope_indexes {
         return format!(
             "SELECT '{name}' AS entity, {{{SCOPE_PARAMETER}_{scope}:String}} AS scope, \
                     toInt64(uniqIf(d.id, d._deleted = 0)) AS cnt \
@@ -62,7 +65,7 @@ fn build_entity_count_query(
         );
     }
 
-    let prefixes: Vec<String> = entity_scopes
+    let prefixes: Vec<String> = scope_indexes
         .iter()
         .map(|&index| scopes[index].as_str().len())
         .collect::<BTreeSet<_>>()
@@ -108,4 +111,11 @@ fn group_counts_by_scope(batches: &[RecordBatch]) -> Result<ScopeCounts, Status>
         by_scope.entry(scope).or_default().insert(name, count);
     }
     Ok(by_scope)
+}
+
+fn count_query_config() -> QueryConfig {
+    QueryConfig {
+        query_cache_ttl: Some(COUNT_CACHE_TTL_SECONDS),
+        ..orbit_server_config::query::default_config()
+    }
 }

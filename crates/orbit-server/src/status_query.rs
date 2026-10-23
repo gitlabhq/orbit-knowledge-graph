@@ -5,8 +5,6 @@ use orbit_server_config::QueryConfig;
 use serde::Serialize;
 use tonic::Status;
 
-const COUNT_CACHE_TTL_SECONDS: u32 = 5;
-
 pub(crate) async fn fetch_status_query_batches(
     client: &ArrowClickHouseClient,
     sql: &str,
@@ -62,13 +60,6 @@ pub(crate) fn map_column_extraction_error(error: impl std::fmt::Display) -> Stat
 pub(crate) fn uncached_query_config() -> QueryConfig {
     QueryConfig {
         use_query_cache: Some(false),
-        ..orbit_server_config::query::default_config()
-    }
-}
-
-pub(crate) fn count_query_config() -> QueryConfig {
-    QueryConfig {
-        query_cache_ttl: Some(COUNT_CACHE_TTL_SECONDS),
         ..orbit_server_config::query::default_config()
     }
 }

@@ -11,14 +11,15 @@ Accepted
 
 ## Date
 
-2026-04-21 (state semantics updated 2026-08-10 and 2026-09-26, see the updates below)
+2026-04-21 (updated 2026-08-10, 2026-09-26, 2026-09-27, 2026-10-11, 2026-10-16 and 2026-10-22, see the updates below)
 
 ## Update: batched item counts (2026-10-22)
 
 `GetItemCounts` takes 1 to 100 traversal paths in `traversal_paths` and returns one
 `namespaces` entry per path, in request order. One ClickHouse query counts all paths, grouped
 by path. A request with only `traversal_path` gets `domains`, as before. The count query sets
-its own 5 second query cache TTL, so a count can be up to 5 seconds old.
+its own 5 second query cache TTL, so a count can be up to 5 seconds old. This replaces the 10
+second TTL below.
 
 ## Update: cached item counts (2026-10-16)
 

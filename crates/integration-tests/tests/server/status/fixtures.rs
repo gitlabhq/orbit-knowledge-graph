@@ -67,35 +67,22 @@ pub fn use_production_query_settings() {
 }
 
 pub async fn query_cache_usage(ctx: &TestContext) -> Vec<String> {
-    read_cached_query_log(ctx, "toString(query_cache_usage)").await
+    read_cached_query_log(ctx, "QueryFinish", "toString(query_cache_usage)").await
 }
 
 pub async fn query_cache_ttls(ctx: &TestContext) -> Vec<String> {
-    read_cached_query_log(ctx, "Settings['query_cache_ttl']").await
+    read_cached_query_log(ctx, "QueryStart", "Settings['query_cache_ttl']").await
 }
 
-pub async fn read_cached_query_log(ctx: &TestContext, column: &str) -> Vec<String> {
-    let read = |select: &str| {
-        format!(
-            "SELECT {select} FROM system.query_log \
-             WHERE current_database = '{}' AND Settings['use_query_cache'] = '1'",
-            ctx.config.database
-        )
-    };
-    let all_finished =
-        read("toString(countIf(type = 'QueryStart') = countIf(type != 'QueryStart'))");
-    for _ in 0..100 {
-        ctx.execute("SYSTEM FLUSH LOGS").await;
-        let batches = ctx.query(&all_finished).await;
-        if String::extract_column(&batches, 0).expect("query log state") == ["1"] {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+pub async fn read_cached_query_log(ctx: &TestContext, row_type: &str, column: &str) -> Vec<String> {
+    ctx.execute("SYSTEM FLUSH LOGS").await;
     let batches = ctx
         .query(&format!(
-            "{} AND type = 'QueryFinish' ORDER BY event_time_microseconds",
-            read(column)
+            "SELECT {column} FROM system.query_log \
+             WHERE type = '{row_type}' AND current_database = '{}' \
+               AND Settings['use_query_cache'] = '1' \
+             ORDER BY event_time_microseconds",
+            ctx.config.database
         ))
         .await;
     String::extract_column(&batches, 0).expect("query log column")
@@ -113,6 +100,7 @@ pub async fn count_items(
     ItemCountService::new(Arc::new(ctx.create_client()))
         .count_items(&load_ontology(), security_context, &scopes)
         .await
+        .expect("item counts")
 }
 
 pub fn admin_context() -> SecurityContext {

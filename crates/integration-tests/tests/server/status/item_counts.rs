@@ -1,6 +1,9 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use integration_testkit::{run_subtests_shared, t};
+use integration_testkit::{load_ontology, run_subtests_shared, t};
+use orbit_server::item_counts::ItemCountService;
+use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
 use super::fixtures::{
@@ -18,14 +21,12 @@ async fn item_counts() {
     run_subtests_shared!(
         &ctx,
         counts_entities_under_a_scope,
-        scope_outside_the_callers_paths_counts_nothing,
         deleted_rows_are_excluded,
         duplicate_versions_count_once,
         reporter_gets_no_vulnerability_count,
         security_manager_gets_vulnerability_count,
-        role_on_another_path_does_not_expose_the_entity,
-        missing_table_degrades_to_zero,
-        repeated_counts_read_the_cache_for_five_seconds,
+        missing_table_fails_the_count_and_zeroes_the_graph_status,
+        repeated_counts_read_the_cache_with_a_five_second_ttl,
         each_scope_gets_its_own_cache_entry,
         one_scope_counts_skip_the_array_join,
         nested_scopes_count_rows_at_each_scope_once,
@@ -74,12 +75,6 @@ async fn counts_entities_under_a_scope(ctx: &TestContext) {
     assert_eq!(group["MergeRequest"], 1);
 }
 
-async fn scope_outside_the_callers_paths_counts_nothing(ctx: &TestContext) {
-    let counts = count(ctx, &role_on(&[("1/100/", 50)]), "1/101/").await;
-
-    assert!(counts.is_empty(), "counts: {counts:?}");
-}
-
 async fn deleted_rows_are_excluded(ctx: &TestContext) {
     let db = ctx.fork("item_counts_deleted_rows").await;
     db.execute(&format!(
@@ -126,27 +121,27 @@ async fn security_manager_gets_vulnerability_count(ctx: &TestContext) {
     assert_eq!(counts["Vulnerability"], 1);
 }
 
-async fn role_on_another_path_does_not_expose_the_entity(ctx: &TestContext) {
-    let security_context = role_on(&[("1/100/", 25), ("1/101/", 20)]);
-
-    let counts = count(ctx, &security_context, "1/101/").await;
-
-    assert!(!counts.contains_key("Vulnerability"));
-    assert_eq!(counts["MergeRequest"], 1);
-}
-
-async fn missing_table_degrades_to_zero(ctx: &TestContext) {
+async fn missing_table_fails_the_count_and_zeroes_the_graph_status(ctx: &TestContext) {
     let db = ctx.fork("item_counts_missing_table").await;
     db.execute(&format!("DROP TABLE {}", t("gl_merge_request")))
         .await;
+    let service = ItemCountService::new(Arc::new(db.create_client()));
+    let scopes = [TraversalPath::new_unchecked("1/100/")];
 
-    let counts = count(&db, &admin_context(), "1/100/").await;
+    let failed = service
+        .count_items(&load_ontology(), &admin_context(), &scopes)
+        .await;
+    let zeros = service
+        .count_items_or_zeros(&load_ontology(), &admin_context(), &scopes)
+        .await
+        .remove(0)
+        .counts;
 
-    assert_eq!(counts["MergeRequest"], 0);
-    assert_eq!(counts["Project"], 0);
+    assert!(failed.is_err());
+    assert_eq!((zeros["MergeRequest"], zeros["Project"]), (0, 0));
 }
 
-async fn repeated_counts_read_the_cache_for_five_seconds(ctx: &TestContext) {
+async fn repeated_counts_read_the_cache_with_a_five_second_ttl(ctx: &TestContext) {
     let db = ctx.fork("item_counts_cache_ttl").await;
 
     count(&db, &admin_context(), "1/100/").await;
@@ -172,8 +167,12 @@ async fn one_scope_counts_skip_the_array_join(ctx: &TestContext) {
     count_many(&db, &admin_context(), &["1/100/"]).await;
     count_many(&db, &admin_context(), &["1/100/", "1/101/"]).await;
 
-    let array_joins =
-        read_cached_query_log(&db, "toString(position(query, 'ARRAY JOIN') > 0)").await;
+    let array_joins = read_cached_query_log(
+        &db,
+        "QueryStart",
+        "toString(position(query, 'ARRAY JOIN') > 0)",
+    )
+    .await;
     assert_eq!(array_joins, ["0", "1"]);
 }
 

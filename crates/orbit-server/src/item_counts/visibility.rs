@@ -16,7 +16,7 @@ pub struct VisibleEntity {
 }
 
 impl Visibility {
-    pub fn get_scopes(&self, entity: &VisibleEntity) -> &[usize] {
+    pub fn scope_indexes(&self, entity: &VisibleEntity) -> &[usize] {
         &self.scope_groups[entity.scope_group]
     }
 }

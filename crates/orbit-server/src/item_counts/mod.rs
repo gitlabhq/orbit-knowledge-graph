@@ -10,6 +10,7 @@ use ontology::Ontology;
 use orbit_log_fields::warn;
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::SecurityContext;
+use tonic::Status;
 
 use self::counts::ScopeCounts;
 pub use self::response::build_item_counts_response;
@@ -34,28 +35,31 @@ impl ItemCountService {
         ontology: &Ontology,
         security_context: &SecurityContext,
         scopes: &[TraversalPath],
-    ) -> Vec<ScopeItemCounts> {
-        let distinct_scopes: Vec<&TraversalPath> =
-            scopes.iter().collect::<BTreeSet<_>>().into_iter().collect();
-        let visibility = visibility::get_visibility(ontology, security_context, &distinct_scopes);
-        let counts = self.read_counts(&distinct_scopes, &visibility).await;
-        scopes
-            .iter()
-            .map(|scope| {
-                let index = distinct_scopes.partition_point(|distinct| *distinct < scope);
-                ScopeItemCounts {
-                    scope: scope.clone(),
-                    counts: build_scope_counts(&visibility, &counts, index, scope),
-                }
-            })
-            .collect()
+    ) -> Result<Vec<ScopeItemCounts>, Status> {
+        let plan = CountPlan::new(ontology, security_context, scopes);
+        let counts = self
+            .read_counts(&plan)
+            .await
+            .map_err(|_| Status::internal("item counts could not be read"))?;
+        Ok(plan.answer(scopes, &counts))
     }
 
-    async fn read_counts(&self, scopes: &[&TraversalPath], visibility: &Visibility) -> ScopeCounts {
-        if visibility.entities.is_empty() {
-            return ScopeCounts::new();
+    pub async fn count_items_or_zeros(
+        &self,
+        ontology: &Ontology,
+        security_context: &SecurityContext,
+        scopes: &[TraversalPath],
+    ) -> Vec<ScopeItemCounts> {
+        let plan = CountPlan::new(ontology, security_context, scopes);
+        let counts = self.read_counts(&plan).await.unwrap_or_default();
+        plan.answer(scopes, &counts)
+    }
+
+    async fn read_counts(&self, plan: &CountPlan<'_>) -> Result<ScopeCounts, Status> {
+        if plan.visibility.entities.is_empty() {
+            return Ok(ScopeCounts::new());
         }
-        counts::count_visible_entities(&self.client, scopes, visibility)
+        counts::count_visible_entities(&self.client, &plan.scopes, &plan.visibility)
             .await
             .inspect_err(|error| {
                 warn!(
@@ -63,27 +67,54 @@ impl ItemCountService {
                     "Item counts could not be read"
                 )
             })
-            .unwrap_or_default()
     }
 }
 
-fn build_scope_counts(
-    visibility: &Visibility,
-    counts: &ScopeCounts,
-    index: usize,
-    scope: &TraversalPath,
-) -> HashMap<String, i64> {
-    let scope_counts = counts.get(scope.as_str());
-    visibility
-        .entities
-        .iter()
-        .filter(|entity| visibility.get_scopes(entity).contains(&index))
-        .map(|entity| {
-            let count = scope_counts
-                .and_then(|by_entity| by_entity.get(&entity.name))
-                .copied()
-                .unwrap_or(0);
-            (entity.name.clone(), count)
-        })
-        .collect()
+struct CountPlan<'a> {
+    scopes: Vec<&'a TraversalPath>,
+    visibility: Visibility,
+}
+
+impl<'a> CountPlan<'a> {
+    fn new(
+        ontology: &Ontology,
+        security_context: &SecurityContext,
+        scopes: &'a [TraversalPath],
+    ) -> Self {
+        let scopes: Vec<&TraversalPath> =
+            scopes.iter().collect::<BTreeSet<_>>().into_iter().collect();
+        let visibility = visibility::get_visibility(ontology, security_context, &scopes);
+        Self { scopes, visibility }
+    }
+
+    fn answer(&self, requested: &[TraversalPath], counts: &ScopeCounts) -> Vec<ScopeItemCounts> {
+        requested
+            .iter()
+            .map(|scope| ScopeItemCounts {
+                scope: scope.clone(),
+                counts: self.build_scope_counts(counts, scope),
+            })
+            .collect()
+    }
+
+    fn build_scope_counts(
+        &self,
+        counts: &ScopeCounts,
+        scope: &TraversalPath,
+    ) -> HashMap<String, i64> {
+        let index = self.scopes.partition_point(|distinct| *distinct < scope);
+        let scope_counts = counts.get(scope.as_str());
+        self.visibility
+            .entities
+            .iter()
+            .filter(|entity| self.visibility.scope_indexes(entity).contains(&index))
+            .map(|entity| {
+                let count = scope_counts
+                    .and_then(|by_entity| by_entity.get(&entity.name))
+                    .copied()
+                    .unwrap_or(0);
+                (entity.name.clone(), count)
+            })
+            .collect()
+    }
 }
