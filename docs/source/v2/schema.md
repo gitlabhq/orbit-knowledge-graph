@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Learn which GitLab data and source code GitLab Orbit indexes, and which node types and relationships the graph contains.
+description: Learn which GitLab data and source code GitLab Orbit indexes, and where to see the node types and relationships of the graph.
 title: GitLab Orbit indexed data
 ---
 
@@ -55,14 +55,16 @@ and fixes a vulnerability. A file is on a branch of the project and defines a de
 
 ## Get the live schema
 
-The schema changes between releases. To list the current node types by domain, run:
+The node types, properties, and relationships change between releases.
+To see the current schema, use one of these methods:
 
-```shell
-glab orbit ontology
-```
-
-To show the properties and relationships of one node type, add its name, for example `glab orbit ontology Definition`.
-In a query, `CALL db.schema()` returns the same information.
+- In GitLab, in the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**, then select the **Schema** tab.
+  On GitLab.com, go to [`https://gitlab.com/dashboard/orbit/schema`](https://gitlab.com/dashboard/orbit/schema).
+  For more information, see [GitLab Orbit dashboard](dashboard.md).
+- In a terminal, run `glab orbit ontology`. To show the properties and relationships of node types,
+  add their names, for example `glab orbit ontology MergeRequest Project`.
+- Over HTTP, send a request to the [schema endpoint](queries/api.md#schema-endpoint), `GET /api/v4/orbit/schema`.
+- In a query, run `CALL db.schema()`.
 
 ## Supported languages
 
@@ -100,181 +102,6 @@ Some languages have limits:
   Helm, and Docker Compose files. No cross-file references.
 
 Files in other languages still get a `File` node, with no definitions.
-
-## Node types
-
-<!-- No generator exists for this table yet. Update it by hand from config/ontology/ when the ontology changes. -->
-<!-- BEGIN GENERATED: schema-nodes -->
-
-### `agents`
-
-Entities related to AI agent sessions.
-
-| Node type | Description | Properties |
-|-----------|-------------|------------|
-| `AgentSession` | An AI agent session in a project, recorded in the AI governance sessions table. Existence, source and flow type only, never its content | `id`, `flow_type`, `source`, `project_id`, `session_started_at` |
-
-### `ci`
-
-Entities related to CI/CD pipelines, stages, jobs, deployments, environments, and runners.
-
-| Node type | Description | Properties |
-|-----------|-------------|------------|
-| `Deployment` | A deployment of a specific commit to a CI/CD environment | `id`, `iid`, `project_id`, `ref`, `tag`, `sha`, `status`, `deployable_type`, `deployable_id`, `on_stop`, `archived`, `created_at`, `finished_at`, `updated_at`, `environment_id`, `user_id` |
-| `Environment` | A CI/CD deployment target (production, staging, review app, etc.) | `id`, `project_id`, `name`, `slug`, `external_url`, `environment_type`, `state`, `tier`, `auto_stop_at`, `auto_delete_at`, `auto_stop_setting`, `cluster_agent_id`, `kubernetes_namespace`, `flux_resource_path`, `description`, `created_at`, `updated_at`, `merge_request_id` |
-| `Job` | A CI/CD job that executes scripts in a pipeline stage | `id`, `name`, `status`, `ref`, `tag`, `allow_failure`, `coverage`, `environment`, `when`, `retried`, `failure_reason`, `created_at`, `started_at`, `finished_at`, `queued_at`, `type`, `runner_id`, `timeout`, `timeout_source`, `exit_code`, `scheduling_type`, `project_id`, `user_id`, `upstream_pipeline_id`, `stage_id`, `pipeline_id`, `auto_canceled_by_id` |
-| `Pipeline` | A CI/CD pipeline that runs a series of stages and jobs to build, test, and deploy code | `id`, `iid`, `sha`, `ref`, `status`, `source`, `tag`, `duration`, `failure_reason`, `created_at`, `started_at`, `finished_at`, `committed_at`, `updated_at`, `before_sha`, `yaml_errors`, `protected`, `project_id`, `user_id`, `merge_request_id`, `auto_canceled_by_id` |
-| `Runner` | A CI/CD runner that executes jobs | `id`, `runner_type`, `name`, `description`, `active`, `locked`, `run_untagged`, `access_level`, `maximum_timeout`, `organization_id`, `created_at`, `contacted_at` |
-| `Stage` | A stage in a CI/CD pipeline that groups related jobs (for example, build, test, deploy) | `id`, `name`, `status`, `position`, `created_at`, `updated_at`, `project_id`, `pipeline_id` |
-
-### `code_review`
-
-Entities related to code review and merge requests.
-
-| Node type | Description | Properties |
-|-----------|-------------|------------|
-| `MergeRequest` | A merge request for code review and merging changes into a target branch | `id`, `iid`, `title`, `description`, `source_branch`, `target_branch`, `state`, `merge_status`, `draft`, `squash`, `created_at`, `updated_at`, `merge_commit_sha`, `discussion_locked`, `prepared_at`, `project_id`, `merged_commit_id`, `latest_build_started_at`, `latest_build_finished_at`, `first_deployed_to_production_at`, `merged_at`, `latest_closed_at`, `first_comment_at`, `first_commit_at`, `last_commit_at`, `diff_size`, `modified_paths_size`, `commits_count`, `first_approved_at`, `first_reassigned_at`, `added_lines`, `removed_lines`, `first_contribution`, `reviewer_first_assigned_at`, `author_id`, `merge_user_id`, `updated_by_id`, `last_edited_by_id`, `closed_by_id`, `milestone_id`, `source_project_id`, `head_pipeline_id`, `latest_merge_request_diff_id`, `diff` |
-| `MergeRequestDiff` | A snapshot of changes (commits and file diffs) associated with a merge request at a point in time | `id`, `merge_request_id`, `state`, `base_commit_sha`, `head_commit_sha`, `start_commit_sha`, `commits_count`, `files_count`, `project_id`, `diff_type`, `real_size`, `stored_externally`, `created_at`, `updated_at`, `patch` |
-| `MergeRequestDiffFile` | A file changed in a merge request diff | `id`, `merge_request_id`, `merge_request_diff_id`, `project_id`, `too_large`, `new_path`, `old_path`, `new_file`, `renamed_file`, `deleted_file`, `binary`, `generated`, `a_mode`, `b_mode`, `diff` |
-
-### `container_registry`
-
-Entities related to container image repositories in the container registry.
-
-| Node type | Description | Properties |
-|-----------|-------------|------------|
-| `ContainerRepository` | A container image repository in a project's container registry | `id`, `name`, `status`, `created_at`, `updated_at`, `project_id` |
-
-### `core`
-
-Entities which represent the structure of a GitLab instance.
-
-| Node type | Description | Properties |
-|-----------|-------------|------------|
-| `Group` | A GitLab group (top-level group or subgroup) | `id`, `full_path`, `name`, `description`, `created_at`, `updated_at`, `visibility_level` |
-| `Note` | A comment or annotation on a GitLab object (issue, merge request, commit, etc.) | `id`, `note`, `noteable_type`, `noteable_id`, `line_code`, `created_at`, `updated_at`, `discussion_id`, `resolved_at`, `internal`, `confidential`, `commit_id`, `st_diff`, `project_id`, `author_id` |
-| `Project` | A GitLab project/repository | `id`, `full_path`, `name`, `description`, `created_at`, `updated_at`, `visibility_level`, `archived`, `star_count`, `last_activity_at` |
-| `User` | A GitLab user account | `id`, `username`, `name`, `created_at`, `state`, `avatar_url`, `public_email`, `last_activity_on`, `user_type` |
-
-### `packages`
-
-Entities related to packages published to the package registry.
-
-| Node type | Description | Properties |
-|-----------|-------------|------------|
-| `Dependency` | A dependency declared by a package in the GitLab package registry (name and version pattern) | `id`, `name`, `version_pattern`, `project_id` |
-| `Package` | A package published to the GitLab package registry (npm, Maven, PyPI, NuGet, and other formats) | `id`, `name`, `version`, `package_type`, `status`, `created_at`, `updated_at`, `project_id` |
-| `PackageFile` | A file belonging to a package in the GitLab package registry (the stored artifact, for example a .whl, .jar, or .tgz) | `id`, `file_name`, `size`, `file_sha256`, `status`, `created_at`, `updated_at`, `project_id`, `package_id` |
-
-### `plan`
-
-Entities related to planning, tracking, and organizing work.
-
-| Node type | Description | Properties |
-|-----------|-------------|------------|
-| `Label` | A label for categorizing and filtering work items | `id`, `title`, `description`, `color`, `created_at`, `updated_at`, `project_id`, `group_id` |
-| `Milestone` | A milestone for tracking progress toward a goal in a project or group | `id`, `iid`, `title`, `description`, `state`, `due_date`, `start_date`, `created_at`, `updated_at`, `project_id`, `group_id` |
-| `WorkItem` | A work item representing an issue, epic, task, incident, or other trackable unit of work | `id`, `iid`, `title`, `description`, `state`, `work_item_type`, `confidential`, `due_date`, `start_date`, `weight`, `created_at`, `updated_at`, `closed_at`, `project_id`, `author_id`, `milestone_id`, `namespace_id`, `closed_by_id` |
-
-### `security`
-
-Entities related to security vulnerabilities and findings.
-
-| Node type | Description | Properties |
-|-----------|-------------|------------|
-| `Finding` | A security scan finding (occurrence) that may be linked to a vulnerability | `id`, `uuid`, `name`, `description`, `solution`, `severity`, `deduplicated`, `overridden_uuid`, `project_id`, `scan_id`, `scanner_id` |
-| `SecurityScan` | A security scan execution that produces findings in a CI/CD pipeline | `id`, `scan_type`, `status`, `latest`, `created_at`, `updated_at`, `project_id`, `pipeline_id`, `build_id` |
-| `Vulnerability` | A security vulnerability identified in a project, representing a confirmed or potential security issue | `id`, `title`, `description`, `state`, `severity`, `report_type`, `resolved_on_default_branch`, `present_on_default_branch`, `created_at`, `updated_at`, `detected_at`, `resolved_at`, `confirmed_at`, `dismissed_at`, `project_id`, `finding_id`, `author_id`, `confirmed_by_id`, `resolved_by_id`, `dismissed_by_id` |
-| `VulnerabilityIdentifier` | A vulnerability identifier such as a CVE, CWE, or other external reference | `id`, `external_type`, `external_id`, `name`, `url`, `created_at`, `updated_at`, `project_id` |
-| `VulnerabilityOccurrence` | A specific occurrence of a vulnerability detected in a project | `id`, `uuid`, `name`, `description`, `solution`, `cve`, `location`, `location_fingerprint`, `severity`, `report_type`, `detection_method`, `created_at`, `updated_at`, `detected_at`, `project_id`, `scanner_id`, `vulnerability_id`, `primary_identifier_id` |
-| `VulnerabilityScanner` | A security scanner that detects vulnerabilities in projects | `id`, `external_id`, `name`, `vendor`, `created_at`, `updated_at`, `project_id` |
-
-### `source_code`
-
-Entities related to source code structure, definitions, and imports.
-
-| Node type | Description | Properties |
-|-----------|-------------|------------|
-| `Branch` | A Git branch in a repository | `id`, `project_id`, `name`, `is_default` |
-| `Commit` | A Git commit, shared target for commit-related edges | `id`, `sha`, `project_id` |
-| `Definition` | A code definition such as a class, function, method, or module | `id`, `project_id`, `branch`, `commit_sha`, `file_path`, `fqn`, `name`, `definition_type`, `start_line`, `end_line`, `start_byte`, `end_byte`, `start_char`, `end_char`, `content` |
-| `Directory` | A directory in a repository's file structure | `id`, `project_id`, `branch`, `commit_sha`, `path`, `name` |
-| `File` | A source code file in a repository | `id`, `project_id`, `branch`, `commit_sha`, `path`, `name`, `extension`, `language`, `size_bytes`, `content`, `reason` |
-| `ImportedSymbol` | An imported symbol or module reference in a source file | `id`, `project_id`, `branch`, `commit_sha`, `file_path`, `import_type`, `import_path`, `identifier_name`, `identifier_alias`, `start_line`, `end_line`, `start_byte`, `end_byte`, `start_char`, `end_char` |
-
-<!-- END GENERATED: schema-nodes -->
-
-## Relationships
-
-<!-- No generator exists for this table yet. Update it by hand from config/ontology/ when the ontology changes. -->
-<!-- BEGIN GENERATED: schema-edges -->
-
-| Relationship | Description | Connects |
-|--------------|-------------|----------|
-| `APPROVED` | User who approved a merge request | `User` → `MergeRequest` |
-| `ASSIGNED` | Assignment relationship between users and entities | `User` → `MergeRequest`, `WorkItem` |
-| `AUTHORED` | Authorship relationship between users and entities | `User` → `MergeRequest`, `Note`, `Vulnerability`, `WorkItem` |
-| `AUTO_CANCELED_BY` | Entity was auto-canceled by a newer pipeline | `Job`, `Pipeline` → `Pipeline` |
-| `BUILT_BY` | Package or package file was built by a CI/CD pipeline | `Package`, `PackageFile` → `Pipeline` |
-| `CALLS` | Call relationships in source code representing function/method invocations | `Definition`, `File` → `Definition`, `ImportedSymbol` |
-| `CHILD_OF` | Pipeline was triggered as a child of another pipeline (downstream pipeline relationship) | `Pipeline` → `Pipeline` |
-| `CLOSED` | User who closed a work item | `User` → `MergeRequest`, `WorkItem` |
-| `CLOSES` | Merge request closes a work item when merged | `MergeRequest` → `WorkItem` |
-| `CONFIRMED_BY` | User who confirmed a vulnerability | `User` → `Vulnerability` |
-| `CONTAINS` | Container relationship for core entities (hierarchy/ownership) | `Branch`, `Directory`, `Group`, `Project`, `User`, `WorkItem` → `Branch`, `Directory`, `File`, `Group`, `Project`, `WorkItem` |
-| `CREATED_FOR_MR` | Environment was first created by a merge request pipeline | `Environment` → `MergeRequest` |
-| `CREATED_MR` | Agent session created a merge request | `AgentSession` → `MergeRequest` |
-| `CREATOR` | User created project | `User` → `Project` |
-| `DECLARES_DEPENDENCY` | Package declares a dependency | `Package` → `Dependency` |
-| `DEFINES` | Definition relationships in source code | `Definition`, `File` → `Definition` |
-| `DEPLOYED_BY` | User who triggered a deployment | `User` → `Deployment` |
-| `DEPLOYED_TO` | Merge request was deployed as part of a deployment | `MergeRequest` → `Deployment` |
-| `DETECTED_BY` | Finding was detected by a vulnerability scanner | `Finding`, `VulnerabilityOccurrence` → `VulnerabilityScanner` |
-| `DISMISSED_BY` | User who dismissed a vulnerability | `User` → `Vulnerability` |
-| `EXTENDS` | Supertype relationships in source code (inheritance, interface implementation, struct embedding, mixin composition) | `Definition` → `Definition` |
-| `FIXES` | Merge request fixes a vulnerability | `MergeRequest` → `Vulnerability` |
-| `HAS_DIFF` | Diff snapshots of a merge request | `MergeRequest` → `MergeRequestDiff` |
-| `HAS_FILE` | Files changed in a merge request diff | `MergeRequestDiff` → `MergeRequestDiffFile` |
-| `HAS_FINDING` | Entity has associated finding or vulnerability occurrence | `SecurityScan`, `Vulnerability` → `Finding`, `VulnerabilityOccurrence` |
-| `HAS_HEAD_PIPELINE` | Merge request's head pipeline (pipeline running against the tip of the source branch) | `MergeRequest` → `Pipeline` |
-| `HAS_IDENTIFIER` | Entity has associated vulnerability identifier (CVE, CWE, etc.) | `Finding`, `VulnerabilityOccurrence` → `VulnerabilityIdentifier` |
-| `HAS_JOB` | Pipeline or stage contains job relationship | `Pipeline`, `Stage` → `Job` |
-| `HAS_LABEL` | Entity has a label applied | `MergeRequest`, `WorkItem` → `Label` |
-| `HAS_LATEST_DIFF` | Merge request's most recent diff snapshot (points to the latest MergeRequestDiff) | `MergeRequest` → `MergeRequestDiff` |
-| `HAS_NOTE` | Entity has a note/comment attached | `MergeRequest`, `Vulnerability`, `WorkItem` → `Note` |
-| `HAS_PACKAGE_FILE` | Package contains a package file | `Package` → `PackageFile` |
-| `HAS_STAGE` | Pipeline contains stage relationship | `Pipeline` → `Stage` |
-| `HAS_VULNERABILITY` | Registry package is affected by a known security vulnerability | `Package` → `Vulnerability` |
-| `IMPORTS` | Import relationships in source code | `File`, `ImportedSymbol` → `Definition`, `ImportedSymbol` |
-| `IN_ENVIRONMENT` | Deployment targets an environment | `Deployment` → `Environment` |
-| `IN_GROUP` | Entity belongs to a group | `Label`, `Milestone`, `WorkItem` → `Group` |
-| `IN_MILESTONE` | Entity belongs to a milestone | `MergeRequest`, `WorkItem` → `Milestone` |
-| `IN_PIPELINE` | Entity belongs to a pipeline | `Job`, `SecurityScan` → `Pipeline` |
-| `IN_PROJECT` | Project association for entities | `AgentSession`, `Branch`, `ContainerRepository`, `Dependency`, `Deployment`, `Environment`, `Finding`, `Job`, `Label`, `MergeRequest`, `MergeRequestDiff`, `MergeRequestDiffFile`, `Milestone`, `Note`, `Package`, `PackageFile`, `Pipeline`, `SecurityScan`, `Stage`, `Vulnerability`, `VulnerabilityIdentifier`, `VulnerabilityOccurrence`, `VulnerabilityScanner`, `WorkItem` → `Project` |
-| `LAST_EDITED_BY` | User who most recently edited an entity's content (title/description) | `User` → `MergeRequest` |
-| `MEMBER_OF` | A user is a member of a group or project | `User` → `Group`, `Project` |
-| `MENTIONS` | One merge request or work item references another in its description or a comment, recorded from the cross-reference system note GitLab writes on mention. | `MergeRequest`, `WorkItem` → `MergeRequest`, `WorkItem` |
-| `MERGED` | User who merged a merge request | `User` → `MergeRequest` |
-| `MERGED_AT_COMMIT` | The commit a merge request was merged at, sourced from the merge_requests row. | `MergeRequest` → `Commit` |
-| `OCCURRENCE_OF` | Vulnerability occurrence is an occurrence of a vulnerability | `VulnerabilityOccurrence` → `Vulnerability` |
-| `ON_BRANCH` | Code entities belong to a specific branch | `Directory`, `File` → `Branch` |
-| `OWNER` | Ownership relationship between users and groups/projects | `User` → `Group` |
-| `RAN_BY` | Security scan was executed by a CI job | `SecurityScan` → `Job` |
-| `RELATED_TO` | Related or blocking relationship between work items | `WorkItem` → `WorkItem` |
-| `REOPENED` | User who reopened a merge request or work item (ADR 013) | `User` → `MergeRequest`, `WorkItem` |
-| `RESOLVED_BY` | User who resolved a vulnerability | `User` → `Vulnerability` |
-| `REVIEWER` | Review assignment relationship between users and merge requests | `User` → `MergeRequest` |
-| `RUNS_ON` | Job executed on a runner | `Job` → `Runner` |
-| `SCANS` | VulnerabilityScanner scans a project for security vulnerabilities | `VulnerabilityScanner` → `Project` |
-| `SOURCE_PROJECT` | Merge request's source project (differs from target project for fork-based MRs) | `MergeRequest` → `Project` |
-| `TRIGGERED` | Trigger relationship between entities | `MergeRequest`, `User` → `Job`, `Pipeline` |
-| `TRIGGERED_BY_PIPELINE` | Job was triggered by an upstream pipeline (child pipeline relationship from the job side) | `Job` → `Pipeline` |
-| `TRIGGERS_PIPELINE` | Bridge job triggered a downstream pipeline | `Job` → `Pipeline` |
-| `UPDATED_BY` | User who most recently updated an entity (non-content changes) | `User` → `MergeRequest` |
-
-<!-- END GENERATED: schema-edges -->
-
-`EXTENDS` points from the child to the parent.
 
 ## Properties resolved at query time
 
