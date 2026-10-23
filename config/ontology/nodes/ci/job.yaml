@@ -365,10 +365,10 @@ storage:
     - {name: "`when`", type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: retried, type: "Nullable(Bool)"}
     - {name: failure_reason, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: started_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: finished_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: queued_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: started_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: finished_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: queued_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: runner_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: timeout, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
@@ -387,10 +387,6 @@ storage:
     - {name: idx_status, column: status, type: "set(16)", granularity: 2}
     - {name: idx_allow_failure, column: allow_failure, type: "minmax", granularity: 1}
     - {name: idx_retried, column: retried, type: "minmax", granularity: 1}
-    - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}
-    - {name: idx_started_at, column: started_at, type: "minmax", granularity: 1}
-    - {name: idx_finished_at, column: finished_at, type: "minmax", granularity: 1}
-    - {name: idx_queued_at, column: queued_at, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_name, column: name, type: text, granularity: 1}
     - {name: idx_ref, column: ref, type: text, granularity: 1}

@@ -80,6 +80,10 @@ impl RelationalMapping for DuckDbBindings {
         false
     }
 
+    fn null_as_epoch(&self, _property: PropertyId) -> bool {
+        false
+    }
+
     fn property_unique(&self, property: PropertyId) -> bool {
         self.property_facts
             .get(property.index())

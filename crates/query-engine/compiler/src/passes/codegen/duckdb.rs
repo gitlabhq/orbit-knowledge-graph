@@ -425,6 +425,7 @@ impl Context {
             Function::Unnest => "unnest",
             Function::TupleElement => "struct_extract_at",
             Function::Coalesce => "coalesce",
+            Function::NullIf => "nullif",
             Function::Concat => "concat",
             Function::ArgMax | Function::ArgMaxOrNull => "arg_max",
             Function::If

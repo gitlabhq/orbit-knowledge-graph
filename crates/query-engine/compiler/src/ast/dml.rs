@@ -95,6 +95,7 @@ pub enum Function {
     Object,
     If,
     Coalesce,
+    NullIf,
     ByteLength,
     Substring,
     Concat,
@@ -500,10 +501,14 @@ impl Expr {
         data_type: SqlType,
         values: Vec<Value>,
     ) -> Option<Self> {
+        Self::in_list(Expr::col(table, column), data_type, values)
+    }
+
+    pub fn in_list(expr: Expr, data_type: SqlType, values: Vec<Value>) -> Option<Self> {
         match values.len() {
             0 => None,
             1 => Some(Expr::eq(
-                Expr::col(table, column),
+                expr,
                 Expr::Param {
                     data_type,
                     value: values.into_iter().next().unwrap(),
@@ -511,7 +516,7 @@ impl Expr {
             )),
             _ => Some(Expr::binary(
                 Op::In,
-                Expr::col(table, column),
+                expr,
                 Expr::Param {
                     data_type: data_type.to_array(),
                     value: Value::Array(values),

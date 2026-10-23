@@ -12,12 +12,14 @@ use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
 use crate::passes::lower::NodeBinding;
+use crate::passes::lower::predicates::output_value;
 
 use crate::passes::lower::sql::{
     dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
     id_list_predicate, id_range_predicate, latest_row_dedup, rel_kind_filter,
 };
-use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
+use crate::passes::plan::predicates::Column;
+use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan, property_value};
 
 pub(crate) fn emit(plan: &Plan<Neighbors>, input: &Input) -> Result<Emitted> {
     let (ast, binding) = emit_neighbors(plan, input)?;
@@ -132,11 +134,18 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     }
 
     let order_by = match &input.order_by {
-        Some(ob) => vec![if ob.direction == OrderDirection::Desc {
-            OrderExpr::desc(Expr::col(&ob.node, &ob.property))
-        } else {
-            OrderExpr::asc(Expr::col(&ob.node, &ob.property))
-        }],
+        Some(ob) => {
+            let value = output_value(&property_value(
+                &plan.nodes,
+                &ob.node,
+                Column::new(&ob.node, &ob.property),
+            ));
+            vec![if ob.direction == OrderDirection::Desc {
+                OrderExpr::desc(value)
+            } else {
+                OrderExpr::asc(value)
+            }]
+        }
         None => vec![],
     };
 

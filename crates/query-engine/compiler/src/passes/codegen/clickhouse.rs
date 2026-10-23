@@ -478,6 +478,7 @@ pub(crate) fn function_name(function: Function) -> &'static str {
         Function::Object => "map",
         Function::If => "if",
         Function::Coalesce => "coalesce",
+        Function::NullIf => "nullIf",
         Function::ByteLength => "length",
         Function::Substring => "substringUTF8",
         Function::Concat => "concat",

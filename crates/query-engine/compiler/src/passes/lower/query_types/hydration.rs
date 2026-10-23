@@ -14,7 +14,9 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use super::Emitted;
+use crate::passes::lower::predicates::output_value;
 use crate::passes::lower::sql::{deleted_false, latest_row_dedup};
+use crate::passes::plan::predicates::{Column, OutputValue};
 use crate::passes::plan::query_types::hydration::HydrationPathFilter;
 use crate::passes::plan::{Hydration, HydrationNodePlan, Plan};
 
@@ -46,9 +48,10 @@ fn emit_arm(node: &HydrationNodePlan) -> Query {
             .columns
             .iter()
             .flat_map(|col| {
+                let value = OutputValue::property(&node.null_as_epoch, Column::new(alias, col));
                 [
                     Expr::string(col),
-                    Expr::func(Function::ToString, vec![Expr::col(alias, col)]),
+                    Expr::func(Function::ToString, vec![output_value(&value)]),
                 ]
             })
             .collect();

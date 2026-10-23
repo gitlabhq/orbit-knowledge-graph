@@ -9,6 +9,12 @@ use super::predicates::{Column, Predicate};
 use super::{DenormalizedDirection, DenormalizedKey, DenormalizedProperty};
 use crate::input::{FilterOp, Input, InputFilter, PredicateTarget};
 
+#[derive(Clone, Copy, PartialEq)]
+pub struct NullAsEpoch {
+    pub column: bool,
+    pub rhs: bool,
+}
+
 #[derive(Clone)]
 pub struct BoundFilter {
     pub filter: InputFilter,
@@ -20,6 +26,7 @@ pub struct BoundFilter {
     pub text_indexed: bool,
     pub unique: bool,
     pub immutable: bool,
+    pub null_as_epoch: NullAsEpoch,
 }
 
 impl BoundFilter {
@@ -46,6 +53,7 @@ impl BoundFilter {
             text_indexed: self.text_indexed,
             unique: self.unique,
             immutable: self.immutable,
+            null_as_epoch: self.null_as_epoch,
         }
     }
 }
@@ -137,6 +145,10 @@ pub fn bind_filter(
         text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),
         unique: property_id.is_some_and(|property| model.property_unique(property)),
         immutable: property_id.is_some_and(|property| !model.property_mutable(property)),
+        null_as_epoch: NullAsEpoch {
+            column: property_id.is_some_and(|property| model.null_as_epoch(property)),
+            rhs: false,
+        },
     }
 }
 
