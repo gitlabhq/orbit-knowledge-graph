@@ -26,21 +26,26 @@ impl GitlabInstanceWatch {
     }
 
     pub fn spawn_refresh(&self, client: Arc<GitlabClient>) {
-        let latest = Arc::clone(&self.latest);
+        let latest = Arc::downgrade(&self.latest);
         tokio::spawn(async move {
             loop {
-                let wait = match client.instance().await {
-                    Ok(instance) => {
-                        *latest.write() = instance;
-                        REFRESH_INTERVAL
-                    }
-                    Err(error) => {
-                        warn!(
-                            expanded(ERROR_MESSAGE) = %error,
-                            safe(ERROR_TYPE) = <&str>::from(&error),
-                            "failed to refresh the GitLab instance, keeping the last known one"
-                        );
-                        RETRY_INTERVAL
+                let wait = {
+                    let Some(latest) = latest.upgrade() else {
+                        break;
+                    };
+                    match client.instance().await {
+                        Ok(instance) => {
+                            *latest.write() = instance;
+                            REFRESH_INTERVAL
+                        }
+                        Err(error) => {
+                            warn!(
+                                expanded(ERROR_MESSAGE) = %error,
+                                safe(ERROR_TYPE) = <&str>::from(&error),
+                                "failed to refresh the GitLab instance, keeping the last known one"
+                            );
+                            RETRY_INTERVAL
+                        }
                     }
                 };
                 tokio::time::sleep(wait).await;
