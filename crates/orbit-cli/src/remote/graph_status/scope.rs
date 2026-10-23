@@ -1,14 +1,10 @@
 use std::fmt;
 use std::process::Command;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::remote::client::OrbitClient;
 use crate::remote::error::{EXIT_GENERIC, RemoteError};
-
-const ORBIT_STATUS_FIELDS: &str = "orbit { \
-     indexing { state areas { name state } projects { indexed totalKnown gaps } lastCompletedAt } \
-     itemCounts { domains { name entities { name count } } } }";
 
 pub(super) enum Scope {
     FullPath(String),
@@ -66,15 +62,6 @@ impl Scope {
             .and_then(|resource| Some(resource.get(field)?.as_str()?.to_string()))
             .ok_or_else(|| RemoteError::new(EXIT_GENERIC, format!("no `{field}` in {path}")))
     }
-}
-
-pub(super) fn build_graphql_request(full_path: &str) -> Value {
-    let query = "query($fullPath: ID!) { \
-         group(fullPath: $fullPath) { STATUS } project(fullPath: $fullPath) { STATUS } }";
-    json!({
-        "query": query.replace("STATUS", ORBIT_STATUS_FIELDS),
-        "variables": { "fullPath": full_path },
-    })
 }
 
 impl fmt::Display for Scope {

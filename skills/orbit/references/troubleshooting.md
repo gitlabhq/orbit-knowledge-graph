@@ -28,7 +28,8 @@ Read this when a command fails with "command not found", an auth error, or a fea
    glab orbit graph-status --full-path GROUP_NAMESPACE
    ```
 
-   Exit 0 means ready to query. Exit 2 means the flag is off; ask your GitLab admin.
+   Exit 0 means ready to query. Exit 2 means Orbit is not turned on for that group or project,
+   or you cannot read it; ask your GitLab admin.
 
 4. Orbit Local: no server needed:
 

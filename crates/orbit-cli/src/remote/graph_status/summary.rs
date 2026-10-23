@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 
 use crate::tui;
 
@@ -14,8 +14,7 @@ pub(super) struct GraphStatus {
 #[derive(Deserialize)]
 struct Indexing {
     state: Option<IndexingState>,
-    #[serde(default)]
-    areas: Vec<Area>,
+    areas: Option<Vec<Area>>,
     projects: Option<Projects>,
 }
 
@@ -25,79 +24,69 @@ struct Area {
     state: Option<IndexingState>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Projects {
-    indexed: usize,
-    total_known: usize,
-    #[serde(default)]
-    gaps: usize,
+    indexed: Option<usize>,
+    total_known: Option<usize>,
+    gaps: Option<usize>,
 }
 
 #[derive(Deserialize)]
 struct ItemCounts {
-    #[serde(default)]
-    domains: Vec<Domain>,
+    domains: Option<Vec<Domain>>,
 }
 
 #[derive(Deserialize)]
 struct Domain {
     name: String,
-    #[serde(default)]
-    entities: Vec<Entity>,
+    entities: Option<Vec<Entity>>,
 }
 
 #[derive(Deserialize)]
 struct Entity {
     name: String,
-    #[serde(deserialize_with = "deserialize_big_int")]
-    count: usize,
+    count: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 enum IndexingState {
-    #[serde(rename = "NOT_STARTED")]
-    NotIndexed,
-    #[serde(rename = "INDEXING")]
-    Backfilling,
-    #[serde(rename = "READY")]
-    Indexed,
-    #[serde(rename = "FAILED")]
-    Error,
+    NotStarted,
+    Indexing,
+    Ready,
+    Failed,
     #[serde(other)]
     Unknown,
-}
-
-fn deserialize_big_int<'de, D: Deserializer<'de>>(deserializer: D) -> Result<usize, D::Error> {
-    String::deserialize(deserializer)?
-        .parse()
-        .map_err(serde::de::Error::custom)
 }
 
 impl GraphStatus {
     pub(super) fn format_indexing(&self) -> String {
         let indexing = self.indexing.as_ref();
         let mut rows: Vec<(&str, String)> = indexing
-            .into_iter()
-            .flat_map(|indexing| &indexing.areas)
-            .map(|area| (area.name.as_str(), label_state(area.state).to_string()))
+            .and_then(|indexing| indexing.areas.as_deref())
+            .unwrap_or_default()
+            .iter()
+            .map(|area| {
+                let state = area.state.unwrap_or(IndexingState::Unknown);
+                (area.name.as_str(), state.label().to_string())
+            })
             .collect();
         if rows.is_empty() {
             rows.push(("Indexing", self.get_overall_state().label().to_string()));
         }
         let projects = indexing.and_then(|indexing| indexing.projects.as_ref());
-        rows.push((
-            "Projects",
-            projects.unwrap_or(&Projects::default()).describe_coverage(),
-        ));
+        rows.push(("Projects", describe_coverage(projects)));
         tui::align_columns(rows.into_iter())
     }
 
     pub(super) fn format_contents(&self) -> String {
         let rows: Vec<(&str, String)> = self
             .item_counts
+            .as_ref()
+            .and_then(|item_counts| item_counts.domains.as_deref())
+            .unwrap_or_default()
             .iter()
-            .flat_map(|item_counts| &item_counts.domains)
             .filter_map(|domain| Some((domain.name.as_str(), domain.describe_largest_entities()?)))
             .collect();
         if rows.is_empty() {
@@ -118,46 +107,43 @@ impl GraphStatus {
     }
 }
 
-fn label_state(state: Option<IndexingState>) -> &'static str {
-    state.unwrap_or(IndexingState::Unknown).label()
-}
-
-impl Projects {
-    fn describe_coverage(&self) -> String {
-        if self.total_known == 0 {
-            return "none yet".to_string();
-        }
-        let coverage = format!(
-            "{} of {} indexed",
-            tui::format_with_thousands(self.indexed),
-            tui::format_with_thousands(self.total_known)
-        );
-        match self.gaps {
-            0 => coverage,
-            gaps => format!("{coverage} · {} failed", tui::format_with_thousands(gaps)),
-        }
+fn describe_coverage(projects: Option<&Projects>) -> String {
+    let count = |field: fn(&Projects) -> Option<usize>| projects.and_then(field).unwrap_or(0);
+    let (indexed, total_known, gaps) = (
+        count(|p| p.indexed),
+        count(|p| p.total_known),
+        count(|p| p.gaps),
+    );
+    if total_known == 0 {
+        return "none yet".to_string();
+    }
+    let coverage = format!(
+        "{} of {} indexed",
+        tui::format_with_thousands(indexed),
+        tui::format_with_thousands(total_known)
+    );
+    match gaps {
+        0 => coverage,
+        gaps => format!("{coverage} · {} failed", tui::format_with_thousands(gaps)),
     }
 }
 
 impl Domain {
     fn describe_largest_entities(&self) -> Option<String> {
-        let mut counted: Vec<&Entity> = self
+        let mut counted: Vec<(&str, usize)> = self
             .entities
+            .as_deref()
+            .unwrap_or_default()
             .iter()
-            .filter(|entity| entity.count > 0)
+            .map(|entity| (entity.name.as_str(), entity.parse_count()))
+            .filter(|(_, count)| *count > 0)
             .collect();
-        counted.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
+        counted.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
 
         let mut parts: Vec<String> = counted
             .iter()
             .take(SHOWN_ENTITIES_PER_DOMAIN)
-            .map(|entity| {
-                format!(
-                    "{} {}",
-                    entity.name,
-                    tui::format_with_thousands(entity.count)
-                )
-            })
+            .map(|(name, count)| format!("{name} {}", tui::format_with_thousands(*count)))
             .collect();
         let hidden = counted.len().saturating_sub(SHOWN_ENTITIES_PER_DOMAIN);
         if hidden > 0 {
@@ -167,25 +153,34 @@ impl Domain {
     }
 }
 
+impl Entity {
+    fn parse_count(&self) -> usize {
+        self.count
+            .as_deref()
+            .and_then(|count| count.parse().ok())
+            .unwrap_or(0)
+    }
+}
+
 impl IndexingState {
     fn label(self) -> &'static str {
         match self {
-            IndexingState::NotIndexed => "not indexed",
-            IndexingState::Backfilling => "backfilling",
-            IndexingState::Indexed => "indexed",
-            IndexingState::Error => "error",
+            IndexingState::NotStarted => "not indexed",
+            IndexingState::Indexing => "backfilling",
+            IndexingState::Ready => "indexed",
+            IndexingState::Failed => "error",
             IndexingState::Unknown => "unknown",
         }
     }
 
     fn describe_next_step(self) -> &'static str {
         match self {
-            IndexingState::Indexed => "Ready.",
-            IndexingState::Backfilling => "Indexing. Counts grow as data arrives.",
-            IndexingState::NotIndexed => {
+            IndexingState::Ready => "Ready.",
+            IndexingState::Indexing => "Indexing. Counts grow as data arrives.",
+            IndexingState::NotStarted => {
                 "Not indexed yet. If this does not change, check that Orbit is enabled in Orbit > Configuration."
             }
-            IndexingState::Error => {
+            IndexingState::Failed => {
                 "Indexing has errors. If this does not clear, contact an instance administrator."
             }
             IndexingState::Unknown => "Indexing state unknown.",
@@ -235,6 +230,21 @@ mod tests {
             status.describe_next_step(),
             "Indexing. Counts grow as data arrives."
         );
+    }
+
+    #[test]
+    fn null_leaves_read_as_unknown_or_zero() {
+        let status = parse_status(
+            r#"{"indexing":{"state":null,"areas":[{"name":"ci","state":null}],"projects":null},
+                "itemCounts":{"domains":[{"name":"ci","entities":[{"name":"Job","count":null}]},
+                {"name":"plan","entities":null}]}}"#,
+        );
+
+        assert_eq!(
+            status.format_indexing(),
+            "ci         unknown\nProjects   none yet"
+        );
+        assert_eq!(status.format_contents(), "nothing yet");
     }
 
     #[test]

@@ -39,8 +39,11 @@ binary, which `glab` downloads, verifies, and keeps up to date for you. Run
 
 Hosted commands such as `query`, `status`, `ontology`, `dsl`, and `tools` call
 the GitLab Orbit Remote REST API. `graph-status` calls the GitLab GraphQL API.
-`glab` injects your GitLab credential automatically. `glab orbit setup` provides guided onboarding and
-configures supported AI agents.
+`glab` injects your GitLab credential automatically. `glab orbit setup`
+provides guided onboarding and configures supported AI agents.
+
+With a GitLab Duo Agent Platform token, `graph-status` needs the GitLab release
+that includes gitlab MR 0 (ai_workflows scopes for the Orbit status fields).
 
 ## Prerequisites
 
@@ -141,6 +144,10 @@ glab orbit graph-status --namespace-id 24
 glab orbit graph-status --project-id 2
 ```
 
+`--namespace-id` and `--project-id` first read the full path with one extra
+REST request. With a fine-grained personal access token, `graph-status` also
+needs `read_group` for a group or `read_project` for a project.
+
 In a terminal, `graph-status` shows a summary of the indexing state and the
 largest entity counts in each domain. When the output goes to a pipe or a
 file, it prints the `orbit` object of the GraphQL response as JSON. Use
@@ -160,6 +167,10 @@ can branch on them without parsing stderr.
 | `403` | `4` | No Knowledge Graph enabled namespaces available. |
 | `429` | `5` | Rate limited. Inspect `Retry-After` and back off. |
 | Other | `1` | Unstructured error. Response body, if any, is included. |
+
+GraphQL errors arrive with HTTP `200`. `graph-status` exits `1` for them and
+prints the error messages. When only one field fails, for example item counts
+after a rate limit, it also prints the fields that resolved.
 
 ## Billing
 
