@@ -40,7 +40,7 @@ message Config {
   Schema schema = 17 [(buf.validate.field).required = true];
   Analytics analytics = 18 [(buf.validate.field).required = true];
   Billing billing = 19 [(buf.validate.field).required = true];
-  map<string, FeatureScope> features = 20;
+  map<string, FeatureScope> features = 20 [(buf.validate.field).map.keys.string = {in: ["code_graph_incremental"]}];
   ObjectStorage object_storage = 21 [(buf.validate.field).required = true];
 }
 

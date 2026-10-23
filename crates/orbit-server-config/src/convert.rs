@@ -49,8 +49,6 @@ pub enum ConvertError {
     },
     #[error("{field} is {value}, which is not one of its declared values")]
     UnknownEnum { field: &'static str, value: i32 },
-    #[error("features.{0} is not a feature this release knows")]
-    UnknownFeature(String),
     #[error("metrics.prometheus.port is {0}, which is not a port number")]
     PortRange(u32),
 }
@@ -99,7 +97,7 @@ impl TryFrom<proto::Config> for AppConfig {
             schema: schema(present(config.schema)),
             analytics: analytics(present(config.analytics))?,
             billing: billing(present(config.billing))?,
-            features: features(config.features)?,
+            features: features(config.features),
             object_storage: object_storage(present(config.object_storage))?,
         })
     }
@@ -504,19 +502,19 @@ fn billing(value: proto::Billing) -> Result<BillingConfig> {
     })
 }
 
-fn features(value: HashMap<String, proto::FeatureScope>) -> Result<FeaturesConfig> {
+fn features(value: HashMap<String, proto::FeatureScope>) -> FeaturesConfig {
     value
         .into_iter()
         .map(|(name, scope)| {
-            let feature: Feature = serde_json::from_value(serde_json::Value::String(name.clone()))
-                .map_err(|_| ConvertError::UnknownFeature(name))?;
-            Ok((
+            let feature: Feature = serde_json::from_value(serde_json::Value::String(name))
+                .expect("the schema lists only features this release knows");
+            (
                 feature,
                 FeatureScope {
                     enabled: present(scope.enabled),
                     namespaces: scope.namespaces,
                 },
-            ))
+            )
         })
         .collect()
 }
@@ -615,13 +613,38 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_feature_flag_is_rejected() {
-        let error = features(HashMap::from([(
-            "not_a_real_flag".to_owned(),
-            proto::FeatureScope::default(),
-        )]))
-        .unwrap_err();
+    fn the_schema_lists_every_feature_this_release_knows() {
+        let pool = prost_reflect::DescriptorPool::decode(proto::FILE_DESCRIPTOR_SET).unwrap();
+        let rules = pool.get_extension_by_name("buf.validate.field").unwrap();
+        let field = pool
+            .get_message_by_name("orbit.config.v1.Config")
+            .unwrap()
+            .get_field_by_name("features")
+            .unwrap();
+        let message = |parent: &prost_reflect::DynamicMessage, name| {
+            parent
+                .get_field_by_name(name)
+                .unwrap()
+                .as_message()
+                .unwrap()
+                .clone()
+        };
+        let rules = field
+            .options()
+            .get_extension(&rules)
+            .as_message()
+            .unwrap()
+            .clone();
+        let keys = message(&message(&message(&rules, "map"), "keys"), "string");
+        let listed: Vec<String> = keys
+            .get_field_by_name("in")
+            .unwrap()
+            .as_list()
+            .unwrap()
+            .iter()
+            .map(|name| name.as_str().unwrap().to_owned())
+            .collect();
 
-        assert!(matches!(error, ConvertError::UnknownFeature(name) if name == "not_a_real_flag"));
+        assert_eq!(listed, <Feature as strum::VariantNames>::VARIANTS);
     }
 }

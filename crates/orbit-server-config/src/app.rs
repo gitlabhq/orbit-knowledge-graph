@@ -494,6 +494,22 @@ graph:
     }
 
     #[test]
+    fn an_unknown_feature_is_rejected() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = write_overlay(
+            dir.path(),
+            "features.yaml",
+            "features:\n  not_a_real_flag:\n    enabled: true\n",
+        );
+
+        let error = AppConfig::load_from(Some(&overlay), dir.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("- features[\"not_a_real_flag\"]"), "{error}");
+    }
+
+    #[test]
     fn an_undeclared_enum_name_is_rejected() {
         let dir = tempfile::TempDir::new().unwrap();
         let overlay = write_overlay(
