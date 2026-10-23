@@ -73,19 +73,15 @@ The `@gitlab/orbit` npm package always uses the musl build on Linux.
 
 ## GitLab Orbit setup and agent connection
 
-<!-- vale orbit.StandaloneProductName = NO -->
+### The GitLab Orbit settings page is missing
 
-### The Orbit settings page is missing
-
-You might not see the **Orbit** settings page.
+You might not see the **GitLab Orbit** settings page.
 The page appears only for users with the Owner role for a top-level group.
 
 This issue occurs when you do not have the Owner role, or when you are in a subgroup.
 
 To resolve this issue, ask a user with the Owner role for the top-level group to turn on GitLab Orbit.
 On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on GitLab Orbit in the **Admin** area.
-
-<!-- vale orbit.StandaloneProductName = YES -->
 
 ### Your agent does not use GitLab Orbit
 

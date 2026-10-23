@@ -23,12 +23,10 @@ about your GitLab data.
 - To query the graph, the Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
 - To use your own coding agent, an agent on your machine, such as Claude Code, Codex, or OpenCode.
 
-<!-- vale orbit.StandaloneProductName = NO -->
-
 To check whether GitLab Orbit is on for your group, in the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
-Then select the **Group status** tab.
+Then select the **Status** tab.
 For more information, see [GitLab Orbit dashboard](dashboard.md).
-If the page shows **Orbit is not turned on for your groups yet**, ask a user with the Owner role to turn on GitLab Orbit for the group.
+If the page shows **GitLab Orbit is not turned on for your groups yet**, ask a user with the Owner role to turn on GitLab Orbit for the group.
 If GitLab Orbit is already on for your group, skip [step 1](#step-1-turn-on-gitlab-orbit-for-your-group),
 and go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
 
@@ -45,13 +43,10 @@ Prerequisites:
 To turn on GitLab Orbit:
 
 1. In the top bar, select **Search or go to** and find your top-level group.
-1. In the left sidebar, select **Settings** > **Orbit**.
-1. Turn on the **Turn on Orbit** toggle.
+1. In the left sidebar, select **Settings** > **GitLab Orbit**.
+1. Turn on the **Turn on GitLab Orbit** toggle.
 
-The page shows **Orbit is indexing `<my-group>`**, then **Orbit is ready for `<my-group>`**.
-
-You can also try GitLab Orbit with a free trial.
-For more information, see [Start a free trial](trial.md).
+The page shows **GitLab Orbit is indexing `<my-group>`**, then **GitLab Orbit is ready for `<my-group>`**.
 
 {{< /tab >}}
 
@@ -65,19 +60,17 @@ Prerequisites:
 To turn on GitLab Orbit:
 
 1. In the upper-right corner, select **Admin**.
-1. In the left sidebar, select **Orbit**.
+1. In the left sidebar, select **GitLab Orbit**.
 1. Under **Top-level groups**, select your group.
-1. Select **Actions** > **Turn on Orbit**.
+1. Select **Actions** > **Turn on GitLab Orbit**.
 
 To turn on GitLab Orbit for every top-level group, including new ones, turn on
-**Turn on Orbit for all top-level groups automatically**.
+**Turn on GitLab Orbit for all top-level groups automatically**.
 For more information, see [turn on indexing for a group](self-managed/orbit-setup.md#turn-on-indexing-for-a-group).
 
 {{< /tab >}}
 
 {{< /tabs >}}
-
-<!-- vale orbit.StandaloneProductName = YES -->
 
 The first index can take up to a few hours.
 Continue with the next steps while the index runs.
@@ -173,6 +166,6 @@ To ask your first question:
 ## Next steps
 
 - [Prompt examples](prompt-examples.md): prompts by goal
-- [MCP server](agents/mcp.md): connect agents that cannot run shell commands
+- [GitLab MCP endpoint](agents/mcp.md): connect agents that cannot run shell commands
 - [Local graph](cli.md#local-graph): index and search code on your machine, with no GitLab account
 - [Troubleshooting](troubleshooting.md): fix common errors
