@@ -23,6 +23,9 @@ title: GitLab Orbit REST API
 {{< /history >}}
 
 Use the GitLab Orbit REST API to query the graph from scripts, scheduled reports, and custom tools.
+For the GitLab API reference, see [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
+For the GitLab Orbit data of the instance and of your groups in the GraphQL API, see
+[`Query.orbit`](https://docs.gitlab.com/api/graphql/reference/#queryorbit).
 
 ## Authentication
 
@@ -63,8 +66,6 @@ The request body contains:
 - `response_format`: Optional. Use `raw` for structured JSON, `llm` for compact
   [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text for agents, or `gql` for a text table.
   Default: `raw`. The GitLab Orbit CLI sends `llm` by default.
-
-A query in the deprecated JSON query DSL sends a JSON object in `query` instead of text.
 
 ### Example request
 
@@ -218,5 +219,7 @@ curl --header "Authorization: Bearer <your_token>" \
 
 - [Queries](_index.md)
 - [Query language](query-language.md)
+- [GitLab Orbit API reference](https://docs.gitlab.com/api/orbit/)
+- [GraphQL API: `Query.orbit`](https://docs.gitlab.com/api/graphql/reference/#queryorbit)
 - [Security](../security.md)
 - [Billing and credit usage](../billing.md)
