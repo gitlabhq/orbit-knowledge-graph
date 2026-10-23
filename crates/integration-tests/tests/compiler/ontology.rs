@@ -1246,8 +1246,8 @@ fn filterable_rejects_traversal_path_below_entity_role_floor() {
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("authorized traversal_path scope"),
-        "expected traversal_path role-scope rejection, got: {err}"
+        err.to_string().contains("requires access level 25"),
+        "expected the entity role-floor rejection, got: {err}"
     );
 }
 

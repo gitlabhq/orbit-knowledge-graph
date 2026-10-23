@@ -56,7 +56,6 @@ impl NodePlan {
                 .to_string(),
             columns,
             emit_select: true,
-            narrowed: false,
         })
     }
 
@@ -148,50 +147,27 @@ where
         .collect()
 }
 
-/// Decides which nodes join the result as rows (`joined`) and which only narrow an edge scan (`narrowed`).
+/// Decides which nodes join the result as rows and which join only to carry their authorization columns.
 pub(super) fn assign_node_access<M>(pattern: &mut Pattern<'_, M>, condition_nodes: &HashSet<String>)
 where
     M: OrbitQueryModel + ?Sized,
 {
-    let narrowing = narrowing_nodes(pattern);
     let access: HashMap<String, (bool, bool)> = pattern
         .nodes
         .values()
         .map(|node| {
             (
                 node.alias.clone(),
-                node_access(pattern, node, condition_nodes, &narrowing),
+                node_access(pattern, node, condition_nodes),
             )
         })
         .collect();
     for node in pattern.nodes.values_mut() {
-        (node.joined, node.narrowed) = access[&node.alias];
-    }
-}
-
-fn narrowing_nodes<M: OrbitQueryModel + ?Sized>(pattern: &Pattern<'_, M>) -> HashSet<String> {
-    match pattern.relations.as_slice() {
-        [relation]
-            if pattern.input.query_type == QueryType::Traversal
-                && relation.max_hops == 1
-                && relation.fk.is_none()
-                && relation.direction != Direction::Both =>
-        {
-            [
-                (&relation.from_node, &relation.to_node),
-                (&relation.to_node, &relation.from_node),
-            ]
-            .into_iter()
-            .filter(|(_, partner)| {
-                pattern
-                    .nodes
-                    .get(partner.as_str())
-                    .is_some_and(NodePlan::is_pinned)
-            })
-            .map(|(node, _)| node.clone())
-            .collect()
+        let authorization_only;
+        (node.joined, authorization_only) = access[&node.alias];
+        if authorization_only {
+            node.columns = Some(ColumnSelection::List(vec![]));
         }
-        _ => HashSet::new(),
     }
 }
 
@@ -199,7 +175,6 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
     pattern: &Pattern<'_, M>,
     node: &NodePlan,
     condition_nodes: &HashSet<String>,
-    narrowing: &HashSet<String>,
 ) -> (bool, bool) {
     let input = pattern.input;
     let group_target = input
@@ -223,19 +198,31 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
         .is_some_and(|order| order.node == node.alias);
     let local_predicate = condition_nodes.contains(&node.alias) && !pattern.holds_fk(&node.alias);
     let uncovered_filter = pattern.has_uncovered_filter(node);
+    let returned = !pattern.aggregate()
+        || input
+            .aggregation_row_nodes(pattern.model)
+            .contains(node.alias.as_str());
+    let role_floor = node.entity.as_deref().is_some_and(|entity| {
+        pattern
+            .model
+            .entity_minimum_access_level(entity)
+            .is_some_and(|level| level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
+    });
+    let authorized_from_table =
+        returned && !node.uses_default_pk() || role_floor && !pattern.holds_fk(&node.alias);
     let filter_only = pattern.aggregate()
         && uncovered_filter
         && !group_target
         && !metric_target
         && !ordered
         && !local_predicate;
-    let joined = input.relationships.is_empty()
+    let joined_as_rows = input.relationships.is_empty()
         || !pattern.model.supports_deferred_node_loading()
         || group_target
         || metric_target
         || ordered
         || local_predicate
         || uncovered_filter && !filter_only;
-    let narrowed = !joined && narrowing.contains(&node.alias) && !node.uses_default_pk();
-    (joined || narrowed, narrowed)
+    let joined = joined_as_rows || authorized_from_table;
+    (joined, joined && !joined_as_rows)
 }

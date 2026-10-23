@@ -222,7 +222,7 @@ mod tests {
             },
         )
         .unwrap();
-        crate::passes::lower::emit(&plan, &input).unwrap().ast
+        crate::passes::lower::emit(&plan, &input, None).unwrap().ast
     }
 
     #[test]

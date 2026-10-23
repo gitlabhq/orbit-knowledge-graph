@@ -33,7 +33,6 @@ pub struct NodePlan {
     pub redaction_id_column: String,
     pub columns: Option<ColumnSelection>,
     pub emit_select: bool,
-    pub narrowed: bool,
 }
 
 #[derive(Clone)]

@@ -653,7 +653,6 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             relation.0,
             membership_keys(keys)
         )],
-        Predicate::Scope { alias, .. } => vec![format!("scope({alias})")],
     }
 }
 

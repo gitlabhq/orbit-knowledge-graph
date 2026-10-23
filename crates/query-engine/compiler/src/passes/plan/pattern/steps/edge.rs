@@ -58,12 +58,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             self.edge_source(&physical, predicates)?
         };
         self.bind_relation_ids(index, relation, source);
-        if relation.max_hops == 1
-            && (pattern.relations.len() > 1
-                || endpoints
-                    .into_iter()
-                    .any(|node| pattern.nodes[node].narrowed))
-        {
+        if relation.max_hops == 1 && pattern.relations.len() > 1 {
             source = self.graph.bind(source, alias);
         }
         self.join_edge(relation, source)?;
