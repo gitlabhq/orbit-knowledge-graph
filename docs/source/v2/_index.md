@@ -44,7 +44,7 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 - [Ask across code and lifecycle](prompt-examples.md)<br>One graph holds your projects, merge requests, pipelines, vulnerabilities, files, and definitions, so one question can cross all of them.
 - [Run one query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
-- [Get only the data that you can access](security.md#how-gitlab-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions, on GitLab.com, GitLab Self-Managed, and GitLab Dedicated.
+- [Get only the data that you can access](security.md#how-gitlab-orbit-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions, on GitLab.com, GitLab Self-Managed, and GitLab Dedicated.
 {.product-cards}
 
 ## What you can ask
@@ -120,7 +120,7 @@ For other clients, see [GitLab MCP endpoint](agents/mcp.md#gitlab-mcp-endpoint).
 {{< tab title="REST API" >}}
 
 To build a script, a scheduled report, or a custom tool on the graph, query it over HTTP.
-For the endpoints, authentication, and examples, see the [REST API](queries/api.md).
+For the endpoints, authentication, and examples, see the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
 
 {{< /tab >}}
 
