@@ -8,7 +8,6 @@ use serde_json::{Number, Value};
 use super::ast::*;
 use super::{QueryParser, Rule};
 use crate::input::{BooleanExpression, Direction, FilterOp, OrderDirection, TruncateUnit};
-use crate::query_contract::MAX_FILTER_STRING_LEN;
 
 pub(super) type Node<'i> = pest_consume::Node<'i, Rule, ()>;
 pub(super) type Result<T> = std::result::Result<T, Error<Rule>>;
@@ -266,7 +265,8 @@ impl QueryParser {
             .pop()
             .ok_or_else(|| error_at(span, "expected a condition"))?;
         let mut expression = Self::predicate(predicate)?;
-        if children.len() + expression.depth() > super::MAX_NESTING {
+        if children.len() + expression.depth() > crate::query_contract::limits().max_predicate_depth
+        {
             return Err(error_at(span, "expression nesting is too deep"));
         }
         for _negation in children {
@@ -785,9 +785,10 @@ fn string(node: &Node) -> Result<String> {
             _ => return Err(mismatch(node)),
         }
     }
-    if result.chars().count() > MAX_FILTER_STRING_LEN {
+    if result.chars().count() > crate::query_contract::limits().max_filter_string_length {
         return Err(node.error(format!(
-            "string literal must not exceed {MAX_FILTER_STRING_LEN} characters"
+            "string literal must not exceed {} characters",
+            crate::query_contract::limits().max_filter_string_length
         )));
     }
     Ok(result)

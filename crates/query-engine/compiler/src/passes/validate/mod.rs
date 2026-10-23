@@ -17,10 +17,6 @@ use crate::input::{
     ColumnSelection, Condition, FilterOp, Input, InputFilter, InputGroupByKey, InputNode,
     PredicateTarget, QueryType, group_by_output_names,
 };
-use crate::query_contract::{
-    MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTER_STRING_LEN, MAX_HOPS_CAP,
-    MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_LIMIT, MAX_PREDICATE_DEPTH, MAX_SKIP,
-};
 use crate::types::SecurityContext;
 #[cfg(test)]
 use ontology::Ontology;
@@ -33,7 +29,7 @@ use query_data_model::PropertyId;
 use super::errors::format_schema_error;
 
 mod conditions;
-use conditions::{check_condition_column, check_condition_counts};
+use conditions::check_condition_column;
 
 pub(crate) const BASE_SCHEMA_JSON: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
@@ -159,27 +155,18 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
     }
 }
 
-/// Maximum span for id_range before it stops counting as selective.
-/// Ranges wider than this are effectively unfiltered full-table scans.
-pub(crate) const MAX_ID_RANGE_SPAN: i64 = 100_000;
-
-/// Tighter id_range cap for path_finding endpoints because frontier BFS is O(anchors × E^depth).
-const MAX_PATH_ANCHOR_RANGE: i64 = 500;
-
-/// Maximum rows resolved from a filtered path_finding endpoint CTE.
-pub(crate) const MAX_PATH_ANCHOR_LIMIT: i64 = 500;
-
 const CONDITION_COLUMN_RULE: &str = "every condition must compare a property of a matched node or relationship with a value or another property";
 
 /// Whether a path_finding endpoint has bounded selectivity.
-/// Uses the tighter MAX_PATH_ANCHOR_RANGE cap for id_range because
+/// Uses the tighter path-anchor range cap for id_range because
 /// the BFS frontier cost is O(anchors * E^depth).
 fn path_endpoint_has_selectivity(node: &InputNode) -> bool {
     if !node.node_ids.is_empty() || !node.filters.is_empty() {
         return true;
     }
     if let Some(ref range) = node.id_range {
-        return range.end.saturating_sub(range.start) <= MAX_PATH_ANCHOR_RANGE;
+        return range.end.saturating_sub(range.start)
+            <= crate::query_contract::limits().max_path_anchor_range;
     }
     false
 }
@@ -199,20 +186,24 @@ fn node_has_selectivity(node: &InputNode) -> bool {
         return true;
     }
     if let Some(ref range) = node.id_range {
-        return range.end.saturating_sub(range.start) <= MAX_ID_RANGE_SPAN;
+        return range.end.saturating_sub(range.start)
+            <= crate::query_contract::limits().max_id_range_span;
     }
     false
 }
 
 fn has_wide_id_range(node: &InputNode) -> bool {
-    node.id_range
-        .as_ref()
-        .is_some_and(|range| range.end.saturating_sub(range.start) > MAX_ID_RANGE_SPAN)
+    node.id_range.as_ref().is_some_and(|range| {
+        range.end.saturating_sub(range.start) > crate::query_contract::limits().max_id_range_span
+    })
 }
 
 fn wide_id_range_hint(wide: bool) -> String {
     if wide {
-        format!(" (an id_range counts only with a span of at most {MAX_ID_RANGE_SPAN})")
+        format!(
+            " (an id_range counts only with a span of at most {})",
+            crate::query_contract::limits().max_id_range_span
+        )
     } else {
         String::new()
     }
@@ -318,22 +309,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
     /// every frontend is held to the same rules. Complexity caps live in
     /// [`Self::check_depth`].
     pub fn check_shape(&self, input: &Input) -> Result<()> {
-        if input.nodes.is_empty() || input.query_type == QueryType::Hydration {
-            return Err(QueryError::Validation(
-                "a public query requires at least one node and cannot request internal hydration"
-                    .into(),
-            ));
-        }
-        if input.limit == 0 || input.limit > MAX_LIMIT {
-            return Err(QueryError::Validation(format!(
-                "limit must be between 1 and {MAX_LIMIT}"
-            )));
-        }
-        if input.skip.is_some_and(|skip| skip > MAX_SKIP) {
-            return Err(QueryError::Validation(format!(
-                "skip must be at most {MAX_SKIP}; to page deeper, ORDER BY a unique key such as id and filter past the last value from the previous page"
-            )));
-        }
+        crate::query_contract::validate_input(input)?;
         for node in &input.nodes {
             validate_identifier(&node.id)?;
             check_reserved_prefix("node id", &node.id, &format!("{}_", node.id))?;
@@ -369,13 +345,10 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             check_filters(&node.filters)?;
         }
         for edge in &input.relationships {
-            if edge.types.is_empty()
-                || edge.hops.min == 0
-                || edge.hops.min > edge.hops.max
-                || edge.hops.max > MAX_HOPS_CAP
-            {
+            if edge.types.is_empty() || edge.hops.min == 0 || edge.hops.min > edge.hops.max {
                 return Err(QueryError::Validation(format!(
-                    "relationships require types and ordered hop bounds between 1 and {MAX_HOPS_CAP}"
+                    "relationships require types and ordered hop bounds between 1 and {}",
+                    crate::query_contract::limits().max_hops
                 )));
             }
             self.check_relationship_types(&edge.types)?;
@@ -383,25 +356,16 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         }
         self.check_predicate_shape(input)?;
         if let Some(path) = &input.path {
-            if path.max_depth == 0 || path.max_depth > MAX_DEPTH_CAP {
+            if path.max_depth == 0 {
                 return Err(QueryError::Validation(format!(
-                    "path max_depth must be between 1 and {MAX_DEPTH_CAP}"
+                    "path max_depth must be between 1 and {}",
+                    crate::query_contract::limits().max_depth
                 )));
             }
             self.check_relationship_types(&path.rel_types)?;
         }
         if let Some(neighbors) = &input.neighbors {
             self.check_relationship_types(&neighbors.rel_types)?;
-        }
-        if input.query_type == QueryType::Neighbors && input.nodes.len() != 1 {
-            return Err(QueryError::Validation(
-                "neighbors requires exactly one center node".into(),
-            ));
-        }
-        if input.query_type == QueryType::Aggregation && input.aggregation.metrics.is_empty() {
-            return Err(QueryError::Validation(
-                "aggregation requires at least one metric".into(),
-            ));
         }
         for metric in &input.aggregation.metrics {
             validate_identifier(metric.expr.node())?;
@@ -484,153 +448,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
 
     /// Enforce query limits for every frontend, including counts across input fields.
     pub fn check_depth(&self, input: &Input) -> Result<()> {
-        use crate::query_contract::{
-            MAX_AGGREGATIONS, MAX_COLUMNS, MAX_DEPTH_CAP, MAX_GROUP_BY_KEYS, MAX_HOPS_CAP,
-            MAX_IN_VALUES, MAX_NODE_IDS, MAX_NODES_CAP, MAX_PREDICATES, MAX_REL_TYPES,
-            MAX_RELS_CAP,
-        };
-
-        let predicate_count = input.conditions().count()
-            + input
-                .nodes
-                .iter()
-                .map(|node| {
-                    node.filters.values().map(Vec::len).sum::<usize>()
-                        + usize::from(!node.node_ids.is_empty())
-                        + 2 * usize::from(node.id_range.is_some())
-                })
-                .sum::<usize>()
-            + input
-                .relationships
-                .iter()
-                .flat_map(|relationship| relationship.filters.values())
-                .map(Vec::len)
-                .sum::<usize>();
-        if predicate_count > MAX_PREDICATES {
-            return Err(QueryError::Validation(format!(
-                "Query has {predicate_count} predicates; the maximum is {MAX_PREDICATES} across the entire query. Remove redundant conditions or simplify the query."
-            )));
-        }
-        if input.nodes.len() > MAX_NODES_CAP {
-            return Err(QueryError::Validation(format!(
-                "nodes count ({}) must not exceed {MAX_NODES_CAP}",
-                input.nodes.len()
-            )));
-        }
-        if input.relationships.len() > MAX_RELS_CAP {
-            return Err(QueryError::Validation(format!(
-                "relationships count ({}) must not exceed {MAX_RELS_CAP}",
-                input.relationships.len()
-            )));
-        }
-        // Multi-node traversal requires exactly n-1 relationships (1 node + 0 rels is a search).
-        if input.query_type == QueryType::Traversal
-            && !input.nodes.is_empty()
-            && !(input.nodes.len() == 1 && input.relationships.is_empty())
-            && input.relationships.len() != input.nodes.len() - 1
-        {
-            return Err(QueryError::Validation(format!(
-                "traversal requires exactly n-1 relationships for n nodes (got {} nodes, {} relationships)",
-                input.nodes.len(),
-                input.relationships.len()
-            )));
-        }
-        if input.aggregation.metrics.len() > MAX_AGGREGATIONS {
-            return Err(QueryError::Validation(format!(
-                "aggregations count ({}) must not exceed {MAX_AGGREGATIONS}",
-                input.aggregation.metrics.len()
-            )));
-        }
-        if input.aggregation.group_by.len() > MAX_GROUP_BY_KEYS {
-            return Err(QueryError::Validation(format!(
-                "group_by count ({}) must not exceed {MAX_GROUP_BY_KEYS}",
-                input.aggregation.group_by.len()
-            )));
-        }
-        for rel in &input.relationships {
-            // "both" generates OR joins that defeat CH index usage; schema also rejects it,
-            // but this guard covers code paths that bypass schema validation.
-            if rel.direction == crate::input::Direction::Both
-                && input.query_type == QueryType::Aggregation
-            {
-                return Err(QueryError::Validation(
-                    "aggregation does not support direction: \"both\" on relationships; \
-                     use separate queries for outgoing and incoming directions"
-                        .into(),
-                ));
-            }
-            if rel.hops.max > MAX_HOPS_CAP {
-                return Err(QueryError::Validation(format!(
-                    "hops upper bound ({}) must not exceed {MAX_HOPS_CAP}",
-                    rel.hops.max
-                )));
-            }
-            if rel.types.len() > MAX_REL_TYPES {
-                return Err(QueryError::Validation(format!(
-                    "relationship type count ({}) must not exceed {MAX_REL_TYPES}",
-                    rel.types.len()
-                )));
-            }
-        }
-        if let Some(ref path) = input.path {
-            if path.max_depth > MAX_DEPTH_CAP {
-                return Err(QueryError::Validation(format!(
-                    "max_depth ({}) must not exceed {MAX_DEPTH_CAP}",
-                    path.max_depth
-                )));
-            }
-            if path.rel_types.len() > MAX_REL_TYPES {
-                return Err(QueryError::Validation(format!(
-                    "path rel_types count ({}) must not exceed {MAX_REL_TYPES}",
-                    path.rel_types.len()
-                )));
-            }
-        }
-        if let Some(neighbors) = &input.neighbors
-            && neighbors.rel_types.len() > MAX_REL_TYPES
-        {
-            return Err(QueryError::Validation(format!(
-                "neighbors rel_types count ({}) must not exceed {MAX_REL_TYPES}",
-                neighbors.rel_types.len()
-            )));
-        }
-        for node in &input.nodes {
-            if node.node_ids.len() > MAX_NODE_IDS {
-                return Err(QueryError::Validation(format!(
-                    "node_ids count ({}) for node \"{}\" must not exceed {MAX_NODE_IDS}",
-                    node.node_ids.len(),
-                    node.id
-                )));
-            }
-            if let Some(crate::input::ColumnSelection::List(cols)) = &node.columns
-                && cols.len() > MAX_COLUMNS
-            {
-                return Err(QueryError::Validation(format!(
-                    "columns count ({}) for node \"{}\" must not exceed {MAX_COLUMNS}",
-                    cols.len(),
-                    node.id
-                )));
-            }
-            for (prop, filters) in &node.filters {
-                for filter in filters {
-                    if let Some(FilterOp::In) = filter.op {
-                        let len = filter
-                            .value
-                            .as_ref()
-                            .and_then(|v| v.as_array())
-                            .map(|a| a.len())
-                            .unwrap_or(0);
-                        if len > MAX_IN_VALUES {
-                            return Err(QueryError::Validation(format!(
-                                "IN filter on \"{prop}\" for node \"{}\" has {len} values, must not exceed {MAX_IN_VALUES}",
-                                node.id
-                            )));
-                        }
-                    }
-                }
-            }
-        }
-        check_condition_counts(input)
+        crate::query_contract::validate_input(input)
     }
 
     /// Validate that filter values are compatible with the ontology column type.
@@ -835,8 +653,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         Ok(())
     }
 
-    const MIN_LIKE_PATTERN_LEN: usize = 3;
-
     fn check_traversal_path_filter(label: &str, filter: &InputFilter) -> Result<()> {
         match filter.op.unwrap_or(FilterOp::Eq) {
             FilterOp::Eq | FilterOp::StartsWith => {
@@ -940,11 +756,11 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         // traversal_path is exempt: short paths like "1/" are valid hierarchical scopes.
         if (is_like_op || is_token_op) && prop != TRAVERSAL_PATH_COLUMN {
             let len = value.as_str().map_or(0, |s| s.chars().count());
-            if len < Self::MIN_LIKE_PATTERN_LEN {
+            if len < crate::query_contract::limits().min_search_pattern_length {
                 return Err(QueryError::Validation(format!(
                     "filter on \"{prop}\" for {entity}: \
                      search pattern must be at least {} characters, got {len}",
-                    Self::MIN_LIKE_PATTERN_LEN
+                    crate::query_contract::limits().min_search_pattern_length
                 )));
             }
         }
@@ -1004,7 +820,8 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                         if node.is_none_or(|n| !path_endpoint_has_selectivity(n)) {
                             return Err(QueryError::Validation(format!(
                                 "path_finding requires node_ids, filters, or id_range \
-                                 (max span {MAX_PATH_ANCHOR_RANGE}) on endpoint \"{endpoint}\""
+                                  (max span {}) on endpoint \"{endpoint}\"",
+                                crate::query_contract::limits().max_path_anchor_range
                             )));
                         }
                     }
@@ -1369,12 +1186,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             return Ok(());
         }
 
-        input.neighbors.as_ref().ok_or_else(|| {
-            QueryError::ReferenceError(
-                "neighbors query requires a 'neighbors' configuration".into(),
-            )
-        })?;
-
         Ok(())
     }
 
@@ -1438,7 +1249,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
 
 pub(crate) fn validate_identifier(identifier: &str) -> Result<()> {
     let mut chars = identifier.chars();
-    let valid = identifier.len() <= MAX_IDENTIFIER_LEN
+    let valid = identifier.len() <= crate::query_contract::limits().max_identifier_length
         && chars
             .next()
             .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
@@ -1465,9 +1276,12 @@ fn check_reserved_prefix(kind: &str, name: &str, column: &str) -> Result<()> {
 fn is_valid_filter_value(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::Number(_) | serde_json::Value::Bool(_) => true,
-        serde_json::Value::String(text) => text.chars().count() <= MAX_FILTER_STRING_LEN,
+        serde_json::Value::String(text) => {
+            text.chars().count() <= crate::query_contract::limits().max_filter_string_length
+        }
         serde_json::Value::Array(values) => {
-            values.len() <= MAX_IN_VALUES && values.iter().all(is_valid_filter_value)
+            values.len() <= crate::query_contract::limits().max_in_values
+                && values.iter().all(is_valid_filter_value)
         }
         serde_json::Value::Null | serde_json::Value::Object(_) => false,
     }
@@ -1482,9 +1296,12 @@ fn check_filters(filters: &std::collections::HashMap<String, Vec<InputFilter>>) 
 
 fn check_filter_entries(property: &str, predicates: &[InputFilter]) -> Result<()> {
     validate_identifier(property)?;
-    if predicates.is_empty() || predicates.len() > MAX_FILTER_ENTRIES_PER_PROPERTY {
+    if predicates.is_empty()
+        || predicates.len() > crate::query_contract::limits().max_filter_entries_per_property
+    {
         return Err(QueryError::Validation(format!(
-            "filter on {property:?} needs between 1 and {MAX_FILTER_ENTRIES_PER_PROPERTY} predicates"
+            "filter on {property:?} needs between 1 and {} predicates",
+            crate::query_contract::limits().max_filter_entries_per_property
         )));
     }
     for filter in predicates {
@@ -1506,16 +1323,19 @@ fn check_filter_entries(property: &str, predicates: &[InputFilter]) -> Result<()
             .ok_or_else(|| QueryError::Validation("predicate requires a value".into()))?;
         if !is_valid_filter_value(value) {
             return Err(QueryError::Validation(format!(
-                "invalid filter value for {property:?}; values must be numbers, booleans, strings up to {MAX_FILTER_STRING_LEN} characters, or lists of up to {MAX_IN_VALUES} such values"
+                "invalid filter value for {property:?}; values must be numbers, booleans, strings up to {} characters, or lists of up to {} such values",
+                crate::query_contract::limits().max_filter_string_length,
+                crate::query_contract::limits().max_in_values
             )));
         }
         if op == FilterOp::In
-            && !value
-                .as_array()
-                .is_some_and(|values| (1..=MAX_IN_VALUES).contains(&values.len()))
+            && !value.as_array().is_some_and(|values| {
+                (1..=crate::query_contract::limits().max_in_values).contains(&values.len())
+            })
         {
             return Err(QueryError::Validation(format!(
-                "IN requires 1-{MAX_IN_VALUES} values"
+                "IN requires 1-{} values",
+                crate::query_contract::limits().max_in_values
             )));
         }
         if op.is_text() && !value.is_string() {

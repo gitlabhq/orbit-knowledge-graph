@@ -18,6 +18,38 @@ limits:
   max_identifier_length: 64
   max_filter_string_length: 1024
   max_predicate_depth: 32
+  max_id_range_span: 100000
+  max_path_anchor_range: 500
+  max_path_anchor_rows: 500
+  min_search_pattern_length: 3
+
+query_types:
+  traversal:
+    nodes: [1, 5]
+    relationships: [0, 4]
+    path: forbidden
+    neighbors: forbidden
+    aggregations: forbidden
+    relationship_shape: tree
+  aggregation:
+    nodes: [1, 5]
+    relationships: [0, 5]
+    path: forbidden
+    neighbors: forbidden
+    aggregations: required
+    relationship_directions: [outgoing, incoming]
+  path_finding:
+    nodes: [2, 2]
+    relationships: [0, 0]
+    path: required
+    neighbors: forbidden
+    aggregations: forbidden
+  neighbors:
+    nodes: [1, 1]
+    relationships: [0, 0]
+    path: forbidden
+    neighbors: required
+    aggregations: forbidden
 
 filter_operators:
   eq: [string, integer, number, boolean, date, datetime, enum, uuid]

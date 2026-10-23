@@ -7,7 +7,6 @@ use crate::input::{
     Direction, HopRange, InputNeighbors, InputPath, InputRelationship, PathType, PredicateTarget,
     PropertyRef, QueryType,
 };
-use crate::query_contract::MAX_NODES_CAP;
 use crate::{Input, InputNode, QueryError, Result};
 
 use super::ast::{Name, NodePattern, Pattern, PatternElement, Query, Range, Relationship};
@@ -117,10 +116,13 @@ impl Lowering {
             }
             return Ok(id);
         }
-        if self.input.nodes.len() == MAX_NODES_CAP {
+        if self.input.nodes.len() == crate::query_contract::limits().max_nodes {
             return Err(invalid(
                 pattern.span,
-                &format!("a query declares at most {MAX_NODES_CAP} nodes"),
+                &format!(
+                    "a query declares at most {} nodes",
+                    crate::query_contract::limits().max_nodes
+                ),
             ));
         }
         let mut node = InputNode {

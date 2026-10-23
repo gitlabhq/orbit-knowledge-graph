@@ -1,15 +1,15 @@
 use super::*;
-use crate::query_contract::{MAX_FILTERS_PER_NODE, MAX_FILTERS_PER_REL};
 
 impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
     pub(super) fn check_predicate_shape(&self, input: &Input) -> Result<()> {
         if input
             .predicates
             .iter()
-            .any(|root| root.depth() > MAX_PREDICATE_DEPTH)
+            .any(|root| root.depth() > crate::query_contract::limits().max_predicate_depth)
         {
             return Err(QueryError::Validation(format!(
-                "conditions must not nest deeper than {MAX_PREDICATE_DEPTH} levels"
+                "conditions must not nest deeper than {} levels",
+                crate::query_contract::limits().max_predicate_depth
             )));
         }
         for root in &input.predicates {
@@ -158,54 +158,6 @@ fn predicate_entity<'a>(input: &'a Input, alias: &str) -> Result<&'a str> {
     input.entity_of(alias).ok_or_else(|| {
         QueryError::ReferenceError(format!("condition references undefined node \"{alias}\""))
     })
-}
-
-pub(super) fn check_condition_counts(input: &Input) -> Result<()> {
-    let nodes = input.nodes.iter().map(|node| {
-        (
-            PredicateTarget::Node(node.id.clone()),
-            &node.filters,
-            MAX_FILTERS_PER_NODE,
-        )
-    });
-    let relationships = input.relationships.iter().enumerate().map(|(index, rel)| {
-        (
-            PredicateTarget::Relationship(index),
-            &rel.filters,
-            MAX_FILTERS_PER_REL,
-        )
-    });
-    for (target, filters, maximum) in nodes.chain(relationships) {
-        let mut counts: std::collections::HashMap<&str, usize> = filters
-            .iter()
-            .map(|(property, filters)| (property.as_str(), filters.len()))
-            .collect();
-        for predicate in input
-            .conditions()
-            .filter(|predicate| predicate.target == target && !predicate.compares_aliases())
-        {
-            *counts.entry(&predicate.property).or_default() += 1;
-        }
-        let owner = match &target {
-            PredicateTarget::Node(alias) => format!("node \"{alias}\""),
-            PredicateTarget::Relationship(index) => format!("relationship[{index}]"),
-        };
-        if counts.len() > maximum {
-            return Err(QueryError::Validation(format!(
-                "filter property count ({}) for {owner} must not exceed {maximum}",
-                counts.len()
-            )));
-        }
-        if let Some((property, count)) = counts
-            .into_iter()
-            .find(|(_, count)| *count > MAX_FILTER_ENTRIES_PER_PROPERTY)
-        {
-            return Err(QueryError::Validation(format!(
-                "filter entry count ({count}) on property \"{property}\" for {owner} must not exceed {MAX_FILTER_ENTRIES_PER_PROPERTY}"
-            )));
-        }
-    }
-    Ok(())
 }
 
 pub(super) fn check_condition_column(lhs: (&str, &str), filter: &InputFilter) -> Result<()> {

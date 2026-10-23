@@ -1,44 +1,13 @@
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use pest_meta::ast::{Expr, Rule};
 use pest_meta::parser::{self, Rule as MetaRule};
-use serde::Deserialize;
 use serde_json::Value;
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct QueryContract {
-    limits: Limits,
-    filter_operators: BTreeMap<String, Vec<String>>,
-    aggregations: BTreeMap<String, Vec<String>>,
-    ordering: Vec<String>,
-    path_types: Vec<String>,
+mod config {
+    include!("src/query_contract/config.rs");
 }
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Limits {
-    max_hops: u32,
-    max_depth: u32,
-    max_nodes: usize,
-    max_relationships: usize,
-    max_node_ids: usize,
-    max_in_values: usize,
-    max_node_filters: usize,
-    max_relationship_filters: usize,
-    max_columns: usize,
-    max_relationship_types: usize,
-    max_aggregations: usize,
-    max_group_by_keys: usize,
-    max_filter_entries_per_property: usize,
-    max_predicates: usize,
-    max_limit: u32,
-    max_skip: u32,
-    max_identifier_length: usize,
-    max_filter_string_length: usize,
-    max_predicate_depth: usize,
-}
+use config::{Limits, QueryContract};
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
@@ -49,8 +18,8 @@ fn main() {
     println!("cargo:rerun-if-changed={}", contract_path.display());
     println!("cargo:rerun-if-changed={}", schema_path.display());
 
-    let contract: QueryContract =
-        serde_saphyr::from_str(&read(&contract_path)).unwrap_or_else(|error| {
+    let contract: QueryContract = orbit_utils::yaml::from_str(&read(&contract_path))
+        .unwrap_or_else(|error| {
             panic!(
                 "{} is not valid contract YAML: {error}",
                 contract_path.display()
@@ -65,10 +34,6 @@ fn main() {
     let grammar_path = PathBuf::from("src/passes/frontend/gql/query.pest");
     let grammar = parse_grammar(&read(&grammar_path));
     check_grammar(&grammar, &contract.limits);
-
-    let generated = generate_rust(&contract);
-    std::fs::write(env_path("OUT_DIR").join("query_contract.rs"), generated)
-        .expect("write generated query contract");
 }
 
 fn env_path(name: &str) -> PathBuf {
@@ -83,23 +48,10 @@ fn read(path: &std::path::Path) -> String {
 }
 
 fn validate_contract(contract: &QueryContract) {
-    const DATA_TYPES: &[&str] = &[
-        "string", "integer", "number", "boolean", "date", "datetime", "enum", "uuid",
-    ];
-    let operations = contract
-        .filter_operators
-        .iter()
-        .chain(contract.aggregations.iter())
-        .map(|(operation, types)| (operation.as_str(), types))
-        .chain(std::iter::once(("ordering", &contract.ordering)));
-    for (operation, types) in operations {
-        for data_type in types {
-            assert!(
-                DATA_TYPES.contains(&data_type.as_str()),
-                "query contract operation `{operation}` has unknown data type `{data_type}`"
-            );
-        }
-    }
+    assert!(
+        !contract.ordering.is_empty(),
+        "ordering types must not be empty"
+    );
     assert_eq!(
         contract.limits.max_node_ids, contract.limits.max_in_values,
         "GQL general and IN lists share one bound"
@@ -108,6 +60,35 @@ fn validate_contract(contract: &QueryContract) {
         contract.limits.max_hops, contract.limits.max_depth,
         "GQL uses one numeric rule for traversal hops and path depth"
     );
+    let query_types = &contract.query_types;
+    for rule in [
+        &query_types.traversal,
+        &query_types.aggregation,
+        &query_types.path_finding,
+        &query_types.neighbors,
+    ] {
+        assert!(rule.nodes[0] <= rule.nodes[1], "invalid node range");
+        assert!(
+            rule.relationships[0] <= rule.relationships[1],
+            "invalid relationship range"
+        );
+        let _ = (
+            rule.path,
+            rule.neighbors,
+            rule.aggregations,
+            &rule.relationship_directions,
+            &rule.relationship_shape,
+        );
+    }
+    let limits = &contract.limits;
+    for limit in [
+        limits.max_id_range_span,
+        limits.max_path_anchor_range,
+        limits.max_path_anchor_rows,
+    ] {
+        assert!(limit > 0, "runtime limits must be positive");
+    }
+    assert!(limits.min_search_pattern_length > 0);
 }
 
 fn check_schema(schema: &Value, contract: &QueryContract) {
@@ -376,140 +357,6 @@ fn check_identifier_patterns(schema: &Value, maximum: usize) {
             pattern.contains(&expected),
             "`{pointer}` must contain `{expected}` from query_contract.yaml"
         );
-    }
-}
-
-fn generate_rust(contract: &QueryContract) -> String {
-    let limits = &contract.limits;
-    let mut output = format!(
-        "pub const MAX_HOPS_CAP: u32 = {};\n\
-         pub const MAX_DEPTH_CAP: u32 = {};\n\
-         pub const MAX_NODES_CAP: usize = {};\n\
-         pub const MAX_RELS_CAP: usize = {};\n\
-         pub const MAX_NODE_IDS: usize = {};\n\
-         pub const MAX_IN_VALUES: usize = {};\n\
-         pub const MAX_FILTERS_PER_NODE: usize = {};\n\
-         pub const MAX_FILTERS_PER_REL: usize = {};\n\
-         pub const MAX_COLUMNS: usize = {};\n\
-         pub const MAX_REL_TYPES: usize = {};\n\
-         pub const MAX_AGGREGATIONS: usize = {};\n\
-         pub const MAX_GROUP_BY_KEYS: usize = {};\n\
-         pub const MAX_FILTER_ENTRIES_PER_PROPERTY: usize = {};\n\
-         pub const MAX_PREDICATES: usize = {};\n\
-         pub const MAX_LIMIT: u32 = {};\n\
-         pub const MAX_SKIP: u32 = {};\n\
-         pub const MAX_IDENTIFIER_LEN: usize = {};\n\
-         pub const MAX_FILTER_STRING_LEN: usize = {};\n\
-         pub const MAX_PREDICATE_DEPTH: usize = {};\n\n",
-        limits.max_hops,
-        limits.max_depth,
-        limits.max_nodes,
-        limits.max_relationships,
-        limits.max_node_ids,
-        limits.max_in_values,
-        limits.max_node_filters,
-        limits.max_relationship_filters,
-        limits.max_columns,
-        limits.max_relationship_types,
-        limits.max_aggregations,
-        limits.max_group_by_keys,
-        limits.max_filter_entries_per_property,
-        limits.max_predicates,
-        limits.max_limit,
-        limits.max_skip,
-        limits.max_identifier_length,
-        limits.max_filter_string_length,
-        limits.max_predicate_depth,
-    );
-
-    let path_types = contract
-        .path_types
-        .iter()
-        .map(|path_type| format!("\"{path_type}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-    output.push_str(&format!(
-        "#[cfg(test)]\npub const PATH_TYPES: &[&str] = &[{path_types}];\n"
-    ));
-
-    output.push_str("\npub fn filter_operator_accepts(op: crate::input::FilterOp, data_type: ontology::DataType) -> bool {\n    match op {\n");
-    for (operation, types) in &contract.filter_operators {
-        output.push_str(&format!(
-            "        crate::input::FilterOp::{} => {},\n",
-            filter_variant(operation),
-            type_match(types)
-        ));
-    }
-    output.push_str("    }\n}\n\n");
-
-    output.push_str("pub fn aggregation_accepts(function: crate::input::AggFunction, data_type: ontology::DataType) -> bool {\n    match function {\n");
-    for (aggregation, types) in &contract.aggregations {
-        output.push_str(&format!(
-            "        crate::input::AggFunction::{} => {},\n",
-            aggregation_variant(aggregation),
-            type_match(types)
-        ));
-    }
-    output.push_str("    }\n}\n\n");
-    output.push_str(&format!(
-        "pub fn ordering_accepts(data_type: ontology::DataType) -> bool {{\n    {}\n}}\n",
-        type_match(&contract.ordering)
-    ));
-    output
-}
-
-fn type_match(types: &[String]) -> String {
-    if types.is_empty() {
-        return "false".into();
-    }
-    let variants = types
-        .iter()
-        .map(|data_type| match data_type.as_str() {
-            "string" => "ontology::DataType::String",
-            "integer" => "ontology::DataType::Int",
-            "number" => "ontology::DataType::Float",
-            "boolean" => "ontology::DataType::Bool",
-            "date" => "ontology::DataType::Date",
-            "datetime" => "ontology::DataType::DateTime",
-            "enum" => "ontology::DataType::Enum",
-            "uuid" => "ontology::DataType::Uuid",
-            other => panic!("unknown data type `{other}`"),
-        })
-        .collect::<Vec<_>>()
-        .join(" | ");
-    format!("matches!(data_type, {variants})")
-}
-
-fn filter_variant(operation: &str) -> &str {
-    match operation {
-        "eq" => "Eq",
-        "ne" => "Ne",
-        "gt" => "Gt",
-        "lt" => "Lt",
-        "gte" => "Gte",
-        "lte" => "Lte",
-        "in" => "In",
-        "contains" => "Contains",
-        "starts_with" => "StartsWith",
-        "ends_with" => "EndsWith",
-        "is_null" => "IsNull",
-        "is_not_null" => "IsNotNull",
-        "token_match" => "TokenMatch",
-        "all_tokens" => "AllTokens",
-        "any_tokens" => "AnyTokens",
-        other => panic!("unknown filter operator `{other}`"),
-    }
-}
-
-fn aggregation_variant(aggregation: &str) -> &str {
-    match aggregation {
-        "count" => "Count",
-        "sum" => "Sum",
-        "avg" => "Avg",
-        "min" => "Min",
-        "max" => "Max",
-        "collect" => "Collect",
-        other => panic!("unknown aggregation `{other}`"),
     }
 }
 

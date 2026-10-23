@@ -6,7 +6,6 @@ use crate::input::{
     InputGroupByKey, InputOrderBy, OrderDirection, PropertyRef, QueryType, RelationshipColumn,
     RelationshipColumnKind, RelationshipOrder, TargetRef,
 };
-use crate::query_contract::MAX_COLUMNS;
 
 use super::super::ast::{AggregateFunction, Expression, Name, Projections, Sort, SortKey, Target};
 use super::super::errors::invalid;
@@ -177,11 +176,14 @@ impl Lowering {
                         }
                         match &mut input_node.columns {
                             Some(ColumnSelection::List(columns))
-                                if columns.len() == MAX_COLUMNS =>
+                                if columns.len() == crate::query_contract::limits().max_columns =>
                             {
                                 return Err(invalid(
                                     span,
-                                    &format!("a node projects at most {MAX_COLUMNS} properties"),
+                                    &format!(
+                                        "a node projects at most {} properties",
+                                        crate::query_contract::limits().max_columns
+                                    ),
                                 ));
                             }
                             Some(ColumnSelection::List(columns))

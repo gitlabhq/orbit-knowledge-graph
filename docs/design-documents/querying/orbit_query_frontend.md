@@ -61,7 +61,7 @@ Schema preparation, result types, and resolution belong only to the GQL frontend
 
 `validate` runs the validator's shape check on every Input. It checks identifiers, limits, and ontology membership natively; it does not read the JSON schema.
 `config/query_contract.yaml` defines limits and the filter, aggregation, and ordering operations allowed for each property type.
-The compiler build generates Rust constants and operation checks from that contract. It also checks matching JSON Schema constraints and Pest bounds.
+The compiler embeds this contract and evaluates its typed rules directly over Input. Its build checks matching JSON Schema constraints and Pest bounds.
 The shared validator also enforces the total predicate count, which spans multiple input fields.
 `validate_relationships` checks each single-hop typed relationship between labeled nodes against the ontology's edge endpoints. It rejects a reversed arrow and names the valid direction. It also rejects a type that connects neither label pair. The pass reads only Input, so the JSON DSL pipelines can adopt it without frontend changes.
 JSON is therefore checked twice, once by schema and once natively; the redundancy is cheap and means every JSON test also exercises the shared validator.

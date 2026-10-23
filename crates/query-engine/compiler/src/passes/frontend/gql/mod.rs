@@ -39,8 +39,6 @@ pub fn pair_outline(query: &str) -> Option<Vec<(usize, String)>> {
 }
 
 const MAX_QUERY_BYTES: usize = 32 * 1024;
-const MAX_NESTING: usize = crate::query_contract::MAX_PREDICATE_DEPTH;
-
 #[derive(Debug, Clone)]
 pub struct ParsedQuery {
     pub input: Input,
@@ -169,7 +167,7 @@ fn check_nesting(query: &str) -> Result<()> {
         match token.as_rule() {
             Rule::OpenDelimiter => {
                 depth += 1;
-                if depth > MAX_NESTING {
+                if depth > crate::query_contract::limits().max_predicate_depth {
                     return Err(invalid(token.as_span(), "expression nesting is too deep"));
                 }
             }
