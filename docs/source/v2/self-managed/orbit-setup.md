@@ -13,22 +13,16 @@ title: Set up GitLab Orbit on GitLab Self-Managed
 
 {{< /details >}}
 
-{{< history >}}
-
-- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.2.2.
-- Generally available in GitLab 19.5.
-
-{{< /history >}}
-
 GitLab Orbit runs as a Helm release next to your instance.
 
 Prerequisites:
 
-- [Data replication](data-replication.md) runs, and rows arrive in the data lake.
-- Administrator access to GitLab.
+- Running [data replication](data-replication.md), with rows in the data lake
+- Administrator access to GitLab
 
 <!-- TODO(GA): update the image and chart versions in the examples to the GA release. -->
-Complete the sections on this page in order. The versions in the commands are examples.
+Complete the sections on this page in order.
+The versions in the commands are examples.
 Use the latest [GitLab Orbit release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases)
 and [GitLab Orbit Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/releases).
 
@@ -42,9 +36,12 @@ GitLab Orbit requires its own graph database and three users:
 | `gkg_reader` | `gkg_reader_app` | Read the graph database |
 | `gkg_siphon_reader` | `gkg_siphon_reader_app` | Read the data lake |
 
-The GitLab Orbit image includes the idempotent statements that create them, so they always match the version
-you run. GitLab Orbit does not create the graph database at startup, and the dispatcher runs schema
-migrations only against a database that already exists.
+The GitLab Orbit image includes the idempotent statements that create the database and the users, so the
+statements always match the version you run.
+GitLab Orbit does not create the graph database at startup, and the dispatcher runs schema migrations only
+against a database that already exists.
+
+To create the database and identities:
 
 1. Read the statements:
 
@@ -54,13 +51,14 @@ migrations only against a database that already exists.
      /usr/share/gkg/clickhouse-setup.sql
    ```
 
-1. Substitute the graph database name, the data lake database name, and a password for each user. Use
-   `orbit` as the graph database name.
+1. Substitute the graph database name, the data lake database name, and a password for each user.
+   Use `orbit` as the graph database name.
 
-1. Run the result against ClickHouse as an administrator. The statements create the graph database and
-   grant the `gkg_app` role its privileges on it.
+1. Run the result against ClickHouse as an administrator.
+   The statements create the graph database and grant the `gkg_app` role its privileges on the database.
 
-1. Confirm that the result includes these grants. The shipped file includes them in GitLab Orbit 0.126.0 and later:
+1. Confirm that the result includes these grants.
+   The shipped file includes these grants in GitLab Orbit 0.126.0 and later:
 
    ```sql
    GRANT SELECT ON system.parts TO gkg_app;
@@ -68,18 +66,21 @@ migrations only against a database that already exists.
    GRANT SELECT ON system.dictionaries TO gkg_reader_app;
    ```
 
-   A managed ClickHouse usually restricts the `system` database. Without the grants, schema migrations stop
-   when a new version is promoted. On a ClickHouse that you run yourself, the grants change nothing, but add
-   them so that the configuration works unchanged if you move to a managed service.
+   A managed ClickHouse usually restricts the `system` database.
+   Without the grants, schema migrations stop when a new version is promoted.
+   On a ClickHouse instance that you run yourself, the grants change nothing.
+   Add the grants anyway, so that the configuration works unchanged if you move to a managed service.
 
 ## Turn on GitLab Orbit in GitLab
 
 GitLab and GitLab Orbit authenticate to each other with one symmetric key that GitLab owns.
 Turn on GitLab Orbit in GitLab first, so the key exists before you copy it into the cluster.
 
-Decide the gRPC endpoint before you start. If GitLab runs in the same cluster, the endpoint is
-`tls://orbit-webserver.gitlab-orbit.svc.cluster.local:50054`. Otherwise, see [TLS and network requirements](#tls-and-network-requirements).
-GitLab connects to the gRPC endpoint on port 50054. An endpoint that begins with `tls://` uses TLS.
+Decide the gRPC endpoint before you start.
+If GitLab runs in the same cluster, the endpoint is `tls://orbit-webserver.gitlab-orbit.svc.cluster.local:50054`.
+Otherwise, see [TLS and network requirements](#tls-and-network-requirements).
+GitLab connects to the gRPC endpoint on port 50054.
+An endpoint that begins with `tls://` uses TLS.
 To use a service mesh for encryption instead, see [Use a plaintext connection](#use-a-plaintext-connection).
 
 {{< tabs >}}
@@ -93,29 +94,33 @@ To use a service mesh for encryption instead, see [Use a plaintext connection](#
    gitlab_rails['orbit_grpc_endpoint'] = 'tls://orbit.example.com:50054'
    ```
 
-1. Reconfigure GitLab. GitLab generates the shared key and writes it to
-   `/var/opt/gitlab/gitlab-rails/etc/gitlab_knowledge_graph_secret`.
+1. Reconfigure GitLab:
 
    ```shell
    sudo gitlab-ctl reconfigure
    ```
 
-1. Read the key. Copy the value exactly, without re-encoding or trimming it:
+   GitLab generates the shared key and writes the key to
+   `/var/opt/gitlab/gitlab-rails/etc/gitlab_knowledge_graph_secret`.
+
+1. Read the key, and copy the exact value.
+   Do not re-encode or trim the value:
 
    ```shell
    sudo cat /var/opt/gitlab/gitlab-rails/etc/gitlab_knowledge_graph_secret
    ```
 
-In a multi-node setup, every Rails node must hold the same key. Generate the key on one node, then set
-`gitlab_rails['orbit_secret']` to that value on the other nodes, or sync
-`/etc/gitlab/gitlab-secrets.json` before their first reconfigure.
+In a multi-node setup, every Rails node must hold the same key.
+Generate the key on one node, then set `gitlab_rails['orbit_secret']` to that value on the other nodes,
+or sync `/etc/gitlab/gitlab-secrets.json` before their first reconfigure.
 
 {{< /tab >}}
 
 {{< tab title="Helm chart (Kubernetes)" >}}
 
-The GitLab chart does not generate the key, so create it yourself. Create the Secret before you upgrade
-GitLab. The chart mounts the Secret without an `optional` flag, so a missing Secret leaves every new pod in
+The GitLab chart does not generate the key, so create the key yourself.
+Create the Secret before you upgrade GitLab.
+The chart mounts the Secret without an `optional` flag, so a missing Secret leaves every new pod in
 `ContainerCreating`.
 
 1. Create a key of 32 random bytes, base64 encoded:
@@ -125,8 +130,9 @@ GitLab. The chart mounts the Secret without an `optional` flag, so a missing Sec
    ```
 
 1. Put that value in a Secret in the namespace of the GitLab release.
+   The example in the next step uses a Secret named `gitlab-orbit-jwt` with the key `secret`.
 
-1. Reference the Secret:
+1. In the GitLab Helm values, reference the Secret:
 
    ```yaml
    global:
@@ -143,29 +149,39 @@ GitLab. The chart mounts the Secret without an `optional` flag, so a missing Sec
 
 {{< /tabs >}}
 
-Until you install the GitLab Orbit chart, GitLab reports connection errors to GitLab Orbit. They are expected.
+Until you install the GitLab Orbit chart, GitLab reports connection errors to GitLab Orbit.
+These errors are expected.
 
 ## Make the credentials available to GitLab Orbit
 
-Create the GitLab Orbit namespace first.
-The values file in the next section expects a Secret named `gkg-secrets` in the GitLab Orbit namespace,
-with these keys:
+GitLab Orbit reads the shared key and the ClickHouse passwords from a Kubernetes Secret.
+The values file in the next section expects a Secret named `gkg-secrets`.
 
-| Key | Holds |
-|-----|-------|
-| `gitlab-jwt-verifying-key` | The shared key from GitLab, to verify tokens from GitLab |
-| `gitlab-jwt-signing-key` | The same shared key, to sign tokens sent back to GitLab |
-| `datalake-password` | The password for the ClickHouse `gkg_siphon_reader` user |
-| `graph-password` | The password for the ClickHouse `gkg_writer` user |
-| `graph-read-password` | The password for the ClickHouse `gkg_reader` user |
+To make the credentials available:
 
-To take a key from a different Secret, set `secretName` and `key` for that credential under `secrets`.
-Sync the values from the secret manager that you already run, for example with the External Secrets Operator.
-Do not store the plaintext elsewhere.
+1. Create the GitLab Orbit namespace.
+1. In the GitLab Orbit namespace, create a Secret named `gkg-secrets` with these keys:
 
-If you use TLS, you also need a certificate for the gRPC endpoint. See [TLS and network requirements](#tls-and-network-requirements).
+   | Key | Holds |
+   |-----|-------|
+   | `gitlab-jwt-verifying-key` | The shared key from GitLab, to verify tokens from GitLab |
+   | `gitlab-jwt-signing-key` | The same shared key, to sign tokens sent back to GitLab |
+   | `datalake-password` | The password for the ClickHouse `gkg_siphon_reader` user |
+   | `graph-password` | The password for the ClickHouse `gkg_writer` user |
+   | `graph-read-password` | The password for the ClickHouse `gkg_reader` user |
+
+   To take a key from a different Secret, set `secretName` and `key` for that credential under `secrets`.
+   Sync the values from the secret manager that you already run, for example with the External Secrets Operator.
+   Do not store the plaintext elsewhere.
+
+If the webserver terminates TLS itself, the webserver also needs a certificate for the gRPC endpoint.
+The values file in the next section expects the certificate in a Secret named `gkg-webserver-tls`.
 
 ## Install GitLab Orbit
+
+Install the GitLab Orbit chart with Helm and a values file for your ClickHouse, NATS, and GitLab connections.
+
+To install GitLab Orbit:
 
 1. Save the following as `orbit-values.yaml` and replace the placeholders:
 
@@ -218,7 +234,8 @@ If you use TLS, you also need a certificate for the gRPC endpoint. See [TLS and 
      existingSecret: gkg-webserver-tls
    ```
 
-1. Install the chart. Adapt the namespace and the install method to your own tooling.
+1. Install the chart.
+   If you use a different namespace or install method, adapt the command:
 
    ```shell
    helm upgrade --install orbit \
@@ -235,8 +252,8 @@ If you use TLS, you also need a certificate for the gRPC endpoint. See [TLS and 
    kubectl -n gitlab-orbit get pods
    ```
 
-The chart turns everything else off by default, including metrics, autoscaling, analytics, and billing.
-Leave them off on GitLab Self-Managed.
+The chart turns everything else off by default, including metrics, autoscaling, and analytics.
+Leave these features off on GitLab Self-Managed.
 
 ### TLS and network requirements
 
@@ -247,21 +264,23 @@ Leave them off on GitLab Self-Managed.
 | GitLab Orbit to ClickHouse | The HTTP interface on port 8123, or 8443 with TLS. Siphon uses the native protocol on port 9000, so both ports must be reachable from the cluster. |
 
 TLS terminates either at a load balancer in front of the `orbit-webserver` service, or in the webserver itself
-with `tls.enabled` and `tls.existingSecret`. Only the webserver case needs the certificate inside the cluster.
+with `tls.enabled` and `tls.existingSecret`.
+Only the webserver case needs the certificate inside the cluster.
 
 The certificate must be valid for the host name that GitLab connects to.
 A certificate from a publicly trusted certificate authority (CA) needs no extra configuration in GitLab.
-For a certificate from your own CA, add the CA certificate to the GitLab trust store. For more information, see
-[Install custom public certificates](https://docs.gitlab.com/omnibus/settings/ssl/#install-custom-public-certificates).
+For a certificate from your own CA, add the CA certificate to the GitLab trust store.
+For more information, see [Install custom public certificates](https://docs.gitlab.com/omnibus/settings/ssl/#install-custom-public-certificates).
 
-If GitLab runs in the same cluster, `ClusterIP` is enough and the endpoint is
-`tls://orbit-webserver.gitlab-orbit.svc.cluster.local:50054`. Otherwise, expose the service with a method that
-your cluster supports, and keep the address on a private network.
+If GitLab runs in the same cluster, the `ClusterIP` service type is enough.
+Otherwise, expose the service with a method that your cluster supports, and keep the address on a private
+network.
 
 ### Use a plaintext connection
 
 Use a plaintext connection when a service mesh, such as Istio, encrypts the traffic between GitLab and
-GitLab Orbit. The webserver then does not need a certificate.
+GitLab Orbit.
+The webserver then does not need a certificate.
 
 Prerequisites:
 
@@ -271,11 +290,13 @@ Prerequisites:
 
 To use a plaintext connection:
 
-1. In `orbit-values.yaml`, set `tls.enabled` to `false`. This value is the default.
+1. In `orbit-values.yaml`, set `tls.enabled` to `false`.
+   This value is the default.
 1. In the GitLab configuration, set the gRPC endpoint without a scheme.
    For example, `orbit-webserver.gitlab-orbit.svc.cluster.local:50054`.
 
-If the host name resolves to an address outside these ranges, GitLab does not send the authorization token.
+If the host name resolves to an address outside the private ranges, GitLab does not send the authorization
+token.
 All requests to GitLab Orbit then fail authentication, and GitLab logs
 `Skipping authorization header on insecure non-private channel`.
 
@@ -290,16 +311,21 @@ The chart defaults suit most installations:
 | Indexer, `code` pool | 1 | 4 CPU, 12 GiB memory, 20 GiB ephemeral storage |
 
 The requests total roughly 10 CPU and 23 GiB before Siphon and NATS.
-Give the indexer room to reach at least 8 CPU and 16 GiB of memory, because many concurrent indexing tasks
-can use all of it. The chart limits allow that headroom by default.
+Give the indexer room to reach at least 8 CPU and 16 GiB of memory.
+Many concurrent indexing tasks can use all of that capacity.
+The chart limits allow that headroom by default.
 
-The indexer downloads code archives to node-local ephemeral storage. Only the `code` pool writes there. The chart
-sizes that scratch space with `indexer.pools.code.tmpSizeLimit`, which defaults to 18 GiB, and with the ephemeral
-storage requests and limits of the pool.
+The indexer downloads code archives to node-local ephemeral storage.
+Only the `code` pool writes to that storage.
+The chart sizes that scratch space with `indexer.pools.code.tmpSizeLimit`, which defaults to 18 GiB, and with
+the ephemeral storage requests and limits of the pool.
 
 ## Turn on indexing for a group
 
-GitLab Orbit indexes top-level groups. Subgroups and projects inherit indexing.
+GitLab Orbit indexes top-level groups.
+Subgroups and projects inherit indexing.
+
+To turn on indexing for a group:
 
 1. In the upper-right corner, select **Admin**.
 1. In the left sidebar, select **GitLab Orbit**.
@@ -308,11 +334,16 @@ GitLab Orbit indexes top-level groups. Subgroups and projects inherit indexing.
 
 The **Index status** of the group changes to **Indexing**, then **Indexed**.
 
-To turn on every top-level group, including new ones, turn on the
-**Turn on GitLab Orbit for all top-level groups automatically** toggle, then select
-**Turn on for all top-level groups**.
-To leave out a group, select it, then select **Actions** > **Exclude from automatic indexing**.
-If GitLab Orbit is on for the group, select **Exclude** to confirm.
+To turn on GitLab Orbit for every top-level group, including new groups:
+
+1. Turn on the **Turn on GitLab Orbit for all top-level groups automatically** toggle.
+1. Select **Turn on for all top-level groups**.
+
+To exclude a group from automatic indexing:
+
+1. Select the group.
+1. Select **Actions** > **Exclude from automatic indexing**.
+1. If GitLab Orbit is on for the group, select **Exclude** to confirm.
 
 To turn on indexing with the API instead, use a token with administrator access:
 
@@ -322,30 +353,38 @@ curl --request PUT \
   --url "https://gitlab.example.com/api/v4/admin/knowledge_graph/namespaces/<group_id>"
 ```
 
-New changes reach the graph through replication in minutes. A sweep picks up existing data in one hour or less.
+New changes reach the graph through replication in minutes.
+A sweep picks up existing data in one hour or less.
 
 ## Verify the installation
 
 Query the graph for a project in the group that you turned on indexing for.
-Put the request body in `request.json`, and replace `my-group` with the full path of that group. The query uses the [Cypher query language](../queries/cypher.md):
+The query uses the [GitLab Orbit query language](../queries/query-language.md).
 
-```json
-{
-  "query": "MATCH (p:Project) WHERE p.full_path STARTS WITH 'my-group/' RETURN p.name, p.full_path LIMIT 10",
-  "response_format": "raw"
-}
-```
+To verify the installation:
 
-```shell
-curl --request POST \
-  --header "Authorization: Bearer <your_access_token>" \
-  --header "Content-Type: application/json" \
-  --data @request.json \
-  --url "https://gitlab.example.com/api/v4/orbit/query"
-```
+1. Save the following request body as `request.json`, and replace `my-group` with the full path of the group:
 
-The query returns rows after the group is indexed. Pod status and the health endpoint do not confirm
-indexing, because both pass long before the first index finishes.
+   ```json
+   {
+     "query": "MATCH (p:Project) WHERE p.full_path STARTS WITH 'my-group/' RETURN p.name, p.full_path LIMIT 10",
+     "response_format": "raw"
+   }
+   ```
+
+1. Send the request:
+
+   ```shell
+   curl --request POST \
+     --header "Authorization: Bearer <your_access_token>" \
+     --header "Content-Type: application/json" \
+     --data @request.json \
+     --url "https://gitlab.example.com/api/v4/orbit/query"
+   ```
+
+The query returns rows after the group is indexed.
+Pod status and the health endpoint do not confirm indexing, because both pass long before the first index
+finishes.
 
 ## Next steps
 
