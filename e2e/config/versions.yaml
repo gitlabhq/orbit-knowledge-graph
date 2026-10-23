@@ -38,16 +38,16 @@ gitlab:
 gitlab_lanes:
   "19-4":
     chart: "10.4.3"
-    ref: "9eb1987ac50225f158efc91b733bf5a2a99371a4"
+    ref: "b0325a9acd7e36f0f88731686fd9cc8d8d4dc85d"
     images:
       webservice:
-        digest: "sha256:d23a51207fd145d7586de03f6bc9ec53e7e4131c4a54f5b07b52737654c05db0"
+        digest: "sha256:e48fec75ffe438c337b349563ddea9d911b584921f74cf3ac25ebf145bda6202"
       workhorse:
-        digest: "sha256:80fabbbb42c0bc12674da7271e3a731793e6dfffbc05a392fa9103c2ac5d00d7"
+        digest: "sha256:4a4556c1372563517e9b9a2505ac5fc6fa8b9a9723d19f9e0b64868b0992de5b"
       sidekiq:
-        digest: "sha256:c277202380cfccbd599e578fdfc7e75adb83ad6e322e72d7f44becd71b5e2679"
+        digest: "sha256:9c21ee1c8b9b2a20eaf979abfe75c18d1aa1f23d9a5d7322ee824dc3777bc0c0"
       toolbox:
-        digest: "sha256:49713ef4a65a5b1f3857ad7b6bd795aba30c8e50833753690c3bd5759d312e34"
+        digest: "sha256:2f0bc573ae18ad26eb842899e38c904b8d549d31eedff61f9f0b08e2c36c1030"
     repository: registry.gitlab.com/gitlab-org/build/cng-mirror
   "19-5":
     chart: "10.5.1"
