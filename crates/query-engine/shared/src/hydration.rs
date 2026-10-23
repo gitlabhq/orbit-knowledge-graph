@@ -18,7 +18,7 @@ use ontology::{DataType, Ontology};
 use orbit_arrow::{ArrowUtils, ColumnValue};
 use orbit_utils::traversal_path::TraversalPath;
 use pipeline::PipelineError;
-use types::QueryResult;
+use types::{QueryResult, QueryResultRow};
 
 pub use crate::content::PropertyMap;
 
@@ -27,13 +27,14 @@ pub use crate::content::PropertyMap;
 pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
     let pk_col = primary_key_column(&template.node_alias);
     let id_col = redaction_id_column(&template.node_alias);
-    let mut ids: Vec<i64> = result
-        .authorized_rows()
-        .filter_map(|row| {
-            row.get_column_i64(&pk_col)
-                .or_else(|| row.get_column_i64(&id_col))
-        })
-        .collect();
+    distinct_ids(result, |row| {
+        row.get_column_i64(&pk_col)
+            .or_else(|| row.get_column_i64(&id_col))
+    })
+}
+
+fn distinct_ids(result: &QueryResult, id: impl FnMut(&QueryResultRow) -> Option<i64>) -> Vec<i64> {
+    let mut ids: Vec<i64> = result.authorized_rows().filter_map(id).collect();
     ids.sort_unstable();
     ids.dedup();
     ids
@@ -319,6 +320,14 @@ pub fn hydrate_static(
             Vec::new()
         };
 
+        let id_col = redaction_id_column(&template.node_alias);
+        let key_pin = template.redaction_key_column.clone().map(|column| {
+            (
+                column,
+                distinct_ids(query_result, |row| row.get_column_i64(&id_col)),
+            )
+        });
+
         total_ids += ids.len();
         nodes.push(InputNode {
             id: HYDRATION_NODE_ALIAS.to_string(),
@@ -326,6 +335,7 @@ pub fn hydrate_static(
             columns: Some(ColumnSelection::List(template.columns.clone())),
             node_ids: ids,
             traversal_paths,
+            key_pin,
             ..InputNode::default()
         });
     }

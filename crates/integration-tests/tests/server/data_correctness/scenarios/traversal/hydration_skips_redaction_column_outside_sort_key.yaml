@@ -1,0 +1,19 @@
+description: Static hydration does not pin an entity whose redaction id column is not a sort-key column of its table
+
+query:
+  gql: |
+    MATCH (mr:MergeRequest {id: 2000})-[:HAS_DIFF]->(d:MergeRequestDiff) WHERE d.id >= 1 AND d.id <= 100000 RETURN d.state LIMIT 10
+
+expect:
+  hydration: static
+  hydration_sql_contains: ["hydrate.id"]
+  hydration_sql_not_contains: ["hydrate.merge_request_id"]
+  node_count: 3
+  edges:
+    HAS_DIFF: [[2000, 5000], [2000, 5001]]
+  nodes:
+    MergeRequestDiff:
+      ids: [5000, 5001]
+      rows:
+        - { id: 5000, state: collected }
+        - { id: 5001, state: collected }

@@ -26,7 +26,7 @@ use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineStage, QueryPipelineContext, TypeMap,
 };
 use query_engine::shared::content::ColumnResolverRegistry;
-use query_engine::shared::{CompilationStage, PipelineOutput, RedactionOutput};
+use query_engine::shared::{CompilationStage, PipelineOutput, QueryExecutionLog, RedactionOutput};
 use response::{
     assert_compilation, assert_output, assert_pagination, assert_repeated_response, repeat_count,
     validate_response,
@@ -646,13 +646,19 @@ async fn execute_output(
         .await
         .expect("hydration should succeed");
 
-    pipeline_output(
+    let mut output = pipeline_output(
         compiled,
         hydration_output.query_result,
         hydration_output.redacted_count,
         hydration_output.result_context,
         compiled.base.sql.clone(),
-    )
+    );
+    output.execution_log = pipeline_ctx
+        .phases
+        .remove::<QueryExecutionLog>()
+        .map(|log| log.0)
+        .unwrap_or_default();
+    output
 }
 
 fn pipeline_output(

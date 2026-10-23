@@ -69,17 +69,10 @@ fn emit_arm(node: &HydrationNodePlan) -> Query {
         scan_where.push(tp_filter);
     }
 
-    if let Some(id_filter) = Expr::col_in(
-        alias,
-        pk,
-        SqlType::Int64,
-        node.node_ids
-            .iter()
-            .map(|id| serde_json::Value::Number((*id).into()))
-            .collect(),
-    ) {
-        scan_where.push(id_filter);
+    if let Some((column, values)) = &node.key_pin {
+        scan_where.extend(int64_in(alias, column, values));
     }
+    scan_where.extend(int64_in(alias, pk, &node.node_ids));
 
     let mut inner_select = vec![
         SelectExpr::col(alias, pk),
@@ -109,6 +102,18 @@ fn emit_arm(node: &HydrationNodePlan) -> Query {
         where_clause: Some(deleted_false(alias)),
         ..Default::default()
     }
+}
+
+fn int64_in(alias: &str, column: &str, values: &[i64]) -> Option<Expr> {
+    Expr::col_in(
+        alias,
+        column,
+        SqlType::Int64,
+        values
+            .iter()
+            .map(|value| serde_json::Value::Number((*value).into()))
+            .collect(),
+    )
 }
 
 fn or_starts_with(alias: &str, paths: &[TraversalPath]) -> Option<Expr> {

@@ -169,9 +169,30 @@ pub(super) fn assert_output(
     if frontend == Frontend::Gql {
         assert_gql_table(output, expect, label);
     }
+    assert_hydration_sql(output, expect, label);
     let response = GraphFormatter.format(output);
     assert_response(&output.compiled.input, response.clone(), expect, label);
     response
+}
+
+fn assert_hydration_sql(output: &PipelineOutput, expect: &QueryExpect, label: &str) {
+    let sql: Vec<&str> = output
+        .execution_log
+        .iter()
+        .map(|execution| execution.rendered_sql.as_str())
+        .collect();
+    for fragment in &expect.hydration_sql_contains {
+        assert!(
+            sql.iter().any(|sql| sql.contains(fragment)),
+            "{label}: hydration SQL does not contain '{fragment}'\nSQL: {sql:?}"
+        );
+    }
+    for fragment in &expect.hydration_sql_not_contains {
+        assert!(
+            !sql.iter().any(|sql| sql.contains(fragment)),
+            "{label}: hydration SQL should not contain '{fragment}'\nSQL: {sql:?}"
+        );
+    }
 }
 
 pub(super) fn assert_pagination(output: &PipelineOutput, label: &str) {

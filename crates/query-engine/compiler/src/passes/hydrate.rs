@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 
 use ontology::VirtualSource;
+use ontology::constants::DEFAULT_PRIMARY_KEY;
 #[cfg(test)]
 use ontology::{FieldSource, Ontology};
 use query_data_model::PropertyRealization;
@@ -59,6 +60,10 @@ pub struct HydrationTemplate {
     /// When true, the hydration pipeline can narrow scans via
     /// `startsWith(traversal_path, tp)` using TP values from the base query.
     pub has_traversal_path: bool,
+    /// Redaction id column that is also a sort-key column of the destination
+    /// table, so the hydration pipeline can narrow scans via `column IN ids`
+    /// using the `_orbit_{alias}_id` values from the base query.
+    pub redaction_key_column: Option<String>,
     /// Filters on virtual columns to apply in-memory after hydration resolves
     /// their values.
     pub virtual_filters: Vec<(String, crate::input::InputFilter)>,
@@ -187,14 +192,21 @@ fn build_static_templates(
             let injected_columns =
                 inject_model_virtual_dependencies(&mut columns, &virtual_columns, model, entity_id);
 
+            let table = model.entity_table(entity)?;
             Some(HydrationTemplate {
                 entity_type: entity.clone(),
                 node_alias: node.id.clone(),
-                destination_table: model.entity_table(entity)?.to_string(),
+                destination_table: table.to_string(),
                 columns,
                 virtual_columns,
                 injected_columns,
                 has_traversal_path: model.entity_has_traversal_path(entity),
+                redaction_key_column: model
+                    .redaction_id_column(entity_id)
+                    .filter(|column| {
+                        *column != DEFAULT_PRIMARY_KEY && model.in_sort_key(table, column)
+                    })
+                    .map(String::from),
                 virtual_filters,
                 filter_injected_columns,
             })

@@ -1,0 +1,29 @@
+description: Static hydration of code entities from two projects in one namespace pins the scan to the projects the base rows carry and keeps each row's properties
+
+config:
+  extra_seed:
+    gl_definition:
+      - { id: 12200, traversal_path: "1/100/1002/", project_id: 1002, branch: main, commit_sha: fed789, file_path: "src/parser.rs", fqn: "parser::parse", name: parse, definition_type: Function, start_line: 5, end_line: 15, start_byte: 50, end_byte: 150, start_char: 4, end_char: 9 }
+      - { id: 12201, traversal_path: "1/100/1002/", project_id: 1002, branch: main, commit_sha: fed789, file_path: "src/lexer.rs", fqn: "lexer::lex", name: lex, definition_type: Function, start_line: 3, end_line: 9, start_byte: 30, end_byte: 90, start_char: 4, end_char: 7 }
+    gl_code_edge:
+      - { traversal_path: "1/100/1002/", project_id: 1002, branch: main, source_id: 12200, source_kind: Definition, relationship_kind: CALLS, target_id: 12201, target_kind: Definition }
+
+query:
+  gql: |
+    MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.id >= 12000 AND caller.id <= 12999 RETURN caller.name, caller.fqn, callee.name, callee.fqn LIMIT 20
+
+expect:
+  hydration: static
+  hydration_sql_contains: ["hydrate.project_id IN [1000, 1002] AND hydrate.id IN [12000, 12001, 12200]"]
+  node_count: 6
+  edges:
+    CALLS: [[12000, 12001], [12001, 12002], [12001, 12102], [12200, 12201]]
+  nodes:
+    Definition:
+      ids: [12000, 12001, 12002, 12102, 12200, 12201]
+      rows:
+        - { id: 12000, name: compile, fqn: "compiler::compile" }
+        - { id: 12001, name: helper, fqn: "compiler::helper" }
+        - { id: 12102, name: run_query, fqn: "orbit::run_query" }
+        - { id: 12200, name: parse, fqn: "parser::parse" }
+        - { id: 12201, name: lex, fqn: "lexer::lex" }
