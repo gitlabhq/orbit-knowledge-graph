@@ -21,7 +21,8 @@ use super::service::OrbitServiceImpl;
 
 /// The client's `grpc-accept-encoding` order picks among the encodings tonic is
 /// compiled with (gzip, zstd); `send_compressed` only switches response
-/// compression on. C-core clients list gzip as the only one they decode.
+/// compression on. C-core clients also decode deflate, but gzip is the only one of ours they
+/// advertise.
 fn with_compression<T>(service: OrbitServiceServer<T>) -> OrbitServiceServer<T> {
     service
         .send_compressed(CompressionEncoding::Gzip)
