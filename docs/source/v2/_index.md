@@ -116,7 +116,7 @@ glab orbit setup
 
 `glab orbit setup` tells your agent to search code with the graph and installs the GitLab Orbit skill,
 which teaches your agent to query your GitLab data.
-For the full steps, see the [quickstart](quickstart.md#step-2-sign-in-and-set-up-your-agent).
+For the full steps, see the [quickstart](quickstart.md#use-gitlab-orbit-with-your-agent).
 For the setup options, see [connect your agent](agents/_index.md).
 
 {{< /tab >}}
