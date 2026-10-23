@@ -51,46 +51,12 @@ Agents on the [Model Context Protocol (MCP) endpoint](../agents/mcp.md) send the
 To search, filter one node type with `WHERE`, for example with `CONTAINS` or `all_tokens`.
 For the syntax, see [filters](query-language.md#filters).
 
-The examples use numeric IDs. To find the ID of a merge request or a project, see
+The query shapes use numeric IDs. To find the ID of a merge request or a project, see
 [bounded nodes](query-language.md#bounded-nodes).
 
-## Examples
-
-### Fetch a merge request diff
-
-The `diff` property of `MergeRequest` returns the full unified diff.
-GitLab Orbit fetches it from the repository when the query asks for it.
-For other properties like this, see [properties resolved at query time](../schema.md#properties-resolved-at-query-time).
-
-```gql orbit-query
-MATCH (mr:MergeRequest {id: 12345})
-RETURN mr.iid, mr.title, mr.state, mr.diff
-LIMIT 1
-```
-
-### Fetch the changed files of a merge request
-
-`HAS_LATEST_DIFF` goes from a merge request to its current diff version.
-`HAS_FILE` goes from a diff version to its files.
-
-```gql orbit-query
-MATCH (mr:MergeRequest {id: 12345})-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
-RETURN f.old_path, f.new_path, f.too_large, f.diff
-LIMIT 20
-```
-
-When `too_large` is `true`, `diff` is `null`.
-
-### Fetch source file content
-
-This query finds indexed files by path and returns the file text.
-
-```gql orbit-query
-MATCH (f:File {project_id: 278964})
-WHERE f.path ENDS WITH 'app/models/project.rb'
-RETURN f.path, f.language, f.content
-LIMIT 5
-```
+To read source text or diffs, return a property that GitLab Orbit fetches from the repository at query time,
+such as `File.content`, `Definition.content`, or `MergeRequest.diff`.
+For the full list, see [properties resolved at query time](../schema.md#properties-resolved-at-query-time).
 
 ## Related topics
 
