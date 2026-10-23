@@ -15,7 +15,7 @@ title: GitLab Orbit architecture
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
@@ -40,10 +40,11 @@ flowchart LR
   gitlab --> duo[GitLab Duo Agent Platform]
 ```
 
-## What the graph contains
+## Graph layers
 
 Each entity, such as a project, a user, or a function, is a node.
-Each relationship, such as `AUTHORED` from a user to a merge request, is a directed edge. The graph has two connected layers:
+Each relationship, such as `AUTHORED` from a user to a merge request, is a directed edge.
+The graph has two connected layers:
 
 - The software development lifecycle (SDLC) layer holds GitLab objects, such as groups, projects, merge requests, pipelines, and work items.
 - The code layer holds files, directories, definitions, and imports.
@@ -51,7 +52,7 @@ Each relationship, such as `AUTHORED` from a user to a merge request, is a direc
 
 For the full list of node types and relationships, see [indexed data](schema.md).
 
-## How GitLab Orbit indexes your data
+## Indexing
 
 After you [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) for a group,
 the indexer builds the graph from two sources:
@@ -63,10 +64,11 @@ the indexer builds the graph from two sources:
   parses them, and indexes again when the default branch changes. You cannot select another branch.
 
 Results show your data as of the last index cycle.
-The first index can take up to a few hours. Later updates take seconds to minutes.
+The first index can take up to a few hours.
+Later updates take seconds to minutes.
 To check the progress, run `glab orbit graph-status --full-path <my-group>`.
 
-## How a query runs
+## Query execution
 
 Queries use [GQL](queries/query-language.md), the GitLab Orbit query language.
 Every query follows the same path:
@@ -76,29 +78,27 @@ Every query follows the same path:
 1. The graph database runs the SQL.
 1. GitLab removes each result that you cannot access. For more information, see [Security](security.md).
 
-## Where the graph runs
+## Hosting
 
-On GitLab.com, the graph is stored in a separate graph database, and the GitLab Orbit services run in a separate Kubernetes cluster.
+On GitLab.com, a separate graph database stores the graph, and the GitLab Orbit services run in a separate Kubernetes cluster.
 They do not share compute or memory with GitLab.com.
 On GitLab Dedicated, GitLab runs GitLab Orbit for your instance.
-On GitLab Self-Managed, you run GitLab Orbit yourself. See [GitLab Orbit on GitLab Self-Managed](self-managed/_index.md).
+On GitLab Self-Managed, you run GitLab Orbit yourself.
+For more information, see [GitLab Orbit on GitLab Self-Managed](self-managed/_index.md).
+
+The GitLab Orbit CLI also indexes repositories on your machine into a [local graph](cli.md#local-graph) of code only, with no authorization layer.
 
 ## Data retention and deletion
 
 When you turn off GitLab Orbit for a group, GitLab keeps the indexed data for 30 days.
-If you turn it on again in that time, indexing continues from where it stopped.
+If you turn GitLab Orbit on again in that time, indexing continues from where it stopped.
 After 30 days, GitLab deletes all graph data of the group.
-
-## The local graph
-
-The GitLab Orbit CLI also indexes repositories on your machine into a local graph of code only, with no authorization layer.
-For more information, see [local graph](cli.md#local-graph).
 
 ## Known issues
 
 - GitLab Orbit indexes code on the default branch only.
   An answer about code on another branch reflects the default branch.
-  For code that you have not merged, use the [local graph](cli.md#local-graph).
+  For code that you have not merged, use the local graph.
 - GitLab Orbit resolves imports and calls in one repository.
   It matches dependencies between repositories by name only.
 - GitLab Orbit does not run on a GitLab Geo secondary site.
@@ -107,8 +107,4 @@ For more information, see [local graph](cli.md#local-graph).
 
 ## Related topics
 
-- [Indexed data](schema.md)
-- [Security](security.md)
-- [Query language](queries/query-language.md)
-- [Local graph](cli.md#local-graph)
 - [Troubleshooting](troubleshooting.md)

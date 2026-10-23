@@ -15,7 +15,7 @@ title: GitLab Orbit indexed data
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
@@ -25,19 +25,21 @@ title: GitLab Orbit indexed data
 GitLab Orbit indexes two kinds of data into one graph:
 
 - Software development lifecycle (SDLC) objects from GitLab, such as groups, projects, users,
-  merge requests, pipelines, work items, and security findings.
-- Source code on the default branch of each project, such as files, directories, definitions, imports, and calls.
-  Binary files get only a `File` node, with no definitions. GitLab Orbit does not index other branches.
+  merge requests, pipelines, work items, and security findings
+- Source code on the default branch of each project, such as files, directories, definitions, imports, and calls
 
-The [local graph](cli.md#local-tables) on your machine holds only code.
+Binary files get only a `File` node, with no definitions.
+GitLab Orbit does not index other branches.
+The [local graph](cli.md#local-graph) on your machine holds only code.
 
-The graph links these objects. For example, a merge request belongs to a project, runs a pipeline,
-and fixes a vulnerability. A file is on a branch of the project and defines a definition.
+The graph links these objects.
+For example, a merge request belongs to a project, runs a pipeline, and fixes a vulnerability.
+A file is on a branch of the project and defines a definition.
 
-![A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition.](img/orbit-graph-hub-light-v19_6.svg)
+![Project hub graph. A merge request, a pipeline, a vulnerability, and a branch link to the project. A file on the branch defines a definition.](img/orbit-graph-hub-light-v19_6.svg)
 {.orbit-graph-figure .orbit-graph-light}
 
-![A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition.](img/orbit-graph-hub-dark-v19_6.svg)
+![Project hub graph. A merge request, a pipeline, a vulnerability, and a branch link to the project. A file on the branch defines a definition.](img/orbit-graph-hub-dark-v19_6.svg)
 {.orbit-graph-figure .orbit-graph-dark}
 
 <style>
@@ -68,12 +70,13 @@ To see the current schema, use one of these methods:
   For more information, see [GitLab Orbit dashboard](dashboard.md).
 - In a terminal, run `glab orbit ontology`. To show the properties and relationships of node types,
   add their names, for example `glab orbit ontology MergeRequest Project`.
-- Over HTTP, send a request to the [schema endpoint](queries/api.md#schema-endpoint), `GET /api/v4/orbit/schema`.
+- Over HTTP, [retrieve the schema](queries/api.md#retrieve-the-schema) with `GET /api/v4/orbit/schema`.
 - In a query, run `CALL db.schema()`.
 
 ## Supported languages
 
-The remote graph and the local graph use the same parser. Each language gets files, directories, and definitions.
+The remote graph and the local graph use the same parser.
+Each language gets files, directories, and definitions.
 Most languages also get imports and cross-file calls.
 
 | Language | File extensions |
@@ -110,7 +113,7 @@ Files in other languages still get a `File` node, with no definitions.
 
 ## Properties resolved at query time
 
-Some properties are not stored in the graph.
+The graph does not store some properties.
 The server fetches them from the repository when your query asks for them.
 
 | Node type | Property | Value |
@@ -123,19 +126,17 @@ The server fetches them from the repository when your query asks for them.
 
 Use these properties to read code without a separate call to the GitLab API.
 
-## Identifiers and authorization
+## Identifiers
 
 - Query responses return all entity IDs as strings, even when the stored value is an integer.
-  This prevents precision loss in JavaScript clients for values above `Number.MAX_SAFE_INTEGER`.
+  String IDs prevent precision loss in JavaScript clients for values above `Number.MAX_SAFE_INTEGER`.
 - On the server, a `Definition` ID is a content hash scoped to the project and branch.
   The same function in two projects has two different IDs.
-- GitLab checks your access to each entity before it returns a result.
-  For more information, see [Security](security.md).
 
 ## Related topics
 
 - [GitLab Orbit architecture](how-it-works.md)
 - [Query language](queries/query-language.md)
-- [Local graph](cli.md#local-graph)
+- [Security](security.md)
 - [CLI](cli.md)
 - [Prompt examples](prompt-examples.md)

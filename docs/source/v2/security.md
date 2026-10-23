@@ -15,7 +15,7 @@ title: GitLab Orbit security
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
@@ -24,40 +24,48 @@ title: GitLab Orbit security
 
 A query returns only the data that your role lets you see in GitLab, even when an agent sends it.
 
-The [local graph](cli.md#local-graph) has no authorization layer. Anyone who can read the graph file can read all of it.
+The [local graph](cli.md#local-graph) has no authorization layer.
+Anyone who can read the graph file can read all of it.
 For more information, see [storage and privacy](cli.md#storage-and-privacy).
 
 ## Roles
 
 A role for a top-level group applies to each subgroup and project in it.
-Turning on GitLab Orbit does not change existing access.
+When you turn on GitLab Orbit, existing access does not change.
 
 | Action | Roles |
 |--------|-------|
 | Query groups, projects, users, merge requests, CI/CD, and work items | Reporter, Security Manager, Developer, Maintainer, or Owner |
 | Query security data | Security Manager, Developer, Maintainer, or Owner |
-| [Turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) | The Owner role for the top-level group. On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn it on. |
+| [Turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) | The Owner role for the top-level group. On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on GitLab Orbit. |
 
-Security data is vulnerabilities, security findings, security scans, scanners, and CVE and CWE identifiers.
-It needs the Security Manager, Developer, Maintainer, or Owner role, because GitLab cannot filter aggregate results after the query runs.
+Security data is vulnerabilities, security findings, security scans, scanners,
+and Common Vulnerabilities and Exposures (CVE) and Common Weakness Enumeration (CWE) identifiers.
+To query security data, you must have the Security Manager, Developer, Maintainer, or Owner role,
+because GitLab cannot filter aggregate results after the query runs.
 For a user with the Reporter role, the response leaves out security entities, even from aggregate counts.
 
 Queries from administrators and auditors return data from each group where GitLab Orbit is on, not only their own groups.
 
 ## How GitLab enforces access
 
-GitLab authorizes every query. GitLab Orbit adds no permissions of its own, and stores no permission data.
+GitLab authorizes every query.
+GitLab Orbit adds no permissions of its own, and stores no permission data.
 
 GitLab enforces access in two layers:
 
-- Namespace scope. Results include only the groups where you have the required role, directly or through a shared group, and their subgroups and projects. A role for a project alone does not give access to that project.
+- Namespace scope. Results include only the groups where you have the required role, directly or through a shared group,
+  and their subgroups and projects.
+  A role for a project alone does not give access to that project.
   A group next to yours in the same parent group stays out of scope unless you have a role for it.
 - A check on each result. Before GitLab returns the results, it checks your permission on each item again,
-  and removes each item that you cannot access. This check covers confidential items, SAML group links,
+  and removes each item that you cannot access.
+  This check covers confidential items, SAML group links,
   and group [IP address restrictions](https://docs.gitlab.com/user/group/access_and_permissions/#restrict-group-access-by-ip-address).
   A request from outside the allowed IP address ranges of a group returns no results from that group.
 
-The graph is read-only. It reads changes from GitLab and never writes back.
+The graph is read-only.
+It reads changes from GitLab and never writes back.
 
 ## Programmatic access
 
@@ -68,7 +76,7 @@ Results include only what the token owner can see in GitLab.
 | [REST API](queries/api.md) | A personal access token with the `read_api` scope, or a fine-grained personal access token, sent as a Bearer token |
 | [GitLab Orbit CLI](cli.md) | Your `glab auth login` credential, or a personal access token with the `read_api` scope in `GITLAB_TOKEN` |
 | [Local graph](cli.md#local-graph) | No authentication. The local graph works offline and has no authorization layer. |
-| [MCP endpoint](agents/mcp.md) | GitLab OAuth, or a personal access token with the `mcp_orbit` or `read_api` scope. Native HTTP clients request the `mcp_orbit` scope. |
+| [Model Context Protocol (MCP) endpoint](agents/mcp.md) | GitLab OAuth, or a personal access token with the `mcp_orbit` or `read_api` scope. Native HTTP clients request the `mcp_orbit` scope. |
 | [GitLab Duo Agent Platform](agents/duo.md) | No token to configure |
 | [Service account](#service-accounts) | A personal access token of a bot user, scoped to the groups where the account is a member |
 
@@ -77,8 +85,11 @@ Results include only what the token owner can see in GitLab.
 When you [create a fine-grained personal access token](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens/#create-a-fine-grained-personal-access-token),
 add the **GitLab Orbit** resource.
 
-- Group and project resources are not supported. A token with only group and project resources gets `403 Forbidden`.
-- SAML SSO enforcement does not apply. The token keeps working after the SAML session of its owner expires.
+GitLab Orbit does not support group and project resources.
+A token with only group and project resources gets `403 Forbidden`.
+
+SAML SSO enforcement does not apply.
+The token keeps working after the SAML session of its owner expires.
 
 ## Service accounts
 
@@ -124,10 +135,10 @@ Verify the scope after you set up the account, and each time you change its memb
 
    ```shell
    curl --request POST \
-     --header "Authorization: Bearer <your_token>" \
+     --header "Authorization: Bearer <your_access_token>" \
      --header "Content-Type: application/json" \
      --data @request.json \
-     --url "https://gitlab.com/api/v4/orbit/query"
+     --url "https://gitlab.example.com/api/v4/orbit/query"
    ```
 
 1. Make sure that the `full_path` values include only the groups where you added the account.
@@ -135,6 +146,4 @@ Verify the scope after you set up the account, and each time you change its memb
 ## Related topics
 
 - [GitLab Orbit architecture](how-it-works.md)
-- [REST API](queries/api.md)
-- [MCP](agents/mcp.md)
 - [Troubleshooting](troubleshooting.md)

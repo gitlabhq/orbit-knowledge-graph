@@ -22,31 +22,30 @@ title: GitLab Orbit query language
 
 GitLab Orbit accepts GQL, a read-only, OpenCypher-like query language that agents already know.
 To send a query, see [run a query](_index.md#run-a-query).
-Code examples in this documentation carry the label `gql`.
 
-## Supported and not supported
+## Supported syntax
 
 GQL supports:
 
-- `MATCH` with one connected pattern. A query can have more than one `MATCH` clause.
-- `WHERE` with `AND`, `NOT`, comparisons, `IN`, `STARTS WITH`, `ENDS WITH`, `CONTAINS`, `IS NULL`, and `IS NOT NULL`.
-- `RETURN` with properties, nodes, `properties(n)`, `n{.property}`, and `AS` aliases.
-- The aggregate functions `count`, `sum`, `avg`, `min`, and `max`, and `date_trunc` for time periods.
-- `ORDER BY` with one sort key, `SKIP` (or `OFFSET`), and `LIMIT`.
-- Variable-length relationships up to three hops, and shortest paths with `ANY SHORTEST` or `SHORTEST 1`.
-- `type(r)`, and the text search functions `token_match`, `all_tokens`, and `any_tokens`.
-- `CALL db.schema()` and `DEBUG`.
+- `MATCH` with one connected pattern, and more than one `MATCH` clause in a query
+- `WHERE` with `AND`, `NOT`, comparisons, `IN`, `STARTS WITH`, `ENDS WITH`, `CONTAINS`, `IS NULL`, and `IS NOT NULL`
+- `RETURN` with properties, nodes, `properties(n)`, `n{.property}`, and `AS` aliases
+- The aggregate functions `count`, `sum`, `avg`, `min`, and `max`, and `date_trunc` for time periods
+- `ORDER BY` with one sort key, `SKIP` (or `OFFSET`), and `LIMIT`
+- Variable-length relationships up to three hops, and shortest paths with `ANY SHORTEST` or `SHORTEST 1`
+- `type(r)`, and the text search functions `token_match`, `all_tokens`, and `any_tokens`
+- `CALL db.schema()` and `DEBUG`
 
 GQL does not support these forms, and rejects them:
 
-- Write clauses, such as `CREATE`, `MERGE`, `SET`, and `DELETE`, and more than one statement.
-- `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`, `YIELD`, and subqueries.
-- Patterns that are not connected or that have a cycle.
-- `OR`, `XOR`, and `x NOT IN [...]`. Write `NOT x IN [...]` instead.
-- `DISTINCT`, `count(*)`, and arbitrary expressions.
-- More than one `ORDER BY` key, and `LIMIT` before `SKIP`.
-- Query parameters.
-- Other functions, such as `collect(x)`. The error names the function.
+- Write clauses, such as `CREATE`, `MERGE`, `SET`, and `DELETE`, and more than one statement
+- `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`, `YIELD`, and subqueries
+- Patterns that are not connected or that have a cycle
+- `OR`, `XOR`, and `x NOT IN [...]` (write `NOT x IN [...]` instead)
+- `DISTINCT`, `count(*)`, and arbitrary expressions
+- More than one `ORDER BY` key, and `LIMIT` before `SKIP`
+- Query parameters
+- Other functions, such as `collect(x)` (the error names the function)
 
 ## Discover the schema
 
@@ -76,22 +75,25 @@ RETURN projections
   `(mr:MergeRequest {iid: 235291})`. Later parts of the query can reuse the bare variable.
 - Write a relationship type after a colon: `-[:IN_PROJECT]->`.
   A lowercase name without a colon, such as `-[r]->`, is a variable that matches any relationship type.
-  An uppercase name without a colon, such as `-[IN_PROJECT]->`, is rejected.
+  GitLab Orbit rejects an uppercase name without a colon, such as `-[IN_PROJECT]->`.
 - To match one of several relationship types, separate them with `|`, for example `-[:AUTHORED|ASSIGNED]->`.
   You can name up to 10 types.
 - Use `->` or `<-` between labeled nodes. Use undirected `--` only to find the neighbors of a node.
 - All parts of the pattern must form one connected tree, with no cycles.
 
-## Anchor at least one node
+## Bounded nodes
 
-Every query needs at least one node that is bounded by an ID or a literal property filter,
+Every query needs at least one node bounded by an ID or a literal property filter,
 such as `{id: 278964}`, `{full_path: 'gitlab-org/gitlab'}`, or a `WHERE` comparison with a literal value.
-`LIMIT` does not count, so `MATCH (p:Project) RETURN p LIMIT 5` is rejected.
+`LIMIT` does not count, so GitLab Orbit rejects `MATCH (p:Project) RETURN p LIMIT 5`.
 
-A neighbors query needs a bounded center node. A shortest path query needs both endpoints bounded.
+A neighbors query needs a bounded center node.
+A shortest path query needs both endpoints bounded.
 
-The examples on this page use numeric IDs, such as `project_id: 278964`. An `id` is unique in the instance.
-An `iid`, such as the number of a merge request, is unique only in its project. To find an ID, query by path first:
+The examples use numeric IDs, such as `project_id: 278964`.
+An `id` is unique in the instance.
+An `iid`, such as the number of a merge request, is unique only in its project.
+To find an ID, query by path first:
 
 ```gql orbit-query
 MATCH (mr:MergeRequest {iid: 235291})-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
@@ -100,7 +102,7 @@ LIMIT 1
 ```
 
 On GitLab.com, this query returns `482908721` and `278964`, the IDs that the examples use.
-It returns them only if you have at least the Reporter role in the `gitlab-org` group.
+It returns them only if you have the Reporter, Security Manager, Developer, Maintainer, or Owner role in the `gitlab-org` group.
 Otherwise, this query and the examples that use `gitlab-org/gitlab` or these IDs return no rows.
 To run the examples, query with the full path of one of your projects, and use the IDs that it returns.
 
@@ -122,7 +124,7 @@ You can wrap the string in `date()` or `datetime()`, but the result is the same.
 Group predicates with parentheses.
 Queries do not take parameters, so do not insert untrusted text into a query.
 
-### Search text
+### Text search
 
 `CONTAINS` is indexed on text-indexed properties, such as `MergeRequest.title` or `Definition.fqn`.
 Use it for a word prefix, such as `'migrat'`, or for a phrase with its words in order, such as `'fix flaky'`.
@@ -214,8 +216,11 @@ LIMIT 12
 
 ## Pagination
 
-To get results page by page, use `SKIP` and `LIMIT`. `OFFSET` is the same as `SKIP`. Put `SKIP` before `LIMIT`.
-Start at `SKIP 0`. For each next page, add the page size to `SKIP`:
+To get results page by page, use `SKIP` and `LIMIT`.
+`OFFSET` is the same as `SKIP`.
+Put `SKIP` before `LIMIT`.
+Start at `SKIP 0`.
+For each next page, add the page size to `SKIP`:
 `SKIP 0 LIMIT 20`, then `SKIP 20 LIMIT 20`, then `SKIP 40 LIMIT 20`.
 Write `SKIP` on every page, also on the first page, so that all pages use the same sort order.
 Do not change other parts of the query between pages.
@@ -229,13 +234,14 @@ SKIP 20
 LIMIT 20
 ```
 
-In the `raw` response format, `pagination.has_more` is `true` while more rows exist. Stop when it is `false`.
+In the `raw` response format, `pagination.has_more` is `true` while more rows exist.
+Stop when `pagination.has_more` is `false`.
 A page can return fewer rows than `LIMIT`, or no rows, because GitLab removes the rows that you cannot access.
 `SKIP` also counts these rows, so pages do not overlap.
 When `pagination.truncated` is `true`, the result is incomplete.
 
-`SKIP` accepts up to 10,000 rows. To go deeper, sort by a unique property, such as `id`,
-and filter past the last value of the previous page:
+`SKIP` accepts up to 10,000 rows.
+To go deeper, sort by a unique property, such as `id`, and filter past the last value of the previous page:
 
 ```gql orbit-query
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
@@ -247,7 +253,8 @@ LIMIT 1000
 
 Use the last `mr.id` of each page as the lower bound for the next page.
 
-Each page reads the current data. If a row is added or deleted before your position between two pages,
+Each page reads the current data.
+If a row is added or deleted before your position between two pages,
 the later pages move by one row, so a row can repeat or be missing.
 
 ## Limits
@@ -264,7 +271,8 @@ Syntax errors report a line and column.
 
 To see the SQL that GitLab Orbit runs, end the query with `DEBUG` and use the `raw` response format.
 On GitLab.com, the response includes the SQL only for GitLab team members.
-On GitLab Self-Managed and GitLab Dedicated, it includes the SQL only for administrators. For other users, GitLab ignores `DEBUG`.
+On GitLab Self-Managed and GitLab Dedicated, the response includes the SQL only for administrators.
+For other users, GitLab ignores `DEBUG`.
 
 ## Examples
 
@@ -333,4 +341,3 @@ For more queries by goal, see [prompt examples](../prompt-examples.md).
 
 - [Queries](_index.md)
 - [REST API](api.md)
-- [Indexed data](../schema.md)
