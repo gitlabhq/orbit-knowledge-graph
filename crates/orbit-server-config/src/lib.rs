@@ -16,6 +16,7 @@ pub mod features;
 pub mod gitlab;
 pub mod grpc;
 pub mod health_check;
+pub mod merge;
 pub mod metrics;
 pub mod nats;
 pub mod object_storage;
