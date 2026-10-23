@@ -54,7 +54,7 @@ Your agent answers with a few graph queries in place of many file reads and API 
 - [Find out how agent-written code performs](prompt-examples.md#find-out-how-agent-written-code-performs)<br>"Using GitLab Orbit, how many merge requests did agents create in my project this month, how many merged, and how many reached production?"
 - [Find the right reviewer for a file](prompt-examples.md#find-the-right-reviewer-for-a-file)<br>"Using GitLab Orbit, who approved changes to app/models/ability.rb in the last six months, and what did reviewers warn about?"
 - [Unblock a release](prompt-examples.md#unblock-a-release)<br>"Using GitLab Orbit, which open merge requests in milestone 19.6 have a failed pipeline, and who owns them?"
-- [Find a shared CI/CD job that fails across the group](prompt-examples.md#find-a-shared-cicd-job-that-fails-across-the-group)<br>"Using GitLab Orbit, which projects in my group failed the docs-lint job this week?"
+- [Find out if a failed job is flaky](prompt-examples.md#find-out-if-a-failed-job-is-flaky)<br>"Using GitLab Orbit, is the failed docs-lint job on my merge request my change or a flaky job?"
 {.product-cards .product-cards-2 .product-prompts}
 
 ## See an answer
