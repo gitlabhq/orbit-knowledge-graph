@@ -40,4 +40,4 @@ This page defines the terms that the GitLab Orbit documentation uses.
 - [GitLab Orbit architecture](how-it-works.md)
 - [Indexed data](schema.md)
 - [Query language](queries/query-language.md)
-- [Local graph](local/_index.md)
+- [Local graph](cli.md#local-graph)

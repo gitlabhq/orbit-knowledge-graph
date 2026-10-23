@@ -219,7 +219,7 @@ cleared **Other Foundational Agents** in the **GitLab Orbit** section of their p
 
 ## Local graph
 
-These issues affect the [local graph](local/_index.md).
+These issues affect the [local graph](cli.md#local-graph).
 
 ### Error: `no local graph found`
 
@@ -276,7 +276,7 @@ Index your repositories again.
 ## Related topics
 
 - [CLI](cli.md)
-- [Local graph](local/_index.md)
+- [Local graph](cli.md#local-graph)
 - [Security](security.md)
 - [GitLab Orbit architecture](how-it-works.md)
 - [MCP](agents/mcp.md)

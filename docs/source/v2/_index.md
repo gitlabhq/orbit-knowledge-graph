@@ -149,7 +149,7 @@ For the endpoints, authentication, and examples, see the [REST API](queries/api.
 ## Code on your machine
 
 The GitLab Orbit CLI also indexes repositories on your machine, so your agent can search code that you have not pushed,
-offline and with no GitLab account. For more information, see [the local graph](local/_index.md).
+offline and with no GitLab account. For more information, see [local graph](cli.md#local-graph).
 
 ## Learn more
 

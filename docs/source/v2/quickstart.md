@@ -179,5 +179,5 @@ For more prompts, see [prompt examples](prompt-examples.md).
 - [Prompt examples](prompt-examples.md): prompts by goal.
 - [GitLab Orbit in GitLab Duo](agents/duo.md): use GitLab Orbit in GitLab Duo Agent Platform.
 - [MCP server](agents/mcp.md): connect agents that cannot run shell commands.
-- [Local graph](local/_index.md): index and search code on your machine, with no GitLab account.
+- [Local graph](cli.md#local-graph): index and search code on your machine, with no GitLab account.
 - [Troubleshooting](troubleshooting.md): fix common errors.
