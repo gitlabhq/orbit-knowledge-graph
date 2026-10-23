@@ -279,7 +279,7 @@ Project- and group-scoped `traversal` and `aggregation` queries add a tight `sta
 
 - It carries one of two things. Either a single `id`, `full_path`, or up to eight `node_ids` for an anchor entity. Or a single equality filter on a `namespace_anchor` FK column such as `project_id`.
 - Anchors and FK columns come from the ontology's `traversal_path_lookup` declarations and edge scope annotations (`Ontology::is_anchor`, `Ontology::anchor_fk_mappings`).
-- Anchors: `Project`, `Group`, `MergeRequest`, `Definition`, `File`, `Directory`. The code entities let "find callers" traversals scope to the symbol's own project.
+- Every path-scoped node is an anchor. It gets an `id` lookup on its own table without a declaration, so a node pinned by id seeds a prefix. `Project` and `Group` also declare a `full_path` lookup.
 
 **How the prefix is produced** (`scope::derive_scope_proofs`, `ScopeProof`)
 
