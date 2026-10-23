@@ -35,7 +35,7 @@ If you installed the standalone binary, run `orbit` in place of `glab orbit`.
 | Code version | The checkout on your machine, including commits that you have not pushed | The default branch of each project |
 | Scope | Each repository that you index | Each top-level group where GitLab Orbit is turned on |
 | Refresh | You run `glab orbit index` again | Automatic |
-| Requires | The [GitLab Orbit CLI](../cli.md) | The GitLab Orbit add-on, and the [roles](../security.md#roles) to read the data |
+| Requires | The [GitLab Orbit CLI](../cli.md) | Access to GitLab Orbit for the group, and the [roles](../security.md#roles) to read the data |
 | Query with | `grep`, `context`, `repo-map`, and `sql` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
 
 Your agent can use both graphs in the same conversation.
@@ -188,5 +188,4 @@ Index and query commands send no code, file paths, or query text off your machin
 - [GitLab Orbit CLI](../cli.md)
 - [Connect your agent](../agents/_index.md)
 - [Indexed data](../schema.md)
-- [Billing and credit usage](../billing.md)
 - [Troubleshooting the local graph](../troubleshooting.md#local-graph)

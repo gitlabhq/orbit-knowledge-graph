@@ -28,8 +28,8 @@ use GitLab Orbit in GitLab Duo, or connect your own coding agent and ask your fi
 
 ## Prerequisites
 
-- A top-level group with a Premium or Ultimate subscription and the GitLab Orbit add-on.
-  To buy the add-on, [contact sales](https://about.gitlab.com/sales/).
+- A top-level group with a Premium or Ultimate subscription and access to GitLab Orbit.
+  To get access, [contact sales](https://about.gitlab.com/sales/).
   On GitLab.com, a group can also start a free trial in [step 1](#step-1-turn-on-gitlab-orbit-for-your-group).
 - To query the graph, the Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
   If GitLab Orbit is already on for your group, skip [step 1](#step-1-turn-on-gitlab-orbit-for-your-group),
@@ -59,7 +59,7 @@ To turn on GitLab Orbit:
 1. Turn on the **Turn on Orbit** toggle.
 1. If the **Start a free Orbit trial?** dialog opens, select **Start free trial**.
 
-For more information about the trial, see [what the trial includes](trial.md#what-the-trial-includes).
+For more information about the trial, see [start a GitLab Orbit trial](trial.md).
 If the page shows **Contact sales**, the group cannot start a trial.
 
 The page shows **Orbit is indexing `<my-group>`**, then **Orbit is ready for `<my-group>`**.

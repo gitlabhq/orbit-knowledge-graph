@@ -95,8 +95,6 @@
           url: 'orbit/v2/schema/'
         - title: Security
           url: 'orbit/v2/security/'
-        - title: Billing and credit usage
-          url: 'orbit/v2/billing/'
         - title: Local graph
           url: 'orbit/v2/local/'
         - title: Glossary

@@ -93,7 +93,8 @@ One query replaces a chain of API calls, so the agent puts less load on your Git
 ## Connect your agent
 
 GitLab Orbit is available on Premium and Ultimate. To get it, [contact sales](https://about.gitlab.com/sales/).
-On GitLab.com, you can also [start a free trial](trial.md). For costs, see [billing and credit usage](billing.md).
+On GitLab.com, you can also [start a free trial](trial.md).
+For information about GitLab Orbit pricing and usage, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
 
 For agents that run shell commands, the GitLab Orbit CLI is the recommended method.
 
