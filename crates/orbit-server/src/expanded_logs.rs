@@ -126,8 +126,14 @@ mod tests {
             anyhow_error_type(&schema_version.into()),
             "unexpected_result"
         );
-        let catalog = orbit_migrations::catalog::CatalogError::Missing(7);
-        assert_eq!(anyhow_error_type(&catalog.into()), "missing");
+        let catalog = || orbit_migrations::catalog::CatalogError::Missing(7);
+        assert_eq!(anyhow_error_type(&catalog().into()), "missing");
+        let from_result = anyhow::Context::context(Err::<(), _>(catalog()), "reading the catalog");
+        assert_eq!(anyhow_error_type(&from_result.unwrap_err()), "missing");
+        let nested = anyhow::Error::from(catalog())
+            .context("inner")
+            .context("outer");
+        assert_eq!(anyhow_error_type(&nested), "missing");
         assert_eq!(
             anyhow_error_type(&anyhow::anyhow!("customer text")),
             "fatal"
