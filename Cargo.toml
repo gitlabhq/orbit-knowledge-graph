@@ -55,6 +55,7 @@ orbit-observability = { path = "crates/orbit-observability" }
 orbit-log-fields = { path = "crates/orbit-log-fields" }
 labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "42c5d6f46a5b23526748aa0080a7200dd7c9ec0e" }
 labkit-fields = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "42c5d6f46a5b23526748aa0080a7200dd7c9ec0e" }
+labkit-config = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "42c5d6f46a5b23526748aa0080a7200dd7c9ec0e" }
 # No bundled ring provider: every binary installs its rustls provider before building a Tracker.
 labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "42c5d6f46a5b23526748aa0080a7200dd7c9ec0e", default-features = false }
 arrow = "58.0.0"
@@ -193,6 +194,7 @@ sqlparser = { version = "0.62.0", features = ["visitor"] }
 prost = "0.14.3"
 prost-build = "0.14.3"
 prost-protovalidate-types = "0.6.0"
+prost-reflect = "0.16.5"
 prost-types = "0.14.3"
 protoc-bin-vendored = "3.2.0"
 tar = "0.4.44"
