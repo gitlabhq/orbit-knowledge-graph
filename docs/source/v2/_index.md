@@ -49,40 +49,13 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 ## What you can ask
 
-- [Change a class hierarchy safely](prompt-examples.md#change-a-class-hierarchy-safely)<br>"Using GitLab Orbit, which classes inherit from BasePolicy, and which open merge requests touch them right now?"
-- [See what shipped to production this week](prompt-examples.md#see-what-shipped-to-production-this-week)<br>"Using GitLab Orbit, which issues and bugs did the merge requests deployed to production this week close?"
-- [Find out how agent-written code performs](prompt-examples.md#find-out-how-agent-written-code-performs)<br>"Using GitLab Orbit, how many merge requests did agents create in my project this month, how many merged, and how many reached production?"
-- [Find the right reviewer for a file](prompt-examples.md#find-the-right-reviewer-for-a-file)<br>"Using GitLab Orbit, who approved changes to app/models/ability.rb in the last six months, and what did reviewers warn about?"
-- [Unblock a release](prompt-examples.md#unblock-a-release)<br>"Using GitLab Orbit, which open merge requests in milestone 19.6 have a failed pipeline, and who owns them?"
-- [Find out if a failed job is flaky](prompt-examples.md#find-out-if-a-failed-job-is-flaky)<br>"Using GitLab Orbit, is the failed docs-lint job on my merge request my change or a flaky job?"
+- [Change a class hierarchy safely](prompt-examples.md#change-a-class-hierarchy-safely)
+- [See what shipped to production this week](prompt-examples.md#see-what-shipped-to-production-this-week)
+- [Find out how agent-written code performs](prompt-examples.md#find-out-how-agent-written-code-performs)
+- [Find the right reviewer for a file](prompt-examples.md#find-the-right-reviewer-for-a-file)
+- [Unblock a release](prompt-examples.md#unblock-a-release)
+- [Find out if a failed job is flaky](prompt-examples.md#find-out-if-a-failed-job-is-flaky)
 {.product-cards .product-cards-2 .product-prompts}
-
-## See an answer
-
-1. Ask your agent:
-
-   ```plaintext
-   Using GitLab Orbit, which projects in <my-group> have the most failed pipelines?
-   ```
-
-1. The agent runs one graph query:
-
-   ```gql orbit-query
-   MATCH (pl:Pipeline)-[:IN_PROJECT]->(p:Project)
-   WHERE pl.status = 'failed' AND p.full_path STARTS WITH 'my-group/'
-   RETURN p.full_path, count(pl) AS failed_pipelines
-   ORDER BY failed_pipelines DESC
-   LIMIT 3
-   ```
-
-1. The agent answers from the rows.
-   The answer is similar to:
-
-   ```plaintext
-   1. my-group/payments-api: 47 failed pipelines
-   2. my-group/web-frontend: 31 failed pipelines
-   3. my-group/auth-service: 12 failed pipelines
-   ```
 
 ## The query language
 
