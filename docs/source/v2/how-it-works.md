@@ -60,13 +60,15 @@ the indexer builds the graph from two sources:
 - SDLC data. GitLab streams changes through a change data capture (CDC) pipeline to the
   [GitLab Data Insights Platform](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/data_insights_platform/),
   and the indexer reads them from there. A new merge request, work item, or pipeline is in the graph in minutes.
-- Source code. The indexer fetches the files of the default branch through the GitLab internal API,
-  parses them, and indexes again when the default branch changes. You cannot select another branch.
+- Source code. The indexer fetches the files of the default branch through the GitLab internal API and
+  [Gitaly](https://docs.gitlab.com/administration/gitaly/), parses them, and indexes again when the default branch changes.
+  You cannot select another branch. An answer about code on another branch reflects the default branch.
+  For code that you have not merged, use the [local graph](cli.md#local-graph).
 
 Results show your data as of the last index cycle.
 The first index can take up to a few hours.
 Later updates take seconds to minutes.
-To check the progress, run `glab orbit graph-status --full-path <my-group>`.
+To check the progress, see [check indexing progress with the GitLab Orbit CLI](cli.md#check-indexing-progress).
 
 ## Query execution
 
@@ -86,7 +88,7 @@ On GitLab Dedicated, GitLab runs GitLab Orbit for your instance.
 On GitLab Self-Managed, you run GitLab Orbit yourself.
 For more information, see [GitLab Orbit on GitLab Self-Managed](self-managed/_index.md).
 
-The GitLab Orbit CLI also indexes repositories on your machine into a [local graph](cli.md#local-graph) of code only, with no authorization layer.
+The GitLab Orbit CLI also indexes repositories on your machine into a local graph of code only, with no authorization layer.
 
 ## Data retention and deletion
 
@@ -94,17 +96,7 @@ When you turn off GitLab Orbit for a group, GitLab keeps the indexed data for 30
 If you turn GitLab Orbit on again in that time, indexing continues from where it stopped.
 After 30 days, GitLab deletes all graph data of the group.
 
-## Known issues
-
-- GitLab Orbit indexes code on the default branch only.
-  An answer about code on another branch reflects the default branch.
-  For code that you have not merged, use the local graph.
-- GitLab Orbit resolves imports and calls in one repository.
-  It matches dependencies between repositories by name only.
-- GitLab Orbit does not run on a GitLab Geo secondary site.
-  After a failover, GitLab Orbit indexes the data again.
-- GitLab Orbit is not available on GitLab Dedicated for Government.
-
 ## Related topics
 
+- [GitLab Orbit roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)
 - [Troubleshooting](troubleshooting.md)
