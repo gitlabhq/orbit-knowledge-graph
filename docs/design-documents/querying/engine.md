@@ -12,7 +12,9 @@ At a high level, here's how data flows through the engine:
 5. A final validation pass is executed to ensure all authorization filters and redaction metadata is present.
 6. Code generation renders the syntax tree as SQL for a particular backend, like Clickhouse.
 
-ClickHouse allows Orbit to have the best of both worlds - fast aggregations for analytical queries, and property-graph semantics for traversals, paths, neighborhoods, and grouped counts. Orbit needs no separate graph database, see [ADR 000](../decisions/000_clickhouse_graph_storage.md) which details that decision.
+ClickHouse allows Orbit to have the best of both worlds - fast aggregations for analytical queries, and property-graph semantics for traversals, paths, neighborhoods, and grouped counts. Orbit needs no separate graph database, see [ADR 000](../decisions/000_clickhouse_graph_storage.md) which details that decision.  
+
+TODO: PUT a markdown table here, showing query type, example (in GQL), meaning, sql fragment
 
 ## Terms
 
@@ -44,6 +46,8 @@ The ontology defines every table, sort key, and index.
 [Data model](../data_model.md) describes the entities and relationships. [Schema management](../schema_management.md) describes how tables change between versions.
 
 Each schema version derives one immutable query data model from its ontology. The compiler reads only that model. It never reads table names from the query or from the ontology files directly.
+
+TODO: Describe how the Data Model here works... show the markdown flow diagrams from the Data Model MRs.
 
 ## Compiler phases at a glance
 
