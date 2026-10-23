@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: GitLab Orbit gives your agent a graph of your GitLab data and code, so it can answer questions about changes, pipelines, security, and code structure.
+description: Give your agent a graph of your GitLab data and code, so the agent can answer questions about changes, pipelines, security, and code structure.
 title: GitLab Orbit
 ---
 
@@ -15,7 +15,7 @@ title: GitLab Orbit
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
 - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) for GitLab Self-Managed in GitLab 19.2.2.
 - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
@@ -38,20 +38,22 @@ Your agent answers with a few graph queries in place of many file reads and API 
 [Quickstart](quickstart.md) [{{< icon name="play" >}} Watch the deep dive video](https://www.youtube.com/watch?v=wddpf0rDGnA)
 {.product-hero-actions}
 
+<!-- Video published on 2026-06-26 -->
+
 </section>
 
 - [Ask across code and lifecycle](prompt-examples.md)<br>One graph holds your projects, merge requests, pipelines, vulnerabilities, files, and definitions, so one question can cross all of them.
-- [One query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
-- [Sees only what you can access](security.md)<br>Every answer is filtered by your GitLab permissions, on GitLab.com, GitLab Self-Managed, and GitLab Dedicated.
+- [Run one query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
+- [Get only the data that you can access](security.md#how-gitlab-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions, on GitLab.com, GitLab Self-Managed, and GitLab Dedicated.
 {.product-cards}
 
 ## What you can ask
 
-- **[Understand a codebase](prompt-examples.md#understand-a-codebase)**<br>`I'm new to <my-group/my-project>. Using GitLab Orbit, give me a tour.`
-- **[Assess the impact of changing a shared library](prompt-examples.md#assess-the-impact-of-changing-a-shared-library)**<br>`Using GitLab Orbit, what breaks if I change the public interface of <shared-payments-lib>?`
-- **[Review the history of a project](prompt-examples.md#review-the-history-of-a-project)**<br>`Using GitLab Orbit, who changed <app/models/project.rb> most, and who should review my change to it?`
-- **[Keep your pipelines healthy](prompt-examples.md#keep-your-pipelines-healthy)**<br>`Using GitLab Orbit, which CI/CD jobs fail most often in <my-group>?`
-- **[Find where vulnerabilities come from](prompt-examples.md#find-where-vulnerabilities-come-from)**<br>`Using GitLab Orbit, which projects in <my-group> have critical vulnerabilities?`
+- [Understand a codebase](prompt-examples.md#understand-a-codebase)<br>`I'm new to <my-group/my-project>. Using GitLab Orbit, give me a tour.`
+- [Assess the impact of changing a shared library](prompt-examples.md#assess-the-impact-of-changing-a-shared-library)<br>`Using GitLab Orbit, what breaks if I change the public interface of <shared-payments-lib>?`
+- [Review the history of a project](prompt-examples.md#review-the-history-of-a-project)<br>`Using GitLab Orbit, who changed <app/models/project.rb> most, and who should review my change to it?`
+- [Keep your pipelines healthy](prompt-examples.md#keep-your-pipelines-healthy)<br>`Using GitLab Orbit, which CI/CD jobs fail most often in <my-group>?`
+- [Find where vulnerabilities come from](prompt-examples.md#find-where-vulnerabilities-come-from)<br>`Using GitLab Orbit, which projects in <my-group> have critical vulnerabilities?`
 
 ## See an answer
 
@@ -71,7 +73,8 @@ Your agent answers with a few graph queries in place of many file reads and API 
    LIMIT 3
    ```
 
-1. The agent answers from the rows. The answer is similar to:
+1. The agent answers from the rows.
+   The answer is similar to:
 
    ```plaintext
    1. my-group/payments-api: 47 failed pipelines
@@ -79,11 +82,12 @@ Your agent answers with a few graph queries in place of many file reads and API 
    3. my-group/auth-service: 12 failed pipelines
    ```
 
-## Why GitLab Orbit uses a query language
+## The query language
 
 GitLab Orbit queries use [GQL](queries/query-language.md), a graph query language that large language models
-already know from their training data. A short GQL pattern describes connections, for example from a merge request
-to its pipelines and to the files that it changed.
+already know from their training data.
+A short GQL pattern describes connections, for example from a merge request to its pipelines and to the files
+that it changed.
 
 Your agent reads the [schema](queries/query-language.md#discover-the-schema), then writes its own query for each question.
 A retrieval-augmented generation (RAG) system gives the agent only the text that a search selected.
@@ -92,7 +96,7 @@ One query replaces a chain of API calls, so the agent puts less load on your Git
 
 ## Connect your agent
 
-GitLab Orbit is available on Premium and Ultimate. To get it, [contact sales](https://about.gitlab.com/sales/).
+To get GitLab Orbit, [contact sales](https://about.gitlab.com/sales/).
 On GitLab.com, you can also [start a free trial](trial.md).
 For information about GitLab Orbit pricing and usage, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
 
@@ -117,7 +121,8 @@ For the setup options, see [connect your agent](agents/_index.md).
 
 {{< tab title="GitLab Duo" >}}
 
-GitLab Duo Agent Platform has GitLab Orbit built in. You do not install anything.
+GitLab Duo Agent Platform has GitLab Orbit built in.
+You do not install anything.
 Agents call the GitLab Orbit tools when the graph can answer a question.
 For more information, see [GitLab Orbit in GitLab Duo](agents/duo.md).
 
@@ -125,7 +130,7 @@ For more information, see [GitLab Orbit in GitLab Duo](agents/duo.md).
 
 {{< tab title="MCP" >}}
 
-If your agent supports MCP and cannot run shell commands, add the GitLab MCP endpoint.
+If your agent supports the Model Context Protocol (MCP) and cannot run shell commands, add the GitLab MCP endpoint.
 For example, in Claude Code:
 
 ```shell
@@ -148,15 +153,18 @@ For the endpoints, authentication, and examples, see the [REST API](queries/api.
 
 ## Code on your machine
 
-The GitLab Orbit CLI also indexes repositories on your machine, so your agent can search code that you have not pushed,
-offline and with no GitLab account. For more information, see [local graph](cli.md#local-graph).
+The GitLab Orbit CLI also indexes repositories on your machine.
+Your agent can then search code that you have not pushed, offline and with no GitLab account.
+For more information, see [local graph](cli.md#local-graph).
 
 ## Learn more
 
-- [Watch the deep dive video](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>GitLab Orbit Technical Deep Dive: The AI Context Graph Layer. On the GitLab YouTube channel.
+- [Watch the deep dive video](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>GitLab Orbit Technical Deep Dive: The AI Context Graph Layer, on the GitLab YouTube channel.
 - [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
 - [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work that the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
 {.product-cards .product-cards-2}
+
+<!-- Video published on 2026-06-26 -->
 
 ## Reference
 
