@@ -29,10 +29,10 @@ and checks your permissions on every query.
 ```mermaid
 flowchart LR
   accTitle: How GitLab Orbit builds and serves the graph
-  accDescr: The indexer reads GitLab data and the code on the default branch of each project, and writes the graph to ClickHouse. GitLab authorizes each query and serves the graph to the CLI, the MCP endpoint, the REST API, and GitLab Duo Agent Platform.
+  accDescr: The indexer reads GitLab data and the code on the default branch of each project, and writes the graph to the graph database. GitLab authorizes each query and serves the graph to the CLI, the MCP endpoint, the REST API, and GitLab Duo Agent Platform.
   data[GitLab data] --> indexer[Indexer]
   code[Code on the default branch] --> indexer
-  indexer --> store[(Graph<br/>ClickHouse)]
+  indexer --> store[(Graph)]
   store --> gitlab[GitLab<br/>authorizes each query]
   gitlab --> cli[CLI]
   gitlab --> mcp[MCP endpoint]
@@ -58,7 +58,7 @@ the indexer builds the graph from two sources:
 
 - SDLC data. GitLab streams changes through a change data capture (CDC) pipeline to the
   [GitLab Data Insights Platform](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/data_insights_platform/),
-  which writes them to ClickHouse. A new merge request, work item, or pipeline is in the graph in minutes.
+  and the indexer reads them from there. A new merge request, work item, or pipeline is in the graph in minutes.
 - Source code. The indexer fetches the files of the default branch through the GitLab internal API,
   parses them, and indexes again when the default branch changes. You cannot select another branch.
 
@@ -72,13 +72,13 @@ Queries use [GQL](queries/query-language.md), the GitLab Orbit query language.
 Every query follows the same path:
 
 1. GitLab receives the query from the CLI, the REST API, the MCP endpoint, or GitLab Duo Agent Platform.
-1. The query engine validates the query against the schema and compiles it to ClickHouse SQL.
-1. ClickHouse runs the SQL against the graph.
+1. The query engine validates the query against the schema and compiles it to SQL.
+1. The graph database runs the SQL.
 1. GitLab removes each result that you cannot access. For more information, see [Security](security.md).
 
 ## Where the graph runs
 
-On GitLab.com, the graph is stored in ClickHouse, and the GitLab Orbit services run in a separate Kubernetes cluster.
+On GitLab.com, the graph is stored in a separate graph database, and the GitLab Orbit services run in a separate Kubernetes cluster.
 They do not share compute or memory with GitLab.com.
 On GitLab Dedicated, GitLab runs GitLab Orbit for your instance.
 On GitLab Self-Managed, you run GitLab Orbit yourself. See [GitLab Orbit on GitLab Self-Managed](self-managed/_index.md).

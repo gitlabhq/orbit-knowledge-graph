@@ -32,12 +32,12 @@ title: Troubleshooting GitLab Orbit
 ### `glab orbit` is not recognized
 
 `glab` shows an unknown command error for `orbit` or one of its commands, because your `glab` version is earlier than 1.115.
-[Update `glab`](https://docs.gitlab.com/cli/), then run `glab orbit --install`.
+[Update `glab`](https://docs.gitlab.com/cli/), then run `glab orbit setup`.
 
 ### Error: `unrecognized subcommand`
 
 ```plaintext
-error: unrecognized subcommand 'mcp'
+error: unrecognized subcommand 'repo-map'
 ```
 
 Your `orbit` binary is older than the release that added the command.
