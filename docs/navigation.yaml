@@ -1,7 +1,7 @@
 # The GitLab Orbit section of the docs.gitlab.com global navigation.
 # Source of truth until it merges in docs-gitlab-com data/en-us/navigation.yaml.
 # scripts/docs/site.sh replaces the GitLab Orbit section of the docs-gitlab-com
-# checkout with this file, so `mise docs:serve` and `docs_hugo_build` show these pages.
+# checkout with this file, so `mise docs:serve` and `mise docs:build` show these pages.
 # Until cutover, the first section is live and the second lists docs/source/v2.
 
 - title: GitLab Orbit
@@ -97,16 +97,5 @@
           url: 'orbit/v2/security/'
         - title: Glossary
           url: 'orbit/v2/glossary/'
-    # Cutover: the administration section also lists orbit/self-managed/.
-    # When you remove the v2/ prefix, keep only one of the two entries.
-    - title: GitLab Self-Managed
-      url: 'orbit/v2/self-managed/'
-      submenu:
-        - title: Get started
-          url: 'orbit/v2/self-managed/getting-started/'
-        - title: Set up data replication
-          url: 'orbit/v2/self-managed/data-replication/'
-        - title: Set up GitLab Orbit
-          url: 'orbit/v2/self-managed/orbit-setup/'
     - title: Troubleshooting
       url: 'orbit/v2/troubleshooting/'
