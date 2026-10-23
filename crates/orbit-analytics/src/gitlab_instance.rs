@@ -32,6 +32,7 @@ impl GitlabInstanceWatch {
                     Ok(instance) => *latest.write() = instance,
                     Err(error) => warn!(
                         expanded(ERROR_MESSAGE) = %error,
+                        safe(ERROR_TYPE) = <&str>::from(&error),
                         "failed to refresh the GitLab instance, keeping the last known one"
                     ),
                 }

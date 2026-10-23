@@ -74,6 +74,7 @@ impl IndexingAnalytics {
             Ok(client) => self.instance.spawn_refresh(Arc::new(client)),
             Err(error) => warn!(
                 expanded(ERROR_MESSAGE) = %error,
+                safe(ERROR_TYPE) = <&str>::from(&error),
                 "cannot build GitLab client, indexing events carry no instance identity"
             ),
         }
