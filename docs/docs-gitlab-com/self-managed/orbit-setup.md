@@ -14,17 +14,6 @@ title: Set up GitLab Orbit
 
 {{< /details >}}
 
-{{< history >}}
-
-- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.2.2.
-
-{{< /history >}}
-
-> [!note]
-> GitLab Orbit on GitLab Self-Managed is in
-> [beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
-> This feature is available for testing, but not ready for production use.
-
 GitLab Orbit runs as a Helm release next to your GitLab instance.
 GitLab calls GitLab Orbit over gRPC on port 50054, and GitLab Orbit calls GitLab over HTTPS.
 GitLab Orbit never connects to Gitaly directly.
@@ -157,7 +146,7 @@ kubectl -n gitlab-orbit rollout restart deployment
 
 ## Install GitLab Orbit
 
-1. Save the following as `orbit-values.yaml`, and replace `<clickhouse_host>`:
+1. Save the following as `orbit-values.yaml`:
 
    ```yaml
    secrets:
@@ -197,6 +186,8 @@ kubectl -n gitlab-orbit rollout restart deployment
      existingSecret: orbit-webserver-tls
    ```
 
+   Replace `<clickhouse_host>` with the host name of your ClickHouse server.
+
 1. Install the chart:
 
    ```shell
@@ -210,8 +201,7 @@ kubectl -n gitlab-orbit rollout restart deployment
    kubectl -n gitlab-orbit get pods
    ```
 
-Before each install and upgrade, the chart creates the graph database, the GitLab Orbit users, and their grants.
-If the data lake is on a different ClickHouse host, [create the users manually](clickhouse.md#create-the-users-manually).
+Before each install and upgrade, the chart creates the GitLab Orbit users and their grants, and the graph database when it does not exist.
 
 Adjust the values for your environment:
 
@@ -226,8 +216,7 @@ Give each indexer pool room to reach at least 8 CPU and 16 GiB of memory.
 
 ### TLS and network requirements
 
-GitLab connects to the gRPC endpoint on port 50054.
-Both Rails and Workhorse open their own connections, so both require a route to the endpoint.
+Every GitLab node that runs Rails or Workhorse needs a route to the gRPC endpoint.
 
 gRPC needs HTTP/2.
 Every proxy between GitLab and the webserver must pass HTTP/2 and the `h2` ALPN protocol.
@@ -279,17 +268,14 @@ GitLab logs `Skipping authorization header on insecure non-private channel`.
 
 GitLab Orbit indexes top-level groups, with their subgroups and projects.
 
-<!-- vale orbit.StandaloneProductName = NO -->
-
 To turn on indexing for a group:
 
 1. In the upper-right corner, select **Admin**.
 1. Go to the GitLab Orbit configuration page at `/admin/orbit`.
-1. Under **Top-level groups**, find your group and select **Turn on Orbit**.
+1. Under **Top-level groups**, find your group and select **Turn on GitLab Orbit**.
+1. Confirm.
 
-To index every top-level group, turn on **Turn on Orbit for all top-level groups automatically**.
-
-<!-- vale orbit.StandaloneProductName = YES -->
+To index every top-level group, turn on **Turn on GitLab Orbit for all top-level groups automatically**.
 
 You can also turn on indexing with the API:
 
@@ -299,7 +285,8 @@ curl --request PUT \
   --url "https://gitlab.example.com/api/v4/admin/knowledge_graph/namespaces/<group_id>"
 ```
 
-Indexing starts in a few seconds, and an hourly sweep picks up any data that indexing missed.
+The first index takes from several minutes to a few hours.
+An hourly sweep picks up any data that indexing missed.
 
 ## Verify the installation
 
@@ -348,8 +335,6 @@ To upgrade GitLab Orbit:
 
 1. Run the `helm upgrade` command from [Install GitLab Orbit](#install-gitlab-orbit).
 1. Run the query from [Verify the installation](#verify-the-installation).
-
-To roll back, install the earlier release.
 
 ### Upgrade GitLab
 
@@ -409,7 +394,7 @@ For more information, see [TLS and network requirements](#tls-and-network-requir
 ### Error: `ontology archive vNN is missing`
 
 The dispatcher stops with `ontology archive vNN is missing; seed the catalog from the exact deployed release before upgrading`.
-This issue occurs when NATS no longer holds the schema archive of the active graph.
-For example, the NATS volume was reset, or the graph comes from a release that the running image cannot upgrade.
+This issue occurs when NATS does not hold the schema archive of the active graph, and the running image does not include it.
+For example, the archive was never published, the NATS volume was reset, or the graph comes from a release that the running image cannot upgrade.
 
 To resolve this issue, point `clickhouse.graph.database` at a new database, upgrade GitLab Orbit, and let it index again.

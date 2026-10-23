@@ -14,17 +14,6 @@ title: Get started with GitLab Orbit on GitLab Self-Managed
 
 {{< /details >}}
 
-{{< history >}}
-
-- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.2.2.
-
-{{< /history >}}
-
-> [!note]
-> GitLab Orbit on GitLab Self-Managed is in
-> [beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
-> This feature is available for testing, but not ready for production use.
-
 GitLab Orbit depends on ClickHouse, Kubernetes, and NATS, and installs none of them.
 Set up all three before you install GitLab Orbit.
 
@@ -36,7 +25,7 @@ Set up all three before you install GitLab Orbit.
 - [ClickHouse](clickhouse.md), set up for GitLab.
 - Kubernetes 1.36 or later. For earlier versions, see [Image volumes](#image-volumes).
 - NATS with JetStream turned on.
-- The latest release of GitLab Orbit and its Helm chart.
+- The latest [GitLab Orbit release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases) and [Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/releases).
 
 ## Installation order
 
@@ -53,9 +42,8 @@ You can verify steps 1 to 3 before you install GitLab Orbit.
 
 Siphon mounts the `gitlab-siphon-tables` image as an
 [image volume](https://kubernetes.io/docs/tasks/configure-pod-container/image-volumes/).
-Image volumes are generally available in Kubernetes 1.36.
-
-Kubernetes 1.33 to 1.35 also work when the `ImageVolume` feature gate is on in the API server and on every node.
+Image volumes are generally available in Kubernetes 1.36, and on by default in Kubernetes 1.35.
+On Kubernetes 1.33 and 1.34, turn on the `ImageVolume` feature gate in the API server and on every node.
 The container runtime must also support image volumes.
 Some managed services, such as Amazon EKS, do not let you turn on the gate.
 When the gate is off, Kubernetes drops the volume without an error, and the Siphon pods fail with
@@ -64,9 +52,6 @@ When the gate is off, Kubernetes drops the volume without an error, and the Siph
 If your cluster cannot use image volumes, set `splitTables.volumeMode: initCopy` in `siphon-values.yaml`.
 For more information, see
 [Split mode without ImageVolume](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts#split-mode-without-imagevolume).
-
-GitLab Orbit can run on a separate cluster from GitLab.
-That cluster must reach GitLab, PostgreSQL, ClickHouse, and NATS, and GitLab must reach that cluster.
 
 ## NATS
 
