@@ -114,10 +114,10 @@ impl HydrationStage {
         let mut query = client.query(&compiled.base.sql);
 
         let query_id = correlation::query_id(&format!("hydration-{kind}"));
-        query = query.with_setting("query_id", &query_id).with_setting(
-            "log_comment",
-            correlation::log_comment(Some(&format!("hydration:{kind}"))),
-        );
+        let label = format!("{}{kind}", hydration_helpers::HYDRATION_LABEL_PREFIX);
+        query = query
+            .with_setting("query_id", &query_id)
+            .with_setting("log_comment", correlation::log_comment(Some(&label)));
         for (key, param) in &compiled.base.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.data_type);
         }
@@ -138,7 +138,7 @@ impl HydrationStage {
         );
 
         let execution = QueryExecution {
-            label: format!("hydration:{kind}"),
+            label,
             rendered_sql,
             query_id,
             elapsed_ms: elapsed.as_secs_f64() * 1000.0,

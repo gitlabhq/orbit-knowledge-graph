@@ -28,7 +28,7 @@ pub struct HydrationNodePlan {
     pub node_ids: Vec<i64>,
     pub columns: Vec<String>,
     pub path_filter: Option<HydrationPathFilter>,
-    pub key_pin: Option<(String, Vec<i64>)>,
+    pub redaction_key_pin: Option<RedactionKeyPin>,
     pub sort_key: Vec<String>,
 }
 
@@ -101,7 +101,7 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
                 node_ids: node.node_ids.clone(),
                 columns,
                 path_filter: path_filter(&node.traversal_paths, options),
-                key_pin: node.key_pin.clone(),
+                redaction_key_pin: node.redaction_key_pin.clone(),
                 sort_key: sort_key(model, table)?.to_vec(),
             })
         })

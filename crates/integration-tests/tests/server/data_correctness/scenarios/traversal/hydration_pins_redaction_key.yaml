@@ -1,5 +1,3 @@
-description: Static hydration of code entities from two projects in one namespace pins the scan to the projects the base rows carry and keeps each row's properties
-
 config:
   extra_seed:
     gl_definition:
@@ -8,22 +6,42 @@ config:
     gl_code_edge:
       - { traversal_path: "1/100/1002/", project_id: 1002, branch: main, source_id: 12200, source_kind: Definition, relationship_kind: CALLS, target_id: 12201, target_kind: Definition }
 
-query:
-  gql: |
-    MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.id >= 12000 AND caller.id <= 12999 RETURN caller.name, caller.fqn, callee.name, callee.fqn LIMIT 20
+cases:
+  - name: two_projects
+    description: Static hydration of code entities from two projects in one namespace pins each scan to the projects its base rows carry
+    query:
+      gql: |
+        MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.id >= 12000 AND caller.id <= 12999 RETURN caller.name, caller.fqn, callee.name, callee.fqn LIMIT 20
+    expect:
+      hydration: static
+      hydration_sql_contains: ["hydrate.project_id IN [1000, 1002]", "hydrate.id IN [12000, 12001, 12200]"]
+      node_count: 6
+      edges:
+        CALLS: [[12000, 12001], [12001, 12002], [12001, 12102], [12200, 12201]]
+      nodes:
+        Definition:
+          ids: [12000, 12001, 12002, 12102, 12200, 12201]
+          rows:
+            - { id: 12000, name: compile, fqn: "compiler::compile" }
+            - { id: 12001, name: helper, fqn: "compiler::helper" }
+            - { id: 12102, name: run_query, fqn: "orbit::run_query" }
+            - { id: 12200, name: parse, fqn: "parser::parse" }
+            - { id: 12201, name: lex, fqn: "lexer::lex" }
 
-expect:
-  hydration: static
-  hydration_sql_contains: ["hydrate.project_id IN [1000, 1002] AND hydrate.id IN [12000, 12001, 12200]"]
-  node_count: 6
-  edges:
-    CALLS: [[12000, 12001], [12001, 12002], [12001, 12102], [12200, 12201]]
-  nodes:
-    Definition:
-      ids: [12000, 12001, 12002, 12102, 12200, 12201]
-      rows:
-        - { id: 12000, name: compile, fqn: "compiler::compile" }
-        - { id: 12001, name: helper, fqn: "compiler::helper" }
-        - { id: 12102, name: run_query, fqn: "orbit::run_query" }
-        - { id: 12200, name: parse, fqn: "parser::parse" }
-        - { id: 12201, name: lex, fqn: "lexer::lex" }
+  - name: one_project
+    description: Static hydration of code entities from one project pins the scan with an equality on the redaction id column
+    query:
+      gql: |
+        MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.id >= 12200 AND caller.id <= 12299 RETURN caller.name, callee.name LIMIT 20
+    expect:
+      hydration: static
+      hydration_sql_contains: ["hydrate.project_id = 1002", "hydrate.id = 12200"]
+      node_count: 2
+      edges:
+        CALLS: [[12200, 12201]]
+      nodes:
+        Definition:
+          ids: [12200, 12201]
+          rows:
+            - { id: 12200, name: parse }
+            - { id: 12201, name: lex }

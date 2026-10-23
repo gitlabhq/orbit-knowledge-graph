@@ -209,10 +209,14 @@ pub struct InputNode {
     /// queries, pruning granules through the primary key.
     #[serde(skip)]
     pub traversal_paths: Vec<TraversalPath>,
-    /// Sort-key column and the values base query rows carry for it. The
-    /// hydration pipeline injects `column IN values` to prune granules.
     #[serde(skip)]
-    pub key_pin: Option<(String, Vec<i64>)>,
+    pub redaction_key_pin: Option<RedactionKeyPin>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedactionKeyPin {
+    pub column: String,
+    pub values: Vec<i64>,
 }
 
 impl Default for InputNode {
@@ -227,7 +231,7 @@ impl Default for InputNode {
             id_range: None,
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
             traversal_paths: Vec::new(),
-            key_pin: None,
+            redaction_key_pin: None,
         }
     }
 }

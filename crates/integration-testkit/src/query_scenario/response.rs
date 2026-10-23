@@ -3,6 +3,7 @@ use std::sync::{Arc, LazyLock};
 use query_engine::compiler::{CompiledQueryContext, Frontend, Input, QueryType};
 use query_engine::formatters::{GraphFormatter, GraphResponse, ResultFormatter};
 use query_engine::shared::PipelineOutput;
+use query_engine::shared::hydration::HYDRATION_LABEL_PREFIX;
 use serde_json::Value;
 
 use super::{QueryExpect, assert_gql_table, assert_response, format::CompileErrorExpect};
@@ -179,6 +180,7 @@ fn assert_hydration_sql(output: &PipelineOutput, expect: &QueryExpect, label: &s
     let sql: Vec<&str> = output
         .execution_log
         .iter()
+        .filter(|execution| execution.label.starts_with(HYDRATION_LABEL_PREFIX))
         .map(|execution| execution.rendered_sql.as_str())
         .collect();
     for fragment in &expect.hydration_sql_contains {

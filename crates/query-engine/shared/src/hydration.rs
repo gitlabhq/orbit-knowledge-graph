@@ -12,7 +12,7 @@ use compiler::constants::{
 };
 use compiler::{
     ColumnSelection, DynamicEntityColumns, FilterOp, HydrationTemplate, Input, InputFilter,
-    InputNode, QueryType,
+    InputNode, QueryType, RedactionKeyPin,
 };
 use ontology::{DataType, Ontology};
 use orbit_arrow::{ArrowUtils, ColumnValue};
@@ -22,14 +22,19 @@ use types::{QueryResult, QueryResultRow};
 
 pub use crate::content::PropertyMap;
 
+pub const HYDRATION_LABEL_PREFIX: &str = "hydration:";
+
 /// Tries the PK column first (`_orbit_{alias}_pk`), falling back to the
 /// redaction ID column (`_orbit_{alias}_id`).
-pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) -> Vec<i64> {
+pub fn collect_static_ids(
+    result: &QueryResult,
+    template: &HydrationTemplate,
+    id_col: &str,
+) -> Vec<i64> {
     let pk_col = primary_key_column(&template.node_alias);
-    let id_col = redaction_id_column(&template.node_alias);
     distinct_ids(result, |row| {
         row.get_column_i64(&pk_col)
-            .or_else(|| row.get_column_i64(&id_col))
+            .or_else(|| row.get_column_i64(id_col))
     })
 }
 
@@ -309,7 +314,8 @@ pub fn hydrate_static(
             continue;
         }
 
-        let ids = collect_static_ids(query_result, template);
+        let id_col = redaction_id_column(&template.node_alias);
+        let ids = collect_static_ids(query_result, template, &id_col);
         if ids.is_empty() {
             continue;
         }
@@ -320,13 +326,14 @@ pub fn hydrate_static(
             Vec::new()
         };
 
-        let id_col = redaction_id_column(&template.node_alias);
-        let key_pin = template.redaction_key_column.clone().map(|column| {
-            (
-                column,
-                distinct_ids(query_result, |row| row.get_column_i64(&id_col)),
-            )
-        });
+        let redaction_key_pin =
+            template
+                .redaction_key_column
+                .clone()
+                .map(|column| RedactionKeyPin {
+                    column,
+                    values: distinct_ids(query_result, |row| row.get_column_i64(&id_col)),
+                });
 
         total_ids += ids.len();
         nodes.push(InputNode {
@@ -335,7 +342,7 @@ pub fn hydrate_static(
             columns: Some(ColumnSelection::List(template.columns.clone())),
             node_ids: ids,
             traversal_paths,
-            key_pin,
+            redaction_key_pin,
             ..InputNode::default()
         });
     }

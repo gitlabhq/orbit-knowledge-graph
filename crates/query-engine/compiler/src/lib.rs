@@ -60,7 +60,7 @@ pub use constants::{
 pub use error::{QueryError, RejectionReason, Result};
 pub use input::{
     ColumnSelection, DynamicColumnMode, FilterOp, Input, InputFilter, InputNode, QueryType,
-    parse_input,
+    RedactionKeyPin, parse_input,
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};

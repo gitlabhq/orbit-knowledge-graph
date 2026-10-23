@@ -60,9 +60,6 @@ pub struct HydrationTemplate {
     /// When true, the hydration pipeline can narrow scans via
     /// `startsWith(traversal_path, tp)` using TP values from the base query.
     pub has_traversal_path: bool,
-    /// Redaction id column that is also a sort-key column of the destination
-    /// table, so the hydration pipeline can narrow scans via `column IN ids`
-    /// using the `_orbit_{alias}_id` values from the base query.
     pub redaction_key_column: Option<String>,
     /// Filters on virtual columns to apply in-memory after hydration resolves
     /// their values.

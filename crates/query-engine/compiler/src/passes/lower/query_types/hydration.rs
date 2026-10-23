@@ -69,8 +69,8 @@ fn emit_arm(node: &HydrationNodePlan) -> Query {
         scan_where.push(tp_filter);
     }
 
-    if let Some((column, values)) = &node.key_pin {
-        scan_where.extend(int64_in(alias, column, values));
+    if let Some(pin) = &node.redaction_key_pin {
+        scan_where.extend(int64_in(alias, &pin.column, &pin.values));
     }
     scan_where.extend(int64_in(alias, pk, &node.node_ids));
 
