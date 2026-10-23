@@ -13,27 +13,19 @@ title: GitLab Orbit prompt examples
 
 {{< /details >}}
 
-{{< history >}}
-
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-- [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
-- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
-
-{{< /history >}}
-
 Use any of the following interfaces to send a prompt to your agent:
 
-- GitLab Duo Chat and GitLab Duo Agent Platform.
+- GitLab Duo Chat and GitLab Duo Agent Platform
 - Other agents such as Claude Code or Codex that connect to GitLab Orbit through the
-  [GitLab Orbit CLI](agents/_index.md) or an [MCP server](agents/mcp.md).
+  [GitLab Orbit CLI](cli.md) or a [Model Context Protocol (MCP) server](agents/mcp.md)
 
-To instruct the agent to search the graph instead of your repository, start the first prompt with something like `Using GitLab Orbit, ...`.
-That exact phrase is not required, but if you don't mention `GitLab Orbit` in the prompt, the agent might use
+To instruct the agent to search the graph instead of your repository, start the first prompt with a phrase like `Using GitLab Orbit`.
+You do not have to use that exact phrase, but if you don't mention `GitLab Orbit` in the prompt, the agent might use
 another source to answer the question.
 Later prompts continue in the same conversation, so you don't need to repeat the phrase.
 
-Replace the values in `<angle brackets>`. The first two prompts, about code, also work on the
+Replace the values in `<angle brackets>`.
+The first two prompts, about code, also work on the
 [local graph](cli.md#local-graph) of a repository on your machine.
 
 Each section also shows a [query](queries/query-language.md) that the agent can run.
@@ -219,7 +211,7 @@ ORDER BY month
 LIMIT 12
 ```
 
-Then it ranks the projects by the average duration of successful pipelines, in seconds:
+Then the agent ranks the projects by the average duration of successful pipelines, in seconds:
 
 ```gql orbit-query
 MATCH (pl:Pipeline)-[:IN_PROJECT]->(p:Project)
@@ -230,6 +222,8 @@ LIMIT 10
 ```
 
 ## Read source code without a checkout
+
+Read a file or a definition from the repository, through the graph.
 
 ```plaintext
 Using GitLab Orbit, show me the source of <app/models/project.rb> and the
@@ -251,5 +245,4 @@ LIMIT 5
 - [GitLab Orbit quickstart](quickstart.md)
 - [Connect your agent](agents/_index.md)
 - [Query the graph](queries/_index.md)
-- [Query language](queries/query-language.md)
 - [Indexed data](schema.md)
