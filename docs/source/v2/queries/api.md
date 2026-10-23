@@ -222,4 +222,3 @@ curl --header "Authorization: Bearer <your_token>" \
 - [GitLab Orbit API reference](https://docs.gitlab.com/api/orbit/)
 - [GraphQL API: `Query.orbit`](https://docs.gitlab.com/api/graphql/reference/#queryorbit)
 - [Security](../security.md)
-- [Billing and credit usage](../billing.md)

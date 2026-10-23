@@ -111,5 +111,4 @@ For more information, see [the local graph](local/_index.md).
 - [Security](security.md)
 - [Query language](queries/query-language.md)
 - [Local graph](local/_index.md)
-- [Billing and credit usage](billing.md)
 - [Troubleshooting](troubleshooting.md)

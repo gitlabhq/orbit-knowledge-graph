@@ -136,4 +136,3 @@ For more prompts, see [prompt examples](../prompt-examples.md).
 - [Connect your agent](_index.md)
 - [GitLab Orbit MCP server](mcp.md)
 - [Prompt examples](../prompt-examples.md)
-- [Billing and credit usage](../billing.md)
