@@ -92,12 +92,12 @@ GitLab reaches the webserver over gRPC.
 
 | Page | Description |
 |------|-------------|
-| [Get started](getting-started.md) | Prerequisites, installation order, and shared configuration values |
+| [Get started](getting-started.md) | Prerequisites, installation order, Kubernetes, NATS, and shared values |
+| [ClickHouse](clickhouse.md) | Versions, databases, high availability, memory, log retention, and users |
 | [Set up data replication](data-replication.md) | PostgreSQL logical replication and Siphon |
-| [Set up GitLab Orbit](orbit-setup.md) | The ClickHouse database and identities, the GitLab connection, the GitLab Orbit chart, group indexing, and upgrades |
-| [Troubleshooting](troubleshooting.md) | Common problems and how to fix them |
+| [Set up GitLab Orbit](orbit-setup.md) | The GitLab connection, the chart, indexing, upgrades, and troubleshooting |
 
-## Known limitations
+## Known issues
 
 GitLab Orbit does not run on a GitLab Geo secondary site.
 
@@ -108,7 +108,7 @@ connections (gRPC from GitLab, ClickHouse, NATS) and JWT verification inside it.
 refuses to start when the module is not in FIPS mode. The linked module is
 [AWS-LC-FIPS 4](https://github.com/aws/aws-lc/blob/main/crypto/fipsmodule/FIPS.md), which is
 in process at the NIST Cryptographic Module Validation Program. There is no separate FIPS image:
-every tag from 0.125.0 carries the same module. The `orbit` command line tool for local indexing
+every published tag carries the same module. The `orbit` command line tool for local indexing
 does not link the module.
 
 Redundancy and recovery for GitLab Orbit are not documented. GitLab Orbit holds no data of its own, so if

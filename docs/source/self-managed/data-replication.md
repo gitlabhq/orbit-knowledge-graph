@@ -41,19 +41,13 @@ Prerequisites:
 
 - The [prerequisites](getting-started.md#prerequisites) for GitLab Orbit on GitLab Self-Managed.
 - A ClickHouse instance set up for GitLab, with the GitLab ClickHouse migrations applied. For more
-  information, see [ClickHouse](getting-started.md#clickhouse).
+  information, see [ClickHouse](clickhouse.md).
 - Superuser access to the GitLab PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.
 - Helm 3 and `kubectl` access to the cluster.
 
-The versions in the commands on this page are for reference only. Prefer the latest versions. To
-find them, see:
-
-- [Siphon releases](https://gitlab.com/gitlab-org/analytics-section/siphon/-/releases)
-- [Siphon Helm chart releases](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts/-/releases)
-
-Use Siphon 0.0.130-beta or later. Earlier releases stop with `Stream.Target ... required` on the CNG table
-definitions.
+Use the latest [Siphon release](https://gitlab.com/gitlab-org/analytics-section/siphon/-/releases) and
+the latest Siphon Helm chart.
 
 Set up replication in this order:
 
@@ -274,35 +268,13 @@ such as the External Secrets Operator. Do not store the plaintext elsewhere.
 
 ## Install Siphon
 
-If you use `configMode: split`, Siphon does not include its own table list. At pod startup, Siphon mounts the
-`gitlab-siphon-tables` image, which contains only the table definitions from the GitLab source tree. The mount
-is an image volume, which needs a supported Kubernetes version. For more information, see
-[Kubernetes](getting-started.md#kubernetes). The
-GitLab cloud native images (CNG) build publishes the `gitlab-siphon-tables` image for every release. This
-means that Siphon's table list matches your GitLab version without manual updates.
-
-The image is `registry.gitlab.com/gitlab-org/build/cng/gitlab-siphon-tables`. It is not part of the Siphon
-project. `global.gitlabVersion` selects its tag and pins the replicated table set to your GitLab version.
-The chart converts the version to the CNG tag format, `vX.Y.Z`, so `19.5.0`, `v19.5.0`, and `v19.5.0-ee`
-all select the `v19.5.0` tag. CNG publishes the image for GitLab 19.5.0 and
-19.3.5. Before you install, confirm the tag exists in the
-[`gitlab-siphon-tables` container registry](https://gitlab.com/gitlab-org/build/CNG/container_registry/11611957).
-A missing tag prevents pods from starting.
-
-If your GitLab version has no CNG tag, use the deprecated
-`registry.gitlab.com/gitlab-org/gitlab/gitlab-siphon-tables` image, which GitLab publishes with `vX.Y.Z-ee`
-tags. Add this block to the values file:
-
-```yaml
-splitTables:
-  image:
-    repository: gitlab-org/gitlab/gitlab-siphon-tables
-    tag: '{{ include "siphon.gitlabVersion" . }}-ee'
-```
-
-For more information, see
-[Using the legacy tables image](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts#using-the-legacy-tables-image).
-Switch to the CNG image after you upgrade GitLab.
+In split mode, Siphon reads the GitLab table definitions from the `gitlab-siphon-tables` image, which
+GitLab publishes for each release.
+`global.gitlabVersion` selects the image tag, so the replicated tables match your GitLab version.
+The image is an [image volume](getting-started.md#image-volumes).
+Before you install, confirm that the
+[`gitlab-siphon-tables` registry](https://gitlab.com/gitlab-org/build/CNG/container_registry/11611957)
+has a tag for your GitLab version.
 
 1. Save the following as `siphon-values.yaml` and replace the placeholders:
 
@@ -310,13 +282,11 @@ Switch to the CNG image after you upgrade GitLab.
    configMode: split
 
    global:
-     # Selects the tag of registry.gitlab.com/gitlab-org/build/cng/gitlab-siphon-tables.
-     # Must match your GitLab version exactly, patch level included.
-     gitlabVersion: v19.5.0
+     gitlabVersion: <gitlab_version>
 
    image:
      repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
-     tag: 0.0.137-beta
+     tag: <siphon_version>
 
    waitForMigrations:
      enabled: false
@@ -409,6 +379,12 @@ Switch to the CNG image after you upgrade GitLab.
          - {name: CLICKHOUSE_SIPHON_PASSWORD, secretName: siphon-secrets, secretKey: ch-siphon-password}
    ```
 
+   Replace the following values:
+
+   - `<gitlab_version>`: Your GitLab version, for example `19.5.0`.
+   - `<siphon_version>`: The Siphon release tag.
+   - `<clickhouse_host>` and `<postgresql_host>`: The ClickHouse and PostgreSQL host names.
+
 1. Install the chart:
 
    ```shell
@@ -416,14 +392,10 @@ Switch to the CNG image after you upgrade GitLab.
    helm repo update
 
    helm upgrade --install siphon siphon/siphon \
-     --version 2.0.0 \
      --namespace siphon \
      --create-namespace \
      --values siphon-values.yaml
    ```
-
-   These commands are a reference for a direct Helm install. Adjust the namespace names and the
-   deployment method to match your own tooling.
 
 1. Confirm that all three deployments are running:
 
@@ -452,7 +424,7 @@ kubectl -n siphon rollout restart deployment
 | `nats_config.replicas` | Must match your NATS cluster size. A single NATS server supports only one replica. |
 | `ssl_mode` | Must match what the PostgreSQL server offers. The example uses `require`, which works with a Linux package PostgreSQL because it serves TLS by default. A server that does not serve TLS refuses the connection, and the producer stops at startup with `server refused TLS connection`. |
 | `connection.replication.use_alter_publication_function` | Must stay `true`, which is the chart default. The `EXECUTE` grant on `public.siphon_alter_publication` exists for this setting: the publication belongs to the GitLab database user, so a direct `ALTER PUBLICATION` from a Siphon role fails. |
-| `connection.clickhouse.connection_settings` | Required on a replicated ClickHouse cluster: `insert_quorum: "auto"`, `insert_quorum_parallel: "0"`, and `async_insert: "0"`. Siphon reads with `select_sequential_consistency` by default, and these three make its delete and refresh queries safe against a lagging replica. Leave them out on a single node and on ClickHouse Cloud. See [High availability](getting-started.md#high-availability). |
+| `connection.clickhouse.connection_settings` | Required on a replicated ClickHouse cluster: `insert_quorum: "auto"`, `insert_quorum_parallel: "0"`, and `async_insert: "0"`. Siphon reads with `select_sequential_consistency` by default, and these three make its delete and refresh queries safe against a lagging replica. Leave them out on a single node and on ClickHouse Cloud. See [High availability](clickhouse.md#high-availability). |
 | `max_age_seconds` | Controls how far back a consumer can replay. Retaining 15 days of every changed row across more than 60 tables produces a large JetStream file store. Size the NATS volume for the full retention window, or lower the value. |
 
 ### Object storage for large rows
@@ -503,4 +475,3 @@ the first copy is complete.
 ## Next step
 
 - [Set up GitLab Orbit](orbit-setup.md)
-- [Troubleshooting](troubleshooting.md)
