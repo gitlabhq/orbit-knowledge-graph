@@ -111,7 +111,7 @@ To see what setup configured, run `glab orbit setup --dry-run`.
 
 | Exit code | Message | Cause | Resolution |
 |-----------|---------|-------|------------|
-| `2` | `Orbit endpoint not available` | GitLab Orbit is not available on your instance. | Ask your administrator to [set up GitLab Orbit](self-managed/_index.md). |
+| `2` | `Orbit endpoint not available` | GitLab Orbit is not available on your instance. | Ask your administrator to [set up GitLab Orbit](https://docs.gitlab.com/orbit/self-managed/). |
 | `2` | Ends with `not found`, such as `Project not found` or `Namespace not found` | The path or ID is wrong, or you are not a member. | Check the path or ID. |
 | `3` | `not authenticated` | You are not signed in, or your token expired. | Run `glab auth login`. |
 | `4` | `Orbit access denied` | No top-level group that you belong to has GitLab Orbit turned on. | Ask a user with the Owner role for the group to [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group). |

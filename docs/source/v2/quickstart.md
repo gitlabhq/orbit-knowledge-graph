@@ -55,7 +55,7 @@ The page shows **GitLab Orbit is indexing `<my-group>`**, then **GitLab Orbit is
 Prerequisites:
 
 - Administrator access.
-- On GitLab Self-Managed, GitLab Orbit [set up for your instance](self-managed/_index.md).
+- On GitLab Self-Managed, GitLab Orbit [set up for your instance](https://docs.gitlab.com/orbit/self-managed/).
 
 To turn on GitLab Orbit:
 
@@ -66,7 +66,7 @@ To turn on GitLab Orbit:
 
 To turn on GitLab Orbit for every top-level group, including new ones, turn on
 **Turn on GitLab Orbit for all top-level groups automatically**.
-For more information, see [turn on indexing for a group](self-managed/orbit-setup.md#turn-on-indexing-for-a-group).
+For more information, see [turn on indexing for a group](https://docs.gitlab.com/orbit/self-managed/orbit-setup/#turn-on-indexing-for-a-group).
 
 {{< /tab >}}
 
