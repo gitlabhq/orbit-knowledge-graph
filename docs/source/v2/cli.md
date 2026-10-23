@@ -126,7 +126,6 @@ Local commands use the local graph on your machine. They need no GitLab account 
 | `query` | Remote | Run a query and stream the response. |
 | `status` | Remote | Show the health of the service. |
 | `ontology` | Remote | Show the node types, properties, and relationships. |
-| `dsl` | Remote | Show the JSON Schema of the deprecated JSON query domain-specific language (DSL). |
 | `tools` | Remote | Show the Model Context Protocol (MCP) tool manifest. |
 | `graph-status` | Remote | Show the indexing progress of a group or project. |
 | `skills` | Remote when a GitLab credential is available, otherwise the built-in copy | List and print the [agent skill](agents/_index.md#gitlab-orbit-skill) files. |
