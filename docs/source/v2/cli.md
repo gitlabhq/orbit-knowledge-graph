@@ -32,9 +32,13 @@ The CLI also indexes the code on your machine into a [local graph](#local-graph)
 
 ## Install the CLI
 
+Use the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) to install the GitLab Orbit CLI.
+`glab` is the recommended install method.
+It downloads and verifies the GitLab Orbit CLI, and tells you when a new version is available.
+
 Prerequisites:
 
-- [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) 1.120 or later.
+- `glab` 1.120 or later.
 
 To install the CLI and set up your agents, run this command in a Git repository:
 
@@ -42,7 +46,6 @@ To install the CLI and set up your agents, run this command in a Git repository:
 glab orbit setup
 ```
 
-On first use, `glab` downloads and verifies the CLI. When a new version is available, `glab` tells you.
 For the setup steps, see [connect your agent](agents/_index.md).
 
 `glab` handles these options itself:
@@ -58,62 +61,31 @@ with `glab config set`. Setup sets `orbit_cli_auto_run` for you.
 
 ### Other install methods
 
-To install the standalone `orbit` binary on your `PATH`, use one of these methods.
-Then open a new terminal and run `orbit help`. The standalone binary runs the same commands as `glab orbit`.
+If you cannot use `glab`, install the standalone `orbit` binary.
+The binary runs the same commands as `glab orbit`.
 
-{{< tabs >}}
+- On macOS and Linux:
 
-{{< tab title="macOS and Linux" >}}
+  ```shell
+  curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
+  ```
 
-```shell
-curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
-```
+  To update, end the command with `bash -s -- --force`.
 
-The installer uses `~/.local/bin`. On Linux, the default glibc build needs glibc 2.28 or later.
-The installer selects the static musl archive on musl distributions such as Alpine.
-To force musl, end the command with `bash -s -- --libc musl`. To update, end the command with `bash -s -- --force`.
+- On Windows:
 
-{{< /tab >}}
+  ```powershell
+  irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 | iex
+  ```
 
-{{< tab title="Windows" >}}
+- With npm:
 
-```powershell
-irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 | iex
-```
+  ```shell
+  npm install -g @gitlab/orbit
+  ```
 
-The installer uses `$env:LOCALAPPDATA\Programs\orbit` and your user `PATH`. It needs no administrator rights.
-If your policy blocks remote scripts, install the signed `orbit.exe` by hand:
-
-1. Download `orbit-cli-windows-x86_64.zip` and its `.sha256` file from the [latest release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases).
-1. Compare the hash with the `.sha256` file (letter case does not matter), and remove the Mark of the Web:
-
-   ```powershell
-   (Get-FileHash .\orbit-cli-windows-x86_64.zip -Algorithm SHA256).Hash
-   Unblock-File .\orbit-cli-windows-x86_64.zip
-   ```
-
-1. Extract `orbit.exe` and add its directory to your user `PATH`:
-
-   ```powershell
-   Expand-Archive -Path .\orbit-cli-windows-x86_64.zip -DestinationPath .
-   New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\Programs\orbit"
-   Move-Item .\orbit.exe "$env:LOCALAPPDATA\Programs\orbit\orbit.exe"
-   [Environment]::SetEnvironmentVariable("PATH", "$env:LOCALAPPDATA\Programs\orbit;$([Environment]::GetEnvironmentVariable('PATH', 'User'))", "User")
-   ```
-
-{{< /tab >}}
-
-{{< tab title="npm" >}}
-
-```shell
-npm install -g @gitlab/orbit
-```
-
-On Linux, the package always uses the static musl binary, which runs on all distributions.
-
-{{< /tab >}}
-
-{{< /tabs >}}
+- By hand: download the archive for your platform from the
+  [latest release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases), and put `orbit` on your `PATH`.
 
 ## Command catalog
 
