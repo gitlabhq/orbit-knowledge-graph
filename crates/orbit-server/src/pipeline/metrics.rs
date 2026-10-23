@@ -4,8 +4,13 @@ use std::time::{Duration, Instant};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
 
+use const_format::concatcp;
 use orbit_observability::query::pipeline as spec;
 use query_engine::pipeline::{PipelineError, PipelineObserver};
+use query_engine::shared::hydration::HYDRATION_LABEL_PREFIX;
+
+const HYDRATION_STATIC_LABEL: &str = concatcp!(HYDRATION_LABEL_PREFIX, "static");
+const HYDRATION_DYNAMIC_LABEL: &str = concatcp!(HYDRATION_LABEL_PREFIX, "dynamic");
 
 static METRICS: LazyLock<QueryPipelineMetrics> = LazyLock::new(QueryPipelineMetrics::new);
 
@@ -128,8 +133,8 @@ impl PipelineObserver for OTelPipelineObserver {
     fn query_executed(&mut self, label: &str, read_rows: u64, read_bytes: u64, memory: i64) {
         let static_label: &'static str = match label {
             "base" => "base",
-            "hydration:static" => "hydration:static",
-            "hydration:dynamic" => "hydration:dynamic",
+            HYDRATION_STATIC_LABEL => HYDRATION_STATIC_LABEL,
+            HYDRATION_DYNAMIC_LABEL => HYDRATION_DYNAMIC_LABEL,
             _ => "other",
         };
         let attrs = [

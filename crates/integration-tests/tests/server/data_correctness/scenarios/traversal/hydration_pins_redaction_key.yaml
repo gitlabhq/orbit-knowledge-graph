@@ -14,7 +14,11 @@ cases:
         MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.id >= 12000 AND caller.id <= 12999 RETURN caller.name, caller.fqn, callee.name, callee.fqn LIMIT 20
     expect:
       hydration: static
-      hydration_sql_contains: ["hydrate.project_id IN [1000, 1002]", "hydrate.id IN [12000, 12001, 12200]"]
+      hydration_sql_contains:
+        - "hydrate.project_id IN [1000, 1002]"
+        - "hydrate.id IN [12000, 12001, 12200]"
+        - "hydrate.project_id IN [1000, 1001, 1002]"
+        - "hydrate.id IN [12001, 12002, 12102, 12201]"
       node_count: 6
       edges:
         CALLS: [[12000, 12001], [12001, 12002], [12001, 12102], [12200, 12201]]
