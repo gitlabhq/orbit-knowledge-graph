@@ -509,7 +509,7 @@ query:
 
 Controls Snowplow product-analytics event emission. Events carry `orbit_common` and `orbit_query` contexts (consumer-owned, defined in `orbit-analytics`).
 
-`analytics.enabled` has three states. An explicit value wins. When it is unset, the webserver and the indexer read the GitLab product usage data setting every 5 minutes from `GET /api/v4/internal/orbit/instance`. They send events only while it is on. A GitLab without that endpoint counts as off.
+`analytics.enabled` has three states. An explicit value wins. When it is unset, the webserver and the indexer read the GitLab product usage data setting every hour from `GET /api/v4/internal/orbit/instance`. They send events only while it is on. A GitLab without that endpoint counts as off.
 
 | Config path | Default | Description |
 |-------------|---------|-------------|

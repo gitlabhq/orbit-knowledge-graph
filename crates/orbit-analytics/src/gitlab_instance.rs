@@ -9,7 +9,7 @@ use parking_lot::RwLock;
 
 use crate::AnalyticsTracker;
 
-const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
+const REFRESH_INTERVAL: Duration = Duration::from_secs(3600);
 
 #[derive(Clone, Default)]
 pub struct GitlabInstanceWatch {
