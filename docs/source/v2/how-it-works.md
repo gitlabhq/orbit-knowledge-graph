@@ -86,7 +86,7 @@ On GitLab.com, a separate graph database stores the graph, and the GitLab Orbit 
 They do not share compute or memory with GitLab.com.
 On GitLab Dedicated, GitLab runs GitLab Orbit for your instance.
 On GitLab Self-Managed, you run GitLab Orbit yourself.
-For more information, see [GitLab Orbit on GitLab Self-Managed](self-managed/_index.md).
+For more information, see [GitLab Orbit on GitLab Self-Managed](https://docs.gitlab.com/orbit/self-managed/).
 
 ## Data retention and deletion
 
