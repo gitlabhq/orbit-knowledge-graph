@@ -223,6 +223,11 @@ fn container_build_files_are_recognized_by_name() {
         "Dockerfile.dev",
         "svc/api/Containerfile.prod",
         "build/app.dockerfile",
+        "dockerfile",
+        "DOCKERFILE",
+        "app.Dockerfile",
+        "build.Containerfile",
+        "Dockerfile.mri.release",
     ] {
         assert_eq!(
             SupportLang::from_path(path),
@@ -230,11 +235,23 @@ fn container_build_files_are_recognized_by_name() {
             "{path}"
         );
     }
-    for path in ["Dockerfile-notes.md", "docs/dockerfile", "MyDockerfile"] {
+    for path in [
+        "Dockerfile-notes.md",
+        "MyDockerfile",
+        "Dockerfile.md",
+        "Dockerfile.tt",
+        "Dockerfile.mri.erb",
+        "Containerfile.template",
+        "Dockerfile.wip.diff",
+    ] {
         assert_ne!(
             SupportLang::from_path(path),
             Some(SupportLang::Dockerfile),
             "{path}"
         );
     }
+    assert_eq!(
+        SupportLang::from_path("Dockerfile.py"),
+        Some(SupportLang::Python)
+    );
 }

@@ -16,24 +16,28 @@ fixtures:
   - path: build/app.dockerfile
     content: "FROM alpine AS e\n"
 
+  - path: ci/DOCKERFILE
+    content: "FROM alpine AS f\n"
+
+  - path: tools/build.Containerfile
+    content: "FROM alpine AS g\n"
+
+  - path: Dockerfile.erb
+    content: "FROM <%= base %> AS template\n"
+
 tests:
-  - name: "Dockerfile, Containerfile, dotted variants and *.dockerfile are indexed"
+  - name: "names match in any case and templates define nothing"
     query: |
-      MATCH (f:File)
-      RETURN f.path AS path
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Class'
+      RETURN d.file_path AS path
       ORDER BY path
     assert:
-      - { row_count: 5 }
+      - { row_count: 7 }
       - { row: { path: "Dockerfile" } }
       - { row: { path: "Containerfile" } }
       - { row: { path: "Dockerfile.dev" } }
       - { row: { path: "services/api/Containerfile.prod" } }
       - { row: { path: "build/app.dockerfile" } }
-
-  - name: "each file defines its own stage"
-    query: |
-      MATCH (d:Definition)
-      RETURN d.name AS name
-      ORDER BY name
-    assert:
-      - { row_count: 5 }
+      - { row: { path: "ci/DOCKERFILE" } }
+      - { row: { path: "tools/build.Containerfile" } }
