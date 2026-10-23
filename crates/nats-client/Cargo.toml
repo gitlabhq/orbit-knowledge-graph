@@ -19,6 +19,7 @@ parking_lot = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 orbit-log-fields = { workspace = true }
+strum = { workspace = true }
 
 [dev-dependencies]
 testcontainers = { workspace = true }

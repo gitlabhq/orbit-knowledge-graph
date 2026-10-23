@@ -16,3 +16,9 @@ invalid:
   - |
     #[tracing::instrument(skip(self, request))]
     fn f(&self, request: Request) {}
+  - |
+    #[instrument(skip_all, err)]
+    fn f() -> Result<(), E> {}
+  - |
+    #[tracing::instrument(skip_all, ret)]
+    fn f() -> u64 {}

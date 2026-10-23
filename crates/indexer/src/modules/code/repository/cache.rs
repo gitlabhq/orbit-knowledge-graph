@@ -15,7 +15,8 @@ use super::CancelOnDrop;
 use super::service::ByteStream;
 use crate::modules::code::metrics::CodeMetrics;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum RepositoryCacheError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

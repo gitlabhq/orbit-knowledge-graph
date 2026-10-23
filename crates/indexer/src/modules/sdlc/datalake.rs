@@ -12,7 +12,8 @@ use thiserror::Error;
 use super::paging::PAGE_BYTE_BUDGET;
 use orbit_arrow::batch_slice_bytes;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub(crate) enum DatalakeError {
     #[error("query failed: {0}")]
     Query(String),

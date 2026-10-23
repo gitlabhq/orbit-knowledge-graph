@@ -443,6 +443,7 @@ impl Pipeline {
                                 safe(ATTEMPT) = attempt + 1,
                                 safe(MAX_ATTEMPTS) = DATALAKE_EXTRACT_RETRY.max_attempts,
                                 safe(BATCH_SIZE) = block_size,
+                                safe(ERROR_TYPE) = <&str>::from(&err),
                                 expanded(ERROR_MESSAGE) = %err,
                                 "datalake query failed, retrying with smaller block size"
                             );

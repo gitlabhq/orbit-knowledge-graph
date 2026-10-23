@@ -339,7 +339,11 @@ impl NatsBroker {
                     {
                         Ok(batch) => batch,
                         Err(e) => {
-                            warn!(expanded(ERROR_MESSAGE) = %e, "fetch batch error");
+                            warn!(
+                                safe(ERROR_TYPE) = "fetch_batch",
+                                expanded(ERROR_MESSAGE) = %e,
+                                "fetch batch error"
+                            );
                             metrics.record_nats_fetch_duration(
                                 fetch_start.elapsed().as_secs_f64(),
                                 "error",

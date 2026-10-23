@@ -644,7 +644,11 @@ impl QueryExecutor {
         let mut cursor = match result {
             Ok(c) => c,
             Err(e) => {
-                orbit_log_fields::debug!(expanded(ERROR_MESSAGE) = %e, "fetch_bytes failed");
+                orbit_log_fields::debug!(
+                    safe(ERROR_TYPE) = "fetch_bytes",
+                    expanded(ERROR_MESSAGE) = %e,
+                    "fetch_bytes failed"
+                );
                 return String::new();
             }
         };
@@ -655,7 +659,11 @@ impl QueryExecutor {
                 Ok(Some(chunk)) => buffer.extend(chunk),
                 Ok(None) => break,
                 Err(e) => {
-                    orbit_log_fields::debug!(expanded(ERROR_MESSAGE) = %e, "fetch_bytes cursor error");
+                    orbit_log_fields::debug!(
+                        safe(ERROR_TYPE) = "fetch_bytes_cursor",
+                        expanded(ERROR_MESSAGE) = %e,
+                        "fetch_bytes cursor error"
+                    );
                     return String::new();
                 }
             }
@@ -714,7 +722,11 @@ impl QueryExecutor {
         let mut cursor = match result {
             Ok(c) => c,
             Err(e) => {
-                orbit_log_fields::debug!(expanded(ERROR_MESSAGE) = %e, "fetch_bytes failed");
+                orbit_log_fields::debug!(
+                    safe(ERROR_TYPE) = "fetch_bytes",
+                    expanded(ERROR_MESSAGE) = %e,
+                    "fetch_bytes failed"
+                );
                 return String::new();
             }
         };
@@ -736,7 +748,11 @@ impl QueryExecutor {
                 }
                 Ok(None) => break,
                 Err(e) => {
-                    orbit_log_fields::debug!(expanded(ERROR_MESSAGE) = %e, "fetch_bytes cursor error");
+                    orbit_log_fields::debug!(
+                        safe(ERROR_TYPE) = "fetch_bytes_cursor",
+                        expanded(ERROR_MESSAGE) = %e,
+                        "fetch_bytes cursor error"
+                    );
                     return String::new();
                 }
             }

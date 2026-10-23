@@ -52,6 +52,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             }
             Err(e) if !any_entry_seen && e.kind() == std::io::ErrorKind::UnexpectedEof => {
                 warn!(
+                    safe(ERROR_TYPE) = "archive_truncated",
                     expanded(ERROR_MESSAGE) = %e,
                     "archive stream truncated before first entry; treating as empty"
                 );
@@ -78,6 +79,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             Err(e) => {
                 warn!(
                     expanded(FILE_PATH) = %entry_path_str,
+                    safe(ERROR_TYPE) = "outside_archive_root",
                     expanded(ERROR_MESSAGE) = %e,
                     "skipping archive entry outside the archive root"
                 );
@@ -152,6 +154,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                         Err(e) => {
                             warn!(
                                 expanded(FILE_PATH) = %meta.path,
+                                safe(ERROR_TYPE) = "archive_entry_write",
                                 expanded(ERROR_MESSAGE) = %e,
                                 "skipping archive entry that could not be written"
                             );
@@ -173,6 +176,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             Err(e) => {
                 warn!(
                     expanded(FILE_PATH) = %relative_path.display(),
+                    safe(ERROR_TYPE) = "archive_entry_unpack",
                     expanded(ERROR_MESSAGE) = %e,
                     "skipping archive entry that could not be unpacked"
                 );

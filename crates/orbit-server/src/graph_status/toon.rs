@@ -106,6 +106,7 @@ pub fn format_status_as_toon(status: &StructuredGraphStatus) -> String {
 
     encode(&toon, &EncodeOptions::default()).unwrap_or_else(|e| {
         warn!(
+            safe(ERROR_TYPE) = "toon_encode",
             expanded(ERROR_MESSAGE) = %e,
             "Failed to encode graph status as TOON, falling back"
         );
