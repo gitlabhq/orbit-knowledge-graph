@@ -331,6 +331,18 @@ mod tests {
     }
 
     #[test]
+    fn dockerfiles_are_parse_candidates() {
+        let mut f = filter();
+        for path in ["Dockerfile", "svc/api.Containerfile", "Dockerfile.dev"] {
+            let (decision, label) = f.on_content(&entry(path, 100), b"FROM alpine\n");
+            assert_eq!(decision, Decision::Parse, "{path}");
+            assert_eq!(label.content, ContentClass::Code, "{path}");
+        }
+        let (decision, _) = f.on_content(&entry("Dockerfile.erb", 100), b"FROM <%= base %>\n");
+        assert_ne!(decision, Decision::Parse);
+    }
+
+    #[test]
     fn list_only_for_excluded_oversize_binary_minified() {
         let mut f = CodeFilter::new(Some(50), None, detect_language_from_path);
         assert_eq!(
