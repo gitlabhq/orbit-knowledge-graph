@@ -168,13 +168,26 @@ LIMIT 20
 - **Without GitLab Orbit:** more than 9,400 REST API calls for a group with about 9,400 projects,
   at least one page of jobs for each project.
 
-## Check that a security fix reached production
+## Fix a vulnerability across every affected project
 
-Find the vulnerabilities whose fix reached production, and if they are resolved.
+Find every project with a vulnerability, fix each one, and follow the fixes to production.
 
 ```plaintext
-Using GitLab Orbit, which vulnerabilities of <my-group>/<my-project> have
-a fix that was deployed to <production>, and are they resolved?
+Using GitLab Orbit, find every project in <my-group> affected by
+<CVE-2026-12345>. Create an issue in each project, and start an agent session
+to fix it. Then follow the deployments, and tell me when every fix is in
+<production> or needs manual work.
+```
+
+```gql orbit-query
+MATCH (v:Vulnerability)-[:HAS_FINDING]->(o:VulnerabilityOccurrence)
+  -[:HAS_IDENTIFIER]->(i:VulnerabilityIdentifier {external_id: 'CVE-2026-12345'})
+MATCH (v)-[:IN_PROJECT]->(p:Project)
+WHERE p.full_path STARTS WITH 'my-group/'
+  AND v.state = 'detected'
+RETURN p.full_path, count(v) AS open_vulnerabilities
+ORDER BY open_vulnerabilities DESC
+LIMIT 50
 ```
 
 ```gql orbit-query
@@ -188,9 +201,9 @@ ORDER BY vulns DESC
 LIMIT 10
 ```
 
-- **With GitLab Orbit:** one query.
+- **With GitLab Orbit:** one query for each question. Your agent creates the issues and starts the fixes.
 - **Without GitLab Orbit:** no count, because no REST API call goes from a merge request to its deployments.
-  You compare the merge commit of each fix with each deployment of the environment.
+  You compare the merge commit of each fix with each deployment of the environment, in each project.
 
 ## Trace a function to its callers
 
