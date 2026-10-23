@@ -18,7 +18,7 @@ title: GitLab Orbit CLI
 - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 - [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 - Commands that call the GitLab server:
-  - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
+  - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
   - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
   - [Enabled on GitLab.com, GitLab Self-Managed, and GitLab Dedicated](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/245620) in GitLab 19.3.
   - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5. Feature flag `knowledge_graph` removed.
@@ -30,7 +30,7 @@ The GitLab Orbit CLI (`orbit`) queries GitLab Orbit on your GitLab instance from
 Your agent runs the same commands for you.
 The CLI also indexes the code on your machine into a [local graph](#local-graph).
 
-## Install the GitLab Orbit CLI
+## Install the CLI
 
 Prerequisites:
 
@@ -53,7 +53,7 @@ For the setup steps, see [connect your agent](agents/_index.md).
 | `--install` | Download the CLI, but do not run it. |
 | `--update` | Update the CLI to the latest version. |
 
-To skip the prompts always, set the `glab` options `orbit_cli_auto_download` and `orbit_cli_auto_run` to `true`
+To skip the prompts on every run, set the `glab` options `orbit_cli_auto_download` and `orbit_cli_auto_run` to `true`
 with `glab config set`. Setup sets `orbit_cli_auto_run` for you.
 
 ### Other install methods
@@ -71,7 +71,7 @@ curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/insta
 
 The installer uses `~/.local/bin`. On Linux, the default glibc build needs glibc 2.28 or later.
 The installer selects the static musl archive on musl distributions such as Alpine.
-To force musl, end the command with `bash -s -- --libc musl`. To update, end it with `bash -s -- --force`.
+To force musl, end the command with `bash -s -- --libc musl`. To update, end the command with `bash -s -- --force`.
 
 {{< /tab >}}
 
@@ -118,31 +118,30 @@ On Linux, the package always uses the static musl binary, which runs on all dist
 ## Command catalog
 
 Remote commands query the remote graph on your GitLab instance.
-They need a GitLab credential and GitLab Orbit [turned on for your group](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
-Local commands use the [local graph](#local-graph) on your machine. They need no GitLab account and no network.
+They need a GitLab credential and GitLab Orbit turned on for your group.
+Local commands use the local graph on your machine. They need no GitLab account and no network.
 
-| Command | Purpose | Graph |
-|---------|---------|-------|
-| `query` | Run a query and stream the response. | Remote |
-| `status` | Show the health of the service. | Remote |
-| `ontology` | Show the node types, properties, and relationships. | Remote |
-| `dsl` | Show the JSON Schema of the deprecated JSON query domain-specific language (DSL). | Remote |
-| `tools` | Show the MCP tool manifest. | Remote |
-| `graph-status` | Show the indexing progress of a group or project. | Remote |
-| `skills` | List and print the [agent skill](agents/_index.md#gitlab-orbit-skill) files. | Remote when a GitLab credential is available, otherwise the built-in copy |
-| `index` | Index a repository, or a directory of repositories. | Local |
-| `grep` | Search every line of code, tests, configuration, and documentation, with the enclosing definitions. | Local |
-| `context` | Show source, callers, and callees. | Local |
-| `repo-map` | Print a compact repository map. | Local |
-| `sql` | Run read-only SQL. | Local |
-| `schema` | List the tables and columns. | Local |
-| `list` | List the indexed repositories. | Local |
-| `setup`, `uninstall` | Add or remove the [agent configuration](agents/_index.md). | None |
-| `config` | Read and write saved settings. | None |
-| `version` | Print the version. | None |
+| Command | Graph | Purpose |
+|---------|-------|---------|
+| `query` | Remote | Run a query and stream the response. |
+| `status` | Remote | Show the health of the service. |
+| `ontology` | Remote | Show the node types, properties, and relationships. |
+| `dsl` | Remote | Show the JSON Schema of the deprecated JSON query domain-specific language (DSL). |
+| `tools` | Remote | Show the Model Context Protocol (MCP) tool manifest. |
+| `graph-status` | Remote | Show the indexing progress of a group or project. |
+| `skills` | Remote when a GitLab credential is available, otherwise the built-in copy | List and print the [agent skill](agents/_index.md#gitlab-orbit-skill) files. |
+| `index` | Local | Index a repository, or a directory of repositories. |
+| `grep` | Local | Search every line of code, tests, configuration, and documentation, with the enclosing definitions. |
+| `context` | Local | Show source, callers, and callees. |
+| `repo-map` | Local | Print a compact repository map. |
+| `sql` | Local | Run read-only SQL. |
+| `schema` | Local | List the tables and columns. |
+| `list` | Local | List the indexed repositories. |
+| `setup`, `uninstall` | None | Add or remove the agent configuration. |
+| `config` | None | Read and write saved settings. |
+| `version` | None | Print the version. |
 
 For all flags, run `glab orbit <command> --help`.
-To index, search, and run SQL on your machine, see [local graph](#local-graph).
 
 ## Query the remote graph
 
@@ -152,6 +151,8 @@ To index, search, and run SQL on your machine, see [local graph](#local-graph).
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
+
+Sign in once with `glab`, then run queries and check indexing progress from the terminal.
 
 Prerequisites:
 
@@ -167,6 +168,8 @@ To sign in:
 `glab orbit` gives your sign-in to the CLI on every run.
 
 ### Run a query
+
+To run a query, pass the query text:
 
 ```shell
 glab orbit query "<query>"
@@ -188,7 +191,7 @@ To list the properties of node types, run `glab orbit ontology MergeRequest Proj
 
 ### Check indexing progress
 
-In a clone of a project in your group, run:
+To check the indexing progress of a project, run this command in a clone of the project:
 
 ```shell
 glab orbit graph-status
@@ -234,10 +237,10 @@ The CLI parses the files in the working tree, skips the files that `.gitignore` 
 and writes definitions, imports, and cross-file references to the graph.
 The parser and [supported languages](schema.md#supported-languages) are the same as for the remote graph.
 
-- To index each repository in a directory, give the path of the directory.
-- Each indexed commit keeps its own graph. Indexing the same commit again replaces its graph.
+- When you pass the path of a directory, the CLI indexes each repository in the directory.
+- Each indexed commit keeps its own graph. When you index the same commit again, the CLI replaces its graph.
 - After you switch branches, `grep` and `context` index the new commit for you.
-  Run `glab orbit index .` before you use `repo-map` or `sql` on it.
+  Before you use `repo-map` or `sql` on the new commit, run `glab orbit index .`.
 
 ### Search and read code
 
@@ -259,12 +262,15 @@ Function read_file — src/utils.py:3-4 ←run
   src/main.py │ :1 from utils import read_file │ Method run:11-13 →hello,read_file :13         read_file('x')
 ```
 
-- If the term names a definition, its source prints first. Then each file is one row, with each match under its enclosing definition.
+- If the term names a definition, its source prints first.
+  Then each file is one row, with each match under its enclosing definition.
   A definition shows as `Kind name:start-end`, with `←` callers and `→` callees.
 - Plain words ignore case, `_`, `-`, and spaces, so `read_file` also matches `ReadFile`.
   Patterns with regular expression characters are regular expressions. For an exact string, use `-F`.
-- Common `rg` options such as `-A`, `-B`, `-C`, `-w`, `-l`, `-c`, `-g`, and `-t` work. To filter by definition type, use `--kind`, such as `--kind Class,Method`.
-- A file that differs from the last commit shows `(edited since index)` and no definitions. Commit the change to index it.
+- Common `rg` options such as `-A`, `-B`, `-C`, `-w`, `-l`, `-c`, `-g`, and `-t` work.
+  To filter by definition type, use `--kind`, such as `--kind Class,Method`.
+- A file that differs from the last commit shows `(edited since index)` and no definitions.
+  Commit the change to index it.
 
 To read the source of a definition, and its callers and callees, pass its name to `context`:
 
@@ -280,11 +286,11 @@ and `imports` show more detail.
 
 ### Run SQL on the local graph
 
+To run read-only SQL directly on the graph tables:
+
 ```shell
 glab orbit sql -F json "SELECT count(*) AS n FROM gl_definition"
 ```
-
-The SQL is read-only and runs directly on the graph tables.
 
 - By default, the query reads every indexed commit of every repository.
   To query only the indexed commit of a checkout, use `--repo <path>`, for example `--repo .`.
@@ -339,6 +345,8 @@ Telemetry is on by default. To turn it off, run:
 ```shell
 glab orbit config set telemetry.enabled false
 ```
+
+The CLI reads these environment variables:
 
 | Variable | Purpose |
 |----------|---------|
