@@ -75,14 +75,27 @@ pub async fn query_cache_ttls(ctx: &TestContext) -> Vec<String> {
 }
 
 pub async fn read_cached_query_log(ctx: &TestContext, column: &str) -> Vec<String> {
-    ctx.execute("SYSTEM FLUSH LOGS").await;
+    let read = |select: &str| {
+        format!(
+            "SELECT {select} FROM system.query_log \
+             WHERE current_database = '{}' AND Settings['use_query_cache'] = '1'",
+            ctx.config.database
+        )
+    };
+    let all_finished =
+        read("toString(countIf(type = 'QueryStart') = countIf(type != 'QueryStart'))");
+    for _ in 0..100 {
+        ctx.execute("SYSTEM FLUSH LOGS").await;
+        let batches = ctx.query(&all_finished).await;
+        if String::extract_column(&batches, 0).expect("query log state") == ["1"] {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
     let batches = ctx
         .query(&format!(
-            "SELECT {column} FROM system.query_log \
-             WHERE type = 'QueryFinish' AND current_database = '{}' \
-               AND Settings['use_query_cache'] = '1' \
-             ORDER BY event_time_microseconds",
-            ctx.config.database
+            "{} AND type = 'QueryFinish' ORDER BY event_time_microseconds",
+            read(column)
         ))
         .await;
     String::extract_column(&batches, 0).expect("query log column")

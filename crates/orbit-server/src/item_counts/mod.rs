@@ -39,21 +39,14 @@ impl ItemCountService {
             scopes.iter().collect::<BTreeSet<_>>().into_iter().collect();
         let visibility = visibility::get_visibility(ontology, security_context, &distinct_scopes);
         let counts = self.read_counts(&distinct_scopes, &visibility).await;
-        let counts_by_scope: HashMap<&TraversalPath, HashMap<String, i64>> = distinct_scopes
-            .iter()
-            .enumerate()
-            .map(|(index, scope)| {
-                (
-                    *scope,
-                    build_scope_counts(&visibility, &counts, index, scope),
-                )
-            })
-            .collect();
         scopes
             .iter()
-            .map(|scope| ScopeItemCounts {
-                scope: scope.clone(),
-                counts: counts_by_scope[scope].clone(),
+            .map(|scope| {
+                let index = distinct_scopes.partition_point(|distinct| *distinct < scope);
+                ScopeItemCounts {
+                    scope: scope.clone(),
+                    counts: build_scope_counts(&visibility, &counts, index, scope),
+                }
             })
             .collect()
     }
