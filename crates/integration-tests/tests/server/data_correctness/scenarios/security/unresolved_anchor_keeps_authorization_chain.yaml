@@ -1,0 +1,41 @@
+description: An anchor the user cannot resolve leaves the authorization chain in force and returns nothing outside it
+
+cases:
+  - name: project_outside_authorized_paths
+    config:
+      security: { paths: ["1/102/"] }
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (p:Project {id: 1000}) RETURN p.name LIMIT 10
+    expect:
+      sql_contains: ["!= '0/') OR startsWith(p.traversal_path, '1/102/'))"]
+      skip_requirements: [node_ids]
+      node_count: 0
+
+  - name: deleted_project_beside_a_live_one
+    config:
+      extra_seed:
+        gl_project:
+          - { id: 5556, name: Gone Project, full_path: public-group/gone-project, visibility_level: public, traversal_path: "1/100/5556/", _version: "2024-06-01 00:00:00", _deleted: true }
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000, 5556], "columns": ["name"]}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (p:Project) WHERE p.id IN [1000, 5556] RETURN p.name LIMIT 10
+    expect:
+      sql_contains: ["!= '0/') AND ((SELECT", "(_scope.id = 5556)"]
+      node_count: 1
+      nodes:
+        Project:
+          ids: [1000]
+          absent: [5556]

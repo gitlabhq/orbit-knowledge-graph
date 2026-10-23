@@ -1,0 +1,98 @@
+description: A resolved anchor puts the authorization chain behind its lookup on scans that hold both in one WHERE; results are unchanged
+
+config:
+  security: { paths: ["1/100/", "1/102/"] }
+
+cases:
+  - name: pinned_project
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (p:Project {id: 1000}) RETURN p.name LIMIT 10
+    expect:
+      sql_contains:
+        - "!= '0/') OR (startsWith(p.traversal_path, '1/100/') OR startsWith(p.traversal_path, '1/102/')))"
+        - "AS _scope WHERE ((startsWith(_scope.traversal_path, '1/100/') OR startsWith(_scope.traversal_path, '1/102/')) AND (_scope.id = 1000))"
+      node_count: 1
+      nodes:
+        Project:
+          ids: [1000]
+
+  - name: cte_scan_of_a_pinned_project
+    query:
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN mr.title LIMIT 10
+    expect:
+      sql_contains:
+        - "!= '0/') OR (startsWith(mr.traversal_path, '1/100/') OR startsWith(mr.traversal_path, '1/102/')))"
+      node_count: 5
+      nodes:
+        Project:
+          ids: [1000]
+        MergeRequest:
+          ids: [2000, 2001, 2004, 2005]
+      edges:
+        IN_PROJECT: [[2000, 1000], [2001, 1000], [2004, 1000], [2005, 1000]]
+
+  - name: edge_scan_of_a_pinned_group
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) RETURN p.name LIMIT 10
+    expect:
+      sql_contains:
+        - "!= '0/') OR (startsWith(_orbit_edge_0.traversal_path, '1/100/') OR startsWith(_orbit_edge_0.traversal_path, '1/102/')))"
+      node_count: 3
+      nodes:
+        Group:
+          ids: [100]
+        Project:
+          ids: [1000, 1002]
+      edges:
+        CONTAINS: [[100, 1000], [100, 1002]]
+
+  - name: one_of_two_anchors_outside_authorization
+    config:
+      security: { paths: ["1/100/1000/", "1/100/200/", "1/102/"] }
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000, 1002], "columns": ["name"]}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (p:Project) WHERE p.id IN [1000, 1002] RETURN p.name LIMIT 10
+    expect:
+      sql_contains:
+        - "!= '0/') AND ((SELECT"
+        - "!= '0/')) OR (startsWith(p.traversal_path, '1/100/1000/') OR"
+      node_count: 1
+      nodes:
+        Project:
+          ids: [1000]
+          absent: [1002]
+
+  - name: final_read_keeps_the_chain
+    query:
+      json: |
+        {
+            "query_type": "traversal",
+            "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 1000}, "columns": ["title"]}],
+            "limit": 10
+        }
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 1000}) RETURN mr.title LIMIT 10
+    expect:
+      sql_contains:
+        - "AS mr FINAL WHERE (startsWith(mr.traversal_path, '1/100/') OR startsWith(mr.traversal_path, '1/102/'))) AS mr"
+      sql_not_contains: ["!= '0/'"]
+      skip_requirements: ["filter:project_id"]
+      node_count: 4
+      nodes:
+        MergeRequest:
+          ids: [2000, 2001, 2004, 2005]

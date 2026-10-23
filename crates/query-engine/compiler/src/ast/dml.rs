@@ -473,6 +473,17 @@ impl Expr {
         Self::conjoin(exprs.into_iter().flatten().collect())
     }
 
+    pub fn leaves(&self, op: Op) -> Vec<&Expr> {
+        match self {
+            Expr::BinaryOp {
+                op: found,
+                left,
+                right,
+            } if *found == op => [left.leaves(op), right.leaves(op)].concat(),
+            _ => vec![self],
+        }
+    }
+
     pub fn or_all(exprs: impl IntoIterator<Item = Option<Expr>>) -> Option<Expr> {
         Self::balanced(Op::Or, exprs.into_iter().flatten().collect())
     }

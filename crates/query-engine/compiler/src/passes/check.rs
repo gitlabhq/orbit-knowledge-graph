@@ -10,10 +10,13 @@ use serde_json::Value;
 
 use crate::ast::visit::{visit_queries, visit_relations};
 use crate::ast::{Expr, Function, Node, Op, Query, TableRef};
+use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
+use crate::scope;
 use crate::types::SecurityContext;
 #[cfg(test)]
 use ontology::Ontology;
+use orbit_utils::traversal_path::TraversalPath;
 
 pub fn check_ast(
     node: &Node,
@@ -52,11 +55,26 @@ fn check_query(
                     .and_then(|entity| model.query_authorization().required_access_level(entity))
                     .unwrap_or(ontology::RequiredRole::Reporter.as_access_level());
                 let eligible_paths = ctx.paths_at_least(access_level);
+                let resolved = scope::resolved_condition(
+                    q.where_clause.as_ref(),
+                    alias,
+                    &column.name,
+                    |authorization| {
+                        has_valid_path_filter(
+                            Some(authorization),
+                            scope::LOOKUP_ALIAS,
+                            TRAVERSAL_PATH_COLUMN,
+                            &eligible_paths,
+                            None,
+                        )
+                    },
+                );
                 if !has_valid_path_filter(
                     q.where_clause.as_ref(),
                     alias,
                     &column.name,
                     &eligible_paths,
+                    resolved.as_ref(),
                 ) {
                     error = Some(QueryError::Security(format!(
                         "post-check failed: column '{alias}.{}' missing valid traversal_path filter at access level {access_level}",
@@ -74,9 +92,13 @@ fn has_valid_path_filter(
     expr: Option<&Expr>,
     alias: &str,
     column: &str,
-    eligible_paths: &[&orbit_utils::traversal_path::TraversalPath],
+    eligible_paths: &[&TraversalPath],
+    resolved: Option<&Expr>,
 ) -> bool {
     let Some(expr) = expr else { return false };
+    if resolved == Some(expr) {
+        return true;
+    }
     match expr {
         Expr::Literal(Value::Bool(false))
         | Expr::Param {
@@ -88,16 +110,16 @@ fn has_valid_path_filter(
             left,
             right,
         } => {
-            has_valid_path_filter(Some(left), alias, column, eligible_paths)
-                || has_valid_path_filter(Some(right), alias, column, eligible_paths)
+            has_valid_path_filter(Some(left), alias, column, eligible_paths, resolved)
+                || has_valid_path_filter(Some(right), alias, column, eligible_paths, resolved)
         }
         Expr::BinaryOp {
             op: Op::Or,
             left,
             right,
         } => {
-            has_valid_path_filter(Some(left), alias, column, eligible_paths)
-                && has_valid_path_filter(Some(right), alias, column, eligible_paths)
+            has_valid_path_filter(Some(left), alias, column, eligible_paths, resolved)
+                && has_valid_path_filter(Some(right), alias, column, eligible_paths, resolved)
         }
         Expr::FuncCall {
             name: Function::StartsWith,
@@ -135,7 +157,6 @@ fn has_valid_path_filter(
 mod tests {
     use super::*;
     use crate::ast::{SelectExpr, TableRef};
-    use crate::constants::TRAVERSAL_PATH_COLUMN;
 
     fn apply_security(node: &mut Node, context: &SecurityContext, ontology: &Ontology) {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
@@ -322,6 +343,69 @@ mod tests {
             (
                 Expr::binary(Op::Or, authorized.clone(), Expr::and(authorized, condition)),
                 true,
+            ),
+        ] {
+            let node = project_query(Some(predicate));
+            assert_eq!(check(&node, &context, &ontology).is_ok(), valid, "{node:?}");
+        }
+    }
+
+    fn authorized_lookup(path: &str) -> Expr {
+        let Expr::Scalar(mut query) =
+            crate::scope::lookup_expr("gl_project", "id", &crate::scope::PathScopeId::Numeric(100))
+        else {
+            unreachable!()
+        };
+        let key = query.where_clause.take().unwrap();
+        query.where_clause = Some(Expr::and(
+            Expr::func(
+                Function::StartsWith,
+                vec![
+                    Expr::col(crate::scope::LOOKUP_ALIAS, TRAVERSAL_PATH_COLUMN),
+                    Expr::string(path),
+                ],
+            ),
+            key,
+        ));
+        Expr::Scalar(query)
+    }
+
+    #[test]
+    fn folded_authorization_needs_its_scope_predicate_and_an_eligible_lookup() {
+        let context = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
+        let ontology = project_ontology();
+        let column = Expr::col("p", TRAVERSAL_PATH_COLUMN);
+        let starts_with = |left, right| Expr::func(Function::StartsWith, vec![left, right]);
+        let authorized = starts_with(column.clone(), Expr::string("42/43/"));
+        let unresolved = |lookup: &Expr| Expr::eq(lookup.clone(), Expr::string("0/"));
+        let scoped = |lookup: &Expr| {
+            Expr::binary(
+                Op::Or,
+                starts_with(column.clone(), lookup.clone()),
+                unresolved(lookup),
+            )
+        };
+        let folded = |resolved: Expr| {
+            Expr::binary(
+                Op::Or,
+                Expr::binary(Op::Ne, resolved, Expr::string("0/")),
+                authorized.clone(),
+            )
+        };
+        let eligible = authorized_lookup("42/43/");
+        let wider = authorized_lookup("42/");
+        for (predicate, valid) in [
+            (Expr::and(folded(eligible.clone()), scoped(&eligible)), true),
+            (folded(eligible.clone()), false),
+            (Expr::and(folded(wider.clone()), scoped(&wider)), false),
+            (Expr::and(folded(wider.clone()), scoped(&eligible)), false),
+            (
+                Expr::and(folded(Expr::col("p", "id")), scoped(&eligible)),
+                false,
+            ),
+            (
+                Expr::and(folded(Expr::Scalar(Box::default())), scoped(&eligible)),
+                false,
             ),
         ] {
             let node = project_query(Some(predicate));

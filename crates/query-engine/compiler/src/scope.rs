@@ -61,7 +61,7 @@ use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN}
 use crate::ast::{Expr, Function, Op, Query, SelectExpr, SqlType, TableRef};
 use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
 
-const LOOKUP_ALIAS: &str = "_scope";
+pub(crate) const LOOKUP_ALIAS: &str = "_scope";
 const UNRESOLVED_PATH: &str = "0/";
 const MAX_LOOKUPS_PER_ALIAS: usize = 8;
 
@@ -247,7 +247,7 @@ fn propagate_scope_proofs(
     result
 }
 
-fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
+pub(crate) fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
     let (key, from) = match value {
         PathScopeId::Numeric(id) => (
             Expr::param(SqlType::Int64, *id),
@@ -287,6 +287,98 @@ fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Exp
         where_clause: Some(Expr::eq(Expr::col(LOOKUP_ALIAS, key_column), key)),
         ..Default::default()
     }))
+}
+
+pub(crate) fn resolved_condition(
+    where_clause: Option<&Expr>,
+    alias: &str,
+    column: &str,
+    authorized: impl Fn(&Expr) -> bool,
+) -> Option<Expr> {
+    let unresolved = Expr::string(UNRESOLVED_PATH);
+    where_clause?
+        .leaves(Op::And)
+        .into_iter()
+        .find_map(|conjunct| {
+            let lookups = scope_lookups(conjunct, alias, column)?;
+            lookups
+                .iter()
+                .all(|lookup| lookup_authorization(lookup).is_some_and(&authorized))
+                .then(|| {
+                    let resolved = |lookup: &&Expr| {
+                        Expr::binary(Op::Ne, (*lookup).clone(), unresolved.clone())
+                    };
+                    Expr::conjoin(lookups.iter().map(resolved).collect())
+                        .expect("scope predicate has at least one lookup")
+                })
+        })
+}
+
+fn scope_lookups<'a>(predicate: &'a Expr, alias: &str, column: &str) -> Option<Vec<&'a Expr>> {
+    let leaves = predicate.leaves(Op::Or);
+    if leaves.len() < 2 || !leaves.len().is_multiple_of(2) {
+        return None;
+    }
+    let (matches, unresolved) = leaves.split_at(leaves.len() / 2);
+    let column = Expr::col(alias, column);
+    matches
+        .iter()
+        .zip(unresolved)
+        .map(|(leaf, flag)| match flag {
+            Expr::BinaryOp {
+                op: Op::Eq,
+                left,
+                right,
+            } if matches!(**left, Expr::Scalar(_))
+                && **right == Expr::string(UNRESOLVED_PATH)
+                && restricts_to(leaf, &column, left) =>
+            {
+                Some(&**left)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn restricts_to(leaf: &Expr, column: &Expr, path: &Expr) -> bool {
+    let first = leaf.leaves(Op::And)[0];
+    *first == Expr::eq(column.clone(), path.clone())
+        || *first == Expr::func(Function::StartsWith, vec![column.clone(), path.clone()])
+}
+
+fn lookup_authorization(lookup: &Expr) -> Option<&Expr> {
+    if let Expr::Scalar(query) = lookup
+        && let TableRef::Scan { table, .. } = &query.from
+        && let Some(Expr::BinaryOp {
+            op: Op::And,
+            left: authorization,
+            right: key,
+        }) = &query.where_clause
+        && let Expr::BinaryOp {
+            op: Op::Eq,
+            left: key_column,
+            right: key_value,
+        } = key.as_ref()
+        && let Expr::Column {
+            column: key_column, ..
+        } = key_column.as_ref()
+        && let Expr::Param {
+            value: key_value, ..
+        } = key_value.as_ref()
+    {
+        let id = match key_value {
+            serde_json::Value::Number(id) => PathScopeId::Numeric(id.as_i64()?),
+            serde_json::Value::String(text) => PathScopeId::Text(text.clone()),
+            _ => return None,
+        };
+        let pristine = Query {
+            where_clause: Some((**key).clone()),
+            ..(**query).clone()
+        };
+        return (Expr::Scalar(Box::new(pristine)) == lookup_expr(table, key_column, &id))
+            .then_some(authorization);
+    }
+    None
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

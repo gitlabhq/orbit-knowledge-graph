@@ -6,6 +6,9 @@
 //! Path filtering strategy:
 //! - 1 path: `startsWith(path)`
 //! - 2+ paths: `startsWith(p1) OR startsWith(p2) OR ...`
+//! - a scan whose scope lookups carry this same chain: `(<every lookup> != '0/')
+//!   OR <chain>`, so ClickHouse drops the chain from index analysis once the
+//!   anchors resolve (`scope::resolved_condition`)
 //!
 //! # Per-entity role scoping
 //!
@@ -30,6 +33,7 @@ use crate::ast::visit::{visit_queries_mut, visit_relations};
 use crate::ast::{Expr, Function, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN};
 use crate::error::Result;
+use crate::scope;
 pub use crate::types::SecurityContext;
 #[cfg(test)]
 use ontology::Ontology;
@@ -73,21 +77,37 @@ fn apply_to_query(
 ) -> Result<()> {
     let aliased_tables = collect_aliased_tables(&q.from, model);
     if !aliased_tables.is_empty() {
-        let security_conds = aliased_tables.iter().map(|(alias, table)| {
-            let min_role = model.table_minimum_access_level(table);
-            let eligible = ctx.paths_at_least(min_role);
-            let broad = build_path_filter(alias, &eligible);
-            match ctx.scope_proofs.get(alias) {
-                Some(scope) if model.table_path_scopable(table) => {
-                    Expr::and(broad, crate::scope::scope_predicate(scope, alias))
+        let where_clause = q.where_clause.take();
+        let security_conds: Vec<Expr> = aliased_tables
+            .iter()
+            .map(|(alias, table)| {
+                let min_role = model.table_minimum_access_level(table);
+                let eligible = ctx.paths_at_least(min_role);
+                let authorization = Expr::or_all([
+                    scope::resolved_condition(
+                        where_clause.as_ref(),
+                        alias,
+                        TRAVERSAL_PATH_COLUMN,
+                        |lookup_filter| {
+                            *lookup_filter == build_path_filter(scope::LOOKUP_ALIAS, &eligible)
+                        },
+                    ),
+                    Some(build_path_filter(alias, &eligible)),
+                ])
+                .expect("authorization filter is present");
+                match ctx.scope_proofs.get(alias) {
+                    Some(proof) if model.table_path_scopable(table) => {
+                        Expr::and(authorization, scope::scope_predicate(proof, alias))
+                    }
+                    _ => authorization,
                 }
-                _ => broad,
-            }
-        });
+            })
+            .collect();
         q.where_clause = Expr::and_all(
             security_conds
+                .into_iter()
                 .map(Some)
-                .chain(std::iter::once(q.where_clause.take())),
+                .chain(std::iter::once(where_clause)),
         );
     }
 
