@@ -174,6 +174,13 @@ finish --> codegen
 
 The DuckDB pipelines skip the security phases, because a local graph has a single user.
 
+TODO: Show a few partial pipelines in plantuml/markdown LTR - and specifically, show how parts of pipelines can be reused
+
+
+And for the the below sections, show, don't tell. We want annotated markdown diagrams for each giving a demonstration of what each phase actually does (simplified, e.g for planning, show a few strats, for validation, show a few categories)
+
+Then we can be more exhaustive in the bullet points, fair?
+
 ## Planning
 
 The planner builds a graph of relations and decides how to read each one. It works from facts in the query data model, not from the shape of the query text.
@@ -233,6 +240,8 @@ The compiler enforces these rules on every query:
 - The webserver connects to ClickHouse as a read-only user.
 
 The [Security](../security.md) design document describes the authorization model and the redaction layer.
+
+TODO: the sections below should be under a references or appendix section please
 
 ## Observability
 
