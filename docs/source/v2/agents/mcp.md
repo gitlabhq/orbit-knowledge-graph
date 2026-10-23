@@ -36,8 +36,7 @@ Prerequisites:
 - GitLab Orbit is [turned on](../quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) for a group that you can access.
 - Your client signs in with OAuth.
   A client that connects over native HTTP must request the `mcp_orbit` scope.
-  You can also use a personal access token with the `read_api` scope,
-  or a [fine-grained personal access token](https://docs.gitlab.com/auth/tokens/fine_grained_access_tokens/).
+  You can also [use a personal access token](#connect-with-a-personal-access-token).
 
 ### Connect a client to the endpoint
 
@@ -135,6 +134,26 @@ Do not add an `oauth` block. `mcp-remote` gets the `mcp_orbit` scope from the en
 
 {{< /tabs >}}
 
+### Connect with a personal access token
+
+Clients that send custom HTTP headers can skip the OAuth sign-in.
+Send a personal access token with the `read_api` scope, or a
+[fine-grained personal access token](../security.md#fine-grained-personal-access-tokens)
+with the **GitLab Orbit** resource, in the `Authorization` header.
+
+For example, in Claude Code:
+
+```shell
+claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp \
+  --header "Authorization: Bearer <your_access_token>"
+```
+
+In Codex, put the token in the `GITLAB_TOKEN` environment variable, then run:
+
+```shell
+codex mcp add gitlab-orbit --url "https://gitlab.com/api/v4/orbit/mcp" --bearer-token-env-var GITLAB_TOKEN
+```
+
 ### Test the connection
 
 In your agent, ask:
@@ -164,7 +183,6 @@ The endpoint has two tools. `list_commands` lists the GitLab Orbit commands with
 
 To get the properties and relationships of a node type, pass its name in `expand_nodes`,
 for example `["MergeRequest"]`, or run `CALL db.schema('MergeRequest')` with `query_graph`.
-The `get_query_dsl` command belongs to the deprecated JSON query domain-specific language (DSL).
 
 Your agent writes the queries for you. For precise control, give it a complete query to run with
 `{"command_name": "query_graph", "parameters": {"query": "<query>"}}`, for example:
@@ -178,6 +196,21 @@ LIMIT 10
 ```
 
 For query recipes and the query language reference, install the [GitLab Orbit skill](_index.md#gitlab-orbit-skill).
+
+## GitLab Orbit tools in the GitLab MCP server
+
+{{< history >}}
+
+- [Added](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/261207) to the GitLab MCP server in GitLab 19.6.
+
+{{< /history >}}
+
+If your agent already connects to the [GitLab MCP server](https://docs.gitlab.com/user/model_context_protocol/mcp_server/),
+you can add the GitLab Orbit commands to that connection instead of a second server.
+The `orbit` toolset of the GitLab MCP server has one tool for each command, for example `query_graph`.
+
+The toolset is off by default. To turn it on, add `orbit` to the `X-Gitlab-Enabled-Mcp-Server-Toolsets` header.
+For the header format, see [select tool groups](https://docs.gitlab.com/user/model_context_protocol/mcp_server/#select-tool-groups-toolsets).
 
 ## Related topics
 
