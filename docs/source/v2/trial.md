@@ -36,6 +36,7 @@ On GitLab Self-Managed and GitLab Dedicated, contact your GitLab account team.
 
 Prerequisites:
 
+- GitLab.com.
 - The Owner role for the top-level group.
 - The group has a Premium or Ultimate subscription, and does not have the GitLab Orbit add-on.
 - The group is eligible for a trial. If it is not, the **Orbit** settings page says that the group is not eligible and shows **Contact sales**.
@@ -58,7 +59,7 @@ If none of your groups has GitLab Orbit turned on, you can also start the trial 
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
-To connect your agent, continue with the [quickstart](quickstart.md#step-2-install-the-cli-and-sign-in).
+To connect your agent, continue with the [quickstart](quickstart.md#step-2-sign-in-and-set-up-your-agent).
 
 ## When the trial ends
 
