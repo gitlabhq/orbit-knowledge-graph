@@ -210,7 +210,7 @@ Model it on the closest existing node (e.g. `nodes/packages/package.yaml`). Requ
 
 - `node_type`, `domain`, `description`, `label`, `destination_table: gl_<node>`, `default_columns`.
 - `redaction: { resource_type: <type>, id_column: id, ability: <ability> }`: **must match the monolith registration** (Section 4).
-- `properties:` block: a path-scoped node gets an `id` traversal_path lookup without a declaration; declare `traversal_path_lookup` only for another key, as `Project` does for `full_path`. **Every property needs a `description`** (CI-enforced). **`nullable` must match the siphon source column**. Don't mark a `NOT NULL` source nullable. Don't mark a `Nullable(...)` source `nullable: false` without a comment explaining the NULL→default coercion. Reviewers flag both directions.
+- `properties:` block: **every property needs a `description`** (CI-enforced). **`nullable` must match the siphon source column**. Don't mark a `NOT NULL` source nullable. Don't mark a `Nullable(...)` source `nullable: false` without a comment explaining the NULL→default coercion. Reviewers flag both directions.
 - `etl: { type: table, scope: namespaced, source: siphon_<table>, order_by: [traversal_path, id], edges: { project_id: { to: Project, as: IN_PROJECT, direction: outgoing } } }`.
   - **Which edge mechanism to use:** the inline `edges:` block here is for edges derived from an **FK column on this node's own source table**. An example is `IN_PROJECT` from `project_id`. Use a **separate edge YAML (§5.2)** only for **join-table edges** (e.g. `DECLARES_DEPENDENCY` from `packages_dependency_links`), where the relationship lives in its own table.
   - **How the ETL uses this (read before adding a mapping):** the `etl:` block declares an extraction plus a row-wise transform. The transform covers source columns → graph columns, FK-edge resolution, and type discriminators. Most nodes are a straight column projection. But some properties need a **mapping**: an Integer-to-Enum column, a computed value, or a non-trivial rename. Declare it here, so it does not fail at index time. See [SDLC indexing → ETL](../design-documents/indexing/sdlc_indexing.md#etl) (and the Integer-to-Enum mapping note in that doc) for how plans, transforms, and column mappings are derived from the ontology.
@@ -302,8 +302,10 @@ This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql
 
 ### 5.6 Document
 
-Add a row to `docs/design-documents/data_model.md`: the node table, the mermaid
-relationship diagram, the `IN_PROJECT` source list, and a new relationship-types row.
+After the code MR merges, open a separate docs MR. Add the node to the user
+schema reference,
+[`docs/source/remote/schema.md`](../source/remote/schema.md), in the table for
+its domain. Update the node count in the page description and the intro.
 
 ### 5.7 Validate (toolchain matters)
 
@@ -354,7 +356,6 @@ knowledge-graph:
 - [ ] `mise schema:bump` run; `mise run schema:generate:ddl` run; `graph.sql` shows the new `gl_<node>`.
 - [ ] `config/seeds/siphon.sql` updated; SDLC YAML scenario(s) added.
 - [ ] Query-side YAML scenario(s) added under `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/` to verify the new entity is queryable end-to-end.
-- [ ] `data_model.md` updated.
 - [ ] `cargo test -p ontology` + `mise test:integration:indexer:sdlc:scenario <domain>/` green (correct toolchain).
 
 ---
@@ -377,8 +378,8 @@ knowledge-graph:
 
 When you finish adding a table / node / edge, **close the loop on this document**.
 Conventions drift between phases (§1). So if anything you hit diverged from what's
-written here, update the relevant section **in the same MR** (or an immediate
-fast-follow). Examples are a new generator flag, a changed CODEC default, an extra
-file maintainers required, a redaction wrinkle, or a toolchain gotcha. A stale playbook is how
+written here, update the relevant section in a separate docs MR. Examples are a new
+generator flag, a changed CODEC default, an extra file maintainers required, a
+redaction wrinkle, or a toolchain gotcha. A stale playbook is how
 the next agent re-burns the time you just spent. If nothing changed, say so
 explicitly in your summary so the next reader trusts the doc.
