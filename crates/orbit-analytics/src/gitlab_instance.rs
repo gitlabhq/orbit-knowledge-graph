@@ -55,29 +55,32 @@ impl GitlabInstanceWatch {
     }
 }
 
-pub fn consenting_tracker(
+pub struct ConsentGate {
     tracker: Arc<dyn AnalyticsTracker>,
-    config: &AnalyticsConfig,
-    instance: &GitlabInstanceWatch,
-) -> Arc<dyn AnalyticsTracker> {
-    if config.follows_gitlab_setting() {
-        Arc::new(GitlabSettingGate {
-            tracker,
-            instance: instance.clone(),
-        })
-    } else {
-        tracker
-    }
-}
-
-struct GitlabSettingGate {
-    tracker: Arc<dyn AnalyticsTracker>,
+    enabled: Option<bool>,
     instance: GitlabInstanceWatch,
 }
 
-impl AnalyticsTracker for GitlabSettingGate {
+impl ConsentGate {
+    pub fn new(
+        tracker: Arc<dyn AnalyticsTracker>,
+        config: &AnalyticsConfig,
+        instance: &GitlabInstanceWatch,
+    ) -> Self {
+        Self {
+            tracker,
+            enabled: config.enabled,
+            instance: instance.clone(),
+        }
+    }
+}
+
+impl AnalyticsTracker for ConsentGate {
     fn track(&self, event: StructuredEvent) {
-        if self.instance.product_usage_data_enabled() {
+        let allowed = self
+            .enabled
+            .unwrap_or_else(|| self.instance.product_usage_data_enabled());
+        if allowed {
             self.tracker.track(event);
         }
     }
@@ -111,7 +114,7 @@ mod tests {
                 environment: DeploymentEnvironment::Production,
             },
         };
-        let tracker = consenting_tracker(counter.clone(), &config, instance);
+        let tracker = ConsentGate::new(counter.clone(), &config, instance);
         tracker.track(StructuredEvent::builder("gkg", "test").build().unwrap());
         counter.0.load(Ordering::Relaxed)
     }

@@ -12,7 +12,7 @@ use orbit_billing::{QuotaService, SnowplowBillingTracker};
 use orbit_log_fields::{info, warn};
 use orbit_migrations::version::SCHEMA_VERSION;
 use orbit_server::active_schema::ActiveSchema;
-use orbit_server::analytics::{GitlabInstanceWatch, SnowplowAnalyticsTracker, consenting_tracker};
+use orbit_server::analytics::{ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker};
 use orbit_server::auth::JwtValidator;
 use orbit_server::cli::{Args, Mode};
 use orbit_server::cluster_health::ClusterHealthChecker;
@@ -289,11 +289,11 @@ async fn run_webserver(
         if config.analytics.follows_gitlab_setting() {
             instance.spawn_refresh(gitlab_client.clone());
         }
-        grpc_server = grpc_server.with_analytics(consenting_tracker(
+        grpc_server = grpc_server.with_analytics(Arc::new(ConsentGate::new(
             Arc::new(tracker.clone()),
             &config.analytics,
             &instance,
-        ));
+        )));
         analytics_tracker = Some(tracker);
     }
 

@@ -8,7 +8,7 @@ mod observer;
 use std::sync::Arc;
 
 use gitlab_client::GitlabClient;
-use orbit_analytics::{GitlabInstanceWatch, SnowplowAnalyticsTracker, consenting_tracker};
+use orbit_analytics::{ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker};
 use orbit_log_fields::warn;
 use orbit_server_config::{
     AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind,
@@ -54,13 +54,13 @@ impl IndexingAnalytics {
     }
 
     pub fn observer(&self) -> Option<Box<dyn IndexingObserver>> {
-        let tracker = consenting_tracker(
+        let tracker = ConsentGate::new(
             Arc::new(self.tracker.clone()?),
             &self.config,
             &self.instance,
         );
         Some(Box::new(SnowplowIndexingObserver::new(
-            tracker,
+            Arc::new(tracker),
             Arc::clone(&self.config),
             self.instance.clone(),
         )))
