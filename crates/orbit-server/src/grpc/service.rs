@@ -973,6 +973,7 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &TraversalPath) -> 
 mod tests {
     mod billing;
     mod commands;
+    mod compression;
     mod query_errors;
     mod quota;
     mod request_span;
