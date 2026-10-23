@@ -10,6 +10,7 @@ use parking_lot::RwLock;
 use crate::AnalyticsTracker;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(3600);
+const RETRY_INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Default)]
 pub struct GitlabInstanceWatch {
@@ -28,15 +29,21 @@ impl GitlabInstanceWatch {
         let latest = Arc::clone(&self.latest);
         tokio::spawn(async move {
             loop {
-                match client.instance().await {
-                    Ok(instance) => *latest.write() = instance,
-                    Err(error) => warn!(
-                        expanded(ERROR_MESSAGE) = %error,
-                        safe(ERROR_TYPE) = <&str>::from(&error),
-                        "failed to refresh the GitLab instance, keeping the last known one"
-                    ),
-                }
-                tokio::time::sleep(REFRESH_INTERVAL).await;
+                let wait = match client.instance().await {
+                    Ok(instance) => {
+                        *latest.write() = instance;
+                        REFRESH_INTERVAL
+                    }
+                    Err(error) => {
+                        warn!(
+                            expanded(ERROR_MESSAGE) = %error,
+                            safe(ERROR_TYPE) = <&str>::from(&error),
+                            "failed to refresh the GitLab instance, keeping the last known one"
+                        );
+                        RETRY_INTERVAL
+                    }
+                };
+                tokio::time::sleep(wait).await;
             }
         });
     }
