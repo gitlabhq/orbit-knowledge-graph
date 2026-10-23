@@ -15,7 +15,7 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use crate::error::GitlabClientError;
-use crate::types::{CloudConnectorToken, MergeRequestDiffBatch, ProjectInfo};
+use crate::types::{CloudConnectorToken, GitlabInstance, MergeRequestDiffBatch, ProjectInfo};
 use orbit_server_config::GitlabClientConfiguration;
 
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, GitlabClientError>> + Send>>;
@@ -178,6 +178,20 @@ impl GitlabClient {
             token: raw.token,
             exp,
         })
+    }
+
+    pub async fn instance(&self) -> Result<Option<GitlabInstance>, GitlabClientError> {
+        let url = format!("{}/api/v4/internal/orbit/instance", self.base_url);
+
+        let response = self.authenticated_get(&url).await?;
+        match response.status() {
+            StatusCode::OK => Ok(Some(response.json().await?)),
+            StatusCode::NOT_FOUND => Ok(None),
+            StatusCode::UNAUTHORIZED => Err(GitlabClientError::Unauthorized),
+            status => Err(GitlabClientError::Unexpected(format!(
+                "instance request returned status {status}"
+            ))),
+        }
     }
 
     pub async fn download_archive(
@@ -464,6 +478,7 @@ pub(crate) fn decode_token_exp(token: &str) -> Result<i64, GitlabClientError> {
 mod tests {
     use super::*;
     use crate::testing::{UNREACHABLE_URL, circuit_breaker};
+    use crate::types::{InstanceIdentity, InstanceSettings};
     use futures::future::BoxFuture;
 
     #[test]
@@ -702,6 +717,59 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn instance_returns_the_served_identity_and_settings_and_ignores_unknown_fields() {
+        use axum::Router;
+        use axum::routing::get;
+
+        let app = Router::new().route(
+            "/api/v4/internal/orbit/instance",
+            get(|| async {
+                axum::Json(serde_json::json!({
+                    "identity": {
+                        "instance_id": "a1b2",
+                        "unique_instance_id": "c3d4",
+                        "host_name": "gitlab.example.com",
+                        "instance_version": "18.6.0-ee",
+                    },
+                    "settings": { "product_usage_data_enabled": true },
+                }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let client =
+            GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
+
+        assert_eq!(
+            client.instance().await.unwrap(),
+            Some(GitlabInstance {
+                identity: InstanceIdentity {
+                    instance_id: Some("a1b2".to_string()),
+                    unique_instance_id: Some("c3d4".to_string()),
+                    host_name: Some("gitlab.example.com".to_string()),
+                },
+                settings: InstanceSettings {
+                    product_usage_data_enabled: true,
+                },
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn instance_is_none_when_gitlab_has_no_endpoint() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, axum::Router::new()).await.unwrap() });
+
+        let client =
+            GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
+
+        assert_eq!(client.instance().await.unwrap(), None);
+    }
+
     fn client_with_breaker(base_url: &str, breaker: &CircuitBreaker) -> GitlabClient {
         GitlabClient::new(config_with_resolve(base_url, None))
             .unwrap()
@@ -710,12 +778,15 @@ mod tests {
 
     type RequestCall = for<'a> fn(&'a GitlabClient) -> BoxFuture<'a, Result<(), GitlabClientError>>;
 
-    const REQUEST_CALLS: [(&str, RequestCall); 8] = [
+    const REQUEST_CALLS: [(&str, RequestCall); 9] = [
         ("project_info", |client| {
             Box::pin(async { client.project_info(1).await.map(drop) })
         }),
         ("cloud_connector_token", |client| {
             Box::pin(async { client.cloud_connector_token().await.map(drop) })
+        }),
+        ("instance", |client| {
+            Box::pin(async { client.instance().await.map(drop) })
         }),
         ("download_archive", |client| {
             Box::pin(async { client.download_archive(1, "main").await.map(drop) })
