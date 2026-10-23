@@ -3,7 +3,9 @@ use std::sync::Arc;
 use clickhouse_client::FromArrowColumn;
 use integration_testkit::{load_ontology, t};
 use orbit_server::active_schema::{ActiveSchema, SchemaSnapshot};
+use orbit_server::item_counts::{ItemCountService, ScopeItemCounts};
 use orbit_server_config::AppConfig;
+use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
 use crate::common::TestContext;
@@ -72,7 +74,7 @@ pub async fn query_cache_ttls(ctx: &TestContext) -> Vec<String> {
     read_cached_query_log(ctx, "Settings['query_cache_ttl']").await
 }
 
-async fn read_cached_query_log(ctx: &TestContext, column: &str) -> Vec<String> {
+pub async fn read_cached_query_log(ctx: &TestContext, column: &str) -> Vec<String> {
     ctx.execute("SYSTEM FLUSH LOGS").await;
     let batches = ctx
         .query(&format!(
@@ -84,6 +86,20 @@ async fn read_cached_query_log(ctx: &TestContext, column: &str) -> Vec<String> {
         ))
         .await;
     String::extract_column(&batches, 0).expect("query log column")
+}
+
+pub async fn count_items(
+    ctx: &TestContext,
+    security_context: &SecurityContext,
+    scopes: &[&str],
+) -> Vec<ScopeItemCounts> {
+    let scopes: Vec<TraversalPath> = scopes
+        .iter()
+        .map(|scope| TraversalPath::new_unchecked(*scope))
+        .collect();
+    ItemCountService::new(Arc::new(ctx.create_client()))
+        .count_items(&load_ontology(), security_context, &scopes)
+        .await
 }
 
 pub fn admin_context() -> SecurityContext {

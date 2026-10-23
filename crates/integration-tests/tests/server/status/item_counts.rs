@@ -1,16 +1,17 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use integration_testkit::{load_ontology, run_subtests_shared, t};
-use orbit_server::item_counts::ItemCountService;
-use orbit_utils::traversal_path::TraversalPath;
+use integration_testkit::{run_subtests_shared, t};
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
-use super::fixtures::{admin_context, query_cache_ttls, query_cache_usage, seed_namespaces};
+use super::fixtures::{
+    admin_context, count_items, query_cache_ttls, query_cache_usage, read_cached_query_log,
+    seed_namespaces, use_production_query_settings,
+};
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
 
 #[tokio::test]
 async fn item_counts() {
+    use_production_query_settings();
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     seed_namespaces(&ctx).await;
 
@@ -24,12 +25,10 @@ async fn item_counts() {
         security_manager_gets_vulnerability_count,
         role_on_another_path_does_not_expose_the_entity,
         missing_table_degrades_to_zero,
-        counts_written_within_the_ttl_stay_cached,
+        repeated_counts_read_the_cache_for_five_seconds,
         each_scope_gets_its_own_cache_entry,
-        counts_stay_cached_for_five_seconds,
-        many_scopes_are_counted_in_one_query,
-        nested_scopes_count_each_scope,
-        scopes_are_answered_in_request_order,
+        one_scope_counts_skip_the_array_join,
+        nested_scopes_count_rows_at_each_scope_once,
         each_scope_needs_its_own_role,
         a_hundred_scopes_are_counted_in_one_query,
     );
@@ -48,13 +47,11 @@ async fn count_many(
     security_context: &SecurityContext,
     scopes: &[&str],
 ) -> Vec<HashMap<String, i64>> {
-    let scopes: Vec<TraversalPath> = scopes
-        .iter()
-        .map(|s| TraversalPath::new_unchecked(*s))
-        .collect();
-    ItemCountService::new(Arc::new(ctx.create_client()))
-        .count_items(&load_ontology(), security_context, &scopes)
+    count_items(ctx, security_context, scopes)
         .await
+        .into_iter()
+        .map(|scope_counts| scope_counts.counts)
+        .collect()
 }
 
 fn role_on(paths: &[(&str, u32)]) -> SecurityContext {
@@ -149,23 +146,14 @@ async fn missing_table_degrades_to_zero(ctx: &TestContext) {
     assert_eq!(counts["Project"], 0);
 }
 
-async fn counts_written_within_the_ttl_stay_cached(ctx: &TestContext) {
-    let db = ctx.fork("item_counts_rows_written_later").await;
-    let insert_group = |id: i64| {
-        format!(
-            "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
-             ({id}, 'Group {id}', 'public', '1/950/{id}/')",
-            t("gl_group")
-        )
-    };
-    db.execute(&insert_group(9500)).await;
+async fn repeated_counts_read_the_cache_for_five_seconds(ctx: &TestContext) {
+    let db = ctx.fork("item_counts_cache_ttl").await;
 
-    let before = count(&db, &admin_context(), "1/950/").await;
-    db.execute(&insert_group(9501)).await;
-    let after = count(&db, &admin_context(), "1/950/").await;
+    count(&db, &admin_context(), "1/100/").await;
+    count(&db, &admin_context(), "1/100/").await;
 
-    assert_eq!((before["Group"], after["Group"]), (1, 1));
     assert_eq!(query_cache_usage(&db).await, ["Write", "Read"]);
+    assert_eq!(query_cache_ttls(&db).await, ["5", "5"]);
 }
 
 async fn each_scope_gets_its_own_cache_entry(ctx: &TestContext) {
@@ -178,38 +166,23 @@ async fn each_scope_gets_its_own_cache_entry(ctx: &TestContext) {
     assert_eq!(query_cache_usage(&db).await, ["Write", "Write"]);
 }
 
-async fn counts_stay_cached_for_five_seconds(ctx: &TestContext) {
-    let db = ctx.fork("item_counts_cache_ttl").await;
+async fn one_scope_counts_skip_the_array_join(ctx: &TestContext) {
+    let db = ctx.fork("item_counts_query_shape").await;
 
-    count(&db, &admin_context(), "1/").await;
+    count_many(&db, &admin_context(), &["1/100/"]).await;
+    count_many(&db, &admin_context(), &["1/100/", "1/101/"]).await;
 
-    assert_eq!(query_cache_ttls(&db).await, ["5"]);
+    let array_joins =
+        read_cached_query_log(&db, "toString(position(query, 'ARRAY JOIN') > 0)").await;
+    assert_eq!(array_joins, ["0", "1"]);
 }
 
-async fn many_scopes_are_counted_in_one_query(ctx: &TestContext) {
-    let db = ctx.fork("item_counts_many_scopes").await;
-
-    let counts = count_many(&db, &admin_context(), &["1/100/", "1/101/"]).await;
-
-    let projects: Vec<i64> = counts.iter().map(|c| c["Project"]).collect();
-    let merge_requests: Vec<i64> = counts.iter().map(|c| c["MergeRequest"]).collect();
-    assert_eq!((projects, merge_requests), (vec![2, 1], vec![1, 1]));
-    assert_eq!(query_cache_usage(&db).await, ["Write"]);
-}
-
-async fn nested_scopes_count_each_scope(ctx: &TestContext) {
+async fn nested_scopes_count_rows_at_each_scope_once(ctx: &TestContext) {
     let counts = count_many(ctx, &admin_context(), &["1/", "1/100/", "1/100/1000/"]).await;
 
     let projects: Vec<i64> = counts.iter().map(|c| c["Project"]).collect();
     let groups: Vec<i64> = counts.iter().map(|c| c["Group"]).collect();
     assert_eq!((projects, groups), (vec![5, 2, 1], vec![2, 1, 0]));
-}
-
-async fn scopes_are_answered_in_request_order(ctx: &TestContext) {
-    let counts = count_many(ctx, &admin_context(), &["1/101/", "1/", "1/101/", "1/107/"]).await;
-
-    let projects: Vec<i64> = counts.iter().map(|c| c["Project"]).collect();
-    assert_eq!(projects, [1, 5, 1, 1]);
 }
 
 async fn each_scope_needs_its_own_role(ctx: &TestContext) {

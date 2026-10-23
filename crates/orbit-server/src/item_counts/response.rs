@@ -1,21 +1,19 @@
 use std::collections::HashMap;
 
 use ontology::Ontology;
-use orbit_utils::traversal_path::TraversalPath;
 
+use super::ScopeItemCounts;
 use crate::proto::{DomainItemCount, EntityItemCount, GetItemCountsResponse, NamespaceItemCounts};
 
 pub fn build_item_counts_response(
     ontology: &Ontology,
-    scopes: &[TraversalPath],
-    counts: &[HashMap<String, i64>],
+    counts: &[ScopeItemCounts],
 ) -> GetItemCountsResponse {
-    let namespaces = scopes
+    let namespaces = counts
         .iter()
-        .zip(counts)
-        .map(|(scope, counts)| NamespaceItemCounts {
-            traversal_path: scope.as_str().to_string(),
-            domains: build_domain_item_counts(ontology, counts),
+        .map(|scope_counts| NamespaceItemCounts {
+            traversal_path: scope_counts.scope.as_str().to_string(),
+            domains: build_domain_item_counts(ontology, &scope_counts.counts),
         })
         .collect();
     GetItemCountsResponse {

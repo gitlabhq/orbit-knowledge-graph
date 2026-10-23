@@ -5,6 +5,8 @@ use orbit_server_config::QueryConfig;
 use serde::Serialize;
 use tonic::Status;
 
+const COUNT_CACHE_TTL_SECONDS: u32 = 5;
+
 pub(crate) async fn fetch_status_query_batches(
     client: &ArrowClickHouseClient,
     sql: &str,
@@ -35,26 +37,9 @@ pub(crate) fn build_prefix_match_condition(
 ) -> String {
     let conditions: Vec<String> = indices
         .into_iter()
-        .map(|index| {
-            format!(
-                "startsWith({column}, {})",
-                build_prefix_placeholder(param, index)
-            )
-        })
+        .map(|index| format!("startsWith({column}, {{{param}_{index}:String}})"))
         .collect();
     format!("({})", conditions.join(" OR "))
-}
-
-pub(crate) fn build_prefix_array(param: &str, indices: impl IntoIterator<Item = usize>) -> String {
-    let placeholders: Vec<String> = indices
-        .into_iter()
-        .map(|index| build_prefix_placeholder(param, index))
-        .collect();
-    format!("[{}]", placeholders.join(", "))
-}
-
-fn build_prefix_placeholder(param: &str, index: usize) -> String {
-    format!("{{{param}_{index}:String}}")
 }
 
 pub(crate) fn bind_prefix_parameters(
@@ -77,6 +62,13 @@ pub(crate) fn map_column_extraction_error(error: impl std::fmt::Display) -> Stat
 pub(crate) fn uncached_query_config() -> QueryConfig {
     QueryConfig {
         use_query_cache: Some(false),
+        ..orbit_server_config::query::default_config()
+    }
+}
+
+pub(crate) fn count_query_config() -> QueryConfig {
+    QueryConfig {
+        query_cache_ttl: Some(COUNT_CACHE_TTL_SECONDS),
         ..orbit_server_config::query::default_config()
     }
 }

@@ -746,10 +746,14 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
         let ctx = extract_request_context(&request, &self.validator)?;
         let req = request.get_ref();
         let single_path = req.traversal_paths.is_empty();
-        let requested_paths = if single_path {
-            slice::from_ref(&req.traversal_path)
-        } else {
-            req.traversal_paths.as_slice()
+        let requested_paths = match (single_path, req.traversal_path.is_empty()) {
+            (true, _) => slice::from_ref(&req.traversal_path),
+            (false, true) => req.traversal_paths.as_slice(),
+            (false, false) => {
+                return Err(Status::invalid_argument(
+                    "set traversal_path or traversal_paths, not both",
+                ));
+            }
         };
         let paths = parse_authorized_paths(&ctx.claims, requested_paths)?;
         let security_context = build_security_context(&ctx.claims)
@@ -764,7 +768,7 @@ impl crate::proto::orbit_service_server::OrbitService for OrbitServiceImpl {
             .item_counts
             .count_items(&schema.ontology, &security_context, &paths)
             .await;
-        let mut response = build_item_counts_response(&schema.ontology, &paths, &counts);
+        let mut response = build_item_counts_response(&schema.ontology, &counts);
         if single_path {
             response.domains = response
                 .namespaces

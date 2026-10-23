@@ -1,12 +1,9 @@
-use std::sync::Arc;
-
 use integration_testkit::run_subtests_shared;
-use orbit_server::item_counts::{ItemCountService, build_item_counts_response};
+use orbit_server::item_counts::build_item_counts_response;
 use orbit_server::proto::{DomainItemCount, NamespaceItemCounts};
-use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
-use super::fixtures::{admin_context, pinned_schema, seed_namespaces};
+use super::fixtures::{admin_context, count_items, pinned_schema, seed_namespaces};
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
 
 #[tokio::test]
@@ -39,15 +36,8 @@ async fn respond_many(
     security_context: &SecurityContext,
     paths: &[&str],
 ) -> Vec<NamespaceItemCounts> {
-    let schema = pinned_schema();
-    let paths: Vec<TraversalPath> = paths
-        .iter()
-        .map(|path| TraversalPath::new_unchecked(*path))
-        .collect();
-    let counts = ItemCountService::new(Arc::new(ctx.create_client()))
-        .count_items(&schema.ontology, security_context, &paths)
-        .await;
-    build_item_counts_response(&schema.ontology, &paths, &counts).namespaces
+    let counts = count_items(ctx, security_context, paths).await;
+    build_item_counts_response(&pinned_schema().ontology, &counts).namespaces
 }
 
 fn count_of(domains: &[DomainItemCount], domain: &str, entity: &str) -> i64 {
@@ -92,17 +82,23 @@ async fn namespaces_keep_the_request_order(ctx: &TestContext) {
     let reporter =
         SecurityContext::new_with_roles(1, vec![AuthorizedPath::new("1/101/", 20)]).unwrap();
 
-    let namespaces = respond_many(ctx, &reporter, &["1/101/", "1/100/", "1/101/1001/"]).await;
+    let namespaces = respond_many(
+        ctx,
+        &reporter,
+        &["1/101/", "1/100/", "1/101/1001/", "1/101/"],
+    )
+    .await;
 
     let paths: Vec<&str> = namespaces
         .iter()
         .map(|n| n.traversal_path.as_str())
         .collect();
-    assert_eq!(paths, ["1/101/", "1/100/", "1/101/1001/"]);
+    assert_eq!(paths, ["1/101/", "1/100/", "1/101/1001/", "1/101/"]);
     assert_eq!(count_of(&namespaces[0].domains, "core", "Project"), 1);
     assert!(namespaces[1].domains.is_empty());
     assert_eq!(
         count_of(&namespaces[2].domains, "code_review", "MergeRequest"),
         1
     );
+    assert_eq!(namespaces[3].domains, namespaces[0].domains);
 }
