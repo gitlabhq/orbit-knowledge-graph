@@ -10,6 +10,7 @@ testkit = []
 
 [dependencies]
 orbit-server-config = { path = "../orbit-server-config" }
+gitlab-client = { workspace = true }
 labkit-events = { workspace = true }
 parking_lot = { workspace = true }
 regress = { workspace = true }
