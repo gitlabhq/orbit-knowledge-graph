@@ -47,7 +47,7 @@ To create the database and identities:
 
    ```shell
    docker run --rm --entrypoint cat \
-     registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:0.134.0 \
+     registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:0.154.1 \
      /usr/share/gkg/clickhouse-setup.sql
    ```
 
@@ -155,12 +155,12 @@ These errors are expected.
 ## Make the credentials available to GitLab Orbit
 
 GitLab Orbit reads the shared key and the ClickHouse passwords from a Kubernetes Secret.
-The values file in the next section expects a Secret named `gkg-secrets`.
+The values file in the next section expects a Secret named `orbit-secrets`.
 
 To make the credentials available:
 
 1. Create the GitLab Orbit namespace.
-1. In the GitLab Orbit namespace, create a Secret named `gkg-secrets` with these keys:
+1. In the GitLab Orbit namespace, create a Secret named `orbit-secrets` with these keys:
 
    | Key | Holds |
    |-----|-------|
@@ -175,7 +175,7 @@ To make the credentials available:
    Do not store the plaintext elsewhere.
 
 If the webserver terminates TLS itself, the webserver also needs a certificate for the gRPC endpoint.
-The values file in the next section expects the certificate in a Secret named `gkg-webserver-tls`.
+The values file in the next section expects the certificate in a Secret named `orbit-webserver-tls`.
 
 ## Install GitLab Orbit
 
@@ -187,14 +187,14 @@ To install GitLab Orbit:
 
    ```yaml
    image:
-     tag: "0.134.0"
+     tag: "0.154.1"
 
    secrets:
-     gitlabJwtVerifyingKey: {secretName: gkg-secrets}
-     gitlabJwtSigningKey: {secretName: gkg-secrets}
-     datalakePassword: {secretName: gkg-secrets}
-     graphPassword: {secretName: gkg-secrets}
-     graphReadPassword: {secretName: gkg-secrets}
+     gitlabJwtVerifyingKey: {secretName: orbit-secrets}
+     gitlabJwtSigningKey: {secretName: orbit-secrets}
+     datalakePassword: {secretName: orbit-secrets}
+     graphPassword: {secretName: orbit-secrets}
+     graphReadPassword: {secretName: orbit-secrets}
 
    # Off by default. Creates the graph schema on first run and schedules indexing.
    dispatcher:
@@ -227,11 +227,15 @@ To install GitLab Orbit:
      service:
        type: ClusterIP
 
+   # Snowplow analytics. On by default in chart 5.x.
+   analytics:
+     enabled: false
+
    # Only when the webserver terminates TLS itself. Omit both keys if a load
    # balancer terminates in front of it.
    tls:
      enabled: true
-     existingSecret: gkg-webserver-tls
+     existingSecret: orbit-webserver-tls
    ```
 
 1. Install the chart.
@@ -240,7 +244,7 @@ To install GitLab Orbit:
    ```shell
    helm upgrade --install orbit \
      oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit \
-     --version 4.4.0 \
+     --version 5.0.0 \
      --namespace gitlab-orbit \
      --create-namespace \
      --values orbit-values.yaml
@@ -252,8 +256,8 @@ To install GitLab Orbit:
    kubectl -n gitlab-orbit get pods
    ```
 
-The chart turns everything else off by default, including metrics, autoscaling, and analytics.
-Leave these features off on GitLab Self-Managed.
+The chart turns everything else off by default, including metrics and autoscaling.
+Leave these features and analytics off on GitLab Self-Managed.
 
 ### TLS and network requirements
 
