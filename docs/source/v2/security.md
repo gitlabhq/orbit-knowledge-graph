@@ -24,10 +24,6 @@ title: GitLab Orbit security
 
 A query returns only the data that your role lets you see in GitLab, even when an agent sends it.
 
-The [local graph](cli.md#local-graph) has no authorization layer.
-Anyone who can read the graph file can read all of it.
-For more information, see [storage and privacy](cli.md#storage-and-privacy).
-
 ## Roles
 
 A role for a top-level group applies to each subgroup and project in it.
@@ -75,7 +71,6 @@ Results include only what the token owner can see in GitLab.
 |---------------|----------------|
 | [REST API](queries/api.md) | A personal access token with the `read_api` scope, or a fine-grained personal access token, sent as a Bearer token |
 | [GitLab Orbit CLI](cli.md) | Your `glab auth login` credential, or a personal access token with the `read_api` scope in `GITLAB_TOKEN` |
-| [Local graph](cli.md#local-graph) | No authentication. The local graph works offline and has no authorization layer. |
 | [Model Context Protocol (MCP) endpoint](agents/mcp.md) | GitLab OAuth, or a personal access token with the `mcp_orbit` or `read_api` scope. Native HTTP clients request the `mcp_orbit` scope. |
 | [GitLab Duo Agent Platform](agents/duo.md) | No token to configure |
 | [Service account](#service-accounts) | A personal access token of a bot user, scoped to the groups where the account is a member |
