@@ -71,8 +71,9 @@ Useful for scripting, debugging, and exploring the schema before writing queries
 Requires `glab` 1.117 or later.
 
 `glab` resolves your credential and passes it to the binary, so no extra
-authentication step is needed. Use `--hostname` to target a specific GitLab
-instance, and `--yes` to skip the one-time run confirmation in scripts.
+authentication step is needed. Use `--yes` to skip the install and one-time run
+confirmations in scripts. Put it before the subcommand, as in
+`glab orbit --yes query ...`.
 
 | Subcommand | Endpoint | Purpose |
 |------------|----------|---------|
