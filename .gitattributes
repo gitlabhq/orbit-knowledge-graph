@@ -1,1 +1,2 @@
 crates/duckdb-client/third_party/duckdb-fts-sources.tar.gz binary
+crates/orbit-server-config/src/proto/orbit.config.v1.rs gitlab-generated

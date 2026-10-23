@@ -1,0 +1,414 @@
+syntax = "proto3";
+package orbit.config.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/descriptor.proto";
+
+// Schema for the Orbit server configuration. config/default.yaml declares a
+// deployment default for every field here, and the loader merges the overlay
+// and secret files over it before decoding.
+//
+// Every singular field has presence, so an explicit null is unset rather than
+// zero. Fields the server cannot run without are marked required.
+//
+// Not a wire format. These messages are only ever decoded from a merged
+// configuration document, so the field numbers carry no compatibility
+// guarantee.
+
+extend google.protobuf.MessageOptions {
+  // A key a closed message does not declare is an error, not ignored.
+  bool closed = 50000;
+}
+
+message Config {
+  optional string grpc_bind_address = 1 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
+  optional uint64 jwt_clock_skew_secs = 2 [(buf.validate.field).required = true];
+  optional string health_check_url = 3;
+  ProbeServer probe_server = 4 [(buf.validate.field).required = true];
+  Nats nats = 5 [(buf.validate.field).required = true];
+  ClickHouse datalake = 6 [(buf.validate.field).required = true];
+  ClickHouse graph = 7 [(buf.validate.field).required = true];
+  ClickHouseSetup clickhouse_setup = 8 [(buf.validate.field).required = true];
+  Engine engine = 9 [(buf.validate.field).required = true];
+  Gitlab gitlab = 10 [(buf.validate.field).required = true];
+  Schedule schedule = 11 [(buf.validate.field).required = true];
+  HealthCheck health_check = 12 [(buf.validate.field).required = true];
+  Metrics metrics = 13 [(buf.validate.field).required = true];
+  Tls tls = 14 [(buf.validate.field).required = true];
+  QuerySettings query = 15 [(buf.validate.field).required = true];
+  Grpc grpc = 16 [(buf.validate.field).required = true];
+  Schema schema = 17 [(buf.validate.field).required = true];
+  Analytics analytics = 18 [(buf.validate.field).required = true];
+  Billing billing = 19 [(buf.validate.field).required = true];
+  map<string, FeatureScope> features = 20 [(buf.validate.field).map.keys.string = {in: ["code_graph_incremental"]}];
+  ObjectStorage object_storage = 21 [(buf.validate.field).required = true];
+}
+
+message ProbeServer {
+  optional string bind_address = 1;
+}
+
+message Nats {
+  optional string url = 1 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
+  optional string username = 2;
+  optional string password = 3;
+  optional string tls_ca_cert_path = 4;
+  optional string tls_cert_path = 5;
+  optional string tls_key_path = 6;
+  optional uint64 connection_timeout_secs = 7 [(buf.validate.field).required = true];
+  optional uint64 request_timeout_secs = 8 [(buf.validate.field).required = true];
+  optional uint64 ack_wait_secs = 9 [(buf.validate.field).required = true];
+  optional uint32 max_deliver = 10;
+  optional uint64 subscription_buffer_size = 11 [(buf.validate.field).required = true];
+  optional string consumer_name = 12;
+  optional uint64 batch_size = 13 [(buf.validate.field).required = true];
+  optional bool auto_create_streams = 14 [(buf.validate.field).required = true];
+  optional uint64 stream_replicas = 15 [(buf.validate.field).required = true];
+  optional uint64 stream_max_age_secs = 16;
+  optional int64 stream_max_bytes = 17;
+  optional int64 stream_max_messages = 18;
+  optional uint64 fetch_expires_secs = 19 [(buf.validate.field).required = true];
+  optional uint64 consumer_inactive_threshold_secs = 20 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 60];
+  optional uint64 release_gc_idle_threshold_secs = 21 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 600];
+}
+
+message ClickHouse {
+  optional string url = 1 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
+  optional string database = 2 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
+  optional string username = 3 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
+  optional string password = 4;
+  optional bool replicated = 5 [(buf.validate.field).required = true];
+  map<string, string> session_settings = 6;
+  map<string, string> insert_settings = 7;
+  Profiling profiling = 8 [(buf.validate.field).required = true];
+}
+
+message Profiling {
+  optional bool enabled = 1 [(buf.validate.field).required = true];
+  optional bool explain = 2 [(buf.validate.field).required = true];
+  optional bool query_log = 3 [(buf.validate.field).required = true];
+  optional bool processors = 4 [(buf.validate.field).required = true];
+  optional bool instance_health = 5 [(buf.validate.field).required = true];
+}
+
+message Gitlab {
+  optional string base_url = 1;
+  optional string resolve_host = 2;
+  Jwt jwt = 3 [(buf.validate.field).required = true];
+}
+
+message Jwt {
+  optional string signing_key = 1;
+  optional string verifying_key = 2;
+}
+
+message Tls {
+  option (closed) = true;
+
+  optional string cert_path = 1;
+  optional string key_path = 2;
+  ListenerTls internal = 3 [(buf.validate.field).required = true];
+}
+
+message ListenerTls {
+  option (closed) = true;
+
+  optional bool enabled = 1 [(buf.validate.field).required = true];
+  optional string cert_path = 2;
+  optional string key_path = 3;
+}
+
+message ClickHouseSetup {
+  optional string admin_username = 1 [(buf.validate.field).required = true];
+  optional string admin_password = 2;
+  optional string writer_password = 3;
+  optional string reader_password = 4;
+  optional string siphon_reader_password = 5;
+}
+
+enum IndexerModule {
+  sdlc = 0;
+  code = 1;
+  namespace_deletion = 2;
+}
+
+message SubscriptionConfig {
+  optional string concurrency_group = 1;
+  optional uint32 max_attempts = 2;
+  optional uint64 retry_interval_secs = 3;
+  optional bool dead_letter_on_exhaustion = 4;
+  optional uint32 max_ack_pending = 5;
+}
+
+message DatalakeRetry {
+  optional uint64 halving_initial_block_size = 1 [(buf.validate.field).required = true];
+  optional uint64 halving_min_block_size = 2 [(buf.validate.field).required = true];
+}
+
+message EntityHandler {
+  optional uint64 datalake_batch_size = 1;
+  optional uint64 system_notes_resolve_lookup_batch_size = 2 [(buf.validate.field).required = true];
+  map<string, uint64> batch_size_overrides = 3;
+}
+
+message CodeIndexingPipeline {
+  optional uint64 max_file_size_bytes = 1 [(buf.validate.field).required = true];
+  optional uint64 max_files = 2 [(buf.validate.field).required = true];
+  optional uint64 max_total_bytes = 3 [(buf.validate.field).required = true];
+  optional uint64 max_repository_files = 4 [(buf.validate.field).required = true];
+  optional uint64 source_memory_budget_bytes = 5 [(buf.validate.field).required = true];
+  optional bool source_compress_spill = 6 [(buf.validate.field).required = true];
+  optional uint64 worker_threads = 7 [(buf.validate.field).required = true];
+  optional uint64 max_concurrent_languages = 8 [(buf.validate.field).required = true];
+  optional uint64 per_file_timeout_ms = 9 [(buf.validate.field).required = true];
+  optional uint64 per_file_parse_timeout_ms = 10 [(buf.validate.field).required = true];
+  optional uint64 per_file_walk_timeout_ms = 11 [(buf.validate.field).required = true];
+  optional uint64 per_file_ssa_timeout_ms = 12 [(buf.validate.field).required = true];
+  optional uint64 cross_file_resolve_timeout_ms = 13 [(buf.validate.field).required = true];
+  optional uint64 max_tree_depth = 14 [(buf.validate.field).required = true];
+  optional uint64 max_cross_file_names = 15 [(buf.validate.field).required = true];
+  optional uint64 max_manifest_bytes = 16 [(buf.validate.field).required = true];
+  optional uint64 max_file_edges = 17 [(buf.validate.field).required = true];
+  optional uint64 job_timeout_secs = 18 [(buf.validate.field).required = true];
+  optional uint64 fetch_concurrency = 19 [(buf.validate.field).required = true];
+  optional uint64 archive_storage_budget = 20 [(buf.validate.field).required = true];
+  optional uint64 archive_tenant_budget = 21 [(buf.validate.field).required = true];
+  optional uint64 archive_lease_ttl_secs = 22 [(buf.validate.field).required = true];
+  optional uint64 archive_lease_max_wait_secs = 23 [(buf.validate.field).required = true];
+  optional uint64 write_slice_rows = 24 [(buf.validate.field).required = true];
+  optional uint64 write_max_concurrent = 25 [(buf.validate.field).required = true];
+  optional uint64 small_repo_max_files = 26 [(buf.validate.field).required = true];
+  optional uint64 small_indexing_slots = 27;
+  optional uint64 big_indexing_slots = 28;
+}
+
+message CodeIndexingTaskHandler {
+  CodeIndexingPipeline pipeline = 1 [(buf.validate.field).required = true];
+}
+
+// The YAML keys are kebab-case, which protobuf field names cannot be, so
+// json_name carries them.
+message Handlers {
+  EntityHandler entity_handler = 1 [json_name = "entity-handler", (buf.validate.field).required = true];
+  CodeIndexingTaskHandler code_indexing_task = 2 [json_name = "code-indexing-task", (buf.validate.field).required = true];
+}
+
+message Engine {
+  optional uint64 max_concurrent_workers = 1;
+  map<string, uint64> concurrency_groups = 2;
+  map<string, SubscriptionConfig> topics = 3;
+  Handlers handlers = 4 [(buf.validate.field).required = true];
+  DatalakeRetry datalake_retry = 5 [(buf.validate.field).required = true];
+  repeated IndexerModule modules = 6;
+}
+
+// The Rust task structs flatten a single-field ScheduleConfiguration, so cron
+// sits directly on each task.
+message GlobalDispatcher {
+  optional string cron = 1 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
+}
+
+message NamespaceDispatcher {
+  optional string cron = 1 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
+  optional uint64 sweep_interval_secs = 2 [(buf.validate.field).required = true];
+}
+
+message SiphonRouter {
+  optional string events_stream_name = 1 [(buf.validate.field).required = true];
+  optional uint64 batch_size = 2 [(buf.validate.field).required = true];
+}
+
+message CodeBackfillSweep {
+  optional string cron = 1 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
+  optional uint64 publish_window = 2 [(buf.validate.field).required = true];
+  optional uint64 stale_sweeps_per_tick = 3 [(buf.validate.field).required = true];
+}
+
+message TableCleanup {
+  optional string cron = 1 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
+}
+
+message NamespaceDeletionScheduler {
+  optional string cron = 1 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
+}
+
+message MigrationCompletion {
+  optional string cron = 1 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
+}
+
+message StaleEdgeReconciliation {
+  optional string cron = 1 [(buf.validate.field).required = true, (buf.validate.field).string.min_len = 1];
+  optional uint64 lookback_secs = 2 [(buf.validate.field).required = true];
+}
+
+message ScheduledTasks {
+  GlobalDispatcher global = 1 [(buf.validate.field).required = true];
+  NamespaceDispatcher namespace = 2 [(buf.validate.field).required = true];
+  SiphonRouter siphon = 3 [(buf.validate.field).required = true];
+  CodeBackfillSweep code_backfill = 4 [json_name = "code-backfill", (buf.validate.field).required = true];
+  TableCleanup table_cleanup = 5 [json_name = "table-cleanup", (buf.validate.field).required = true];
+  NamespaceDeletionScheduler namespace_deletion = 6 [json_name = "namespace-deletion", (buf.validate.field).required = true];
+  MigrationCompletion migration_completion = 7 [json_name = "migration-completion", (buf.validate.field).required = true];
+  StaleEdgeReconciliation stale_edge_reconciliation = 8 [json_name = "stale-edge-reconciliation", (buf.validate.field).required = true];
+}
+
+message Schedule {
+  ScheduledTasks tasks = 1 [(buf.validate.field).required = true];
+}
+
+message NamespaceTarget {
+  optional string namespace = 1 [(buf.validate.field).required = true];
+  repeated string deployments = 2;
+  repeated string stateful_sets = 3 [json_name = "statefulSets"];
+}
+
+message HealthCheck {
+  optional string bind_address = 1 [(buf.validate.field).required = true];
+  repeated NamespaceTarget targets = 2;
+}
+
+message Grpc {
+  optional uint64 keepalive_interval_secs = 1 [(buf.validate.field).required = true];
+  optional uint64 keepalive_timeout_secs = 2 [(buf.validate.field).required = true];
+  optional uint64 tcp_keepalive_secs = 3 [(buf.validate.field).required = true];
+  optional uint32 connection_window_size = 4 [(buf.validate.field).required = true];
+  optional uint32 stream_window_size = 5 [(buf.validate.field).required = true];
+  optional uint64 concurrency_limit = 6 [(buf.validate.field).required = true];
+  optional uint64 max_connection_age_secs = 7 [(buf.validate.field).required = true];
+  optional uint64 max_connection_age_grace_secs = 8 [(buf.validate.field).required = true];
+  optional uint64 stream_timeout_secs = 9 [(buf.validate.field).required = true];
+  optional uint32 max_header_list_size_bytes = 10 [(buf.validate.field).required = true];
+  optional uint64 result_chunk_bytes = 11 [(buf.validate.field).required = true, (buf.validate.field).uint64 = {gte: 65536, lte: 4194304}];
+  optional uint64 max_result_bytes = 12 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 1048576];
+}
+
+message QueryConfig {
+  optional uint64 max_execution_time = 1;
+  optional uint64 max_memory_usage = 2;
+  optional uint64 max_bytes_to_read = 3;
+  optional uint64 max_rows_to_read = 4;
+  optional uint64 max_rows_in_set = 5;
+  optional uint64 max_ast_elements = 6;
+  optional uint64 max_expanded_ast_elements = 7;
+  optional uint64 max_ast_depth = 8;
+  optional bool use_query_cache = 9;
+  optional uint32 query_cache_ttl = 10;
+}
+
+message QuerySettings {
+  QueryConfig default = 1 [(buf.validate.field).required = true];
+  map<string, QueryConfig> overrides = 2;
+}
+
+message ExpandedLogs {
+  optional bool global_override = 1 [(buf.validate.field).required = true];
+  repeated uint64 root_namespace_ids = 2;
+}
+
+message Otel {
+  optional bool enabled = 1 [(buf.validate.field).required = true];
+  optional string endpoint = 2 [(buf.validate.field).required = true];
+}
+
+message Prometheus {
+  optional bool enabled = 1 [(buf.validate.field).required = true];
+  optional uint32 port = 2;
+}
+
+message Metrics {
+  optional string log_level = 1;
+  ExpandedLogs expanded_logs = 2 [(buf.validate.field).required = true];
+  Otel otel = 3 [(buf.validate.field).required = true];
+  Prometheus prometheus = 4 [(buf.validate.field).required = true];
+}
+
+message Schema {
+  optional uint32 max_retained_versions = 1 [(buf.validate.field).required = true, (buf.validate.field).uint32.gte = 2];
+  optional uint64 version_poll_interval_secs = 2 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 1];
+  optional uint64 indexer_schema_wait_timeout_secs = 3 [(buf.validate.field).required = true, (buf.validate.field).uint64.gte = 1];
+}
+
+enum DeploymentKind {
+  self_managed = 0;
+  com = 1;
+  dedicated = 2;
+}
+
+enum DeploymentEnvironment {
+  development = 0;
+  staging = 1;
+  production = 2;
+}
+
+message Deployment {
+  optional DeploymentKind type = 1 [(buf.validate.field).required = true];
+  optional DeploymentEnvironment environment = 2 [(buf.validate.field).required = true];
+}
+
+message Analytics {
+  optional bool enabled = 1 [(buf.validate.field).required = true];
+  optional string collector_url = 2 [(buf.validate.field).required = true];
+  Deployment deployment = 3 [(buf.validate.field).required = true];
+}
+
+enum BillingAuthMode {
+  oidc = 0;
+  cloud_connector = 1;
+}
+
+enum QuotaAuthMode {
+  admin_token = 0;
+  license_checksum = 1;
+}
+
+message Quota {
+  optional bool enabled = 1 [(buf.validate.field).required = true];
+  optional string customers_dot_url = 2 [(buf.validate.field).required = true];
+  optional QuotaAuthMode auth_mode = 3 [(buf.validate.field).required = true];
+  optional string api_user = 4;
+  optional string api_token = 5;
+  optional uint64 request_timeout_ms = 6 [(buf.validate.field).required = true];
+  optional uint64 fallback_cache_ttl_secs = 7 [(buf.validate.field).required = true];
+}
+
+message Billing {
+  optional bool enabled = 1 [(buf.validate.field).required = true];
+  optional string collector_url = 2 [(buf.validate.field).required = true];
+  optional BillingAuthMode auth_mode = 3 [(buf.validate.field).required = true];
+  Quota quota = 4 [(buf.validate.field).required = true];
+}
+
+message FeatureScope {
+  option (closed) = true;
+
+  optional bool enabled = 1 [(buf.validate.field).required = true];
+  repeated int64 namespaces = 2;
+}
+
+enum ObjectStorageProvider {
+  s3 = 0;
+  gcs = 1;
+  local = 2;
+}
+
+enum ObjectStorageAuth {
+  identity = 0;
+  static = 1;
+}
+
+message ObjectStorage {
+  optional bool enabled = 1 [(buf.validate.field).required = true];
+  optional ObjectStorageProvider provider = 2 [(buf.validate.field).required = true];
+  optional string bucket = 3 [(buf.validate.field).required = true];
+  optional string prefix = 4 [(buf.validate.field).required = true];
+  optional ObjectStorageAuth auth = 5 [(buf.validate.field).required = true];
+  optional string region = 6;
+  optional string endpoint = 7;
+  optional bool path_style = 8 [(buf.validate.field).required = true];
+  optional bool allow_http = 9 [(buf.validate.field).required = true];
+  optional string ca_cert_path = 10;
+  optional string access_key_id = 11;
+  optional string secret_access_key = 12;
+  optional string session_token = 13;
+  optional string service_account_key = 14;
+}
