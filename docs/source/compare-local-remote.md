@@ -216,7 +216,7 @@ GitLab Orbit Remote and Local index code in the same languages.
 | C++ | {{< yes >}} | {{< yes >}} |
 | PHP | {{< yes >}} | {{< yes >}} |
 | Bash/Shell | {{< yes >}} | {{< no >}} |
-| Dockerfile/Containerfile (Remote only with the incremental engine) | {{< yes >}} | {{< no >}} |
+| Dockerfile/Containerfile (Remote: when enabled for your namespace) | {{< yes >}} | {{< no >}} |
 
 ## Work scope and freshness
 
