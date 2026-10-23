@@ -116,6 +116,29 @@ To add the tools:
 To edit the flow in VS Code, see
 [Edit a flow](https://docs.gitlab.com/user/duo_agent_platform/flows/custom/?tab=VS+Code#edit-a-flow).
 
+### Give a flow the local graph
+
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259938) in GitLab 19.6 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `duo_developer_orbit`. Disabled by default.
+
+{{< /history >}}
+
+> [!flag]
+> The availability of this feature is controlled by a feature flag.
+> For more information, see the history.
+
+When a flow has a checkout of the project, the [GitLab Orbit CLI](../cli.md) installs the
+[GitLab Orbit skill](_index.md#gitlab-orbit-skill) and indexes the checkout before the agent starts.
+The agent can then search the code of the current branch with the [local graph](../cli.md#local-graph).
+The skill also covers your GitLab data when **Other Foundational Agents** is selected
+in the GitLab Orbit preferences of the user who triggers the flow.
+
+Prerequisites:
+
+- The flow does not set [`coding_environment: none`](https://docs.gitlab.com/user/duo_agent_platform/flows/custom_flows_schema/#coding_environment).
+- The agent components that use the skill have the `run_command` tool, so they can run `glab orbit` commands.
+
 ## Example prompts
 
 Ask these questions in any agent or flow that uses GitLab Orbit:
