@@ -1,22 +1,35 @@
 use super::*;
-use crate::grpc::server::with_compression;
+use crate::grpc::GrpcServer;
 use tonic::codec::CompressionEncoding;
 
-async fn response_encoding(accept_encoding: Option<&'static str>) -> Option<String> {
+const CURRENT_PATH: &str = "/orbit.v1.OrbitService/";
+const LEGACY_PATH: &str = "/gkg.v1.KnowledgeGraphService/";
+
+async fn serve_registered_server() -> tonic::transport::Channel {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        tonic::transport::Server::builder()
-            .add_service(with_compression(OrbitServiceServer::new(test_service())))
-            .serve_with_incoming(TcpListenerStream::new(listener))
-            .await
-            .unwrap();
-    });
-    let channel = tonic::transport::Endpoint::from_shared(format!("http://{addr}"))
+    let defaults = orbit_server_config::AppConfig::embedded_defaults();
+    let server = GrpcServer::new(
+        Arc::new(mock_validator()),
+        ActiveSchema::pinned(test_ontology()),
+        test_client(),
+        ClusterHealthChecker::default().into_arc(),
+        None,
+        defaults.grpc,
+        Arc::new(defaults.analytics),
+    );
+    tokio::spawn(server.run(listener));
+    tonic::transport::Endpoint::from_shared(format!("http://{addr}"))
         .unwrap()
         .connect()
         .await
-        .unwrap();
+        .unwrap()
+}
+
+async fn response_encoding(
+    service_path: &'static str,
+    accept_encoding: Option<&'static str>,
+) -> Option<String> {
     let channel = tower::ServiceBuilder::new()
         .layer(tower::util::MapRequestLayer::new(
             move |mut request: tonic::codegen::http::Request<tonic::body::Body>| {
@@ -26,10 +39,12 @@ async fn response_encoding(accept_encoding: Option<&'static str>) -> Option<Stri
                         .insert("grpc-accept-encoding", value.parse().unwrap()),
                     None => request.headers_mut().remove("grpc-accept-encoding"),
                 };
+                let path = request.uri().path().replacen(CURRENT_PATH, service_path, 1);
+                *request.uri_mut() = path.parse().unwrap();
                 request
             },
         ))
-        .service(channel);
+        .service(serve_registered_server().await);
     let mut client = OrbitServiceClient::new(channel)
         .accept_compressed(CompressionEncoding::Gzip)
         .accept_compressed(CompressionEncoding::Zstd);
@@ -46,35 +61,35 @@ async fn response_encoding(accept_encoding: Option<&'static str>) -> Option<Stri
 }
 
 #[tokio::test]
-async fn c_core_client_gets_gzip() {
-    assert_eq!(
-        response_encoding(Some("identity, deflate, gzip")).await,
-        Some("gzip".into())
-    );
+async fn negotiates_encoding_on_current_and_legacy_paths() {
+    let cases = [
+        (Some("identity, deflate, gzip"), Some("gzip")),
+        (Some("identity,deflate,gzip"), Some("gzip")),
+        (Some("identity, zstd"), Some("zstd")),
+        (Some("zstd, gzip"), Some("zstd")),
+        (Some("gzip, zstd"), Some("gzip")),
+        (Some("identity, deflate"), None),
+        (None, None),
+    ];
+    for path in [CURRENT_PATH, LEGACY_PATH] {
+        for (accept, expected) in cases {
+            assert_eq!(
+                response_encoding(path, accept).await.as_deref(),
+                expected,
+                "{path} accepting {accept:?}"
+            );
+        }
+    }
 }
 
 #[tokio::test]
-async fn zstd_client_gets_zstd() {
-    assert_eq!(
-        response_encoding(Some("identity, zstd")).await,
-        Some("zstd".into())
-    );
-}
-
-#[tokio::test]
-async fn client_offering_both_gets_its_first_choice() {
-    assert_eq!(
-        response_encoding(Some("zstd, gzip")).await,
-        Some("zstd".into())
-    );
-    assert_eq!(
-        response_encoding(Some("gzip, zstd")).await,
-        Some("gzip".into())
-    );
-}
-
-#[tokio::test]
-async fn client_advertising_neither_gets_identity() {
-    assert_eq!(response_encoding(Some("identity, deflate")).await, None);
-    assert_eq!(response_encoding(None).await, None);
+async fn accepts_compressed_requests() {
+    for encoding in [CompressionEncoding::Gzip, CompressionEncoding::Zstd] {
+        let mut client =
+            OrbitServiceClient::new(serve_registered_server().await).send_compressed(encoding);
+        client
+            .get_graph_schema(authed_request(GetGraphSchemaRequest::default()))
+            .await
+            .unwrap_or_else(|status| panic!("{encoding:?} request rejected: {status}"));
+    }
 }

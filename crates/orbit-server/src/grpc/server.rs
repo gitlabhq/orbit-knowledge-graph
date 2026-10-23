@@ -19,10 +19,10 @@ use orbit_billing::{BillingTracker, QuotaService};
 
 use super::service::OrbitServiceImpl;
 
-/// Enables gzip (decoded by the Ruby and Python C-core clients) and zstd.
-/// tonic answers with the first enabled encoding in the client's
-/// `grpc-accept-encoding` order.
-pub(super) fn with_compression<T>(service: OrbitServiceServer<T>) -> OrbitServiceServer<T> {
+/// The client's `grpc-accept-encoding` order picks among the encodings tonic is
+/// compiled with (gzip, zstd); `send_compressed` only switches response
+/// compression on. C-core clients list gzip as the only one they decode.
+fn with_compression<T>(service: OrbitServiceServer<T>) -> OrbitServiceServer<T> {
     service
         .send_compressed(CompressionEncoding::Gzip)
         .send_compressed(CompressionEncoding::Zstd)
