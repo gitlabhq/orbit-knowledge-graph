@@ -86,8 +86,6 @@
       submenu:
         - title: Query language
           url: 'orbit/v2/queries/query-language/'
-        - title: REST API
-          url: 'orbit/v2/queries/api/'
     - title: GitLab Orbit architecture
       url: 'orbit/v2/how-it-works/'
       submenu:
