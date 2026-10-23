@@ -15,7 +15,7 @@ title: GitLab Orbit query language
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1258) in GitLab 19.4 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `orbit_gql_queries`. Disabled by default.
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/256465) in GitLab 19.4.
 - Generally available in GitLab 19.5.
 
 {{< /history >}}
