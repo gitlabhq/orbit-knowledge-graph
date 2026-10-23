@@ -22,11 +22,16 @@ toml = { workspace = true }
 # `toml` is used only from `build_support/crate_map_drift.rs`, which is pulled
 # in via `include!` from `build.rs` and `tests/`; cargo-shear does not follow
 # `include!`, so it reports `toml` as unused.
+# `prost-protovalidate-types` is depended on for the `buf/validate/validate.proto`
+# it ships, which `xtask proto-config` passes to protoc as an include path. The
+# version pin is what keeps the compiled rules and the runtime validator in step.
 [package.metadata.cargo-shear]
-ignored = ["toml"]
+ignored = ["toml", "prost-protovalidate-types"]
 
 [dependencies]
 clap = { workspace = true }
+prost-build = { workspace = true }
+prost-protovalidate-types = { workspace = true }
 anyhow = { workspace = true }
 arrow = { workspace = true }
 chrono = { workspace = true }

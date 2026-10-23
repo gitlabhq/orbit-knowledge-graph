@@ -296,6 +296,10 @@ extends = "bench:engine"
 vars = { action = "smoke" }
 description = "Run one code indexing pass against each benchmark repository"
 
+[tasks."proto:config"]
+run = "cargo xtask proto-config"
+description = "Regenerate the config prost types and descriptor set"
+
 [tasks."proto:go"]
 run = "scripts/dev/proto-go.sh generate"
 description = "Generate Go protobuf/gRPC stubs for Workhorse integration"
