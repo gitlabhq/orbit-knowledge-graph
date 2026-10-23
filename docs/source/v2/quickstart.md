@@ -48,12 +48,11 @@ To turn on GitLab Orbit:
 1. In the top bar, select **Search or go to** and find your top-level group.
 1. In the left sidebar, select **Settings** > **Orbit**.
 1. Turn on the **Turn on Orbit** toggle.
-1. If the **Start a free Orbit trial?** dialog opens, select **Start free trial**.
-
-For more information about the trial, see [start a GitLab Orbit trial](trial.md).
-If the page shows **Contact sales**, the group cannot start a trial.
 
 The page shows **Orbit is indexing `<my-group>`**, then **Orbit is ready for `<my-group>`**.
+
+You can also try GitLab Orbit with a free trial.
+For more information, see [Start a free trial](trial.md).
 
 {{< /tab >}}
 

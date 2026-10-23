@@ -27,7 +27,9 @@ On GitLab.com, you can start a free GitLab Orbit trial yourself in an eligible t
 The trial turns on GitLab Orbit for the group, its subgroups, and its projects, through every [access method](agents/_index.md).
 On GitLab Self-Managed and GitLab Dedicated, contact your GitLab account team.
 
-## Start a trial
+## Start a free trial
+
+Start a free trial to try GitLab Orbit in a top-level group before you buy it.
 
 <!-- vale orbit.StandaloneProductName = NO -->
 

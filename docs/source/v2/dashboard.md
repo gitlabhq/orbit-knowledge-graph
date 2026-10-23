@@ -23,6 +23,8 @@ If GitLab Orbit is not on for any of your groups, the dashboard lists your group
 The heading is **Try Orbit for free** when a group is eligible for a free trial.
 Otherwise, the heading is **Orbit is not turned on for your groups yet**.
 To turn on GitLab Orbit, select the groups, then select **Turn on Orbit**.
+On GitLab.com, you can also try GitLab Orbit with a free trial.
+For more information, see [Start a free trial](trial.md).
 
 The dashboard has four tabs.
 **Leave feedback** is in the page header.
@@ -40,6 +42,5 @@ For administrators, the header also has **Settings**.
 ## Related topics
 
 - [GitLab Orbit quickstart](quickstart.md)
-- [Start a GitLab Orbit trial](trial.md)
 - [GitLab Orbit query language](queries/query-language.md)
 - [Security](security.md)
