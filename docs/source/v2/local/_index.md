@@ -36,7 +36,7 @@ If you installed the standalone binary, run `orbit` in place of `glab orbit`.
 | Scope | Each repository that you index | Each top-level group where GitLab Orbit is turned on |
 | Refresh | You run `glab orbit index` again | Automatic |
 | Requires | The [GitLab Orbit CLI](../cli.md) | The GitLab Orbit add-on, and the [roles](../security.md#roles) to read the data |
-| Query with | `grep`, `context`, `repo-map`, `sql`, and the local MCP server | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
+| Query with | `grep`, `context`, `repo-map`, and `sql` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
 
 Your agent can use both graphs in the same conversation.
 [`glab orbit setup`](../agents/_index.md#set-up-your-agents) configures your agents for the local graph.
@@ -169,18 +169,13 @@ The local tables differ from the remote graph in these ways:
   specific to the language, such as `Class`, `Method`, `NamedImport`, or `CjsRequire`.
 - `ImportedSymbol.identifier_name` is empty for wildcard and side-effect imports.
 
-## Connect an agent over MCP
-
-For agents that cannot run shell commands, `glab orbit mcp serve` serves the local graph over MCP.
-For setup and tools, see [local MCP server](../agents/mcp.md#local-mcp-server).
-
 ## Storage and privacy
 
 The CLI keeps the local graph in `~/.gitlab/orbit/local/`: one DuckDB file for each indexed commit under `revisions/`, and a `manifest.duckdb` file that lists them.
 
 - To keep the local graph in a different directory, set `ORBIT_DATA_DIR`.
 - If `~/.gitlab/orbit` does not exist, the CLI moves an earlier `~/.orbit` directory to it.
-- Local commands, except `mcp serve`, accept `--db <path>` for a different graph file.
+- Local commands accept `--db <path>` for a different graph file.
 - When an update of the CLI changes the format of the local graph, the next `index` rebuilds the graph file.
   Index your other repositories again after you update.
 

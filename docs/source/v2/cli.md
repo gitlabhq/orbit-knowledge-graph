@@ -36,18 +36,25 @@ Prerequisites:
 
 - [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) 1.120 or later.
 
+To install the CLI and set up your agents, run this command in a Git repository:
+
 ```shell
-glab orbit --install
-glab orbit version
+glab orbit setup
 ```
 
-`glab` downloads the binary, verifies its checksum, and keeps it in its own directory, not on your `PATH`.
-Run it as `glab orbit`, which passes your `glab auth login` credential to it. To update it, run `glab orbit --update`.
+On first use, `glab` downloads and verifies the CLI. When a new version is available, `glab` tells you.
+For the setup steps, see [connect your agent](agents/_index.md).
 
-`glab` asks for confirmation before it downloads or runs the binary. To skip the prompts once, put `--yes`
-before the command, for example `glab orbit --yes status`. To skip them always, run
-`glab config set orbit_cli_auto_download true` and `glab config set orbit_cli_auto_run true`.
-`glab orbit setup` sets `orbit_cli_auto_run` for you.
+`glab` handles these options itself:
+
+| Option | Description |
+|--------|-------------|
+| `--yes` | Skip the confirmation prompts for this run. Put it before the command, for example `glab orbit --yes status`. |
+| `--install` | Download the CLI, but do not run it. |
+| `--update` | Update the CLI to the latest version. |
+
+To skip the prompts always, set the `glab` options `orbit_cli_auto_download` and `orbit_cli_auto_run` to `true`
+with `glab config set`. Setup sets `orbit_cli_auto_run` for you.
 
 ### Other install methods
 
@@ -106,21 +113,6 @@ On Linux, the package always uses the static musl binary, which runs on all dist
 
 {{< /tab >}}
 
-{{< tab title="Source" >}}
-
-You need the stable [Rust toolchain](https://rustup.rs/) and [`mise`](https://mise.jdx.dev/):
-
-```shell
-git clone https://gitlab.com/gitlab-org/orbit/knowledge-graph.git
-cd knowledge-graph
-mise install
-mise run build:cli
-```
-
-The binary is at `target/release/orbit`.
-
-{{< /tab >}}
-
 {{< /tabs >}}
 
 ## Command catalog
@@ -145,7 +137,6 @@ Local commands use the [local graph](local/_index.md) on your machine. They need
 | `sql` | Run read-only SQL. | Local |
 | `schema` | List the tables and columns. | Local |
 | `list` | List the indexed repositories. | Local |
-| `mcp` | Serve the local graph to agents over MCP. | Local |
 | `setup`, `uninstall` | Add or remove the [agent configuration](agents/_index.md). | None |
 | `config` | Read and write saved settings. | None |
 | `version` | Print the version. | None |
@@ -162,62 +153,76 @@ To index, search, and run SQL on your machine, see [the local graph](local/_inde
 
 {{< /details >}}
 
-Sign in with `glab auth login`.
-On GitLab Self-Managed and GitLab Dedicated, sign in with `glab auth login --hostname <host>`.
-Then run `glab orbit` in a clone from that host, or run `glab config set --global host <host>` to use the instance in any directory.
-Without `glab`, the binary reads `GITLAB_TOKEN`, or uses `glab auth credential-helper`.
-For an instance other than GitLab.com, also set `GITLAB_URL=https://<host>`.
+Prerequisites:
 
-To run a query, pass the text in the [Cypher query language](queries/cypher.md). This query returns five projects in a group. Replace `my-group` with the full path of your group:
+- GitLab Orbit is [turned on for your group](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
+
+To sign in:
+
+1. Run `glab auth login`.
+   On GitLab Self-Managed or GitLab Dedicated, select your instance from the list, or add `--hostname <gitlab.example.com>`.
+1. Optional. On GitLab Self-Managed or GitLab Dedicated, to use `glab orbit` outside a clone of a project on your instance,
+   run `glab config set --global host <gitlab.example.com>`.
+
+`glab orbit` gives your sign-in to the CLI on every run.
+
+### Run a query
+
+```shell
+glab orbit query "<query>"
+```
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `<query>` | string | Yes, if you do not use `--file` | The query text in the [GitLab Orbit query language](queries/query-language.md). |
+| `--file` | string | No | A file that holds the request body, or `-` for stdin. The body is a JSON object, such as `{"query": "MATCH ...", "response_format": "raw"}`. |
+| `--response-format` | string | No | `llm` (default) for [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md), a compact text format with one table for each node type and a table of relationships. `raw` for JSON. `gql` for a text table. |
+
+This query returns five projects in a group. Replace `my-group` with the full path of your group:
 
 ```shell
 glab orbit query "MATCH (p:Project) WHERE p.full_path STARTS WITH 'my-group/' RETURN p.full_path LIMIT 5"
 ```
 
-To read a request body from a file, use `--file <path>`, or `--file -` for stdin.
-A request body is a JSON object, such as `{"query": "MATCH ...", "response_format": "raw"}`.
-
-`--response-format` selects the output:
-
-- `llm` (default): [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md), a compact text format
-  with one table for each node type and a table of relationships.
-- `raw`: JSON.
-- `gql`: a text table.
-
 To list the properties of node types, run `glab orbit ontology MergeRequest Project`.
 
 ### Check indexing progress
 
-To check indexing progress, run `graph-status`. `status` shows only the health of the service.
+In a clone of a project in your group, run:
 
 ```shell
-glab orbit graph-status --full-path my-group/my-project
+glab orbit graph-status
 ```
 
-- In a terminal, `graph-status` prints a summary. When the output goes to a pipe or a file, it prints JSON.
-  Use `--response-format raw` for JSON or `llm` for compact text.
-- Without a scope option, it shows the project of the `origin` remote of the current clone.
-- To select the scope, use one of `--full-path`, `--namespace-id`, or `--project-id`.
+With no option, `graph-status` shows the project of the `origin` remote of the clone.
+In a terminal, it prints a summary. In a pipe or a file, it prints JSON.
+`status` shows only the health of the service.
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `--full-path` | string | No | The full path of a group or project, such as `my-group`. |
+| `--namespace-id` | integer | No | The ID of a group. |
+| `--project-id` | integer | No | The ID of a project. |
+| `--response-format` | string | No | `raw` for JSON, or `llm` for compact text. |
+
+Use only one of `--full-path`, `--namespace-id`, and `--project-id`.
 
 ## Settings and telemetry
 
-The CLI keeps its settings and the [local graph](local/_index.md#storage-and-privacy) in `~/.gitlab/orbit/`,
-and caches the GitLab Orbit skill in the cache directory of your operating system.
+The CLI keeps its settings and the [local graph](local/_index.md#storage-and-privacy) in `~/.gitlab/orbit/`.
 
-The CLI sends usage events to GitLab product analytics: the command or MCP tool, the result, the exit code,
-the duration, the CLI version, and the agent. `setup` and `uninstall` also send the agents, components,
-and scope that they changed, and the outcome. Remote requests carry the request ID of the event and,
-when it is set, the session ID of Claude Code or Codex.
-The CLI never sends repository content, file paths, or query text.
+The CLI sends usage events to GitLab product analytics, such as the command, the result, the duration, and the CLI version.
+It never sends repository content, file paths, or query text.
+Telemetry is on by default. To turn it off, run:
 
-Telemetry is on by default, and it is the only saved setting. To turn it off, run `glab orbit config set telemetry.enabled false`.
+```shell
+glab orbit config set telemetry.enabled false
+```
 
 | Variable | Purpose |
 |----------|---------|
-| `GITLAB_TOKEN`, `GITLAB_URL` | Token and instance for remote commands without `glab`. Default URL: `https://gitlab.com`. |
-| `ORBIT_TELEMETRY_ENABLED` | `false` or `true`. Overrides the saved setting, for example in CI. |
-| `ORBIT_TELEMETRY_COLLECTOR_URL` | A different event collector, for testing. |
-| `AI_AGENT` | The name of the agent, for telemetry. Overrides the agent that the CLI detects. |
+| `GITLAB_TOKEN`, `GITLAB_URL` | Token and instance for remote commands when you run the CLI without `glab`. Default URL: `https://gitlab.com`. Without `GITLAB_TOKEN`, the CLI gets the token and instance of your `glab` sign-in from `glab auth credential-helper`. |
+| `ORBIT_TELEMETRY_ENABLED` | `false` or `true`. Overrides the saved telemetry setting, for example in CI. |
 
 ## Exit codes
 

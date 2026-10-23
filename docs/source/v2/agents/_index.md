@@ -27,14 +27,13 @@ Connect the agents on your machine to GitLab Orbit with one command. Run it in a
 glab orbit setup
 ```
 
-- `glab orbit setup` tells your agents to search code with the graph,
-  and indexes the repository into the [local graph](../local/_index.md).
-- Setup also installs the [GitLab Orbit skill](#gitlab-orbit-skill),
-  which teaches your agent to query your GitLab data, such as merge requests, pipelines, and vulnerabilities.
-- If you do not run setup, install the skill with `glab skills install --global orbit`.
+Setup tells your agents to search code with the [local graph](../local/_index.md), indexes the repository,
+and installs the [GitLab Orbit skill](#gitlab-orbit-skill). The skill teaches your agent to query your GitLab data,
+such as merge requests, pipelines, and vulnerabilities.
+For a short walkthrough, see the [quickstart](../quickstart.md).
 
 GitLab Duo Agent Platform has GitLab Orbit built in. See [GitLab Orbit in GitLab Duo](duo.md).
-For agents that cannot run shell commands, use an [MCP server](mcp.md).
+For agents that cannot run shell commands, use the [GitLab MCP endpoint](mcp.md).
 
 If you installed the standalone binary, run `orbit` in place of `glab orbit`.
 
@@ -42,7 +41,8 @@ If you installed the standalone binary, run `orbit` in place of `glab orbit`.
 
 Prerequisites:
 
-- The [GitLab Orbit CLI](../cli.md) is installed.
+- [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) 1.120 or later. On first use, `glab` downloads the [GitLab Orbit CLI](../cli.md).
+- You are signed in with `glab auth login`.
 
 To set up your agents:
 
@@ -52,19 +52,29 @@ To set up your agents:
    The agents that setup detects on your machine are selected.
 
 Setup supports Claude Code (`claude`), Codex (`codex`), GitLab Duo (`duo`), OpenCode (`opencode`), and Pi (`pi`).
+Setup puts the skill in `~/.agents/skills/orbit`. Other agents that support the
+[Agent Skills specification](https://agentskills.io/specification), such as Gemini CLI, can also load it from there.
+
 To update the setup, run the command again.
 
-Options:
+### Setup options
 
-- Name agents to set up only those, for example `glab orbit setup claude codex`.
-  Setup adds a named agent even when it does not detect it. `--all` sets up every supported agent.
-- `--yes` skips the list. Use it in scripts and other places without a terminal.
-  Without it, setup stops with `stdin is not a terminal; pass --yes to proceed without a prompt`.
-- `--mcp` also registers the [local MCP server](mcp.md#local-mcp-server).
-- `--skip <component>` leaves out `instructions`, `hooks`, `skill`, or `mcp`. You can repeat it.
-- `--skill full` installs the full skill files in place of the wrapper skill. The default is `--skill wrapper`.
-- `--no-index` skips indexing.
-- `--dry-run` shows the changes and writes nothing. Add `--verbose` to list every file.
+```shell
+glab orbit setup [<agent>...] [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `<agent>` | Set up only these agents, for example `claude codex`. Setup adds a named agent even when it does not detect it. |
+| `--all` | Set up every supported agent. |
+| `--yes`, `-y` | Skip the list of agents. Use it in scripts and other places without a terminal. |
+| `--skip <component>` | Leave out `instructions`, `hooks`, or `skill`. You can repeat it. |
+| `--skill full` | Install the full skill files in place of the wrapper skill. |
+| `--no-index` | Do not index the repository. |
+| `--project` | Write to the current project in place of your user configuration. |
+| `--dir <path>` | Write to the project in `<path>`. Implies `--project`. |
+| `--dry-run` | Show the changes and write nothing. |
+| `--verbose`, `-v` | List every file that setup changes. |
 
 ### What setup changes
 
@@ -74,15 +84,13 @@ By default, setup writes to your user configuration, so the changes affect only 
 |-----------|--------------|--------|
 | Instructions | A block between `<!-- orbit:setup:begin -->` and `<!-- orbit:setup:end -->` in the instruction file of the agent. The block tells the agent to search with `orbit grep` and to read code with `orbit context`. | All |
 | Hooks | A reminder to use `orbit grep`. For Claude Code, the reminder comes when the agent runs `grep`, `rg`, `ack`, or `ag` in an indexed repository, and never blocks the call. For OpenCode, it comes once each session. | Claude Code, OpenCode |
-| Skill | The `orbit` skill, in `~/.agents/skills/`. By default it is a wrapper that loads the skill your instance serves. With `--skill full`, or when GitLab Duo is set up, it holds the skill files. Claude Code also gets a link in `~/.claude/skills/` and permission rules in `settings.json`, so the wrapper loads without a prompt. | Claude Code, Codex, GitLab Duo, OpenCode |
-| MCP server | With `--mcp`, an `orbit` entry in the MCP configuration of the agent. | Claude Code, Codex, OpenCode |
+| Skill | The `orbit` skill, in `~/.agents/skills/orbit`. For Claude Code, setup also links it in `~/.claude/skills/`, and allows the skill command in `settings.json` so that the skill loads without a prompt. | Claude Code, Codex, GitLab Duo, OpenCode |
 
 - Setup changes only the text between its markers and the entries that it marked as its own.
 - Before setup changes a file for the first time, it saves a copy as `<name>.orbit-backup`.
-- `glab` asks for confirmation before it runs the GitLab Orbit binary. When you run setup through `glab`,
-  setup sets the `glab` option `orbit_cli_auto_run` to `true`, so the hooks run without that prompt.
-- To write to a project instead, use `--project` for the current directory, or `--dir <path>`.
-  Teams usually commit files such as `CLAUDE.md`, `AGENTS.md`, and `.mcp.json`, so the change can reach your teammates.
+- Setup sets the `glab` option `orbit_cli_auto_run` to `true`, so the hooks run without a prompt.
+- With `--project` or `--dir`, setup writes files such as `CLAUDE.md` and `AGENTS.md` in the project.
+  Teams usually commit these files, so the change can reach your teammates.
 
 ## GitLab Orbit skill
 
@@ -94,50 +102,18 @@ By default, setup writes to your user configuration, so the changes affect only 
 {{< /details >}}
 
 The GitLab Orbit skill gives your agent query recipes, the reference for the query language of your instance,
-and troubleshooting steps. It covers your GitLab data and the local graph.
-The `orbit` skill that setup installs covers your GitLab data and the local graph. If you ran setup, you already have it.
+and troubleshooting steps. It covers your GitLab data and the local graph. `glab orbit setup` installs it.
 
 Prerequisites:
 
 - You are signed in with `glab auth login`.
 - GitLab Orbit is [turned on for your group](../quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
 
-If you do not run setup, install the skill for all your projects:
+By default, setup installs a wrapper skill. The wrapper loads the skill that your GitLab instance serves,
+so it always matches your instance. If the CLI cannot get the skill from your instance, it uses the copy built into the CLI.
 
-```shell
-glab skills install --global orbit
-```
-
-Claude Code does not read `~/.agents/skills`, and `glab skills install` does not link the skill.
-Setup writes this link for you. If you installed the skill with `glab skills install` and use Claude Code, also link the skill:
-
-```shell
-mkdir -p ~/.claude/skills && ln -s ~/.agents/skills/orbit ~/.claude/skills/orbit
-```
-
-- To install the skill for the current project only, leave out `--global`.
-- To update the skill, run the install command again with `--force`.
-
-### Use the wrapper skill
-
-The `orbit-wrapper` skill loads the skill that your GitLab instance serves, so it always matches your instance and CLI.
-With `glab` 1.123 or later, `glab skills install orbit` already installs this wrapper under the name `orbit`. With earlier versions, the installed `orbit` skill is a copy that you update with `--force`.
-Install the wrapper in place of the `orbit` skill. The `npx` command needs [Node.js](https://nodejs.org/):
-
-```shell
-npx skills add https://gitlab.com/gitlab-org/orbit/knowledge-graph --skill orbit-wrapper
-```
-
-Claude Code loads the wrapper only if it can run `glab orbit skills get orbit` without a prompt.
-Allow the command in `~/.claude/settings.json`:
-
-```json
-{
-  "permissions": {
-    "allow": ["Bash(glab orbit skills get orbit)"]
-  }
-}
-```
+With `--skill full`, or when GitLab Duo is set up, the `orbit` skill holds the skill files.
+To update them, run `glab orbit setup` again.
 
 ## Remove the setup
 
@@ -145,16 +121,14 @@ Allow the command in `~/.claude/settings.json`:
 glab orbit uninstall
 ```
 
-`glab orbit uninstall` removes what setup wrote and leaves the rest of each file unchanged.
-If you edited a file after setup, it keeps the file and its backup.
-It accepts the same agent names and the `--yes`, `--dry-run`, `--project`, and `--dir` options as setup.
-
-`glab orbit uninstall` also removes the `orbit` skill and the `~/.claude/skills/orbit` link that setup wrote. If you installed the skill with `glab skills install`, delete `~/.agents/skills/orbit` and the `~/.claude/skills/orbit` link.
+`glab orbit uninstall` removes what setup wrote, including the `orbit` skill and the `~/.claude/skills/orbit` link.
+It leaves the rest of each file unchanged. If you edited a file after setup, it keeps the file and its backup.
+It accepts the same agent names and the `--yes`, `--dry-run`, `--verbose`, `--project`, and `--dir` options as setup.
 
 ## Related topics
 
 - [GitLab Orbit quickstart](../quickstart.md)
 - [Prompt examples](../prompt-examples.md)
 - [GitLab Orbit in GitLab Duo](duo.md)
-- [MCP servers](mcp.md)
+- [GitLab Orbit MCP server](mcp.md)
 - [GitLab Orbit CLI](../cli.md)
