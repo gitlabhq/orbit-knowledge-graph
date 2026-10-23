@@ -125,6 +125,7 @@ impl NatsMessage {
             Ok(()) => {
                 if let Err(ack_error) = self.ack().await {
                     warn!(
+                        safe(ERROR_TYPE) = <&str>::from(&ack_error),
                         expanded(ERROR_MESSAGE) = %ack_error,
                         safe(MESSAGE_ID) = message_id.as_ref(),
                         "failed to ack exhausted message"
@@ -134,12 +135,14 @@ impl NatsMessage {
             }
             Err(dlq_error) => {
                 warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&dlq_error),
                     expanded(ERROR_MESSAGE) = %dlq_error,
                     safe(MESSAGE_ID) = message_id.as_ref(),
                     "failed to publish to dead letter queue, nacking for redelivery"
                 );
                 if let Err(nack_error) = self.nack().await {
                     warn!(
+                        safe(ERROR_TYPE) = <&str>::from(&nack_error),
                         expanded(ERROR_MESSAGE) = %nack_error,
                         safe(MESSAGE_ID) = message_id.as_ref(),
                         "failed to nack message after DLQ failure"
@@ -173,7 +176,11 @@ impl ProgressNotifier {
         if let Some(acker) = &self.acker
             && let Err(error) = acker.ack_progress().await
         {
-            warn!(expanded(ERROR_MESSAGE) = %error, "failed to send in-progress ack");
+            warn!(
+                safe(ERROR_TYPE) = <&str>::from(&error),
+                expanded(ERROR_MESSAGE) = %error,
+                "failed to send in-progress ack"
+            );
         }
     }
 }

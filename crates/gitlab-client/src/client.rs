@@ -608,6 +608,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn project_info_advertises_compression_and_decodes_gzip_response() {
+        use axum::Router;
+        use axum::http::{HeaderMap, HeaderValue, header};
+        use axum::routing::get;
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+        use std::sync::{Arc, Mutex};
+
+        let seen = Arc::new(Mutex::new(None::<String>));
+        let recorder = Arc::clone(&seen);
+        let app = Router::new().route(
+            "/api/v4/internal/orbit/project/{id}/info",
+            get(move |headers: HeaderMap| {
+                let recorder = Arc::clone(&recorder);
+                async move {
+                    *recorder.lock().unwrap() = headers
+                        .get(header::ACCEPT_ENCODING)
+                        .and_then(|value| value.to_str().ok())
+                        .map(str::to_owned);
+                    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+                    encoder
+                        .write_all(br#"{"project_id":7,"default_branch":"main"}"#)
+                        .unwrap();
+                    (
+                        [(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"))],
+                        encoder.finish().unwrap(),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let client =
+            GitlabClient::new(config_with_resolve(&format!("http://{addr}"), None)).unwrap();
+        let info = client.project_info(7).await.unwrap();
+
+        assert_eq!(info.project_id, 7);
+        assert_eq!(info.default_branch, "main");
+        let accept_encoding = seen
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("Accept-Encoding header");
+        assert!(accept_encoding.contains("gzip"), "{accept_encoding}");
+        assert!(accept_encoding.contains("br"), "{accept_encoding}");
+        assert!(accept_encoding.contains("zstd"), "{accept_encoding}");
+    }
+
+    #[tokio::test]
     async fn cloud_connector_token_returns_the_served_token_with_its_exp_even_if_expired() {
         use axum::Router;
         use axum::routing::get;

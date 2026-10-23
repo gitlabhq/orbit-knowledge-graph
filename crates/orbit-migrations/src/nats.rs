@@ -55,6 +55,7 @@ async fn delete_nats_streams(
                 orbit_log_fields::warn!(
                     safe(SCHEMA_VERSION) = schema_version,
                     safe(NATS_STREAM) = stream_name.as_str(),
+                    safe(ERROR_TYPE) = "delete_stream",
                     expanded(ERROR_MESSAGE) = %error,
                     "failed to delete NATS stream"
                 );

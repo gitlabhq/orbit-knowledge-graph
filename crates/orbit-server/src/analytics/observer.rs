@@ -95,6 +95,7 @@ impl AnalyticsObserver {
             Ok(c) => c,
             Err(e) => {
                 orbit_log_fields::warn!(
+                    safe(ERROR_TYPE) = e.kind(),
                     expanded(ERROR_MESSAGE) = %e,
                     "failed to build orbit_common context, skipping analytics event"
                 );
@@ -113,6 +114,7 @@ impl AnalyticsObserver {
             Ok(q) => q,
             Err(e) => {
                 orbit_log_fields::warn!(
+                    safe(ERROR_TYPE) = e.kind(),
                     expanded(ERROR_MESSAGE) = %e,
                     "failed to build orbit_query context, skipping analytics event"
                 );
@@ -130,6 +132,7 @@ impl AnalyticsObserver {
         {
             Ok(event) => tracker.track(event),
             Err(e) => orbit_log_fields::warn!(
+                safe(ERROR_TYPE) = e.kind(),
                 expanded(ERROR_MESSAGE) = %e,
                 "failed to build analytics event"
             ),

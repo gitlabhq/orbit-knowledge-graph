@@ -37,12 +37,30 @@ fn valid_rust_log() -> Option<String> {
         .filter(|directive| EnvFilter::try_new(directive).is_ok())
 }
 
+/// The variant of a typed error inside an `anyhow` error, else `fatal`: many webserver errors carry no kind.
+pub fn anyhow_error_type(error: &anyhow::Error) -> &'static str {
+    if let Some(error) = error.downcast_ref::<indexer::config::IndexerError>() {
+        return error.into();
+    }
+    if let Some(error) = error.downcast_ref::<indexer::config::DispatcherError>() {
+        return error.into();
+    }
+    if let Some(error) = error.downcast_ref::<orbit_migrations::version::SchemaVersionError>() {
+        return error.into();
+    }
+    if let Some(error) = error.downcast_ref::<orbit_migrations::catalog::CatalogError>() {
+        return error.into();
+    }
+    "fatal"
+}
+
 /// The default hook prints the panic text, which can hold parsed source code, to stderr.
 pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
         let location = info.location().map(ToString::to_string);
         orbit_log_fields::error!(
             safe(PANIC_LOCATION) = location.as_deref(),
+            safe(ERROR_TYPE) = "panic",
             expanded(ERROR_MESSAGE) = info.payload_as_str(),
             "panic"
         );
@@ -91,6 +109,36 @@ mod tests {
     use super::*;
 
     const FILE_PATH: &str = "app/models/user.rb";
+
+    #[test]
+    fn anyhow_error_type_names_the_variant_of_a_typed_error() {
+        use indexer::config::{DispatcherError, IndexerError};
+        use indexer::orchestrator::scheduled::SchedulerError;
+
+        let indexer = IndexerError::Analytics(labkit_events::Error::MissingField("schema"));
+        let dispatcher = DispatcherError::Scheduler(SchedulerError::TaskPanicked { count: 1 });
+
+        assert_eq!(anyhow_error_type(&indexer.into()), "analytics");
+        assert_eq!(anyhow_error_type(&dispatcher.into()), "scheduler");
+        let schema_version =
+            orbit_migrations::version::SchemaVersionError::UnexpectedResult("x".into());
+        assert_eq!(
+            anyhow_error_type(&schema_version.into()),
+            "unexpected_result"
+        );
+        let catalog = || orbit_migrations::catalog::CatalogError::Missing(7);
+        assert_eq!(anyhow_error_type(&catalog().into()), "missing");
+        let from_result = anyhow::Context::context(Err::<(), _>(catalog()), "reading the catalog");
+        assert_eq!(anyhow_error_type(&from_result.unwrap_err()), "missing");
+        let nested = anyhow::Error::from(catalog())
+            .context("inner")
+            .context("outer");
+        assert_eq!(anyhow_error_type(&nested), "missing");
+        assert_eq!(
+            anyhow_error_type(&anyhow::anyhow!("customer text")),
+            "fatal"
+        );
+    }
 
     #[derive(Clone, Default)]
     struct Buffer(Arc<Mutex<Vec<u8>>>);

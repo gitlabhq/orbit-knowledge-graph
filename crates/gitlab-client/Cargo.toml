@@ -14,7 +14,7 @@ orbit-observability = { workspace = true }
 orbit-server-config = { path = "../orbit-server-config" }
 jsonwebtoken = { workspace = true }
 rand = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["gzip", "brotli", "zstd"] }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -25,4 +25,5 @@ orbit-log-fields = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }
+flate2 = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "test-util"] }

@@ -224,6 +224,7 @@ impl RepositoryResolver {
                         };
                         warn!(
                             safe(ATTEMPT) = attempt + 1,
+                            safe(ERROR_TYPE) = <&str>::from(&err),
                             expanded(ERROR_MESSAGE) = %err,
                             "archive download failed"
                         );
@@ -263,6 +264,7 @@ impl RepositoryResolver {
                     Err(e) => {
                         warn!(
                             safe(ATTEMPT) = attempt + 1,
+                            safe(ERROR_TYPE) = <&str>::from(&e),
                             expanded(ERROR_MESSAGE) = %e,
                             "archive extraction failed"
                         );
@@ -285,6 +287,7 @@ impl RepositoryResolver {
                 Err(error @ (LeaseError::Lost(_) | LeaseError::Backend(_))) => {
                     warn!(
                         safe(ATTEMPT) = attempt + 1,
+                        safe(ERROR_TYPE) = <&str>::from(&error),
                         expanded(ERROR_MESSAGE) = %error,
                         "archive lease failed"
                     );
