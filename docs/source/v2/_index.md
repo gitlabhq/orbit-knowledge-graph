@@ -155,6 +155,7 @@ offline and with no GitLab account. For more information, see [local graph](cli.
 
 - [Watch the deep dive video](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>GitLab Orbit Technical Deep Dive: The AI Context Graph Layer. On the GitLab YouTube channel.
 - [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
+- [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work that the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
 {.product-cards .product-cards-2}
 
 ## Reference
