@@ -103,7 +103,6 @@ typed-path = "0.12.3"
 
 # Indexer dependencies
 anyhow = "1.0.100"
-config = { version = "0.15", default-features = false, features = ["yaml"] }
 parquet = { version = "60", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
 tokio = { version = "1.49.0", features = ["full"] }
 strum = { version = "0.28.0", features = ["derive"] }
