@@ -18,8 +18,8 @@ about your GitLab data.
 
 ## Prerequisites
 
-- GitLab Orbit turned on for the top-level group and the project indexed.
-  To get access, start a [free trial on GitLab.com](#step-1-turn-on-gitlab-orbit-for-your-group), or [contact sales](https://about.gitlab.com/sales/).
+- Access to GitLab Orbit for the top-level group.
+  To get access, start a [free trial on GitLab.com](trial.md), or [contact sales](https://about.gitlab.com/sales/).
 - To query the graph, the Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
 - To use your own coding agent, an agent on your machine, such as Claude Code, Codex, or OpenCode.
 
