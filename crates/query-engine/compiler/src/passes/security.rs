@@ -6,9 +6,6 @@
 //! Path filtering strategy:
 //! - 1 path: `startsWith(path)`
 //! - 2+ paths: `startsWith(p1) OR startsWith(p2) OR ...`
-//! - a scan whose scope lookups carry this same chain: `(<every lookup> != '0/')
-//!   OR <chain>`, so ClickHouse drops the chain from index analysis once the
-//!   anchors resolve (`scope::resolved_condition`)
 //!
 //! # Per-entity role scoping
 //!
