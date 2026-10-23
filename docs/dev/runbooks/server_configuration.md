@@ -506,11 +506,13 @@ query:
 
 ## Analytics
 
-Controls Snowplow product-analytics event emission. Events carry `orbit_common` and `orbit_query` contexts (consumer-owned, defined in `orbit-analytics`). Disabled by default -- Helm enables it for .com and Dedicated.
+Controls Snowplow product-analytics event emission. Events carry `orbit_common` and `orbit_query` contexts (consumer-owned, defined in `orbit-analytics`).
+
+`analytics.enabled` has three states. An explicit value wins. When it is unset, the webserver and the indexer read the GitLab product usage data setting every hour from `GET /api/v4/internal/orbit/instance`. They send events only while it is on. A GitLab without that endpoint counts as off.
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `analytics.enabled` | `false` | Enable Snowplow analytics event emission |
+| `analytics.enabled` | unset | `true` always sends, `false` never sends, unset follows the GitLab product usage data setting |
 | `analytics.collector_url` | `""` | Snowplow collector endpoint (e.g. `https://events.gitlab.net`) |
 | `analytics.deployment.type` | `self_managed` | `com`, `dedicated`, or `self_managed` |
 | `analytics.deployment.environment` | `development` | `development`, `staging`, or `production` |
