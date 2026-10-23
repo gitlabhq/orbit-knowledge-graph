@@ -49,12 +49,13 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 ## What you can ask
 
-- [Find out how agent-written code performs](prompt-examples.md#find-out-how-agent-written-code-performs)<br>`Using GitLab Orbit, how many merge requests did agents create in <my-group>/<my-project> this month, how many merged, and how many reached production?`
-- [See what shipped to production this week](prompt-examples.md#see-what-shipped-to-production-this-week)<br>`Using GitLab Orbit, which issues and bugs did the merge requests deployed to <production> this week close?`
-- [Change a class hierarchy safely](prompt-examples.md#change-a-class-hierarchy-safely)<br>`Using GitLab Orbit, which classes inherit from <BasePolicy>, and which open merge requests touch them right now?`
-- [Unblock a release](prompt-examples.md#unblock-a-release)<br>`Using GitLab Orbit, which open merge requests in milestone <19.6> have a failed pipeline, and who owns them?`
-- [Find the right reviewer for a file](prompt-examples.md#find-the-right-reviewer-for-a-file)<br>`Using GitLab Orbit, who approved changes to <app/models/ability.rb> in the last six months, and what did reviewers warn about?`
-- [Find a shared CI/CD job that fails across the group](prompt-examples.md#find-a-shared-cicd-job-that-fails-across-the-group)<br>`Using GitLab Orbit, which projects in <my-group> failed the <docs-lint> job this week?`
+- [Change a class hierarchy safely](prompt-examples.md#change-a-class-hierarchy-safely)<br>"Using GitLab Orbit, which classes inherit from BasePolicy, and which open merge requests touch them right now?"
+- [See what shipped to production this week](prompt-examples.md#see-what-shipped-to-production-this-week)<br>"Using GitLab Orbit, which issues and bugs did the merge requests deployed to production this week close?"
+- [Find out how agent-written code performs](prompt-examples.md#find-out-how-agent-written-code-performs)<br>"Using GitLab Orbit, how many merge requests did agents create in my project this month, how many merged, and how many reached production?"
+- [Find the right reviewer for a file](prompt-examples.md#find-the-right-reviewer-for-a-file)<br>"Using GitLab Orbit, who approved changes to app/models/ability.rb in the last six months, and what did reviewers warn about?"
+- [Unblock a release](prompt-examples.md#unblock-a-release)<br>"Using GitLab Orbit, which open merge requests in milestone 19.6 have a failed pipeline, and who owns them?"
+- [Find a shared CI/CD job that fails across the group](prompt-examples.md#find-a-shared-cicd-job-that-fails-across-the-group)<br>"Using GitLab Orbit, which projects in my group failed the docs-lint job this week?"
+{.product-cards .product-cards-2 .product-prompts}
 
 ## See an answer
 
@@ -306,6 +307,7 @@ body:has(.product-landing) .docs-content .language-plaintext {
   transition: all 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .docs-content ul.product-cards > li:hover { background-color: var(--gl-background-color-subtle); }
+.docs-content ul.product-prompts > li { color: var(--gl-text-color-subtle); }
 .docs-content ul.product-cards > li > a {
   display: inline-block;
   padding-bottom: var(--gl-spacing-scale-3);
