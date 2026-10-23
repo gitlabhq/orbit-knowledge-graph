@@ -1,0 +1,60 @@
+name: "Dockerfile: no cross-file stage links and no self-references"
+
+fixtures:
+  - path: a/Dockerfile
+    content: |
+      FROM golang:1.22 AS ubuntu
+      RUN true
+
+      FROM scratch AS foss
+      RUN true
+
+  - path: b/Dockerfile
+    content: |
+      FROM ubuntu AS ee
+      COPY --from=foss /x /x
+
+      FROM golang AS golang
+      ENV PATH=/go/bin:$PATH
+      ENV MODE=$MODE-fast
+      ENV QUOTED="/x:$QUOTED"
+      ENV GOPATH=$PATH
+
+  - path: c/Dockerfile
+    content: |
+      FROM alpine AS base
+      FROM base AS app
+
+tests:
+  - name: "an external base image never binds to a stage of another Dockerfile"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.definition_type = 'Class' AND b.definition_type = 'Class'
+      RETURN a.name AS from_stage, a.file_path AS from_file, b.name AS to_stage, b.file_path AS to_file
+    assert:
+      - { row_count: 1 }
+      - { row: { from_stage: "app", from_file: "c/Dockerfile", to_stage: "base", to_file: "c/Dockerfile" } }
+
+  - name: "base images stay unresolved imports"
+    query: |
+      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      RETURN i.identifier_name AS name
+    assert:
+      - { empty: true }
+
+  - name: "no definition calls itself"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.fqn = b.fqn AND a.file_path = b.file_path
+      RETURN a.fqn AS fqn
+    assert:
+      - { empty: true }
+
+  - name: "a variable still links to a different variable it expands"
+    query: |
+      MATCH (a:Definition)-[:CALLS]->(b:Definition)
+      WHERE a.definition_type = 'Variable'
+      RETURN a.name AS user, b.name AS variable
+    assert:
+      - { row_count: 1 }
+      - { row: { user: "GOPATH", variable: "PATH" } }
