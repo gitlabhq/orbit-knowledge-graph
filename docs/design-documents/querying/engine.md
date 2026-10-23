@@ -20,10 +20,8 @@ Here's what each query type looks like on the way in, and the shape of the SQL t
 | --- | --- | --- | --- |
 | Traversal | `MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'}) RETURN u.username, mr.title` | Merged merge requests and the users who wrote them | `FROM gl_edge AS e JOIN gl_merge_request AS mr ON mr.id = e.target_id WHERE e.relationship_kind = ? AND mr.state = ?` |
 | Aggregation | `MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964}) RETURN mr.state, count(mr) AS mrs` | How many merge requests one project has in each state | `SELECT mr.state, COUNT(mr.id) AS mrs ... GROUP BY mr.state` |
-| Path finding | `MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {id: 278964}) RETURN path` | The shortest chain of containment from a group down to a project | `WITH forward AS (...), backward AS (...) SELECT ... FROM forward JOIN backward ON ...` |
+| Path finding | `MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {id: 278964}) RETURN path` | The shortest path from a group to a project | `WITH forward AS (...), backward AS (...) SELECT ... FROM forward JOIN backward ON ...` |
 | Neighbors | `MATCH (mr:MergeRequest {id: 42})--(n) RETURN n` | Everything directly connected to one merge request, in either direction | `SELECT ... FROM gl_edge WHERE source_id = ? UNION ALL SELECT ... FROM gl_edge WHERE target_id = ?` |
-
-Path finding searches from both ends at once. One frontier walks forward from the start node, another walks backward from the end node, and a path exists wherever the two meet. That keeps each frontier to about half the depth of the full path.
 
 ## Terms
 
@@ -56,7 +54,7 @@ The ontology defines every table, sort key, and index.
 
 ## Query data model
 
-The engine never reads the ontology directly. Instead, each schema version derives one immutable query data model from its ontology, and every engine phase reads from that model. Table names never come from the query itself.
+The query engine never reads the ontology directly. Instead, each schema version of Orbit derives one immutable query data model from its ontology, and every engine phase reads from that model. 
 
 At a high level, the model splits the ontology into three kinds of facts:
 
