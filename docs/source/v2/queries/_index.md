@@ -35,8 +35,18 @@ glab orbit query "MATCH (p:Project {full_path: '<my-group/my-project>'}) RETURN 
 ```
 
 The CLI prints compact [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text. For JSON, add `--response-format raw`.
-From a script, [run a query](api.md#run-a-query) with the REST API.
 Agents on the [Model Context Protocol (MCP) endpoint](../agents/mcp.md) send the same text with the `query_graph` command.
+
+## Use the GitLab Orbit API
+
+From a script, a scheduled report, or a custom tool, send the same query text to the GitLab REST API.
+Authenticate with a personal access token, or with a [service account](../security.md#service-accounts)
+for automation without a personal account.
+Results include only the data that the token owner can access.
+
+- For the endpoints, parameters, and examples, see the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
+- For GitLab Orbit data in the GraphQL API, such as the groups where GitLab Orbit is turned on and the schema,
+  see [`Query.orbit`](https://docs.gitlab.com/api/graphql/reference/queries/#orbit).
 
 ## Query shapes
 
@@ -60,7 +70,5 @@ For the full list, see [properties resolved at query time](../schema.md#properti
 
 ## Related topics
 
-- [GitLab Orbit API reference](https://docs.gitlab.com/api/orbit/)
-- [GraphQL API: `Query.orbit`](https://docs.gitlab.com/api/graphql/reference/#queryorbit)
 - [Prompt examples](../prompt-examples.md)
 - [Indexed data](../schema.md)

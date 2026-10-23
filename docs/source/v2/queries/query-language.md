@@ -298,5 +298,5 @@ For other users, GitLab ignores `DEBUG`.
 ## Related topics
 
 - [Queries](_index.md)
-- [REST API](api.md)
+- [GitLab Orbit API](https://docs.gitlab.com/api/orbit/)
 - [Prompt examples](../prompt-examples.md)
