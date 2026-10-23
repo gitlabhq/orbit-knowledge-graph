@@ -1,0 +1,39 @@
+name: "Dockerfile: files are recognized by name"
+
+fixtures:
+  - path: Dockerfile
+    content: "FROM alpine AS a\n"
+
+  - path: Containerfile
+    content: "FROM alpine AS b\n"
+
+  - path: Dockerfile.dev
+    content: "FROM alpine AS c\n"
+
+  - path: services/api/Containerfile.prod
+    content: "FROM alpine AS d\n"
+
+  - path: build/app.dockerfile
+    content: "FROM alpine AS e\n"
+
+tests:
+  - name: "Dockerfile, Containerfile, dotted variants and *.dockerfile are indexed"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+      ORDER BY path
+    assert:
+      - { row_count: 5 }
+      - { row: { path: "Dockerfile" } }
+      - { row: { path: "Containerfile" } }
+      - { row: { path: "Dockerfile.dev" } }
+      - { row: { path: "services/api/Containerfile.prod" } }
+      - { row: { path: "build/app.dockerfile" } }
+
+  - name: "each file defines its own stage"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 5 }

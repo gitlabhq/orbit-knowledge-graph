@@ -27,6 +27,13 @@ languages:
     grammar: tree-sitter-c-sharp
     fqn_separator: "."
 
+  dockerfile:
+    extensions: [dockerfile, containerfile]
+    filenames: [Dockerfile, Containerfile]
+    filename_prefixes: ["Dockerfile.", "Containerfile."]
+    aliases: [docker, containerfile]
+    grammar: tree-sitter-containerfile
+
   elixir:
     extensions: [ex, exs]
     grammar: tree-sitter-elixir

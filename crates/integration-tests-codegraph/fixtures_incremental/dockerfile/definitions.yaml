@@ -1,0 +1,50 @@
+name: "Dockerfile: stages and variables become definitions"
+
+fixtures:
+  - path: Dockerfile
+    content: |
+      ARG GO_VERSION=1.22
+      FROM golang:${GO_VERSION} AS builder
+      ENV CGO_ENABLED=0 GOOS=linux
+      RUN go build -o /out/app ./cmd/app
+
+      FROM alpine:3.19 AS runtime
+      ARG APP_USER=app
+      ENV APP_HOME=/opt/${APP_USER}
+      EXPOSE 8080
+
+tests:
+  - name: "each named stage is a Class definition and each ARG/ENV a Variable"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn, d.definition_type AS kind
+      ORDER BY fqn
+    assert:
+      - { row_count: 7 }
+      - { row: { fqn: "Dockerfile.GO_VERSION", kind: "Variable" } }
+      - { row: { fqn: "Dockerfile.builder", kind: "Class" } }
+      - { row: { fqn: "Dockerfile.builder.CGO_ENABLED", kind: "Variable" } }
+      - { row: { fqn: "Dockerfile.builder.GOOS", kind: "Variable" } }
+      - { row: { fqn: "Dockerfile.runtime", kind: "Class" } }
+      - { row: { fqn: "Dockerfile.runtime.APP_HOME", kind: "Variable" } }
+      - { row: { fqn: "Dockerfile.runtime.APP_USER", kind: "Variable" } }
+
+  - name: "a stage defines the variables declared after its FROM"
+    query: |
+      MATCH (s:Definition)-[:DEFINES]->(v:Definition)
+      WHERE s.definition_type = 'Class'
+      RETURN s.name AS stage, v.name AS variable
+      ORDER BY stage, variable
+    assert:
+      - { row_count: 4 }
+      - { row: { stage: "builder", variable: "CGO_ENABLED" } }
+      - { row: { stage: "builder", variable: "GOOS" } }
+      - { row: { stage: "runtime", variable: "APP_HOME" } }
+      - { row: { stage: "runtime", variable: "APP_USER" } }
+
+  - name: "the file is indexed as Dockerfile"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.language AS language
+    assert:
+      - { row: { path: "Dockerfile", language: "dockerfile" } }
