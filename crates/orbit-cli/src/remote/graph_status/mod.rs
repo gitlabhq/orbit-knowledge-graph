@@ -22,7 +22,7 @@ const GRAPH_STATUS_QUERY: &str = "query($fullPath: ID!) { \
      indexing { state areas { name state } projects { indexed totalKnown gaps } } \
      itemCounts { domains { name entities { name count } } } }";
 const SCOPE_POINTERS: [&str; 2] = ["/group", "/project"];
-const DAP_SCOPES_RELEASE: &str = "the GitLab release that includes gitlab MR 0";
+const DAP_SCOPES_RELEASE: &str = "the GitLab release that includes gitlab-org/gitlab!264673";
 
 #[derive(Deserialize)]
 struct GraphqlResponse {
