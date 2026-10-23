@@ -156,9 +156,9 @@ For the setup options and what setup changes, see [connect your agent](agents/_i
 1. Start a new session of your agent in the repository and ask about your GitLab data:
 
    ```plaintext
-   Using GitLab Orbit, which CI/CD jobs failed most often in <my-group> in the
-   last 30 days? For the top three, show the failure reasons and the merge
-   requests with the most failed pipelines.
+   Using GitLab Orbit, which projects in <my-group> had the most failed pipelines
+   in the last 30 days? For the top three, show the failure reasons of the failed
+   jobs and the merge requests with the most failed pipelines.
    ```
 
    The agent writes a graph query, runs it with `glab orbit query`, and answers with only the data that you can access.
