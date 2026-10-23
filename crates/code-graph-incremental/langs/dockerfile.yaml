@@ -137,7 +137,7 @@ display:
           file_path: '@$M'
           # A name that is not a Dockerfile keeps its extension. The regexes
           # mirror `file_names` in config/languages.yaml.
-          language: '@$M|split_last("/")|regex_replace("(?i)^(.*)\.(tt|erb|template|tmpl|tpl|j2|jinja|jinja2|in|diff|patch|md|txt|bak|orig|dockerignore|yml|yaml|json|toml|lock)$", "${1}_.${2}")|regex_replace("(?i)^((docker|container)file(\..*)?|.*\.(docker|container)file)$", "dockerfile.dockerfile")|split_last(".")'
+          language: '@$M|split_last("/")|regex_replace("(?i)^(.*)\.(tt|erb|template|tmpl|tpl|j2|jinja|jinja2|in|diff|patch|md|txt|bak|orig|dockerignore|yml|yaml|json|toml|lock)$", "_.${2}")|regex_replace("(?i)^((docker|container)file(\..*)?|.*\.(docker|container)file)$", "dockerfile.dockerfile")|split_last(".")'
       - match: '(__def !(__impl))'
         tag:
           entity: Definition
