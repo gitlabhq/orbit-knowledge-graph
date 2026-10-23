@@ -51,6 +51,8 @@ done
 
 count="$(find "$CLONE/$TABLES_PATH" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) | wc -l | tr -d ' ')"
 [[ "$count" -gt 0 ]] || { echo "no table files found at $TABLES_PATH in $GITLAB_REF"; exit 1; }
+# The siphon container reads the files as another user; a local umask of 077 breaks it.
+chmod -R u+rwX,go+rX "$CLONE/$TABLES_PATH"
 tar -czf "$TARBALL" -C "$CLONE/$TABLES_PATH" .
 log "packed $count table files ($(du -h "$TARBALL" | cut -f1 | tr -d ' '))"
 
