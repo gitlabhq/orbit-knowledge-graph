@@ -84,9 +84,15 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             &node.alias,
             ReadOwner::Node(node.alias.clone()),
             sort_key(self.model, table)?,
-            node.conditions(),
+            self.node_conditions(node),
             self.model.supports_selective_latest_rows(),
         ))
+    }
+
+    fn node_conditions(&self, node: &NodePlan) -> Vec<Predicate> {
+        let mut conditions = node.conditions();
+        conditions.extend(self.shared_column_predicates(node));
+        conditions
     }
 
     fn entity_kind(&self, edge_alias: &str, node: &str, id_column: &str) -> Option<Predicate> {
