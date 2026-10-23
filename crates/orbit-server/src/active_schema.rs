@@ -69,6 +69,7 @@ impl ActiveSchema {
                 _ = shutdown.cancelled() => return,
                 Err(error) = self.follow_active_version(&loader, retry_backoff) => {
                     warn!(
+                        safe(ERROR_TYPE) = crate::expanded_logs::anyhow_error_type(&error),
                         expanded(ERROR_MESSAGE) = %error,
                         "active version watch lost; reopening"
                     );
@@ -91,6 +92,7 @@ impl ActiveSchema {
             Ok(version) => version,
             Err(error) => {
                 warn!(
+                    safe(ERROR_TYPE) = "active_version_read",
                     expanded(ERROR_MESSAGE) = %error,
                     "active version unknown; keeping the last installed snapshot"
                 );
@@ -102,6 +104,7 @@ impl ActiveSchema {
                 Ok(()) => changes.try_next().await?,
                 Err(error) => {
                     warn!(
+                        safe(ERROR_TYPE) = "schema_install",
                         expanded(ERROR_MESSAGE) = %format_args!("{error:#}"),
                         "active schema unavailable; retrying"
                     );
@@ -181,6 +184,7 @@ impl SchemaSnapshot {
                 warn!(
                     safe(MIGRATION_VERSION) = migration_version,
                     safe(QUERY_NAME) = query.name.as_str(),
+                    safe(ERROR_TYPE) = "query_validation",
                     expanded(ERROR_MESSAGE) = %error,
                     "named query unavailable in active schema"
                 );

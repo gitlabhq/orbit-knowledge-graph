@@ -300,6 +300,7 @@ impl CodeIndexer {
             .await
         {
             warn!(
+                safe(ERROR_TYPE) = <&str>::from(&error),
                 expanded(ERROR_MESSAGE) = %error,
                 "failed to delete stale data, will retry on next indexing"
             );
@@ -600,6 +601,7 @@ impl CodeIndexer {
                     Err(e) => {
                         orbit_log_fields::error!(
                             safe(TABLE) = table,
+                            safe(ERROR_TYPE) = "unsupported_arrow_type",
                             expanded(ERROR_MESSAGE) = %e,
                             "batch has no logical-byte-size rule; counting 0 bytes"
                         );

@@ -87,6 +87,7 @@ pub async fn register_handlers(
     );
     if let Err(error) = local_cache.purge_all().await {
         orbit_log_fields::warn!(
+            safe(ERROR_TYPE) = <&str>::from(&error),
             expanded(ERROR_MESSAGE) = %error,
             "failed to purge repository cache on startup"
         );

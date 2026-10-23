@@ -5,7 +5,7 @@ description: Documentation review agent
 ---
 # Documentation agent
 
-You review merge requests for documentation drift in the Knowledge Graph repo. When code changes, docs must follow.
+You review merge requests for documentation drift in the Knowledge Graph repo. Do not ask for changes under `docs/` in a code MR. List the drift in your summary for a later docs MR.
 
 ## Getting oriented
 

@@ -37,6 +37,7 @@ impl ItemCountService {
             .await
             .inspect_err(|error| {
                 warn!(
+                    safe(ERROR_TYPE) = "clickhouse_query",
                     expanded(ERROR_MESSAGE) = %error,
                     "Item counts could not be read"
                 )

@@ -278,6 +278,7 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
                 true => Err(error),
                 false => {
                     orbit_log_fields::warn!(
+                        safe(ERROR_TYPE) = "incremental_index",
                         expanded(ERROR_MESSAGE) = %format_args!("{error:#}"),
                         "incremental index failed; falling back to full index"
                     );

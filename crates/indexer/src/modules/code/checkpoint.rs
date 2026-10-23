@@ -14,7 +14,8 @@ use thiserror::Error;
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum CheckpointError {
     #[error("query failed: {0}")]
     Query(String),

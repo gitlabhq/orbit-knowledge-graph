@@ -349,10 +349,12 @@ impl TestContext {
 }
 
 fn test_settings() -> HashMap<String, String> {
-    HashMap::from([
+    let mut settings = AppConfig::embedded_defaults().graph.session_settings;
+    settings.extend([
         ("async_insert".to_string(), "0".to_string()),
         ("fsync_metadata".to_string(), "0".to_string()),
-    ])
+    ]);
+    settings
 }
 
 fn test_client(url: &str, database: &str) -> ArrowClickHouseClient {

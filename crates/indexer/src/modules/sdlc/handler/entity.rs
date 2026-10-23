@@ -300,6 +300,7 @@ impl EntityHandler {
     ) -> Result<PipelineStats, HandlerError> {
         warn!(
             safe(ENTITY) = self.plan.name.as_str(),
+            safe(ERROR_TYPE) = "unknown_table",
             expanded(ERROR_MESSAGE) = reason,
             "source table does not exist; the plan is complete with nothing new indexed until it appears"
         );

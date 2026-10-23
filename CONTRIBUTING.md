@@ -55,8 +55,10 @@ Run `mise lint:docs` before pushing any documentation changes.
 
 ## Documentation conventions
 
-- Design documents describe the current system. Update the owning document under
-  `docs/design-documents/` in the same MR as a behavior change.
+- Do not change any file under `docs/` in an MR that changes code. Change it
+  only when a CI or build check fails without it.
+  The `docs-in-code-mr-check` CI job enforces this rule. When a check needs the
+  change, add the `docs-in-code-mr` label and retry the job.
 - Rewrite or remove stale text instead of preserving history.
 - Keep `README.md` a front page: what GitLab Orbit is, the quickstart, and links.
   Put lists such as languages, entity types, and commands only in the page that

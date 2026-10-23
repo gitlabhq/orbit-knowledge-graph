@@ -216,6 +216,7 @@ async fn delete_streams(
                 warn!(
                     safe(RELEASE) = context,
                     safe(NATS_STREAM) = name.as_str(),
+                    safe(ERROR_TYPE) = "delete_stream",
                     expanded(ERROR_MESSAGE) = %e,
                     "failed to delete versioned stream"
                 );

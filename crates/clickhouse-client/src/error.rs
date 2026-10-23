@@ -1,7 +1,8 @@
 use circuit_breaker::CircuitBreakableError;
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum ClickHouseError {
     #[error("query error: {0}")]
     Query(#[source] clickhouse::error::Error),
