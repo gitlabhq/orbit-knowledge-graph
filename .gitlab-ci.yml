@@ -855,7 +855,14 @@ cli-integration-test:
   script:
     - cargo build -p orbit-cli
     - cargo nextest run --profile ci --test cli --test outside_repository --no-fail-fast
+    - mv target/nextest/ci/junit.xml target/nextest/ci/junit-cli.xml
+    - cargo nextest run --profile ci -p orbit-cli --test remote_cli --no-fail-fast
     - sccache --show-stats || true
+  artifacts:
+    reports:
+      junit:
+        - target/nextest/ci/junit-cli.xml
+        - target/nextest/ci/junit.xml
 
 .integration-test-template:
   stage: test
