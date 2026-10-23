@@ -69,9 +69,9 @@ Results include only what the token owner can see in GitLab.
 
 | Access method | Authentication |
 |---------------|----------------|
-| [REST API](queries/api.md) | A personal access token with the `read_api` scope, or a fine-grained personal access token, sent as a Bearer token |
+| [REST API](https://docs.gitlab.com/api/orbit/) | A personal access token with the `read_api` scope, or a fine-grained personal access token, sent as a Bearer token |
 | [GitLab Orbit CLI](cli.md) | Your `glab auth login` credential, or a personal access token with the `read_api` scope in `GITLAB_TOKEN` |
-| [Model Context Protocol (MCP) endpoint](agents/mcp.md) | GitLab OAuth, or a personal access token with the `mcp_orbit` or `read_api` scope. Native HTTP clients request the `mcp_orbit` scope. |
+| [Model Context Protocol (MCP) endpoint](agents/mcp.md) | GitLab OAuth, where the client requests the `mcp_orbit` scope, or a personal access token with the `read_api` scope |
 | [GitLab Duo Agent Platform](agents/duo.md) | No token to configure |
 | [Service account](#service-accounts) | A personal access token of a bot user, scoped to the groups where the account is a member |
 

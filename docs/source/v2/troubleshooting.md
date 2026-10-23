@@ -139,7 +139,7 @@ You might get an error that states:
 Orbit API error (HTTP 400): {"code":"compile_error","message":"schema violation: Orbit query syntax at line 1, column 1: expected Statement ..."}
 ```
 
-This issue occurs when the query uses the deprecated JSON query domain-specific language (DSL).
+This issue occurs when the query is not written in GQL, for example a JSON query.
 
 To resolve this issue, rewrite the query in [GQL](queries/query-language.md), for example:
 
