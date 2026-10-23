@@ -47,6 +47,27 @@ GQL does not support these forms, and rejects them:
 - Query parameters
 - Other functions, such as `collect(x)` (the error names the function)
 
+### Neighbors
+
+To find every node that is connected to one node, write an undirected relationship, `--`, from a bounded node:
+
+```gql orbit-query
+MATCH (mr:MergeRequest {id: 482908721})--(n)
+RETURN n
+LIMIT 20
+```
+
+### Shortest paths
+
+To find the shortest path between two bounded nodes, use `ANY SHORTEST`.
+Name the relationship type and keep the hop range small.
+A pattern with no relationship type, such as `-[*1..3]->`, follows every relationship and might time out.
+
+```gql orbit-query
+MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {full_path: 'gitlab-org/gitlab'})
+RETURN path
+```
+
 ## Discover the schema
 
 To list the properties and relationships of one node type, run:
@@ -274,70 +295,8 @@ On GitLab.com, the response includes the SQL only for GitLab team members.
 On GitLab Self-Managed and GitLab Dedicated, the response includes the SQL only for administrators.
 For other users, GitLab ignores `DEBUG`.
 
-## Examples
-
-### Count merge requests by state
-
-```gql orbit-query
-MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
-RETURN mr.state, count(mr) AS mrs
-ORDER BY mrs DESC
-LIMIT 10
-```
-
-### List open work items in a project
-
-```gql orbit-query
-MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
-WHERE wi.state = 'opened'
-RETURN wi.iid, wi.title, wi.work_item_type
-ORDER BY wi.created_at DESC
-LIMIT 10
-```
-
-### Find the merge requests that changed a file
-
-`HAS_DIFF` covers every diff version of a merge request.
-Anchor the file on `old_path` and `project_id`, so the same path in another project does not match.
-
-```gql orbit-query
-MATCH (mr:MergeRequest)-[:HAS_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile {project_id: 278964, old_path: 'app/services/base_service.rb'})
-RETURN mr.id, mr.iid, mr.title, count(d) AS snapshots
-ORDER BY snapshots DESC
-LIMIT 100
-```
-
-### Find the subclasses of a class
-
-`EXTENDS` points from the child to the parent. This query includes descendants up to three hops away.
-
-```gql orbit-query
-MATCH (child:Definition)-[:EXTENDS*1..3]->(parent:Definition {fqn: 'ApplicationRecord', project_id: 278964, branch: 'master'})
-RETURN child.name, child.fqn, child.file_path
-LIMIT 1000
-```
-
-### Find everything connected to one node
-
-```gql orbit-query
-MATCH (mr:MergeRequest {id: 482908721})--(n)
-RETURN n
-LIMIT 20
-```
-
-### Find the shortest path between two nodes
-
-Name the relationship type and keep the hop range small.
-An untyped `-[*1..3]->` follows every relationship and might time out.
-
-```gql orbit-query
-MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {full_path: 'gitlab-org/gitlab'})
-RETURN path
-```
-
-For more queries by goal, see [prompt examples](../prompt-examples.md).
-
 ## Related topics
 
 - [Queries](_index.md)
 - [REST API](api.md)
+- [Prompt examples](../prompt-examples.md)

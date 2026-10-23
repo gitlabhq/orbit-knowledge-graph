@@ -122,7 +122,7 @@ The server fetches them from the repository when your query asks for them.
 | `Definition` | `content` | Source text of the definition |
 | `MergeRequest` | `diff` | Full unified diff of the merge request |
 | `MergeRequestDiff` | `patch` | Full unified patch of the diff version |
-| `MergeRequestDiffFile` | `diff` | Patch of one changed file |
+| `MergeRequestDiffFile` | `diff` | Patch of one changed file. `null` when `too_large` is `true`. |
 
 Use these properties to read code without a separate call to the GitLab API.
 
