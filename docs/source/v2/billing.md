@@ -45,7 +45,7 @@ GitLab Orbit meters queries only. Schema, status, and discovery calls are free o
 | Check status and indexing progress | `glab orbit status`, `glab orbit graph-status`, `GET /api/v4/orbit/status`, `GET /api/v4/orbit/graph_status` | {{< no >}} |
 | List tools and commands | MCP `list_commands`, `glab orbit tools`, `GET /api/v4/orbit/tools`, `GET /api/v4/orbit/agent/commands` | {{< no >}} |
 | Fetch the response format reference | MCP `get_response_format`, `GET /api/v4/orbit/schema/format` | {{< no >}} |
-| Index or query the local graph | `glab orbit index`, `grep`, `context`, `repo-map`, `sql`, the local MCP server | {{< no >}} |
+| Index or query the local graph | `glab orbit index`, `grep`, `context`, `repo-map`, `sql` | {{< no >}} |
 
 ## Cost for each query
 

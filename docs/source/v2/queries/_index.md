@@ -103,5 +103,7 @@ LIMIT 5
 
 - [Query language](query-language.md)
 - [REST API](api.md)
+- [GitLab Orbit API reference](https://docs.gitlab.com/api/orbit/)
+- [GraphQL API: `Query.orbit`](https://docs.gitlab.com/api/graphql/reference/#queryorbit)
 - [Prompt examples](../prompt-examples.md)
 - [Indexed data](../schema.md)

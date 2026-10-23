@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query GitLab Orbit with GQL, a read-only, OpenCypher-like query language. Learn the statement shape, filters, aggregations, pagination, and limits.
+description: Query GitLab Orbit with GQL, a read-only, OpenCypher-like query language. Learn what GQL supports, the statement shape, filters, aggregations, pagination, and limits.
 title: GitLab Orbit query language
 ---
 
@@ -21,8 +21,32 @@ title: GitLab Orbit query language
 {{< /history >}}
 
 GitLab Orbit accepts GQL, a read-only, OpenCypher-like query language that agents already know.
-GQL replaces the deprecated JSON query domain-specific language (DSL). To send a query, see [run a query](_index.md#run-a-query).
+To send a query, see [run a query](_index.md#run-a-query).
 Code examples in this documentation carry the label `gql`.
+
+## Supported and not supported
+
+GQL supports:
+
+- `MATCH` with one connected pattern. A query can have more than one `MATCH` clause.
+- `WHERE` with `AND`, `NOT`, comparisons, `IN`, `STARTS WITH`, `ENDS WITH`, `CONTAINS`, `IS NULL`, and `IS NOT NULL`.
+- `RETURN` with properties, nodes, `properties(n)`, `n{.property}`, and `AS` aliases.
+- The aggregate functions `count`, `sum`, `avg`, `min`, and `max`, and `date_trunc` for time periods.
+- `ORDER BY` with one sort key, `SKIP` (or `OFFSET`), and `LIMIT`.
+- Variable-length relationships up to three hops, and shortest paths with `ANY SHORTEST` or `SHORTEST 1`.
+- `type(r)`, and the text search functions `token_match`, `all_tokens`, and `any_tokens`.
+- `CALL db.schema()` and `DEBUG`.
+
+GQL does not support these forms, and rejects them:
+
+- Write clauses, such as `CREATE`, `MERGE`, `SET`, and `DELETE`, and more than one statement.
+- `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`, `YIELD`, and subqueries.
+- Patterns that are not connected or that have a cycle.
+- `OR`, `XOR`, and `x NOT IN [...]`. Write `NOT x IN [...]` instead.
+- `DISTINCT`, `count(*)`, and arbitrary expressions.
+- More than one `ORDER BY` key, and `LIMIT` before `SKIP`.
+- Query parameters.
+- Other functions, such as `collect(x)`. The error names the function.
 
 ## Discover the schema
 
@@ -43,7 +67,9 @@ MATCH pattern [WHERE predicates]
 [MATCH pattern [WHERE predicates] ...]
 RETURN projections
 [ORDER BY key [ASC | DESC]]
-[LIMIT rows | PAGE rows [AFTER 'token']]
+[SKIP rows]
+[LIMIT rows]
+[DEBUG]
 ```
 
 - Each node needs a variable. Declare the label of each node, and any inline properties, where the node first appears:
@@ -122,7 +148,7 @@ LIMIT 10
 These properties have a text index:
 
 <!-- The table below is generated from the ontology's `text` storage indexes. -->
-<!-- Do not edit it by hand: run `mise run docs:generate` and commit. The `docs-generated-check` pre-commit hook fails on drift. -->
+<!-- Copy it from docs/source/remote/queries/query-language.md after `mise run docs:query-language`. That task does not update this v2 copy. -->
 <!-- BEGIN GENERATED: text-indexed-properties -->
 
 | Entity | Text-indexed properties |
@@ -175,6 +201,8 @@ These properties have a text index:
 - To group by a time period, use `date_trunc('<unit>', <property>)` as a group key on a date property.
   The units are `minute`, `hour`, `day`, `week`, `month`, `quarter`, and `year`.
   `minute` and `hour` also need a filter on the same property. Weeks start on Sunday.
+- `type(r)` returns the type of a one-hop relationship variable in `WHERE`, `RETURN`, and `ORDER BY`,
+  but not as an aggregation group key.
 
 ```gql orbit-query
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
@@ -186,26 +214,51 @@ LIMIT 12
 
 ## Pagination
 
-`PAGE rows` replaces `LIMIT` and returns `next_cursor` while more rows remain.
-To get the next page, run the same query with `PAGE rows AFTER '<next_cursor>'`.
-The cursor belongs to the query text, so do not change anything else between pages.
+To get results page by page, use `SKIP` and `LIMIT`. `OFFSET` is the same as `SKIP`. Put `SKIP` before `LIMIT`.
+Start at `SKIP 0`. For each next page, add the page size to `SKIP`:
+`SKIP 0 LIMIT 20`, then `SKIP 20 LIMIT 20`, then `SKIP 40 LIMIT 20`.
+Write `SKIP` on every page, also on the first page, so that all pages use the same sort order.
+Do not change other parts of the query between pages.
 
-In the `raw` response format, the cursor is `pagination.next_cursor`.
+```gql orbit-query
+MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+WHERE mr.state = 'merged'
+RETURN mr.iid, mr.title
+ORDER BY mr.created_at DESC
+SKIP 20
+LIMIT 20
+```
+
+In the `raw` response format, `pagination.has_more` is `true` while more rows exist. Stop when it is `false`.
+A page can return fewer rows than `LIMIT`, or no rows, because GitLab removes the rows that you cannot access.
+`SKIP` also counts these rows, so pages do not overlap.
 When `pagination.truncated` is `true`, the result is incomplete.
+
+`SKIP` accepts up to 10,000 rows. To go deeper, sort by a unique property, such as `id`,
+and filter past the last value of the previous page:
+
+```gql orbit-query
+MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
+WHERE mr.state = 'merged' AND mr.id > 482908721
+RETURN mr.id, mr.iid, mr.title
+ORDER BY mr.id
+LIMIT 1000
+```
+
+Use the last `mr.id` of each page as the lower bound for the next page.
+
+Each page reads the current data. If a row is added or deleted before your position between two pages,
+the later pages move by one row, so a row can repeat or be missing.
 
 ## Limits
 
 - Each relationship spans at most three hops. `-[:CONTAINS*1..3]->` is a bounded variable-length hop.
 - A query has at most five nodes and five relationships.
 - `ORDER BY` takes one sort key.
-- `LIMIT` and `PAGE` accept 1 to 1000 rows.
+- `LIMIT` accepts 1 to 1000 rows. The default is 30.
+- `SKIP` accepts 0 to 10,000 rows.
 - Each node returns at most 50 properties and filters on at most 500 IDs.
 - The query text is at most 32 KiB.
-
-These forms are not supported and are rejected:
-write clauses, more than one statement, `OPTIONAL MATCH`, `WITH`, `UNION`, `UNWIND`, `YIELD`, subqueries,
-`OR`, `x NOT IN [...]`, `DISTINCT`, `count(*)`, arbitrary expressions, and `SKIP` or other offset pagination.
-`type(r)` returns the type of a one-hop relationship variable in `WHERE`, `RETURN`, and `ORDER BY`, but not as an aggregation group key. Other functions, such as `collect(x)`, are rejected with an error that names the function.
 
 Syntax errors report a line and column.
 
