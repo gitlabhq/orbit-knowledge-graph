@@ -1,9 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-mod application;
-
-pub use application::apply_plan;
-
 #[derive(Clone, Default)]
 pub struct QueryScope {
     nodes: HashMap<String, ScopeProof>,
@@ -154,12 +150,6 @@ pub fn derive_scope_proofs(
     input: &Input,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
 ) -> HashMap<String, ScopeProof> {
-    if !matches!(
-        input.query_type,
-        QueryType::Traversal | QueryType::Aggregation
-    ) {
-        return HashMap::new();
-    }
     let anchor_fks: Vec<_> = model
         .anchor_foreign_keys()
         .iter()
@@ -186,7 +176,19 @@ pub fn derive_scope_proofs(
                 .then(|| (node.id.clone(), ScopeProof::from_sources(lookups)))
         })
         .collect();
-    propagate_scope_proofs(input, model, &seed)
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return HashMap::new();
+    }
+    let mut proofs = propagate_scope_proofs(input, model, &seed);
+    proofs.retain(|alias, _| {
+        input
+            .entity_of(alias)
+            .is_some_and(|entity| model.entity_has_traversal_path(entity))
+    });
+    proofs
 }
 
 fn propagate_scope_proofs(

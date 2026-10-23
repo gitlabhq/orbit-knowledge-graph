@@ -15,7 +15,7 @@ physical:
       ctes:
         absent: true
       expect: ["(Join ON _orbit_edge_0.target_id = _orbit_edge_1.source_id (_) (_))"]
-      reject: ["(Scan Table(gl_definition) ...)", "(Filter _orbit_edge_1.source_id IN ?.id (_))"]
+      reject: ["(Filter _orbit_edge_1.source_id IN ?.id (_))"]
     emitted:
       ctes:
         absent: true

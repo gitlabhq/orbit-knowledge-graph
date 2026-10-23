@@ -9,6 +9,7 @@ pub(crate) mod sql;
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
+use crate::scope::QueryScope;
 use std::collections::HashMap;
 
 use super::plan::graph::ExecutionPlan;
@@ -47,23 +48,6 @@ impl NodeBinding {
             table_alias,
             traversal_path,
         }
-    }
-
-    pub fn role_identity(&self) -> Result<Option<&Expr>> {
-        Ok(match self {
-            Self::Values {
-                identity,
-                table_alias: None,
-                ..
-            } => Some(identity),
-            Self::Projected { role_identity } => role_identity.as_ref(),
-            Self::Filtered => {
-                return Err(QueryError::Lowering(
-                    "protected filtered node requires a visible identity".into(),
-                ));
-            }
-            _ => None,
-        })
     }
 
     fn identity(&self) -> &Expr {
@@ -170,10 +154,10 @@ fn redaction_columns<T>(plan: &Plan<T>, execution: &ExecutionPlan) -> Vec<Column
         .collect()
 }
 
-pub fn emit(plan: &QueryPlan, input: &Input) -> Result<LoweredQuery> {
+pub fn emit(plan: &QueryPlan, input: &Input, scope: Option<&QueryScope>) -> Result<LoweredQuery> {
     let emitted = match plan {
-        QueryPlan::Traversal(plan) => query_types::traversal::emit(plan, input)?,
-        QueryPlan::Aggregation(plan) => query_types::aggregation::emit(plan, input)?,
+        QueryPlan::Traversal(plan) => query_types::traversal::emit(plan, input, scope)?,
+        QueryPlan::Aggregation(plan) => query_types::aggregation::emit(plan, input, scope)?,
         QueryPlan::Neighbors(plan) => query_types::neighbors::emit(plan, input)?,
         QueryPlan::PathFinding(plan) => query_types::pathfinding::emit(plan, input)?,
         QueryPlan::Hydration(plan) => query_types::hydration::emit(plan)?,

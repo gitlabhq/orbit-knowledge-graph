@@ -993,7 +993,15 @@ mod tests {
             "limit": 10
         }"#;
 
-        let sql = compile_sql(query);
+        let sql = compile(
+            query,
+            Frontend::JsonDsl,
+            &ONTOLOGY,
+            &crate::testkit::admin_ctx(),
+        )
+        .expect("should compile")
+        .base
+        .render();
 
         assert!(
             sql.contains("gl_vulnerability"),
