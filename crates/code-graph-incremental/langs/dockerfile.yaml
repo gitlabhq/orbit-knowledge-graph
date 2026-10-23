@@ -1,0 +1,286 @@
+# Dockerfile / Containerfile rewrite rules (POC).
+# Handles: FROM stages as class-like definitions (the base image is an
+# ImportedSymbol inside the stage), ARG and ENV pairs as variable definitions,
+# COPY --from=<stage> and FROM <stage> as calls to the stage, $VAR / ${VAR}
+# expansions as calls to the variable definition.
+
+config:
+  stdlib: []
+
+stages:
+  - name: normalize
+    rules:
+      - match: '(source_file $$$C)'
+        replace: '(__source_file @$ROOT $$$C)'
+
+  - name: expansions
+    rules:
+      - match: '$V:variable'
+        replace: '(__call (__callee @$V $V))'
+
+  - name: pair-defs
+    rules:
+      - match: '(arg_pair name: $N default:? $V)'
+        replace: '(__def (__defname @$N) (__variable) $V)'
+      - match: '(env_pair name: $N value:? $V)'
+        replace: '(__def (__defname @$N) (__variable) $V)'
+
+  - name: from-heads
+    rules:
+      - match: '(from_instruction (image_spec name: $N tag: (image_tag $$$T)) as: $A)'
+        replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
+      - match: '(from_instruction (image_spec name: $N) as: $A)'
+        replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)))'
+      - match: '(from_instruction (image_spec name: $N))'
+        replace: '(__from (__defname @$N|prepend("stage:")) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))))'
+
+  - name: copy-from
+    rules:
+      - match: '(copy_instruction $P:(param "^--from="))'
+        replace: '(__call (__callee @$P|strip_prefix("--from=") $P))'
+
+  # The grammar has no stage node, and a rule fires once per node per stage,
+  # so each pass below nests the first ungrouped stage under its FROM.
+  # Stage 25 onwards falls back to flat definitions.
+  - name: group-stage-1
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-2
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-3
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-4
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-5
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-6
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-7
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-8
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-9
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-10
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-11
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-12
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-13
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-14
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-15
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-16
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-17
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-18
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-19
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-20
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-21
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-22
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-23
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-stage-24
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY $G:__from $$$POST)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY) $G $$$POST)'
+
+  - name: group-last-stage
+    rules:
+      - match: '(__source_file $$$PRE (__from $$$H) $$$BODY)'
+        replace: '(__source_file @$ROOT $$$PRE (__def $$$H $$$BODY))'
+
+  - name: group-leftover-stages
+    rules:
+      - match: '(__from $$$H)'
+        replace: '(__def $$$H)'
+
+  - name: tag-defs
+    rules:
+      - match: '(__def (__function))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__method))'
+        tag: { callable: "true", scoped: "true" }
+      - match: '(__def (__class))'
+        tag: { callable: "true", value: "true", declares_type: "true", scoped: "true" }
+      - match: '(__def (__lambda))'
+        tag: { callable: "true" }
+      - match: '(__def (__enum_variant))'
+        tag: { callable: "true", value: "true", scoped: "true" }
+      - match: '(__def (__struct))'
+        tag: { value: "true", declares_type: "true", scoped: "true" }
+      - match: '(__def (__variable))'
+        tag: { callable: "true", value: "true", scoped: "true" }
+      - match: '(__def (__impl))'
+        tag: { scoped: "true" }
+      - match: '(__def (__trait))'
+        tag: { value: "true", declares_type: "true", scoped: "true" }
+      - match: '(__def (__enum))'
+        tag: { value: "true", declares_type: "true", scoped: "true" }
+
+  - name: tag-file-dir
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
+
+  - name: resolve-paths
+    rules:
+      - match: '(__import)'
+        tag:
+          resolved_source: '@$ROOT|child_sym("__source_path")'
+      - match: '(__import (__source_path "^."))'
+        tag:
+          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
+
+resolve:
+  stages: []
+
+display:
+  - name: fqn
+    rules:
+      - match: '$M:__source_file'
+        tag:
+          entity: File
+          fqn: '@$M|stem|split_last("/")'
+          file_path: '@$M'
+          language: '@$M|regex_replace("^.*$", "dockerfile")'
+      - match: '(__def !(__impl))'
+        tag:
+          entity: Definition
+          fqn: '@$ROOT|concat(".", "ancestor_tag:fqn", "child_sym:__defname")|keep_last(".", "64", "4096")'
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+      - match: '(__def (__impl))'
+        tag:
+          entity: Definition
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+  - name: def_type
+    rules:
+      - match: '(__def (__function))'
+        tag: { def_type: Function }
+      - match: '(__def (__method))'
+        tag: { def_type: Method }
+      - match: '(__def (__class))'
+        tag: { def_type: Class }
+      - match: '(__def (__struct))'
+        tag: { def_type: Struct }
+      - match: '(__def (__interface))'
+        tag: { def_type: Interface }
+      - match: '(__def (__enum))'
+        tag: { def_type: Enum }
+      - match: '(__def (__enum_variant))'
+        tag: { def_type: EnumVariant }
+      - match: '(__def (__trait))'
+        tag: { def_type: Trait }
+      - match: '(__def (__impl))'
+        tag: { def_type: Impl }
+      - match: '(__def (__variable))'
+        tag: { def_type: Variable }
+      - match: '(__def (__constant))'
+        tag: { def_type: Constant }
+      - match: '(__def (__static_constant))'
+        tag: { def_type: Static }
+      - match: '(__def (__lambda))'
+        tag: { def_type: Lambda }
+      - match: '(__def (__field_def))'
+        tag: { def_type: Field }
+      - match: '(__def (__property))'
+        tag: { def_type: Property }
+      - match: '(__def (__type_alias))'
+        tag: { def_type: TypeAlias }
+  - name: imports
+    rules:
+      - match: '(__import)'
+        tag:
+          entity: ImportedSymbol
+          file_path: '@$ROOT|ancestor_tag("file_path")'
+          source_path: '@$ROOT|child_sym("__source")'
+      - match: '(__import)'
+        tag: { import_type: Source }
+      - match: '(__name "*")'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name (__alias))'
+        tag:
+          import_type: AliasedImport
+          resolved: '@$ROOT|has_incoming("Imports")'
+      - match: '(__name)'
+        tag:
+          resolved: '@$ROOT|has_incoming("Imports")'

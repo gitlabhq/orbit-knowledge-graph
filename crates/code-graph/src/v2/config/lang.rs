@@ -220,6 +220,11 @@ define_languages! {
         separator: ".",
         names: ["hcl", "terraform"],
     },
+    Dockerfile => {
+        extensions: ["dockerfile", "containerfile"],
+        separator: ".",
+        names: ["dockerfile", "containerfile", "docker"],
+    },
     Swift => {
         support_lang: Swift,
         extensions: ["swift"],

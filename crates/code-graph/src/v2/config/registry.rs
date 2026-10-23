@@ -18,15 +18,48 @@ fn detect_language_from_extension(extension: &str) -> Option<Language> {
 }
 
 pub fn detect_language_from_path(path: &str) -> Option<Language> {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    if is_container_build_file(name) {
+        return Some(Language::Dockerfile);
+    }
     let ext = std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())?;
     detect_language_from_extension(ext)
 }
 
+/// `Dockerfile`, `Containerfile` and their dotted variants (`Dockerfile.dev`)
+/// carry no language extension.
+fn is_container_build_file(name: &str) -> bool {
+    ["Dockerfile", "Containerfile"].iter().any(|base| {
+        name == *base
+            || name
+                .strip_prefix(base)
+                .is_some_and(|rest| rest.starts_with('.'))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn container_build_files_are_detected_by_name() {
+        for path in [
+            "Dockerfile",
+            "Containerfile",
+            "Dockerfile.dev",
+            "svc/Containerfile.prod",
+            "build/app.dockerfile",
+        ] {
+            assert_eq!(
+                detect_language_from_path(path),
+                Some(Language::Dockerfile),
+                "{path}"
+            );
+        }
+        assert_eq!(detect_language_from_path("docs/Dockerfile-notes.md"), None);
+    }
 
     #[test]
     fn detect_all_extensions() {

@@ -13,6 +13,7 @@ pub enum SupportLang {
     Cpp,
     #[serde(rename = "csharp")]
     CSharp,
+    Dockerfile,
     Elixir,
     Go,
     Haskell,
@@ -37,6 +38,12 @@ pub enum SupportLang {
 #[derive(serde::Deserialize)]
 pub struct LangEntry {
     extensions: Vec<String>,
+    /// Exact file names (`Dockerfile`) for languages whose files carry no extension.
+    #[serde(default)]
+    filenames: Vec<String>,
+    /// File-name prefixes (`Dockerfile.`) matched before any extension.
+    #[serde(default)]
+    filename_prefixes: Vec<String>,
     #[serde(default)]
     aliases: Vec<String>,
     grammar: String,
@@ -94,6 +101,7 @@ pub fn lang_yaml(lang_id: SupportLang) -> Option<&'static str> {
         SupportLang::Cpp => Some(include_str!("../langs/cpp.yaml")),
         SupportLang::Scala => Some(include_str!("../langs/scala.yaml")),
         SupportLang::Bash => Some(include_str!("../langs/bash.yaml")),
+        SupportLang::Dockerfile => Some(include_str!("../langs/dockerfile.yaml")),
         SupportLang::Elixir => Some(include_str!("../langs/elixir.yaml")),
         SupportLang::Lua => Some(include_str!("../langs/lua.yaml")),
         SupportLang::Swift => Some(include_str!("../langs/swift.yaml")),
@@ -113,6 +121,17 @@ impl SupportLang {
     }
 
     pub fn from_path(path: &str) -> Option<Self> {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        let by_name = LANG_CONFIG.languages.iter().find(|(_, entry)| {
+            entry.filenames.iter().any(|f| f == name)
+                || entry
+                    .filename_prefixes
+                    .iter()
+                    .any(|p| name.starts_with(p.as_str()))
+        });
+        if let Some((lang, _)) = by_name {
+            return Some(*lang);
+        }
         let ext = std::path::Path::new(path)
             .extension()
             .and_then(|e| e.to_str())?;
@@ -213,6 +232,7 @@ fn grammar_to_ts_language(grammar: &str) -> tree_sitter::Language {
     match grammar {
         "tree-sitter-bash" => tree_sitter_bash::LANGUAGE.into(),
         "tree-sitter-c" => tree_sitter_c::LANGUAGE.into(),
+        "tree-sitter-containerfile" => tree_sitter_containerfile::LANGUAGE.into(),
         "tree-sitter-cpp" => tree_sitter_cpp::LANGUAGE.into(),
         "tree-sitter-c-sharp" => tree_sitter_c_sharp::LANGUAGE.into(),
         "tree-sitter-elixir" => tree_sitter_elixir::LANGUAGE.into(),
