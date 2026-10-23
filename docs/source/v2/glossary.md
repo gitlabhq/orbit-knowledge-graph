@@ -30,7 +30,7 @@ This page defines the terms that the GitLab Orbit documentation uses.
 | GQL | The GitLab Orbit query language, a read-only, OpenCypher-like language. Agents write GQL for you. |
 | Named query | A query that GitLab provides on the server. You run it by name with parameters. |
 | GitLab Orbit CLI | The `orbit` binary. `glab orbit` installs it and forwards every command to it. |
-| GitLab Orbit skill | The instructions and query recipes that your agent loads to use GitLab Orbit. `glab skills install --global orbit` installs it. |
+| GitLab Orbit skill | The instructions and query recipes that your agent loads to use GitLab Orbit. `glab orbit setup` installs it. |
 | MCP endpoint | The GitLab server for the Model Context Protocol at `/api/v4/orbit/mcp`, for agents that cannot run shell commands. |
 | Indexing | The process that reads GitLab data and code and writes the graph. GitLab indexes a group when you turn on GitLab Orbit for it, and keeps the graph current. |
 | Top-level group | The group at the root of a group hierarchy. GitLab Orbit is turned on, billed, and scoped for each top-level group. |
