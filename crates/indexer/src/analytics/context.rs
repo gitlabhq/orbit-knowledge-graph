@@ -30,11 +30,11 @@ fn saturating_i64(value: u64) -> i64 {
 
 pub(crate) fn build_common(
     config: &AnalyticsConfig,
-    instance: Option<&InstanceIdentity>,
+    instance: Option<InstanceIdentity>,
     root_namespace_id: Option<i64>,
 ) -> Result<OrbitCommonContext, LabkitError> {
     let environment: &'static str = config.deployment.environment.into();
-    let instance = instance.cloned().unwrap_or_default();
+    let instance = instance.unwrap_or_default();
 
     Ok(OrbitCommonContext::new(orbit_common::OrbitCommon {
         deployment_type: Some(config.deployment.kind.into()),

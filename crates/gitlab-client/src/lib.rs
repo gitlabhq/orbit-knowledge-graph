@@ -9,6 +9,6 @@ pub use cc_token::{CloudConnectorTokenCache, CloudConnectorTokenFetcher};
 pub use client::{ByteStream, GitlabClient, JWT_AUDIENCE, JWT_ISSUER, JWT_SUBJECT};
 pub use error::GitlabClientError;
 pub use types::{
-    CloudConnectorToken, InstanceIdentity, MergeRequestDiffBatch, MergeRequestDiffFileEntry,
-    ProjectInfo,
+    CloudConnectorToken, GitlabInstance, InstanceIdentity, InstanceSettings, MergeRequestDiffBatch,
+    MergeRequestDiffFileEntry, ProjectInfo,
 };

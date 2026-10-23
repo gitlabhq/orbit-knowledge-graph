@@ -5,12 +5,11 @@
 mod context;
 mod observer;
 
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::Arc;
 
-use gitlab_client::{GitlabClient, InstanceIdentity};
-use orbit_analytics::{AnalyticsTracker, SnowplowAnalyticsTracker};
-use orbit_log_fields::{info, warn};
+use gitlab_client::GitlabClient;
+use orbit_analytics::{GitlabInstanceWatch, SnowplowAnalyticsTracker, consenting_tracker};
+use orbit_log_fields::warn;
 use orbit_server_config::{
     AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind,
     GitlabClientConfiguration,
@@ -19,13 +18,11 @@ use orbit_server_config::{
 use crate::observer::IndexingObserver;
 pub use observer::SnowplowIndexingObserver;
 
-const INSTANCE_IDENTITY_RETRY_INTERVAL: Duration = Duration::from_secs(60);
-
 #[derive(Clone)]
 pub struct IndexingAnalytics {
     tracker: Option<SnowplowAnalyticsTracker>,
     config: Arc<AnalyticsConfig>,
-    instance: Arc<OnceLock<InstanceIdentity>>,
+    instance: GitlabInstanceWatch,
 }
 
 impl IndexingAnalytics {
@@ -33,7 +30,7 @@ impl IndexingAnalytics {
         Ok(Self {
             tracker: build_tracker(config)?,
             config: Arc::new(config.clone()),
-            instance: Arc::default(),
+            instance: GitlabInstanceWatch::default(),
         })
     }
 
@@ -41,14 +38,14 @@ impl IndexingAnalytics {
         Self {
             tracker: None,
             config: Arc::new(AnalyticsConfig {
-                enabled: false,
+                enabled: Some(false),
                 collector_url: String::new(),
                 deployment: DeploymentConfig {
                     kind: DeploymentKind::SelfManaged,
                     environment: DeploymentEnvironment::Development,
                 },
             }),
-            instance: Arc::default(),
+            instance: GitlabInstanceWatch::default(),
         }
     }
 
@@ -57,22 +54,24 @@ impl IndexingAnalytics {
     }
 
     pub fn observer(&self) -> Option<Box<dyn IndexingObserver>> {
-        let tracker: Arc<dyn AnalyticsTracker> = Arc::new(self.tracker.clone()?);
+        let tracker = consenting_tracker(
+            Arc::new(self.tracker.clone()?),
+            &self.config,
+            &self.instance,
+        );
         Some(Box::new(SnowplowIndexingObserver::new(
             tracker,
             Arc::clone(&self.config),
-            Arc::clone(&self.instance),
+            self.instance.clone(),
         )))
     }
 
-    pub fn resolve_instance_identity(&self, gitlab: &GitlabClientConfiguration) {
+    pub fn watch_gitlab_instance(&self, gitlab: &GitlabClientConfiguration) {
         if !self.is_enabled() {
             return;
         }
         match GitlabClient::new(gitlab.clone()) {
-            Ok(client) => {
-                tokio::spawn(fetch_instance_identity(client, Arc::clone(&self.instance)));
-            }
+            Ok(client) => self.instance.spawn_refresh(Arc::new(client)),
             Err(error) => warn!(
                 expanded(ERROR_MESSAGE) = %error,
                 "cannot build GitLab client, indexing events carry no instance identity"
@@ -87,42 +86,18 @@ impl IndexingAnalytics {
     }
 }
 
-async fn fetch_instance_identity(client: GitlabClient, instance: Arc<OnceLock<InstanceIdentity>>) {
-    loop {
-        match client.instance_identity().await {
-            Ok(Some(identity)) => {
-                info!(
-                    expanded(HOST) = identity.host_name.as_deref().unwrap_or_default(),
-                    "resolved GitLab instance identity for indexing analytics"
-                );
-                let _ = instance.set(identity);
-                return;
-            }
-            Ok(None) => {
-                info!("GitLab serves no instance identity, indexing events carry none");
-                return;
-            }
-            Err(error) => {
-                warn!(
-                    expanded(ERROR_MESSAGE) = %error,
-                    "failed to fetch GitLab instance identity, retrying"
-                );
-                tokio::time::sleep(INSTANCE_IDENTITY_RETRY_INTERVAL).await;
-            }
-        }
-    }
-}
-
 fn build_tracker(
     config: &AnalyticsConfig,
 ) -> Result<Option<SnowplowAnalyticsTracker>, labkit_events::Error> {
-    if !config.enabled {
+    if !config.may_send_events() {
         return Ok(None);
     }
     if config.collector_url.trim().is_empty() {
-        orbit_log_fields::warn!(
-            "analytics.enabled=true but analytics.collector_url is empty; indexing analytics disabled"
-        );
+        if config.enabled == Some(true) {
+            warn!(
+                "analytics.enabled=true but analytics.collector_url is empty; indexing analytics disabled"
+            );
+        }
         return Ok(None);
     }
     SnowplowAnalyticsTracker::from_config(config).map(Some)

@@ -142,7 +142,7 @@ pub async fn run(
         );
     }
     if let Some(gitlab) = &config.gitlab {
-        analytics.resolve_instance_identity(gitlab);
+        analytics.watch_gitlab_instance(gitlab);
     }
 
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {

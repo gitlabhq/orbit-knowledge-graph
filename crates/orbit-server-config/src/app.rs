@@ -196,6 +196,21 @@ graph:
         assert_eq!(config.graph.insert_settings, expected);
     }
 
+    #[test]
+    fn an_analytics_overlay_replaces_the_unset_default() {
+        let config: AppConfig = builder_with_defaults()
+            .add_source(config::File::from_str(
+                "analytics:\n  enabled: false\n",
+                config::FileFormat::Yaml,
+            ))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap();
+
+        assert_eq!(config.analytics.enabled, Some(false));
+    }
+
     fn address(value: &str) -> SocketAddr {
         value.parse().unwrap()
     }
