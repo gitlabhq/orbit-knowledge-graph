@@ -55,7 +55,8 @@ use std::time::Duration;
 
 use clickhouse::{ClickHouseClients, ClickHouseWriter};
 use engine::EngineBuilder;
-use engine::handler::HandlerRegistry;
+use engine::handler::{HandlerInitError, HandlerRegistry};
+use gitlab_client::GitlabClient;
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
@@ -134,6 +135,14 @@ pub async fn run(
 
     let registry = Arc::new(HandlerRegistry::default());
 
+    let gitlab_client = config
+        .gitlab
+        .clone()
+        .map(GitlabClient::new)
+        .transpose()
+        .map_err(HandlerInitError::new)?
+        .map(Arc::new);
+
     let analytics = analytics::IndexingAnalytics::from_config(&config.analytics)?;
     if analytics.is_enabled() {
         info!(
@@ -141,8 +150,8 @@ pub async fn run(
             "indexing analytics enabled"
         );
     }
-    if let Some(gitlab) = &config.gitlab {
-        analytics.watch_gitlab_instance(gitlab);
+    if let Some(client) = &gitlab_client {
+        analytics.watch_gitlab_instance(Arc::clone(client));
     }
 
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {
@@ -171,6 +180,7 @@ pub async fn run(
             &ontology,
             writer.clone(),
             analytics.clone(),
+            gitlab_client,
             &resources,
         )
         .await?;

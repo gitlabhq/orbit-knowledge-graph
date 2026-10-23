@@ -12,7 +12,6 @@ use orbit_analytics::{ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker
 use orbit_log_fields::warn;
 use orbit_server_config::{
     AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind,
-    GitlabClientConfiguration,
 };
 
 use crate::observer::IndexingObserver;
@@ -66,17 +65,9 @@ impl IndexingAnalytics {
         )))
     }
 
-    pub fn watch_gitlab_instance(&self, gitlab: &GitlabClientConfiguration) {
-        if !self.is_enabled() {
-            return;
-        }
-        match GitlabClient::new(gitlab.clone()) {
-            Ok(client) => self.instance.spawn_refresh(Arc::new(client)),
-            Err(error) => warn!(
-                expanded(ERROR_MESSAGE) = %error,
-                safe(ERROR_TYPE) = <&str>::from(&error),
-                "cannot build GitLab client, indexing events carry no instance identity"
-            ),
+    pub fn watch_gitlab_instance(&self, client: Arc<GitlabClient>) {
+        if self.is_enabled() {
+            self.instance.spawn_refresh(client);
         }
     }
 
