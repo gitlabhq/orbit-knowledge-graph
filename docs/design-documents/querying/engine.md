@@ -9,12 +9,21 @@ At a high level, here's how data flows through the engine:
 3. The query planner attempts to pick the most efficient way to execute a graph query.
 4. The selected query plan is turned into a SQL syntax tree.
 5. Additional engine passes add authorization filters, response formatting, and query settings.
-5. A final validation pass is executed to ensure all authorization filters and redaction metadata is present.
-6. Code generation renders the syntax tree as SQL for a particular backend, like Clickhouse.
+6. A final validation pass is executed to ensure all authorization filters and redaction metadata are present.
+7. Code generation renders the syntax tree as SQL for a particular backend, like ClickHouse.
 
-ClickHouse allows Orbit to have the best of both worlds - fast aggregations for analytical queries, and property-graph semantics for traversals, paths, neighborhoods, and grouped counts. Orbit needs no separate graph database, see [ADR 000](../decisions/000_clickhouse_graph_storage.md) which details that decision.  
+ClickHouse allows Orbit to have the best of both worlds - fast aggregations for analytical queries, and property-graph semantics for traversals, paths, neighborhoods, and grouped counts. Orbit needs no separate graph database, see [ADR 000](../decisions/000_clickhouse_graph_storage.md) which details that decision.
 
-TODO: PUT a markdown table here, showing query type, example (in GQL), meaning, sql fragment
+Here's what each query type looks like on the way in, and the shape of the SQL that comes out. The fragments are trimmed down to the interesting part; the real SQL also carries authorization filters, current-row reads, and the page limit.
+
+| Query type | Example (GQL) | Meaning | SQL fragment |
+| --- | --- | --- | --- |
+| Traversal | `MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'}) RETURN u.username, mr.title` | Merged merge requests and the users who wrote them | `FROM gl_edge AS e JOIN gl_merge_request AS mr ON mr.id = e.target_id WHERE e.relationship_kind = ? AND mr.state = ?` |
+| Aggregation | `MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964}) RETURN mr.state, count(mr) AS mrs` | How many merge requests one project has in each state | `SELECT mr.state, COUNT(mr.id) AS mrs ... GROUP BY mr.state` |
+| Path finding | `MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {id: 278964}) RETURN path` | The shortest chain of containment from a group down to a project | `WITH forward AS (...), backward AS (...) SELECT ... FROM forward JOIN backward ON ...` |
+| Neighbors | `MATCH (mr:MergeRequest {id: 42})--(n) RETURN n` | Everything directly connected to one merge request, in either direction | `SELECT ... FROM gl_edge WHERE source_id = ? UNION ALL SELECT ... FROM gl_edge WHERE target_id = ?` |
+
+Path finding searches from both ends at once. One frontier walks forward from the start node, another walks backward from the end node, and a path exists wherever the two meet. That keeps each frontier to about half the depth of the full path.
 
 ## Terms
 
@@ -45,9 +54,82 @@ The ontology defines every table, sort key, and index.
 
 [Data model](../data_model.md) describes the entities and relationships. [Schema management](../schema_management.md) describes how tables change between versions.
 
-Each schema version derives one immutable query data model from its ontology. The compiler reads only that model. It never reads table names from the query or from the ontology files directly.
+## Query data model
 
-TODO: Describe how the Data Model here works... show the markdown flow diagrams from the Data Model MRs.
+The engine never reads the ontology directly. Instead, each schema version derives one immutable query data model from its ontology, and every engine phase reads from that model. Table names never come from the query itself.
+
+At a high level, the model splits the ontology into three kinds of facts:
+
+- The **logical graph**: entities, properties, relationships, and relationship variants. A variant is one relationship between one pair of entity types, like `(User)-[:AUTHORED]->(MergeRequest)`.
+- The **backend facts**: tables, columns, sort keys, foreign keys, and which edge table each relationship variant lives in.
+- The **authorization facts**: role requirements, redaction rules, and scope rules.
+
+```mermaid
+flowchart LR
+    O["Ontology"]
+
+    O --> G["<b>Logical graph</b><br/>• Entities and properties<br/>• Relationships and variants"]
+    O --> B["<b>Backend facts</b><br/>• Tables and columns<br/>• Sort keys and foreign keys"]
+    O --> A["<b>Authorization facts</b><br/>• Role requirements<br/>• Redaction and scope rules"]
+
+    G & B & A --> M["Query data model"]
+
+    M --> CH["ClickHouse + GitLab authorization"]
+    M --> DB["DuckDB + trusted local"]
+
+    CH --> C["Engine"]
+    DB --> C
+
+    C --> P["Query plan"]
+    P --> S["SQL"]
+```
+
+### How a model is put together
+
+Every model has the same three parts, and each part can be swapped on its own:
+
+- The **graph catalog** describes the logical graph. It is shared by every backend.
+- The **layout** pairs a physical schema with a mapping. The schema describes the tables a backend actually has. The mapping connects each graph identity, like an entity or a property, to the table and column that stores it.
+- The **policy** decides what a caller may see.
+
+```mermaid
+flowchart TB
+    Model["DataModel&lt;Schema, Mapping, Policy&gt;"]
+    Model -->|graph| Graph["Graph catalog"]
+    Model -->|layout| Store["Layout&lt;Schema, Mapping&gt;"]
+    Model -->|authorization| Policy["Policy"]
+    Store -->|schema| Schema["Relational schema<br/>for one backend"]
+    Store -->|mapping| Mapping["Mapping from graph<br/>identities to columns"]
+    Schema --> Tables["Tables, columns,<br/>and backend options"]
+```
+
+The model builds its mapping from the graph and the schema it is given, so a mapping can never be paired with the wrong schema. A missing property in the mapping simply means that the backend cannot supply it.
+
+Orbit ships two models today:
+
+| Model | Schema | Policy | Used by |
+| --- | --- | --- | --- |
+| `ClickHouseDataModel` | ClickHouse tables, engines, indexes, and views | GitLab authorization | Orbit Remote |
+| `DuckDbDataModel` | The local DuckDB tables | Trusted local, since a local graph has one user | The local graph schema and the code-graph test suites |
+
+A new backend, like a document store, brings its own schema and mapping. It does not have to look relational, and the graph catalog stays the same.
+
+### Who reads the model
+
+The engine reads the model through the mapping. That's how the planner finds the edge table for each relationship variant and the column behind each property. It also finds sorted copies of a table that suit a lookup better.
+
+Schema management reads the physical schema directly. DDL, migrations, cleanup, and view lifecycle all come from the same ClickHouse schema that the engine queries, so the two cannot drift apart.
+
+```mermaid
+flowchart LR
+    S["ClickHouse schema"] --> D["DDL rendering"]
+    S --> M["Migration inventory"]
+    S --> C["Cleanup inventory"]
+    S --> V["View lifecycle"]
+    S --> E["Engine, through the mapping"]
+```
+
+The code lives in `crates/query-data-model/`.
 
 ## Compiler phases at a glance
 
