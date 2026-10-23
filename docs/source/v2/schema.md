@@ -70,7 +70,7 @@ To see the current schema, use one of these methods:
   For more information, see [GitLab Orbit dashboard](dashboard.md).
 - In a terminal, run `glab orbit ontology`. To show the properties and relationships of node types,
   add their names, for example `glab orbit ontology MergeRequest Project`.
-- Over HTTP, [retrieve the schema](queries/api.md#retrieve-the-schema) with `GET /api/v4/orbit/schema`.
+- Over HTTP, call `GET /api/v4/orbit/schema`. For more information, see the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
 - In a query, run `CALL db.schema()`.
 
 ## Supported languages
