@@ -157,7 +157,7 @@ Orbit Remote's [Graph Query Engine](querying/graph_engine.md) validates queries 
 The current implementation uses ClickHouse for remote graph storage and query execution. In the current repository state:
 
 - Graph nodes live in typed `gl_*` ClickHouse tables such as `gl_group`, `gl_project`, `gl_merge_request`, `gl_pipeline`, `gl_job`, `gl_vulnerability`, `gl_branch`, `gl_file`, `gl_definition`, and `gl_imported_symbol`.
-- Relationships are stored in ontology-configured edge tables (defaulting to `gl_edge`) with adjacency-optimized ordering and projections. Each edge YAML can specify a `table:` field to route relationship types to dedicated tables; `settings.edge_tables` in `schema.yaml` defines available tables.
+- Relationships are stored in ontology-configured edge tables (defaulting to `gl_edge`) with adjacency-optimized ordering. Each edge YAML can specify a `table:` field to route relationship types to dedicated tables; `settings.edge_tables` in `schema.yaml` defines available tables.
 - Code indexing progress is tracked in `code_indexing_checkpoint`.
 - The ontology in `config/ontology/` defines the mapping between entity names, properties, redaction metadata, ETL sources, and relationship kinds.
 

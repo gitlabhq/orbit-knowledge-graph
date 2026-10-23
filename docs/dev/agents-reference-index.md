@@ -12,7 +12,9 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | FIPS posture (module guard, graph and binary gates) | `crates/orbit-server/src/fips.rs`, `scripts/checks/fips/check-graph.sh`, `scripts/checks/fips/check-binary.sh`; design in `docs/design-documents/security.md` |
 | Image signing (keyless cosign, canonical project only) | `scripts/release/publish-manifest.sh`, `scripts/release/sign-image.sh`; runbook in `docs/dev/runbooks/image_signing.md`; design in `docs/design-documents/security.md` |
 | Image hardening (non-root user, Dockerfile scan, release gate, Vulnerability Report) | `Dockerfile`, `dockerfile-scan`, `release-image-scan`, `container_scanning` in `.gitlab-ci.yml`; design in `docs/design-documents/security.md` |
-| Query DSL spec | `docs/design-documents/querying/` |
+| Query architecture and compiler design | `docs/design-documents/querying/` |
+| Query DSL spec | `config/schemas/graph_query.schema.json`; reference in `docs/source/remote/queries/query-language.md` |
+| Compiler phases and pipelines | `crates/query-engine/compiler/src/config.rs` |
 | Orbit query frontend | `crates/query-engine/compiler/src/passes/frontend/`; design in `docs/design-documents/querying/orbit_query_frontend.md` |
 | SDLC indexing pipeline | `docs/design-documents/indexing/sdlc_indexing.md` |
 | Code indexing pipeline | `docs/design-documents/indexing/code_indexing.md` |

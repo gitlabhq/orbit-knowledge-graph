@@ -1,350 +1,158 @@
-# Graph engine
+# Graph query engine
 
 ## Overview
 
-We will use ClickHouse as the primary database for graph queries in deployed environments. The query tier compiles high‑level graph operations into ClickHouse SQL and executes them directly on adjacency‑ordered edge tables and typed node tables. This pairs OLAP throughput with property‑graph semantics (paths, traversals, pattern matching) without introducing another datastore.
+The graph query engine turns a graph query into parameterized SQL over typed node tables and adjacency-ordered edge tables.
 
-This plan draws on the [team's research](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/267). The approach keeps the service stateless and focuses on schema design, SQL generation, and guardrails.
+1. A frontend parses the query into the shared input.
+2. The compiler checks the input against the ontology and the caller's access.
+3. The planner picks how to read each node and relationship.
+4. Lowering builds a SQL syntax tree from the plan.
+5. Security passes add authorization filters, and a final check proves that every read carries one.
+6. Code generation renders the tree as SQL for one backend.
 
-## Storage Model in ClickHouse
+ClickHouse gives OLAP throughput, and the compiler adds property-graph semantics on top: traversals, paths, neighborhoods, and grouped counts. Orbit needs no separate graph database. [ADR 000](../decisions/000_clickhouse_graph_storage.md) records that choice.
 
-The ontology defines the ClickHouse storage model, including table routing, sort keys,
-primary keys, and secondary indexes.
+## Engine principles
 
-- Each node type has a dedicated `ReplacingMergeTree` table. Namespaced node tables
-  usually lead their sort key with `traversal_path`; individual ontology declarations
-  can add entity-specific columns such as project, branch, or local identifiers.
-- Relationship types share physical edge tables. `settings.edge_tables` declares those
-  tables, `settings.default_edge_table` selects `gl_edge` as the default, and an edge YAML
-  can use `table:` to route a relationship elsewhere. The current routes include
-  dedicated tables for code, CI/CD, security, and merge request diff relationships.
-- `traversal_path` is the slash-delimited namespace hierarchy for a namespaced row. The
-  query engine applies `startsWith` predicates to namespaced node and edge scans, using
-  exactly the paths Rails authorized. See [Security Architecture](../security.md).
-- Code tables can also carry project and branch columns. Their ontology declarations put
-  these columns into the physical sort and primary keys where required. See
-  [Code Indexing](../indexing/code_indexing.md).
+- The compiler is the only path from a query to SQL. Every safety rule lives in one place.
+- Phases are small and ordered. Each phase declares the state it reads and writes, and cannot touch anything else.
+- Planning decides what to read. Lowering decides how to spell it in SQL. Code generation decides the dialect.
+- The planner may change how a query reads data, but never what the query returns.
+- A query reads the current version of each row. Speed never comes at the cost of stale results.
+- When the engine cannot prove that a read is safe, it rejects the query.
 
-### Storage catalogs
+## Terms
 
-Each backend owns its storage catalog under `query-data-model/src/implementations/`.
-Both use `Layout<Relational<Backend>, Mapping>` with shared table, column, and key structures.
-`Layout<S, M>` pairs an explicit schema and mapping. The bound `M: Mapping<S>` enforces compatible types.
-`Relational<Backend>` owns the tables directly. `RelationalBackend` supplies physical types, options, and backend metadata.
-ClickHouse keeps codecs, engines, indexes, and auxiliary objects in those backend-specific types.
-DuckDB uses the same relational structures with its local type facts.
-`DataModel<S, M, A>` owns the graph, layout, and an independent policy value.
-Its fallible constructor derives the mapping from the supplied graph and schema. Private layout fields prevent callers from substituting an unrelated mapping.
-Constructors in `derive.rs` derive a storage schema once, then build its query mapping from that schema.
-The model does not retain the ontology. JSON frontend validation reads the graph and policy catalogs directly.
-The existing compiler uses `OrbitQueryModel` in `models/orbit.rs`, which combines relational mapping with GitLab policy.
-Backend implementations remain under `implementations/`; authorization policies live under `authz/`.
-Document storage can use the core model without implementing that Orbit contract.
-The ClickHouse catalog copies table, column, index, engine, and view declarations into owned metadata.
-It also resolves the source bindings for declared joined tables and records which entities write each table.
-Query mappings, DDL rendering, migration scope, and cleanup consume these facts.
-The DuckDB catalog records local node and edge layouts for its query mapping.
-Shared graph contracts contain logical identities; ClickHouse codecs and engine settings stay in its backend.
+- The **query data model** is the compiler's view of one schema version: the logical graph, its physical layout for one backend, and its authorization policy.
+- A **phase** is one compiler step, such as `validate` or `plan`.
+- A **pipeline** is an ordered list of phases for one frontend and one backend.
+- A **relation** is one read of a node or edge table in the plan.
+- A **scope** is a narrow traversal path prefix that the compiler derives from the query, such as the path of one project.
+- A **tombstone** is the row version that marks a row as deleted.
 
-### Edge table schema
+## Storage model
 
-Each physical edge table has ontology-defined columns and storage settings. For example,
-the default `gl_edge` table uses this key and these ID indexes in the generated DDL:
+The ontology defines every table, sort key, and index.
 
-```sql
-PRIMARY KEY (traversal_path, relationship_kind, source_id)
-ORDER BY (
-  traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind
-)
-INDEX idx_source_id source_id TYPE bloom_filter(0.0001) GRANULARITY 1
-INDEX idx_target_id target_id TYPE bloom_filter(0.0001) GRANULARITY 1
+- Each entity has its own node table. Namespaced tables lead their sort key with the traversal path, so authorization filters prune the primary index.
+- Relationships share edge tables. The ontology routes each relationship to a table, with `gl_edge` as the default. Edge tables sort by traversal path, relationship kind, and source, so one-hop lookups read a narrow range.
+- Every row has a version and a deleted flag. The indexer appends new versions, and ClickHouse merges old ones away in the background.
+- The ontology can declare a denormalized join: a pre-joined chain of tables that answers several hops in one scan. Every table in the chain keeps its own traversal path, and each one is filtered on its own.
+
+[Data model](../data_model.md) describes the entities and relationships. [Schema management](../schema_management.md) describes how tables change between versions.
+
+Each schema version derives one immutable query data model from its ontology. The compiler reads only that model. It never reads table names from the query or from the ontology files directly.
+
+## Compiler phases at a glance
+
+```plantuml
+@startuml
+left to right direction
+skinparam componentStyle rectangle
+component "Parse\nJSON or GQL" as parse
+component "Validate and\nnormalize" as check_input
+component "Restrict\nand scope" as restrict
+component "Plan" as plan
+component "Lower to\nSQL tree" as lower
+component "Enforce, secure,\nand check" as secure
+component "Paginate, hydrate,\nand settings" as finish
+component "Generate SQL" as codegen
+parse --> check_input
+check_input --> restrict
+restrict --> plan
+plan --> lower
+lower --> secure
+secure --> finish
+finish --> codegen
+@enduml
 ```
 
-Leading with `traversal_path` lets authorization and namespace scope prune the primary
-index. `relationship_kind` then groups the relationship types routed to the same table.
-Bloom filter indexes support source and target ID lookups. The current ontology-backed
-edge DDL does not define source- or target-ordered projections.
+| Group | Phases | Responsibility |
+| --- | --- | --- |
+| Parse | `json_dsl_parse`, `gql_parse` | Turn query text into the shared input |
+| Understand | `validate`, `validate_relationships`, `normalize` | Check shape, limits, and ontology names, then resolve names and types |
+| Restrict | `restrict` | Remove admin-only fields, check requested paths, and derive the query scope |
+| Plan | `plan` | Choose access paths, join order, current-state reads, and hydration |
+| Lower | `lower`, `response_policy` | Build the SQL tree and cap the size of projected values |
+| Protect | `enforce`, `security`, `check` | Add role-gated reads and redaction columns, inject authorization filters, and verify them |
+| Finish | `paginate`, `hydrate_plan`, `settings`, `codegen` | Set the page window, plan hydration, pick query settings, and render SQL |
 
-## Query Engine Design
+`crates/query-engine/compiler/src/config.rs` declares the phases and the pipelines that use them:
 
-The compiler supports two query frontends:
+| Pipeline | Frontend | Backend | Used by |
+| --- | --- | --- | --- |
+| `clickhouse_json_dsl` | JSON Query DSL | ClickHouse | Orbit Remote |
+| `clickhouse_gql` | GQL | ClickHouse | Orbit Remote |
+| `ch_hydration` | None | ClickHouse | Hydration queries, with the same security phases |
+| `duckdb_json_dsl`, `duckdb_gql` | Either | DuckDB | The local graph schema and the code-graph test suites |
 
-1. The JSON Query DSL describes traversal, neighbors, path-finding, and aggregation queries. Remote requests through MCP, HTTP, and gRPC default to this frontend for compatibility.
-2. The [Orbit Query Frontend](orbit_query_frontend.md) accepts a restricted, read-only language based on openCypher 9 syntax. Rails selects the compiler preset with the default-off `orbit_gql_queries` feature flag. The protobuf `QueryLanguage` enum is independent of the raw or named query kind. Both modes use the same endpoint and authorization pipeline, but each accepts only its own query shape. This is not a Neo4j-compatible driver.
+The DuckDB pipelines skip the security phases, because a local graph has a single user.
 
-### Compiler pass pipeline
+## Planning
 
-Both frontends compile to parameterized ClickHouse SQL through shared passes.
-`crates/query-engine/compiler/src/config.rs` defines the `clickhouse_json_dsl` and `clickhouse_gql` presets for graph queries.
-`compiler::gql::prepare` parses once: MATCH enters the shared graph passes, while `CALL db.schema(...)` resolves ontology metadata inside the GQL frontend without SQL.
-Schema calls have no state in the shared compiler contexts. `compiler::compile` remains query-only for both frontends.
+The planner builds a graph of relations and decides how to read each one. It works from facts in the query data model, not from the shape of the query text.
 
-Each active schema snapshot derives one immutable query data model from its loaded ontology.
-The data model assigns typed IDs to entities, properties, relationships, and relationship variants.
-Its backend catalog resolves tables, columns, edge routes, foreign keys, sort keys, and denormalized properties.
-Its authorization catalog resolves GitLab redaction and scope metadata.
-Each stored property realization contains its physical query column. An absent realization means that the backend cannot supply that property.
-Foreign-key facts identify the source or target endpoint that holds the key, its property, and the referenced ID property.
-The endpoint remains unambiguous for self-relationships and incoming traversals.
-Planning resolves the referenced property's column for FK joins and filtering subqueries. Graph IDs remain separate; direct ID substitution requires a reference to the graph ID column.
-The current ontology files, archives, DDL, and indexing declarations remain unchanged.
-Planning resolves backend facts into execution requirements. Lowering translates those requirements into the SQL AST and physical result bindings.
-All later passes continue to use that AST. Planning does not construct SQL expressions, query blocks, function calls, or casts.
-Pure catalog and filter-value helpers live under planning; SQL construction helpers live under lowering.
-The SQL AST records aggregate functions, optional arguments, distinctness, and conditions as structured values.
-Built-in calls use a closed `Function` vocabulary rather than SQL names. Each renderer owns function spelling, argument placement, and dialect syntax.
-The emitted explain view prints exact `Function` variant names, such as `StartsWith`. ClickHouse codegen renders `startsWith`; DuckDB renders `starts_with`.
-Security checks recognize the prefix operation directly. String byte length is distinct from character substring operations.
-Shared parameter types live in `orbit-utils::query_types`. They describe scalar and array values, dates, and timestamps with precision and timezone intent.
-ClickHouse type spelling belongs to its adapter. DuckDB renders temporal casts and binds string values without ClickHouse-specific literal syntax.
-Codegen renders ClickHouse combinators or DuckDB aggregate filters. Time buckets retain their units until codegen selects the backend expression and result type.
-Week buckets start on Sunday. Day and larger buckets return dates; minute and hour buckets retain timestamp output.
-Collection aggregates omit null inputs and return an empty array for empty input. Other aggregates retain their backend result conventions, including empty sums and averages.
-Token search records single, all, or any matching. ClickHouse renders its native token functions; DuckDB rejects these operations because equivalent tokenizer semantics are not available.
-CTE bodies use the complete query renderer, including nested definitions. DuckDB omits the outer limit of a recursive CTE body.
-UNION arms also retain their local CTE definitions. Empty path arrays carry field types instead of relying on dummy values in lowering.
+- Each relationship in the query becomes one relation. Shared nodes connect the relations into a chain or a branch.
+- The planner reads edges first. It joins a node table only when the query needs node data: a filter, a returned property, a group key, or a sort key.
+- A relationship that spans several edge tables becomes a union. Every arm returns the same columns, so later phases see one shape.
+- A selective chain narrows as it goes. The distinct endpoints of one hop bound the scan of the next hop.
+- Hops in the reverse direction filter on the target column, which has its own index.
 
-`mise test:plan-shape` checks YAML fixtures with `query.json` and `query.gql` arms.
-The shared runner and structural matcher live in `integration-testkit::plan_shape`.
-Logical assertions inspect parsed, normalized Input before query scope application.
-They include node and relationship filters, groups, measures, ordering, and limits.
-Physical assertions select `planned` or `emitted` under each backend, keeping the selected plan separate from the SQL AST before enforcement.
-The explain view renders incoming relationships in source-to-target order so both frontends can share assertions.
-Patterns use the operator grammar from !2590: `(_)` matches one subtree and `(...)` matches zero or more children.
-`...` permits additional Filter, Project, or Aggregate items; a trailing head `...` matches a token prefix.
-These assertions check plan structure; data-correctness scenarios check execution results.
+### Scope
 
-### Plan fixture assertions
+A project-scoped or group-scoped query should read only that project's rows. The compiler gets this without a lookup before the query.
 
-Each assertion block supports `expect`, `reject`, `bind`, `occurrences`, `ctes`, and `exact`.
-Use multiline patterns for nested operations. Expressions use readable column references and preserve explicit grouping and quoted literals.
+1. The restrict phase finds anchor nodes, such as a project, group, merge request, or file with a known ID or path.
+2. The query reads the anchor's current traversal path in a subquery inside the same statement. ClickHouse evaluates it before index analysis, so it prunes like a literal prefix.
+3. The scope spreads along relationships that stay in one namespace. It never spreads across relationships that can cross namespaces, and never from a child namespace to its parent.
 
-```yaml
-physical:
-  clickhouse:
-    planned:
-      bind:
-        - (CTE $projects (Project p.id AS id (_)))
-      expect:
-        - (Filter p.id IN $projects.id, ... (_))
-      occurrences:
-        - pattern: (CTE $projects (_))
-          count: 1
-      ctes:
-        exact_order: [$projects]
-    emitted:
-      expect:
-        - (Scan Table(gl_project) AS p)
-```
+A missing anchor falls back to the caller's authorization filter, so the query still returns rows that are indexed. A transferred project scopes to its new path as soon as its rows are indexed.
 
-`bind` must match exactly one subtree and introduce a named capture. Later assertions may reference it but cannot introduce new captures.
-Captures are local to one assertion block and one frontend/backend run. They capture syntax, not scoped SQL relation identities.
-`?` matches one expression token or parenthesized group; `$name` captures that same unit and requires later uses to agree.
-Quoted `'?'`, `'$name'`, and `'...'` are literal strings. Failed matches do not change capture bindings.
+## Current-state reads
 
-Item lists match without order, preserve duplicate counts, and require `...` to admit extra items.
-Child order remains significant. Expressions retain token order and grouping; the matcher does not infer algebraic equivalence.
-`exact` compares the whole ordered tree, including projection order, and rejects wildcards and captures.
-`ctes.exact_order` checks the complete top-level CTE sequence, including captured names.
-Use `ctes.absent: true` to assert that no top-level CTEs exist. Omit `ctes` to leave definitions unchecked.
-The two forms are exclusive. Empty lists, empty blocks, and `absent: false` are rejected.
-Failures report the fixture path, frontend, backend, phase, and assertion index. Missing-pattern errors include the first subtree with the requested operator.
+Node and edge tables keep several versions of a row until ClickHouse merges them. A correct query must answer "does the current version match?", not "did any version ever match?". The two answers differ for any column that can change back, such as a job status after a retry.
 
-The planned Project view lists requested outputs; it does not assert a closed projection schema for later compiler phases.
-Scope-aware relation captures remain deferred to the query-local SQL identity work.
-Family explain views include neighbor access and routes, path frontier depths and endpoints, and hydration projections, paths, and dedup keys.
-Hydration fixtures use ordinary JSON/GQL node selectors plus an internal `hydration` setup block with `dynamic`, `path_segment_budget`, and alias-keyed `paths`.
-The harness applies that setup after normalization; hydration remains unavailable as a user query type.
+The compiler reads current state in one of two ways:
 
-Traversal and aggregation build one logical relation for each relationship
-occurrence. Each relation reads its routed stored edge tables. Shared node
-bindings compose those relations in one chain or branch. The planner joins a
-current node row when a query consumes canonical node data.
+- `FINAL` is the default. ClickHouse merges sorted parts as a stream, so memory stays bounded no matter how many rows match.
+- A selective read finds candidate keys first, then reads every version of only those keys and keeps the latest. The planner uses it for exact IDs, narrow ID ranges, relation frontiers, and filters that the ontology marks as selective.
 
-Result enforcement consumes physical node bindings instead of searching the
-SQL tree for aliases. It still adds required authorization scans and projects
-redaction columns.
-Neighbors emits direction-specific redaction columns in its own query arms.
-Its projected binding carries only an identity needed for an additional role scan, when required.
-Property comparisons and cursor identities reuse the resolved node bindings.
-Lowering rejects identities without a visible physical source. The planner
-retains current node reads for properties, grouping, sorting, conditions, and
-policy provenance.
+Where a filter runs depends on whether its column can change:
 
-| # | Pass | Responsibility |
-|---|---|---|
-| 1 | `json_dsl_parse` or `gql_parse` | Lowers raw graph-query text to `Input`; GQL preparation supplies parsed Input instead. The JSON frontend also validates the JSON schemas |
-| 2 | `validate` | Checks native `Input` shape, bounds, ontology membership, and cross-references |
-| 3 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
-| 4 | `restrict` | Strips `admin_only` fields, validates user-supplied paths, and derives immutable query scope ([Security](../security.md)) |
-| 5 | `plan` | Chooses performance-equivalent access paths, join order, hydration, and dedup strategies |
-| 6 | `apply_scope` | Adds scope predicates to owned reads in the relation graph |
-| 7 | `lower` | Emits the SQL AST and physical result bindings from the query plan |
-| 8 | `response_policy` | Applies transport-size policy to result projections |
-| 9 | `enforce` | Adds role-gated scans and redaction columns, then builds the result context |
-| 10 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all namespaced node and edge scans, with per-entity role scoping ([Security](../security.md)) |
-| 11 | `paginate` | Sets the probe limit and lowers `SKIP` to an `OFFSET` over a stable order |
-| 12 | `check` | Verifies every namespaced graph-table path column carries a valid role-scoped `startsWith` predicate or a fail-closed false predicate ([Security](../security.md)) |
-| 13 | `hydrate_plan` | Builds the hydration plan for entity properties the base query does not already project; nodes joined inline (FK shapes, sort and group targets) need no second query |
-| 14 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
-| 15 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
+- Sort-key and unchanging columns filter before the latest version is picked. Every tombstone carries these columns, so a tombstone passes the filter and hides the deleted row.
+- Changing columns filter after the pick, so an old version cannot match.
+- The deleted flag always filters last.
 
-The planner emits ClickHouse SQL similar to these patterns.
+Orbit does not use `argMax`-style aggregations to resolve the latest version. Their memory grows with the number of result rows, and that number is unknown when the query compiles. On settled ClickHouse parts, `FINAL` was faster or equal in every measured case and stayed bounded. A slow `FINAL` aggregation is a sign of fragmented parts, and the fix belongs in storage, not in the query.
 
-- One‑hop neighbors: equality filter on the edge table’s leading keys, `WHERE startsWith(traversal_path, ?) AND branch = ? AND src_id IN (...)` (for code) or `WHERE startsWith(traversal_path, ?) AND src_id IN (...)` (for SDLC), producing O(degree) scans per source.
-- Multi-selector traversals: stored edge relations compose through shared node bindings. A traversal can contain up to five node selectors and therefore four relationship selectors. Each relationship selector can independently use an inclusive `hops` range whose upper bound is 3.
-- Path finding: bounded expansion over the routed edge tables, with `path.max_depth` capped independently at 3.
-- Reverse hops: filter the edge table on `target_id`, supported by its target ID bloom filter.
-- Alternate relationship types: a query's relationship types may span multiple physical edge tables, or use a wildcard. In that case the compiler emits a `UNION ALL` across the relevant tables. Each arm selects the standard edge columns so downstream passes see a uniform schema.
-- Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results. Top-level `group_by` supports node groups and scalar property groups. Property groups keep the grouped alias table-backed, so security filters and latest-row checks apply before aggregation.
-- HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
-- Derived-table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions. Current-row reads can also use the selective form described below.
-- Exact endpoint metadata: a node filter can run on edge tags when every selected relationship variant carries that property.
-- Canonical node reads: uncovered filters and consumed properties join the current node row directly.
-- Cross-node comparisons resolve IDs through the plan's edge or FK columns. Other properties require node joins before comparison.
-- Row deduplication: `ReplacingMergeTree` does not guarantee merge-time dedup between queries, so the compiler injects query-time dedup (see [Row deduplication](#row-deduplication) below).
+## Hydration
 
-Selective fixed chains define the first edge relation once. A distinct endpoint
-frontier narrows the next edge scan without replacing the original match rows.
-Declared equivalent layouts provide deterministic source- or target-oriented
-access when the selected endpoint is known.
+The main query returns identities and the properties it already joined. Path-finding and neighbor queries find node types only at run time, so they usually return identities alone.
 
-### Row deduplication
+The hydration plan describes a second query that fetches the missing properties for a small, fixed set of IDs. That query compiles through the `ch_hydration` pipeline, so it carries the same authorization filters as the main query.
 
-Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness through `FINAL` or an explicit latest-row operation.
+## Pagination
 
-`FINAL` is the default. A selective current-row read can use a two-step form instead:
+The server asks for one row beyond the page and uses it to report `has_more`. `SKIP` becomes an `OFFSET` over a stable order, and the compiler adds tie-breakers so that pages neither overlap nor drop rows. Redaction runs after SQL, so a page can hold fewer rows than its limit while `has_more` is still true.
 
-1. Read matching candidate rows without `FINAL`, then project and deduplicate the complete replacement key.
-2. Read all versions for those keys. Sort-key and unchanging-column filters run first; a tombstone carries both, so it passes them and wins the pick. Keep the greatest `_version` with `LIMIT 1 BY`, then apply the remaining filters and `_deleted = false`.
+## Safety
 
-The second filter application preserves latest-state semantics. An old version can find a candidate key, but it cannot make the current version match. Because a tombstone carries the unchanging columns, a deleted row cannot resurface through a filter on one of them. Tuple membership keeps composite replacement keys intact. Routed edge reads apply this process to each physical table before `UNION ALL`.
+The compiler enforces these rules on every query:
 
-The planner uses this form for exact IDs, bounded ID ranges, relation frontiers, and positive filters marked as high selectivity in the ontology. Text searches on changing columns, negated filters, `!=`, `IS NOT NULL`, namespace-anchor-only filters, wide ID ranges, and low-selectivity fields keep `FINAL`. Backends must opt in; DuckDB does not use this ClickHouse strategy.
+- Query values are bound parameters. Names must match the ontology. The SQL tree accepts only a closed set of functions, and each backend renders its own spelling.
+- Every namespaced node and edge read carries a `startsWith(traversal_path, ?)` filter at the role floor of its entity.
+- The `check` phase walks the final SQL tree and rejects the query if any namespaced read lacks a valid filter.
+- Shape limits cap nodes, relationships, hops, path depth, predicates, ID lists, and result size. The [query language reference](../../source/remote/queries/query-language.md#validation-limits) lists them.
+- The `settings` phase sets a time and memory limit for each query type.
+- The webserver connects to ClickHouse as a read-only user.
 
-A relation referenced more than once is stored as a materialized CTE. The exception is a relation whose selective predicates are all point lookups (one ID, or equality on a `unique` property); those are recomputed inline.
-
-| Scan type | Strategy | Rationale |
-|---|---|---|
-| Single-node traversal | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Applies latest-row semantics before filters and limits. |
-| Canonical endpoint reads | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Supplies current filters and properties that exact edge metadata does not cover. |
-| Redaction joins for filtered non-default auth IDs | Current-row node subquery | Lets enforcement joins for entities such as code definitions apply property filters inside the latest-row read. |
-| Hydration (UNION ALL arms) | Non-`FINAL` scan with `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`, outer `_deleted = false` | Hydration reads a tiny pinned `id IN (...)` set; dropping `FINAL` lets column pruning and projections apply (`FINAL` reconstructs full rows, defeating both). Dedup identity is the table's full sort key, matching `FINAL`'s per-ORDER-BY-key semantics. Falls back to `FINAL` when a table has no sort key. |
-| Main query node scans and joins | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Keeps traversal, aggregation, and single-node lookup semantics consistent. |
-| Fixed and variable stored-edge scans | `FINAL`, or selective candidate keys followed by `LIMIT 1 BY` | Prevents a newer edge tombstone from exposing an older live edge. |
-| Single-relation aggregation | Non-`FINAL` scan with sort-key and unchanging filters before `LIMIT 1 BY <replacement key> ORDER BY <replacement key>, _version DESC`; `FINAL` per table when the relationship spans several edge tables | Resolves current edge rows before evaluating the aggregate condition. |
-
-Filter placement rules for current-row reads:
-
-- **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are emitted on the current-row read so ClickHouse can still use primary-key pruning where supported.
-- **Immutable non-key filters** (`created_at`, `author_id`) also run before the pick. The indexer writes every tombstone with these columns, so the tombstone passes the filter, reaches the pick and wins.
-- **Mutable filters** (`state`, `status`, `draft`) evaluate after latest-row resolution, preventing stale row versions from matching. The selective form also uses them to find candidate keys.
-- **`_deleted = false`** is always applied after latest-row resolution, either on the `FINAL` scan or outside a wrapping subquery.
-- **Exact edge metadata** can enforce a node filter only when every selected relationship variant carries the current value.
-- **Pinned endpoint IDs** remain predicates on the edge relation and any required current node read.
-
-Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
-
-### Denormalized joins
-
-A denormalized join pre-joins a linear chain of tables into one `gl_denorm_<name>` table. The compiler can then answer the matching hops with a single scan. It is declared as a chain of edge variants. Each variant is realized either through its edge table, or, with `via: fk`, directly node to node on the variant's FK column:
-
-```yaml
-denormalized_joins:
-  - name: reviewer_project
-    hops:
-      - {relationship: REVIEWER,   from: User,         to: MergeRequest}
-      - {relationship: IN_PROJECT, from: MergeRequest, to: Project, via: fk}
-```
-
-That resolves to the table chain `gl_user, gl_edge, gl_merge_request, gl_project`.
-Adjacent tables join on the ID or edge ID that links them.
-Every scoped table keeps its own `traversal_path` in the row, exactly as each scan alias keeps its own in an ordinary join.
-Every other column of every table is copied under a `t{i}_` prefix.
-The first scoped table's `traversal_path` is the row's unprefixed one and leads the sort key.
-The DDL generator composes the table from the source tables' already-generated definitions (columns, codecs, indexes, settings, partitioning).
-It emits one `TO` materialized view per table, joined outward from the trigger with `FINAL`.
-The security pass filters each path column in the row against the authorized set (see `Ontology::traversal_path_columns`), each at its own table's role floor.
-So a hop may cross namespaces just as it may in an edge chain.
-A row is returned only when the caller is authorized for every namespace it touches.
-The loader only requires that at least one table in the chain is scoped.
-
-Before declaring a join in `schema.yaml`, trial it as an ontology overlay under `config/seeds/overlays/<name>/`. That directory mirrors `config/ontology/` and is merged over it. Run the data correctness suite against it with `mise test:integration:overlay <name>`. The suite creates the table and its views from the seed. It checks the table holds exactly the rows the live source join produces. It runs the YAML query scenarios against the overlaid ontology.
-
-### Scope rewrite (traversal_path prefix injection)
-
-Project- and group-scoped `traversal` and `aggregation` queries add a tight `startsWith(traversal_path, <prefix>)` predicate so the primary key prunes the scan.
-
-**When a node is scoped**
-
-- It carries one of two things. Either a single `id`, `full_path`, or up to eight `node_ids` for an anchor entity. Or a single equality filter on a `namespace_anchor` FK column such as `project_id`.
-- Anchors and FK columns come from the ontology's `traversal_path_lookup` declarations and edge scope annotations (`Ontology::is_anchor`, `Ontology::anchor_fk_mappings`).
-- Anchors: `Project`, `Group`, `MergeRequest`, `Definition`, `File`, `Directory`. The code entities let "find callers" traversals scope to the symbol's own project.
-
-**How the prefix is produced** (`scope::derive_scope_proofs`, `ScopeProof`)
-
-- No pre-query lookup. The compiler emits a scalar subquery in the same statement: `(SELECT coalesce(if(argMaxOrNull(_deleted, _version), NULL, argMaxOrNull(traversal_path, _version)), '0/') FROM <anchor table> AS _scope WHERE _scope.<key> = ?)`.
-- ClickHouse evaluates it once before index analysis, so pruning equals a literal prefix (production `EXPLAIN`: 273 of 39 350 granules for both forms).
-- ID lookups use an aggregate over all matching versions. Full-path lookups use `FINAL` before filtering the mutable path, so an old name cannot resolve a renamed anchor.
-- A missing or deleted anchor yields `0/`. The predicate then falls back to the authorization filter alone (`startsWith(...) OR <lookup> = '0/'`). So rows whose anchor row is not indexed yet still return, as with the old resolver.
-- Several anchors on one node give one `startsWith` per anchor, OR-ed. Above eight the node keeps only the authorization filter.
-- The lookup reads the anchor's current row, so a transferred project scopes to its new location as soon as its rows are indexed. No cache, no staleness window.
-
-**Where it lands**
-
-- Restriction derives immutable node and relationship proofs. Planning does not consume them.
-- Scope application runs after planning and before lowering. It wraps each owned relation read with its scope predicate.
-- Lowering emits these predicates with the read. Security injection then adds caller authorization filters.
-
-**Propagation** (`Ontology::propagate_scope_prefixes`)
-
-- Edge variants declare `scope`: `namespace_anchor`, `same_namespace`, or omitted for cross-namespace.
-- Group containment propagates a parent's prefix to its descendants, never a descendant's prefix to its parent. This follows the stored edge direction, including incoming query selectors. A project's path cannot constrain its ancestor group or that group's membership edges.
-- Other scope-preserving variants propagate prefixes in both directions. A two-pass taint walk resolves the exact variant and refuses aliases reachable through a cross-namespace edge.
-- Cross-namespace relationships such as `CLOSES` do not propagate, so multi-edge traversals stay correct. This is what lets a 2+ edge project-scoped traversal seek the project's PK range instead of scanning the org-wide edge table (#601941).
-
-## Request Flow (Deployed)
-
-1. Client (MCP or REST) submits a tool call or Cypher.
-2. Adapter validates/normalizes input pursuant to the currently deployed schema. For SDLC queries it computes the user's `traversal_path` prefixes, which encode the organization ID as their first segment. For code queries it selects the active `branch`.
-3. Planner compiles to ClickHouse SQL (CTEs, recursive CTEs, unions, joins) with bound parameters.
-4. ClickHouse executes; the server returns rows plus the generated SQL for audit.
-
-### Unified Response Format
-
-The server fetches one probe row beyond the requested window, trims it, and derives honest pagination metadata (`has_more`, `truncated`). `SKIP` lowers to a SQL `OFFSET` over a stable order, so each page is a fresh bounded query. There is no cross-page result cache. The formatting stage then transforms the trimmed `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, group_columns?, rows?, pagination? }` shape for all four query types (traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. `format_version` (semver) lets consumers detect breaking changes.
-Aggregation queries include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
-A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
-
-Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](../indexing/sdlc_indexing.md). The indexer publishes a small state record (namespace → active state). The web tier caches namespace metadata and injects appropriate filters into queries; no file swapping is required.
-
-Direct projections and hydration apply ontology-derived [text excerpts](../../source/remote/queries/query-language.md#text-excerpts) in SQL before serialization, without changing filters, joins, authorization, grouping, sorting, or cursor keys.
-
-## Authorization and Safety
-
-- Hard filters in SQL: every query carries `startsWith(traversal_path, ?)` predicates scoped to the caller's authorized namespaces. Organization isolation is implicit, because the org ID is the first path segment.
-- Redaction layer: final pass to drop rows the upstream filters could not precisely exclude (e.g., confidential flags). Avoid redaction for aggregates; either pre‑filter or block the query shape.
-- All queries will be parameterized.
-- Depth caps and relationship allow‑lists to prevent runaway traversals; row and time limits per request.
-- Grammar‑based query validation: the planner validates generated SQL against a strict subset of the ClickHouse grammar. The validator walks the AST to verify that required predicates (e.g., `startsWith(traversal_path, ?)`) are present in `WHERE` clauses and rejects queries that omit them. This "fail closed" approach ensures malformed or overly broad queries are blocked before execution rather than relying solely on downstream filtering.
+The [Security](../security.md) design document describes the authorization model and the redaction layer.
 
 ## Observability
 
-- Per-phase timings (parse/plan/render/execute) and row counts.
-- Emitted SQL and parameter map for debugging.
-- Per-query ClickHouse resource stats (`read_rows`, `read_bytes`, `memory_usage`) extracted from the `X-ClickHouse-Summary` response header on every query. When profiling is enabled, these are enriched from `system.query_log`.
-- Query result cache metrics: lookups (hit/miss/error), stores (success/error/too_large), evictions (per_user_limit).
+Each query reports the time of each phase, the rows it returned, and the rows, bytes, and memory that ClickHouse used. Authorized callers can see the compiled SQL and its parameters. [Observability](../observability.md) lists the metrics.
 
-## Integration with Indexing
+## Testing
 
-The indexer writes denormalized, typed node and edge tables in ClickHouse via ETL rather than synchronous materialized views. The exact mechanisms for this are covered in [SDLC Indexing](../indexing/sdlc_indexing.md) and [Schema Management](../schema_management.md). Materialized views would require filtered license checks on every inserted row, reducing ingestion efficiency. ETL decouples transformation from ingestion, allowing the indexer to batch writes and maintain control over schema evolution without impacting ClickHouse insert performance. Materialized views are reserved for precomputing stable summaries (e.g., group closure) that change infrequently and do not require per-row filtering. But these are optional enhancements for performance and may be subject to change.
-Edge lookups use the ontology-declared sort keys, primary keys, and bloom filter indexes rather than per-table projections.
-
-## Security and performance testing
-
-Security query scenarios, plan-shape fixtures, performance scenarios, and local fuzz targets check the query engine. For each test layer and its CI job, see [Testing](../testing.md). For the authorization model, see [Security Architecture](../security.md).
-
-## References
-
-- graphhouse experiments and benchmarks (multi‑table schema, adjacency ordering, recursive CTEs)
-- ClickGraph engine (Cypher → ClickHouse SQL, recursive CTEs, path functions, Bolt/HTTP front ends)
+Query scenarios check results in both languages. Plan-shape fixtures check the plan the compiler picks. Fuzz targets check the frontends. [Testing](../testing.md) describes each layer and its CI job.

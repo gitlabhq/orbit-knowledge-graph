@@ -1,163 +1,40 @@
-# Intermediary LLM query language
+# JSON Query DSL
 
 ## Overview
 
-Orbit uses a JSON query DSL that compiles to ClickHouse SQL. Rather than exposing multiple specialized tools, we provide a single query schema that supports traversal (including single-entity lookups), aggregation, path finding, and neighborhood exploration. The graph ontology validates all queries at runtime.
+The JSON Query DSL is the default query language of Orbit Remote. It is built for LLMs that fill in a JSON schema.
 
-The query engine follows this pipeline:
+1. An agent reads the graph schema and the DSL schema.
+2. The agent fills in one JSON object that describes the query.
+3. Orbit checks the object against the JSON schema, then against the ontology.
+4. The shared compiler turns it into parameterized SQL.
 
-```mermaid
-flowchart LR
-    A[JSON Input] --> B[Schema Validation]
-    B --> C[Ontology Validation]
-    C --> D[Lower to SQL-like AST]
-    D --> E[Apply Security Context]
-    E --> F[Code Generation]
-    F --> G[Parameterized SQL]
-```
+One schema covers traversal, aggregation, path finding, and neighbors. Agents use one tool for every graph question, not one tool for each question type.
 
-The JSON schema (`config/schemas/graph_query.schema.json`) defines the structure, while the ontology (`config/ontology/`) provides entity types, relationship types, and property definitions that are validated at runtime.
+## Why JSON
 
-Agents should fetch the current DSL and graph schema before composing a query. The DSL is versioned by the `query_dsl` pin in `config/versions.yaml`. The major version is reflected in the `graph_query` schema `$id`. The graph schema comes from the ontology. Agents should expand every candidate node type needed for the question before using properties, filters, columns, or aggregations.
+- LLMs produce valid JSON against a schema more reliably than free-form query text.
+- A JSON schema documents every field, type, and limit in one machine-readable file: `config/schemas/graph_query.schema.json`.
+- Every value has a field, so values never mix with query structure. Nothing in the object can become SQL text.
+- UI clients and services can build queries in code without a parser.
 
-```mermaid
-sequenceDiagram
-    participant Client as MCP Client / LLM
-    participant Service as Query Service
-    participant Validator as Schema + Ontology Validator
-    participant Compiler as Query Compiler
-    participant CH as ClickHouse
+[GQL](orbit_query_frontend.md) is the text alternative. Both languages compile to the same input and return the same results.
 
-    Client->>Service: JSON query
-    Service->>Validator: Validate against schema
-    Validator->>Validator: Validate entities/relationships against ontology
-    Validator-->>Service: Validated input
-    Service->>Compiler: Lower to SQL-like AST
-    Compiler->>Compiler: Apply security context (tenant isolation)
-    Compiler->>Compiler: Generate parameterized SQL
-    Compiler->>CH: Execute query
-    CH-->>Service: Result rows
-    Service-->>Client: Response (SQL + results)
-```
+## Query shape
 
-## Query Schema
+A query names its type and the nodes it matches. The other fields depend on the type.
 
-The JSON query schema supports four query types through a single unified structure.
+| Part | Purpose |
+| --- | --- |
+| `query_type` | One of `traversal`, `aggregation`, `path_finding`, or `neighbors` |
+| `nodes` | The node selectors: an entity type, a variable name, and optional IDs, filters, and columns |
+| `relationships` | The relationship selectors that connect the nodes, with a direction and a hop range |
+| `aggregations` and `group_by` | The metrics and group keys of an aggregation |
+| `path` and `neighbors` | The settings for path finding and neighbors |
+| `limit` and ordering | The size and order of the result |
+| `options` | Presentation settings that do not change what the query matches |
 
-### Required Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `query_type` | `string` | One of: `traversal`, `aggregation`, `path_finding`, `neighbors` |
-| `nodes` | `array` | 1-5 node selectors to match. Always required; single-node queries use a 1-element array |
-
-### Optional Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `relationships` | `array` | Up to 5 relationship selectors; `traversal` requires exactly one fewer relationship selector than node selectors (at most 4) |
-| `aggregations` | `array` | Aggregation specs (required when `query_type` is `aggregation`) |
-| `group_by` | `array` | Group keys for aggregation rows |
-| `path` | `object` | Path finding config (required when `query_type` is `path_finding`) |
-| `neighbors` | `object` | Neighbors config (required when `query_type` is `neighbors`) |
-| `limit` | `integer` | Max results (1-1000, default: 30) |
-| `order_by` | `string` | Result ordering: `"node.property"` (asc) or `"-node.property"` (desc). |
-| `aggregation_sort` | `string` | Aggregation row ordering: `"column"` (asc) or `"-column"` (desc), referencing an output column alias. |
-| `options` | `object` | Consumer-level preferences that affect result presentation, not query semantics. See [Query Options](#query-options). |
-
-## Node Selectors
-
-Each node selector specifies which graph nodes to match. All query types declare between 1 and 5 selectors in the `nodes` array; `neighbors` queries and single-entity `traversal` lookups use a 1-element array.
-
-```json
-{
-  "id": "u",
-  "entity": "User",
-  "columns": ["username", "email"],
-  "filters": {
-    "username": "admin"
-  },
-  "node_ids": [123, 456]
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | `string` | Variable identifier (required). Used to reference this node in relationships and aggregations. |
-| `entity` | `string` | Entity type (e.g., `User`, `Project`, `MergeRequest`). Validated against ontology. |
-| `columns` | `string` or `array` | Columns to return. Use `"*"` for all columns, or an array of column names (e.g., `["username", "email"]`). If omitted, only `id` is returned. Columns are validated against the ontology. |
-| `filters` | `object` | Property filters. Keys are property names. |
-| `node_ids` | `array` | Specific node IDs to match. |
-| `id_range` | `object` | ID range filter with `start` and `end` (inclusive). |
-| `id_property` | `string` | Which property contains the ID (default: `id`). |
-
-## Filter Operators
-
-Filters support both simple equality and advanced operators.
-
-**Simple equality:**
-
-```json
-{"filters": {"username": "admin", "state": "active"}}
-```
-
-**Operator objects** (multiple keys AND-combine, e.g. for ranges):
-
-```json
-{
-  "filters": {
-    "created_at": {"gte": "2024-01-01", "lt": "2025-01-01"},
-    "state": {"in": ["active", "blocked"]},
-    "username": {"contains": "admin"}
-  }
-}
-```
-
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `eq` | Equality | `{"eq": "admin"}` |
-| `gt`, `lt`, `gte`, `lte` | Comparison | `{"gte": 100}` |
-| `in` | Membership | `{"in": ["a", "b"]}` |
-| `contains` | Substring match | `{"contains": "test"}` |
-| `starts_with` | Prefix match | `{"starts_with": "gl_"}` |
-| `ends_with` | Suffix match | `{"ends_with": "_bot"}` |
-| `is_null` | Null check (boolean; `false` negates) | `{"is_null": true}` |
-| `is_not_null` | Not null check (boolean; `false` negates) | `{"is_not_null": true}` |
-
-Repeating an operator on one property takes an array of operator objects:
-`{"title": [{"contains": "foo"}, {"contains": "bar"}]}`.
-
-## Relationship Selectors
-
-Relationships connect nodes in the query. The schema permits at most 5 relationship
-selectors. A `traversal` query requires exactly one fewer relationship selector than
-node selectors, so its chain has at most 4 relationship selectors. This shape limit
-is separate from each selector's `hops` range, whose upper bound is 3.
-
-```json
-{
-  "type": "AUTHORED",
-  "from": "u",
-  "to": "mr",
-  "direction": "outgoing",
-  "hops": [1, 1]
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | `string` or `array` | Relationship type(s) to traverse. Use an array for multiple types. |
-| `from` | `string` | Source node variable ID. |
-| `to` | `string` | Target node variable ID. |
-| `direction` | `string` | `outgoing` (default), `incoming`, or `both`. |
-| `hops` | `array` | Inclusive `[min, max]` hop range; `[2, 2]` means exactly 2. Bounds 1-3, default `[1, 1]`. |
-| `filters` | `object` | Filters on relationship properties. |
-
-## Query Types
-
-### Traversal Queries
-
-Match nodes and relationships, return matching entities.
+For example, this query returns the merged merge requests of each user:
 
 ```json orbit-query
 {
@@ -174,384 +51,23 @@ Match nodes and relationships, return matching entities.
 }
 ```
 
-### Aggregation Queries
+The [query language reference](../../source/remote/queries/query-language.md) documents every field, operator, and limit, with examples of each query type.
 
-Group and aggregate results.
+## Validation
 
-Each aggregation is an object with a single function key (`count`, `sum`,
-`avg`, `min`, `max`). Its value is a `"node"` or `"node.property"` reference,
-plus an optional `as` output column name. Without `as`, the column name derives
-as `<function>_<node>[_<property>]`.
+Orbit checks a JSON query twice:
 
-Use top-level `group_by` to group aggregation rows. It applies to every
-aggregation in the query. A node group is the node ID string (`"u"`).
+1. The JSON schema checks the structure, types, and limits.
+2. The shared validator checks the same limits, then checks every entity, relationship, and property against the ontology.
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-    {"id": "u", "entity": "User"}
-  ],
-  "relationships": [
-    {"type": "AUTHORED", "from": "u", "to": "mr"}
-  ],
-  "group_by": ["u"],
-  "aggregations": [
-    { "count": "mr", "as": "mr_count" }
-  ],
-  "limit": 10,
-  "aggregation_sort": "-mr_count"
-}
-```
+The second check is the same one that GQL uses. Every JSON test therefore also tests the shared validator. A build script checks that the limits in the JSON schema match the limits in Rust.
 
-Property groups are `"node.property"` strings (`"mr.state"`), such as
-dashboard buckets. Date properties can be bucketed with the object form
-`{"key": "mr.created_at", "truncate": "month", "as": "<optional-name>"}`.
-They must reference ClickHouse-backed, filterable properties allowed for the
-caller. Virtual fields and unfilterable fields are rejected during validation.
+## Schema discovery
 
-`group_by` supports up to four keys and can mix node and property groups.
-Node groups name their column after the node ID; property groups use
-`<node>_<property>` (plus `_<unit>` when truncated), overridable with the
-object form's `as`. Duplicate group or aggregate output names are rejected.
+Agents read the graph schema before they write a query. `get_graph_schema` returns the ontology as compact text, sized for an LLM context window. By default it lists node types by domain and relationship types with their endpoints. An agent expands the node types it needs to see their properties and relationships. The response never exposes the ClickHouse schema.
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {"id": "v", "entity": "Vulnerability", "filters": {"report_type": "sast"}}
-  ],
-  "group_by": ["v.severity"],
-  "aggregations": [
-    { "count": "v", "as": "vulnerability_count" }
-  ],
-  "limit": 10,
-  "aggregation_sort": "-vulnerability_count"
-}
-```
+`get_query_dsl` returns the DSL schema. Its version is the `query_dsl` pin in `config/versions.yaml`, and its major version is part of the schema `$id`.
 
-Aggregation responses are table-shaped: `columns` describes the metrics,
-`group_columns` describes any grouping keys, and `rows` carries group values
-plus metric values. Node groups put a nested node object in the row under the
-group key; property groups put the scalar bucket value there.
+## Future of the DSL
 
-| Aggregation Function | Description | Requires `property` | Supported property types |
-|---------------------|-------------|---------------------|--------------------------|
-| `count` | Count matching entities | No | N/A |
-| `sum` | Sum of property values | Yes | Numeric only |
-| `avg` | Average of property values | Yes | Numeric only |
-| `min` | Minimum property value | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
-| `max` | Maximum property value | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
-
-`sum` and `avg` reject `DateTime` properties with a validation error. To
-aggregate over dates, use `min` or `max`.
-
-> **Note:** `collect` (collect property values into an array) is planned but not yet implemented and will return an error if used.
-
-### Path Finding Queries
-
-Find paths between nodes using recursive CTEs.
-
-```json orbit-query
-{
-  "query_type": "path_finding",
-  "nodes": [
-    {"id": "start", "entity": "Project", "node_ids": [100]},
-    {"id": "end", "entity": "Project", "node_ids": [200]}
-  ],
-  "path": {
-    "type": "shortest",
-    "from": "start",
-    "to": "end",
-    "max_depth": 3,
-    "rel_types": ["CONTAINS"]
-  }
-}
-```
-
-| Path Type | Description |
-|-----------|-------------|
-| `shortest` | Find the single shortest path |
-
-### Single-entity Traversal (lookup)
-
-Match a single entity type with optional filters. This is a `traversal` query with one node and no relationships.
-
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [{
-    "id": "u",
-    "entity": "User",
-    "columns": ["username", "email"],
-    "filters": {
-      "username": {"starts_with": "admin"}
-    }
-  }],
-  "limit": 10
-}
-```
-
-### Neighbors Queries
-
-Find all nodes connected to a given node. Neighbors queries take exactly one node selector and require a `neighbors` configuration.
-
-```json orbit-query
-{
-  "query_type": "neighbors",
-  "nodes": [{"id": "u", "entity": "User", "node_ids": [100]}],
-  "neighbors": {
-    "direction": "both",
-    "rel_types": ["AUTHORED", "MEMBER_OF"]
-  },
-  "limit": 20
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `direction` | `string` | `outgoing`, `incoming`, or `both` (default: `both`). |
-| `rel_types` | `array` | Relationship types to traverse. If omitted, all types are considered. |
-
-The response includes the neighbor's ID, entity type, and the relationship that connects them.
-
-## Query Options
-
-The `options` object controls presentation behavior without changing query semantics. It is optional and all fields have sensible defaults.
-
-```json orbit-query
-{
-  "query_type": "path_finding",
-  "nodes": [
-    {"id": "start", "entity": "User", "node_ids": [1]},
-    {"id": "end", "entity": "Project", "node_ids": [100]}
-  ],
-  "path": {
-    "type": "shortest",
-    "from": "start",
-    "to": "end",
-    "max_depth": 3,
-    "rel_types": ["MEMBER_OF"]
-  },
-  "options": {"dynamic_columns": "*"}
-}
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `dynamic_columns` | `string` | `"default"` | Columns fetched for dynamically-discovered entities during PathFinding/Neighbors hydration. `"default"` returns the entity's `default_columns` from the ontology. `"*"` returns all columns. |
-| `include_debug_sql` | `boolean` | `false` | When `true`, includes compiled ClickHouse SQL in response metadata. Only honored for authorized users (instance admins and direct GitLab org members with Reporter+ access). |
-
-This is relevant for PathFinding and Neighbors queries where entity types are discovered at runtime. For Search and Traversal queries, column selection is controlled per-node via the `columns` field and this option has no effect.
-
-## Ontology Integration
-
-The query engine validates queries against the ontology at runtime. The ontology defines:
-
-- **Entity types**: Valid node labels (e.g., `User`, `Project`, `MergeRequest`)
-- **Relationship types**: Valid edge labels (e.g., `AUTHORED`, `CONTAINS`, `IN_PROJECT`)
-- **Properties**: Available properties per entity with their data types
-
-Entity and relationship type names in queries must match definitions in the ontology. Property filters are validated to ensure the property exists on the referenced entity.
-
-### Schema Discovery
-
-The `get_graph_schema` tool returns the ontology in a compact TOON format sized for LLM context windows. It does not expose the underlying ClickHouse or Postgres schema.
-
-By default, the response lists node types grouped by domain and edge types with their source/target types. Pass `expand_nodes` to get property details and relationships for specific entity types.
-
-**Parameters:**
-
-```json
-{
-  "expand_nodes": ["User", "MergeRequest"]
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `expand_nodes` | `array` | Node types to expand with properties and relationships (optional). |
-
-**Default response structure (compact):**
-
-The response groups nodes by domain and lists edges with their valid source and target types:
-
-```yaml
-domains:
-  - name: core
-    nodes: [User, Group, Project, Note]
-  - name: code_review
-    nodes: [MergeRequest, MergeRequestDiff, MergeRequestDiffFile]
-  - name: ci
-    nodes: [Pipeline, Stage, Job]
-  - name: security
-    nodes: [Vulnerability, VulnerabilityOccurrence, Finding, ...]
-  - name: plan
-    nodes: [WorkItem, Milestone, Label]
-  - name: source_code
-    nodes: [Branch, Directory, File, Definition, ImportedSymbol]
-edges:
-  - name: AUTHORED
-    from: [User]
-    to: [Note, MergeRequest, Vulnerability, WorkItem]
-  - name: CONTAINS
-    from: [Group, User, WorkItem]
-    to: [Group, Project, WorkItem]
-  ...
-```
-
-**Expanded response (when `expand_nodes=["User"]`):**
-
-Expanded nodes include their properties (with types and nullability) and their outgoing/incoming relationship types:
-
-```yaml
-- name: User
-  props: [id:int64, username:string, email:string, is_admin:boolean, user_type:enum]
-  out: [AUTHORED, CONTAINS, MEMBER_OF, OWNER, ...]
-  in: [ASSIGNED, CONFIRMED_BY, CREATOR, DISMISSED_BY, ...]
-```
-
-## Compilation Security
-
-From a security perspective, all JSON inputs are validated and sanitized based on their contents. This is a hard requirement for related MR reviews.
-
-### Typed JSON → Internal AST → SQL
-
-We never concatenate user/LLM strings into raw SQL:
-
-1. JSON is deserialized into strongly-typed Rust structs matching the schema
-2. Structs are validated against the ontology (entity types, relationship types, properties)
-3. Validated input is lowered to an internal SQL AST
-4. SQL generator only accepts this AST. It cannot take arbitrary strings
-
-This prevents the LLM from "inventing" SQL fragments. The query builder only interpolates placeholders in the SQL and binds the actual values out-of-band via the driver, so there is no injection point.
-
-### Parameterization
-
-All user-supplied scalar values (node IDs, filter values like `state = 'opened'`, date ranges, etc.) are passed as bound parameters to ClickHouse. This applies equally whether the request comes directly from a user, an LLM, or another service.
-
-```sql
-SELECT u.id AS u_id, mr.id AS mr_id
-FROM gl_users AS u
-INNER JOIN gl_edges AS e0 ON (u.id = e0.source_id AND (e0.relationship_kind = {p0:String}))
-INNER JOIN gl_merge_requests AS mr ON (e0.target_id = mr.id)
-WHERE (u.username = {p1:String}) AND (mr.state = {p2:String})
-LIMIT 25
-```
-
-With parameters:
-
-```json
-{
-  "p0": "AUTHORED",
-  "p1": "admin",
-  "p2": "merged"
-}
-```
-
-### Validation
-
-**Identifier validation:**
-
-- Node/relationship variable IDs: alphanumeric + underscore, 1-64 chars, must start with letter/underscore
-- Safe SQL identifier pattern: `^[a-zA-Z_][a-zA-Z0-9_]{0,63}$`
-
-**Ontology validation:**
-
-All enum-like fields (entity types, relationship types, property names) are validated against strict allow-lists derived from the ontology:
-
-- Entity types must be one of the known node types (e.g., `User`, `Project`, `MergeRequest`, `Issue`)
-- Relationship types must be one of the known edge types (e.g., `AUTHORED`, `IN_PROJECT`, `CONTAINS`)
-- Properties must exist on their referenced entity
-- Aggregation targets and `group_by` entries must reference valid nodes
-- Aggregation property group keys must reference valid nodes and column-backed, filterable properties
-- Filter operators are limited to a small, explicit set (`eq`, `in`, `gte`, `lte`, etc.), represented as enums in the AST
-
-If a value is not in the allow-list, we reject the request with a validation error rather than passing it through to SQL. This means the LLM cannot introduce new table names, join arbitrary system tables, or call random functions.
-
-**Constraint enforcement:**
-
-Each relationship step has a hard-coded hop cap, and the schema enforces the same bounds:
-
-- `hops` upper bound limited to 3 to prevent resource exhaustion
-- `limit` capped at 1000 results (default: 30)
-- Path `max_depth` limited to 3
-- `node_ids` capped at 500 per node selector
-- `IN` filter values capped at 100 per filter
-- `cursor.page_size` capped at 1000
-
-> **Note:** These limits will be tuned as we collect usage data.
-
-### Multi-Tenant Isolation
-
-Security context is injected into all queries via `traversal_path` filtering:
-
-- Single path: `startsWith(traversal_path, "{path}")`
-- Multiple paths: Optimized with longest common prefix
-
-This filtering is applied to every namespaced node and edge table scan and injected into the WHERE clause for short-circuit filtering. Global node tables declared by the ontology, such as `gl_user` and `gl_runner`, have no `traversal_path` column and are excluded from path-based filtering. Their results rely on Rails redaction, while joins through namespaced relationships retain path filtering. Permission predicates come from the caller's JWT, so the resulting query remains subject to the GitLab authorization model.
-
-### Read-Only Execution
-
-Generated SQL is executed using a read-only database user that:
-
-- Can only run `SELECT` (no `INSERT/UPDATE/DELETE/DDL`)
-- Is restricted to Orbit graph tables
-- Has permission predicates injected based on the caller's JWT
-
-This makes it harder for an LLM-originated query to read cross-tenant data or modify storage.
-
-### Resource Controls
-
-Because the Query Engine is the **only** path from JSON into SQL, we have a single choke point for enforcing resource controls:
-
-- Per-request timeouts and max result size
-- Per-user and per-token rate limiting
-- Logging/metrics on generated ASTs and compiled SQL, so we can audit or block abusive patterns
-
-### Summary
-
-The compilation step is a controlled JSON → AST → SQL translation. Free-form values are parameterized, enum-like inputs are validated against allow-lists, the database role is read-only and tenant-scoped, and traversal depth and result sizes are capped.
-
-## Complete Example
-
-**Input:**
-
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [
-    {"id": "u", "entity": "User", "filters": {"username": "admin"}},
-    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}
-  ],
-  "relationships": [
-    {"type": "AUTHORED", "from": "u", "to": "mr"}
-  ],
-  "limit": 25
-}
-```
-
-**Generated SQL:**
-
-```sql
-SELECT u.id AS u_id, mr.id AS mr_id
-FROM gl_users AS u
-INNER JOIN gl_edges AS e0 ON (u.id = e0.source_id AND (e0.relationship_kind = {p0:String}))
-INNER JOIN gl_merge_requests AS mr ON (e0.target_id = mr.id)
-WHERE startsWith(mr.traversal_path, {sec0:String})
-  AND (u.username = {p1:String})
-  AND (mr.state = {p2:String})
-LIMIT 25
-```
-
-**Parameters:**
-
-```json
-{
-  "p0": "AUTHORED",
-  "sec0": "1/",
-  "p1": "admin",
-  "p2": "merged"
-}
-```
+GQL may replace the JSON Query DSL. The JSON frontend is one module with its own parse phase. Retiring it deletes that module and the schema file, and the shared phases do not change.
