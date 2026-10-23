@@ -204,6 +204,14 @@ repos:
     version: v10.3.1
     groups: [yaml]
 
+  # Dockerfile
+  - name: docker-library-golang
+    source: github
+    project: docker-library/golang
+    version: main
+    commit_sha: 41d9b4da70324ae7b6461ac2cc401b06719ff57d
+    groups: [dockerfile]
+
   # Zig
   - name: zls
     source: github

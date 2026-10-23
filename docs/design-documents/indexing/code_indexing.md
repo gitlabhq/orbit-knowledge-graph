@@ -215,6 +215,14 @@ The memory budget is small, so most repositories stay in memory and a large one 
 Spill compression defaults to off.
 The existing file-size and total-byte limits also apply, with total bytes charged before filtering.
 
+Dockerfile and Containerfile indexing exists only in the incremental engine. Files match by name in any case, such as `Dockerfile`, `app.Dockerfile`, and `Dockerfile.dev`. The `file_names` data in `config/languages.yaml` drives this. A real language extension wins, so `Dockerfile.py` stays Python. Template extensions such as `.erb` or `.tt` are skipped.
+
+Each `FROM` is a `Class` definition that holds the `ARG` and `ENV` variables of its stage. Its base image is an `ImportedSymbol` that never resolves to a stage in another file. `FROM <stage>` and `COPY --from=<stage>` become `CALLS` edges to the stage. `$VAR` expansions become `CALLS` edges to the variable. A reference to its own definition adds no edge. `EXPOSE`, `ENTRYPOINT`, `CMD`, unnamed stages, and numeric `COPY --from=0` are out of scope.
+
+On the flag-off v2 path a Dockerfile is a parse candidate of its own family with no pipeline. It keeps its `File` row with the `dockerfile` language and counts as skipped.
+
+A rule stage marked `repeat: true` re-runs until a pass replaces no node. The grammar has no stage node and a rule fires once per node per pass. The Dockerfile rules use `repeat: true` to nest every stage under its `FROM`.
+
 Each archive starts a fresh incremental-engine run; the server does not persist engine snapshots between jobs.
 An engine error that cannot succeed on retry dead-letters the job at once, as a fatal legacy pipeline error does. Examples are a rules load error and an export schema mismatch. A cancelled run and a failed insert stay retryable.
 File and directory rows are emitted once across language families, including files rejected by the content policy.
