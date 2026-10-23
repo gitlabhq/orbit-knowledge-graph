@@ -13,6 +13,24 @@ stages:
       - match: '(source_file $$$C)'
         replace: '(__source_file @$ROOT $$$C)'
 
+  # `ENV PATH=/bin:$PATH` reads the previous value; drop the self-reference so
+  # it does not become a call from the variable to itself.
+  - name: drop-self-expansions
+    repeat: true
+    rules:
+      - match: '(env_pair name: $N value: (unquoted_string $$$A (expansion $X:variable) $$$B))'
+        where: '$N == $X'
+        replace: '(env_pair name: $N value: (unquoted_string $$$A $$$B))'
+      - match: '(env_pair name: $N value: (double_quoted_string $$$A (expansion $X:variable) $$$B))'
+        where: '$N == $X'
+        replace: '(env_pair name: $N value: (double_quoted_string $$$A $$$B))'
+      - match: '(arg_pair name: $N default: (unquoted_string $$$A (expansion $X:variable) $$$B))'
+        where: '$N == $X'
+        replace: '(arg_pair name: $N default: (unquoted_string $$$A $$$B))'
+      - match: '(arg_pair name: $N default: (double_quoted_string $$$A (expansion $X:variable) $$$B))'
+        where: '$N == $X'
+        replace: '(arg_pair name: $N default: (double_quoted_string $$$A $$$B))'
+
   - name: expansions
     rules:
       - match: '$V:variable'
@@ -27,6 +45,9 @@ stages:
 
   - name: from-heads
     rules:
+      - match: '(from_instruction (image_spec name: $N $$$T) as: $A)'
+        where: '$N == $A'
+        replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))))'
       - match: '(from_instruction (image_spec name: $N tag: (image_tag $$$T)) as: $A)'
         replace: '(__from (__defname @$A) (__class) (__import (__source @$N) (__source_path @$N) (__name @$N (__alias @$N|prepend("image:")))) (__call (__callee @$N|prepend("image:") $N)) (__call (__callee @$N $N)) $$$T)'
       - match: '(from_instruction (image_spec name: $N) as: $A)'
@@ -85,15 +106,6 @@ stages:
       - match: '$M:__source_file'
         tag:
           file_dir: '@$M|regex_replace("[^/]*$", "")|regex_replace("/$", "")'
-
-  - name: resolve-paths
-    rules:
-      - match: '(__import)'
-        tag:
-          resolved_source: '@$ROOT|child_sym("__source_path")'
-      - match: '(__import (__source_path "^."))'
-        tag:
-          resolved_source: '@$ROOT|concat("/", "ancestor_tag:file_dir", "child_sym:__source_path")|regex_replace("(^|/)\./", "$1")|regex_loop("[^/]+/\.\./", "")|regex_replace("/$", "")|regex_replace("^/", "")'
 
 resolve:
   stages: []
