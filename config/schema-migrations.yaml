@@ -16,9 +16,16 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 114
+  scope: "*"
+  note: >-
+    Makes every node time column non-nullable and stores a null time as the epoch,
+    so the temporal minmax table setting indexes all 76 of them; the 25 explicit time
+    minmax lines go and Date32 columns default to 1970-01-01. DDL changes on 23
+    tables; null times are rewritten to the epoch on re-index.
 - version: 113
   scope: "*"
-  note: "Adds skip indexes measured at group scope on 2026-10-22: set on security_scan.status, job.failure_reason and vulnerability_occurrence.report_type; bloom on merge_request.iid and work_item.iid; text on merge_request_diff.head_commit_sha so prefix searches prune; minmax on note.created_at. Makes every node time column non-nullable and stores a null time as the epoch, so the temporal minmax setting indexes all of them; Date32 columns default to 1970-01-01 and the explicit time minmax lines go. DDL changes on 23 tables; null times are rewritten to the epoch on re-index."
+  note: "Adds skip indexes measured at group scope on 2026-10-22: set on security_scan.status, job.failure_reason and vulnerability_occurrence.report_type; bloom on merge_request.iid and work_item.iid; text on merge_request_diff.head_commit_sha so prefix searches prune; minmax on note.created_at. DDL changes on seven tables; no indexed row changes."
 - version: 112
   scope: none
   note: >-
