@@ -183,5 +183,4 @@ For query recipes and the query language reference, install the [GitLab Orbit sk
 - [GitLab Orbit in GitLab Duo](duo.md)
 - [GitLab Orbit CLI](../cli.md)
 - [Queries](../queries/_index.md)
-- [Billing and credit usage](../billing.md)
 - [Troubleshooting](../troubleshooting.md)

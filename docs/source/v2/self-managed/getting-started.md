@@ -26,7 +26,7 @@ GitLab Orbit does not install ClickHouse, Kubernetes, or NATS. They must exist a
 
 <!-- TODO(GA): confirm the minimum GitLab version at GA. -->
 - GitLab 19.2.2 or later.
-- A Premium or Ultimate subscription with the GitLab Orbit add-on.
+- A Premium or Ultimate subscription with access to GitLab Orbit. To get access, [contact sales](https://about.gitlab.com/sales/).
 - Administrator access to the GitLab instance and to its PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.
 - ClickHouse 26.4 or later, set up for GitLab.

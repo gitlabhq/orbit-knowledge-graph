@@ -129,16 +129,16 @@ LIMIT 1
 ### Error: `GitLab credits exhausted`
 
 The query fails with HTTP `402`, and `glab orbit query` exits with code 1.
-The top-level group that GitLab Orbit bills has no GitLab Credits left, or its free trial ended.
-Buy more [GitLab Credits](https://docs.gitlab.com/subscriptions/gitlab_credits/) for the group.
+The free trial of the top-level group ended. To keep using GitLab Orbit, [contact sales](https://about.gitlab.com/sales/).
+For information about GitLab Orbit pricing and usage, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
 
-If the message is `Unable to verify GitLab credits`, GitLab could not check the GitLab Credits of the group.
+If the message is `Unable to verify GitLab credits`, GitLab could not check whether the group can run queries.
 Wait a few minutes, then send the query again.
 
 ### Error: `This group is not eligible for a GitLab Orbit trial`
 
-The group does not meet the conditions for a trial, or already has the GitLab Orbit add-on.
-To buy the add-on, [contact sales](https://about.gitlab.com/sales/). For more information, see [start a GitLab Orbit trial](trial.md).
+The group does not meet the conditions for a trial, or already has GitLab Orbit.
+To get access to GitLab Orbit, [contact sales](https://about.gitlab.com/sales/). For more information, see [start a GitLab Orbit trial](trial.md).
 
 ### Results are missing recent data
 

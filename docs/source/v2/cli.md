@@ -242,5 +242,4 @@ glab orbit config set telemetry.enabled false
 - [Connect your agent](agents/_index.md)
 - [Local graph](local/_index.md)
 - [Query language](queries/query-language.md)
-- [Billing and credit usage](billing.md)
 - [Troubleshooting](troubleshooting.md)
