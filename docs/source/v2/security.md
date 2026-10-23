@@ -104,14 +104,13 @@ Prerequisites:
 
 - The Owner role for the group.
 
-To set up a service account:
+To set up a service account for GitLab Orbit:
 
-1. [Create a group service account](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account)
-   in each top-level group that the tool must query.
-1. [Create a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-personal-access-token-for-a-service-account)
-   for the service account with the `read_api` scope. Service accounts cannot use fine-grained personal access tokens.
-1. [Add the service account](https://docs.gitlab.com/user/profile/service_accounts/#add-a-service-account-to-a-group-or-project)
-   to the lowest subgroup that has the data, with the Reporter role. If the tool must read security data, select the **Security Manager** role.
+1. [Create a service account and a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account) for it.
+   Give the token the `read_api` scope. Service accounts cannot use fine-grained personal access tokens.
+1. Add the service account to the lowest subgroup that has the data, with the Reporter role.
+   If the tool must read security data, select the **Security Manager** role.
+   Repeat this step for each group that the tool must query.
 
 ### Verify the scope of a service account
 
