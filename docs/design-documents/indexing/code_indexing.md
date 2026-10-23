@@ -215,9 +215,9 @@ The memory budget is small, so most repositories stay in memory and a large one 
 Spill compression defaults to off.
 The existing file-size and total-byte limits also apply, with total bytes charged before filtering.
 
-Dockerfile and Containerfile indexing exists only in the incremental engine. Files match by name in any case, such as `Dockerfile`, `app.Dockerfile`, and `Dockerfile.dev`. The `file_names` data in `config/languages.yaml` drives this. A real language extension wins, so `Dockerfile.py` stays Python. Template extensions such as `.erb` or `.tt` are skipped.
+Dockerfile and Containerfile indexing exists only in the incremental engine. Files match by name in any case, such as `Dockerfile`, `app.Dockerfile`, and `Dockerfile.dev`. The `file_names` data in `config/languages.yaml` drives this. A real language extension wins, so `Dockerfile.py` stays Python. Template and data extensions such as `.erb`, `.tt`, `.yml`, or `.dockerignore` are skipped. Files that no language parses keep their own extension as the `File` language, never `dockerfile`.
 
-Each `FROM` is a `Class` definition that holds the `ARG` and `ENV` variables of its stage. Its base image is an `ImportedSymbol` that never resolves to a stage in another file. `FROM <stage>` and `COPY --from=<stage>` become `CALLS` edges to the stage. `$VAR` expansions become `CALLS` edges to the variable. A reference to its own definition adds no edge. `EXPOSE`, `ENTRYPOINT`, `CMD`, unnamed stages, and numeric `COPY --from=0` are out of scope.
+Each `FROM` is a `Class` definition that holds the `ARG` and `ENV` variables of its stage. Its base image is an `ImportedSymbol` that never resolves to a stage in another file. `FROM <stage>` and `COPY --from=<stage>` become `CALLS` edges to the stage. `$VAR` expansions become `CALLS` edges to the variable. An expansion of a variable with the same name as the one being defined adds no edge, so `ENV PATH=$GOPATH/bin:$PATH` links only to `GOPATH`. For the same reason `ENV V=$V` does not link to an `ARG V`. `EXPOSE`, `ENTRYPOINT`, `CMD`, unnamed stages, and numeric `COPY --from=0` are out of scope.
 
 On the flag-off v2 path a Dockerfile is a parse candidate of its own family with no pipeline. It keeps its `File` row with the `dockerfile` language and counts as skipped.
 
