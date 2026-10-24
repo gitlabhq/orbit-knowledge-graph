@@ -2,7 +2,7 @@
 //!
 //! `Pred` = `Exists(Extract)` + boolean logic. That's it.
 //!
-//! ```ignore
+//! ```text
 //! use treesitter_visit::predicate::*;
 //!
 //! has_name()

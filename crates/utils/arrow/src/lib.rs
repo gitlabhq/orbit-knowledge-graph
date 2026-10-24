@@ -552,9 +552,11 @@ impl ColRef<'_> {
 /// column builders and produces a RecordBatch. No opinions about which
 /// columns exist or their order -- the caller controls the full schema.
 ///
-/// ```ignore
+/// ```
 /// use orbit_arrow::{BatchBuilder, ColumnSpec, ColumnType};
 ///
+/// # struct Node { id: i64, path: String, name: String }
+/// # fn example(nodes: Vec<Node>) -> Result<(), Box<dyn std::error::Error>> {
 /// let specs = vec![
 ///     ColumnSpec { name: "id".into(), col_type: ColumnType::Int, nullable: false },
 ///     ColumnSpec { name: "path".into(), col_type: ColumnType::Str, nullable: false },
@@ -567,6 +569,8 @@ impl ColRef<'_> {
 ///         b.col("name")?.push_str(&n.name)?;
 ///         Ok(())
 ///     })?;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug)]
 pub struct BatchBuilder {
@@ -712,7 +716,7 @@ impl BatchBuilder {
 /// project ID, branch) that aren't part of the domain struct.
 /// Defaults to `()` for types that don't need external context.
 ///
-/// ```ignore
+/// ```text
 /// let specs = ontology.local_entity_specs("File");
 /// let batch = FileNode::to_record_batch(&nodes, &specs, &ctx)?;
 /// ```
