@@ -1,9 +1,11 @@
 //! Predicates and projections the planner attaches to relations, and the facts about a predicate the
 //! planner asks for: selective, a point lookup, or filtering the sort key.
 
+use std::collections::HashSet;
+
 use ontology::constants::*;
 
-use super::filters::BoundFilter;
+use super::filters::{BoundFilter, NullAsEpoch};
 use super::graph::RelationId;
 use crate::input::{BooleanExpression, FilterOp, InputFilter};
 
@@ -34,6 +36,7 @@ pub enum Predicate {
         text_indexed: bool,
         unique: bool,
         immutable: bool,
+        null_as_epoch: NullAsEpoch,
     },
     Ids {
         column: Column,
@@ -67,10 +70,6 @@ pub enum Predicate {
         columns: Vec<Column>,
         relation: RelationId,
         keys: Vec<String>,
-    },
-    Scope {
-        alias: String,
-        proof: crate::scope::ScopeProof,
     },
 }
 
@@ -139,15 +138,15 @@ impl Predicate {
             | Self::EntityKind { column, .. } => in_key(&column.name),
             Self::Membership { columns, .. } => columns.iter().all(|column| in_key(&column.name)),
             Self::RelationshipKinds { .. } => in_key(RELATIONSHIP_KIND_COLUMN),
-            Self::Scope { .. } => in_key(TRAVERSAL_PATH_COLUMN),
             _ => false,
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum OutputValue {
     Column(Column),
+    EpochAsNull(Column),
     Text(String),
     Depth(u32),
     Path(Vec<(Column, Column)>),
@@ -163,7 +162,22 @@ pub enum OutputValue {
     },
 }
 
-impl OutputValue {}
+impl OutputValue {
+    pub fn property(null_as_epoch: &HashSet<String>, column: Column) -> Self {
+        if null_as_epoch.contains(&column.name) {
+            Self::EpochAsNull(column)
+        } else {
+            Self::Column(column)
+        }
+    }
+
+    pub fn column(&self) -> Option<&Column> {
+        match self {
+            Self::Column(column) | Self::EpochAsNull(column) => Some(column),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Projection {

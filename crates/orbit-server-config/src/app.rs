@@ -26,7 +26,6 @@ use crate::secret_file_source::SecretFileSource;
 use crate::tls::TlsConfig;
 
 pub const SECRET_FILE_DIR: &str = "/etc/secrets";
-pub const DEFAULT_CONFIG_FILE: &str = "config/default";
 pub const OVERLAY_CONFIG_FILE: &str = "config/config";
 
 /// `config/default.yaml`, compiled in as the lowest configuration layer.
@@ -60,9 +59,8 @@ pub struct AppConfig {
 
 impl AppConfig {
     /// Layers, lowest to highest priority: the embedded `config/default.yaml`,
-    /// an on-disk `config/default.yaml` when present (the Helm chart's ConfigMap
-    /// key), the overlay (`--config <path>`, else `config/config.yaml` when
-    /// present), secret files.
+    /// the overlay (`--config <path>`, else `config/config.yaml` when present),
+    /// secret files.
     pub fn load(overlay: Option<&Path>) -> Result<Self, ConfigError> {
         Self::load_from(overlay, Path::new(SECRET_FILE_DIR))
     }
@@ -84,7 +82,6 @@ impl AppConfig {
         };
         let config = config::Config::builder()
             .add_source(embedded_defaults_source())
-            .add_source(config::File::with_name(DEFAULT_CONFIG_FILE).required(false))
             .add_source(overlay_file)
             .add_source(SecretFileSource::new(secret_dir))
             .build()
@@ -194,6 +191,21 @@ graph:
         let mut expected = AppConfig::embedded_defaults().graph.insert_settings;
         expected.insert("wait_for_async_insert".to_string(), "0".to_string());
         assert_eq!(config.graph.insert_settings, expected);
+    }
+
+    #[test]
+    fn an_analytics_overlay_replaces_the_unset_default() {
+        let config: AppConfig = builder_with_defaults()
+            .add_source(config::File::from_str(
+                "analytics:\n  enabled: false\n",
+                config::FileFormat::Yaml,
+            ))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap();
+
+        assert_eq!(config.analytics.enabled, Some(false));
     }
 
     fn address(value: &str) -> SocketAddr {

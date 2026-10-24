@@ -254,6 +254,30 @@ agent-file-sync-check:
   script:
     - diff AGENTS.md CLAUDE.md || (echo "AGENTS.md and CLAUDE.md are out of sync. Please ensure they have identical content." && exit 1)
 
+docs-in-code-mr-check:
+  stage: lint
+  image: alpine:latest
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-only-rules
+  needs: []
+  script:
+    - apk add --no-cache git
+    - |
+      case ",${CI_MERGE_REQUEST_LABELS:-}," in *,docs-in-code-mr,*) echo "docs-in-code-mr label set; skipping." && exit 0;; esac
+      BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+      git cat-file -e "${BASE}^{commit}" 2>/dev/null || git fetch origin "$BASE" --depth=1 || git fetch --unshallow origin "$CI_COMMIT_SHA"
+      CHANGED=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE" HEAD)
+      DOCS=$(echo "$CHANGED" | grep '^docs/' | grep -vxF -e docs/source/remote/queries/query-language.md -e docs/dev/agents-crate-map.md || true)
+      CODE=$(echo "$CHANGED" | grep -v -e '^docs/' -e '\.md$' -e '^\.vale' -e '^\.markdownlint' -e '^lychee\.toml$' || true)
+      if [ -n "$DOCS" ] && [ -n "$CODE" ]; then
+        printf 'This MR changes code and files under docs/:\n%s\n\n' "$DOCS"
+        echo "Move the docs/ changes to a separate docs MR."
+        echo "If a CI or build check needs them, add the docs-in-code-mr label and retry this job."
+        exit 1
+      fi
+
 mr-title-check:
   stage: lint
   image: node:26-alpine
@@ -855,7 +879,14 @@ cli-integration-test:
   script:
     - cargo build -p orbit-cli
     - cargo nextest run --profile ci --test cli --test outside_repository --no-fail-fast
+    - mv target/nextest/ci/junit.xml target/nextest/ci/junit-cli.xml
+    - cargo nextest run --profile ci -p orbit-cli --test remote_cli --no-fail-fast
     - sccache --show-stats || true
+  artifacts:
+    reports:
+      junit:
+        - target/nextest/ci/junit-cli.xml
+        - target/nextest/ci/junit.xml
 
 .integration-test-template:
   stage: test
@@ -926,6 +957,55 @@ corpus-smoke-test:
     # against a real ClickHouse schema (no correctness assertions).
     - ./scripts/dev/run-container-tests.sh --profile ci --all-features --test server_containers --no-capture -E "$NEXTEST_FILTER"
     - sccache --show-stats || true
+
+.fuzz-corpus:
+  id_tokens:
+    FUZZ_CORPUS_JWT:
+      aud: gkg-fuzz
+
+fuzz-smoke:
+  stage: test
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+    - .fuzz-corpus
+  needs: []
+  allow_failure: true
+  script:
+    - mise run test:fuzz
+    - sccache --show-stats || true
+
+fuzz-deep:
+  stage: test
+  extends:
+    - .job-template
+    - .fuzz-corpus
+  tags:
+    - ${RUNNER_LARGE}
+  needs: []
+  timeout: 90 minutes
+  parallel: 3
+  variables:
+    FUZZ_BUDGET_SECONDS: "2700"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "fuzz-deep"
+      variables:
+        FUZZ_CORPUS_PUSH: "1"
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  before_script:
+    - !reference [.job-template, before_script]
+    - rustup toolchain install nightly --profile minimal
+  script:
+    - ./scripts/fuzz/run.sh deep
+  artifacts:
+    when: always
+    access: developer
+    paths:
+      - crates/fuzz/tests/*/corpus/
+    expire_in: 30 days
 
 # Build Stage
 
@@ -1428,13 +1508,15 @@ e2e-gitlab-stable:
   extends: e2e
   parallel:
     matrix:
-      - E2E_GITLAB_LANE: ["19-5"]
+      - E2E_GITLAB_LANE: ["19-4", "19-5"]
   variables:
     E2E_SUFFIX: "-gl${E2E_GITLAB_LANE}"
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "e2e-gitlab-stable"
+    - !reference [.skip-on-solo-schedule, rules]
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == 'automation/e2e-pin-bump'
       allow_failure: true
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'

@@ -57,6 +57,7 @@ impl K8sChecker {
                     safe(K8S_NAMESPACE) = namespace,
                     safe(COMPONENT) = name,
                     safe(K8S_KIND) = "deployment",
+                    safe(ERROR_TYPE) = "k8s_request",
                     expanded(ERROR_MESSAGE) = %e,
                     "Failed to get deployment status"
                 );
@@ -100,6 +101,7 @@ impl K8sChecker {
                     safe(K8S_NAMESPACE) = namespace,
                     safe(COMPONENT) = name,
                     safe(K8S_KIND) = "statefulset",
+                    safe(ERROR_TYPE) = "k8s_request",
                     expanded(ERROR_MESSAGE) = %e,
                     "Failed to get statefulset status"
                 );

@@ -136,3 +136,55 @@ instructions:
       Recommend the author route emission through BillingTracker / BillingObserver,
       or get an explicit review from someone on the team with SOX domain
       knowledge.
+
+  - name: Project conventions
+    fileFilters:
+      - "**/*.rs"
+    instructions: |
+      Review against the "Engineering conventions" in CONTRIBUTING.md. Clippy
+      and the comment lints already cover lint-level style and narration
+      comments, so skip those. Comment only on clear violations such as:
+      1. Comments that reference an MR or issue instead of explaining a
+         non-obvious why
+      2. New infrastructure that duplicates an existing helper
+      3. Graph-shape facts (entity names, properties, edges) hardcoded in Rust
+         instead of read from the ontology
+      4. Tests, code comments, or a crate AGENTS.md left stale by the change
+      For stale pages under docs/, suggest a follow-up docs MR. Never ask for
+      docs/ edits in a code MR; the docs-in-code-mr-check CI job forbids them.
+
+  - name: Code-graph crate guidance
+    fileFilters:
+      - "crates/code-graph/**/*.rs"
+      - "crates/integration-tests-codegraph/**/*"
+    instructions: |
+      Review against crates/code-graph/AGENTS.md. Flag:
+      1. Language-specific branches in shared code (linker, pipeline,
+         analyzer) outside src/v2/langs/{generic,custom}/. Prefer a generic
+         hook the pipeline already exposes, or an existing edge type
+      2. Duplicated construction of shared types (such as CanonicalDefinition
+         in src/v2/types/) or DSL helpers in src/v2/dsl/
+      3. A new language without a code-indexing-benchmark.yaml entry
+      4. Test sources written as files instead of inline in the
+         integration-tests-codegraph YAML suites (use a shared fixture_tree
+         when several suites need the same files)
+
+  - name: Indexer crate guidance
+    fileFilters:
+      - "crates/indexer/**/*.rs"
+    instructions: |
+      Review against crates/indexer/AGENTS.md. Flag:
+      1. Reuse-first, a default and not a hard rule, so flag as a suggestion:
+         a new SDLC pipeline or handler that hand-rolls paging and
+         checkpoints instead of Pipeline::run_plan or EntityHandler,
+         hand-rolled Arrow code instead of orbit_arrow helpers, hand-written
+         edge specs instead of ontology-derived edge_specs, hand-rolled
+         siphon column handling, or custom retry loops instead of the shared
+         retry harness in engine/retry.rs
+      2. Graph-table writes that do not use
+         prefixed_table_name(table, SCHEMA_VERSION). Datalake reads are
+         unversioned; do not flag them
+      3. DDL run from handler or indexer-mode code paths. DDL belongs only in
+         dispatcher-mode code (schema::migration and the migration-completion
+         GC); do not flag those
+      4. New edge or action routing without an end-to-end YAML scenario

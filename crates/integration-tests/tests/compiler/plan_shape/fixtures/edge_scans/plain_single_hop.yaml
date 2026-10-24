@@ -17,13 +17,13 @@ physical:
         - (CTE $ids (Project _id_source.target_id AS id (_)))
       expect:
         - (Filter b._deleted = false (Deduplicate LimitBy ... (Filter b.id IN $ids.id (_))))
-      reject: ["(Scan Table(gl_definition) AS a)", "(Deduplicate Final (Scan Table(gl_definition) AS b))"]
+      reject: ["(Deduplicate Final (Scan Table(gl_definition) AS b))"]
     emitted:
       expect:
         - (Join ON b.id = _orbit_edge_0.target_id (_) (_))
         - (Filter _orbit_edge_0.source_id = 1, ... (Scan Table(gl_code_edge) AS _orbit_edge_0))
-        - (Filter b.id IN ?.id (Scan Table(gl_definition) AS b))
-      reject: ["(Scan Table(gl_definition) AS a)", "(Deduplicate Final (Scan Table(gl_definition) AS b))"]
+        - (Filter StartsWith(b.traversal_path, scalar(gl_definition AS _scope WHERE _scope.id = 1)) OR (scalar(gl_definition AS _scope WHERE _scope.id = 1) = '0/'), b.id IN ?.id (Scan Table(gl_definition) AS b))
+      reject: ["(Deduplicate Final (Scan Table(gl_definition) AS b))"]
   duckdb:
     planned:
       expect: ["(Join ON b.id = _orbit_edge_0.target_id (_) (Bind b (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS b)))))", "(Join ON a.id = _orbit_edge_0.source_id (_) (Bind a (Filter ... (Bind a (Filter ... (Deduplicate Final (Scan Table(gl_definition) AS a)))))))"]

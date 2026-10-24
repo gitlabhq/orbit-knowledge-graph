@@ -292,7 +292,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of code indexing tasks that did not fail in the selected time range. Amber below 99%, red below 95%. Failed tasks are retried, so freshness shows the user impact.",
+      "description": "Share of code indexing attempts that did not fail in the selected time range. No free lane and lock waits are not failures. Objective: 99%. Amber below 99%, red below 95%. Failed tasks are retried, so freshness shows the user impact.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -362,7 +362,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "1 - (sum(increase(gkg_indexer_code_events_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\", outcome=\"error\"}[$__range])) or vector(0)) / (sum(increase(gkg_indexer_code_events_processed_total{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\", outcome=~\"indexed|empty_repository|error\"}[$__range])) > 0)",
+          "expr": "1 - (sum(increase(gkg_etl_handler_errors_total{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\", handler=\"code_indexing_task\", error_kind!~\"backpressure|deferred\"}[$__range])) or vector(0)) / (sum(increase(gkg_etl_handler_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\", handler=\"code_indexing_task\"}[$__range])) > 0)",
           "instant": true,
           "legendFormat": "Code OK",
           "range": false,
@@ -454,7 +454,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Share of SDLC plan runs that did not fail in the selected time range. Amber below 99%, red below 95%. Failed runs are retried, so freshness shows the user impact.",
+      "description": "Share of SDLC handler runs that did not fail in the selected time range. Objective: 99%. Amber below 99%, red below 95%. Failed runs are retried, so freshness shows the user impact.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -524,7 +524,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum(increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\"}[$__range])) / ((sum(increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\"}[$__range])) + (sum(increase(gkg_indexer_sdlc_pipeline_errors_total{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\"}[$__range])) or vector(0))) > 0)",
+          "expr": "1 - (sum(increase(gkg_etl_handler_errors_total{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\", handler=~\"entity\\\\..*\", error_kind!~\"backpressure|deferred\"}[$__range])) or vector(0)) / (sum(increase(gkg_etl_handler_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\"$cluster\", handler=~\"entity\\\\..*\"}[$__range])) > 0)",
           "instant": true,
           "legendFormat": "SDLC OK",
           "range": false,

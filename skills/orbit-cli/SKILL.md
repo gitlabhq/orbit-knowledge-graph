@@ -8,7 +8,7 @@ description: >
   file reads and text greps, including matches in config, templates, and docs.
   Works on the working tree and unpushed branches. Not a fit: reading one known
   file, or hosted GitLab data (use the `orbit` skill).
-version: 0.24.0
+version: 0.24.1
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -26,11 +26,14 @@ every matching line in code, tests, config, and docs, labeled with its enclosing
 read-only aggregations. `repo-map` orients you at the directory level. For
 production data, use the `orbit` skill.
 
-The binary is `orbit`, or `glab orbit` through the wrapper. Add `--yes` in
-non-interactive shells. Run `orbit <command> --help` before you guess a flag.
-Run `orbit skills` to list available skills. Use `orbit skills get orbit [path]`
-to print the composed skill (`SKILL.md` by default), or specify a path to print
-a file from the skill tree.
+The binary is `orbit`, or `glab orbit` through the wrapper. In non-interactive
+shells, put glab's `--yes` before the subcommand so glab skips its install and
+run prompts: `glab orbit --yes sql "..."`. The binary rejects `--yes` after
+other subcommands. Only `setup` and `uninstall` take their own `--yes`
+(`glab orbit --yes setup --yes`). Run `orbit <command> --help` before you guess
+a flag. Run `orbit skills` to list available skills. Use
+`orbit skills get orbit [path]` to print the composed skill (`SKILL.md` by
+default), or specify a path to print a file from the skill tree.
 
 Wrapper details: [`references/local/cli.md`](references/local/cli.md).
 

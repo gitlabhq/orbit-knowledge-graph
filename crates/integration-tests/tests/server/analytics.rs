@@ -286,7 +286,7 @@ async fn analytics_tracker_delivers_a_partial_batch_without_flush() {
     let micro = start_micro(&http).await;
 
     let mut config = AppConfig::embedded_defaults().analytics;
-    config.enabled = true;
+    config.enabled = Some(true);
     config.collector_url = micro.base_url.clone();
     let tracker = SnowplowAnalyticsTracker::from_config(&config).expect("tracker build");
 

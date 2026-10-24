@@ -65,7 +65,7 @@ When a project or subgroup is transferred or reparented, Rails rewrites its `tra
 
 The `Project` and `Group` extracts collapse that join with `argMax(traversal_path, version)` scoped to the root being indexed. A move within a root then stops emitting the old path. Moves across roots and rows written before the collapse still reach the reconciler.
 
-On the same cadence as the deletion scheduler, `reconcile_moved_entities` runs one pass per enabled root namespace. For each root it reuses the deletion `INSERT INTO ... SELECT`. It appends one predicate that narrows the scan. The scan goes from "all rows under the root" to "rows whose `traversal_path` is no longer a current route under the root":
+On the same cadence as the deletion scheduler, `reconcile_moved_entities` runs one pass per enabled root namespace. For each graph table it first reads the distinct live `traversal_path` values under the root. Then it reads the current routes under the root from the datalake. The live paths that are not current routes are stale. The pass reuses the deletion `INSERT INTO ... SELECT` to tombstone only those:
 
 ```sql
 INSERT INTO {table} ({sort_key_columns}, _deleted, _version)
@@ -73,11 +73,10 @@ SELECT {sort_key_columns}, true, now64(6)
 FROM {table}
 WHERE startsWith(traversal_path, {traversal_path:String})
   AND _deleted = false
-  AND (SELECT count() FROM (current routes under root)) > 0
-  AND traversal_path NOT IN (current routes under root)
+  AND traversal_path IN {stale_paths:Array(String)}
 ```
 
-A row at the entity's current path is always present in the route set. The ETL joins those same tables to write it, so it is never matched. Only old-path rows match. The `count() > 0` guard skips reconcile for a freshly-enabled root whose route tables have not replicated yet. So a transient empty-route window can never tombstone a just-indexed namespace. The pass is idempotent. A tombstoned row has `_deleted = true` and is filtered out. A still-stale row re-inserts an identical tombstone that ReplacingMergeTree collapses.
+The graph is read before the routes. The ETL writes a row only after its route exists, so a row indexed during the pass is never seen as stale. The `clickhouse` crate sends parameters in the request URI, so the stale paths go in parts that fit the URI (`strings_per_array_param`). An empty route set skips the tombstones for a freshly-enabled root whose route tables have not replicated yet. The pass is idempotent. A tombstoned row has `_deleted = true` and is filtered out. A still-stale row re-inserts an identical tombstone that ReplacingMergeTree collapses.
 
 ## Data model
 

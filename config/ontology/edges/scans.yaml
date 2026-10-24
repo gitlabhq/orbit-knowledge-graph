@@ -6,5 +6,6 @@ table: gl_sec_edge
 variants:
   - from_node: { type: VulnerabilityScanner, id: id }
     to_node: { type: Project, id: id }
+    scope: same_namespace
     fk_column: project_id
     description: "VulnerabilityScanner scans project."

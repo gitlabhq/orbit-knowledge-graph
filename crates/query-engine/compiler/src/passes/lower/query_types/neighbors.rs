@@ -1,5 +1,5 @@
 //! Neighbors emits its own redaction columns directly (rather than relying on
-//! the enforce pass's _orbit_* injection) since the center edge column differs
+//! the result-contract pass's _orbit_* injection) since the center edge column differs
 //! per direction arm.
 
 use ontology::constants::*;
@@ -12,12 +12,14 @@ use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
 use crate::passes::lower::NodeBinding;
+use crate::passes::lower::predicates::output_value;
 
 use crate::passes::lower::sql::{
     dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
-    id_list_predicate, id_range_predicate, rel_kind_filter,
+    id_list_predicate, id_range_predicate, latest_row_dedup, rel_kind_filter,
 };
-use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan};
+use crate::passes::plan::predicates::Column;
+use crate::passes::plan::{EdgeTableConfig, Neighbors, Plan, property_value};
 
 pub(crate) fn emit(plan: &Plan<Neighbors>, input: &Input) -> Result<Emitted> {
     let (ast, binding) = emit_neighbors(plan, input)?;
@@ -47,6 +49,12 @@ pub(crate) fn emit(plan: &Plan<Neighbors>, input: &Input) -> Result<Emitted> {
     })
 }
 
+#[derive(Clone, Copy)]
+enum CenterBound {
+    Path,
+    Id,
+}
+
 fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBinding)> {
     let Neighbors {
         center: center_alias,
@@ -58,8 +66,11 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         incoming_kinds,
         incoming_scope_preserving,
         incoming_cross_scope,
+        outgoing_scope_preserving,
+        outgoing_cross_scope,
         outgoing_neighbor_paths,
         incoming_neighbor_paths,
+        center_sort_key,
     } = &plan.operation;
     let direction = *direction;
     let has_non_denorm = *has_non_denorm;
@@ -75,15 +86,12 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     let center_id_range = cnp.id_range.clone();
     let edge_alias = "e";
 
-    let center_lookup = |edge: &str, center: &str| Expr::InSelect {
-        expr: Box::new(Expr::col(edge, TARGET_ID_COLUMN)),
+    let center_rows = "_ctr";
+    let center_lookup = |edge: &str, edge_col: &str| Expr::InSelect {
+        expr: Box::new(Expr::col(edge, edge_col)),
         query: Box::new(Query {
-            select: vec![SelectExpr::col(center, DEFAULT_PRIMARY_KEY)],
-            from: TableRef::scan_final(&center_table, center),
-            where_clause: Expr::conjoin(vec![
-                id_list_predicate(center, DEFAULT_PRIMARY_KEY, &center_node_ids),
-                deleted_false(center),
-            ]),
+            select: vec![SelectExpr::col(center_rows, DEFAULT_PRIMARY_KEY)],
+            from: TableRef::cte(center_rows, center_rows),
             ..Default::default()
         }),
     };
@@ -91,12 +99,8 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     let path_lookup = |edge: &str| Expr::InSelect {
         expr: Box::new(Expr::col(edge, TRAVERSAL_PATH_COLUMN)),
         query: Box::new(Query {
-            select: vec![SelectExpr::col("_tpd", TRAVERSAL_PATH_COLUMN)],
-            from: TableRef::scan_final(&center_table, "_tpd"),
-            where_clause: Expr::conjoin(vec![
-                id_list_predicate("_tpd", DEFAULT_PRIMARY_KEY, &center_node_ids),
-                deleted_false("_tpd"),
-            ]),
+            select: vec![SelectExpr::col(center_rows, TRAVERSAL_PATH_COLUMN)],
+            from: TableRef::cte(center_rows, center_rows),
             ..Default::default()
         }),
     };
@@ -130,35 +134,40 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
     }
 
     let order_by = match &input.order_by {
-        Some(ob) => vec![if ob.direction == OrderDirection::Desc {
-            OrderExpr::desc(Expr::col(&ob.node, &ob.property))
-        } else {
-            OrderExpr::asc(Expr::col(&ob.node, &ob.property))
-        }],
+        Some(ob) => {
+            let value = output_value(&property_value(
+                &plan.nodes,
+                &ob.node,
+                Column::new(&ob.node, &ob.property),
+            ));
+            vec![if ob.direction == OrderDirection::Desc {
+                OrderExpr::desc(value)
+            } else {
+                OrderExpr::asc(value)
+            }]
+        }
         None => vec![],
     };
 
-    let build_arm = |dir: Direction| -> Query {
-        let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing, arm_kinds) =
-            match dir {
-                Direction::Outgoing => (
-                    SOURCE_ID_COLUMN,
-                    SOURCE_KIND_COLUMN,
-                    TARGET_ID_COLUMN,
-                    TARGET_KIND_COLUMN,
-                    1i64,
-                    outgoing_kinds,
-                ),
-                Direction::Incoming => (
-                    TARGET_ID_COLUMN,
-                    TARGET_KIND_COLUMN,
-                    SOURCE_ID_COLUMN,
-                    SOURCE_KIND_COLUMN,
-                    0i64,
-                    incoming_kinds,
-                ),
-                Direction::Both => unreachable!(),
-            };
+    let build_arm = |dir: Direction, arm_kinds: &[String], bound: Option<CenterBound>| -> Query {
+        let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing) = match dir
+        {
+            Direction::Outgoing => (
+                SOURCE_ID_COLUMN,
+                SOURCE_KIND_COLUMN,
+                TARGET_ID_COLUMN,
+                TARGET_KIND_COLUMN,
+                1i64,
+            ),
+            Direction::Incoming => (
+                TARGET_ID_COLUMN,
+                TARGET_KIND_COLUMN,
+                SOURCE_ID_COLUMN,
+                SOURCE_KIND_COLUMN,
+                0i64,
+            ),
+            Direction::Both => unreachable!(),
+        };
 
         let denorm_direction = if dir == Direction::Outgoing {
             query_data_model::DenormalizedDirection::Source
@@ -177,24 +186,10 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
             if let Some(f) = rel_kind_filter(a, arm_kinds) {
                 wp.push(f);
             }
-            if dir == Direction::Incoming && !center_node_ids.is_empty() && center_has_tp {
-                if incoming_cross_scope.is_empty() {
-                    wp.push(path_lookup(a));
-                } else if incoming_scope_preserving.is_empty() {
-                    wp.push(center_lookup(a, "_ctr"));
-                } else {
-                    let narrowed_filter = rel_kind_filter(a, incoming_scope_preserving)
-                        .expect("nonempty scoped kinds");
-                    let broad_filter = rel_kind_filter(a, incoming_cross_scope)
-                        .expect("nonempty cross-scope kinds");
-                    wp.push(
-                        Expr::or_all([
-                            Some(Expr::and(narrowed_filter, path_lookup(a))),
-                            Some(Expr::and(broad_filter, center_lookup(a, "_ctr"))),
-                        ])
-                        .expect("incoming route groups are nonempty"),
-                    );
-                }
+            match bound {
+                Some(CenterBound::Path) => wp.push(path_lookup(a)),
+                Some(CenterBound::Id) => wp.push(center_lookup(a, center_edge_col)),
+                None => {}
             }
             wp.push(deleted_false(a));
             wp
@@ -319,7 +314,8 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         }
     };
 
-    let query = if let Some(table) = fused_table {
+    let mut uses_center = false;
+    let mut query = if let Some(table) = fused_table {
         let mut q = build_fused_both_arm(
             &center_id,
             &center_entity,
@@ -334,18 +330,78 @@ fn emit_neighbors(plan: &Plan<Neighbors>, input: &Input) -> Result<(Node, NodeBi
         q.order_by = order_by;
         q.limit = Some(input.limit);
         q
-    } else if direction == Direction::Both {
-        let mut outgoing = build_arm(Direction::Outgoing);
-        outgoing.union_all = vec![build_arm(Direction::Incoming)];
-        outgoing.order_by = order_by;
-        outgoing.limit = Some(input.limit);
-        outgoing
     } else {
-        let mut arm = build_arm(direction);
-        arm.order_by = order_by;
-        arm.limit = Some(input.limit);
-        arm
+        let arms_for = |dir: Direction| -> Vec<(Query, bool)> {
+            let (all_kinds, carrying, rest) = match dir {
+                Direction::Incoming => (
+                    incoming_kinds,
+                    incoming_scope_preserving,
+                    incoming_cross_scope,
+                ),
+                _ => (
+                    outgoing_kinds,
+                    outgoing_scope_preserving,
+                    outgoing_cross_scope,
+                ),
+            };
+            if center_node_ids.is_empty() || !center_has_tp {
+                return vec![(build_arm(dir, all_kinds, None), false)];
+            }
+            if carrying.is_empty() {
+                let guard = (dir == Direction::Incoming).then_some(CenterBound::Id);
+                return vec![(build_arm(dir, all_kinds, guard), guard.is_some())];
+            }
+            if rest.is_empty() {
+                return vec![(build_arm(dir, all_kinds, Some(CenterBound::Path)), true)];
+            }
+            vec![
+                (build_arm(dir, carrying, Some(CenterBound::Path)), true),
+                (build_arm(dir, rest, Some(CenterBound::Id)), true),
+            ]
+        };
+        let arms = match direction {
+            Direction::Both => {
+                [arms_for(Direction::Outgoing), arms_for(Direction::Incoming)].concat()
+            }
+            dir => arms_for(dir),
+        };
+        uses_center = arms.iter().any(|(_, used)| *used);
+        let mut arms: Vec<Query> = arms.into_iter().map(|(arm, _)| arm).collect();
+        let mut first = arms.remove(0);
+        first.union_all = arms;
+        first.order_by = order_by;
+        first.limit = Some(input.limit);
+        first
     };
+    if uses_center {
+        let (order_by, limit_by) = latest_row_dedup(center_rows, center_sort_key);
+        let latest = Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan(&center_table, center_rows),
+            where_clause: Some(id_list_predicate(
+                center_rows,
+                DEFAULT_PRIMARY_KEY,
+                &center_node_ids,
+            )),
+            order_by,
+            limit_by,
+            ..Default::default()
+        };
+        query.ctes.push(crate::ast::Cte {
+            name: center_rows.to_string(),
+            query: Box::new(Query {
+                select: vec![
+                    SelectExpr::col(center_rows, DEFAULT_PRIMARY_KEY),
+                    SelectExpr::col(center_rows, TRAVERSAL_PATH_COLUMN),
+                ],
+                from: TableRef::subquery(latest, center_rows),
+                where_clause: Some(deleted_false(center_rows)),
+                ..Default::default()
+            }),
+            recursive: false,
+            materialized: true,
+        });
+    }
     let role_identity = (!has_non_denorm && center_uses_default_pk).then(|| {
         query
             .select

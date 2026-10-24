@@ -4,7 +4,10 @@
 updates it, and passes your GitLab credential on each call. It runs on macOS,
 Linux, and Windows.
 
-glab owns `--install`, `--update`, and `--yes`. It forwards every other
+glab owns `--install`, `--update`, and `--yes`, and reads them only before the
+subcommand (`glab orbit --yes list`; `glab orbit list --yes` fails because the
+binary rejects the flag). glab's own `update` command takes `--yes` too, and
+`orbit setup` and `orbit uninstall` take their own. glab forwards every other
 argument to the binary. Run `glab help orbit` for the wrapper. Run
 `glab orbit --help` for the binary.
 

@@ -1,58 +1,75 @@
 use std::collections::{HashMap, HashSet};
 
-mod application;
-
-pub use application::apply_plan;
-
 #[derive(Clone, Default)]
-pub struct QueryScope {
-    nodes: HashMap<String, ScopeProof>,
-    relationships: Vec<Option<ScopeProof>>,
+pub struct TpBounds {
+    nodes: HashMap<String, TpBound>,
+    relationships: Vec<Option<TpBound>>,
+    self_seeded: HashSet<String>,
 }
 
-impl QueryScope {
-    pub fn new(
+impl TpBounds {
+    pub fn derive(
         input: &Input,
-        nodes: HashMap<String, ScopeProof>,
         model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     ) -> Self {
-        let relationships = input
+        let anchor_fks = anchor_fks(model);
+        let nodes = derive_node_bounds(input, model, &anchor_fks);
+        let relationships: Vec<Option<TpBound>> = input
             .relationships
             .iter()
-            .map(|relationship| relationship_proof(input, relationship, &nodes, model))
+            .map(|relationship| relationship_bound(input, relationship, &nodes, model))
+            .collect();
+        let shared = |alias: &str, bound: &TpBound| {
+            nodes.iter().any(|(other, b)| other != alias && b == bound)
+                || relationships.iter().flatten().any(|b| b == bound)
+        };
+        let self_seeded = input
+            .nodes
+            .iter()
+            .filter(|node| {
+                pinned_only_by_own_keys(node, &anchor_fks)
+                    && nodes
+                        .get(&node.id)
+                        .is_some_and(|bound| !shared(&node.id, bound))
+            })
+            .map(|node| node.id.clone())
             .collect();
         Self {
             nodes,
             relationships,
+            self_seeded,
         }
     }
 
-    pub fn node(&self, alias: &str) -> Option<&ScopeProof> {
+    pub(crate) fn node(&self, alias: &str) -> Option<&TpBound> {
+        if self.self_seeded.contains(alias) {
+            return None;
+        }
         self.nodes.get(alias)
     }
 
-    pub fn relationship(&self, index: usize) -> Option<&ScopeProof> {
+    pub(crate) fn relationship(&self, index: usize) -> Option<&TpBound> {
         self.relationships.get(index).and_then(Option::as_ref)
     }
 }
 
-fn relationship_proof(
+fn relationship_bound(
     input: &Input,
     relationship: &crate::input::InputRelationship,
-    proofs: &HashMap<String, ScopeProof>,
+    bounds: &HashMap<String, TpBound>,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Option<ScopeProof> {
-    let from_proof = proofs.get(&relationship.from);
-    let to_proof = proofs.get(&relationship.to);
-    if from_proof == to_proof {
-        return from_proof.cloned();
+) -> Option<TpBound> {
+    let from_bound = bounds.get(&relationship.from);
+    let to_bound = bounds.get(&relationship.to);
+    if from_bound == to_bound {
+        return from_bound.cloned();
     }
     let from = input.entity_of(&relationship.from)?;
     let to = input.entity_of(&relationship.to)?;
     relationship.types.iter().find_map(|kind| {
         match model.variant_scope(kind, from, to) {
-            Some(ontology::EdgeVariantScope::PruneToSource) => from_proof,
-            Some(ontology::EdgeVariantScope::PruneToTarget) => to_proof,
+            Some(ontology::EdgeVariantScope::PruneToSource) => from_bound,
+            Some(ontology::EdgeVariantScope::PruneToTarget) => to_bound,
             _ => None,
         }
         .cloned()
@@ -62,7 +79,7 @@ fn relationship_proof(
 use ontology::TraversalPathKind;
 use ontology::constants::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
-use crate::ast::{Expr, Function, Op, Query, SelectExpr, SqlType, TableRef};
+use crate::ast::{Expr, Function, Query, SelectExpr, SqlType, TableRef};
 use crate::input::{Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
 
 const LOOKUP_ALIAS: &str = "_scope";
@@ -70,110 +87,53 @@ const UNRESOLVED_PATH: &str = "0/";
 const MAX_LOOKUPS_PER_ALIAS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ScopeProof {
-    sources: Vec<ScopeSource>,
-    depth: Option<(u32, u32)>,
+pub(crate) struct TpBound {
+    lookups: Vec<TpLookup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum ScopeSource {
-    Literal(String),
-    Lookup {
-        source_table: String,
-        key_column: String,
-        value: PathScopeId,
-    },
+struct TpLookup {
+    source_table: String,
+    key_column: String,
+    value: TpLookupValue,
 }
 
-impl ScopeProof {
-    pub fn literal(path: &str) -> Self {
-        Self::from_sources(vec![ScopeSource::Literal(path.to_string())])
-    }
-
-    fn from_sources(sources: Vec<ScopeSource>) -> Self {
-        Self {
-            sources,
-            depth: None,
-        }
-    }
-
-    pub fn is_single_source(&self) -> bool {
-        self.sources.len() == 1
-    }
-
-    #[must_use]
-    pub fn with_depth(mut self, min: u32, max: u32) -> Self {
-        self.depth = Some((min, max));
-        self
+impl TpBound {
+    fn from_lookups(lookups: Vec<TpLookup>) -> Self {
+        Self { lookups }
     }
 }
 
-pub fn scope_predicate(proof: &ScopeProof, alias: &str) -> Expr {
-    let values: Vec<Expr> = proof.sources.iter().map(scope_value_expr).collect();
+pub(crate) fn bound_predicate(bound: &TpBound, alias: &str) -> Expr {
+    let values: Vec<Expr> = bound.lookups.iter().map(lookup_value_expr).collect();
     let matches = values.iter().map(|path| {
         let column = Expr::col(alias, TRAVERSAL_PATH_COLUMN);
-        Some(match proof.depth {
-            Some((0, 0)) => Expr::eq(column, path.clone()),
-            Some((min, max)) => Expr::and(
-                Expr::func(Function::StartsWith, vec![column.clone(), path.clone()]),
-                depth_between(column, path, min, max),
-            ),
-            None => Expr::func(Function::StartsWith, vec![column, path.clone()]),
-        })
+        Some(Expr::func(Function::StartsWith, vec![column, path.clone()]))
     });
     let unresolved = values
         .iter()
         .map(|path| Some(Expr::eq(path.clone(), Expr::string(UNRESOLVED_PATH))));
-    Expr::or_all(matches.chain(unresolved)).expect("scope proof has at least one source")
+    Expr::or_all(matches.chain(unresolved)).expect("TP bound has at least one lookup")
 }
 
-fn depth_between(column: Expr, path: &Expr, min: u32, max: u32) -> Expr {
-    let segments =
-        |expr: Expr| Expr::func(Function::CountSubstrings, vec![expr, Expr::string("/")]);
-    let depth = segments(column);
-    let base = segments(path.clone());
-    let bound = |hops: u32| Expr::binary(Op::Add, base.clone(), Expr::int(i64::from(hops)));
-    Expr::and(
-        Expr::binary(Op::Ge, depth.clone(), bound(min)),
-        Expr::binary(Op::Le, depth, bound(max)),
-    )
+fn lookup_value_expr(lookup: &TpLookup) -> Expr {
+    lookup_expr(&lookup.source_table, &lookup.key_column, &lookup.value)
 }
 
-fn scope_value_expr(source: &ScopeSource) -> Expr {
-    match source {
-        ScopeSource::Literal(path) => Expr::string(path),
-        ScopeSource::Lookup {
-            source_table,
-            key_column,
-            value,
-        } => lookup_expr(source_table, key_column, value),
-    }
-}
-
-pub fn derive_scope_proofs(
+fn derive_node_bounds(
     input: &Input,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> HashMap<String, ScopeProof> {
-    if !matches!(
-        input.query_type,
-        QueryType::Traversal | QueryType::Aggregation
-    ) {
-        return HashMap::new();
-    }
-    let anchor_fks: Vec<_> = model
-        .anchor_foreign_keys()
-        .iter()
-        .map(|(column, entity)| (column.as_str(), model.graph().entity(*entity).name.as_str()))
-        .collect();
-    let seed: HashMap<String, ScopeProof> = input
+    anchor_fks: &[(&str, &str)],
+) -> HashMap<String, TpBound> {
+    let seed: HashMap<String, TpBound> = input
         .nodes
         .iter()
         .filter_map(|node| {
-            let lookups: Vec<ScopeSource> = scope_keys(node, &anchor_fks)
+            let lookups: Vec<TpLookup> = bound_keys(node, anchor_fks)
                 .into_iter()
                 .filter_map(|key| {
                     model.traversal_path_lookup(&key.entity, key.kind).map(
-                        |(source_table, key_column)| ScopeSource::Lookup {
+                        |(source_table, key_column)| TpLookup {
                             source_table: source_table.to_string(),
                             key_column: key_column.to_string(),
                             value: key.value,
@@ -183,21 +143,49 @@ pub fn derive_scope_proofs(
                 .collect();
             (1..=MAX_LOOKUPS_PER_ALIAS)
                 .contains(&lookups.len())
-                .then(|| (node.id.clone(), ScopeProof::from_sources(lookups)))
+                .then(|| (node.id.clone(), TpBound::from_lookups(lookups)))
         })
         .collect();
-    propagate_scope_proofs(input, model, &seed)
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return HashMap::new();
+    }
+    let mut bounds = propagate_bounds(input, model, &seed);
+    bounds.retain(|alias, _| {
+        input
+            .entity_of(alias)
+            .is_some_and(|entity| model.entity_has_traversal_path(entity))
+    });
+    bounds
 }
 
-fn propagate_scope_proofs(
+fn pinned_only_by_own_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> bool {
+    let keys = bound_keys(node, anchor_fks);
+    !keys.is_empty()
+        && keys
+            .iter()
+            .all(|key| Some(key.entity.as_str()) == node.entity.as_deref())
+}
+
+fn anchor_fks(model: &(impl query_data_model::OrbitQueryModel + ?Sized)) -> Vec<(&str, &str)> {
+    model
+        .anchor_foreign_keys()
+        .iter()
+        .map(|(column, entity)| (column.as_str(), model.graph().entity(*entity).name.as_str()))
+        .collect()
+}
+
+fn propagate_bounds(
     input: &Input,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-    seed: &HashMap<String, ScopeProof>,
-) -> HashMap<String, ScopeProof> {
+    seed: &HashMap<String, TpBound>,
+) -> HashMap<String, TpBound> {
     if seed.is_empty() {
         return HashMap::new();
     }
-    let edges = scope_edges(input, model);
+    let edges = bound_edges(input, model);
     let mut tainted = HashSet::new();
     loop {
         let mut changed = false;
@@ -223,18 +211,18 @@ fn propagate_scope_proofs(
                 continue;
             }
             let next = match (result.get(edge.from).cloned(), result.get(edge.to).cloned()) {
-                (Some(proof), None) if !tainted.contains(edge.to) => {
-                    Some((edge.to.to_string(), proof))
+                (Some(bound), None) if !tainted.contains(edge.to) => {
+                    Some((edge.to.to_string(), bound))
                 }
-                (None, Some(proof))
+                (None, Some(bound))
                     if edge.propagates_to_source && !tainted.contains(edge.from) =>
                 {
-                    Some((edge.from.to_string(), proof))
+                    Some((edge.from.to_string(), bound))
                 }
                 _ => None,
             };
-            if let Some((alias, proof)) = next {
-                result.insert(alias, proof);
+            if let Some((alias, bound)) = next {
+                result.insert(alias, bound);
                 changed = true;
             }
         }
@@ -245,13 +233,13 @@ fn propagate_scope_proofs(
     result
 }
 
-fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Expr {
+fn lookup_expr(source_table: &str, key_column: &str, value: &TpLookupValue) -> Expr {
     let (key, from) = match value {
-        PathScopeId::Numeric(id) => (
+        TpLookupValue::Numeric(id) => (
             Expr::param(SqlType::Int64, *id),
             TableRef::scan(source_table, LOOKUP_ALIAS),
         ),
-        PathScopeId::Text(text) => (
+        TpLookupValue::Text(text) => (
             Expr::param(SqlType::String, text.clone()),
             TableRef::scan_final(source_table, LOOKUP_ALIAS),
         ),
@@ -288,37 +276,37 @@ fn lookup_expr(source_table: &str, key_column: &str, value: &PathScopeId) -> Exp
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum PathScopeId {
+enum TpLookupValue {
     Numeric(i64),
     Text(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PathResolutionKey {
-    pub entity: String,
-    pub kind: TraversalPathKind,
-    pub value: PathScopeId,
+struct TpLookupKey {
+    entity: String,
+    kind: TraversalPathKind,
+    value: TpLookupValue,
 }
 
-impl PathResolutionKey {
-    pub fn id(entity: impl Into<String>, id: i64) -> Self {
+impl TpLookupKey {
+    fn id(entity: impl Into<String>, id: i64) -> Self {
         Self {
             entity: entity.into(),
             kind: TraversalPathKind::Id,
-            value: PathScopeId::Numeric(id),
+            value: TpLookupValue::Numeric(id),
         }
     }
 
-    pub fn full_path(entity: impl Into<String>, value: impl Into<String>) -> Self {
+    fn full_path(entity: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             entity: entity.into(),
             kind: TraversalPathKind::FullPath,
-            value: PathScopeId::Text(value.into()),
+            value: TpLookupValue::Text(value.into()),
         }
     }
 }
 
-pub fn scope_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> Vec<PathResolutionKey> {
+fn bound_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> Vec<TpLookupKey> {
     let Some(entity) = node.entity.as_deref() else {
         return Vec::new();
     };
@@ -326,30 +314,21 @@ pub fn scope_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> Vec<PathReso
     let mut keys = Vec::new();
     if node.node_ids.len() > 1 {
         for &id in &node.node_ids {
-            keys.push(PathResolutionKey::id(entity, id));
+            keys.push(TpLookupKey::id(entity, id));
         }
     } else if let Some(id) = single_id(node) {
-        keys.push(PathResolutionKey::id(entity, id));
+        keys.push(TpLookupKey::id(entity, id));
     }
     if let Some(value) = single_full_path(node) {
-        keys.push(PathResolutionKey::full_path(entity, value));
+        keys.push(TpLookupKey::full_path(entity, value));
     }
     for (column, anchor) in anchor_fks {
         if let Some(id) = single_eq_id(node, column) {
-            keys.push(PathResolutionKey::id(*anchor, id));
+            keys.push(TpLookupKey::id(*anchor, id));
         }
     }
     keys
 }
-pub fn is_scope_only(node: &InputNode) -> bool {
-    if scope_keys(node, &[]).len() != 1 || node.id_range.is_some() || node.node_ids.len() > 1 {
-        return false;
-    }
-    let anchor_filters = single_full_path(node).is_some() as usize
-        + (node.node_ids.is_empty() && single_id(node).is_some()) as usize;
-    node.filters.len() == anchor_filters
-}
-
 fn single_id(node: &InputNode) -> Option<i64> {
     if node.node_ids.len() == 1 {
         return Some(node.node_ids[0]);
@@ -370,17 +349,17 @@ fn single_eq_id(node: &InputNode, column: &str) -> Option<i64> {
     eq_value(node.filters.get(column)?)?.as_i64()
 }
 
-struct ScopeEdge<'a> {
+struct BoundEdge<'a> {
     from: &'a str,
     to: &'a str,
     scope_preserving: bool,
     propagates_to_source: bool,
 }
 
-fn scope_edges<'a>(
+fn bound_edges<'a>(
     input: &'a Input,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Vec<ScopeEdge<'a>> {
+) -> Vec<BoundEdge<'a>> {
     let entities: HashMap<&str, &str> = input
         .nodes
         .iter()
@@ -396,7 +375,7 @@ fn scope_edges<'a>(
             };
             let source_kind = entities.get(from.as_str()).copied().unwrap_or_default();
             let target_kind = entities.get(to.as_str()).copied().unwrap_or_default();
-            ScopeEdge {
+            BoundEdge {
                 from,
                 to,
                 scope_preserving: relationship.types.iter().all(|kind| {
@@ -441,8 +420,8 @@ mod tests {
     #[test]
     fn node_ids_single_yields_id_key() {
         assert_eq!(
-            scope_keys(&project_node("p"), ANCHOR_FKS),
-            vec![PathResolutionKey::id("Project", 42)]
+            bound_keys(&project_node("p"), ANCHOR_FKS),
+            vec![TpLookupKey::id("Project", 42)]
         );
     }
 
@@ -451,11 +430,11 @@ mod tests {
         let mut node = project_node("p");
         node.node_ids = vec![1, 2, 3];
         assert_eq!(
-            scope_keys(&node, ANCHOR_FKS),
+            bound_keys(&node, ANCHOR_FKS),
             vec![
-                PathResolutionKey::id("Project", 1),
-                PathResolutionKey::id("Project", 2),
-                PathResolutionKey::id("Project", 3),
+                TpLookupKey::id("Project", 1),
+                TpLookupKey::id("Project", 2),
+                TpLookupKey::id("Project", 3),
             ]
         );
     }
@@ -476,8 +455,8 @@ mod tests {
             }],
         );
         assert_eq!(
-            scope_keys(&node, ANCHOR_FKS),
-            vec![PathResolutionKey::full_path("Project", "group/project")]
+            bound_keys(&node, ANCHOR_FKS),
+            vec![TpLookupKey::full_path("Project", "group/project")]
         );
     }
 
@@ -497,8 +476,8 @@ mod tests {
             }],
         );
         assert_eq!(
-            scope_keys(&node, ANCHOR_FKS),
-            vec![PathResolutionKey::full_path("Project", "group/project")]
+            bound_keys(&node, ANCHOR_FKS),
+            vec![TpLookupKey::full_path("Project", "group/project")]
         );
     }
 
@@ -510,7 +489,7 @@ mod tests {
             node_ids: vec![42],
             ..Default::default()
         };
-        assert!(scope_keys(&node, ANCHOR_FKS).is_empty());
+        assert!(bound_keys(&node, ANCHOR_FKS).is_empty());
     }
 
     fn node_with_filter(entity: &str, column: &str, value: serde_json::Value) -> InputNode {
@@ -534,8 +513,8 @@ mod tests {
     fn project_id_filter_resolves_to_project_anchor() {
         let node = node_with_filter("MergeRequest", "project_id", json!(278964));
         assert_eq!(
-            scope_keys(&node, ANCHOR_FKS),
-            vec![PathResolutionKey::id("Project", 278964)]
+            bound_keys(&node, ANCHOR_FKS),
+            vec![TpLookupKey::id("Project", 278964)]
         );
     }
 
@@ -543,8 +522,8 @@ mod tests {
     fn group_id_filter_resolves_to_group_anchor() {
         let node = node_with_filter("MergeRequest", "group_id", json!(9970));
         assert_eq!(
-            scope_keys(&node, ANCHOR_FKS),
-            vec![PathResolutionKey::id("Group", 9970)]
+            bound_keys(&node, ANCHOR_FKS),
+            vec![TpLookupKey::id("Group", 9970)]
         );
     }
     #[test]
@@ -567,8 +546,8 @@ mod tests {
             }],
         );
         assert_eq!(
-            scope_keys(&node, ANCHOR_FKS),
-            vec![PathResolutionKey::id("Project", 278964)]
+            bound_keys(&node, ANCHOR_FKS),
+            vec![TpLookupKey::id("Project", 278964)]
         );
     }
 
@@ -587,11 +566,11 @@ mod tests {
                 ..Default::default()
             }],
         );
-        assert!(scope_keys(&node, ANCHOR_FKS).is_empty());
+        assert!(bound_keys(&node, ANCHOR_FKS).is_empty());
     }
 
     #[test]
-    fn scope_edges_resolves_scope_policy() {
+    fn bound_edges_resolve_scope_policy() {
         let input = crate::parse_input(
             r#"{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"diff","entity":"MergeRequestDiff"}],"relationships":[{"type":"HAS_DIFF","from":"mr","to":"diff"}],"limit":1}"#,
         )
@@ -600,7 +579,7 @@ mod tests {
             ontology::Ontology::load_embedded().unwrap(),
         ))
         .unwrap();
-        let edges = scope_edges(&input, model.as_ref());
+        let edges = bound_edges(&input, model.as_ref());
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].from, "mr");
         assert_eq!(edges[0].to, "diff");

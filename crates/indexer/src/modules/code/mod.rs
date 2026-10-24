@@ -47,6 +47,10 @@ pub fn code_indexing_task_topic_policy() -> SubscriptionConfig {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "handler wiring takes each collaborator explicitly"
+)]
 pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
@@ -54,9 +58,10 @@ pub async fn register_handlers(
     ontology: &ontology::Ontology,
     writer: Arc<crate::clickhouse::ClickHouseWriter>,
     analytics: IndexingAnalytics,
+    gitlab_client: Option<Arc<GitlabClient>>,
     resources: &orbit_server_config::ContainerResources,
 ) -> Result<(), HandlerInitError> {
-    let Some(gitlab_config) = &config.gitlab else {
+    let Some(gitlab_client) = gitlab_client else {
         orbit_log_fields::info!("Code handlers disabled (GitLab client not configured)");
         return Ok(());
     };
@@ -66,8 +71,6 @@ pub async fn register_handlers(
     let table_names =
         Arc::new(CodeTableNames::from_ontology(ontology).map_err(HandlerInitError::new)?);
 
-    let gitlab_client =
-        Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(HandlerInitError::new)?);
     let client = Arc::new(clients.graph.clone());
 
     let repository_service: Arc<dyn RepositoryService> =
@@ -87,6 +90,7 @@ pub async fn register_handlers(
     );
     if let Err(error) = local_cache.purge_all().await {
         orbit_log_fields::warn!(
+            safe(ERROR_TYPE) = <&str>::from(&error),
             expanded(ERROR_MESSAGE) = %error,
             "failed to purge repository cache on startup"
         );

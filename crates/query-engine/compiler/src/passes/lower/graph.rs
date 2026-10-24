@@ -5,20 +5,30 @@ use super::sql::latest_row_dedup;
 use super::{EmitOutput, NodeBinding};
 use crate::ast::{Cte, Expr, Query, SelectExpr, TableRef};
 use crate::passes::plan::graph::{
-    ExecutionPlan, RelationGraph, RelationId, RelationNode, RelationRef,
+    ExecutionPlan, ReadOwner, RelationGraph, RelationId, RelationNode, RelationRef,
 };
 use crate::passes::plan::predicates::Column;
+use crate::tp_bounds::{TpBounds, bound_predicate};
 
-pub(super) fn execute(plan: &ExecutionPlan, root_columns: &[Column]) -> EmitOutput {
+pub(super) struct Reads<'a> {
+    graph: &'a RelationGraph,
+    materialized: HashSet<RelationId>,
+    tp_bounds: Option<&'a TpBounds>,
+}
+
+pub(super) fn execute(
+    plan: &ExecutionPlan,
+    root_columns: &[Column],
+    tp_bounds: Option<&TpBounds>,
+) -> EmitOutput {
     let usage = plan.graph.usage(plan.root);
-    let materialized: HashSet<RelationId> = usage.materialized().collect();
+    let reads = Reads {
+        graph: &plan.graph,
+        materialized: usage.materialized().collect(),
+        tp_bounds,
+    };
     let required = super::columns::required_columns(plan, &usage, root_columns);
-    let source = emit_ref(
-        &RelationRef::from(plan.root),
-        &plan.graph,
-        &materialized,
-        None,
-    );
+    let source = emit_ref(&RelationRef::from(plan.root), &reads, None);
     EmitOutput {
         from: source.from,
         where_parts: source.predicates,
@@ -35,7 +45,7 @@ pub(super) fn execute(plan: &ExecutionPlan, root_columns: &[Column]) -> EmitOutp
                 };
                 let mut cte = Cte::new(
                     relation_name(id),
-                    emit_node(id, &plan.graph, &materialized, Some(id)).query(select),
+                    emit_node(id, &reads, Some(id)).query(select),
                 );
                 cte.materialized = usage.references(id) > 1;
                 cte
@@ -92,11 +102,11 @@ impl RelationOutput {
 
 fn emit_ref(
     relation: &RelationRef,
-    graph: &RelationGraph,
-    materialized: &HashSet<RelationId>,
+    reads: &Reads<'_>,
     current: Option<RelationId>,
 ) -> RelationOutput {
-    let output = if materialized.contains(&relation.id) && current != Some(relation.id) {
+    let graph = reads.graph;
+    let output = if reads.materialized.contains(&relation.id) && current != Some(relation.id) {
         RelationOutput {
             from: TableRef::cte(
                 relation_name(relation.id),
@@ -109,7 +119,7 @@ fn emit_ref(
             predicates: vec![],
         }
     } else {
-        emit_node(relation.id, graph, materialized, current)
+        emit_node(relation.id, reads, current)
     };
     match &relation.alias {
         Some(alias)
@@ -141,12 +151,8 @@ pub(super) fn exposed_alias(id: RelationId, graph: &RelationGraph) -> Option<Str
     }
 }
 
-fn emit_node(
-    id: RelationId,
-    graph: &RelationGraph,
-    materialized: &HashSet<RelationId>,
-    current: Option<RelationId>,
-) -> RelationOutput {
+fn emit_node(id: RelationId, reads: &Reads<'_>, current: Option<RelationId>) -> RelationOutput {
+    let graph = reads.graph;
     match graph.get(id) {
         RelationNode::Read {
             table,
@@ -161,26 +167,37 @@ fn emit_node(
             },
             predicates: vec![],
         },
-        RelationNode::Owned { input, alias, .. } => {
+        RelationNode::Owned {
+            input,
+            owner,
+            alias,
+        } => {
             let mut reference = input.clone();
             reference.alias = Some(alias.clone());
-            emit_ref(&reference, graph, materialized, current)
+            let mut output = emit_ref(&reference, reads, current);
+            let bound = reads.tp_bounds.and_then(|bounds| match owner {
+                ReadOwner::Node(node) => bounds.node(node),
+                ReadOwner::Relationship(index) => bounds.relationship(*index),
+            });
+            if let Some(bound) = bound {
+                output.predicates.insert(0, bound_predicate(bound, alias));
+            }
+            output
         }
         RelationNode::Filter { input, predicates } => {
-            let mut output = emit_ref(input, graph, materialized, current);
+            let mut output = emit_ref(input, reads, current);
             output.predicates.extend(predicates.iter().map(predicate));
             output
         }
-        RelationNode::Project { input, outputs } => emit_ref(input, graph, materialized, current)
-            .wrapped(
-                projections(outputs),
-                input.alias.clone().unwrap_or_else(|| relation_name(id)),
-            ),
+        RelationNode::Project { input, outputs } => emit_ref(input, reads, current).wrapped(
+            projections(outputs),
+            input.alias.clone().unwrap_or_else(|| relation_name(id)),
+        ),
         RelationNode::UnionAll { inputs, alias } => RelationOutput {
             from: TableRef::union_all(
                 inputs
                     .iter()
-                    .map(|input| emit_ref(input, graph, materialized, current).query(star()))
+                    .map(|input| emit_ref(input, reads, current).query(star()))
                     .collect(),
                 alias,
             ),
@@ -192,8 +209,8 @@ fn emit_node(
             endpoints,
             predicates,
         } => {
-            let mut left = emit_ref(left, graph, materialized, current);
-            let right = emit_ref(right, graph, materialized, current);
+            let mut left = emit_ref(left, reads, current);
+            let right = emit_ref(right, reads, current);
             let condition = predicates.iter().map(predicate).fold(
                 Expr::eq(column(&endpoints.0), column(&endpoints.1)),
                 Expr::and,
@@ -208,7 +225,7 @@ fn emit_node(
             left
         }
         RelationNode::Bind { input, alias } => {
-            emit_ref(input, graph, materialized, current).wrapped(star(), alias)
+            emit_ref(input, reads, current).wrapped(star(), alias)
         }
         RelationNode::Latest {
             input,
@@ -220,7 +237,7 @@ fn emit_node(
             let dedup = Query {
                 order_by,
                 limit_by,
-                ..emit_ref(input, graph, materialized, current).query(star())
+                ..emit_ref(input, reads, current).query(star())
             };
             RelationOutput {
                 from: TableRef::subquery(dedup, alias),

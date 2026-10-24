@@ -71,6 +71,20 @@ pub trait OrbitQueryModel {
             .is_some_and(|property| property.nullable)
     }
 
+    fn null_as_epoch(&self, property: PropertyId) -> bool {
+        self.query_backend().null_as_epoch(property)
+    }
+
+    fn null_as_epoch_properties(&self, entity: EntityId) -> HashSet<String> {
+        self.graph()
+            .entity(entity)
+            .properties
+            .iter()
+            .filter(|property| self.null_as_epoch(**property))
+            .map(|property| self.graph().property(*property).name.clone())
+            .collect()
+    }
+
     fn property_for_entity_id(&self, entity: EntityId, property: &str) -> Option<&Property> {
         self.graph()
             .property_id(entity, property)
@@ -231,10 +245,6 @@ pub trait OrbitQueryModel {
 
     fn redaction_id_column(&self, entity: EntityId) -> Option<&str> {
         self.query_authorization().redaction_id_column(entity)
-    }
-
-    fn table_path_scopable(&self, table: &str) -> bool {
-        self.query_backend().table_path_scopable(table)
     }
 
     fn table_has_path_columns(&self, table: &str) -> bool {

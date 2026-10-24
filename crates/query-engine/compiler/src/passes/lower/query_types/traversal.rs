@@ -4,9 +4,14 @@ use crate::constants::EDGE_TYPE_SUFFIX;
 use crate::error::{QueryError, Result};
 use crate::input::{Input, OrderDirection};
 use crate::passes::lower::{graph, predicates};
-use crate::passes::plan::{EdgeRelation, Plan, Traversal};
+use crate::passes::plan::{EdgeRelation, Plan, Traversal, property_value};
+use crate::tp_bounds::TpBounds;
 
-pub(crate) fn emit(plan: &Plan<Traversal>, input: &Input) -> Result<Emitted> {
+pub(crate) fn emit(
+    plan: &Plan<Traversal>,
+    input: &Input,
+    tp_bounds: Option<&TpBounds>,
+) -> Result<Emitted> {
     let execution = &plan.operation.execution;
     let mut read = super::super::redaction_columns(plan, execution);
     read.extend(
@@ -15,12 +20,16 @@ pub(crate) fn emit(plan: &Plan<Traversal>, input: &Input) -> Result<Emitted> {
             .iter()
             .map(|order| execution.property(&order.node, &order.property)),
     );
-    let mut output = graph::execute(execution, &read);
+    let mut output = graph::execute(execution, &read, tp_bounds);
     let nodes = output.take_bindings(plan, input)?;
     let mut query = output.into_query(vec![], vec![], vec![], input.limit);
     query.order_by = match (&input.order_by, &input.relationship_return.sort) {
         (Some(order), _) => vec![ordered(
-            predicates::column(&execution.property(&order.node, &order.property)),
+            predicates::output_value(&property_value(
+                &plan.nodes,
+                &order.node,
+                execution.property(&order.node, &order.property),
+            )),
             order.direction,
         )],
         (None, Some(sort)) => {

@@ -1,7 +1,3 @@
-use std::collections::HashMap;
-
-use crate::scope::ScopeProof;
-
 use crate::error::{QueryError, Result};
 use orbit_utils::traversal_path::TraversalPath;
 use serde::Deserialize;
@@ -92,7 +88,6 @@ impl AuthorizedPath {
 pub struct SecurityContext {
     pub org_id: i64,
     pub traversal_paths: Vec<AuthorizedPath>,
-    pub scope_proofs: HashMap<String, ScopeProof>,
     pub admin: bool,
     pub access_level: Option<AccessLevel>,
     pub realm: Option<Realm>,
@@ -131,7 +126,6 @@ impl SecurityContext {
         Ok(Self {
             org_id,
             traversal_paths,
-            scope_proofs: HashMap::new(),
             admin: false,
             access_level: None,
             realm: None,

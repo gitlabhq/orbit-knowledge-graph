@@ -14,7 +14,11 @@ pub fn extract_request_context<T>(
         .ok_or_else(|| Status::unauthenticated("Missing or invalid authorization header"))?;
 
     let claims = validator.validate(token).map_err(|e| {
-        orbit_log_fields::warn!(expanded(ERROR_MESSAGE) = %e, "JWT validation failed");
+        orbit_log_fields::warn!(
+            safe(ERROR_TYPE) = <&str>::from(&e),
+            expanded(ERROR_MESSAGE) = %e,
+            "JWT validation failed"
+        );
         Status::unauthenticated(format!("JWT validation failed: {e}"))
     })?;
 

@@ -80,6 +80,10 @@ impl RelationalMapping for DuckDbBindings {
         false
     }
 
+    fn null_as_epoch(&self, _property: PropertyId) -> bool {
+        false
+    }
+
     fn property_unique(&self, property: PropertyId) -> bool {
         self.property_facts
             .get(property.index())
@@ -90,10 +94,6 @@ impl RelationalMapping for DuckDbBindings {
         self.property_facts
             .get(property.index())
             .is_none_or(|facts| facts.mutable)
-    }
-
-    fn table_path_scopable(&self, _table: &str) -> bool {
-        false
     }
 
     fn table_path_columns(&self, _table: &str) -> Option<&[crate::PathColumn]> {

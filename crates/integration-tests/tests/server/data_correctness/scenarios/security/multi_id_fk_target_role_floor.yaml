@@ -29,15 +29,12 @@ query:
     RETURN count(v) AS n
 
 cases:
-  - name: reporter_counts_nothing
-    description: A multi-ID FK target retains its elevated-role scan in an ungrouped aggregation
+  - name: reporter_is_rejected
+    description: A caller below the role floor is rejected before planning
     config:
       security: { org_id: 1, paths: ["1/100/"], access_level: 20 }
     expect:
-      row_count: 1
-      row_values: [{ n: 0 }]
-      sql_contains: ["_role_f.id IN (SELECT", "LIMIT 1 BY _role_f.traversal_path, _role_f.id", "false"]
-      skip_requirements: [node_ids]
+      compile_error_contains: ["requires access level 25"]
 
   - name: developer_counts_the_finding
     description: The same aggregation counts the vulnerability once the caller meets the role floor

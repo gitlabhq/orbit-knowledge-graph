@@ -239,6 +239,7 @@ operator when word order does not matter.
 | `Job` | `name`, `ref` |
 | `Label` | `description`, `title` |
 | `MergeRequest` | `description`, `source_branch`, `target_branch`, `title` |
+| `MergeRequestDiff` | `head_commit_sha` |
 | `MergeRequestDiffFile` | `new_path`, `old_path` |
 | `Milestone` | `description`, `title` |
 | `Note` | `note` |

@@ -109,6 +109,7 @@ impl TableCleanup {
                 self.metrics.record_error(TASK_NAME, "apply_deleted_mask");
                 warn!(
                     safe(TABLE) = table.as_str(),
+                    safe(ERROR_TYPE) = "apply_deleted_mask",
                     expanded(ERROR_MESSAGE) = %error,
                     "failed to apply deleted mask"
                 );

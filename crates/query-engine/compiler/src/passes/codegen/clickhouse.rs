@@ -6,7 +6,7 @@ use crate::ast::{
     Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,
 };
 use crate::error::Result;
-use crate::passes::enforce::ResultContext;
+use crate::passes::result_contract::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -81,7 +81,7 @@ pub fn cte_statements(ast: &Node) -> Result<Vec<CteStatement>> {
 /// # Trust boundary
 ///
 /// This function bypasses the compiler security pipeline (`apply_security_context`,
-/// `check_ast`, `enforce_return`). It must only be used for trusted, internally
+/// `security_check`, `result_contract`). It must only be used for trusted, internally
 /// constructed ASTs (e.g. schema version management DDL/DML), never for
 /// user-supplied query input.
 pub fn emit_simple_query(node: &Node) -> Result<(String, HashMap<String, ParamValue>)> {
@@ -478,6 +478,7 @@ pub(crate) fn function_name(function: Function) -> &'static str {
         Function::Object => "map",
         Function::If => "if",
         Function::Coalesce => "coalesce",
+        Function::NullIf => "nullIf",
         Function::ByteLength => "length",
         Function::Substring => "substringUTF8",
         Function::Concat => "concat",

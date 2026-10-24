@@ -218,6 +218,19 @@ fn wide_id_range_hint(wide: bool) -> String {
     }
 }
 
+fn at_or_before_epoch(value: &str) -> bool {
+    value.get(..10).is_some_and(|date| {
+        let dated = date.bytes().enumerate().all(|(i, byte)| {
+            if i == 4 || i == 7 {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        });
+        dated && date <= "1970-01-01"
+    })
+}
+
 fn is_aggregate_scalar(data_type: DataType) -> bool {
     matches!(
         data_type,
@@ -937,6 +950,25 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             return Ok(());
         };
 
+        if self
+            .property_id(entity, prop)
+            .is_some_and(|property| self.model.get().null_as_epoch(property))
+        {
+            let values = value
+                .as_array()
+                .map_or(std::slice::from_ref(value), Vec::as_slice);
+            if values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .any(at_or_before_epoch)
+            {
+                return Err(QueryError::Validation(format!(
+                    "filter on \"{prop}\" for {entity}: \
+                     values on or before 1970-01-01 stand for null; use is_null or is_not_null"
+                )));
+            }
+        }
+
         // traversal_path is exempt: short paths like "1/" are valid hierarchical scopes.
         if (is_like_op || is_token_op) && prop != TRAVERSAL_PATH_COLUMN {
             let len = value.as_str().map_or(0, |s| s.chars().count());
@@ -1571,6 +1603,16 @@ mod tests {
             err.to_string().contains(expected),
             "expected error containing \"{expected}\", got: {err}"
         );
+    }
+
+    #[test]
+    fn epoch_boundary_rejects_dates_on_or_before_1970() {
+        for value in ["1970-01-01", "1970-01-01T00:00:00Z", "1969-12-31T23:59:59Z"] {
+            assert!(at_or_before_epoch(value), "{value}");
+        }
+        for value in ["1970-01-02", "2024-06-10T00:00:00Z", "now", "0"] {
+            assert!(!at_or_before_epoch(value), "{value}");
+        }
     }
 
     #[test]

@@ -57,7 +57,7 @@ cases:
         MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE caller.project_id = 1000 RETURN caller, callee LIMIT 50
     expect:
       compile_only: true
-      sql_contains: ["AS callee FINAL ON"]
+      sql_contains: ["AS callee ON (callee.id = _orbit_edge_0.target_id)"]
 
   - name: pinned_target_drops_a_denied_caller
     description: The narrowed caller join still removes a caller whose project id the user may not read, with its edge

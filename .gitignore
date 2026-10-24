@@ -72,6 +72,7 @@ e2e/report.html
 *.tfstate
 *.tfstate.backup
 *.tfvars
+.terraform.lock.hcl
 !bench/infra/.terraform.lock.hcl
 image-digests/
 .cargo-cache/

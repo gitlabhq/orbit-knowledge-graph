@@ -36,5 +36,5 @@ cases:
             - (Deduplicate LimitBy u.id (Filter u.id IN ?.id, ... (Scan Table(gl_user) AS u)))
           reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
         emitted:
-          expect: ["(Limit 51 (_))", "(Sort u.created_at DESC (_))"]
+          expect: ["(Limit 51 (_))", "(Sort NullIf(u.created_at, '1970-01-01 00:00:00') DESC (_))"]
           reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]

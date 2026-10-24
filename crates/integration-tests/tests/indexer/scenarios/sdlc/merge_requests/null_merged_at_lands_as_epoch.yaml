@@ -1,0 +1,24 @@
+description: >-
+  A null DateTime64 lands as the epoch in storage. merged_at comes from the metrics
+  join as NULL in the Arrow batch; the column is not Nullable, so ClickHouse writes the
+  column default, 1970-01-01 00:00:00. The query layer reads that value back as null.
+
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  merge_requests:
+    - { id: 1, iid: 101, title: Still open, source_branch: a, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, author_id: 1, traversal_path: "1/100/" }
+    - { id: 2, iid: 102, title: Merged, source_branch: b, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, author_id: 1, merge_user_id: 1, traversal_path: "1/100/" }
+  siphon_merge_request_metrics:
+    - { id: 1, merge_request_id: 1, merged_at: null, target_project_id: 1000, traversal_path: "1/100/" }
+    - { id: 2, merge_request_id: 2, merged_at: "2024-01-18 09:30:00", target_project_id: 1000, traversal_path: "1/100/" }
+
+expect:
+  nodes:
+    gl_merge_request:
+      count: 2
+      rows:
+        - { id: 1, state: opened, merged_at: "1970-01-01T00:00:00Z" }
+        - { id: 2, state: merged, merged_at: "2024-01-18T09:30:00Z" }
