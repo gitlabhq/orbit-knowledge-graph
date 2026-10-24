@@ -28,10 +28,10 @@ async fn item_counts() {
         missing_table_fails_the_count_and_zeroes_the_graph_status,
         repeated_counts_read_the_cache_with_a_five_second_ttl,
         each_scope_gets_its_own_cache_entry,
-        one_scope_counts_skip_the_array_join,
+        each_path_gets_one_plain_count_query,
         nested_scopes_count_rows_at_each_scope_once,
         each_scope_needs_its_own_role,
-        a_hundred_scopes_are_counted_in_one_query,
+        a_hundred_scopes_get_a_hundred_queries,
     );
 }
 
@@ -152,19 +152,18 @@ async fn each_scope_gets_its_own_cache_entry(ctx: &TestContext) {
     assert_eq!(query_cache_usage(&db).await, ["Write", "Write"]);
 }
 
-async fn one_scope_counts_skip_the_array_join(ctx: &TestContext) {
+async fn each_path_gets_one_plain_count_query(ctx: &TestContext) {
     let db = ctx.fork("item_counts_query_shape").await;
 
-    count(&db, &admin_context(), "1/100/").await;
     count_items(&db, &admin_context(), &["1/100/", "1/101/"]).await;
 
-    let array_joins = read_cached_query_log(
+    let shapes = read_cached_query_log(
         &db,
         "QueryStart",
-        "toString(position(query, 'ARRAY JOIN') > 0)",
+        "concat(toString(position(query, 'ARRAY JOIN') > 0), Settings['enable_parallel_replicas'])",
     )
     .await;
-    assert_eq!(array_joins, ["0", "1"]);
+    assert_eq!(shapes, ["01", "01"]);
 }
 
 async fn nested_scopes_count_rows_at_each_scope_once(ctx: &TestContext) {
@@ -189,7 +188,7 @@ async fn each_scope_needs_its_own_role(ctx: &TestContext) {
     assert!(counts[2].counts.is_empty());
 }
 
-async fn a_hundred_scopes_are_counted_in_one_query(ctx: &TestContext) {
+async fn a_hundred_scopes_get_a_hundred_queries(ctx: &TestContext) {
     let db = ctx.fork("item_counts_hundred_scopes").await;
     let scopes: Vec<String> = (0..100).map(|id| format!("1/{}/", 100 + id)).collect();
     let scopes: Vec<&str> = scopes.iter().map(String::as_str).collect();
@@ -198,5 +197,5 @@ async fn a_hundred_scopes_are_counted_in_one_query(ctx: &TestContext) {
 
     let projects: Vec<i64> = counts.iter().take(3).map(|c| c.counts["Project"]).collect();
     assert_eq!((counts.len(), projects), (100, vec![2, 1, 0]));
-    assert_eq!(query_cache_usage(&db).await, ["Write"]);
+    assert_eq!(query_cache_usage(&db).await, vec!["Write"; 100]);
 }

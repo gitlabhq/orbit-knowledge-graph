@@ -16,8 +16,8 @@ Accepted
 ## Update: batched item counts (2026-10-22)
 
 `GetItemCounts` takes 1 to 100 traversal paths in `traversal_paths` and returns one
-`namespaces` entry per path, in request order. One ClickHouse query counts all paths, grouped
-by path. A request with only `traversal_path` gets `domains`, as before. The count query sets
+`namespaces` entry per path, in request order. Each path gets its own count query, the same
+query as for one path, and up to 8 run at once. Large paths read through parallel replicas. A request with only `traversal_path` gets `domains`, as before. The count query sets
 its own 5 second query cache TTL, so a count can be up to 5 seconds old. This replaces the 10
 second TTL below.
 

@@ -103,9 +103,8 @@ impl<'a> CountPlan<'a> {
         let index = self.scopes.partition_point(|distinct| *distinct < scope);
         let scope_counts = counts.get(scope.as_str());
         self.visibility
-            .entities
-            .iter()
-            .filter(|entity| self.visibility.scope_indexes(entity).contains(&index))
+            .entities_in_scope(index)
+            .into_iter()
             .map(|entity| {
                 let count = scope_counts
                     .and_then(|by_entity| by_entity.get(&entity.name))

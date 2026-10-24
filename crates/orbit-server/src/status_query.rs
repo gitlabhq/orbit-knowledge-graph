@@ -31,10 +31,9 @@ pub(crate) async fn fetch_status_query_batches(
 pub(crate) fn build_prefix_match_condition(
     column: &str,
     param: &str,
-    indices: impl IntoIterator<Item = usize>,
+    prefix_count: usize,
 ) -> String {
-    let conditions: Vec<String> = indices
-        .into_iter()
+    let conditions: Vec<String> = (0..prefix_count)
         .map(|index| format!("startsWith({column}, {{{param}_{index}:String}})"))
         .collect();
     format!("({})", conditions.join(" OR "))

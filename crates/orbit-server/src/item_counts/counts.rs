@@ -1,21 +1,27 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
-use arrow::record_batch::RecordBatch;
-use clickhouse_client::{ArrowClickHouseClient, ArrowQuery, FromArrowColumn};
+use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
+use futures::{StreamExt, TryStreamExt};
+use orbit_server_config::QueryConfig;
 use orbit_utils::traversal_path::TraversalPath;
 use tonic::Status;
 
 use super::visibility::{Visibility, VisibleEntity};
-use orbit_server_config::QueryConfig;
-
 use crate::status_query::{
     bind_prefix_parameters, build_prefix_match_condition, fetch_status_query_batches,
     map_column_extraction_error,
 };
 
-const SCOPE_PARAMETER: &str = "scope";
-const SCOPE_GROUP_PARAMETER: &str = "scope_group";
 const COUNT_CACHE_TTL_SECONDS: u32 = 5;
+const MAX_CONCURRENT_COUNT_QUERIES: usize = 8;
+const PARALLEL_REPLICA_SETTINGS: [(&str, &str); 3] = [
+    ("enable_parallel_replicas", "1"),
+    (
+        "parallel_replicas_min_number_of_rows_per_replica",
+        "50000000",
+    ),
+    ("cancel_http_readonly_queries_on_client_close", "1"),
+];
 
 pub type ScopeCounts = HashMap<String, HashMap<String, i64>>;
 
@@ -24,10 +30,25 @@ pub async fn count_visible_entities(
     scopes: &[&TraversalPath],
     visibility: &Visibility,
 ) -> Result<ScopeCounts, Status> {
-    let sql = visibility
-        .entities
+    futures::stream::iter(scopes.iter().enumerate())
+        .map(|(index, scope)| count_scope(client, scope, visibility.entities_in_scope(index)))
+        .buffer_unordered(MAX_CONCURRENT_COUNT_QUERIES)
+        .try_collect()
+        .await
+}
+
+async fn count_scope(
+    client: &ArrowClickHouseClient,
+    scope: &TraversalPath,
+    entities: Vec<&VisibleEntity>,
+) -> Result<(String, HashMap<String, i64>), Status> {
+    if entities.is_empty() {
+        return Ok((scope.as_str().to_string(), HashMap::new()));
+    }
+    let sql = entities
         .iter()
-        .map(|entity| build_entity_count_query(entity, visibility.scope_indexes(entity), scopes))
+        .enumerate()
+        .map(|(index, entity)| build_entity_count_query(index, entity))
         .collect::<Vec<_>>()
         .join(" UNION ALL ");
     let batches = fetch_status_query_batches(
@@ -35,78 +56,41 @@ pub async fn count_visible_entities(
         &sql,
         "entity counts",
         &count_query_config(),
-        |query| bind_count_parameters(query, scopes, visibility),
+        |query| {
+            let query = (0..entities.len()).fold(query, |query, index| {
+                bind_prefix_parameters(query, &build_scope_parameter_name(index), &[scope])
+            });
+            PARALLEL_REPLICA_SETTINGS
+                .into_iter()
+                .fold(query, |query, (name, value)| {
+                    query.with_setting(name, value)
+                })
+        },
     )
     .await?;
-    group_counts_by_scope(&batches)
+
+    let names = String::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
+    let counts = i64::extract_column(&batches, 1).map_err(map_column_extraction_error)?;
+    Ok((
+        scope.as_str().to_string(),
+        names.into_iter().zip(counts).collect(),
+    ))
 }
 
-fn build_entity_count_query(
-    entity: &VisibleEntity,
-    scope_indexes: &[usize],
-    scopes: &[&TraversalPath],
-) -> String {
-    let (name, table) = (&entity.name, &entity.table);
-    let in_scopes = build_prefix_match_condition(
-        "d.traversal_path",
-        SCOPE_PARAMETER,
-        scope_indexes.iter().copied(),
-    );
-    if let [scope] = scope_indexes {
-        return format!(
-            "SELECT '{name}' AS entity, {{{SCOPE_PARAMETER}_{scope}:String}} AS scope, \
-                    toInt64(uniqIf(d.id, d._deleted = 0)) AS cnt \
-               FROM {table} AS d \
-              WHERE {in_scopes}"
-        );
-    }
-
-    let prefixes: Vec<String> = scope_indexes
-        .iter()
-        .map(|&index| scopes[index].as_str().len())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .map(|length| format!("left(d.traversal_path, {length})"))
-        .collect();
+fn build_entity_count_query(index: usize, entity: &VisibleEntity) -> String {
+    let in_scopes =
+        build_prefix_match_condition("d.traversal_path", &build_scope_parameter_name(index), 1);
     format!(
-        "SELECT '{name}' AS entity, scope, toInt64(uniqIf(d.id, d._deleted = 0)) AS cnt \
+        "SELECT '{name}' AS entity, toInt64(uniqIf(d.id, d._deleted = 0)) AS cnt \
            FROM {table} AS d \
-          ARRAY JOIN [{prefixes}] AS scope \
-          WHERE indexHint({in_scopes}) \
-            AND scope IN {{{SCOPE_GROUP_PARAMETER}_{group}:Array(String)}} \
-          GROUP BY scope",
-        prefixes = prefixes.join(", "),
-        group = entity.scope_group,
+          WHERE {in_scopes}",
+        name = entity.name,
+        table = entity.table,
     )
 }
 
-fn bind_count_parameters(
-    query: ArrowQuery,
-    scopes: &[&TraversalPath],
-    visibility: &Visibility,
-) -> ArrowQuery {
-    let query = bind_prefix_parameters(query, SCOPE_PARAMETER, scopes);
-    visibility
-        .scope_groups
-        .iter()
-        .enumerate()
-        .filter(|(_, group)| group.len() > 1)
-        .fold(query, |query, (index, group)| {
-            let group_scopes: Vec<&str> =
-                group.iter().map(|&scope| scopes[scope].as_str()).collect();
-            query.param(&format!("{SCOPE_GROUP_PARAMETER}_{index}"), group_scopes)
-        })
-}
-
-fn group_counts_by_scope(batches: &[RecordBatch]) -> Result<ScopeCounts, Status> {
-    let names = String::extract_column(batches, 0).map_err(map_column_extraction_error)?;
-    let scopes = String::extract_column(batches, 1).map_err(map_column_extraction_error)?;
-    let counts = i64::extract_column(batches, 2).map_err(map_column_extraction_error)?;
-    let mut by_scope = ScopeCounts::new();
-    for ((name, scope), count) in names.into_iter().zip(scopes).zip(counts) {
-        by_scope.entry(scope).or_default().insert(name, count);
-    }
-    Ok(by_scope)
+fn build_scope_parameter_name(index: usize) -> String {
+    format!("scope_{index}")
 }
 
 fn count_query_config() -> QueryConfig {

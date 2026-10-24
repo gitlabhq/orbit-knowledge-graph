@@ -16,8 +16,11 @@ pub struct VisibleEntity {
 }
 
 impl Visibility {
-    pub fn scope_indexes(&self, entity: &VisibleEntity) -> &[usize] {
-        &self.scope_groups[entity.scope_group]
+    pub fn entities_in_scope(&self, index: usize) -> Vec<&VisibleEntity> {
+        self.entities
+            .iter()
+            .filter(|entity| self.scope_groups[entity.scope_group].contains(&index))
+            .collect()
     }
 }
 

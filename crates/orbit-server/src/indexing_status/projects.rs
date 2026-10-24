@@ -75,7 +75,7 @@ pub async fn read_project_coverage(
     scopes: &[TraversalPath],
 ) -> Result<HashMap<String, ProjectCoverage>, Status> {
     let (project_table, code_checkpoint_table) = find_coverage_tables(ontology)?;
-    let in_scopes = build_prefix_match_condition("traversal_path", "scope", 0..scopes.len());
+    let in_scopes = build_prefix_match_condition("traversal_path", "scope", scopes.len());
     let sql = PROJECT_COVERAGE_SQL.replace("{in_scopes}", &in_scopes);
     let scopes: Vec<&str> = scopes.iter().map(TraversalPath::as_str).collect();
     let config = uncached_query_config();
