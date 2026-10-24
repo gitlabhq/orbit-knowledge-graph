@@ -1,6 +1,9 @@
 description: A Definition neighbor is authorized by its own project, not the center node's project
 
 config:
+  extra_seed:
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 12001, source_kind: Definition, relationship_kind: CALLS, target_id: 12102, target_kind: Definition }
   redaction:
     allow:
       project: [1000]
