@@ -4,26 +4,47 @@ use std::collections::{HashMap, HashSet};
 pub struct TpBounds {
     nodes: HashMap<String, TpBound>,
     relationships: Vec<Option<TpBound>>,
+    self_seeded: HashSet<String>,
 }
 
 impl TpBounds {
-    pub(crate) fn derive(
+    pub fn derive(
         input: &Input,
         model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     ) -> Self {
-        let nodes = derive_node_bounds(input, model);
-        let relationships = input
+        let anchor_fks = anchor_fks(model);
+        let nodes = derive_node_bounds(input, model, &anchor_fks);
+        let relationships: Vec<Option<TpBound>> = input
             .relationships
             .iter()
             .map(|relationship| relationship_bound(input, relationship, &nodes, model))
             .collect();
+        let shared = |alias: &str, bound: &TpBound| {
+            nodes.iter().any(|(other, b)| other != alias && b == bound)
+                || relationships.iter().flatten().any(|b| b == bound)
+        };
+        let self_seeded = input
+            .nodes
+            .iter()
+            .filter(|node| {
+                pinned_only_by_own_keys(node, &anchor_fks)
+                    && nodes
+                        .get(&node.id)
+                        .is_some_and(|bound| !shared(&node.id, bound))
+            })
+            .map(|node| node.id.clone())
+            .collect();
         Self {
             nodes,
             relationships,
+            self_seeded,
         }
     }
 
     pub(crate) fn node(&self, alias: &str) -> Option<&TpBound> {
+        if self.self_seeded.contains(alias) {
+            return None;
+        }
         self.nodes.get(alias)
     }
 
@@ -102,17 +123,13 @@ fn lookup_value_expr(lookup: &TpLookup) -> Expr {
 fn derive_node_bounds(
     input: &Input,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
+    anchor_fks: &[(&str, &str)],
 ) -> HashMap<String, TpBound> {
-    let anchor_fks: Vec<_> = model
-        .anchor_foreign_keys()
-        .iter()
-        .map(|(column, entity)| (column.as_str(), model.graph().entity(*entity).name.as_str()))
-        .collect();
     let seed: HashMap<String, TpBound> = input
         .nodes
         .iter()
         .filter_map(|node| {
-            let lookups: Vec<TpLookup> = bound_keys(node, &anchor_fks)
+            let lookups: Vec<TpLookup> = bound_keys(node, anchor_fks)
                 .into_iter()
                 .filter_map(|key| {
                     model.traversal_path_lookup(&key.entity, key.kind).map(
@@ -142,6 +159,22 @@ fn derive_node_bounds(
             .is_some_and(|entity| model.entity_has_traversal_path(entity))
     });
     bounds
+}
+
+fn pinned_only_by_own_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> bool {
+    let keys = bound_keys(node, anchor_fks);
+    !keys.is_empty()
+        && keys
+            .iter()
+            .all(|key| Some(key.entity.as_str()) == node.entity.as_deref())
+}
+
+fn anchor_fks(model: &(impl query_data_model::OrbitQueryModel + ?Sized)) -> Vec<(&str, &str)> {
+    model
+        .anchor_foreign_keys()
+        .iter()
+        .map(|(column, entity)| (column.as_str(), model.graph().entity(*entity).name.as_str()))
+        .collect()
 }
 
 fn propagate_bounds(
