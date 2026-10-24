@@ -101,7 +101,7 @@ impl ResultContext {
     }
 }
 
-pub fn enforce_lowered_return(
+pub fn apply(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
@@ -109,7 +109,7 @@ pub fn enforce_lowered_return(
 ) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth.clone_from(model.entity_auth());
-    enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |entity| {
+    apply_with(node, input, metadata, model, &mut ctx, |entity| {
         model
             .redaction_id_column(entity)
             .unwrap_or(DEFAULT_PRIMARY_KEY)
@@ -118,20 +118,7 @@ pub fn enforce_lowered_return(
     Ok(ctx)
 }
 
-pub fn enforce_local_return(
-    node: &mut Node,
-    input: &Input,
-    metadata: &LoweredMetadata,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> Result<ResultContext> {
-    let mut ctx = ResultContext::new().with_query_type(input.query_type);
-    enforce_lowered_return_with(node, input, metadata, model, &mut ctx, |_| {
-        DEFAULT_PRIMARY_KEY.to_string()
-    })?;
-    Ok(ctx)
-}
-
-fn enforce_lowered_return_with(
+fn apply_with(
     node: &mut Node,
     input: &Input,
     metadata: &LoweredMetadata,
@@ -234,13 +221,13 @@ fn enforce_return_columns(
         let entity_id = model
             .entity(entity)
             .map(|entity| entity.id)
-            .ok_or_else(|| QueryError::Enforcement(format!("unknown entity '{entity}'")))?;
+            .ok_or_else(|| QueryError::PipelineInvariant(format!("unknown entity '{entity}'")))?;
         let id_col = redaction_id_column(&node.id);
         let binding = bindings.get(&node.id).ok_or_else(|| {
-            QueryError::Enforcement(format!("node '{}' has no lowered binding", node.id))
+            QueryError::PipelineInvariant(format!("node '{}' has no lowered binding", node.id))
         })?;
         if matches!(binding, NodeBinding::Filtered) {
-            return Err(QueryError::Enforcement(format!(
+            return Err(QueryError::PipelineInvariant(format!(
                 "node '{}' has no result identity",
                 node.id
             )));
@@ -257,7 +244,7 @@ fn enforce_return_columns(
         let needs_separate_pk = redaction_column != DEFAULT_PRIMARY_KEY;
         let authorization_id = if needs_separate_pk {
             let table_alias = table_alias.as_deref().ok_or_else(|| {
-                QueryError::Enforcement(format!(
+                QueryError::PipelineInvariant(format!(
                     "node '{}' is authorized by {redaction_column} but has no table read",
                     node.id
                 ))

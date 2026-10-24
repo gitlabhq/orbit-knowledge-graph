@@ -182,10 +182,10 @@ pub async fn send_query_error(
 /// exceeded). These are identified by the `Display` prefix that
 /// `QueryError` adds via thiserror.
 ///
-/// All other errors (lowering, enforcement, codegen, ontology, execution,
-/// authorization, etc.) may contain ClickHouse table names, column names,
-/// SQL fragments, or infrastructure details. These are replaced with a
-/// generic message; server-side logs capture the full error.
+/// All other errors (lowering, codegen, ontology, execution, authorization,
+/// etc.) may contain ClickHouse table names, column names, SQL fragments, or
+/// infrastructure details. These are replaced with a generic message;
+/// server-side logs capture the full error.
 fn sanitize_error_message(error: &PipelineError) -> String {
     match error {
         PipelineError::Compile {

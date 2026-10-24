@@ -4,26 +4,19 @@
 
 use orbit_server_config::QueryConfig;
 
-/// Pathfinding hard ceilings. Config can tighten but never exceed these.
-/// Kept in sync with config/default.yaml `path_finding:` block.
-const PATHFINDING_MAX_EXECUTION_TIME: u64 = 15;
-const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
-const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 1_000_000;
-
-use crate::ast::visit::{visit_queries, visit_relations};
-use crate::ast::{Node, TableRef};
+use crate::ast::Node;
 use crate::error::{QueryError, Result};
-use crate::input::{Input, QueryType};
+use crate::input::Input;
 use crate::passes::codegen::CompiledQueryContext;
-use crate::passes::enforce::ResultContext;
 use crate::passes::frontend;
 use crate::passes::hydrate::HydrationPlan;
 use crate::passes::lower::LoweredMetadata;
 use crate::passes::plan::HydrationCompileOptions;
 use crate::passes::plan::QueryPlan;
+use crate::passes::result_contract::ResultContext;
 use crate::passes::{
-    check, codegen, enforce, hydrate, lower, normalize, page, plan, relationships, response_policy,
-    restrict, security, settings, validate,
+    codegen, hydrate, lower, normalize, page, plan, relationships, response_policy, restrict,
+    result_contract, security, security_check, settings, validate,
 };
 use crate::types::SecurityContext;
 
@@ -101,32 +94,19 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [input, tp_bounds]
             mutates: [query_plan, node, lowered_metadata]
         }
+        paginate {
+            reads_state: [input, lowered_metadata]
+            mutates: [node]
+        }
         response_policy {
             reads_env: [data_model]
             reads_state: [input]
             mutates: [node]
         }
-        enforce {
+        result_contract {
             reads_env: [data_model]
             reads_state: [input]
             mutates: [node, lowered_metadata, result_ctx]
-        }
-        enforce_local {
-            reads_env: [data_model]
-            reads_state: [input]
-            mutates: [node, lowered_metadata, result_ctx]
-        }
-        security {
-            reads_env: [security_ctx, data_model]
-            mutates: [node]
-        }
-        paginate {
-            reads_state: [input, lowered_metadata]
-            mutates: [node]
-        }
-        check {
-            reads_env: [security_ctx, data_model]
-            reads_state: [node]
         }
         hydrate_plan {
             reads_env: [security_ctx, data_model]
@@ -136,6 +116,14 @@ compiler_pipeline_macros::define_compiler_ctx! {
         settings {
             reads_state: [input, node]
             mutates: [query_plan, query_config]
+        }
+        security {
+            reads_env: [security_ctx, data_model]
+            mutates: [node]
+        }
+        security_check {
+            reads_env: [security_ctx, data_model]
+            reads_state: [node]
         }
         codegen {
             reads_state: [input]
@@ -152,31 +140,31 @@ compiler_pipeline_macros::define_compiler_ctx! {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, response_policy, enforce, security, paginate, check, hydrate_plan, settings, codegen]
+            phases: [json_dsl_parse, validate, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, settings, security, security_check, codegen]
         }
         clickhouse_gql {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, response_policy, enforce, security, paginate, check, hydrate_plan, settings, codegen]
+            phases: [gql_parse, validate, validate_relationships, normalize, restrict, plan_clickhouse, tp_bounds, lower, paginate, response_policy, result_contract, hydrate_plan, settings, security, security_check, codegen]
         }
         ch_hydration {
             model: query_data_model::ClickHouseDataModel
             env: [security_ctx]
             state: [input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, query_config, hydration_plan, output]
-            phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, response_policy, enforce, security, check, settings, codegen]
+            phases: [validate_conditions, restrict, plan_clickhouse, tp_bounds, lower, response_policy, result_contract, settings, security, security_check, codegen]
         }
         duckdb_json_dsl {
             model: query_data_model::DuckDbDataModel
             env: []
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, enforce_local, paginate, duckdb_codegen]
+            phases: [json_dsl_parse, validate_local, normalize, plan_duckdb, lower, paginate, result_contract, duckdb_codegen]
         }
         duckdb_gql {
             model: query_data_model::DuckDbDataModel
             env: []
             state: [raw, input, tp_bounds, hydration_options, query_plan, node, lowered_metadata, result_ctx, hydration_plan, output]
-            phases: [gql_parse, validate_local, validate_relationships, normalize, plan_duckdb, lower, enforce_local, paginate, duckdb_codegen]
+            phases: [gql_parse, validate_local, validate_relationships, normalize, plan_duckdb, lower, paginate, result_contract, duckdb_codegen]
         }
         validate_normalize_gql {
             model: query_data_model::ClickHouseDataModel
@@ -310,7 +298,7 @@ fn response_policy(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn enforce<C>(ctx: &mut C) -> Result<()>
+fn result_contract<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
     C::Model: query_data_model::OrbitQueryModel,
@@ -318,24 +306,7 @@ where
     let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
     let mut node = require(ctx.take_node(), "node")?;
     let input = require(ctx.input().clone(), "input")?;
-    let result_context =
-        enforce::enforce_lowered_return(&mut node, &input, &metadata, ctx.data_model())?;
-    ctx.set_node(node);
-    ctx.set_lowered_metadata(metadata);
-    ctx.set_result_ctx(result_context);
-    Ok(())
-}
-
-fn enforce_local<C>(ctx: &mut C) -> Result<()>
-where
-    C: CompilerCtx,
-    C::Model: query_data_model::OrbitQueryModel,
-{
-    let metadata = require(ctx.take_lowered_metadata(), "lowered_metadata")?;
-    let mut node = require(ctx.take_node(), "node")?;
-    let input = require(ctx.input().clone(), "input")?;
-    let result_context =
-        enforce::enforce_local_return(&mut node, &input, &metadata, ctx.data_model())?;
+    let result_context = result_contract::apply(&mut node, &input, &metadata, ctx.data_model())?;
     ctx.set_node(node);
     ctx.set_lowered_metadata(metadata);
     ctx.set_result_ctx(result_context);
@@ -363,13 +334,13 @@ fn paginate(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn check<C>(ctx: &mut C) -> Result<()>
+fn security_check<C>(ctx: &mut C) -> Result<()>
 where
     C: CompilerCtx,
     C::Model: query_data_model::OrbitQueryModel,
 {
     let node = require(ctx.node().clone(), "node")?;
-    check::check_ast(&node, ctx.security_ctx(), ctx.data_model())
+    security_check::verify(&node, ctx.security_ctx(), ctx.data_model())
 }
 
 fn hydrate_plan<C>(ctx: &mut C) -> Result<()>
@@ -387,49 +358,9 @@ where
 
 fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = require(ctx.input().clone(), "input")?;
-    let query_type: &str = input.query_type.into();
-    let mut config = settings::resolve(query_type);
-
     let node = require(ctx.node().clone(), "node")?;
-    if let Node::Query(q) = &node {
-        let derived = &mut config.compiler_derived;
-        derived.null_in_is_unknown = input.has_negation();
-        visit_queries(q, &mut |query| {
-            derived.enable_materialized_cte |= query.ctes.iter().any(|cte| cte.materialized);
-            visit_relations(&query.from, &mut |relation| {
-                derived.optimize_move_to_prewhere_if_final |=
-                    matches!(relation, TableRef::Scan { final_: true, .. });
-            });
-            if !query.ctes.is_empty() {
-                derived.use_index_for_in_with_subqueries_max_values =
-                    Some(IN_SUBQUERY_INDEX_MAX_VALUES);
-            }
-            Ok(())
-        })?;
-    }
-
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
-    if query_plan.relations().len() >= 3 {
-        config.compiler_derived.join_order_algorithm = Some("dpsize".into());
-    }
-    if query_plan.is_point_lookup() && config.use_query_cache == Some(true) {
-        config.use_query_cache = Some(false);
-    }
-    // Pathfinding safety net: enforce hard limits on fan-out-prone queries
-    // regardless of config. These are compiler-side floors; the config can
-    // only tighten them further.
-    if input.query_type == QueryType::PathFinding {
-        if config.max_execution_time.is_none()
-            || config.max_execution_time > Some(PATHFINDING_MAX_EXECUTION_TIME)
-        {
-            config.max_execution_time = Some(PATHFINDING_MAX_EXECUTION_TIME);
-        }
-        if config.max_memory_usage.is_none()
-            || config.max_memory_usage > Some(PATHFINDING_MAX_MEMORY_USAGE)
-        {
-            config.max_memory_usage = Some(PATHFINDING_MAX_MEMORY_USAGE);
-        }
-    }
+    let config = settings::resolve(&input, &node, &query_plan)?;
     ctx.set_query_plan(query_plan);
     ctx.set_query_config(config);
     Ok(())
