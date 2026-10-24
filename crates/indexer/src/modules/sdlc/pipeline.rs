@@ -52,7 +52,7 @@ impl From<DatalakeError> for PipelineError {
     fn from(err: DatalakeError) -> Self {
         match err {
             DatalakeError::SourceUnavailable(reason) => Self::SourceUnavailable(reason),
-            other => HandlerError::Processing(format!("datalake query failed: {other}")).into(),
+            other => HandlerError::from(other).into(),
         }
     }
 }
@@ -257,7 +257,7 @@ impl Pipeline {
                 write_futures.push(async move {
                     w.write(&table, batches, d)
                         .await
-                        .map_err(|e| HandlerError::Processing(e.to_string()))
+                        .map_err(HandlerError::from)
                 });
             }
 
@@ -437,7 +437,10 @@ impl Pipeline {
                                 truncated,
                             })
                         }
-                        Err(err @ DatalakeError::SourceUnavailable(_)) => Step::GiveUp(err.into()),
+                        Err(
+                            err @ (DatalakeError::SourceUnavailable(_)
+                            | DatalakeError::Unavailable(_)),
+                        ) => Step::GiveUp(err.into()),
                         Err(err) => {
                             warn!(
                                 safe(ATTEMPT) = attempt + 1,
@@ -495,7 +498,8 @@ impl Pipeline {
             .save(position_key, checkpoint, WriteDurability::FireAndForget)
             .await
             .map_err(|err| {
-                HandlerError::Processing(format!("failed to save cursor for {position_key}: {err}"))
+                HandlerError::from(err)
+                    .prefix_message_with(format!("failed to save cursor for {position_key}"))
             })?;
         progress.notify_in_progress().await;
         Ok(())
@@ -986,6 +990,41 @@ mod tests {
             .await;
 
         assert!(matches!(result, Err(PipelineError::SourceUnavailable(_))));
+        assert_eq!(datalake.observed_block_sizes().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_datalake_backs_off_without_a_retry() {
+        let datalake = Arc::new(RecordingDatalake::with_responses(vec![Err(
+            DatalakeError::Unavailable("circuit open for service datalake".to_string()),
+        )]));
+        let pipeline = Pipeline::new(
+            datalake.clone(),
+            Arc::new(RecordingCheckpointStore::new()),
+            test_metrics(),
+            AppConfig::embedded_defaults().engine.datalake_retry,
+            passthrough_registry(),
+        );
+
+        let plan = simple_plan("Unavailable");
+        let result = pipeline
+            .run_plan(
+                &noop_context(),
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                Checkpoint::new(test_watermark()),
+                test_window(),
+            )
+            .await;
+
+        assert!(
+            matches!(
+                result,
+                Err(PipelineError::Failed(HandlerError::Backpressure(_)))
+            ),
+            "got {result:?}"
+        );
         assert_eq!(datalake.observed_block_sizes().len(), 1);
     }
 
