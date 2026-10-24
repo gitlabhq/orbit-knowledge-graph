@@ -27,10 +27,9 @@ Software lifecycle context graph for AI agents
 
 <section class="product-landing product-hero">
 
-GitLab Orbit indexes your GitLab data and code into a graph your agent can query.
-Ask which of your projects a CVE affects, which changes reached production before an incident,
-or what a merge request affects outside its diff.
-Your agent answers with a few graph queries in place of many file reads and API calls.
+GitLab Orbit gives your agent a graph of your GitLab data and code.
+On every merge request review, failed pipeline, and new CVE, your agent queries the graph
+and answers with proof, not guesses.
 {.product-hero-lead}
 
 [Quickstart](quickstart.md) [{{< icon name="play" >}} Watch GitLab Orbit in two minutes](https://www.youtube.com/watch?v=dKaPp-TWd_o)
@@ -57,10 +56,10 @@ Your agent answers with a few graph queries in place of many file reads and API 
 - [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
 {.product-cards .product-cards-2}
 
-## Questions GitLab Orbit can answer
+## Example questions
 
 - {{< icon name="merge-request" >}}[Review a merge request with proof](prompt-examples.md#review-a-merge-request-with-proof)<br>Which code and projects does this merge request affect? Each finding comes with the graph result that shows it.
-- {{< icon name="shield" >}}[Fix a vulnerability across every affected project](prompt-examples.md#fix-a-vulnerability-across-every-affected-project)<br>Which projects in my group does this CVE affect, and which fixes reached production?
+- {{< icon name="shield" >}}[Fix a vulnerability across projects](prompt-examples.md#fix-a-vulnerability-across-every-affected-project)<br>Which projects in my group does this CVE affect, and which fixes reached production?
 - {{< icon name="issue-type-incident" >}}[Respond to a production incident](prompt-examples.md#respond-to-a-production-incident)<br>Which changes to the failing component, and to the code that it calls, reached production this week?
 - {{< icon name="code" >}}[Change shared code safely](prompt-examples.md#change-shared-code-safely)<br>Which classes inherit from this base class, and what calls the method that I change?
 {.product-cards .product-cards-2 .product-cards-icons}
