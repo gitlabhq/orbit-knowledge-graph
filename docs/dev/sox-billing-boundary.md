@@ -117,7 +117,7 @@ the task. The right answer is almost always one of:
 ## Maintaining these rules
 
 When you change the rules in this document, also update the corresponding
-inline rules in `.gitlab/duo/mr-review-instructions.yml`. GitLab Duo cannot
+inline rules in `.gitlab/duo/mr-review-instructions.yaml`. GitLab Duo cannot
 follow file references from its custom review instructions. So the YAML
 file carries its own copy of the rules. That copy must be kept in sync with
 this document.

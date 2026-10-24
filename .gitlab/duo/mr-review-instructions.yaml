@@ -141,36 +141,47 @@ instructions:
     fileFilters:
       - "**/*.rs"
     instructions: |
-      Review against the engineering conventions in the root AGENTS.md and
-      CONTRIBUTING.md ("Engineering conventions"). Read them first; do not
-      restate them. Clippy already covers lint-level style, so skip that.
-      Comment only on clear violations such as:
-      1. Comments that narrate what the code shows or reference MRs instead of
-         explaining a non-obvious why
+      Review against the "Engineering conventions" in CONTRIBUTING.md. Clippy
+      and the comment lints already cover lint-level style and narration
+      comments, so skip those. Comment only on clear violations such as:
+      1. Comments that reference an MR or issue instead of explaining a
+         non-obvious why
       2. New infrastructure that duplicates an existing helper
       3. Graph-shape facts (entity names, properties, edges) hardcoded in Rust
          instead of read from the ontology
-      4. Changes that leave stale docs or tests behind
-      Do not suggest edits under docs/ for a code change; the
-      docs-in-code-mr-check CI job forbids them.
+      4. Tests, code comments, or a crate AGENTS.md left stale by the change
+      For stale pages under docs/, suggest a follow-up docs MR. Never ask for
+      docs/ edits in a code MR; the docs-in-code-mr-check CI job forbids them.
 
   - name: Code-graph crate guidance
     fileFilters:
-      - "crates/code-graph/**"
+      - "crates/code-graph/**/*.rs"
     instructions: |
-      Read crates/code-graph/AGENTS.md and review against it. In particular,
-      flag language-specific branches in shared code (linker, pipeline,
-      analyzer) outside src/v2/langs/, duplicated construction of shared
-      types or DSL helpers, and new languages without a
-      code-indexing-benchmark.yaml entry. Prefer a generic hook the pipeline
-      already exposes over a per-language branch.
+      Review against crates/code-graph/AGENTS.md. Flag:
+      1. Language-specific branches in shared code (linker, pipeline,
+         analyzer) outside src/v2/langs/{generic,custom}/. Prefer a generic
+         hook the pipeline already exposes, or an existing edge type
+      2. Duplicated construction of shared types (such as CanonicalDefinition
+         in src/v2/types/) or DSL helpers in src/v2/dsl/
+      3. A new language without a code-indexing-benchmark.yaml entry
+      4. Test sources written as files instead of inline in the
+         integration-tests-codegraph YAML suites (use a shared fixture_tree
+         when several suites need the same files)
 
   - name: Indexer crate guidance
     fileFilters:
-      - "crates/indexer/**"
+      - "crates/indexer/**/*.rs"
     instructions: |
-      Read crates/indexer/AGENTS.md and review against it. Flag changes that
-      bypass the shared retry harness, write to ClickHouse tables without
-      prefixed_table_name(table, SCHEMA_VERSION), run DDL from the indexer
-      (the dispatcher owns schema migration), or change schema behavior
-      without matching the documented migration flow.
+      Review against crates/indexer/AGENTS.md. Flag:
+      1. Reuse-first violations, the most common preventable feedback: a new
+         pipeline or handler that does not use Pipeline::run_plan or
+         EntityHandler, hand-rolled Arrow code instead of orbit_arrow
+         helpers, hand-written edge specs instead of ontology-derived
+         edge_specs, hand-rolled siphon column handling, or custom retry
+         loops instead of the shared retry harness in engine/retry.rs
+      2. ClickHouse reads or writes that do not use
+         prefixed_table_name(table, SCHEMA_VERSION)
+      3. DDL run from handler or indexer-mode code paths. DDL belongs only in
+         schema::migration, which runs in dispatcher mode; do not flag that
+         module itself
+      4. New edge or action routing without an end-to-end YAML scenario

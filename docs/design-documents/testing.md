@@ -333,7 +333,7 @@ Next to the tests, CI runs checks on each MR:
 
 ### Review automation
 
-- [GitLab Duo review agents](../../.gitlab/duo/mr-review-instructions.yml) review the Rust changes in each MR. They check Rust security, Rust performance, logging security, and the SOX billing boundary.
+- [GitLab Duo review agents](../../.gitlab/duo/mr-review-instructions.yaml) review the Rust changes in each MR. They check Rust security, Rust performance, logging security, and the SOX billing boundary.
 - The `ai-review-bot` component and the manual `ai:*` jobs review performance, security, and docs on request.
 - A daily job marks stale MRs and later closes them.
 
