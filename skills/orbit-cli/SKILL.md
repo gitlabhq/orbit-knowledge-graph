@@ -9,7 +9,7 @@ description: >
   Works on the working tree and unpushed branches, and also searches and reads
   the project's GitLab. Not a fit: reading one known file, or counts and
   relationships across GitLab (use the `orbit` skill).
-version: 0.33.0
+version: 0.33.1
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
