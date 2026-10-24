@@ -147,24 +147,6 @@ To resolve this issue, do one of the following:
 - Sign in with `glab auth login`.
 - Set `GITLAB_TOKEN`. For an instance other than GitLab.com, also set `GITLAB_URL`.
 
-### Error: `compile_error` for a JSON query
-
-You might get an error that states:
-
-```plaintext
-Orbit API error (HTTP 400): {"code":"compile_error","message":"schema violation: Orbit query syntax at line 1, column 1: expected Statement ..."}
-```
-
-This issue occurs when the query is not written in the GitLab Orbit query language (GQL), for example a JSON query.
-
-To resolve this issue, rewrite the query in [GQL](queries/query-language.md), for example:
-
-```gql orbit-query
-MATCH (p:Project {full_path: 'gitlab-org/gitlab'})
-RETURN p.name, p.full_path
-LIMIT 1
-```
-
 ### Error: `GitLab credits exhausted`
 
 The query fails with HTTP `402`, and `glab orbit query` exits with code 1.

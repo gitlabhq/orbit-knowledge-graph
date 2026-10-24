@@ -144,5 +144,5 @@ To give a flow the local graph, in the flow configuration:
 ## Related topics
 
 - [Connect your agent](_index.md)
-- [GitLab Orbit MCP server](mcp.md)
+- [GitLab Orbit MCP endpoint](mcp.md)
 - [Prompt examples](../prompt-examples.md)

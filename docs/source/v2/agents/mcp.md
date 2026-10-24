@@ -2,8 +2,8 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Connect MCP clients to GitLab Orbit with the GitLab MCP endpoint.
-title: GitLab Orbit MCP server
+description: Connect MCP clients to GitLab Orbit with the GitLab Orbit MCP endpoint.
+title: GitLab Orbit MCP endpoint
 ---
 
 {{< details >}}
@@ -13,11 +13,11 @@ title: GitLab Orbit MCP server
 
 {{< /details >}}
 
-The GitLab MCP endpoint is a [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server.
+The GitLab Orbit MCP endpoint is a [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server.
 It gives your agent the GitLab data and code of the groups where GitLab Orbit is turned on.
 If your agent can run shell commands, use the [CLI and the GitLab Orbit skill](_index.md) instead.
 
-## GitLab MCP endpoint
+## GitLab Orbit MCP endpoint
 
 {{< history >}}
 

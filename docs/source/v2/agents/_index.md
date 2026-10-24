@@ -28,7 +28,7 @@ The GitLab Orbit skill teaches your agent to query your GitLab data, such as mer
 and vulnerabilities, and the local graph.
 
 GitLab Duo Agent Platform has GitLab Orbit built in. For more information, see [GitLab Orbit in GitLab Duo](duo.md).
-For agents that cannot run shell commands or prefer MCP, use the [GitLab MCP endpoint](mcp.md).
+For agents that cannot run shell commands or prefer MCP, use the [GitLab Orbit MCP endpoint](mcp.md).
 
 ## Set up your agent
 
@@ -127,5 +127,5 @@ It accepts the same agent names and the `--yes`, `--dry-run`, `--verbose`, `--pr
 - [GitLab Orbit quickstart](../quickstart.md)
 - [Prompt examples](../prompt-examples.md)
 - [GitLab Orbit in GitLab Duo](duo.md)
-- [GitLab Orbit MCP server](mcp.md)
+- [GitLab Orbit MCP endpoint](mcp.md)
 - [GitLab Orbit CLI](../cli.md)

@@ -24,6 +24,9 @@ Definition
 GitLab Orbit CLI
 : The `orbit` binary. `glab orbit` installs it and forwards every command to it.
 
+GitLab Orbit MCP endpoint
+: The GitLab server for the Model Context Protocol (MCP) at `/api/v4/orbit/mcp`, for agents that cannot run shell commands.
+
 GitLab Orbit skill
 : The instructions and query recipes your agent loads to use GitLab Orbit. `glab orbit setup` installs it.
 
@@ -35,9 +38,6 @@ Indexing
 
 Local graph
 : The graph the GitLab Orbit CLI builds from a repository on your machine. It holds code only and works offline.
-
-Model Context Protocol (MCP) endpoint
-: The GitLab server for the Model Context Protocol at `/api/v4/orbit/mcp`, for agents that cannot run shell commands.
 
 Named query
 : A query GitLab provides on the server. You run it by name with parameters.

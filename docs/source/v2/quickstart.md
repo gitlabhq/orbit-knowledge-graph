@@ -121,6 +121,6 @@ To ask your first question:
 ## Next steps
 
 - [Prompt examples](prompt-examples.md): prompts by goal
-- [GitLab MCP endpoint](agents/mcp.md): connect agents that cannot run shell commands
+- [GitLab Orbit MCP endpoint](agents/mcp.md): connect agents that cannot run shell commands
 - [Local graph](cli.md#local-graph): index and search code on your machine, with no GitLab account
 - [Troubleshooting](troubleshooting.md): fix common errors
