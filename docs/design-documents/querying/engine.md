@@ -50,7 +50,7 @@ This table shows a GQL example of each one, and the SQL that it produces.
 This section maps the parts of the engine, in the order that the rest of this document describes them.
 It starts with where the data lives and how the engine reads it, and follows one query through each phase, from text to SQL.
 
-| Theme | Component | What it does |Query Engine Phases |
+| Theme | Component | What it does | Query Engine Phases |
 | --- | --- | --- | --- |
 | Data | [Storage model](#storage-model) | Typed node tables and shared edge tables in ClickHouse, all declared by the ontology | None |
 | Data | [Query data model](#query-data-model) | The engine's read-only view of one schema version: the graph, its tables, and its authorization rules | None |
@@ -69,23 +69,28 @@ It starts with where the data lives and how the engine reads it, and follows one
 
 ---
 
-#### 
+### System diagram
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 36, "rankSpacing": 40, "padding": 12}}}%%
 flowchart TB
     accTitle: How the graph query engine fits together
-    accDescr: Once per schema version, the ontology produces the ClickHouse storage model and the query data model. For each query, a frontend parses the text, then validation, restriction, planning, lowering, authorization, and the finishing phases turn it into parameterized SQL. ClickHouse runs the SQL, Rails redacts the rows, and hydration fetches the remaining properties before the response goes back.
+    accDescr: Once per schema version, the ontology produces the query data model and the ClickHouse storage model. For each request, the query text enters the frontend, and the security context feeds restriction and authorization. The query data model feeds validation, planning, and authorization. The pipeline generates parameterized SQL. Outside the engine, ClickHouse runs the SQL, Rails redacts the rows, and a hydration query fetches the remaining properties before the response goes back.
 
-    subgraph schema_time["Once per schema version"]
+    subgraph schema_version["Once per schema version"]
         ontology["Ontology"]
-        storage[("Storage model<br/>node and edge tables in ClickHouse")]
         model["Query data model<br/>graph, layout, and policy"]
-        ontology --> storage
+        storage[("Storage model<br/>node and edge tables")]
         ontology --> model
+        ontology --> storage
     end
 
-    subgraph query_time["Once per query: one pipeline"]
+    subgraph request["Once per request"]
         query_text["GQL or JSON query"]
+        context["Security context<br/>caller paths and roles"]
+    end
+
+    subgraph pipeline["Engine pipeline"]
         frontend["Frontend<br/>parse into the shared input"]
         validation["Validation<br/>shape, limits, names, types"]
         restriction["Restriction and scope<br/>admin-only fields, paths, anchors"]
@@ -94,24 +99,43 @@ flowchart TB
         authorization["Authorization<br/>enforce, security, check"]
         finishing["Pagination, hydration plan,<br/>and settings"]
         codegen["Code generation<br/>ClickHouse or DuckDB SQL"]
-        query_text --> frontend --> validation --> restriction --> planning --> lowering --> authorization --> finishing --> codegen
+        frontend --> validation --> restriction --> planning --> lowering --> authorization --> finishing --> codegen
     end
 
-    context["Security context<br/>caller paths and roles"]
-    context --> restriction
-    context --> authorization
+    subgraph execution["Execution, outside the engine"]
+        sql["Parameterized SQL"]
+        clickhouse[("ClickHouse<br/>runs the SQL")]
+        redaction["Rails redaction<br/>drops denied rows"]
+        hydration["Hydration query<br/>through ch_hydration"]
+        response["Response"]
+        sql --> clickhouse --> redaction --> hydration --> response
+    end
 
+    query_text --> frontend
+    context -- "caller paths" --> restriction
+    context -- "roles" --> authorization
     model -. "names and types" .-> validation
-    model -. "tables, routes, and keys" .-> planning
-    model -. "role floors and redaction rules" .-> authorization
+    model -. "tables and routes" .-> planning
+    model -. "role floors" .-> authorization
+    codegen --> sql
 
-    codegen --> sql["Parameterized SQL"]
-    sql --> storage
-    storage --> rows["Rows"]
-    rows --> redaction["Rails redaction<br/>outside the engine"]
-    redaction --> hydration["Hydration query<br/>through ch_hydration"]
-    hydration -.-> storage
-    hydration --> response["Response"]
+    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
+    classDef input fill:#FEF3C7,stroke:#B45309,color:#78350F
+    classDef phase fill:#DCFCE7,stroke:#15803D,color:#14532D
+    classDef outside fill:#F3F4F6,stroke:#6B7280,color:#111827,stroke-dasharray:4 3
+
+    class ontology,model,storage,clickhouse data
+    class query_text,context input
+    class frontend,validation,restriction,planning,lowering,authorization,finishing,codegen phase
+    class sql,redaction,hydration,response outside
+
+    style schema_version fill:#EFF6FF,stroke:#93C5FD
+    style request fill:#FFFBEB,stroke:#FCD34D
+    style pipeline fill:#F0FDF4,stroke:#86EFAC
+    style execution fill:#F9FAFB,stroke:#D1D5DB
+
+    linkStyle 13,14,15 stroke:#B45309,stroke-width:2px
+    linkStyle 16,17,18 stroke:#2563EB,stroke-width:2px
 ```
 
 ---
@@ -172,7 +196,6 @@ flowchart LR
 <details>
 <summary><b>How a model is put together</b>: the graph catalog, the layout, and the policy</summary>
 
-
 Every model has the same three parts, and each part can be swapped on its own:
 
 - The **graph catalog** describes the logical graph.
@@ -213,7 +236,6 @@ It does not have to look relational, and the graph catalog stays the same.
 <details>
 <summary><b>Data model consumers</b>: the engine through the mapping, and schema management through the schema</summary>
 
-
 The engine reads the model through the mapping.
 The planner uses the mapping to find the edge table for each relationship variant and the column behind each property.
 It also uses the mapping to find sorted copies of a table for a faster lookup.
@@ -233,7 +255,6 @@ flowchart LR
 ```
 
 </details>
-
 
 The code lives in `crates/query-data-model/`.
 
@@ -321,7 +342,6 @@ Expand a phase to see how it works.
 <details>
 <summary><b>Validation</b>: rejects invalid queries before planning starts</summary>
 
-
 Validation is the first phase after parsing.
 It rejects an invalid query before planning starts.
 Each check rejects a different kind of mistake, and every rejection is a client-safe error.
@@ -403,7 +423,6 @@ The [query language reference](../../source/remote/queries/query-language.md#val
 
 <details>
 <summary><b>Restriction and scope</b>: applies the caller's access, and narrows the query to the namespaces it touches</summary>
-
 
 Restriction is the first phase that reads the caller's security context: their organization, plus each traversal path they can read and their role on it.
 Restriction does three things:
@@ -489,7 +508,6 @@ The rules for scope:
 
 <details>
 <summary><b>Planning</b>: picks how to read each node and relationship</summary>
-
 
 The planner decides how to read each node and relationship.
 It works from facts in the query data model, not from the shape of the query text.
@@ -583,7 +601,6 @@ A planner change that picks a different plan for one of them fails a test.
 <details>
 <summary><b>Current-state reads</b>: makes every read see the latest version of each row</summary>
 
-
 Node and edge tables keep several versions of a row until ClickHouse merges them.
 A correct query has to ask "does the current version match?", not "did any version ever match?".
 Those two questions give different answers for any column that can change back.
@@ -657,7 +674,6 @@ Some more details:
 <details>
 <summary><b>Lowering and code generation</b>: turns the plan into SQL for one backend</summary>
 
-
 Lowering turns the plan into a SQL syntax tree.
 Code generation then renders that tree for one backend.
 Built-in functions are a closed vocabulary in the tree, so each backend spells them its own way.
@@ -689,7 +705,6 @@ tree --> duckdb
 
 <details>
 <summary><b>Authorization</b>: adds authorization filters, then proves that every read has one</summary>
-
 
 Three phases protect every remote query.
 `enforce` adds what redaction needs, `security` adds the authorization filters, and `check` verifies that every read has a filter.
@@ -747,7 +762,6 @@ The [Security](../security.md) design document describes the full authorization 
 <details>
 <summary><b>Hydration</b>: fetches the properties that the main query didn't return</summary>
 
-
 The main query returns identities, plus the properties it already joined.
 Hydration fetches the rest in one more small query.
 
@@ -779,7 +793,6 @@ end note
 
 <details>
 <summary><b>Pagination</b>: pages through results without keeping server state</summary>
-
 
 The engine pages without keeping any state between requests.
 Every page is a new, bounded query.
@@ -813,7 +826,6 @@ end note
 
 <details>
 <summary><b>Settings</b>: sets time and memory limits for each query type</summary>
-
 
 The `settings` phase picks ClickHouse settings for each query type: time limits, memory limits, and caching.
 Path finding has hard ceilings of 15 seconds and 15 GiB.
