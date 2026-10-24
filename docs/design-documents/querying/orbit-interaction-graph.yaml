@@ -1,0 +1,343 @@
+proposal: orbit-interaction-graph
+version: 0
+status: design-only
+source_commit: 1ccbaa84d9faf77292f39c4f1abc83b8e5cd23c8
+
+sources:
+  schema: config/ontology/schema.yaml
+  topology: crates/query-data-model/src/generic/catalog.rs
+  model: crates/query-data-model/src/generic/mod.rs
+  layout: crates/query-data-model/src/layout/mod.rs
+  mappings: crates/query-data-model/src/layout/relational/mapping.rs
+  clickhouse_mapping: crates/query-data-model/src/implementations/clickhouse/mapping/mod.rs
+  duckdb_mapping: crates/query-data-model/src/implementations/duckdb/mapping/mod.rs
+  authorization: crates/query-data-model/src/authz/gitlab.rs
+  local_authorization: crates/query-data-model/src/authz/trusted.rs
+  project: config/ontology/nodes/core/project.yaml
+  merge_request: config/ontology/nodes/code_review/merge_request.yaml
+  diff: config/ontology/nodes/code_review/merge_request_diff.yaml
+  vulnerability: config/ontology/nodes/security/vulnerability.yaml
+  definition: config/ontology/nodes/source_code/definition.yaml
+  in_project: config/ontology/edges/in_project.yaml
+  authored: config/ontology/edges/authored.yaml
+  has_diff: config/ontology/edges/has_diff.yaml
+  calls: config/ontology/edges/calls.yaml
+  tags: crates/ontology/src/loading/mod.rs
+  security_pass: crates/query-engine/compiler/src/passes/security.rs
+  compiler_pipeline: crates/query-engine/compiler/src/config.rs
+  foreign_key_planner: crates/query-engine/compiler/src/passes/plan/fk.rs
+  virtual_resolution: crates/query-engine/shared/src/content.rs
+
+imports:
+  ontology:
+    source: schema
+    through: ontology-loader
+    derives:
+      - entities-and-properties
+      - relationship-variants
+      - storage-declarations
+      - property-realizations
+      - authorization-policies
+      - materialized-tag-coverage
+    identity: active-schema-snapshot
+
+graph:
+  nodes:
+    - id: entity.Project
+      kind: entity
+      resolve: {source: project, name: Project}
+    - id: entity.MergeRequest
+      kind: entity
+      resolve: {source: merge_request, name: MergeRequest}
+    - id: entity.MergeRequestDiff
+      kind: entity
+      resolve: {source: diff, name: MergeRequestDiff}
+    - id: entity.Vulnerability
+      kind: entity
+      resolve: {source: vulnerability, name: Vulnerability}
+    - id: entity.Definition
+      kind: entity
+      resolve: {source: definition, name: Definition}
+    - id: entity.User
+      kind: entity
+      resolve: {source: schema, name: User}
+
+    - id: variant.mr_project
+      kind: relationship-variant
+      resolve:
+        source: in_project
+        relationship: IN_PROJECT
+        from: MergeRequest
+        to: Project
+    - id: variant.user_mr
+      kind: relationship-variant
+      resolve:
+        source: authored
+        relationship: AUTHORED
+        from: User
+        to: MergeRequest
+    - id: variant.mr_diff
+      kind: relationship-variant
+      resolve:
+        source: has_diff
+        relationship: HAS_DIFF
+        from: MergeRequest
+        to: MergeRequestDiff
+    - id: variant.definition_calls
+      kind: relationship-variant
+      resolve:
+        source: calls
+        relationship: CALLS
+        from: Definition
+        to: Definition
+
+    - id: binding.mr_project_fk
+      kind: foreign-key-binding
+      resolve: {source: clickhouse_mapping, variant: variant.mr_project}
+      expected: {holder: source, property: project_id, referenced_property: id}
+    - id: binding.user_mr_fk
+      kind: foreign-key-binding
+      resolve: {source: clickhouse_mapping, variant: variant.user_mr}
+      expected: {holder: target, property: author_id, referenced_property: id}
+    - id: binding.mr_diff_fk
+      kind: foreign-key-binding
+      resolve: {source: clickhouse_mapping, variant: variant.mr_diff}
+      expected: {holder: target, property: merge_request_id, referenced_property: id}
+    - id: storage.diff_edges
+      kind: storage-resource
+      resolve: {source: schema, backend: clickhouse, logical_table: gl_diff_edge}
+    - id: storage.code_edges
+      kind: storage-resource
+      resolve: {source: schema, backend: clickhouse, logical_table: gl_code_edge}
+    - id: storage.local_edges
+      kind: storage-resource
+      resolve: {source: schema, backend: duckdb, setting: local_db.edge_table}
+
+    - id: policy.project
+      kind: resource-policy
+      resolve: {source: authorization, entity: Project}
+      expected: {resource_type: project, ability: read_code, id_column: id}
+    - id: policy.merge_request
+      kind: resource-policy
+      resolve: {source: authorization, entity: MergeRequest}
+      expected: {resource_type: merge_request, ability: read_merge_request, id_column: id}
+    - id: policy.diff
+      kind: resource-policy
+      resolve: {source: authorization, entity: MergeRequestDiff}
+      expected: {resource_type: merge_request, ability: read_merge_request, id_column: merge_request_id}
+    - id: policy.vulnerability
+      kind: resource-policy
+      resolve: {source: authorization, entity: Vulnerability}
+      expected: {resource_type: vulnerability, ability: read_vulnerability, required_access_level: 25}
+    - id: policy.definition
+      kind: resource-policy
+      resolve: {source: authorization, entity: Definition}
+      expected: {resource_type: project, ability: read_code, id_column: project_id}
+    - id: policy.trusted_local
+      kind: policy-domain
+      resolve: {source: local_authorization, provider: TrustedLocalCatalog}
+
+    - id: property.diff_patch
+      kind: property
+      resolve: {source: diff, entity: MergeRequestDiff, property: patch}
+    - id: property.diff_id
+      kind: property
+      resolve: {source: diff, entity: MergeRequestDiff, property: id}
+    - id: property.diff_project
+      kind: property
+      resolve: {source: diff, entity: MergeRequestDiff, property: project_id}
+    - id: property.diff_redaction_id
+      kind: property
+      resolve: {source: diff, entity: MergeRequestDiff, property: merge_request_id}
+    - id: realization.diff_patch
+      kind: service-property-binding
+      resolve: {source: diff, entity: MergeRequestDiff, property: patch, field: virtual}
+      expected: {service: gitaly, lookup: raw_patch, depends_on: [project_id, id]}
+
+    - id: logical.traverse
+      kind: logical-operation
+      provider: graph.traverse
+    - id: logical.read_property
+      kind: logical-operation
+      provider: graph.read_property
+    - id: physical.fk_join
+      kind: construction-template
+      template: fk_join
+    - id: physical.edge_traversal
+      kind: construction-template
+      template: edge_traversal
+    - id: physical.gitaly_patch
+      kind: construction-template
+      template: gitaly_patch
+
+    - id: requirement.fixed_hop
+      kind: requirement
+      evaluator: query.exactly_one_directed_hop
+    - id: requirement.no_edge_predicates
+      kind: requirement
+      evaluator: query.no_relationship_property_predicates
+    - id: requirement.stored_fk
+      kind: requirement
+      evaluator: mapping.both_fk_properties_are_available
+    - id: requirement.path_scope
+      kind: requirement
+      evaluator: policy.authorized_path_guard
+    - id: requirement.resource_permission
+      kind: requirement
+      evaluator: policy.resource_decision_for_bound_identity
+    - id: requirement.resolver_available
+      kind: requirement
+      evaluator: services.lookup_is_registered_and_enabled
+
+    - id: implementation.fk
+      kind: implementation
+      bind: {query: traversal-occurrence, variant: selected-relationship-variant}
+      obligations: preserve-and-propagate
+    - id: implementation.edge
+      kind: implementation
+      bind: {query: traversal-occurrence, variants: selected-relationship-variants}
+      obligations: preserve-and-propagate
+    - id: implementation.patch
+      kind: implementation
+      bind: {query: property-read-occurrence, property: property.diff_patch}
+      obligations: preserve-and-propagate
+
+  edges:
+    - {from: variant.mr_project, relation: source, to: entity.MergeRequest}
+    - {from: variant.mr_project, relation: target, to: entity.Project}
+    - {from: variant.user_mr, relation: source, to: entity.User}
+    - {from: variant.user_mr, relation: target, to: entity.MergeRequest}
+    - {from: variant.mr_diff, relation: source, to: entity.MergeRequest}
+    - {from: variant.mr_diff, relation: target, to: entity.MergeRequestDiff}
+    - {from: variant.definition_calls, relation: source, to: entity.Definition}
+    - {from: variant.definition_calls, relation: target, to: entity.Definition}
+    - {from: variant.mr_project, relation: realized_by, to: binding.mr_project_fk}
+    - {from: variant.user_mr, relation: realized_by, to: binding.user_mr_fk}
+    - {from: variant.mr_diff, relation: realized_by, to: binding.mr_diff_fk}
+    - {from: variant.mr_diff, relation: routed_to, to: storage.diff_edges}
+    - {from: variant.definition_calls, relation: routed_to, to: storage.code_edges}
+    - {from: variant.definition_calls, relation: local_route, to: storage.local_edges}
+    - {from: entity.Project, relation: governed_by, to: policy.project}
+    - {from: entity.MergeRequest, relation: governed_by, to: policy.merge_request}
+    - {from: entity.MergeRequestDiff, relation: governed_by, to: policy.diff}
+    - {from: entity.Vulnerability, relation: governed_by, to: policy.vulnerability}
+    - {from: entity.Definition, relation: governed_by, to: policy.definition}
+    - {from: policy.diff, relation: identity_from, to: property.diff_redaction_id}
+    - {from: policy.diff, relation: owner_entity, to: entity.MergeRequest}
+    - {from: property.diff_patch, relation: realized_by, to: realization.diff_patch}
+    - {from: realization.diff_patch, relation: requires_value, to: property.diff_project}
+    - {from: realization.diff_patch, relation: requires_value, to: property.diff_id}
+    - {from: implementation.fk, relation: implements, to: logical.traverse}
+    - {from: implementation.fk, relation: requires_all, to: requirement.fixed_hop}
+    - {from: implementation.fk, relation: requires_all, to: requirement.no_edge_predicates}
+    - {from: implementation.fk, relation: requires_all, to: requirement.stored_fk}
+    - {from: implementation.fk, relation: constructs, to: physical.fk_join}
+    - {from: implementation.edge, relation: implements, to: logical.traverse}
+    - {from: implementation.edge, relation: constructs, to: physical.edge_traversal}
+    - {from: implementation.patch, relation: implements, to: logical.read_property}
+    - {from: implementation.patch, relation: requires_all, to: requirement.resolver_available}
+    - {from: implementation.patch, relation: requires_all, to: requirement.resource_permission}
+    - {from: implementation.patch, relation: constructs, to: physical.gitaly_patch}
+
+templates:
+  fk_join:
+    parameters: [source, target, foreign_key]
+    nodes:
+      source_read: {op: graph.read_current, entity: $source}
+      target_read: {op: graph.read_current, entity: $target}
+      result:
+        op: relational.join
+        inputs: [source_read, target_read]
+        on:
+          op: value.equal
+          inputs:
+            - {resolve: $foreign_key.holder_occurrence_property}
+            - {resolve: $foreign_key.referenced_occurrence_property}
+    output: result
+
+  edge_traversal:
+    parameters: [variants, source, target]
+    nodes:
+      routes: {op: catalog.edge_routes, variants: $variants}
+      edges:
+        op: graph.read_live_edges
+        routes: routes
+        variants: $variants
+        endpoints: [$source, $target]
+    output: edges
+
+  gitaly_patch:
+    parameters: [diffs, principal]
+    nodes:
+      arguments:
+        op: graph.require_properties
+        input: $diffs
+        properties: [property.diff_project, property.diff_id, property.diff_redaction_id]
+      allowed:
+        op: gitlab.redact
+        input: arguments
+        principal: $principal
+        policy: policy.diff
+      patches:
+        op: service.resolve_batch
+        input: allowed
+        realization: realization.diff_patch
+        correlation: [entity.MergeRequestDiff, property.diff_id]
+    output: patches
+
+policy_rules:
+  remote_scan_scope:
+    match: {op: storage.read, domain: gitlab_remote}
+    for_each: catalog.path_columns(match.resource)
+    require: requirement.path_scope
+    construct:
+      eligible: {op: policy.paths_at_least, role: catalog.role_floor(match.path_column)}
+      prefixes: {op: path.minimal_prefixes, input: eligible}
+      guard: {op: value.starts_with_any, value: match.path_column, prefixes: prefixes}
+      result: {op: data.filter, input: match, predicate: guard}
+    empty_eligible: false_predicate
+    empty_security_context: error
+
+  returned_resource:
+    match: {op: result.resource, domain: gitlab_remote}
+    policy: catalog.resource_policy(match.entity)
+    require: requirement.resource_permission
+    retain:
+      graph_identity: catalog.identity(match.entity)
+      authorization_identity: catalog.authorization_identity(match.entity)
+    satisfy_with: gitlab.redaction_response
+
+  trusted_local:
+    match: {domain: trusted_local}
+    policy: policy.trusted_local
+    remote_requirements: not_applicable
+
+search:
+  alternatives: implements_edges
+  prerequisites: requires_all_edges
+  state_key: [query_occurrence, requested_outputs, policy_domain, obligations, catalog_snapshot]
+  unknown_requirement: unsatisfied
+  cycles: detect_and_bound
+  construction: checked_catalog_builder
+  evidence:
+    retain: [rule_id, query_bindings, catalog_facts, requirement_results, constructed_operations]
+
+acceptance:
+  - name: foreign_key_holder_direction
+    bindings: [binding.mr_project_fk, binding.user_mr_fk, binding.mr_diff_fk]
+    assert: source_and_target_holders_are_distinct
+  - name: role_floor_before_prefix_collapse
+    entity: entity.Vulnerability
+    paths:
+      - {path: "1/", roles: [20]}
+      - {path: "1/100/", roles: [25]}
+    expected_prefixes: ["1/100/"]
+  - name: diff_identity_is_not_redaction_identity
+    graph_identity: property.diff_id
+    redaction_identity: property.diff_redaction_id
+    resolver_arguments: [property.diff_project, property.diff_id]
+  - name: local_calls_is_not_remote_calls
+    remote: {route: storage.code_edges, policy: policy.definition}
+    local: {route: storage.local_edges, policy: policy.trusted_local}
+  - name: partial_tag_coverage_is_not_proof
+    assert: every_selected_variant_and_direction_has_a_materialized_binding
