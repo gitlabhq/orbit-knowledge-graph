@@ -95,11 +95,45 @@ pub(crate) async fn read(
     let response = client.query_raw(request).await?;
     let response: Value = serde_json::from_slice(&response)
         .map_err(|e| error(format!("unreadable graph response: {e}")))?;
-    let nodes = response["result"]["nodes"]
+    let mut nodes = response["result"]["nodes"]
         .as_array()
         .cloned()
         .unwrap_or_default();
+    if let Code::File { path, .. } = code {
+        let exact = nodes.iter().any(|node| node["path"] == path.as_str());
+        if !exact && let Some(content) = repository_file(client, id, &branch, path).await {
+            nodes = vec![json!({"path": path, "content": content})];
+        } else if !path.contains('/') && nodes.len() > 1 {
+            nodes.sort_by_key(|node| node["path"].as_str().map_or(usize::MAX, str::len));
+            nodes.truncate(1);
+        }
+    }
     Ok(render(project, &branch, code, &nodes))
+}
+
+async fn repository_file(
+    client: &OrbitClient,
+    id: i64,
+    branch: &str,
+    path: &str,
+) -> Option<String> {
+    let encoded: String = path
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect();
+    let body = client
+        .get_api(
+            &format!("projects/{id}/repository/files/{encoded}/raw"),
+            &[("ref", branch.to_string())],
+        )
+        .await
+        .ok()?;
+    String::from_utf8(body).ok()
 }
 
 fn definition_query(project_id: i64, branch: &str, name: &str) -> String {
@@ -115,11 +149,14 @@ fn definition_query(project_id: i64, branch: &str, name: &str) -> String {
 }
 
 fn file_query(project_id: i64, branch: &str, path: &str) -> String {
+    let by = match path.contains('/') {
+        true => format!("f.path = {}", gql_string(path)),
+        false => format!("f.path ENDS WITH {}", gql_string(&format!("/{path}"))),
+    };
     format!(
-        "MATCH (f:File {{project_id: {project_id}, branch: {}}}) WHERE f.path ENDS WITH {} \
+        "MATCH (f:File {{project_id: {project_id}, branch: {}}}) WHERE {by} \
          RETURN f.path, f.content LIMIT 5",
-        gql_string(branch),
-        gql_string(path)
+        gql_string(branch)
     )
 }
 
@@ -139,7 +176,10 @@ fn numbered(out: &mut String, content: &str, first: usize, range: Option<(usize,
 fn render(project: &str, branch: &str, code: &Code, nodes: &[Value]) -> String {
     let mut out = String::new();
     if nodes.is_empty() {
-        let _ = writeln!(out, "{code} in {project}@{branch}: not found in the graph");
+        let _ = writeln!(
+            out,
+            "{code} in {project}@{branch}: not found in the graph or the repository"
+        );
         return out;
     }
     for node in nodes {
