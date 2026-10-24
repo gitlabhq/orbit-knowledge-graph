@@ -77,7 +77,7 @@ For more examples, see [prompt examples](prompt-examples.md).
 - [Indexed data](schema.md)
 - [Queries](queries/_index.md)
 - [Security](security.md)
-- [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/ "Install GitLab Orbit on Kubernetes, connect GitLab to it, and index your first group.")
+- [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/ "Install GitLab Orbit on Kubernetes and connect it to GitLab.")
 - [Troubleshooting](troubleshooting.md)
 
 {{< /cards >}}
