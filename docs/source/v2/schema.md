@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Learn which GitLab data and source code GitLab Orbit indexes, and where to see the node types and relationships of the graph.
+description: See which GitLab data and code GitLab Orbit indexes.
 title: GitLab Orbit indexed data
 ---
 
@@ -12,14 +12,6 @@ title: GitLab Orbit indexed data
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
-
-{{< history >}}
-
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-
-{{< /history >}}
 
 GitLab Orbit indexes two kinds of data into one graph:
 
@@ -70,7 +62,7 @@ To see the current schema, use one of these methods:
 - In a terminal, run `glab orbit ontology`. To show the properties and relationships of node types,
   add their names, for example `glab orbit ontology MergeRequest Project`.
 - Over HTTP, call `GET /api/v4/orbit/schema`. For more information, see the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
-- In a query, run `CALL db.schema()`.
+- In a query, for example in the **Query editor** tab of the [GitLab Orbit dashboard](dashboard.md) or with `glab orbit query`, run `CALL db.schema()`.
 
 ## Supported languages
 
@@ -104,7 +96,7 @@ Most languages also get imports and cross-file calls.
 Some languages have limits:
 
 - Bash/Shell: function definitions and `source` or `.` imports only. No cross-file calls.
-- Rust: cross-file `CALLS` and `EXTENDS` edges. No other reference edges.
+- Rust: cross-file `CALLS` and `EXTENDS` relationships. No other reference relationships.
 - YAML: anchors and aliases. Mapping keys become definitions only in GitLab CI, ArgoCD,
   Helm, and Docker Compose files. No cross-file references.
 
@@ -129,7 +121,7 @@ Use these properties to read code without a separate call to the GitLab API.
 
 - Query responses return all entity IDs as strings, even when the stored value is an integer.
   String IDs prevent precision loss in JavaScript clients for values above `Number.MAX_SAFE_INTEGER`.
-- On the server, a `Definition` ID is a content hash scoped to the project and branch.
+- On the server, a `Definition` ID is a hash of the project, branch, file path, fully qualified name, and position of the definition.
   The same function in two projects has two different IDs.
 
 ## Related topics
@@ -137,5 +129,5 @@ Use these properties to read code without a separate call to the GitLab API.
 - [GitLab Orbit architecture](how-it-works.md)
 - [Query language](queries/query-language.md)
 - [Security](security.md)
-- [CLI](cli.md)
+- [GitLab Orbit CLI](cli.md)
 - [Prompt examples](prompt-examples.md)

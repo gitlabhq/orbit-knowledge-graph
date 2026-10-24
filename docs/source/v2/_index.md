@@ -6,6 +6,12 @@ description: Give your agent a graph of your GitLab data and code, so the agent 
 title: GitLab Orbit
 ---
 
+<!-- The tagline sits directly under the page title, above the availability details, on purpose. -->
+<!-- gitlab-docs-review-disable lint.details-placement -->
+
+Software lifecycle context graph for AI agents
+{.product-hero-title}
+
 {{< details >}}
 
 - Tier: Premium, Ultimate
@@ -13,10 +19,12 @@ title: GitLab Orbit
 
 {{< /details >}}
 
+<!-- gitlab-docs-review-enable -->
+
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
 - [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) for GitLab Self-Managed in GitLab 19.2.2.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
 
@@ -24,188 +32,99 @@ title: GitLab Orbit
 
 <section class="product-landing product-hero">
 
-<p class="product-hero-brand"><img src="img/orbit-logo-v19_6.svg" alt="GitLab Orbit logo" width="48" height="48"> GitLab Orbit</p>
-
-Software lifecycle context graph for AI agents
-{.product-hero-title}
-
-GitLab Orbit indexes your GitLab data and code into a graph that your agent can query.
-Ask what breaks if you change a service, who should review a file, or why pipelines fail.
-Your agent answers with a few graph queries in place of many file reads and API calls.
+GitLab Orbit gives your agent a graph of your GitLab data and code.
+On every merge request review, failed pipeline, and new CVE, your agent queries the graph
+and answers with proof, not guesses.
 {.product-hero-lead}
 
-[Quickstart](quickstart.md) [{{< icon name="play" >}} Watch the deep dive video](https://www.youtube.com/watch?v=wddpf0rDGnA)
+[Quickstart](quickstart.md) [{{< icon name="play" >}} Watch GitLab Orbit in two minutes](https://www.youtube.com/watch?v=dKaPp-TWd_o)
 {.product-hero-actions}
 
-<!-- Video published on 2026-06-26 -->
+<!-- Video published on 2026-09-03 -->
 
 </section>
 
-- [Ask across code and lifecycle](prompt-examples.md)<br>One graph holds your projects, merge requests, pipelines, vulnerabilities, files, and definitions, so one question can cross all of them.
-- [Run one query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
-- [Get only the data that you can access](security.md#how-gitlab-orbit-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions, on GitLab.com, GitLab Self-Managed, and GitLab Dedicated.
-{.product-cards}
+- {{< icon name="connected" >}}[Ask across code and lifecycle](prompt-examples.md)<br>One graph connects your GitLab data and code, so one question can cross both.
+- {{< icon name="search" >}}[Run one query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
+- {{< icon name="lock" >}}[Get only the data you can access](security.md#how-gitlab-orbit-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions.
+{.product-cards .product-cards-icons}
 
-## Questions that GitLab Orbit can answer
+## About GitLab Orbit
 
-- [Fix a vulnerability across every affected project](prompt-examples.md#fix-a-vulnerability-across-every-affected-project)<br>Which projects in my group does this CVE affect, and which fixes reached production?
-- [Change shared code safely](prompt-examples.md#change-shared-code-safely)<br>Which classes inherit from this base class, and what calls the method that I change?
-- [Find out how agent-written code performs](prompt-examples.md#find-out-how-agent-written-code-performs)<br>What share of the merge requests that agents created merged, and how long did they take?
-- [See what shipped to production this week](prompt-examples.md#see-what-shipped-to-production-this-week)<br>Which issues, tasks, and incidents did this week's production deployments close?
-{.product-cards .product-cards-2}
+- <img src="img/orbit-video-how-it-works-v19_6.png" alt="Thumbnail of the GitLab Orbit architecture video." width="640" height="360">[How GitLab Orbit works](https://www.youtube.com/watch?v=YtPc8kOmyi0)<br>The architecture of GitLab Orbit, from indexing to queries.
+- <img src="img/orbit-video-deep-dive-v19_6.png" alt="Thumbnail of the GitLab Orbit technical deep dive video." width="640" height="360">[How we built GitLab Orbit](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>A technical deep dive into the context graph.
+{.product-cards .product-cards-2 .product-video-cards}
 
-For more examples, see [prompt examples](prompt-examples.md).
-
-## The query language
-
-GitLab Orbit queries use [GQL](queries/query-language.md), a graph query language that large language models
-already know from their training data.
-A short GQL pattern describes connections, for example from a merge request to its pipelines and to the files
-that it changed.
-
-Your agent reads the [schema](queries/query-language.md#discover-the-schema), then writes its own query for each question.
-A retrieval-augmented generation (RAG) system gives the agent only the text that a search selected.
-With GitLab Orbit, the agent selects the exact data that it needs.
-One query replaces a chain of API calls, so the agent puts less load on your GitLab instance and makes fewer errors.
-
-## Connect your agent
-
-To get GitLab Orbit, [contact sales](https://about.gitlab.com/sales/).
-On GitLab.com, you can also [start a free trial](trial.md).
-For information about GitLab Orbit pricing and usage, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
-
-For agents that run shell commands, the GitLab Orbit CLI is the recommended method.
-
-{{< tabs >}}
-
-{{< tab title="Claude Code, Codex, OpenCode" >}}
-
-Sign in with `glab auth login`, then run one command in a Git repository:
-
-```shell
-glab orbit setup
-```
-
-`glab orbit setup` tells your agent to search code with the graph and installs the GitLab Orbit skill,
-which teaches your agent to query your GitLab data.
-For the full steps, see the [quickstart](quickstart.md#use-gitlab-orbit-with-your-agent).
-For the setup options, see [connect your agent](agents/_index.md).
-
-{{< /tab >}}
-
-{{< tab title="GitLab Duo" >}}
-
-GitLab Duo Agent Platform has GitLab Orbit built in.
-You do not install anything.
-Agents call the GitLab Orbit tools when the graph can answer a question.
-For more information, see [GitLab Orbit in GitLab Duo](agents/duo.md).
-
-{{< /tab >}}
-
-{{< tab title="MCP" >}}
-
-If your agent supports the Model Context Protocol (MCP) and cannot run shell commands, add the GitLab MCP endpoint.
-For example, in Claude Code:
-
-```shell
-claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
-```
-
-On GitLab Self-Managed and GitLab Dedicated, replace `gitlab.com` with the hostname of your instance.
-For other clients, see [GitLab MCP endpoint](agents/mcp.md#gitlab-mcp-endpoint).
-
-{{< /tab >}}
-
-{{< tab title="REST API" >}}
-
-To build a script, a scheduled report, or a custom tool on the graph, query it over HTTP.
-For the endpoints, authentication, and examples, see the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
-
-{{< /tab >}}
-
-{{< /tabs >}}
-
-## Code on your machine
-
-The GitLab Orbit CLI also indexes repositories on your machine.
-Your agent can then search code that you have not pushed, offline and with no GitLab account.
-For more information, see [local graph](cli.md#local-graph).
-
-## Learn more
+<!-- Videos published on 2026-07-06 and 2026-06-26 -->
 
 - [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
-- [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work that the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
+- [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
 {.product-cards .product-cards-2}
+
+## Example questions
+
+- {{< icon name="merge-request" >}}[Review a merge request with proof](prompt-examples.md#review-a-merge-request-with-proof)<br>Which code and projects does this merge request affect? Each finding comes with the graph result that shows it.
+- {{< icon name="shield" >}}[Fix a vulnerability across projects](prompt-examples.md#fix-a-vulnerability-across-every-affected-project)<br>Which projects in my group does this CVE affect, and which fixes reached production?
+- {{< icon name="issue-type-incident" >}}[Respond to a production incident](prompt-examples.md#respond-to-a-production-incident)<br>Which changes to the failing component, and to the code that it calls, reached production this week?
+- {{< icon name="code" >}}[Change shared code safely](prompt-examples.md#change-shared-code-safely)<br>Which classes inherit from this base class, and what calls the method that I change?
+{.product-cards .product-cards-2 .product-cards-icons}
+
+For more examples, see [prompt examples](prompt-examples.md).
 
 ## Reference
 
 {{< cards >}}
 
-- [GitLab Orbit CLI](cli.md)
-- [GitLab Orbit dashboard](dashboard.md)
+- [Connect your agent](agents/_index.md)
 - [Indexed data](schema.md)
 - [Queries](queries/_index.md)
 - [Security](security.md)
-- [GitLab Self-Managed](https://docs.gitlab.com/orbit/self-managed/)
-- [Glossary](glossary.md)
+- [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/ "Install GitLab Orbit on Kubernetes and connect it to GitLab.")
 - [Troubleshooting](troubleshooting.md)
 
 {{< /cards >}}
 
 <style>
 /* Product landing page. Visual wrappers only, with GitLab UI design tokens; the content above is Markdown. */
+/* Page title: the standard H1, with the GitLab Orbit logo after it. */
 body:has(.product-landing) h1#skipTarget {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: var(--gl-spacing-scale-4);
+}
+body:has(.product-landing) h1#skipTarget::after {
+  content: "";
+  flex: none;
+  width: 40px;
+  height: 40px;
+  background: URL("img/orbit-logo-v19_6.svg") center / contain no-repeat;
 }
 body:has(.product-landing) .docs-content .language-plaintext {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* Hero: a flat bordered panel. */
+/* Hero: tagline, lead, and actions, with no panel. */
 .docs-content .product-hero {
   margin: var(--gl-spacing-scale-5) 0 var(--gl-spacing-scale-6);
-  padding: var(--gl-spacing-scale-6);
-  border: 1px solid var(--gl-border-color-default);
-  border-radius: var(--gl-border-radius-lg);
 }
 .docs-content .product-hero p { margin: 0; }
-.docs-content .product-hero img {
-  border: 0;
-  padding: 0;
-  border-radius: 0;
-}
-.docs-content .product-hero-brand {
-  display: flex;
-  align-items: center;
-  gap: var(--gl-spacing-scale-4);
-  font-size: var(--gl-text-size-h1);
-  line-height: 1.15;
-  font-weight: 600;
-  color: var(--gl-text-color-heading);
-}
+/* Tagline: directly under the page title, smaller than a heading. */
 .docs-content .product-hero-title {
-  margin-top: var(--gl-spacing-scale-4) !important;
-  font-size: var(--gl-text-size-h3);
-  line-height: 1.25;
-  font-weight: 500;
-  color: var(--gl-text-color-default);
+  margin: calc(-1 * var(--gl-spacing-scale-4)) 0 var(--gl-spacing-scale-5);
+  font-size: 1.125rem;
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--gl-text-color-subtle);
 }
 .docs-content .product-hero-lead {
-  margin-top: var(--gl-spacing-scale-4) !important;
   max-width: 68ch;
 }
 .docs-content .product-hero-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--gl-spacing-scale-3);
-  margin-top: var(--gl-spacing-scale-5) !important;
+  margin: var(--gl-spacing-scale-5) 0 var(--gl-spacing-scale-6) !important;
 }
 /* Same metrics and tokens as .btn.gl-button.btn-md: 2rem tall, 0.875rem text, 8px radius. */
 .docs-content .product-hero-actions a {
@@ -233,12 +152,12 @@ body:has(.product-landing) .docs-content .language-plaintext {
   border-color: var(--gl-button-confirm-primary-border-color-hover);
   color: var(--gl-button-confirm-primary-foreground-color-hover) !important;
 }
-.docs-content .product-hero-actions a:nth-child(2) {
+.docs-content .product-hero-actions a:not(:first-child) {
   background-color: var(--gl-button-default-primary-background-color-default);
   border-color: var(--gl-button-default-primary-border-color-default);
   color: var(--gl-button-default-primary-foreground-color-default) !important;
 }
-.docs-content .product-hero-actions a:nth-child(2):hover {
+.docs-content .product-hero-actions a:not(:first-child):hover {
   background-color: var(--gl-button-default-primary-background-color-hover);
   border-color: var(--gl-button-default-primary-border-color-hover);
   color: var(--gl-button-default-primary-foreground-color-hover) !important;
@@ -249,8 +168,38 @@ body:has(.product-landing) .docs-content .language-plaintext {
   height: 1rem;
   fill: currentColor;
 }
-@media (max-width: 640px) {
-  .docs-content .product-hero { padding: var(--gl-spacing-scale-5); }
+
+/* Value cards: a GitLab icon in a tinted badge above the title. */
+.docs-content ul.product-cards-icons > li > span:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin: 0 auto var(--gl-spacing-scale-4);
+  border-radius: var(--gl-border-radius-lg);
+  background-color: color-mix(in srgb, currentColor 12%, transparent);
+  color: var(--gl-color-purple-600);
+}
+.gl-dark .docs-content ul.product-cards-icons > li > span:first-child { color: var(--gl-color-purple-300); }
+.docs-content ul.product-cards-icons > li > span:first-child svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: currentColor;
+}
+
+/* Video cards: the thumbnail fills the top of the card, edge to edge, clipped to the card's rounded corners. */
+.docs-content ul.product-video-cards > li { overflow: hidden; }
+.docs-content ul.product-video-cards > li > img {
+  display: block;
+  width: calc(100% + 2.5rem);
+  max-width: none;
+  margin: -1.25rem -1.25rem var(--gl-spacing-scale-4);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
 }
 
 /* Cards: same metrics as the cards shortcode (.card-body.card.gl-rounded-lg): 1.25rem padding, 8px radius, neutral-100 border, subtle hover. */
@@ -305,5 +254,9 @@ body:has(.product-landing) .docs-content .language-plaintext {
 .docs-content ul.product-cards > li:hover > a::after {
   background-color: var(--gl-text-color-default);
   translate: 0 0;
+}
+/* Links outside GitLab.com get the site's external-link icon instead of the arrow. A larger offset keeps a gap while the icon sits half a width to the left; it still slides right on hover. */
+.docs-content ul.product-cards > li > a[href^="http"]:not([href*="GitLab.com" i])::after {
+  left: var(--gl-spacing-scale-3);
 }
 </style>

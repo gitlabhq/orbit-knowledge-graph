@@ -15,13 +15,12 @@ title: GitLab Orbit CLI
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
-- [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 19.0.
+- [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) from experiment to beta in GitLab 19.1.
 - Commands that call the GitLab server:
   - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-  - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-  - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Generally available in GitLab 19.5.
+  - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
 
 {{< /history >}}
 
@@ -31,35 +30,10 @@ The CLI also indexes the code on your machine into a [local graph](#local-graph)
 
 ## Install the CLI
 
-Use the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) to install the GitLab Orbit CLI and connect your agents.
-`glab` is the recommended install method.
-It downloads and verifies the GitLab Orbit CLI, and tells you when a new version is available.
+You should use the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) to install the GitLab Orbit CLI and connect your agents.
+`glab` downloads and verifies the GitLab Orbit CLI, and tells you when a new version is available.
 
-Prerequisites:
-
-- `glab` 1.120 or later. To check your version, run `glab version`.
-
-To install the CLI and set up your agents:
-
-1. Go to a Git repository on your machine. Any repository works.
-1. Run `glab orbit setup`.
-   On first use, `glab` asks to download the GitLab Orbit CLI.
-1. In the list of agents, keep or clear the selection, then press <kbd>Enter</kbd>.
-   Setup selects the agents that it detects on your machine.
-
-Setup installs the GitLab Orbit skill for your agents and indexes the repository for code search.
-To update the setup, run the command again.
-For the setup options and the files that setup changes, see [connect your agent](agents/_index.md#setup-options).
-
-To run setup without a terminal, for example from an agent or a script, confirm both prompts with `--yes`:
-
-```shell
-glab orbit --yes setup --yes
-```
-
-The first `--yes` confirms the download. The second skips the list of agents.
-
-To query your GitLab data, also [sign in with `glab`](#query-the-remote-graph).
+To install the CLI and set up your agents, see [set up your agent](agents/_index.md#set-up-your-agent).
 
 `glab` handles these options itself:
 
@@ -69,13 +43,20 @@ To query your GitLab data, also [sign in with `glab`](#query-the-remote-graph).
 | `--install` | Download the CLI, but do not run it. |
 | `--update` | Update the CLI to the latest version. |
 
-To skip the prompts on every run, set the `glab` options `orbit_cli_auto_download` and `orbit_cli_auto_run` to `true`
-with `glab config set`. Setup sets `orbit_cli_auto_run` for you.
+To skip the prompts on every run, set the `glab` options `orbit_cli_auto_download` and `orbit_cli_auto_run` to `true`:
 
-### Other install methods
+```shell
+glab config set --global orbit_cli_auto_download true
+glab config set --global orbit_cli_auto_run true
+```
+
+When you run setup in a repository, it sets `orbit_cli_auto_run` only for that repository.
+
+### Install the standalone binary
 
 If you cannot use `glab`, install the standalone `orbit` binary.
 The binary runs the same commands as `glab orbit`.
+In the commands on this page, replace `glab orbit` with `orbit`, for example `orbit setup`.
 
 - On macOS and Linux:
 
@@ -83,7 +64,11 @@ The binary runs the same commands as `glab orbit`.
   curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
   ```
 
-  To update, end the command with `bash -s -- --force`.
+  To update, run the command with `--force`:
+
+  ```shell
+  curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash -s -- --force
+  ```
 
 - On Windows:
 
@@ -140,7 +125,8 @@ Sign in once with `glab`, then run queries and check indexing progress from the 
 
 Prerequisites:
 
-- GitLab Orbit is [turned on for your group](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
+- GitLab Orbit is [turned on for your group](quickstart.md#step-1-turn-on-gitlab-orbit).
+- The Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
 
 To sign in:
 
@@ -150,7 +136,8 @@ To sign in:
    run `glab config set --global host <gitlab.example.com>`.
 
 `glab orbit` passes your `glab` credential to the CLI on every run.
-The standalone `orbit` binary uses `GITLAB_TOKEN` if you set it, otherwise your `glab` credential.
+The standalone `orbit` binary uses a personal access token with the `read_api` scope in `GITLAB_TOKEN` if you set it, otherwise your `glab` credential.
+On GitLab Self-Managed or GitLab Dedicated, also set `GITLAB_URL` to the URL of your instance.
 
 ### Run a query
 
@@ -184,6 +171,7 @@ glab orbit graph-status
 
 With no option, `graph-status` shows the project of the `origin` remote of the clone.
 In a terminal, it prints a summary. In a pipe or a file, it prints JSON.
+When indexing is complete, **SDLC data** and **Code** show `indexed`, and the summary ends with `Ready.`
 `status` shows only the health of the service.
 
 | Option | Type | Required | Description |
@@ -223,7 +211,7 @@ and writes definitions, imports, and cross-file references to the graph.
 The parser and [supported languages](schema.md#supported-languages) are the same as for the remote graph.
 
 - When you pass the path of a directory, the CLI indexes each repository in the directory.
-- Each indexed commit keeps its own graph. When you index the same commit again, the CLI replaces its graph.
+- Each indexed commit keeps its own graph. When you index the same commit again, the CLI reindexes only the files that changed since the last run.
 - After you switch branches, `grep` and `context` index the new commit for you.
   Before you use `repo-map` or `sql` on the new commit, run `glab orbit index .`.
 
@@ -254,8 +242,8 @@ Function read_file — src/utils.py:3-4 ←run
   Patterns with regular expression characters are regular expressions. For an exact string, use `-F`.
 - Common `rg` options such as `-A`, `-B`, `-C`, `-w`, `-l`, `-c`, `-g`, and `-t` work.
   To filter by definition type, use `--kind`, such as `--kind Class,Method`.
-- A file that differs from the last commit shows `(edited since index)` and no definitions.
-  Commit the change to index it.
+- A file that differs from the last commit shows `(edited since index)` and no definitions, even after you run `glab orbit index .` again.
+  Commit the change to see its definitions.
 
 To read the source of a definition, and its callers and callees, pass its name to `context`:
 
@@ -294,7 +282,7 @@ and a `local/manifest.duckdb` file that lists them.
 - When an update of the CLI changes the format of the local graph, the next `index` rebuilds the graph file.
   Index your other repositories again after you update.
 
-The CLI sends usage events to GitLab product analytics, such as the command, the result, the duration, and the CLI version.
+The CLI sends usage events, such as the command, the result, the duration, and the CLI version, to GitLab product analytics.
 It never sends repository content, file paths, or query text.
 Telemetry is on by default. To turn it off, run:
 
@@ -308,14 +296,14 @@ The CLI reads these environment variables:
 |----------|---------|
 | `GITLAB_TOKEN`, `GITLAB_URL` | Token and instance for remote commands when you run the CLI without `glab`. Default URL: `https://gitlab.com`. Without `GITLAB_TOKEN`, the CLI gets the token and instance of your `glab` sign-in from `glab auth credential-helper`. |
 | `ORBIT_DATA_DIR` | A directory for the settings and the local graph, instead of `~/.gitlab/orbit/`. |
-| `ORBIT_TELEMETRY_ENABLED` | `false` or `true`. Overrides the saved telemetry setting, for example in CI. |
+| `ORBIT_TELEMETRY_ENABLED` | `false` or `true`. Overrides the saved telemetry setting, for example in a CI/CD job. |
 
 ## Exit codes
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Success. |
-| `1` | Other error, for example a missing credential, or HTTP `402`, `422`, or `503`. See stderr. `grep` also exits with `1`, and prints nothing, when nothing matches. |
+| `1` | Other error, for example a missing credential, or HTTP `402`, `422`, or `503`. See stderr. `grep` also exits with `1`, with no error message, when nothing matches. |
 | `2` | A command-line usage error, or HTTP `404`: the path does not exist, or the endpoint is not available. |
 | `3` | HTTP `401`. The token is missing or expired. |
 | `4` | HTTP `403`. No group with GitLab Orbit turned on is available to you. |

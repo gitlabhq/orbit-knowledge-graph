@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Learn how GitLab Orbit protects your data, which roles you need to query it, and how to set up programmatic access.
+description: See how GitLab Orbit protects your data, and which roles you need.
 title: GitLab Orbit security
 ---
 
@@ -12,14 +12,6 @@ title: GitLab Orbit security
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
-
-{{< history >}}
-
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-
-{{< /history >}}
 
 A query returns only the data that your role lets you see in GitLab, even when an agent sends it.
 
@@ -32,13 +24,12 @@ When you turn on GitLab Orbit, existing access does not change.
 |--------|-------|
 | Query groups, projects, users, merge requests, CI/CD, and work items | Reporter, Security Manager, Developer, Maintainer, or Owner |
 | Query security data | Security Manager, Developer, Maintainer, or Owner |
-| [Turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) | The Owner role for the top-level group. On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on GitLab Orbit. |
+| [Turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit) | The Owner role for the top-level group. On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on GitLab Orbit. |
 
 Security data is vulnerabilities, security findings, security scans, scanners,
 and Common Vulnerabilities and Exposures (CVE) and Common Weakness Enumeration (CWE) identifiers.
-To query security data, you must have the Security Manager, Developer, Maintainer, or Owner role,
-because GitLab cannot filter aggregate results after the query runs.
-For a user with the Reporter role, the response leaves out security entities, even from aggregate counts.
+Because GitLab cannot filter aggregate results after a query runs, the response for a user with the Reporter role
+leaves out security entities, even from aggregate counts.
 
 Queries from administrators and auditors return data from each group where GitLab Orbit is on, not only their own groups.
 
@@ -102,20 +93,22 @@ Project membership, and membership of groups where GitLab Orbit is off, do not g
 Prerequisites:
 
 - The Owner role for the group.
+- GitLab Orbit is [turned on for the group](quickstart.md#step-1-turn-on-gitlab-orbit).
 
 To set up a service account for GitLab Orbit:
 
-1. [Create a service account and a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account) for it.
-   Give the token the `read_api` scope. Service accounts cannot use fine-grained personal access tokens.
-1. Add the service account to the lowest subgroup that has the data, with the Reporter role.
-   If the tool must read security data, select the **Security Manager** role.
-   Repeat this step for each group that the tool must query.
+1. [Create a service account and a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account) with the `read_api` scope.
+   Service accounts cannot use fine-grained personal access tokens.
+1. Add the service account with the Reporter role to the lowest subgroup that has the data.
+   To read security data, use the Security Manager role.
+   Repeat this step for each group that the service account must query.
 
 ### Verify the scope of a service account
 
 Verify the scope after you set up the account, and each time you change its memberships:
 
-1. Save this request in a file named `request.json`. The query uses the [GitLab Orbit query language](queries/query-language.md).
+1. Save this request in a file named `request.json`.
+   The `query` value is a [GQL](queries/query-language.md) query.
 
    ```json
    {
@@ -134,7 +127,10 @@ Verify the scope after you set up the account, and each time you change its memb
      --url "https://gitlab.example.com/api/v4/orbit/query"
    ```
 
-1. Make sure that the `full_path` values include only the groups where you added the account.
+   Replace `<your_access_token>` with the token of the service account, and `gitlab.example.com` with your instance, or `gitlab.com` on GitLab.com.
+
+1. Make sure that the `full_path` values include only the groups where you added the account, and their subgroups.
+   If you see other groups, check the memberships of the account, including groups that its groups are shared with.
 
 ## Related topics
 

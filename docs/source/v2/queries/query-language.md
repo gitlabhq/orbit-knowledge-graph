@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query GitLab Orbit with GQL, a read-only, OpenCypher-like query language. Learn what GQL supports, the statement shape, filters, aggregations, pagination, and limits.
+description: Query GitLab Orbit with GQL, a read-only, openCypher-like query language. Learn what GQL supports, the statement shape, filters, aggregations, pagination, and limits.
 title: GitLab Orbit query language
 ---
 
@@ -15,13 +15,14 @@ title: GitLab Orbit query language
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/256465) in GitLab 19.4.
-- Generally available in GitLab 19.5.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/256465) in GitLab 19.5.
 
 {{< /history >}}
 
-GitLab Orbit accepts GQL, a read-only, OpenCypher-like query language that agents already know.
+GitLab Orbit accepts GQL, a read-only, openCypher-like query language that agents already know.
 To send a query, see [run a query](_index.md#run-a-query).
+The examples use the `gitlab-org/gitlab` project on GitLab.com.
+To run them on your own projects, see [bounded nodes](#bounded-nodes).
 
 ## Supported syntax
 
@@ -46,27 +47,6 @@ GQL does not support these forms, and rejects them:
 - More than one `ORDER BY` key, and `LIMIT` before `SKIP`
 - Query parameters
 - Other functions, such as `collect(x)` (the error names the function)
-
-### Neighbors
-
-To find every node that is connected to one node, write an undirected relationship, `--`, from a bounded node:
-
-```gql orbit-query
-MATCH (mr:MergeRequest {id: 482908721})--(n)
-RETURN n
-LIMIT 20
-```
-
-### Shortest paths
-
-To find the shortest path between two bounded nodes, use `ANY SHORTEST`.
-Name the relationship type and keep the hop range small.
-A pattern with no relationship type, such as `-[*1..3]->`, follows every relationship and might time out.
-
-```gql orbit-query
-MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {full_path: 'gitlab-org/gitlab'})
-RETURN path
-```
 
 ## Discover the schema
 
@@ -123,9 +103,30 @@ LIMIT 1
 ```
 
 On GitLab.com, this query returns `482908721` and `278964`, the IDs that the examples use.
-It returns them only if you have the Reporter, Security Manager, Developer, Maintainer, or Owner role in the `gitlab-org` group.
+It returns them only if you have the Reporter, Security Manager, Developer, Maintainer, or Owner role for the `gitlab-org` group.
 Otherwise, this query and the examples that use `gitlab-org/gitlab` or these IDs return no rows.
 To run the examples, query with the full path of one of your projects, and use the IDs that it returns.
+
+### Find the neighbors of a node
+
+To find every node that is connected to one node, write an undirected relationship, `--`, from a [bounded node](#bounded-nodes):
+
+```gql orbit-query
+MATCH (mr:MergeRequest {id: 482908721})--(n)
+RETURN n
+LIMIT 20
+```
+
+### Find the shortest path between two nodes
+
+To find the shortest path between two [bounded nodes](#bounded-nodes), use `ANY SHORTEST`.
+Name the relationship type and keep the hop range small.
+A pattern with no relationship type, such as `-[*1..3]->`, follows every relationship and might time out.
+
+```gql orbit-query
+MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {full_path: 'gitlab-org/gitlab'})
+RETURN path
+```
 
 ## Filters
 
@@ -215,14 +216,23 @@ These properties have a text index:
   `source_branch`, and `target_branch` for `MergeRequest`. `properties(mr)` returns all of them.
   `mr{.iid, .title}` returns the listed properties.
 - The response always includes the identity of each node and the metadata of each relationship.
+- `type(r)` returns the type of a one-hop relationship variable in `WHERE`, `RETURN`, and `ORDER BY`,
+  but not as an aggregation group key.
+
+### Aggregate results
+
 - The aggregate functions are `count`, `sum`, `avg`, `min`, and `max`.
   The other items in `RETURN` become group keys.
   To sort by an aggregate, give it an alias: `RETURN mr.state, count(mr) AS mrs ORDER BY mrs DESC`.
+  `sum` and `avg` need a numeric property. `min` and `max` need a number, boolean, enum, date, or timestamp property.
+  In an aggregation, a text match or a `<`, `<=`, `>`, or `>=` comparison on a free-text property, such as `mr.title`,
+  needs that node in a group key: return the node, as in `RETURN mr, count(p)`, or one of its free-text properties,
+  as in `RETURN mr.title, count(p)`. Other properties, such as `mr.iid`, do not count.
+  Otherwise, the query fails with `text matching and ordering require grouping by "mr"`.
+  `Project`, `Group`, and code nodes are exempt.
 - To group by a time period, use `date_trunc('<unit>', <property>)` as a group key on a date property.
   The units are `minute`, `hour`, `day`, `week`, `month`, `quarter`, and `year`.
   `minute` and `hour` also need a filter on the same property. Weeks start on Sunday.
-- `type(r)` returns the type of a one-hop relationship variable in `WHERE`, `RETURN`, and `ORDER BY`,
-  but not as an aggregation group key.
 
 ```gql orbit-query
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
@@ -234,13 +244,9 @@ LIMIT 12
 
 ## Pagination
 
-To get results page by page, use `SKIP` and `LIMIT`.
-`OFFSET` is the same as `SKIP`.
-Put `SKIP` before `LIMIT`.
-Start at `SKIP 0`.
-For each next page, add the page size to `SKIP`:
+To get results page by page, put `SKIP` before `LIMIT`, and add the page size to `SKIP` for each next page:
 `SKIP 0 LIMIT 20`, then `SKIP 20 LIMIT 20`, then `SKIP 40 LIMIT 20`.
-Write `SKIP` on every page, also on the first page, so that all pages use the same sort order.
+Write `SKIP` on every page, including `SKIP 0` on the first page, so that all pages use the same sort order.
 Do not change other parts of the query between pages.
 
 ```gql orbit-query
@@ -252,7 +258,7 @@ SKIP 20
 LIMIT 20
 ```
 
-In the `raw` response format, `pagination.has_more` is `true` while more rows exist.
+In the `raw` response format (`--response-format raw` in the CLI), `pagination.has_more` is `true` while more rows exist.
 Stop when `pagination.has_more` is `false`.
 A page can return fewer rows than `LIMIT`, or no rows, because GitLab removes the rows that you cannot access.
 `SKIP` also counts these rows, so pages do not overlap.
@@ -285,9 +291,11 @@ the later pages move by one row, so a row can repeat or be missing.
 - Each node returns at most 50 properties and filters on at most 500 IDs.
 - The query text is at most 32 KiB.
 
+## Debug a query
+
 Syntax errors report a line and column.
 
-To see the SQL that GitLab Orbit runs, end the query with `DEBUG` and use the `raw` response format.
+To see the SQL that GitLab Orbit runs, end the query with `DEBUG` and use the `raw` response format (`--response-format raw`).
 On GitLab.com, the response includes the SQL only for GitLab team members.
 On GitLab Self-Managed and GitLab Dedicated, the response includes the SQL only for administrators.
 For other users, GitLab ignores `DEBUG`.
