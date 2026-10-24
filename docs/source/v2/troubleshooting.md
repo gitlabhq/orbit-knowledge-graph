@@ -91,7 +91,7 @@ This issue occurs when the agent did not load the GitLab Orbit skill.
 To resolve this issue:
 
 - Check that the skill is installed in `~/.agents/skills/orbit`. For Claude Code, also check the
-  `~/.claude/skills/orbit` link. For more information, see [GitLab Orbit skill](agents/_index.md#gitlab-orbit-skill).
+  `~/.claude/skills/orbit` link. For more information, see [connect your agent](agents/_index.md).
 - Start a new session of your agent. A session that started before setup does not load the skill.
 - Start the prompt with `Using GitLab Orbit`.
 
