@@ -1,5 +1,3 @@
-// Shared validation enforces these limits for every query frontend.
-
 pub const MAX_HOPS_CAP: u32 = 3;
 pub const MAX_DEPTH_CAP: u32 = 3;
 pub const MAX_NODES_CAP: usize = 5;
