@@ -102,39 +102,29 @@ pub(crate) async fn read(
     Ok(render(project, &branch, code, &nodes))
 }
 
-fn definition_query(project_id: i64, branch: &str, name: &str) -> Value {
-    let filter = match name.contains(['.', ':', '#']) {
-        true => json!({"fqn": {"ends_with": name}}),
-        false => json!({"name": name}),
+fn definition_query(project_id: i64, branch: &str, name: &str) -> String {
+    let by = match name.contains(['.', ':', '#']) {
+        true => format!("d.fqn ENDS WITH {}", gql_string(name)),
+        false => format!("d.name = {}", gql_string(name)),
     };
-    let mut filters = json!({"project_id": project_id, "branch": branch});
-    filters
-        .as_object_mut()
-        .expect("filters is an object")
-        .extend(filter.as_object().expect("filter is an object").clone());
-    json!({
-        "query_type": "traversal",
-        "nodes": [{
-            "id": "d",
-            "entity": "Definition",
-            "filters": filters,
-            "columns": ["fqn", "definition_type", "file_path", "start_line", "end_line", "content"],
-        }],
-        "limit": 5,
-    })
+    format!(
+        "MATCH (d:Definition {{project_id: {project_id}, branch: {}}}) WHERE {by} \
+         RETURN d.fqn, d.definition_type, d.file_path, d.start_line, d.end_line, d.content LIMIT 5",
+        gql_string(branch)
+    )
 }
 
-fn file_query(project_id: i64, branch: &str, path: &str) -> Value {
-    json!({
-        "query_type": "traversal",
-        "nodes": [{
-            "id": "f",
-            "entity": "File",
-            "filters": {"project_id": project_id, "branch": branch, "path": {"ends_with": path}},
-            "columns": ["path", "content"],
-        }],
-        "limit": 5,
-    })
+fn file_query(project_id: i64, branch: &str, path: &str) -> String {
+    format!(
+        "MATCH (f:File {{project_id: {project_id}, branch: {}}}) WHERE f.path ENDS WITH {} \
+         RETURN f.path, f.content LIMIT 5",
+        gql_string(branch),
+        gql_string(path)
+    )
+}
+
+fn gql_string(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
 fn numbered(out: &mut String, content: &str, first: usize, range: Option<(usize, usize)>) {
