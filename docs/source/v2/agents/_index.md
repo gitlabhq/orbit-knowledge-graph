@@ -8,7 +8,7 @@ title: Connect your agent to GitLab Orbit
 
 {{< details >}}
 
-- Tier: Free, Premium, Ultimate
+- Tier: Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
@@ -99,7 +99,8 @@ Setup follows these rules:
 
 - Setup changes only the text between its markers and the entries it marked as its own.
 - Before setup changes a file for the first time, it saves a copy as `<name>.orbit-backup`.
-- Setup sets the `glab` option `orbit_cli_auto_run` to `true`, so the hooks run without a prompt.
+- Setup sets the `glab` option `orbit_cli_auto_run` to `true` for the repository where you run it, so the hooks run without a prompt.
+  To set it for every repository, run `glab config set orbit_cli_auto_run true --global`.
 - With `--project` or `--dir`, setup writes files such as `CLAUDE.md` and `AGENTS.md` in the project.
   Teams usually commit these files, so the change can reach your teammates.
 

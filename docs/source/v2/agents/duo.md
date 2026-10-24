@@ -54,15 +54,15 @@ To choose which agents use GitLab Orbit:
    | Checkbox | Agents that get the GitLab Orbit tools |
    |----------|----------------------------------------|
    | **Agentic Chat** | GitLab Duo Agentic Chat. |
-   | **Orbit Agent** | The standalone GitLab Orbit agent in GitLab Duo. |
    | **Other Foundational Agents** | Foundational agents outside chat, for example the Security Analyst Agent. |
    | **Custom Agents** | Custom agents users build. |
 
 1. Select **Save changes**.
 1. Open GitLab Duo Chat and confirm that the status dot next to **Orbit** in the chat header is green.
 
-In the chat header, select **Orbit** to turn the **Agentic chat**, **Foundational agents**, and **Custom agents** toggles
-on or off without leaving the chat.
+In the chat header, select **Orbit** to change the same settings without leaving the chat.
+The **Agentic chat**, **Foundational agents**, and **Custom agents** toggles match the
+**Agentic Chat**, **Other Foundational Agents**, and **Custom Agents** checkboxes, and save your preferences.
 
 <!-- vale orbit.StandaloneProductName = YES -->
 

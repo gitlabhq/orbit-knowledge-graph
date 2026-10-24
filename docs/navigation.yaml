@@ -77,7 +77,7 @@
           url: 'orbit/v2/cli/'
         - title: GitLab Duo
           url: 'orbit/v2/agents/duo/'
-        - title: GitLab Orbit MCP server
+        - title: GitLab Orbit MCP endpoint
           url: 'orbit/v2/agents/mcp/'
     - title: GitLab Orbit dashboard
       url: 'orbit/v2/dashboard/'

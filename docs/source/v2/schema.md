@@ -129,5 +129,5 @@ Use these properties to read code without a separate call to the GitLab API.
 - [GitLab Orbit architecture](how-it-works.md)
 - [Query language](queries/query-language.md)
 - [Security](security.md)
-- [CLI](cli.md)
+- [GitLab Orbit CLI](cli.md)
 - [Prompt examples](prompt-examples.md)

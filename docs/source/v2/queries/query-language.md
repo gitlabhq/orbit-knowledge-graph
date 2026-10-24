@@ -226,7 +226,10 @@ These properties have a text index:
   To sort by an aggregate, give it an alias: `RETURN mr.state, count(mr) AS mrs ORDER BY mrs DESC`.
   `sum` and `avg` need a numeric property. `min` and `max` need a number, boolean, enum, date, or timestamp property.
   In an aggregation, a text match or a `<`, `<=`, `>`, or `>=` comparison on a free-text property, such as `mr.title`,
-  needs that node in a group key. `Project`, `Group`, and code nodes are exempt.
+  needs that node in a group key: return the node, as in `RETURN mr, count(p)`, or one of its free-text properties,
+  as in `RETURN mr.title, count(p)`. Other properties, such as `mr.iid`, do not count.
+  Otherwise, the query fails with `text matching and ordering require grouping by "mr"`.
+  `Project`, `Group`, and code nodes are exempt.
 - To group by a time period, use `date_trunc('<unit>', <property>)` as a group key on a date property.
   The units are `minute`, `hour`, `day`, `week`, `month`, `quarter`, and `year`.
   `minute` and `hour` also need a filter on the same property. Weeks start on Sunday.

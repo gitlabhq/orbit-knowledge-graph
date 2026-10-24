@@ -171,6 +171,7 @@ glab orbit graph-status
 
 With no option, `graph-status` shows the project of the `origin` remote of the clone.
 In a terminal, it prints a summary. In a pipe or a file, it prints JSON.
+When indexing is complete, **SDLC data** and **Code** show `indexed`, and the summary ends with `Ready.`
 `status` shows only the health of the service.
 
 | Option | Type | Required | Description |
@@ -210,7 +211,7 @@ and writes definitions, imports, and cross-file references to the graph.
 The parser and [supported languages](schema.md#supported-languages) are the same as for the remote graph.
 
 - When you pass the path of a directory, the CLI indexes each repository in the directory.
-- Each indexed commit keeps its own graph. When you index the same commit again, the CLI re-indexes only the files that changed since the last run, including uncommitted edits.
+- Each indexed commit keeps its own graph. When you index the same commit again, the CLI reindexes only the files that changed since the last run.
 - After you switch branches, `grep` and `context` index the new commit for you.
   Before you use `repo-map` or `sql` on the new commit, run `glab orbit index .`.
 
@@ -241,8 +242,8 @@ Function read_file — src/utils.py:3-4 ←run
   Patterns with regular expression characters are regular expressions. For an exact string, use `-F`.
 - Common `rg` options such as `-A`, `-B`, `-C`, `-w`, `-l`, `-c`, `-g`, and `-t` work.
   To filter by definition type, use `--kind`, such as `--kind Class,Method`.
-- A file that differs from the last commit shows `(edited since index)` and no definitions.
-  Commit the change to index it.
+- A file that differs from the last commit shows `(edited since index)` and no definitions, even after you run `glab orbit index .` again.
+  Commit the change to see its definitions.
 
 To read the source of a definition, and its callers and callees, pass its name to `context`:
 

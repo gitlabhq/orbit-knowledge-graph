@@ -81,21 +81,21 @@ Prerequisites:
 
 - The Owner role for the top-level group.
 
-To turn GitLab Orbit on or off:
+If GitLab Orbit is not turned on for any of your groups, the dashboard has no tabs and lists the top-level groups that you own.
+To turn on GitLab Orbit, select the groups, select **Turn on GitLab Orbit**, then in the confirmation dialog, select **Turn on GitLab Orbit**.
+On GitLab.com, you can also try GitLab Orbit with a [free trial](trial.md).
+
+Otherwise, to turn GitLab Orbit on or off:
 
 1. In the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
 1. Select the **Status** tab.
 1. Select the checkbox next to your top-level group.
 1. Select **Actions** > **Turn on GitLab Orbit** or **Actions** > **Turn off GitLab Orbit**.
-1. On the confirmation dialog, select **Turn on GitLab Orbit** or **Turn off GitLab Orbit**.
+1. In the confirmation dialog, select **Turn on GitLab Orbit** or **Turn off GitLab Orbit**.
 
 The tab shows the new GitLab Orbit status of the group.
 When you turn off GitLab Orbit, GitLab keeps the indexed data for a limited time.
 For more information, see [data retention and deletion](how-it-works.md#data-retention-and-deletion).
-
-If GitLab Orbit is not turned on for any of your groups, the dashboard lists your groups.
-To turn on GitLab Orbit, select the groups, then select **Turn on GitLab Orbit**.
-On GitLab.com, you can also try GitLab Orbit with a [free trial](trial.md).
 
 ## Related topics
 

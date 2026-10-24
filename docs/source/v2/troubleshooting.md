@@ -228,6 +228,19 @@ cleared **Other Foundational Agents** in the **GitLab Orbit** section of their p
 
 To resolve this issue, [add the tools to the flow](agents/duo.md#use-gitlab-orbit-in-a-custom-flow), and ask the user to select **Other Foundational Agents** again in their preferences.
 
+### The status dot next to Orbit is not green
+
+In GitLab Duo Chat, the status dot next to **Orbit** in the chat header is an empty circle, and the agent does not use GitLab Orbit.
+
+This issue occurs when GitLab Orbit is turned off for the type of agent you chat with: Agentic Chat, foundational agents, or custom agents.
+
+To resolve this issue, in the chat header, select **Orbit**, then turn on the toggle for that type of agent.
+You can also select the matching checkbox in the **GitLab Orbit** section of your preferences.
+
+If **Orbit** does not appear in the chat header, GitLab Orbit in GitLab Duo is not on for you.
+On GitLab.com, GitLab Orbit must be turned on for a group that you belong to.
+On GitLab Self-Managed and GitLab Dedicated, an administrator can turn off GitLab Orbit in GitLab Duo for the instance.
+
 <!-- vale orbit.StandaloneProductName = YES -->
 
 ## Local graph
@@ -311,7 +324,7 @@ To resolve this issue, index your repositories again.
 
 ## Related topics
 
-- [CLI](cli.md)
+- [GitLab Orbit CLI](cli.md)
 - [Security](security.md)
 - [GitLab Orbit architecture](how-it-works.md)
-- [MCP](agents/mcp.md)
+- [GitLab Orbit MCP endpoint](agents/mcp.md)

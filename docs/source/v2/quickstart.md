@@ -27,8 +27,9 @@ about your GitLab data.
 ## Step 1: Turn on GitLab Orbit for your group
 
 To check whether GitLab Orbit is already on for your group, open the [GitLab Orbit dashboard](dashboard.md).
-If GitLab Orbit is on for any of your groups, the **Status** tab shows the state of each group.
-If it is on, go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
+If the dashboard has no tabs, GitLab Orbit is off for all of your groups.
+Otherwise, find your top-level group on the **Status** tab.
+If GitLab Orbit is on for your top-level group, go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
 If it is off and you do not have the Owner role for the top-level group, ask a user with that role to turn it on.
 
 Prerequisites:
@@ -53,7 +54,13 @@ Other agents, such as Claude Code or Codex, need a one-time setup on your machin
 
 ### Use GitLab Orbit in GitLab Duo
 
-To ask your first question, open GitLab Duo Chat and use one of the prompts at the end of this page.
+To ask your first question, open GitLab Duo Chat and ask:
+
+```plaintext
+Use GitLab Orbit to list the 5 most recently updated projects in my group.
+```
+
+For more prompts, see [prompt examples](prompt-examples.md).
 To choose which agents use GitLab Orbit, see [GitLab Orbit in GitLab Duo](agents/duo.md).
 
 ### Use GitLab Orbit with your agent

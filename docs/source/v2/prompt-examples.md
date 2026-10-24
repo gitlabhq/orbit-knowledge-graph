@@ -14,11 +14,11 @@ title: GitLab Orbit prompt examples
 {{< /details >}}
 
 Send these prompts to GitLab Duo Chat, or to an agent that uses the [GitLab Orbit CLI](cli.md)
-or the [GitLab Model Context Protocol (MCP) endpoint](agents/mcp.md).
+or the [GitLab Orbit Model Context Protocol (MCP) endpoint](agents/mcp.md).
 Start the first prompt of a conversation with `Using GitLab Orbit` to make sure the agent uses GitLab Orbit, and replace the values in `<angle brackets>`.
 
-Each example also shows the [queries](queries/query-language.md) that the agent runs, on the `gitlab-org/gitlab` project on GitLab.com.
-To check an answer, replace the paths and IDs with those of your project, then run the query with `glab orbit query "<query>"`.
+Each example also shows the [queries](queries/query-language.md) that the agent runs, on the `gitlab-org` group and the `gitlab-org/gitlab` project on GitLab.com.
+To check an answer, replace the group and project paths, IDs, branch and environment names, and dates with your own, then run the query with `glab orbit query "<query>"`.
 To find the IDs, see [bounded nodes](queries/query-language.md#bounded-nodes).
 
 ## Fix a vulnerability across every affected project

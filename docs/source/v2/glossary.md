@@ -25,7 +25,7 @@ GitLab Orbit CLI
 : The `orbit` binary. `glab orbit` installs it and forwards every command to it.
 
 GitLab Orbit MCP endpoint
-: The GitLab server for the Model Context Protocol (MCP) at `/api/v4/orbit/mcp`, for agents that cannot run shell commands.
+: The Model Context Protocol (MCP) server of GitLab Orbit, at `/api/v4/orbit/mcp`, for agents that cannot run shell commands.
 
 GitLab Orbit skill
 : The instructions and query recipes your agent loads to use GitLab Orbit. `glab orbit setup` installs it.
