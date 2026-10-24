@@ -4,7 +4,7 @@ use crate::constants::EDGE_TYPE_SUFFIX;
 use crate::error::{QueryError, Result};
 use crate::input::{Input, OrderDirection};
 use crate::passes::lower::{graph, predicates};
-use crate::passes::plan::{EdgeRelation, Plan, Traversal};
+use crate::passes::plan::{EdgeRelation, Plan, Traversal, property_value};
 use crate::tp_bounds::TpBounds;
 
 pub(crate) fn emit(
@@ -25,7 +25,11 @@ pub(crate) fn emit(
     let mut query = output.into_query(vec![], vec![], vec![], input.limit);
     query.order_by = match (&input.order_by, &input.relationship_return.sort) {
         (Some(order), _) => vec![ordered(
-            predicates::column(&execution.property(&order.node, &order.property)),
+            predicates::output_value(&property_value(
+                &plan.nodes,
+                &order.node,
+                execution.property(&order.node, &order.property),
+            )),
             order.direction,
         )],
         (None, Some(sort)) => {

@@ -1,0 +1,10 @@
+description: A time window filter compares the stored column directly so the minmax index can prune
+
+query:
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.merged_at >= '2024-06-01T00:00:00Z' RETURN mr.title LIMIT 10
+
+expect:
+  compile_only: true
+  sql_contains: ["mr.merged_at >= "]
+  sql_not_contains: ["nullIf"]

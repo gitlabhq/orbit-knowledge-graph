@@ -24,6 +24,10 @@ properties:
     nullable: false
     mutable: false
     description: "Unique ID."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_security_scan
+      key_column: id
 
   scan_type:
     type: enum

@@ -1,6 +1,8 @@
 pub mod clickhouse;
 pub mod duckdb;
 
+use std::collections::HashSet;
+
 use crate::{DataModelError, GraphCatalog, PropertyRealization};
 
 pub use clickhouse::{ClickHouseBindings, EntityLayout, TableLayout};
@@ -13,6 +15,7 @@ pub(super) struct PropertyBackendFacts {
     has_text_index: bool,
     unique: bool,
     mutable: bool,
+    null_as_epoch: bool,
 }
 
 #[derive(Debug)]
@@ -33,6 +36,13 @@ pub(crate) fn entity_facts(ontology: &ontology::Ontology, local: bool) -> Vec<En
                 .then(|| ontology.local_entity_fields(&node.name))
                 .flatten();
             let text_indexed = ontology.text_indexed_columns(&node.name);
+            let non_nullable_storage: HashSet<&str> = node
+                .storage
+                .columns
+                .iter()
+                .filter(|column| !column.ch_type.starts_with("Nullable("))
+                .map(|column| column.name.trim_matches('`'))
+                .collect();
             EntityFacts {
                 name: node.name.clone(),
                 table: node.destination_table.clone(),
@@ -70,6 +80,13 @@ pub(crate) fn entity_facts(ontology: &ontology::Ontology, local: bool) -> Vec<En
                                     && text_indexed.contains(&field.name.as_str()),
                                 unique: field.unique,
                                 mutable: field.mutable,
+                                null_as_epoch: !local
+                                    && field.nullable
+                                    && matches!(
+                                        field.data_type,
+                                        ontology::DataType::DateTime | ontology::DataType::Date
+                                    )
+                                    && non_nullable_storage.contains(field.name.as_str()),
                             },
                         )
                     })
@@ -90,6 +107,7 @@ fn derive_property_backend_facts(
             has_text_index: false,
             unique: false,
             mutable: true,
+            null_as_epoch: false,
         };
         graph.properties().count()
     ];

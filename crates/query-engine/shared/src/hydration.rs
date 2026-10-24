@@ -39,7 +39,7 @@ pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) ->
     ids
 }
 
-/// Reads the `_orbit_{alias}_tp` column emitted by the enforce pass.
+/// Reads the `_orbit_{alias}_tp` column emitted by the result-contract pass.
 pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<TraversalPath> {
     let tp_col = traversal_path_column(alias);
     let mut paths: Vec<TraversalPath> = result

@@ -2,8 +2,9 @@ use super::Emitted;
 use crate::ast::*;
 use crate::error::Result;
 use crate::input::{Input, OrderDirection};
-use crate::passes::lower::predicates::{column, predicate};
+use crate::passes::lower::predicates::{output_value, predicate};
 use crate::passes::lower::{EmitOutput, graph};
+use crate::passes::plan::predicates::OutputValue;
 use crate::passes::plan::query_types::aggregation::{AggregationPlan, Group};
 use crate::passes::plan::{Aggregation, Plan};
 use crate::tp_bounds::TpBounds;
@@ -18,13 +19,19 @@ pub(crate) fn emit(
     for condition in &result.condition {
         super::super::columns::referenced(&predicate(condition), &mut read);
     }
-    read.extend(result.groups.iter().map(|group| group.column.clone()));
     read.extend(
         result
-            .measures
+            .groups
             .iter()
-            .filter_map(|measure| measure.argument.clone()),
+            .filter_map(|group| group.value.column().cloned()),
     );
+    read.extend(result.measures.iter().filter_map(|measure| {
+        measure
+            .argument
+            .as_ref()
+            .and_then(OutputValue::column)
+            .cloned()
+    }));
     let mut output = graph::execute(&plan.operation.execution, &read, tp_bounds);
     let nodes = output.take_bindings(plan, input)?;
     let query = aggregation(&plan.operation.result, output, input.limit);
@@ -37,7 +44,7 @@ pub(crate) fn emit(
 }
 
 fn group(value: &Group) -> Expr {
-    let column = column(&value.column);
+    let column = output_value(&value.value);
     match value.truncate {
         Some(unit) => Expr::TimeBucket {
             unit,
@@ -60,7 +67,7 @@ fn aggregation(plan: &AggregationPlan, output: EmitOutput, limit: u32) -> Query 
                     argument: measure
                         .argument
                         .as_ref()
-                        .map(|value| Box::new(column(value))),
+                        .map(|value| Box::new(output_value(value))),
                     distinct: false,
                     condition: condition.clone().map(Box::new),
                 },

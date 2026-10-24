@@ -15,6 +15,7 @@ variants:
 
   - from_node: { type: User, id: id }
     to_node: { type: Project, id: id }
+    scope: prune_to_target
     description: "User namespace contains project."
 
   - from_node: { type: Project, id: id }

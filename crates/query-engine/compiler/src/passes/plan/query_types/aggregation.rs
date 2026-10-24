@@ -13,18 +13,18 @@ use crate::input::{
 };
 use crate::passes::plan::graph::{ExecutionPlan, RelationNode};
 use crate::passes::plan::pattern::Pattern;
-use crate::passes::plan::predicates::{Column, Predicate};
-use crate::passes::plan::{NodePlan, Plan};
+use crate::passes::plan::predicates::{Column, OutputValue, Predicate};
+use crate::passes::plan::{NodePlan, Plan, property_value};
 
 #[derive(Clone, PartialEq)]
 pub struct Group {
-    pub column: Column,
+    pub value: OutputValue,
     pub truncate: Option<TruncateUnit>,
 }
 
 pub struct Measure {
     pub function: AggFunction,
-    pub argument: Option<Column>,
+    pub argument: Option<OutputValue>,
     pub name: String,
 }
 
@@ -77,7 +77,7 @@ fn aggregation_plan(
                 ..
             } => {
                 let group = Group {
-                    column: execution.property(node, property),
+                    value: property_value(nodes, node, execution.property(node, property)),
                     truncate: *truncate,
                 };
                 plan.group_outputs.push((group.clone(), alias));
@@ -91,7 +91,7 @@ fn aggregation_plan(
                     add_group(
                         &mut plan.groups,
                         Group {
-                            column: execution.property(node, &column),
+                            value: property_value(nodes, node, execution.property(node, &column)),
                             truncate: None,
                         },
                     );
@@ -106,14 +106,16 @@ fn aggregation_plan(
                 add_group(
                     &mut plan.groups,
                     Group {
-                        column: primary_key,
+                        value: OutputValue::Column(primary_key),
                         truncate: None,
                     },
                 );
                 add_group(
                     &mut plan.groups,
                     Group {
-                        column: execution.property(node, &metadata.redaction_id_column),
+                        value: OutputValue::Column(
+                            execution.property(node, &metadata.redaction_id_column),
+                        ),
                         truncate: None,
                     },
                 );
@@ -126,14 +128,22 @@ fn aggregation_plan(
                 .property
                 .as_ref()
                 .filter(|_| nodes.get(&target.node).is_some_and(|node| node.joined))
-                .map(|property| execution.property(&target.node, property)),
+                .map(|property| {
+                    property_value(
+                        nodes,
+                        &target.node,
+                        execution.property(&target.node, property),
+                    )
+                }),
             AggExpr::Sum(property)
             | AggExpr::Avg(property)
             | AggExpr::Min(property)
             | AggExpr::Max(property)
-            | AggExpr::Collect(property) => {
-                Some(execution.property(&property.node, &property.property))
-            }
+            | AggExpr::Collect(property) => Some(property_value(
+                nodes,
+                &property.node,
+                execution.property(&property.node, &property.property),
+            )),
         };
         plan.measures.push(Measure {
             function: metric.expr.function(),

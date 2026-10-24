@@ -24,6 +24,10 @@ properties:
     nullable: false
     mutable: false
     description: "Derived ID (hash of project_id + branch name)."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_branch
+      key_column: id
 
   project_id:
     type: int64

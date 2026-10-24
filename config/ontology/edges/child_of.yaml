@@ -6,6 +6,7 @@ table: gl_ci_edge
 variants:
   - from_node: { type: Pipeline, id: id }
     to_node: { type: Pipeline, id: id }
+    scope: prune_to_source
     description: "Pipeline is a downstream child of the source pipeline."
 
 indexer:
