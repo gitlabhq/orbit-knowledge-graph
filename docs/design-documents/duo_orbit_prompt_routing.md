@@ -36,7 +36,7 @@ Out of scope:
 
 - The internal implementation of `query_graph` and `get_graph_schema` (see
   [ADR 011](decisions/011_agent_command_surface.md) and the
-  [querying design docs](querying/)).
+  [querying architecture pages](../architecture/querying.md)).
 - The DWS-side flow definitions and agent prompts; those live in the `ai-assist`
   repository.
 - Authorization for graph queries; see [Security](security.md).
@@ -57,7 +57,7 @@ The Orbit MCP tools that this doc gates are themselves designed in:
 - **[ADR 008: Workhorse query acceleration](decisions/008_workhorse_query_acceleration.md)**:
   why `query_graph` runs through Workhorse and not the GKG executor. This is the reason
   Rails still intercepts that command in the agent command surface.
-- **[Querying overview](querying/README.md)**: the agent command discovery
+- **[Querying overview](../architecture/querying.md)**: the agent command discovery
   contract; this doc describes when prompts can reach those commands at all.
 - **[Security](security.md)**: every Orbit tool call passes through Rails
   redaction; this doc is the upstream gate that decides if the tool call
@@ -1156,7 +1156,7 @@ read as "agentic Duo Chat usage" only.
 - [ADR 004: Unified response schema](decisions/004_unified_response_schema.md)
 - [ADR 008: Workhorse query acceleration](decisions/008_workhorse_query_acceleration.md)
 - [ADR 011: Agent command surface](decisions/011_agent_command_surface.md)
-- [Querying overview](querying/README.md)
+- [Querying overview](../architecture/querying.md)
 - [Security](security.md)
 
 ### Source MRs in `gitlab-org/gitlab`

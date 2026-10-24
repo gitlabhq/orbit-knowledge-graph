@@ -106,7 +106,7 @@ maintenance perspective to be too high. We keep an eye on
 - Graph nodes live in typed `gl_*` ClickHouse tables; relationships live in
   ontology-configured edge tables with adjacency-optimized ordering and
   projections. See the [data model](../data_model.md) and
-  [Graph Query Engine](../querying/graph_engine.md) design documents for the
+  [Graph Query Engine](../../architecture/query-engine.md) design documents for the
   as-built implementation.
 - The query layer compiles an intermediate JSON query language into
   parameterized ClickHouse SQL instead of executing Cypher natively.

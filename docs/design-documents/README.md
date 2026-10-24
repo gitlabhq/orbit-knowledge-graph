@@ -8,7 +8,7 @@ Today, the repository includes the following major components:
 
 - Orbit Remote's `gkg-server` binary, which runs in five modes: `Webserver`, `Indexer`, `DispatchIndexing`, `HealthCheck`, and `ClickhouseSetup`.
 - A ClickHouse-backed remote graph runtime with ontology-driven schema, ETL, authorization metadata, and Query DSL validation. The authoritative ontology lives in `config/ontology/`.
-- Remote HTTP, gRPC, REST, and MCP query surfaces accept JSON Query DSL or GQL text. The Rails rollout flag selects the language, and the [Orbit query frontend](querying/orbit_query_frontend.md) compiles it into parameterized ClickHouse SQL.
+- Remote HTTP, gRPC, REST, and MCP query surfaces accept JSON Query DSL or GQL text. The Rails rollout flag selects the language, and the [graph query engine](../architecture/query-engine.md) compiles it into parameterized ClickHouse SQL.
 - A distributed remote indexing pipeline that consumes Siphon CDC through NATS JetStream, dispatches indexing work, and writes SDLC and code graph data into ClickHouse.
 - Orbit Local's standalone `orbit` CLI, which indexes a repository into DuckDB and supports direct SQL, schema inspection, repository maps, and a stateless stdio MCP server.
 - Shared crates for indexing, query compilation, formatting, ontology loading, database access, GitLab API access, health checks, and integration testing.
@@ -72,7 +72,7 @@ graph TD
 See the following design documents for more details on the Orbit architecture:
 
 - [Orbit Indexing Service](indexing/)
-- [Orbit Querying Service](querying/)
+- [Orbit Querying Service](../architecture/querying.md)
 - [Orbit Data Model](data_model.md)
 - [Orbit Schema Management](schema_management.md)
 - [Orbit Security](security.md)
@@ -152,12 +152,12 @@ flowchart TD
 
 ### Database & Database Ops
 
-Orbit Remote's [Graph Query Engine](querying/graph_engine.md) validates queries against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. Both frontends share the same compiler and authorization pipeline.
+Orbit Remote's [Graph Query Engine](../architecture/query-engine.md) validates queries against the ontology and compiles traversal, aggregation, neighbors, and path-finding requests into parameterized ClickHouse SQL. Both frontends share the same compiler and authorization pipeline.
 
 The current implementation uses ClickHouse for remote graph storage and query execution. In the current repository state:
 
 - Graph nodes live in typed `gl_*` ClickHouse tables such as `gl_group`, `gl_project`, `gl_merge_request`, `gl_pipeline`, `gl_job`, `gl_vulnerability`, `gl_branch`, `gl_file`, `gl_definition`, and `gl_imported_symbol`.
-- Relationships are stored in ontology-configured edge tables (defaulting to `gl_edge`) with adjacency-optimized ordering and projections. Each edge YAML can specify a `table:` field to route relationship types to dedicated tables; `settings.edge_tables` in `schema.yaml` defines available tables.
+- Relationships are stored in ontology-configured edge tables (defaulting to `gl_edge`) with adjacency-optimized ordering. Each edge YAML can specify a `table:` field to route relationship types to dedicated tables; `settings.edge_tables` in `schema.yaml` defines available tables.
 - Code indexing progress is tracked in `code_indexing_checkpoint`.
 - The ontology in `config/ontology/` defines the mapping between entity names, properties, redaction metadata, ETL sources, and relationship kinds.
 
@@ -177,7 +177,7 @@ Files order defining code first, then other code, tests, and text files.
 
 ClickHouse was chosen over dedicated graph databases (Neo4j, FalkorDB, Memgraph, Neptune, SpannerGraph) after KuzuDB was archived in October 2025. The full evaluation, benchmarking results, and legal/procurement context are recorded in [ADR 000: ClickHouse as graph storage](decisions/000_clickhouse_graph_storage.md).
 
-View the [Graph Query Engine](querying/graph_engine.md) design document for more details.
+View the [Graph Query Engine](../architecture/query-engine.md) design document for more details.
 
 ## Motivation
 
@@ -351,7 +351,7 @@ This makes property graphs a flexible choice for both AI-driven analytics and hu
 
 Property graphs are standardized by [SQL 2023's ISO/IEC 9075-16:2023](https://www.iso.org/standard/79473.html). The team evaluated Cypher and dedicated graph databases during the original storage and query-language design; those decisions remain documented in [ADR 000](decisions/000_clickhouse_graph_storage.md). The client contract is the JSON Query DSL or the Orbit query frontend's read-only text; neither exposes generated SQL.
 
-See the [querying design documents](./querying/) for the current query architecture.
+See the [querying architecture pages](../architecture/querying.md) for the current query architecture.
 
 ### Orbit is OLAP, not OLTP
 
@@ -386,7 +386,7 @@ See the [Observability Design Document](observability.md) for more details.
 For how we will achieve this, see the following design documents:
 
 - See the [Indexing Service Design Document](indexing/) for how the indexing service will index SDLC metadata and code.
-- See the [Web Service Design Document](querying/) for how the web service will serve queries.
+- See the [Querying architecture page](../architecture/querying.md) for how the web service will serve queries.
 - (Follow up MR) ClickHouse Cloud Clustering for scalability and reliability.
 
 ### FinOps & Maintainability

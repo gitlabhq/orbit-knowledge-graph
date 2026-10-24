@@ -33,6 +33,7 @@ SCOPE = (
     "CONTEXT.md",
     "crates/*/AGENTS.md",
     "docs/dev/**/*.md",
+    "docs/architecture/**/*.md",
     "docs/design-documents/**/*.md",
     ".gitlab/merge_request_templates/*.md",
     ".gitlab/issue_templates/*.md",
