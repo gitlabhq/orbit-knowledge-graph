@@ -156,6 +156,7 @@ instructions:
   - name: Code-graph crate guidance
     fileFilters:
       - "crates/code-graph/**/*.rs"
+      - "crates/integration-tests-codegraph/**/*"
     instructions: |
       Review against crates/code-graph/AGENTS.md. Flag:
       1. Language-specific branches in shared code (linker, pipeline,
@@ -173,15 +174,17 @@ instructions:
       - "crates/indexer/**/*.rs"
     instructions: |
       Review against crates/indexer/AGENTS.md. Flag:
-      1. Reuse-first violations, the most common preventable feedback: a new
-         pipeline or handler that does not use Pipeline::run_plan or
-         EntityHandler, hand-rolled Arrow code instead of orbit_arrow
-         helpers, hand-written edge specs instead of ontology-derived
-         edge_specs, hand-rolled siphon column handling, or custom retry
-         loops instead of the shared retry harness in engine/retry.rs
-      2. ClickHouse reads or writes that do not use
-         prefixed_table_name(table, SCHEMA_VERSION)
+      1. Reuse-first, a default and not a hard rule, so flag as a suggestion:
+         a new SDLC pipeline or handler that hand-rolls paging and
+         checkpoints instead of Pipeline::run_plan or EntityHandler,
+         hand-rolled Arrow code instead of orbit_arrow helpers, hand-written
+         edge specs instead of ontology-derived edge_specs, hand-rolled
+         siphon column handling, or custom retry loops instead of the shared
+         retry harness in engine/retry.rs
+      2. Graph-table writes that do not use
+         prefixed_table_name(table, SCHEMA_VERSION). Datalake reads are
+         unversioned; do not flag them
       3. DDL run from handler or indexer-mode code paths. DDL belongs only in
-         schema::migration, which runs in dispatcher mode; do not flag that
-         module itself
+         dispatcher-mode code (schema::migration and the migration-completion
+         GC); do not flag those
       4. New edge or action routing without an end-to-end YAML scenario
