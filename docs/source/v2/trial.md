@@ -47,7 +47,7 @@ The page shows **GitLab Orbit is indexing `<my-group>`**, then **GitLab Orbit is
 
 If none of your groups has GitLab Orbit turned on, you can also start the trial from the [GitLab Orbit dashboard](dashboard.md).
 
-To connect your agent, continue with the [quickstart](quickstart.md#step-2-set-up-your-agent-to-use-gitlab-orbit).
+To connect your agent, continue with the [quickstart](quickstart.md#step-2-connect-your-agent).
 
 ## When the trial ends
 

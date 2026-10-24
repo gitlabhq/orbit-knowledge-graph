@@ -27,33 +27,35 @@ about your GitLab data.
 ## Step 1: Turn on GitLab Orbit for your group
 
 A user with the Owner role for the top-level group turns on GitLab Orbit in the [GitLab Orbit dashboard](dashboard.md).
-If GitLab Orbit is already on for your group, go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
+If GitLab Orbit is already on for your group, go to [step 2](#step-2-connect-your-agent).
 Otherwise, see [turn GitLab Orbit on or off for a group](dashboard.md#turn-gitlab-orbit-on-or-off-for-a-group).
 
 The first index usually completes in a few minutes, and can take up to a few hours for large codebases.
 Continue with the next steps while the index runs.
 
-## Step 2: Set up your agent to use GitLab Orbit
+## Step 2: Connect your agent
 
-GitLab Duo uses GitLab Orbit automatically.
+GitLab Duo uses GitLab Orbit with no setup.
 Other agents, such as Claude Code or Codex, need a one-time setup on your machine.
 
-### Use GitLab Orbit in GitLab Duo
+### GitLab Duo
 
-To ask your first question, open GitLab Duo Chat and ask:
+<!-- vale orbit.StandaloneProductName = NO -->
 
-```plaintext
-Use GitLab Orbit to list the 5 most recently updated projects in my group.
-```
+GitLab Orbit is on by default in GitLab Duo.
+To check, open GitLab Duo Chat and find **Orbit** in the chat header:
 
-For more prompts, see [prompt examples](prompt-examples.md).
+- If the status dot is green, GitLab Orbit is on. Go to [step 3](#step-3-ask-your-first-question).
+- If the status dot is empty, select **Orbit**, then turn on the toggle for the agent you chat with.
+  For more information, see [troubleshooting](troubleshooting.md#the-status-dot-next-to-orbit-is-not-green).
+
+<!-- vale orbit.StandaloneProductName = YES -->
+
 To choose which agents use GitLab Orbit, see [GitLab Orbit in GitLab Duo](agents/duo.md).
 
-### Use GitLab Orbit with your agent
+### Other agents
 
-Connect an agent on your machine to GitLab Orbit, then ask your first question.
-
-To set up your agent:
+To set up an agent on your machine:
 
 <!-- vale orbit.StandaloneProductName = NO -->
 
@@ -87,24 +89,42 @@ To run setup yourself, see [connect your agent](agents/_index.md).
 
 To check indexing progress, run `glab orbit graph-status` until the summary ends with `Ready.`
 
-To ask your first question:
+## Step 3: Ask your first question
 
-1. Start a new session of your agent in the repository and ask about your GitLab data:
+Ask GitLab Duo Chat or your agent about your GitLab data.
+Replace `<my-group>` and `<my-group>/<my-project>` with the full paths of your group and project.
 
-   ```plaintext
-   Using GitLab Orbit, which open merge requests in <my-group>/<my-project> are blocked
-   by a failed job? Include only merge requests updated in the last 7 days.
-   Group them by job, and show who authored each one.
-   ```
+- Find the merge requests that a failing job blocks:
 
-   Replace `<my-group>/<my-project>` with the full path of your project.
-   The agent writes a graph query, runs it with `glab orbit query`, and answers with only the data that you can access.
+  ```plaintext
+  Using GitLab Orbit, which open merge requests in <my-group>/<my-project> are blocked
+  by a failed job? Include only merge requests updated in the last 7 days.
+  Group them by job, and show who authored each one.
+  ```
 
-1. Ask about your code:
+- Find the open vulnerabilities to fix first:
 
-   ```plaintext
-   Using GitLab Orbit, what does this project do, and how is it structured?
-   ```
+  ```plaintext
+  Using GitLab Orbit, which projects in <my-group> have open critical or high
+  vulnerabilities, and how many does each have?
+  ```
+
+- Check what a merge request affects before you approve it:
+
+  ```plaintext
+  Using GitLab Orbit, review merge request <!123> in <my-group>/<my-project>.
+  Which callers of the code that it changes are outside the merge request?
+  ```
+
+The agent writes a graph query, runs it, and answers with only the data that you can access.
+
+In a clone of the project, your agent can also answer questions about the code:
+
+```plaintext
+Using GitLab Orbit, what does this project do, and how is it structured?
+```
+
+For more prompts, see [prompt examples](prompt-examples.md).
 
 ## Next steps
 
