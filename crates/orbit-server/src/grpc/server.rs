@@ -6,6 +6,7 @@ use orbit_log_fields::info;
 use orbit_server_config::{AnalyticsConfig, GrpcConfig};
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::net::TcpListener;
+use tonic::codec::CompressionEncoding;
 use tonic::transport::Server as TonicServer;
 use tonic::transport::server::{ServerTlsConfig, TcpIncoming};
 
@@ -17,6 +18,18 @@ use crate::proto::orbit_service_server::OrbitServiceServer;
 use orbit_billing::{BillingTracker, QuotaService};
 
 use super::service::OrbitServiceImpl;
+
+/// The client's `grpc-accept-encoding` order picks among the encodings tonic is
+/// compiled with (gzip, zstd); `send_compressed` only switches response
+/// compression on. C-core clients also decode deflate, but gzip is the only one of ours they
+/// advertise.
+fn with_compression<T>(service: OrbitServiceServer<T>) -> OrbitServiceServer<T> {
+    service
+        .send_compressed(CompressionEncoding::Gzip)
+        .send_compressed(CompressionEncoding::Zstd)
+        .accept_compressed(CompressionEncoding::Gzip)
+        .accept_compressed(CompressionEncoding::Zstd)
+}
 
 pub struct GrpcServer {
     service: OrbitServiceImpl,
@@ -109,10 +122,12 @@ impl GrpcServer {
             .layer(tower::util::MapFutureLayer::new(|future| {
                 tracing::Instrument::instrument(future, crate::auth::request_span())
             }))
-            .add_service(OrbitServiceServer::from_arc(Arc::clone(&service)))
-            .add_service(super::legacy::LegacyGkgService::new(
+            .add_service(with_compression(OrbitServiceServer::from_arc(Arc::clone(
+                &service,
+            ))))
+            .add_service(super::legacy::LegacyGkgService::new(with_compression(
                 OrbitServiceServer::from_arc(service),
-            ))
+            )))
             .serve_with_incoming(incoming)
             .await
     }
