@@ -27,6 +27,10 @@ properties:
     nullable: false
     mutable: false
     description: "Governance session ID."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_agent_session
+      key_column: id
 
   flow_type:
     type: enum

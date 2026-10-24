@@ -1,5 +1,5 @@
 //! Neighbors emits its own redaction columns directly (rather than relying on
-//! the enforce pass's _orbit_* injection) since the center edge column differs
+//! the result-contract pass's _orbit_* injection) since the center edge column differs
 //! per direction arm.
 
 use ontology::constants::*;

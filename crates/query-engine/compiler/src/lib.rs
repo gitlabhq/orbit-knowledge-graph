@@ -73,7 +73,6 @@ pub use passes::codegen::{
     ddl::duckdb::emit_create_table as emit_duckdb_create_table, ddl::duckdb::generate_local_ddl,
     ddl::generate_local_tables,
 };
-pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
 pub use passes::frontend::{Frontend, gql};
 pub use passes::hydrate::{
     DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
@@ -81,6 +80,7 @@ pub use passes::hydrate::{
 };
 pub use passes::normalize::build_entity_auth;
 pub use passes::plan::HydrationCompileOptions;
+pub use passes::result_contract::{EdgeMeta, RedactionNode, ResultContext};
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;
@@ -781,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_clamps_settings_to_safety_floor() {
+    fn path_finding_clamps_settings_to_safety_ceiling() {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -797,11 +797,11 @@ mod tests {
 
         assert!(
             sql.contains("max_execution_time = 15"),
-            "pathfinding must clamp max_execution_time to 15, got:\n{sql}"
+            "pathfinding max_execution_time must not exceed 15, got:\n{sql}"
         );
         assert!(
             sql.contains("max_memory_usage = 16106127360"),
-            "pathfinding must clamp max_memory_usage to 15 GiB, got:\n{sql}"
+            "pathfinding max_memory_usage must not exceed 15 GiB, got:\n{sql}"
         );
     }
 

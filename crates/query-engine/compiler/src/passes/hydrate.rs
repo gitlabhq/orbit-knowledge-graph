@@ -4,8 +4,6 @@
 use std::collections::HashSet;
 
 use ontology::VirtualSource;
-#[cfg(test)]
-use ontology::{FieldSource, Ontology};
 use query_data_model::PropertyRealization;
 
 use crate::ast::Node;
@@ -364,153 +362,50 @@ fn virtual_request(
 }
 
 #[cfg(test)]
-fn inject_virtual_dependencies(
-    columns: &mut Vec<String>,
-    virtual_columns: &[VirtualColumnRequest],
-    node: &ontology::NodeEntity,
-) -> Vec<String> {
-    let mut injected = Vec::new();
-    for virtual_column in virtual_columns {
-        let Some(field) = node
-            .fields
-            .iter()
-            .find(|field| field.name == virtual_column.column_name)
-        else {
-            continue;
-        };
-        if let FieldSource::Virtual(source) = &field.source {
-            for dependency in &source.depends_on {
-                if !columns.contains(dependency)
-                    && node.fields.iter().any(|field| {
-                        field.name == *dependency
-                            && matches!(field.source, FieldSource::DatabaseColumn(_))
-                    })
-                {
-                    columns.push(dependency.clone());
-                    injected.push(dependency.clone());
-                }
-            }
-        }
-    }
-    injected
-}
-
-#[cfg(test)]
-fn split_columns(
-    requested: &[String],
-    node: &ontology::NodeEntity,
-) -> (Vec<String>, Vec<VirtualColumnRequest>) {
-    let mut columns = Vec::new();
-    let mut virtual_columns = Vec::new();
-    for column in requested {
-        match node.fields.iter().find(|field| field.name == *column) {
-            Some(field) => match &field.source {
-                FieldSource::DatabaseColumn(_) => columns.push(column.clone()),
-                FieldSource::Virtual(source) if !source.disabled => {
-                    virtual_columns.push(VirtualColumnRequest {
-                        column_name: column.clone(),
-                        service: source.service.clone(),
-                        lookup: source.lookup.clone(),
-                    });
-                }
-                FieldSource::Virtual(_) => {}
-            },
-            None => columns.push(column.clone()),
-        }
-    }
-    (columns, virtual_columns)
-}
-
-#[cfg(test)]
-fn build_dynamic_specs_from_ontology(
-    input: &Input,
-    ontology: &Ontology,
-    security_context: &SecurityContext,
-) -> Vec<DynamicEntityColumns> {
-    let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-    build_dynamic_specs(input, model.as_ref(), security_context)
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
-    use ontology::{Field, FieldSource, VirtualSource};
+    use ontology::{DataType, FieldSource, Ontology, VirtualSource};
+    use query_data_model::{ClickHouseDataModel, OrbitQueryModel};
 
-    fn db_field(name: &str) -> Field {
-        Field {
-            name: name.to_string(),
-            source: FieldSource::DatabaseColumn(name.to_string()),
-            filterable: true,
-            ..Default::default()
-        }
+    fn model(dependencies: &[&str], disabled: bool) -> ClickHouseDataModel {
+        let ontology = Ontology::new()
+            .with_nodes(["TestNode"])
+            .with_fields(
+                "TestNode",
+                ["id", "name", "project_id", "branch", "path"].map(|name| (name, DataType::String)),
+            )
+            .modify_field("TestNode", "name", |field| {
+                field.source = FieldSource::Virtual(VirtualSource {
+                    service: "gitaly".into(),
+                    lookup: "blob_content".into(),
+                    disabled,
+                    depends_on: dependencies.iter().map(ToString::to_string).collect(),
+                    allowed_ops: VirtualSource::DEFAULT_ALLOWED_OPS
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect(),
+                });
+            })
+            .unwrap();
+        ClickHouseDataModel::derive(std::sync::Arc::new(ontology)).unwrap()
     }
 
-    fn virtual_field(name: &str, service: &str, lookup: &str, deps: &[&str]) -> Field {
-        Field {
-            name: name.to_string(),
-            source: FieldSource::Virtual(VirtualSource {
-                service: service.to_string(),
-                lookup: lookup.to_string(),
-                disabled: false,
-                depends_on: deps.iter().map(|s| s.to_string()).collect(),
-                allowed_ops: VirtualSource::DEFAULT_ALLOWED_OPS
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect(),
-            }),
-            nullable: true,
-            ..Default::default()
-        }
-    }
-
-    fn test_node(fields: Vec<Field>) -> ontology::NodeEntity {
-        ontology::NodeEntity {
-            name: "TestNode".to_string(),
-            domain: "test".to_string(),
-            description: String::new(),
-            label: String::new(),
-            destination_table: "gl_test".to_string(),
-            fields,
-            primary_keys: vec!["id".to_string()],
-            enrichment_props: vec![],
-            default_columns: vec![],
-            sort_key: vec!["id".to_string()],
-            pipelines: vec![],
-            reindex_on: vec![],
-            redaction: None,
-            style: Default::default(),
-            has_traversal_path: false,
-            global: false,
-            storage: Default::default(),
-        }
-    }
-
-    fn vc_req(col: &str, service: &str, lookup: &str) -> VirtualColumnRequest {
-        VirtualColumnRequest {
-            column_name: col.to_string(),
-            service: service.to_string(),
-            lookup: lookup.to_string(),
-        }
+    fn entity(model: &ClickHouseDataModel) -> query_data_model::EntityId {
+        model.entity("TestNode").unwrap().id
     }
 
     #[test]
     fn inject_adds_missing_dependencies() {
-        let node = test_node(vec![
-            db_field("id"),
-            db_field("project_id"),
-            db_field("branch"),
-            db_field("path"),
-            virtual_field(
-                "content",
-                "gitaly",
-                "blob_content",
-                &["project_id", "branch", "path"],
-            ),
-        ]);
-        let vcs = vec![vc_req("content", "gitaly", "blob_content")];
+        let model = model(&["project_id", "branch", "path"], false);
+        let virtual_columns = vec![virtual_request(&model, entity(&model), "name").unwrap()];
         let mut columns = vec!["name".to_string()];
 
-        let injected = inject_virtual_dependencies(&mut columns, &vcs, &node);
+        let injected = inject_model_virtual_dependencies(
+            &mut columns,
+            &virtual_columns,
+            &model,
+            entity(&model),
+        );
 
         assert!(columns.contains(&"project_id".to_string()));
         assert!(columns.contains(&"branch".to_string()));
@@ -520,21 +415,16 @@ mod tests {
 
     #[test]
     fn inject_does_not_duplicate_existing_columns() {
-        let node = test_node(vec![
-            db_field("id"),
-            db_field("project_id"),
-            db_field("branch"),
-            virtual_field(
-                "content",
-                "gitaly",
-                "blob_content",
-                &["project_id", "branch"],
-            ),
-        ]);
-        let vcs = vec![vc_req("content", "gitaly", "blob_content")];
+        let model = model(&["project_id", "branch"], false);
+        let virtual_columns = vec![virtual_request(&model, entity(&model), "name").unwrap()];
         let mut columns = vec!["project_id".to_string()];
 
-        let injected = inject_virtual_dependencies(&mut columns, &vcs, &node);
+        let injected = inject_model_virtual_dependencies(
+            &mut columns,
+            &virtual_columns,
+            &model,
+            entity(&model),
+        );
 
         let count = columns.iter().filter(|c| *c == "project_id").count();
         assert_eq!(count, 1, "project_id should not be duplicated");
@@ -544,11 +434,16 @@ mod tests {
 
     #[test]
     fn inject_noop_when_no_virtual_columns() {
-        let node = test_node(vec![db_field("id"), db_field("name")]);
-        let vcs: Vec<VirtualColumnRequest> = vec![];
+        let model = model(&[], false);
+        let virtual_columns = Vec::new();
         let mut columns = vec!["name".to_string()];
 
-        let injected = inject_virtual_dependencies(&mut columns, &vcs, &node);
+        let injected = inject_model_virtual_dependencies(
+            &mut columns,
+            &virtual_columns,
+            &model,
+            entity(&model),
+        );
 
         assert_eq!(columns, vec!["name".to_string()]);
         assert!(injected.is_empty());
@@ -556,20 +451,11 @@ mod tests {
 
     #[test]
     fn inject_skips_deps_not_in_ontology() {
-        let node = test_node(vec![
-            db_field("id"),
-            db_field("branch"),
-            virtual_field(
-                "content",
-                "gitaly",
-                "blob_content",
-                &["branch", "nonexistent"],
-            ),
-        ]);
-        let vcs = vec![vc_req("content", "gitaly", "blob_content")];
+        let model = model(&["branch", "nonexistent"], false);
+        let virtual_columns = vec![virtual_request(&model, entity(&model), "name").unwrap()];
         let mut columns = vec![];
 
-        inject_virtual_dependencies(&mut columns, &vcs, &node);
+        inject_model_virtual_dependencies(&mut columns, &virtual_columns, &model, entity(&model));
 
         assert!(columns.contains(&"branch".to_string()));
         assert!(!columns.contains(&"nonexistent".to_string()));
@@ -577,44 +463,26 @@ mod tests {
 
     #[test]
     fn split_columns_separates_db_and_virtual() {
-        let node = test_node(vec![
-            db_field("id"),
-            db_field("name"),
-            virtual_field("content", "gitaly", "blob_content", &[]),
-        ]);
-        let requested = vec!["name".to_string(), "content".to_string()];
+        let model = model(&[], false);
+        let requested = vec!["id".to_string(), "name".to_string()];
 
-        let (cols, vcs) = split_columns(&requested, &node);
+        let (columns, virtual_columns) = split_model_columns(&requested, &model, entity(&model));
 
-        assert_eq!(cols, vec!["name"]);
-        assert_eq!(vcs.len(), 1);
-        assert_eq!(vcs[0].column_name, "content");
-        assert_eq!(vcs[0].service, "gitaly");
+        assert_eq!(columns, vec!["id"]);
+        assert_eq!(virtual_columns.len(), 1);
+        assert_eq!(virtual_columns[0].column_name, "name");
+        assert_eq!(virtual_columns[0].service, "gitaly");
     }
 
     #[test]
     fn split_columns_excludes_disabled_virtual() {
-        let node = test_node(vec![
-            db_field("id"),
-            Field {
-                name: "content".to_string(),
-                source: FieldSource::Virtual(VirtualSource {
-                    service: "gitaly".to_string(),
-                    lookup: "blob_content".to_string(),
-                    disabled: true,
-                    depends_on: vec![],
-                    allowed_ops: vec![],
-                }),
-                nullable: true,
-                ..Default::default()
-            },
-        ]);
-        let requested = vec!["content".to_string()];
+        let model = model(&[], true);
+        let requested = vec!["name".to_string()];
 
-        let (cols, vcs) = split_columns(&requested, &node);
+        let (columns, virtual_columns) = split_model_columns(&requested, &model, entity(&model));
 
-        assert!(cols.is_empty());
-        assert!(vcs.is_empty());
+        assert!(columns.is_empty());
+        assert!(virtual_columns.is_empty());
     }
 
     // Regression guard: before the fix, `dynamic_columns: "*"` on
@@ -624,7 +492,6 @@ mod tests {
     // `node.columns`).
 
     use crate::input::{DynamicColumnMode, Input, InputNode, QueryType};
-    use ontology::{DataType, Ontology};
 
     fn user_ontology() -> Ontology {
         Ontology::new()
@@ -668,7 +535,8 @@ mod tests {
         let ctx = non_admin_ctx();
         let input = neighbors_input(DynamicColumnMode::All);
 
-        let specs = build_dynamic_specs_from_ontology(&input, &ont, &ctx);
+        let model = ClickHouseDataModel::derive(std::sync::Arc::new(ont)).unwrap();
+        let specs = build_dynamic_specs(&input, &model, &ctx);
         let user = specs
             .iter()
             .find(|s| s.entity_type == "User")
@@ -694,7 +562,8 @@ mod tests {
         let ctx = admin_ctx();
         let input = neighbors_input(DynamicColumnMode::All);
 
-        let specs = build_dynamic_specs_from_ontology(&input, &ont, &ctx);
+        let model = ClickHouseDataModel::derive(std::sync::Arc::new(ont)).unwrap();
+        let specs = build_dynamic_specs(&input, &model, &ctx);
         let user = specs
             .iter()
             .find(|s| s.entity_type == "User")
@@ -721,7 +590,8 @@ mod tests {
         let ctx = non_admin_ctx();
         let input = neighbors_input(DynamicColumnMode::Default);
 
-        let specs = build_dynamic_specs_from_ontology(&input, &ont, &ctx);
+        let model = ClickHouseDataModel::derive(std::sync::Arc::new(ont)).unwrap();
+        let specs = build_dynamic_specs(&input, &model, &ctx);
         let user = specs
             .iter()
             .find(|s| s.entity_type == "User")

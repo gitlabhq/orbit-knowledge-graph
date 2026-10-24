@@ -17,14 +17,8 @@
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
 - version: 114
-  scope: "*"
-  note: >-
-    Makes every node time column non-nullable and stores a null time as the epoch,
-    so the temporal minmax table setting indexes all 76 of them; the 25 explicit time
-    minmax lines go and Date32 columns default to 1970-01-01. The job failure_reason
-    set index widens from 32 to 64 to cover its 46 declared values plus the empty
-    default. DDL changes on 23 tables; null times are rewritten to the epoch on
-    re-index.
+  scope: none
+  note: "Declares the measured scope on twenty edge variants and an id traversal_path lookup on every path-scoped node, 31 in all. Query-planner metadata only: the compiler prunes with it, the indexer never reads it, so no table DDL or indexed row changes."
 - version: 113
   scope: "*"
   note: "Adds skip indexes measured at group scope on 2026-10-22: set on security_scan.status, job.failure_reason and vulnerability_occurrence.report_type; bloom on merge_request.iid and work_item.iid; text on merge_request_diff.head_commit_sha so prefix searches prune; minmax on note.created_at. DDL changes on seven tables; no indexed row changes."

@@ -17,7 +17,7 @@ use crate::ast::{
     Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,
 };
 use crate::error::{QueryError, Result};
-use crate::passes::enforce::ResultContext;
+use crate::passes::result_contract::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
