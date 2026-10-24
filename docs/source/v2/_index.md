@@ -243,10 +243,8 @@ body:has(.product-landing) .docs-content .language-plaintext {
   background-color: var(--gl-text-color-default);
   translate: 0 0;
 }
-/* Links outside gitlab.com get the site's external-link icon instead of the arrow: keep it in place, after a gap. */
+/* Links outside gitlab.com get the site's external-link icon instead of the arrow. A larger offset keeps a gap while the icon sits half a width to the left; it still slides right on hover. */
 .docs-content ul.product-cards > li > a[href^="http"]:not([href*="gitlab.com"])::after {
-  left: 0;
-  margin-left: var(--gl-spacing-scale-2);
-  translate: 0 0;
+  left: var(--gl-spacing-scale-3);
 }
 </style>
