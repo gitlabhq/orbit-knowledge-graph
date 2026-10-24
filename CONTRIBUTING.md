@@ -48,7 +48,7 @@ Run `mise lint:docs` before pushing any documentation changes.
 ## Engineering conventions
 
 - Comments explain why. Do not narrate what the code shows.
-- Rust doc examples compile in `mise test:fast`; `ignore` blocks fail it. Use a plain or `no_run` block with hidden `# ` setup lines, or `text` for pseudo-code.
+- Rust doc examples compile in `mise test:fast`; `ignore` blocks fail it. Use a plain or `no_run` block with hidden setup lines starting with `#`, or `text` for pseudo-code.
 - Reuse existing infrastructure before adding new infrastructure.
 - Before changing an area, read its design document and the crate-local `AGENTS.md`, if present.
 - Treat the ontology as the single source of truth for graph-shape facts.

@@ -4,7 +4,7 @@ set -euo pipefail
 # Run unit tests: --lib tests from all workspace crates plus --bin tests
 # for binary-only crates that contain test modules, plus the integration
 # test targets of code-graph-incremental (one --test per file in its tests/),
-# plus the workspace doctests, which must contain no ignored examples.
+# plus the workspace doctests.
 #
 # integration-tests targets (local, containers, cli) run in their own CI
 # jobs to avoid pulling the entire dependency graph into this job.
