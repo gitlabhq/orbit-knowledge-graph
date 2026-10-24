@@ -92,10 +92,6 @@ impl RelationalMapping for DuckDbBindings {
             .is_none_or(|facts| facts.mutable)
     }
 
-    fn table_path_scopable(&self, _table: &str) -> bool {
-        false
-    }
-
     fn table_path_columns(&self, _table: &str) -> Option<&[crate::PathColumn]> {
         None
     }

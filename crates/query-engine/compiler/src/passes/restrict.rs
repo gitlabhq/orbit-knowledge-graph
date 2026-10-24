@@ -197,20 +197,6 @@ fn validate_traversal_path_within_scope(
     )))
 }
 
-/// Confine edge scans to a tight `traversal_path` prefix when the traversal is
-/// pinned to a project/group. An edge row's `traversal_path` is its source
-/// entity's, so an edge whose two endpoints both resolve to the same scope can
-/// only hold rows under that scope; scoping it is lossless and restores the
-/// edge PK prefix that the broad org-wide authorization filter erases (#601941).
-///
-/// The per-alias proofs come from [`crate::scope::derive_scope_proofs`].
-fn stamp_edge_scope_proofs(
-    input: &Input,
-    model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-) -> std::collections::HashMap<String, crate::scope::ScopeProof> {
-    crate::scope::derive_scope_proofs(input, model)
-}
-
 fn admin_only(
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     entity: &str,
@@ -223,12 +209,11 @@ pub fn restrict(
     input: &mut Input,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     security_ctx: &SecurityContext,
-) -> Result<std::collections::HashMap<String, crate::scope::ScopeProof>> {
+) -> Result<()> {
     enforce_traversal_path_filters(input, model, security_ctx)?;
-    let scope_proofs = stamp_edge_scope_proofs(input, model);
 
     if security_ctx.admin {
-        return Ok(scope_proofs);
+        return Ok(());
     }
 
     if matches!(input.query_type, QueryType::Aggregation) {
@@ -325,7 +310,7 @@ pub fn restrict(
         }
     }
 
-    Ok(scope_proofs)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -342,7 +327,7 @@ mod tests {
 
     fn apply(input: &mut Input, ontology: &Ontology, context: &SecurityContext) -> Result<()> {
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        restrict(input, model.as_ref(), context).map(|_| ())
+        restrict(input, model.as_ref(), context)
     }
 
     fn ontology() -> Ontology {
@@ -1195,8 +1180,9 @@ mod tests {
             ..Input::default()
         };
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ont.clone())).unwrap();
-        let proofs = restrict(&mut input, model.as_ref(), &ctx).expect("restrict ok");
-        let mr_prefix = proofs.get("mr").cloned();
+        restrict(&mut input, model.as_ref(), &ctx).expect("restrict ok");
+        let bounds = crate::tp_bounds::TpBounds::derive(&input, model.as_ref());
+        let mr_prefix = bounds.node("mr");
         assert!(
             mr_prefix.is_some(),
             "pinned MergeRequest derives a scope prefix"
@@ -1234,10 +1220,11 @@ mod tests {
             ..Input::default()
         };
         let model = crate::data_model::clickhouse(std::sync::Arc::new(ont.clone())).unwrap();
-        let proofs = restrict(&mut input, model.as_ref(), &ctx).expect("restrict ok");
+        restrict(&mut input, model.as_ref(), &ctx).expect("restrict ok");
+        let bounds = crate::tp_bounds::TpBounds::derive(&input, model.as_ref());
 
         assert!(
-            proofs.contains_key("mr_a") && !proofs.contains_key("mr_b"),
+            bounds.node("mr_a").is_some() && bounds.node("mr_b").is_none(),
             "mr_b must remain unpinned"
         );
     }
