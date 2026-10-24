@@ -97,12 +97,10 @@ For more information, see [local graph](cli.md#local-graph).
 {{< cards >}}
 
 - [GitLab Orbit CLI](cli.md)
-- [GitLab Orbit dashboard](dashboard.md)
 - [Indexed data](schema.md)
 - [Queries](queries/_index.md)
 - [Security](security.md)
 - [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/ "Install GitLab Orbit on Kubernetes, connect GitLab to it, and index your first group.")
-- [Glossary](glossary.md)
 - [Troubleshooting](troubleshooting.md)
 
 {{< /cards >}}
