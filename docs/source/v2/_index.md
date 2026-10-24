@@ -58,14 +58,11 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 ## Questions GitLab Orbit can answer
 
-- [Review a merge request with proof](prompt-examples.md#review-a-merge-request-with-proof):
-  Which code and projects does this merge request affect? Each finding comes with the graph result that shows it.
-- [Fix a vulnerability across every affected project](prompt-examples.md#fix-a-vulnerability-across-every-affected-project):
-  Which projects in my group does this CVE affect, and which fixes reached production?
-- [Respond to a production incident](prompt-examples.md#respond-to-a-production-incident):
-  Which changes to the failing component, and to the code that it calls, reached production this week?
-- [Change shared code safely](prompt-examples.md#change-shared-code-safely):
-  Which classes inherit from this base class, and what calls the method that I change?
+- {{< icon name="merge-request" >}}[Review a merge request with proof](prompt-examples.md#review-a-merge-request-with-proof)<br>Which code and projects does this merge request affect? Each finding comes with the graph result that shows it.
+- {{< icon name="shield" >}}[Fix a vulnerability across every affected project](prompt-examples.md#fix-a-vulnerability-across-every-affected-project)<br>Which projects in my group does this CVE affect, and which fixes reached production?
+- {{< icon name="issue-type-incident" >}}[Respond to a production incident](prompt-examples.md#respond-to-a-production-incident)<br>Which changes to the failing component, and to the code that it calls, reached production this week?
+- {{< icon name="code" >}}[Change shared code safely](prompt-examples.md#change-shared-code-safely)<br>Which classes inherit from this base class, and what calls the method that I change?
+{.product-cards .product-cards-2 .product-cards-icons}
 
 For more examples, see [prompt examples](prompt-examples.md).
 
