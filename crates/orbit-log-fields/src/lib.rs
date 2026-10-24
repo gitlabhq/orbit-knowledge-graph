@@ -26,6 +26,11 @@ mod macros;
 // ast-grep-ignore: no-raw-tracing-macro -- the macros of this crate call tracing through this path
 pub use tracing as __tracing;
 
+#[doc(hidden)]
+pub const fn __static_str(value: &'static str) -> &'static str {
+    value
+}
+
 macro_rules! fields {
     ($($(#[$doc:meta])* $name:ident = $value:expr;)*) => {
         $($(#[$doc])* pub const $name: &str = $value;)*

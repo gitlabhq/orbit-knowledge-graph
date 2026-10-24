@@ -1,10 +1,11 @@
 id: instrument-skips-arguments
 language: rust
 severity: error
-message: '`#[instrument]` must use `skip_all` and name each field with a constant in `fields(...)`.'
+message: '`#[instrument]` must use `skip_all`, no `err` or `ret`, and name each field with a constant in `fields(...)`.'
 note: |
   Without `skip_all`, `#[instrument]` records every argument with `Debug`
-  under the argument name.
+  under the argument name. `err` and `ret` log the error or the return value
+  without a fixed error type; log the error with a log macro instead.
 rule:
   kind: attribute_item
   has:
@@ -15,10 +16,12 @@ rule:
           regex: '^instrument$'
         - kind: scoped_identifier
           regex: '^(::)?tracing::instrument$'
+  any:
+    - not:
+        regex: '\bskip_all\b'
+    - regex: '[(,]\s*(err|ret)\b'
   not:
-    any:
-      - regex: '\bskip_all\b'
-      - matches: test-code
+    matches: test-code
 ---
 id: instrument-field-is-constant
 language: rust

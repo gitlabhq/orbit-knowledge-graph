@@ -16,6 +16,6 @@ physical:
     emitted:
       expect:
         - (Filter e._deleted = false (Union ALL AS e (_) (_)))
-        - (Deduplicate LimitBy ... (Sort ... (Project ... (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE'] (Scan Table(gl_ci_edge) AS _e)))))
-        - (Deduplicate LimitBy ... (Sort ... (Project ... (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE'] (Scan Table(gl_edge) AS _e)))))
+        - (Deduplicate LimitBy ... (Sort ... (Project ... (SemiJoin _e.traversal_path IN subquery (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE'] (Scan Table(gl_ci_edge) AS _e)) (Project _ctr.traversal_path AS traversal_path (Scan Table(_ctr) AS _ctr))))))
+        - (Deduplicate LimitBy ... (Sort ... (Project ... (SemiJoin _e.traversal_path IN subquery (Filter _e.source_kind = 'MergeRequest', _e.source_id = 1, _e.relationship_kind IN ['IN_PROJECT', 'HAS_HEAD_PIPELINE'] (Scan Table(gl_edge) AS _e)) (Project _ctr.traversal_path AS traversal_path (Scan Table(_ctr) AS _ctr))))))
       reject: ["(Bind _orbit_fused (_))"]

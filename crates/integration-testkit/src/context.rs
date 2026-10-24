@@ -159,6 +159,20 @@ impl TestContext {
         self.client.clone()
     }
 
+    pub async fn drop_table(&self, table: &str) {
+        self.execute(&format!("DROP TABLE IF EXISTS `{table}` SYNC"))
+            .await;
+    }
+
+    pub async fn create_table(&self, table: &str) {
+        let schema_refs: Vec<&str> = self.schema_sqls.iter().map(String::as_str).collect();
+        let statement = schema_statements(&self.config.database, &schema_refs)
+            .into_iter()
+            .find(|statement| creates_table(statement, table))
+            .unwrap_or_else(|| panic!("no CREATE TABLE statement for {table} in the schema SQL"));
+        self.execute(&statement).await;
+    }
+
     pub async fn fork(&self, name: &str) -> Self {
         let database = self.fork_database_name(name);
         let schema_refs: Vec<&str> = self.schema_sqls.iter().map(String::as_str).collect();
@@ -335,10 +349,12 @@ impl TestContext {
 }
 
 fn test_settings() -> HashMap<String, String> {
-    HashMap::from([
+    let mut settings = AppConfig::embedded_defaults().graph.session_settings;
+    settings.extend([
         ("async_insert".to_string(), "0".to_string()),
         ("fsync_metadata".to_string(), "0".to_string()),
-    ])
+    ]);
+    settings
 }
 
 fn test_client(url: &str, database: &str) -> ArrowClickHouseClient {
@@ -399,6 +415,15 @@ fn database_label(label: &str) -> String {
         .filter(|character| character.is_ascii_alphanumeric() || *character == '_')
         .take(48)
         .collect()
+}
+
+fn creates_table(statement: &str, table: &str) -> bool {
+    let kind = statement_kind(statement);
+    let created = kind
+        .strip_prefix("CREATE TABLE IF NOT EXISTS ")
+        .or_else(|| kind.strip_prefix("CREATE TABLE "))
+        .map(|rest| rest.split(['(', ' ']).next().unwrap_or_default());
+    created.is_some_and(|name| name.eq_ignore_ascii_case(table))
 }
 
 fn statement_kind(statement: &str) -> String {

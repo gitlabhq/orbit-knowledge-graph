@@ -17,7 +17,7 @@ use crate::ast::{
     Cte, Expr, Function, Insert, JoinType, Node, Op, Query, SqlType, TableRef, TextMatch,
 };
 use crate::error::{QueryError, Result};
-use crate::passes::enforce::ResultContext;
+use crate::passes::result_contract::ResultContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -425,6 +425,7 @@ impl Context {
             Function::Unnest => "unnest",
             Function::TupleElement => "struct_extract_at",
             Function::Coalesce => "coalesce",
+            Function::NullIf => "nullif",
             Function::Concat => "concat",
             Function::ArgMax | Function::ArgMaxOrNull => "arg_max",
             Function::If

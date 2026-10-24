@@ -93,6 +93,7 @@ impl ClusterHealthChecker {
             Ok(Some(version)) => apply_migration_status(structured, version),
             Ok(None) => {}
             Err(error) => warn!(
+                safe(ERROR_TYPE) = <&str>::from(&error),
                 expanded(ERROR_MESSAGE) = %error,
                 "failed to read migrating schema version; leaving cluster health unhealthy"
             ),
@@ -292,6 +293,7 @@ impl ClusterHealthChecker {
         let options = EncodeOptions::default();
         encode(&toon, &options).unwrap_or_else(|e| {
             orbit_log_fields::warn!(
+                safe(ERROR_TYPE) = "toon_encode",
                 expanded(ERROR_MESSAGE) = %e,
                 "Failed to encode health as TOON, falling back"
             );

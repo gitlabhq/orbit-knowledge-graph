@@ -45,45 +45,27 @@ local contentGitalyCalls = o.metric('gkg.content.gitaly.calls');
 // 1. At a glance ----------------------------------------------------------
 // Tiles summarize the selected time range and stay in text color until a threshold is crossed, so only real
 // trouble is coloured. Thresholds follow the latency (5 s, 25 s) and error
-// (99.5%) objectives.
+// (99%) objectives, with the same definitions as the orbit_query SLO in runbooks.
 local Q = pipelineQueries.prom_name;
 local DUR = pipelineDuration.prom_name;
-local VALID = 'status!~"compile_error|security_error", query_type!="unknown"';
-local SERVER_STATUS = 'execution_error|timeout|streaming_error|content_resolution_error|authorization_error|custom_error';
-local COMPILER_FAULT = 'lowering|enforcement|codegen|pipeline|ontology_internal|security';
+local VALID = 'outcome!="caller_error"';
+local SERVER = 'outcome="server_error"';
+local COMPILER_FAULT = 'lowering|codegen|pipeline|ontology_internal|security';
 local OK = 'status="ok", query_type!="unknown"';
 local SCHEMA = 'status="ok", query_type="unknown"';
 local REJECTED = 'status=~"compile_error|security_error"';
 
-local serverErrors(range) =
-  '(sum(increase(%s{%s, status=~"%s"}[%s])) or vector(0)) + (sum(increase(%s{%s, failure_reason=~"%s"}[%s])) or vector(0))'
-  % [Q, SEL, SERVER_STATUS, range, compilerRejected, SEL, COMPILER_FAULT, range];
+local serverErrors(range) = 'sum(increase(%s{%s, %s}[%s])) or vector(0)' % [Q, SEL, SERVER, range];
 
-local NEUTRAL = [{ color: 'text', value: null }];
-local steps(pairs) = NEUTRAL + [{ color: p[1], value: p[0] } for p in pairs];
-local stepsDown(red, amber) = [
-  { color: 'red', value: null },
-  { color: '#EAB839', value: red },
-  { color: 'green', value: amber },
-];
+local NEUTRAL = o.NEUTRAL;
+local steps = o.steps;
+local stepsDown = o.stepsDown;
+local colored = o.colored;
 
+// Ratios guard their denominator with `> 0` and quantiles filter with `>= 0`, so a
+// range with no queries shows no value instead of NaN.
 local tile(title, description, expr, unit, thresholds, decimals=null) =
-  o.stat(title, description, o.target(expr, title, DS) + { instant: true, range: false }, unit, 3, 4) + {
-    fieldConfig+: {
-      defaults+: {
-        color: { mode: 'thresholds' },
-        thresholds: { mode: 'absolute', steps: thresholds },
-        [if decimals != null then 'decimals']: decimals,
-      },
-    },
-    options+: {
-      textMode: 'value',
-      graphMode: 'none',
-      colorMode: 'value',
-      justifyMode: 'center',
-      text: { titleSize: 13, valueSize: 32 },
-    },
-  };
+  o.glanceTile(title, description, expr, DS, unit, thresholds, decimals);
 
 local percentiles(title, description) = o.timeseries(
   title,
@@ -107,11 +89,6 @@ local percentiles(title, description) = o.timeseries(
   },
   options+: { legend: { displayMode: 'table', placement: 'bottom', calcs: ['mean', 'max', 'lastNotNull'] } },
 };
-
-local colored(names) = [
-  { matcher: { id: 'byName', options: n[0] }, properties: [{ id: 'color', value: { mode: 'fixed', fixedColor: n[1] } }] }
-  for n in names
-];
 
 local errorBars(title, description, targets, colors) =
   o.barTimeseries(title, description, targets, 'short', 6, 9, minInterval='10m') + {
@@ -144,50 +121,50 @@ local glance = [
   o.row('At a glance'),
   tile(
     'Queries/min',
-    'Valid queries per minute, averaged over the selected time range: successful queries and server failures. Excludes rejected client queries and schema calls.',
-    'sum(rate(%s{%s, %s}[$__range])) * 60' % [Q, SEL, VALID],
+    'Valid queries per minute, averaged over the selected time range: successful queries and server failures. Excludes caller errors and schema calls.',
+    'sum(rate(%s{%s, %s, query_type!="unknown"}[$__range])) * 60' % [Q, SEL, VALID],
     'short', NEUTRAL, 1,
   ),
   tile(
     'Success',
-    'Share of valid queries in the selected time range that did not fail on the server side. Objective: 99.5%. Amber below the objective, red below 95%. Rejected client queries are not counted.',
-    '1 - (%s) / sum(increase(%s{%s, %s}[$__range]))' % [serverErrors('$__range'), Q, SEL, VALID],
-    'percentunit', stepsDown(0.95, 0.995), 2,
+    'Share of valid queries in the selected time range that did not fail on the server side. Objective: 99%. Amber below the objective, red below 95%. Caller errors (bad queries, cancels, unreadable values) are not counted.',
+    '1 - (%s) / (sum(increase(%s{%s, %s}[$__range])) > 0)' % [serverErrors('$__range'), Q, SEL, VALID],
+    'percentunit', stepsDown(0.95, 0.99), 2,
   ),
   tile(
     'Server errors',
-    'Queries that failed because of the service in the selected time range: execution, timeout, streaming, content resolution, redaction, and compiler faults. The count grows with the time range, so it stays neutral; the Success tile judges it. See the chart below for the split by type.',
+    'Queries that failed because of the service in the selected time range: database errors, timeouts, content resolution, redaction, and compiler faults. The count grows with the time range, so it stays neutral; the Success tile judges it. See the chart below for the split by type.',
     serverErrors('$__range'),
     'short', NEUTRAL, 0,
   ),
   tile(
     'Under 5 s',
-    'Share of successful queries in the selected time range that finished in 5 seconds or less.',
-    'sum(increase(%s_bucket{%s, %s, le="5.0"}[$__range])) / sum(increase(%s_count{%s, %s}[$__range]))' % [DUR, SEL, OK, DUR, SEL, OK],
+    'Share of valid queries in the selected time range that finished in 5 seconds or less. Objective: 95%. Server faults count too, so a timeout counts as slow.',
+    'sum(increase(%s_bucket{%s, %s, query_type!="unknown", le="5.0"}[$__range])) / (sum(increase(%s_count{%s, %s, query_type!="unknown"}[$__range])) > 0)' % [DUR, SEL, VALID, DUR, SEL, VALID],
     'percentunit', stepsDown(0.9, 0.95), 1,
   ),
   tile(
     'p50',
     'Median duration of successful queries in the selected time range.',
-    'histogram_quantile(0.50, sum by (le) (rate(%s_bucket{%s, %s}[$__range])))' % [DUR, SEL, OK],
+    'histogram_quantile(0.50, sum by (le) (rate(%s_bucket{%s, %s}[$__range]))) >= 0' % [DUR, SEL, OK],
     's', NEUTRAL,
   ),
   tile(
     'p95',
     'p95 duration of successful queries in the selected time range. Amber from 5 s, red from 25 s.',
-    'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s, %s}[$__range])))' % [DUR, SEL, OK],
+    'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s, %s}[$__range]))) >= 0' % [DUR, SEL, OK],
     's', steps([[5, '#EAB839'], [25, 'red']]), 1,
   ),
   tile(
     'p99',
     'p99 duration of successful queries in the selected time range. Amber from 25 s, the long-tail objective (99% of queries within 25 s).',
-    'histogram_quantile(0.99, sum by (le) (rate(%s_bucket{%s, %s}[$__range])))' % [DUR, SEL, OK],
+    'histogram_quantile(0.99, sum by (le) (rate(%s_bucket{%s, %s}[$__range]))) >= 0' % [DUR, SEL, OK],
     's', steps([[25, '#EAB839']]), 1,
   ),
   tile(
     'Rejected',
     'Share of queries in the selected time range (schema calls excluded) that were rejected before running: invalid client input (bad syntax, unknown schema, and so on) or a user with no enabled namespace. Not a service fault, so it stays neutral.',
-    '(sum(increase(%s{%s, %s}[$__range])) or vector(0)) / (sum(increase(%s{%s}[$__range])) - (sum(increase(%s{%s, %s}[$__range])) or vector(0)))' % [Q, SEL, REJECTED, Q, SEL, Q, SEL, SCHEMA],
+    '(sum(increase(%s{%s, %s}[$__range])) or vector(0)) / ((sum(increase(%s{%s}[$__range])) - (sum(increase(%s{%s, %s}[$__range])) or vector(0))) > 0)' % [Q, SEL, REJECTED, Q, SEL, Q, SEL, SCHEMA],
     'percentunit', NEUTRAL, 1,
   ),
   volume(
@@ -221,15 +198,12 @@ local glance = [
   ),
   errorBars(
     'Server errors by type',
-    'Queries that failed because of the service, by type, per 10 minutes. compiler_fault counts compiler bugs, not invalid client input.',
+    'Queries that failed because of the service, by status, per 10 minutes. compile_error here counts compiler bugs, not invalid client input.',
+    [o.target('sum by (status) (increase(%s{%s, %s}[$__interval])) > 0' % [Q, SEL, SERVER], '{{status}}', DS, 'A')],
     [
-      o.target('sum by (status) (increase(%s{%s, status=~"%s"}[$__interval])) > 0' % [Q, SEL, SERVER_STATUS], '{{status}}', DS, 'A'),
-      o.target('sum(increase(%s{%s, failure_reason=~"%s"}[$__interval])) > 0' % [compilerRejected, SEL, COMPILER_FAULT], 'compiler_fault', DS, 'B'),
-    ],
-    [
-      ['execution_error', '#3987e5'], ['streaming_error', '#d95926'], ['timeout', '#c98500'],
+      ['execution_error', '#3987e5'], ['security_error', '#d95926'], ['timeout', '#c98500'],
       ['content_resolution_error', '#199e70'], ['authorization_error', '#d55181'],
-      ['custom_error', '#9085e9'], ['compiler_fault', '#e66767'],
+      ['custom_error', '#9085e9'], ['compile_error', '#e66767'],
     ],
   ),
   errorBars(
@@ -322,7 +296,7 @@ local reliability = [
   ),
   o.timeseries(
     'Server: compiler rejections by reason (1h windows)',
-    'Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`: parse/schema/reference/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline. Renders a flat zero baseline when no rejections occur in the window.',
+    'Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`: parse/schema/reference/ontology/ontology_internal/depth/limit/security/lowering/codegen/pipeline. Renders a flat zero baseline when no rejections occur in the window.',
     [
       o.target(
         'sum by (failure_reason) (increase(%s{%s}[1h]))' % [compilerRejected, SEL],

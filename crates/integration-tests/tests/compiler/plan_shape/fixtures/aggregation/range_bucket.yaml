@@ -24,6 +24,6 @@ physical:
         - (Filter n._deleted = false (Deduplicate LimitBy ... (Filter n.id >= 1, n.id <= 100 (_))))
     emitted:
       expect:
-        - (Aggregate group bucket(month, n.created_at), bucket(month, n.created_at) AS n_created_at_month, COUNT() AS n (_))
+        - (Aggregate group bucket(month, NullIf(n.created_at, '1970-01-01 00:00:00')), bucket(month, NullIf(n.created_at, '1970-01-01 00:00:00')) AS n_created_at_month, COUNT() AS n (_))
         - (Filter n._deleted = false (_))
         - (Filter n.id >= 1, n.id <= 100 (_))

@@ -24,6 +24,10 @@ properties:
     nullable: false
     mutable: false
     description: "Unique ID."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_vulnerability_identifier
+      key_column: id
 
   external_type:
     type: string
@@ -109,8 +113,8 @@ storage:
     - {name: external_id, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: url, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:

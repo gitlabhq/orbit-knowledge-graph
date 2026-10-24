@@ -12,10 +12,8 @@ use crate::ast::visit::{visit_queries, visit_relations};
 use crate::ast::{Expr, Function, Node, Op, Query, TableRef};
 use crate::error::{QueryError, Result};
 use crate::types::SecurityContext;
-#[cfg(test)]
-use ontology::Ontology;
 
-pub fn check_ast(
+pub fn verify(
     node: &Node,
     ctx: &SecurityContext,
     model: &(impl query_data_model::OrbitQueryModel + ?Sized),
@@ -134,17 +132,30 @@ fn has_valid_path_filter(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, LazyLock};
+
     use crate::ast::{SelectExpr, TableRef};
     use crate::constants::TRAVERSAL_PATH_COLUMN;
+    use query_data_model::ClickHouseDataModel;
 
-    fn apply_security(node: &mut Node, context: &SecurityContext, ontology: &Ontology) {
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        crate::passes::security::apply_security_context(node, context, model.as_ref()).unwrap();
+    fn model() -> &'static ClickHouseDataModel {
+        static MODEL: LazyLock<ClickHouseDataModel> = LazyLock::new(|| {
+            ClickHouseDataModel::derive(Arc::new(ontology::Ontology::load_embedded().unwrap()))
+                .unwrap()
+        });
+        &MODEL
     }
 
-    fn check(node: &Node, context: &SecurityContext, ontology: &Ontology) -> Result<()> {
-        let model = crate::data_model::clickhouse(std::sync::Arc::new(ontology.clone())).unwrap();
-        check_ast(node, context, model.as_ref())
+    fn derive_model(ontology: ontology::Ontology) -> ClickHouseDataModel {
+        ClickHouseDataModel::derive(Arc::new(ontology)).unwrap()
+    }
+
+    fn apply_security(node: &mut Node, context: &SecurityContext, model: &ClickHouseDataModel) {
+        crate::passes::security::apply_security_context(node, context, model).unwrap();
+    }
+
+    fn check(node: &Node, context: &SecurityContext, model: &ClickHouseDataModel) -> Result<()> {
+        verify(node, context, model)
     }
     fn project_query(where_clause: Option<Expr>) -> Node {
         Node::Query(Box::new(Query {
@@ -159,17 +170,12 @@ mod tests {
         }))
     }
 
-    fn project_ontology() -> Ontology {
-        Ontology::new().with_nodes(["Project"])
-    }
-
     #[test]
     fn passes_after_security_injection() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let ontology = project_ontology();
         let mut node = project_query(None);
-        apply_security(&mut node, &ctx, &ontology);
-        assert!(check(&node, &ctx, &ontology).is_ok());
+        apply_security(&mut node, &ctx, model());
+        assert!(check(&node, &ctx, model()).is_ok());
     }
 
     #[test]
@@ -177,7 +183,6 @@ mod tests {
         use crate::ast::{Cte, JoinType, OrderExpr};
 
         let context = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let ontology = project_ontology();
         for position in [
             "select",
             "where",
@@ -254,9 +259,9 @@ mod tests {
             }
             let outer_predicate = query.where_clause.clone();
             let mut node = Node::Query(Box::new(query));
-            assert!(check(&node, &context, &ontology).is_err(), "{position}");
-            apply_security(&mut node, &context, &ontology);
-            check(&node, &context, &ontology).unwrap_or_else(|error| panic!("{position}: {error}"));
+            assert!(check(&node, &context, model()).is_err(), "{position}");
+            apply_security(&mut node, &context, model());
+            check(&node, &context, model()).unwrap_or_else(|error| panic!("{position}: {error}"));
             let Node::Query(query) = &node else {
                 unreachable!()
             };
@@ -290,8 +295,7 @@ mod tests {
     fn fails_without_any_filter() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = project_query(Some(Expr::lit(true)));
-        let ontology = project_ontology();
-        let err = check(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, model()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -301,7 +305,6 @@ mod tests {
     #[test]
     fn rejects_path_filters_that_do_not_restrict_every_result() {
         let context = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let ontology = project_ontology();
         let column = Expr::col("p", TRAVERSAL_PATH_COLUMN);
         let starts_with = |left, right| Expr::func(Function::StartsWith, vec![left, right]);
         let authorized = starts_with(column.clone(), Expr::string("42/43/"));
@@ -325,7 +328,7 @@ mod tests {
             ),
         ] {
             let node = project_query(Some(predicate));
-            assert_eq!(check(&node, &context, &ontology).is_ok(), valid, "{node:?}");
+            assert_eq!(check(&node, &context, model()).is_ok(), valid, "{node:?}");
         }
     }
 
@@ -337,8 +340,7 @@ mod tests {
             vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::string("99/")],
         );
         let node = project_query(Some(wrong_filter));
-        let ontology = project_ontology();
-        let err = check(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, model()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -348,10 +350,9 @@ mod tests {
     #[test]
     fn accepts_lowest_common_prefix() {
         let ctx = SecurityContext::new(42, vec!["42/10/".into(), "42/20/".into()]).unwrap();
-        let ontology = project_ontology();
         let mut node = project_query(None);
-        apply_security(&mut node, &ctx, &ontology);
-        assert!(check(&node, &ctx, &ontology).is_ok());
+        apply_security(&mut node, &ctx, model());
+        assert!(check(&node, &ctx, model()).is_ok());
     }
 
     /// An AND-chain containing `Bool(false)` short-circuits to zero rows, so
@@ -365,17 +366,18 @@ mod tests {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let dead = Expr::param(crate::ast::SqlType::Bool, false);
         let node = project_query(Some(Expr::binary(Op::And, dead, Expr::lit(true))));
-        let ontology = project_ontology();
-        assert!(check(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, model()).is_ok());
     }
 
     #[test]
     fn rejects_reporter_path_for_security_manager_table() {
         let context = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
-        let ontology = Ontology::new()
-            .with_nodes(["Vulnerability"])
-            .with_redaction("Vulnerability", "vulnerability", "id")
-            .with_redaction_role("Vulnerability", ontology::RequiredRole::SecurityManager);
+        let model = derive_model(
+            ontology::Ontology::new()
+                .with_nodes(["Vulnerability"])
+                .with_redaction("Vulnerability", "vulnerability", "id")
+                .with_redaction_role("Vulnerability", ontology::RequiredRole::SecurityManager),
+        );
         let node = Node::Query(Box::new(Query {
             from: TableRef::scan("gl_vulnerability", "v"),
             where_clause: Some(Expr::func(
@@ -388,23 +390,25 @@ mod tests {
             ..Default::default()
         }));
 
-        let error = check(&node, &context, &ontology).unwrap_err();
+        let error = check(&node, &context, &model).unwrap_err();
         assert!(error.to_string().contains("access level 25"));
     }
 
     #[test]
     fn validates_role_floor_for_denormalized_join() {
         let context = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
-        let ontology = Ontology::load_embedded()
-            .unwrap()
-            .with_redaction_role("MergeRequest", ontology::RequiredRole::SecurityManager)
-            .with_denormalized_join(
-                "reviewer_project",
-                &[
-                    ("REVIEWER", "User", "MergeRequest", false),
-                    ("IN_PROJECT", "MergeRequest", "Project", true),
-                ],
-            );
+        let model = derive_model(
+            ontology::Ontology::load_embedded()
+                .unwrap()
+                .with_redaction_role("MergeRequest", ontology::RequiredRole::SecurityManager)
+                .with_denormalized_join(
+                    "reviewer_project",
+                    &[
+                        ("REVIEWER", "User", "MergeRequest", false),
+                        ("IN_PROJECT", "MergeRequest", "Project", true),
+                    ],
+                ),
+        );
         let node = Node::Query(Box::new(Query {
             from: TableRef::scan("gl_denorm_reviewer_project", "d"),
             where_clause: Some(Expr::func(
@@ -417,7 +421,7 @@ mod tests {
             ..Default::default()
         }));
 
-        let error = check(&node, &context, &ontology).unwrap_err();
+        let error = check(&node, &context, &model).unwrap_err();
         assert!(error.to_string().contains("d.t2_traversal_path"));
         assert!(error.to_string().contains("access level 25"));
     }
@@ -441,8 +445,7 @@ mod tests {
             Expr::param(crate::ast::SqlType::Bool, false),
         );
         let node = project_query(Some(eq_false));
-        let ontology = project_ontology();
-        let err = check(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, model()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -463,8 +466,7 @@ mod tests {
             Expr::lit(true),
         );
         let node = project_query(Some(or_expr));
-        let ontology = project_ontology();
-        let err = check(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, model()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -493,8 +495,7 @@ mod tests {
             dead_conjunct,
         );
         let node = project_query(Some(where_expr));
-        let ontology = project_ontology();
-        assert!(check(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, model()).is_ok());
     }
 
     /// Inverse of the previous test: if the AND chain has no Bool(false)
@@ -515,8 +516,7 @@ mod tests {
             Expr::binary(Op::Gt, Expr::col("p", "id"), Expr::lit(0)),
         );
         let node = project_query(Some(where_expr));
-        let ontology = project_ontology();
-        let err = check(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, model()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -537,8 +537,7 @@ mod tests {
             where_clause: None,
             ..Default::default()
         }));
-        let ontology = project_ontology();
-        assert!(check(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, model()).is_ok());
     }
 
     #[test]
@@ -549,7 +548,7 @@ mod tests {
                 from: TableRef::scan(table, "unknown"),
                 ..Default::default()
             }));
-            let error = check(&node, &ctx, &Ontology::new()).unwrap_err();
+            let error = check(&node, &ctx, model()).unwrap_err();
             assert!(error.to_string().contains(table));
         }
     }
@@ -557,7 +556,6 @@ mod tests {
     #[test]
     fn reports_first_invalid_scan() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let ontology = project_ontology().with_nodes(["MergeRequest"]);
         let node = Node::Query(Box::new(Query {
             from: TableRef::join(
                 crate::ast::JoinType::Inner,
@@ -567,7 +565,7 @@ mod tests {
             ),
             ..Default::default()
         }));
-        let error = check(&node, &ctx, &ontology).unwrap_err();
+        let error = check(&node, &ctx, model()).unwrap_err();
         assert!(error.to_string().contains("first.traversal_path"));
     }
 
@@ -599,8 +597,7 @@ mod tests {
     fn rejects_subquery_without_inner_security_filter() {
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
         let node = wrap_in_subquery(inner_project_query(None));
-        let ontology = project_ontology();
-        let err = check(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, model()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -612,7 +609,7 @@ mod tests {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut inner = inner_project_query(None);
         let mut wrapped = Node::Query(Box::new(inner.clone()));
-        apply_security(&mut wrapped, &ctx, &ontology::Ontology::new());
+        apply_security(&mut wrapped, &ctx, model());
         let filter = Expr::func(
             Function::StartsWith,
             vec![
@@ -622,8 +619,7 @@ mod tests {
         );
         inner.where_clause = Some(filter);
         let node = wrap_in_subquery(inner);
-        let ontology = project_ontology();
-        assert!(check(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, model()).is_ok());
     }
 
     #[test]
@@ -644,8 +640,7 @@ mod tests {
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
-        let ontology = project_ontology();
-        let err = check(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, model()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -678,8 +673,7 @@ mod tests {
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
-        let ontology = project_ontology();
-        assert!(check(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, model()).is_ok());
     }
 
     #[test]
@@ -691,8 +685,7 @@ mod tests {
             ..Default::default()
         };
         let node = wrap_in_subquery(inner);
-        let ontology = project_ontology();
-        assert!(check(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, model()).is_ok());
     }
 
     #[test]
@@ -720,8 +713,7 @@ mod tests {
             }],
             ..Default::default()
         }));
-        let ontology = project_ontology();
-        let err = check(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, model()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter")
@@ -749,9 +741,8 @@ mod tests {
             }],
             ..Default::default()
         }));
-        let ontology = project_ontology();
-        apply_security(&mut node, &ctx, &ontology);
-        assert!(check(&node, &ctx, &ontology).is_ok());
+        apply_security(&mut node, &ctx, model());
+        assert!(check(&node, &ctx, model()).is_ok());
     }
 
     #[test]
@@ -780,8 +771,7 @@ mod tests {
         }));
 
         let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
-        let ontology = project_ontology();
-        let err = check(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, model()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -823,8 +813,7 @@ mod tests {
         }));
 
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
-        let ontology = project_ontology();
-        assert!(check(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, model()).is_ok());
     }
 
     #[test]
@@ -861,8 +850,7 @@ mod tests {
             where_clause: Some(filter),
             ..Default::default()
         }));
-        let ontology = project_ontology();
-        let err = check(&node, &ctx, &ontology).unwrap_err();
+        let err = check(&node, &ctx, model()).unwrap_err();
         assert!(
             err.to_string()
                 .contains("missing valid traversal_path filter"),
@@ -914,7 +902,6 @@ mod tests {
             where_clause: Some(outer_filter),
             ..Default::default()
         }));
-        let ontology = ontology::Ontology::new();
-        assert!(check(&node, &ctx, &ontology).is_ok());
+        assert!(check(&node, &ctx, model()).is_ok());
     }
 }

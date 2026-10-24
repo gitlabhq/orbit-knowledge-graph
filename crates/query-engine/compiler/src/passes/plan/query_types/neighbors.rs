@@ -23,8 +23,11 @@ pub struct Neighbors {
     pub incoming_kinds: Vec<String>,
     pub incoming_scope_preserving: Vec<String>,
     pub incoming_cross_scope: Vec<String>,
+    pub outgoing_scope_preserving: Vec<String>,
+    pub outgoing_cross_scope: Vec<String>,
     pub outgoing_neighbor_paths: Vec<(String, String)>,
     pub incoming_neighbor_paths: Vec<(String, String)>,
+    pub center_sort_key: Vec<String>,
 }
 
 pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
@@ -136,39 +139,46 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
         .filter(|relationship| touches(relationship, false))
         .copied()
         .collect();
-    let incoming_scope_preserving: Vec<_> = incoming_kinds
-        .iter()
-        .filter(|relationship| {
+    let split_by_path = |kinds: &[&str], center_is_target: bool| {
+        let (mut carrying, mut rest) = (Vec::new(), Vec::new());
+        for relationship in kinds {
             let mut found = false;
-            let mut scope_preserving = true;
+            let mut carries = true;
             for route in model.relationship_routes(relationship) {
-                for variant in route
-                    .variants()
-                    .filter(|variant| variant.target == center_entity_id)
-                {
+                for variant in route.variants().filter(|variant| match center_is_target {
+                    true => variant.target == center_entity_id,
+                    false => variant.source == center_entity_id,
+                }) {
                     found = true;
-                    scope_preserving &= model
-                        .variant_scope(
-                            relationship,
-                            &model.graph().entity(variant.source).name,
-                            &model.graph().entity(variant.target).name,
-                        )
-                        .is_some_and(ontology::EdgeVariantScope::is_scope_preserving);
+                    let source = &model.graph().entity(variant.source).name;
+                    let target = &model.graph().entity(variant.target).name;
+                    carries &= model
+                        .variant_scope(relationship, source, target)
+                        .is_some_and(|scope| match center_is_target {
+                            // The edge row carries the target's path; a source shares it only where the ontology says so.
+                            true => scope.is_scope_preserving(),
+                            false => {
+                                scope.propagates_to_source(relationship, source)
+                                    || scope.edge_path_is_source_path()
+                            }
+                        });
                 }
             }
-            found && scope_preserving
-        })
-        .map(|relationship| relationship.to_string())
+            match found && carries {
+                true => carrying.push(relationship.to_string()),
+                false => rest.push(relationship.to_string()),
+            }
+        }
+        (carrying, rest)
+    };
+    let (incoming_scope_preserving, incoming_cross_scope) = split_by_path(&incoming_kinds, true);
+    let outgoing_kinds_for_split: Vec<_> = relationships
+        .iter()
+        .filter(|relationship| touches(relationship, true))
+        .copied()
         .collect();
-    let incoming_cross_scope = incoming_kinds
-        .into_iter()
-        .filter(|relationship| {
-            !incoming_scope_preserving
-                .iter()
-                .any(|kind| kind == relationship)
-        })
-        .map(str::to_string)
-        .collect();
+    let (outgoing_scope_preserving, outgoing_cross_scope) =
+        split_by_path(&outgoing_kinds_for_split, false);
     let covered = |filter: &BoundFilter,
                    direction: DenormalizedDirection,
                    relationships: &[RelationshipId]| {
@@ -255,8 +265,14 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
         incoming_kinds: arm_kinds(false),
         incoming_scope_preserving,
         incoming_cross_scope,
+        outgoing_scope_preserving,
+        outgoing_cross_scope,
         outgoing_neighbor_paths: neighbor_paths(true),
         incoming_neighbor_paths: neighbor_paths(false),
+        center_sort_key: match center.table.as_deref() {
+            Some(table) => super::super::sort_key(model, table)?.to_vec(),
+            None => Vec::new(),
+        },
     });
     plan.node_edge_mappings.insert(
         center.alias.clone(),

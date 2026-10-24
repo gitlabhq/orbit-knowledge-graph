@@ -1,3 +1,141 @@
+## [0.157.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.156.0...v0.157.0) (2026-10-24)
+
+### Features
+
+* **server:** enable gzip and zstd gRPC response compression ([97c7641](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/97c7641dceb3548215fdd11424c60c6245e4f4bc)) by Dmitry Gruzd
+
+### Fixes
+
+* **duo:** load MR review instructions and add project conventions ([55580b9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/55580b9c2f66f671f46f1694df4c5fd7f9587e83)) by Dmitry Gruzd
+* **indexer:** redeliver SDLC messages when a ClickHouse circuit is open ([a7b631a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a7b631a4623c585372aef2413ea3e8ffc6fd8650)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **compiler:** seed path proofs from every pinned node ([2537677](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2537677b500a15f2e74da4209fe49be487b3b7a2)) by Michael Usachenko
+* **schema:** store null times as the epoch and index every time column ([c19d83e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c19d83e3de639689539588df40e3515bdc896135)) by Michael Usachenko
+
+### Other
+
+* **compiler:** clean up post-lowering phases ([e995a9f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e995a9f5e35a65f66a1226c47111e97b7aa42cda)) by Michael Usachenko
+* **compiler:** isolate traversal path bounds ([cedf697](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cedf69737dc07e561c464ede7d1972d2c9ca3b81)) by Michael Usachenko
+* **e2e:** dump datalake commit and watermark read timing on failure ([318550c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/318550c38dca32e1454e6cd466c7a48476cdefc4)) by Jean-Gabriel Doyon
+* **server:** drop with_compression doc comment ([8733d67](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8733d67da22e3caba60565653f8cc58d02df354b)) by Dmitry Gruzd
+
+## [0.156.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.155.0...v0.156.0) (2026-10-24)
+
+### Features
+
+* **analytics:** follow the GitLab product usage data setting ([b7133c2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b7133c2afecd3552520b816d451b1e9738b86fde)) by Jean-Gabriel Doyon
+* **server:** count items for up to 100 paths in one call ([863136c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/863136c48b7ed50432a8c6805f22fef948edb2cd)) by Michael Angelo Rivera
+
+### Performance
+
+* **compiler:** pin both ends of a code-graph hop to the query's project ([1e5e5bb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1e5e5bb2bb22b4f4467aff198285718fc1ac2033)) by Michael Angelo Rivera
+* **schema:** add skip indexes on seven measured filter columns ([e38db98](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e38db98882c1966a83560c66c104e391f5548455)) by Michael Usachenko
+
+### Other
+
+* **e2e:** add a GitLab 19.4 lane ([3697b49](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3697b49bb41c32fb18809c35377bc2fda2ac4c52)) by Jean-Gabriel Doyon
+* **e2e:** run GitLab 19.5 suite post-merge ([c904d29](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c904d291549449a05f1fee61aa43adec15416d01)) by Michael Usachenko
+
+## [0.155.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.154.1...v0.155.0) (2026-10-23)
+
+### Features
+
+* **indexer:** count freshness runs and align dashboard tiles with the Orbit SLOs ([67d387b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/67d387b4cf342797ec3346c99776b52bebfd88d2)) by Bohdan Parkhomchuk
+* **observability:** log a fixed error_type next to every error_message ([3cce259](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3cce25909b38bf07331367e98e230303ce2b2cc6)) by Bohdan Parkhomchuk
+* **orbit-cli:** let skills get fetch any skill the server lists ([b4b0bb3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b4b0bb3c5ee79b52ae5297342090a34b20d074d3)) by Dmitry Gruzd
+
+### Fixes
+
+* **circuit-breaker:** recover a half-open circuit whose probe reports no failure ([6d2b31b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6d2b31bc9ffeb4ba36a256ec723c2a23cd971e10)) by Jean-Gabriel Doyon
+* **indexer:** reconcile moved entities on roots with many routes ([d5b94dc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d5b94dcbeb891ebf36c08bd3cdceb6d13892598e)) by Michael Angelo Rivera
+* **indexer:** stop dispatcher startup when refreshable views fail to replace ([ccd9a24](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ccd9a2401cc8a9f6dfcb3dc384b4ed598825ebb4)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **clickhouse:** add cache session settings for reader queries ([cc2aa9b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cc2aa9b3ce75921ffb15986ccfbe781d240e1b5e)) by Michael Angelo Rivera
+* **compiler:** apply path bounds at every read and let the planner own authorization reads ([6ecf64f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6ecf64f025d7bd59b597bf9fccb5830fdcd656ae)) by Michael Usachenko
+* **http:** enable response compression on gitlab-client and orbit-cli ([1a0b9fb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1a0b9fbbf4dda767865b6afe942a429042dd07f8)) by Dmitry Gruzd
+
+### Other
+
+* **config:** drop the unused on-disk config/default.yaml layer ([d95b9c1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d95b9c19394b90bec9b3d536488e7d1ce837da22)) by Luke Hollinda
+* document plaintext grpc mode for service mesh ([a1cfcb5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a1cfcb510f1b77e22a9aa798216819ecc5b59fe5)) by Bohdan Parkhomchuk
+* **e2e:** expect the compile-time refusal of a Reporter vulnerability count ([e79d857](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e79d8575a35d727481d7566302de63a8c82e4f92)) by Jean-Gabriel Doyon
+* **fuzz:** run the Bolero targets on MRs and a daily deep schedule ([5e37f96](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5e37f962cbf0661b3219db6aee1015e35d2cfdb7)) by Aaron Algutifan
+* **image:** bump ubi and always install the freshest CA bundle ([e7eaec9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e7eaec984bd0d09f1a81f7e49d5691d8de6dc473)) by Bohdan Parkhomchuk
+* keep code MRs out of docs/ ([2b8c408](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2b8c4085e4498b20e590432677a535c5aadd036d)) by Michael Angelo Rivera
+* **orbit-cli:** say where glab --yes goes ([718ba97](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/718ba973f2b9e4c1246288122208ca8f2aa5ca10)) by Dmitry Gruzd
+* use orbit chart names in self-managed setup ([b67c9eb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b67c9eb70a75c902564c016f7cc8738248963fc0)) by Bohdan Parkhomchuk
+
+## [0.154.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.154.0...v0.154.1) (2026-10-22)
+
+### Fixes
+
+* **compiler:** explain a failed oneOf with its schema description ([701cc5d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/701cc5debe7b38f3484d6b43f42ab528f2cbcfae)) by ANBUCHELVAN GANESAN CSE
+* **indexer:** complete a plan whose source table does not exist ([fc46ccf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fc46ccf750a5c8d0ac4c7cf7e52de353fb99781c)) by Michael Angelo Rivera
+* **indexer:** log a missing change-detection source table as a warning ([afc20b3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/afc20b3089139109cb336ecb09aebe91ec783376)) by Michael Angelo Rivera
+
+### Performance
+
+* **compiler:** scope the authorization join by the node's resolved prefix ([0e7479b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0e7479b514283e5694d3928bfe1de72ae9e6c58d)) by Michael Usachenko
+
+### Other
+
+* **code-graph:** remove [secure]-runner benchmarks ([0e90ac6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0e90ac667f1c989fcd549026c06b3ea9756ecb51)) by Michael Usachenko
+* **e2e:** run the e2e suites against released GitLab versions ([2300ba3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2300ba3ca2d5a7922fc2175a9d16764e8fe8c7cc)) by Jean-Gabriel Doyon
+
+## [0.154.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.153.0...v0.154.0) (2026-10-22)
+
+### Features
+
+* **dashboards:** indexer at a glance overview ([5f7a593](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5f7a5935c0ea78bc6008d8831d2a3f3fa65faee4)) by Bohdan Parkhomchuk
+
+## [0.153.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.152.0...v0.153.0) (2026-10-22)
+
+### Features
+
+* **named-queries:** add context_for_issue, context_for_review, and context_for_job ([8013854](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8013854530fe780eab83f158d267a25cb3f10e6c)) by Aaron Algutifan
+* **orbit-cli:** index with the incremental engine ([25d825d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/25d825db5355359e1606f2bc503426dd92fa50fc)) by Aaron Algutifan
+
+### Fixes
+
+* **code-graph-incremental:** leave class members out of the names a package shares ([eb5a9c8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/eb5a9c811c2373ba3a2f4ab340fd6a57d2a9389c)) by Aaron Algutifan
+* **indexer:** count only top-level groups as enabled roots ([056c136](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/056c136cb1426a1d29c998f50e34dc2774694c71)) by Bohdan Parkhomchuk
+* **indexer:** write tombstones with unchanged columns and drop the planner's tombstone guard ([352f83a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/352f83a24bd314bb114ac9e72f5f18dc66294b47)) by Michael Usachenko
+
+### Performance
+
+* **compiler:** bound unfiltered FK endpoints by the keys their holder reached ([cad715a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cad715abe45f7376f81b7868b76977b6f28956ed)) by Jean-Gabriel Doyon
+
+### Other
+
+* update docs review app URL for Cloudflare Workers ([ecbd716](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ecbd716fee180f39a55757ddf6c5176bf56b77e8)) by Marcel Amirault
+
+## [0.152.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.151.1...v0.152.0) (2026-10-21)
+
+### Features
+
+* **cli:** send CLI version, OS, and arch on every CLI event ([538f543](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/538f5433680ecc7f553fe22d23d6ef3c43fad258)) by Jean-Gabriel Doyon
+* **indexer:** record how far indexed SDLC data trails the datalake ([d92a6fa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d92a6fad0e3be71507224f9cae32f198094aeb2d)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **indexer:** bound the merge request extract to the page keys ([794366f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/794366f88cbecf3aa3ae375d6281c8119406532c)) by Jean-Gabriel Doyon
+
+## [0.151.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.151.0...v0.151.1) (2026-10-21)
+
+### Fixes
+
+* **observability:** separate caller errors from server errors in query metrics ([d952d6e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d952d6e592eaa79bf2dda212e0c7a0d6762b18b2)) by Bohdan Parkhomchuk
+* **utils:** map Windows absolute symlink targets in vfs Directory ([06e6db0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/06e6db0b6bf5375ce2f8f67141cb1c9d81a28afe)) by Dmitry Gruzd
+
+### Other
+
+* **adr:** add ADR 021 for entity context expansion in the context endpoint ([0bbcabf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0bbcabf44f9ba2522d067519e7b1a7b3f1ecf45f)) by Dmitry Gruzd
+* **e2e:** run HA suite in post-merge pipeline ([2d3b0d9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2d3b0d983f7781a50daf6190e8e11d62fbab017e)) by Michael Usachenko
+
 ## [0.151.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.150.0...v0.151.0) (2026-10-21)
 
 ### Features

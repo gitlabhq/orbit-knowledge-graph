@@ -16,9 +16,28 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 115
+  scope: "*"
+  note: >-
+    Makes every node time column non-nullable and stores a null time as the epoch,
+    so the temporal minmax table setting indexes all 76 of them; the 25 explicit time
+    minmax lines go and Date32 columns default to 1970-01-01. The job failure_reason
+    set index widens from 32 to 64 to cover its 46 declared values plus the empty
+    default. DDL changes on 23 tables; null times are rewritten to the epoch on
+    re-index.
+- version: 114
+  scope: none
+  note: "Declares the measured scope on twenty edge variants and an id traversal_path lookup on every path-scoped node, 31 in all. Query-planner metadata only: the compiler prunes with it, the indexer never reads it, so no table DDL or indexed row changes."
+- version: 113
+  scope: "*"
+  note: "Adds skip indexes measured at group scope on 2026-10-22: set on security_scan.status, job.failure_reason and vulnerability_occurrence.report_type; bloom on merge_request.iid and work_item.iid; text on merge_request_diff.head_commit_sha so prefix searches prune; minmax on note.created_at. DDL changes on seven tables; no indexed row changes."
 - version: 112
   scope: none
-  note: "Drops 26 mutable: false marks the planner cannot trust across live versions: author ids rewritten on user deletion, foreign keys set to NULL, commit SHAs written after insert, and code-graph columns outside the id hash. No table DDL or indexed row changes."
+  note: >-
+    The MergeRequest extract finds its page keys first, in a materialized CTE, and
+    joins metrics, reviewers and approvals only for those keys instead of the whole
+    window; on prod data it returns the same rows as before (the version kept for the
+    last MR of a page was already arbitrary), so no indexed row changes.
 - version: 111
   scope: "*"
   note: "Adds a minmax skip index on _deleted to every versioned table so a pre-pick filter can carry OR _deleted and still prune tombstone-free granules. Drops the unique marks on Label.title and Milestone.title (titles repeat across projects) and the mutable: false marks on code-graph commit_sha and File.size_bytes (ids do not include the commit). Full rebuild so the index files exist for every part."

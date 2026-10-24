@@ -1,0 +1,43 @@
+cases:
+  - name: column_comparison_drops_null_side
+    description: A comparison between two time columns is unknown when either side stores the epoch for null
+    config:
+      redaction: { allow: { merge_request: [99020, 99021, 99022] } }
+      extra_seed:
+        gl_merge_request:
+          - { id: 99020, traversal_path: "1/100/1000/", project_id: 1000, title: merged after creation, created_at: "2024-01-01 00:00:00", merged_at: "2024-02-01 00:00:00" }
+          - { id: 99021, traversal_path: "1/100/1000/", project_id: 1000, title: never merged, created_at: "2024-01-01 00:00:00" }
+          - { id: 99022, traversal_path: "1/100/1000/", project_id: 1000, title: no creation time, merged_at: "2024-02-01 00:00:00" }
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)
+        WHERE mr.id IN [99020, 99021, 99022] AND mr.merged_at > mr.created_at
+        RETURN mr.title LIMIT 10
+    expect:
+      skip_requirements: ["filter:merged_at"]
+      node_count: 1
+      nodes:
+        MergeRequest:
+          ids: [99020]
+          absent: [99021, 99022]
+
+  - name: negated_column_comparison_drops_null_side
+    description: NOT over the same comparison drops the null sides too instead of keeping them
+    config:
+      redaction: { allow: { merge_request: [99020, 99021, 99022] } }
+      extra_seed:
+        gl_merge_request:
+          - { id: 99020, traversal_path: "1/100/1000/", project_id: 1000, title: merged after creation, created_at: "2024-01-01 00:00:00", merged_at: "2024-02-01 00:00:00" }
+          - { id: 99021, traversal_path: "1/100/1000/", project_id: 1000, title: never merged, created_at: "2024-01-01 00:00:00" }
+          - { id: 99022, traversal_path: "1/100/1000/", project_id: 1000, title: no creation time, merged_at: "2024-02-01 00:00:00" }
+    query:
+      gql: |
+        MATCH (mr:MergeRequest)
+        WHERE mr.id IN [99020, 99021, 99022] AND NOT mr.merged_at > mr.created_at
+        RETURN mr.title LIMIT 10
+    expect:
+      skip_requirements: ["filter:merged_at", node_ids]
+      node_count: 0
+      nodes:
+        MergeRequest:
+          absent: [99020, 99021, 99022]

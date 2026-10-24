@@ -10,12 +10,21 @@ const ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
 struct CapturedRequest {
     request_line: String,
     auth_header: Option<String>,
+    accept_encoding: Option<String>,
     body: String,
 }
 
 fn serve_once(
     response_body: &'static str,
     content_type: &'static str,
+) -> (String, thread::JoinHandle<CapturedRequest>) {
+    serve_once_encoded(response_body.as_bytes().to_vec(), content_type, None)
+}
+
+fn serve_once_encoded(
+    response_body: Vec<u8>,
+    content_type: &'static str,
+    content_encoding: Option<&'static str>,
 ) -> (String, thread::JoinHandle<CapturedRequest>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let addr = listener.local_addr().expect("mock addr");
@@ -31,6 +40,7 @@ fn serve_once(
             .expect("read request line");
 
         let mut auth_header = None;
+        let mut accept_encoding = None;
         let mut content_length = 0usize;
         loop {
             let mut line = String::new();
@@ -44,6 +54,8 @@ fn serve_once(
                 let value = value.trim().to_string();
                 if name == "private-token" {
                     auth_header = Some(value.clone());
+                } else if name == "accept-encoding" {
+                    accept_encoding = Some(value);
                 } else if name == "content-length" {
                     content_length = value.parse().expect("parse content-length");
                 }
@@ -55,18 +67,21 @@ fn serve_once(
             reader.read_exact(&mut body).expect("read request body");
         }
 
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+        let encoding_header = content_encoding
+            .map(|encoding| format!("Content-Encoding: {encoding}\r\n"))
+            .unwrap_or_default();
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n{encoding_header}Content-Length: {}\r\nConnection: close\r\n\r\n",
             response_body.len()
         );
-        stream
-            .write_all(response.as_bytes())
-            .expect("write response");
+        stream.write_all(head.as_bytes()).expect("write head");
+        stream.write_all(&response_body).expect("write response");
         stream.flush().expect("flush response");
 
         CapturedRequest {
             request_line: request_line.trim_end().to_string(),
             auth_header,
+            accept_encoding,
             body: String::from_utf8(body).expect("utf8 body"),
         }
     });
@@ -358,4 +373,33 @@ fn scheme_less_gitlab_url_fails_with_a_clear_error() {
         "{stderr}"
     );
     assert!(!stderr.contains("plaintext"), "{stderr}");
+}
+
+#[test]
+fn ontology_advertises_compression_and_decodes_gzip_response() {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(br#"{"schema_version":"gzipped"}"#)
+        .expect("gzip body");
+    let compressed = encoder.finish().expect("finish gzip");
+
+    let (base_url, handle) = serve_once_encoded(compressed, "application/json", Some("gzip"));
+    let output = run_orbit(&base_url, &["ontology"]);
+    let request = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let accept_encoding = request.accept_encoding.expect("Accept-Encoding header");
+    assert!(accept_encoding.contains("gzip"), "{accept_encoding}");
+    assert!(accept_encoding.contains("br"), "{accept_encoding}");
+    assert!(accept_encoding.contains("zstd"), "{accept_encoding}");
+
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(stdout["schema_version"], "gzipped");
 }

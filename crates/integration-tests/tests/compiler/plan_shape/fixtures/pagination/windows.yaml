@@ -101,7 +101,7 @@ cases:
     physical:
       clickhouse:
         emitted:
-          expect: ["(Limit 3 (Offset 4 (Sort _orbit_edge_0.source_id, _orbit_edge_0.target_id (_))))"]
+          expect: ["(Limit 3 (Offset 4 (Sort a.id, b.id (_))))"]
       duckdb:
         emitted:
           expect: ["(Limit 3 (Offset 4 (Sort a.id, b.id (_))))"]
@@ -142,7 +142,7 @@ cases:
       clickhouse:
         emitted:
           expect:
-            - (Limit 21 (Offset 20 (Sort _orbit_mr_id, _orbit_neighbor_id, _orbit_relationship_type, _orbit_neighbor_is_outgoing (Union ALL (_) (_)))))
+            - (Limit 21 (Offset 20 (Sort _orbit_mr_id, _orbit_neighbor_id, _orbit_relationship_type, _orbit_neighbor_is_outgoing (Union ALL (_) (_) (_)))))
           reject: ["(Sort e.source_id, ... (_))"]
 
   - name: Path-finding SKIP sorts on the path arrays

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, TIMESTAMP_FORMAT};
+use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, ClickHouseError, TIMESTAMP_FORMAT};
 use crate::durability::WriteDurability;
 use crate::observer::IndexingMode;
 use async_trait::async_trait;
@@ -36,6 +36,18 @@ pub fn namespace_id_from_key(key: &str) -> Option<i64> {
 pub enum CheckpointError {
     #[error("checkpoint store operation failed: {0}")]
     Store(String),
+
+    #[error("checkpoint store unavailable: {0}")]
+    Unavailable(String),
+}
+
+impl From<ClickHouseError> for CheckpointError {
+    fn from(error: ClickHouseError) -> Self {
+        match error {
+            ClickHouseError::CircuitOpen { .. } => CheckpointError::Unavailable(error.to_string()),
+            _ => CheckpointError::Store(error.to_string()),
+        }
+    }
 }
 
 /// `floor` is `None` for a backfill (start of time); it is persisted so a resume rebuilds the window.
@@ -100,6 +112,15 @@ impl Checkpoint {
 
     pub fn is_completed(&self) -> bool {
         matches!(self.progress(), Progress::Completed)
+    }
+
+    /// Every row up to this watermark is indexed; `None` until a first full pass completes.
+    pub fn synced_until(&self) -> Option<DateTime<Utc>> {
+        match self.progress() {
+            Progress::Completed => Some(self.watermark),
+            Progress::Paging => self.resume_floor,
+            Progress::FirstPass => None,
+        }
     }
 
     pub fn resume_cursor(&self) -> &[String] {
@@ -181,6 +202,7 @@ pub trait CheckpointStore: Send + Sync {
 
 pub struct ClickHouseCheckpointStore {
     client: Arc<ArrowClickHouseClient>,
+    table: String,
 }
 
 enum KeyFilter {
@@ -198,7 +220,14 @@ impl KeyFilter {
 
 impl ClickHouseCheckpointStore {
     pub fn new(client: Arc<ArrowClickHouseClient>) -> Self {
-        Self { client }
+        Self::for_version(client, *SCHEMA_VERSION)
+    }
+
+    pub fn for_version(client: Arc<ArrowClickHouseClient>, version: u32) -> Self {
+        Self {
+            client,
+            table: prefixed_table_name(CHECKPOINT_TABLE, version),
+        }
     }
 
     // The newest row wins per key, except `indexed_at`: a page write from an overlapping run must
@@ -207,7 +236,7 @@ impl ClickHouseCheckpointStore {
         &self,
         keys: KeyFilter,
     ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
-        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let table = &self.table;
         let key_condition = match keys {
             KeyFilter::Exact(_) => "key = {key:String}",
             KeyFilter::Prefix(_) => "startsWith(key, {key:String})",
@@ -227,8 +256,7 @@ impl ClickHouseCheckpointStore {
             ))
             .param("key", keys.value())
             .fetch_arrow()
-            .await
-            .map_err(checkpoint_store_error)?;
+            .await?;
 
         let keys = String::extract_column(&batches, 0).map_err(checkpoint_store_error)?;
         let watermarks =
@@ -253,7 +281,7 @@ impl ClickHouseCheckpointStore {
     }
 
     async fn tombstone(&self, key: &str, watermark: &DateTime<Utc>) -> Result<(), CheckpointError> {
-        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let table = &self.table;
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
 
         self.insert(
@@ -267,8 +295,7 @@ impl ClickHouseCheckpointStore {
         .param("watermark", formatted_watermark)
         .param("version", client_version())
         .execute()
-        .await
-        .map_err(checkpoint_store_error)?;
+        .await?;
 
         Ok(())
     }
@@ -361,7 +388,7 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         checkpoint: &Checkpoint,
         durability: WriteDurability,
     ) -> Result<(), CheckpointError> {
-        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let table = &self.table;
         let formatted_watermark = checkpoint.watermark.format(TIMESTAMP_FORMAT).to_string();
         let cursor_json =
             encode_cursor_column(&checkpoint.cursor_values, &checkpoint.resume_floor)?;
@@ -386,8 +413,7 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         )
         .param("version", client_version())
         .execute()
-        .await
-        .map_err(checkpoint_store_error)?;
+        .await?;
 
         Ok(())
     }
@@ -437,6 +463,15 @@ mod tests {
     }
 
     #[test]
+    fn an_open_circuit_makes_the_checkpoint_store_unavailable() {
+        let error = CheckpointError::from(ClickHouseError::CircuitOpen { service: "graph" });
+        assert!(
+            matches!(error, CheckpointError::Unavailable(_)),
+            "got {error:?}"
+        );
+    }
+
+    #[test]
     fn serialization_roundtrip_completed() {
         let checkpoint = Checkpoint::new("2024-06-15T12:00:00Z".parse().unwrap());
 
@@ -480,6 +515,23 @@ mod tests {
 
         checkpoint.start_attempt();
         assert!(checkpoint.is_completed());
+    }
+
+    #[test]
+    fn synced_until_is_the_last_fully_indexed_watermark() {
+        let floor = ts("2026-06-07T21:00:00Z");
+        let target = ts("2026-06-07T21:30:00Z");
+        let mut checkpoint = Checkpoint::new(floor);
+        assert_eq!(checkpoint.synced_until(), None);
+
+        checkpoint.record_page(target, None, vec!["42".to_string()]);
+        assert_eq!(checkpoint.synced_until(), None);
+
+        checkpoint.complete(floor);
+        assert_eq!(checkpoint.synced_until(), Some(floor));
+
+        checkpoint.record_page(target, Some(floor), vec!["42".to_string()]);
+        assert_eq!(checkpoint.synced_until(), Some(floor));
     }
 
     #[test]

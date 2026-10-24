@@ -90,6 +90,7 @@ pub async fn wait_until_ready(
         |_carried, _attempt| async move {
             let active = read_active_version(graph).await.unwrap_or_else(|error| {
                 warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&error),
                     expanded(ERROR_MESSAGE) = %error,
                     "failed to read active schema version — retrying"
                 );
@@ -97,6 +98,7 @@ pub async fn wait_until_ready(
             });
             let migrating = read_migrating_version(graph).await.unwrap_or_else(|error| {
                 warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&error),
                     expanded(ERROR_MESSAGE) = %error,
                     "failed to read migrating schema version — retrying"
                 );

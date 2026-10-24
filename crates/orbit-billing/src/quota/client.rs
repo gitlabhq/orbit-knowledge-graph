@@ -120,6 +120,7 @@ impl QuotaClient {
             Ok(r) => r,
             Err(e) => {
                 warn!(
+                    safe(ERROR_TYPE) = "quota_request",
                     expanded(ERROR_MESSAGE) = %e,
                     safe(REALM) = normalize_realm(&request.key.realm),
                     safe(INSTANCE_ID) = request.key.instance_id.as_str(),

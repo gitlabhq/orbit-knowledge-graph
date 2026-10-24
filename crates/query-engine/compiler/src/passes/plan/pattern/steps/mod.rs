@@ -178,10 +178,6 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         if let Some(ids) = self.reached_ids(alias) {
             node.predicates
                 .push(membership(Column::new(alias, DEFAULT_PRIMARY_KEY), ids));
-        } else if node.narrowed {
-            return Err(QueryError::Lowering(format!(
-                "node '{alias}' has no narrowing relation"
-            )));
         }
         self.attach_table(&node, |builder| {
             let binding = builder.binding(alias).ok_or_else(|| {
@@ -233,7 +229,12 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         let read = self.pattern.node_read(&mut self.graph, node)?;
         let state = self.nodes.entry(node.alias.clone()).or_default();
         state.read = Some(read);
-        if node.conditions().iter().any(Predicate::is_selective) {
+        if self
+            .pattern
+            .node_conditions(node)
+            .iter()
+            .any(Predicate::is_selective)
+        {
             state.bounded_read = Some(read);
         }
         Ok(read)
@@ -280,7 +281,6 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
                 && pattern.relations[index + 1..]
                     .iter()
                     .any(|next| next.endpoint_column(node).is_some())
-                || pattern.nodes[node].narrowed
                 || pattern.model.supports_selective_latest_rows()
                     && pattern.nodes[node].joined
                     && (pattern.endpoint_is_selective(other) || self.ids(other).is_some());

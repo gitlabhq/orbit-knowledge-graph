@@ -306,10 +306,6 @@ impl RelationGraph {
             .iter()
             .cloned()
             .partition(|predicate| predicate.filters_sort_key(key, true));
-        let identity = identity
-            .into_iter()
-            .map(|predicate| predicate.guard_tombstones(key, alias))
-            .collect();
         let read = self.read(table, alias, false);
         let current = self.owned(read, owner.clone(), alias);
         let mut current = self.filter(current, identity);

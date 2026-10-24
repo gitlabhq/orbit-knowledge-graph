@@ -23,7 +23,7 @@ RUN --mount=type=secret,id=sccache_gcs_key \
     ./scripts/checks/fips/check-binary.sh target/release/gkg-server && \
     cp target/release/gkg-server /gkg-server
 
-FROM registry.access.redhat.com/ubi10/ubi-minimal:10.1
+FROM registry.access.redhat.com/ubi10/ubi-minimal:10.2
 
 ARG GKG_VERSION=dev
 ENV GKG_VERSION=$GKG_VERSION
@@ -41,6 +41,11 @@ COPY config/clickhouse-setup.sql /usr/share/gkg/clickhouse-setup.sql
 # Grafana dashboards, shipped in the image so deployments apply the flavor matching the running code.
 COPY dashboards/dedicated/*.dashboard.json /usr/share/gkg/dashboards/dedicated/
 COPY dashboards/orbit/*.dashboard.json /usr/share/gkg/dashboards/com/
+
+# Upgrade the CA bundle on every build so trust fixes do not wait for a base image rebuild.
+# Keep it below the version-stamped ENV, or the build cache serves a stale bundle.
+RUN microdnf upgrade -y --nodocs --setopt=install_weak_deps=0 ca-certificates && \
+    microdnf clean all
 
 # UID matches the chart's runAsUser; group 0 lets OpenShift's arbitrary UIDs keep the same access.
 RUN echo 'gkg:x:65532:0::/nonexistent:/usr/sbin/nologin' >> /etc/passwd && \

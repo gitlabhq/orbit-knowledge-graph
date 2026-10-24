@@ -6,7 +6,8 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::BoundFilter;
-use crate::passes::plan::filters::denorm_tag_values;
+use crate::passes::plan::filters::{NullAsEpoch, denorm_tag_values};
+use crate::passes::plan::predicates::Column;
 
 pub(crate) fn latest_row_dedup(
     alias: &str,
@@ -21,122 +22,80 @@ pub(crate) fn latest_row_dedup(
     (order, Some((1, keys)))
 }
 
-fn resolves_latest_rows(ctes: &[crate::ast::Cte], query: &Query, alias: &str) -> bool {
-    query.limit_by.is_some() || relation_resolves_latest_rows(ctes, &query.from, alias)
-}
-
-fn relation_resolves_latest_rows(ctes: &[crate::ast::Cte], table: &TableRef, alias: &str) -> bool {
-    match table {
-        TableRef::Subquery {
-            alias: nested,
-            query,
-        } => nested == alias && resolves_latest_rows(ctes, query, alias),
-        TableRef::Cte {
-            name,
-            alias: nested,
-        } => {
-            nested == alias
-                && ctes
-                    .iter()
-                    .any(|cte| cte.name == *name && resolves_latest_rows(ctes, &cte.query, alias))
-        }
-        TableRef::Union { alias: nested, .. } => nested == alias,
-        _ => false,
-    }
-}
-
-pub(in crate::passes) fn latest_rows_for_join(
-    ctes: &[crate::ast::Cte],
-    source: &TableRef,
-    identity: &Expr,
-    table: &str,
-    alias: &str,
-    sort_key: Option<&[String]>,
-) -> TableRef {
-    let Expr::Column {
-        table: source_alias,
-        column,
-    } = identity
-    else {
-        return TableRef::scan_final(table, alias);
-    };
-    let Some(sort_key) =
-        sort_key.filter(|key| key.iter().any(|column| column == DEFAULT_PRIMARY_KEY))
-    else {
-        return TableRef::scan_final(table, alias);
-    };
-    let mut relation = None;
-    crate::ast::visit::visit_relations(source, &mut |candidate| {
-        if relation_resolves_latest_rows(ctes, candidate, source_alias) {
-            relation = Some(candidate.clone());
-        }
-    });
-    let Some(relation) = relation else {
-        return TableRef::scan_final(table, alias);
-    };
-    let keys = Query {
-        select: vec![SelectExpr::col(source_alias, column)],
-        from: relation,
-        ..Default::default()
-    };
-    let (order_by, limit_by) = latest_row_dedup(alias, sort_key);
-    TableRef::subquery(
-        Query {
-            select: vec![SelectExpr::star()],
-            from: TableRef::scan(table, alias),
-            where_clause: Some(Expr::InSelect {
-                expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
-                query: Box::new(keys),
-            }),
-            order_by,
-            limit_by,
-            ..Default::default()
-        },
-        alias,
-    )
-}
-
 pub fn filter_to_expr(alias: &str, prop: &str, bound: &BoundFilter) -> Expr {
     filter_expression(
-        alias,
-        prop,
+        &Column::new(alias, prop),
         &bound.filter,
         bound.data_type.as_ref(),
         bound.in_sort_key,
         bound.text_indexed,
+        bound.null_as_epoch,
+        false,
     )
 }
 
+fn epoch() -> Expr {
+    Expr::param(
+        parameter_type(Some(&ontology::DataType::DateTime)),
+        "1970-01-01 00:00:00",
+    )
+}
+
+pub(super) fn null_if_epoch(value: Expr) -> Expr {
+    Expr::func(Function::NullIf, vec![value, epoch()])
+}
+
+fn not_epoch(value: Expr) -> Expr {
+    Expr::binary(Op::Ne, value, epoch())
+}
+
+fn read(column: Expr, null_as_epoch: bool) -> Expr {
+    if null_as_epoch {
+        null_if_epoch(column)
+    } else {
+        column
+    }
+}
+
 pub(crate) fn filter_expression(
-    alias: &str,
-    prop: &str,
+    column: &Column,
     filter: &InputFilter,
     data_type: Option<&ontology::DataType>,
     in_sort_key: bool,
     text_indexed: bool,
+    null_as_epoch: NullAsEpoch,
+    negated: bool,
 ) -> Expr {
-    let col = Expr::col(alias, prop);
+    let (alias, prop) = (column.source.as_str(), column.name.as_str());
+    let raw = Expr::col(alias, prop);
 
     if let Some((rhs_alias, rhs_prop)) = &filter.rhs_column {
-        let rhs = Expr::col(rhs_alias, rhs_prop);
-        return comparison(col, filter.op.unwrap_or(FilterOp::Eq), rhs)
-            .expect("validated property comparison");
+        let rhs = read(Expr::col(rhs_alias, rhs_prop), null_as_epoch.rhs);
+        return comparison(
+            read(raw, null_as_epoch.column),
+            filter.op.unwrap_or(FilterOp::Eq),
+            rhs,
+        )
+        .expect("validated property comparison");
     }
+
+    let col = read(raw.clone(), null_as_epoch.column && negated);
 
     let val = || filter.value.clone().unwrap_or(serde_json::Value::Null);
     let typed = |v: serde_json::Value| -> Expr { Expr::param(parameter_type(data_type), v) };
 
     let op = filter.op.unwrap_or(FilterOp::Eq);
     let expression = match op {
+        FilterOp::IsNull if null_as_epoch.column => return Expr::eq(raw, epoch()),
+        FilterOp::IsNotNull if null_as_epoch.column => return not_epoch(raw),
         op @ (FilterOp::Eq
         | FilterOp::Ne
         | FilterOp::Gt
         | FilterOp::Gte
         | FilterOp::Lt
         | FilterOp::Lte) => comparison(col, op, typed(val())).expect("comparison operator"),
-        FilterOp::In => Expr::col_in(
-            alias,
-            prop,
+        FilterOp::In => Expr::in_list(
+            col,
             parameter_type(data_type),
             filter
                 .value
@@ -176,6 +135,11 @@ pub(crate) fn filter_expression(
                 query: Box::new(needle),
             }
         }
+    };
+    let expression = if null_as_epoch.column && !negated {
+        Expr::and(expression, not_epoch(raw))
+    } else {
+        expression
     };
     if text_indexed && matches!(op, FilterOp::Eq | FilterOp::In) {
         let values = match val() {

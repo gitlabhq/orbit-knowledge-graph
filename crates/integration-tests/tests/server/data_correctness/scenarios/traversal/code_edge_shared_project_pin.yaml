@@ -1,0 +1,96 @@
+description: A project filter on one endpoint of a code edge pins the other endpoint scan and keeps the rows
+
+config:
+  security:
+    paths: ["1/100/"]
+  extra_seed:
+    gl_imported_symbol:
+      - { id: 14000, traversal_path: "1/100/1000/", project_id: 1000, branch: main }
+      - { id: 14200, traversal_path: "1/100/1002/", project_id: 1002, branch: main }
+    gl_file:
+      - { id: 13100, traversal_path: "1/100/1000/", project_id: 1000, branch: dev, commit_sha: dev123, path: src/dev.rs, name: dev.rs, extension: rs, language: Rust }
+      - { id: 13200, traversal_path: "1/100/1002/", project_id: 1002, branch: main, commit_sha: ghi789, path: src/lib.rs, name: lib.rs, extension: rs, language: Rust }
+    gl_definition:
+      - { id: 12200, traversal_path: "1/100/1002/", project_id: 1002, branch: main, name: compile, fqn: "compiler::compile" }
+      - { id: 12300, traversal_path: "1/100/1000/", project_id: 1000, branch: dev, name: compile_dev, fqn: "compiler::compile_dev" }
+    gl_code_edge:
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 14000, source_kind: ImportedSymbol, relationship_kind: IMPORTS, target_id: 12000, target_kind: Definition }
+      - { traversal_path: "1/100/1002/", project_id: 1002, branch: main, source_id: 14200, source_kind: ImportedSymbol, relationship_kind: IMPORTS, target_id: 12200, target_kind: Definition }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 13000, source_kind: File, relationship_kind: DEFINES, target_id: 12000, target_kind: Definition }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: main, source_id: 13001, source_kind: File, relationship_kind: DEFINES, target_id: 12001, target_kind: Definition }
+      - { traversal_path: "1/100/1000/", project_id: 1000, branch: dev, source_id: 13100, source_kind: File, relationship_kind: DEFINES, target_id: 12300, target_kind: Definition }
+      - { traversal_path: "1/100/1002/", project_id: 1002, branch: main, source_id: 13200, source_kind: File, relationship_kind: DEFINES, target_id: 12200, target_kind: Definition }
+
+cases:
+  - name: source_project_filter_pins_target_scan
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"i","entity":"ImportedSymbol","filters":{"project_id":1000},"columns":["project_id"]},{"id":"d","entity":"Definition","columns":["project_id","name"]}],"relationships":[{"type":"IMPORTS","from":"i","to":"d"}],"limit":10}
+      gql: |
+        MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition) WHERE i.project_id = 1000 RETURN i.project_id, d.project_id, d.name LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        ImportedSymbol: { ids: [14000], filters: { project_id: { eq: 1000 } } }
+        Definition: { rows: [{ id: 12000, project_id: 1000, name: compile }] }
+      edges: { IMPORTS: [[14000, 12000]] }
+      sql_contains: ["(d.project_id = 1000)"]
+
+  - name: target_project_filter_pins_source_scan
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"i","entity":"ImportedSymbol","columns":["project_id"]},{"id":"d","entity":"Definition","filters":{"project_id":1002},"columns":["project_id","name"]}],"relationships":[{"type":"IMPORTS","from":"i","to":"d"}],"limit":10}
+      gql: |
+        MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition) WHERE d.project_id = 1002 RETURN i.project_id, d.project_id, d.name LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        ImportedSymbol: { rows: [{ id: 14200, project_id: 1002 }] }
+        Definition: { ids: [12200], filters: { project_id: { eq: 1002 } } }
+      edges: { IMPORTS: [[14200, 12200]] }
+      sql_contains: ["(i.project_id = 1002)"]
+
+  - name: no_project_filter_keeps_both_projects
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"i","entity":"ImportedSymbol","columns":["project_id"]},{"id":"d","entity":"Definition","filters":{"name":"compile"},"columns":["project_id","name"]}],"relationships":[{"type":"IMPORTS","from":"i","to":"d"}],"limit":10}
+      gql: |
+        MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition) WHERE d.name = 'compile' RETURN i.project_id, d.project_id, d.name LIMIT 10
+    expect:
+      node_count: 4
+      nodes:
+        ImportedSymbol: { ids: [14000, 14200] }
+        Definition: { ids: [12000, 12200], filters: { name: { eq: compile } } }
+      edges: { IMPORTS: [[14000, 12000], [14200, 12200]] }
+      sql_not_contains: ["i.project_id =", "d.project_id ="]
+
+  - name: branch_filter_stays_on_the_edge_and_keeps_rows
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"f","entity":"File","filters":{"project_id":1000,"branch":"main"},"columns":["project_id","branch"]},{"id":"d","entity":"Definition","columns":["project_id","name"]}],"relationships":[{"type":"DEFINES","from":"f","to":"d"}],"limit":100}
+      gql: |
+        MATCH (f:File)-[:DEFINES]->(d:Definition) WHERE f.project_id = 1000 AND f.branch = 'main' RETURN f.project_id, f.branch, d.project_id, d.name LIMIT 100
+    expect:
+      node_count: 4
+      nodes:
+        File: { ids: [13000, 13001], filters: { project_id: { eq: 1000 }, branch: { eq: main } } }
+        Definition: { ids: [12000, 12001], absent: [12200, 12300] }
+      edges: { DEFINES: [[13000, 12000], [13001, 12001]] }
+      sql_contains: ["(_orbit_edge_0.branch = 'main')", "(d.project_id = 1000)"]
+      sql_not_contains: ["d.branch =", "f.branch ="]
+
+  - name: cross_project_decoy_edge_is_not_reachable
+    config:
+      security:
+        paths: ["1/"]
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"caller","entity":"Definition","columns":["name"]},{"id":"callee","entity":"Definition","filters":{"project_id":1001},"columns":["name"]}],"relationships":[{"type":"CALLS","from":"caller","to":"callee"}],"limit":10}
+      gql: |
+        MATCH (caller:Definition)-[:CALLS]->(callee:Definition) WHERE callee.project_id = 1001 RETURN caller.name, callee.name LIMIT 10
+    expect:
+      node_count: 0
+      nodes:
+        Definition: { ids: [], filters: { project_id: { eq: 1001 } } }
+      edge_count: { CALLS: 0 }
+      sql_contains: ["(caller.project_id = 1001)"]

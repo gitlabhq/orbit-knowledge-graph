@@ -6,6 +6,7 @@ rule:
   any:
     - inside:
         matches: tracing-macro
+    - matches: nested-tracing-args
     - regex: '^\{'
       not:
         precedes:

@@ -43,7 +43,7 @@ pub mod input;
 pub mod metrics;
 pub(crate) mod query_limits;
 
-pub mod scope;
+pub mod tp_bounds;
 pub mod types;
 
 pub mod config;
@@ -73,7 +73,6 @@ pub use passes::codegen::{
     ddl::duckdb::emit_create_table as emit_duckdb_create_table, ddl::duckdb::generate_local_ddl,
     ddl::generate_local_tables,
 };
-pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
 pub use passes::frontend::{Frontend, gql};
 pub use passes::hydrate::{
     DynamicEntityColumns, HydrationKind, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
@@ -81,7 +80,7 @@ pub use passes::hydrate::{
 };
 pub use passes::normalize::build_entity_auth;
 pub use passes::plan::HydrationCompileOptions;
-pub use scope::ScopeProof;
+pub use passes::result_contract::{EdgeMeta, RedactionNode, ResultContext};
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;
@@ -508,6 +507,53 @@ mod tests {
         }
     }
 
+    fn compile_error(query: &str) -> String {
+        compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx())
+            .expect_err("query must be rejected")
+            .to_string()
+    }
+
+    #[test]
+    fn multi_node_traversal_without_relationships_explains_the_shape() {
+        let msg = compile_error(
+            r#"{"query_type":"traversal","nodes":[
+                {"id":"u","entity":"User","node_ids":[1],"columns":["username"]},
+                {"id":"mr","entity":"MergeRequest","node_ids":[2]}
+            ],"limit":5}"#,
+        );
+        assert!(
+            msg.contains("Multi-node traversal requires nodes + relationships"),
+            "{msg}"
+        );
+        assert!(!msg.contains("oneOf"), "{msg}");
+    }
+
+    #[test]
+    fn non_numeric_id_range_endpoint_says_the_value_is_invalid() {
+        let msg = compile_error(
+            r#"{"query_type":"traversal","nodes":[{"id":"p","entity":"Project",
+                "columns":["name"],"id_range":{"start":"abc","end":5}}],"limit":5}"#,
+        );
+        assert!(
+            msg.contains("invalid value at /nodes/0/id_range/start: Start of ID range (inclusive)"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn malformed_filter_explains_the_accepted_shapes() {
+        let msg = compile_error(
+            r#"{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1],
+                "columns":["name"],"filters":{"name":{"op":"bogus","value":1}}}],"limit":5}"#,
+        );
+        assert!(msg.contains("A bare value is an equality match"), "{msg}");
+        assert!(
+            msg.contains("invalid value at /nodes/0/filters/name: "),
+            "{msg}"
+        );
+        assert!(!msg.contains("oneOf"), "{msg}");
+    }
+
     #[test]
     fn unfiltered_edge_only_count_emits_bare_count_for_projection_routing() {
         let query = r#"{
@@ -735,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_clamps_settings_to_safety_floor() {
+    fn path_finding_clamps_settings_to_safety_ceiling() {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -751,11 +797,11 @@ mod tests {
 
         assert!(
             sql.contains("max_execution_time = 15"),
-            "pathfinding must clamp max_execution_time to 15, got:\n{sql}"
+            "pathfinding max_execution_time must not exceed 15, got:\n{sql}"
         );
         assert!(
             sql.contains("max_memory_usage = 16106127360"),
-            "pathfinding must clamp max_memory_usage to 15 GiB, got:\n{sql}"
+            "pathfinding max_memory_usage must not exceed 15 GiB, got:\n{sql}"
         );
     }
 
@@ -946,7 +992,15 @@ mod tests {
             "limit": 10
         }"#;
 
-        let sql = compile_sql(query);
+        let sql = compile(
+            query,
+            Frontend::JsonDsl,
+            &ONTOLOGY,
+            &crate::testkit::admin_ctx(),
+        )
+        .expect("should compile")
+        .base
+        .render();
 
         assert!(
             sql.contains("gl_vulnerability"),
@@ -1068,69 +1122,6 @@ mod tests {
                     if message == "cross-node property comparisons are only supported in traversal queries"),
                 "{error}"
             );
-        }
-    }
-
-    #[test]
-    fn scope_proofs_preserve_deeper_authorization_filters() {
-        let mut context = SecurityContext::new(1, vec!["1/2/3/".into(), "1/2/4/".into()]).unwrap();
-        context.scope_proofs =
-            std::collections::HashMap::from([("p".into(), ScopeProof::literal("1/2/"))]);
-        for (query, lookup, alias, literal_proof) in [
-            (
-                "MATCH (p:Project {name: 'example'}) RETURN p LIMIT 20",
-                false,
-                "p",
-                true,
-            ),
-            (
-                "MATCH (p:Project {id: 100}) RETURN p LIMIT 20",
-                true,
-                "p",
-                true,
-            ),
-            (
-                "MATCH (p:Project {full_path: 'parent/project'}) RETURN p LIMIT 20",
-                true,
-                "p",
-                true,
-            ),
-            (
-                "MATCH (p:MergeRequest {project_id: 100}) RETURN p LIMIT 20",
-                true,
-                "p",
-                true,
-            ),
-            (
-                "MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) RETURN count(p) AS c LIMIT 20",
-                true,
-                "_orbit_edge_0",
-                false,
-            ),
-        ] {
-            let compiled = compile(query, Frontend::Gql, &ONTOLOGY, &context).unwrap();
-            let sql = compiled.base.render();
-            for path in ["1/2/3/", "1/2/4/"] {
-                assert!(
-                    sql.contains(&format!("startsWith({alias}.traversal_path, '{path}')")),
-                    "{query}: {sql}"
-                );
-            }
-            if literal_proof {
-                assert!(
-                    sql.contains(&format!("startsWith({alias}.traversal_path, '1/2/')")),
-                    "{query}: {sql}"
-                );
-            }
-            if lookup {
-                assert!(sql.contains("argMaxOrNull"), "{query}: {sql}");
-                for path in ["1/2/3/", "1/2/4/"] {
-                    assert!(
-                        sql.contains(&format!("startsWith(_scope.traversal_path, '{path}')")),
-                        "{query}: {sql}"
-                    );
-                }
-            }
         }
     }
 

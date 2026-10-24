@@ -14,9 +14,8 @@ cases:
         planned:
           bind:
             - (CTE $first (Filter _orbit_edge_0._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_0.source_id >= 1, _orbit_edge_0.source_id <= 10, ... (Scan Table(gl_code_edge) AS _orbit_edge_0)))))
-            - (CTE $reached (Project _id_source.target_id AS id (Bind _id_source (Scan Relation(?) AS _orbit_relation))))
           expect:
-            - (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.source_id IN $reached.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))))
+            - (Filter _orbit_edge_1._deleted = false (Deduplicate LimitBy ... (Filter _orbit_edge_1.source_id IN ?.id, ... (Scan Table(gl_code_edge) AS _orbit_edge_1))))
         emitted:
           expect:
             - (Filter _orbit_edge_0.source_id >= 1, _orbit_edge_0.source_id <= 10, ... (_))

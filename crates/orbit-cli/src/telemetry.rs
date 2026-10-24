@@ -1,10 +1,11 @@
 use std::sync::{LazyLock, OnceLock};
 use std::time::Duration;
 
-use labkit_events::StructuredEvent;
+use labkit_events::{SnowplowContext, StructuredEvent};
 use orbit_analytics::{
-    AnalyticsTracker, OrbitCliCommandContext, OrbitCliSetupContext, OrbitCommonContext,
-    SnowplowAnalyticsTracker, orbit_cli_command, orbit_cli_setup, orbit_common,
+    AnalyticsTracker, OrbitCliCommandContext, OrbitCliContext, OrbitCliSetupContext,
+    OrbitCommonContext, SnowplowAnalyticsTracker, orbit_cli, orbit_cli_command, orbit_cli_setup,
+    orbit_common,
 };
 use regex::Regex;
 use uuid::Uuid;
@@ -97,7 +98,12 @@ pub fn emit_command_event<T: AnalyticsTracker + ?Sized>(
         duration_ms: i64::try_from(duration.as_millis()).ok(),
         cli_version: env!("ORBIT_VERSION").parse().ok(),
     };
-    track_outcome(tracker, action, outcome, coding_agent);
+    track_event(
+        tracker,
+        action,
+        OrbitCliCommandContext::new(outcome),
+        coding_agent,
+    );
 }
 
 pub fn emit_tool_call_event<T: AnalyticsTracker + ?Sized>(
@@ -118,7 +124,12 @@ pub fn emit_tool_call_event<T: AnalyticsTracker + ?Sized>(
         duration_ms: i64::try_from(duration.as_millis()).ok(),
         cli_version: env!("ORBIT_VERSION").parse().ok(),
     };
-    track_outcome(tracker, MCP_TOOL_CALL_ACTION, outcome, coding_agent);
+    track_event(
+        tracker,
+        MCP_TOOL_CALL_ACTION,
+        OrbitCliCommandContext::new(outcome),
+        coding_agent,
+    );
 }
 
 pub fn emit_setup_event<T: AnalyticsTracker + ?Sized>(
@@ -127,13 +138,12 @@ pub fn emit_setup_event<T: AnalyticsTracker + ?Sized>(
     run: &SetupRun,
     coding_agent: Option<&str>,
 ) {
-    if let Ok(event) = StructuredEvent::builder(CATEGORY, action)
-        .context(build_common_context(coding_agent))
-        .context(OrbitCliSetupContext::new(run.into()))
-        .build()
-    {
-        tracker.track(event);
-    }
+    track_event(
+        tracker,
+        action,
+        OrbitCliSetupContext::new(run.into()),
+        coding_agent,
+    );
 }
 
 impl From<&SetupRun> for orbit_cli_setup::OrbitCliSetup {
@@ -178,19 +188,28 @@ impl From<&SetupRun> for orbit_cli_setup::OrbitCliSetup {
     }
 }
 
-fn track_outcome<T: AnalyticsTracker + ?Sized>(
+fn track_event<T: AnalyticsTracker + ?Sized>(
     tracker: &T,
     action: &str,
-    outcome: orbit_cli_command::OrbitCliCommand,
+    event_context: impl SnowplowContext,
     coding_agent: Option<&str>,
 ) {
     if let Ok(event) = StructuredEvent::builder(CATEGORY, action)
         .context(build_common_context(coding_agent))
-        .context(OrbitCliCommandContext::new(outcome))
+        .context(build_cli_context())
+        .context(event_context)
         .build()
     {
         tracker.track(event);
     }
+}
+
+fn build_cli_context() -> OrbitCliContext {
+    OrbitCliContext::new(orbit_cli::OrbitCli {
+        cli_version: env!("ORBIT_VERSION").parse().ok(),
+        os: std::env::consts::OS.parse().ok(),
+        arch: std::env::consts::ARCH.parse().ok(),
+    })
 }
 
 fn build_common_context(coding_agent: Option<&str>) -> OrbitCommonContext {
@@ -361,6 +380,25 @@ mod tests {
     }
 
     #[test]
+    fn every_event_reports_cli_build() {
+        let tracker = orbit_analytics::InMemoryAnalyticsTracker::new();
+        emit_command_event(&tracker, "query", 0, Duration::ZERO, None);
+        emit_tool_call_event(&tracker, "index", true, Duration::ZERO, None);
+        emit_setup_event(&tracker, AGENTS_CONFIGURED_ACTION, &setup_run(), None);
+        for event in tracker.drain() {
+            let cli = context_data(&event, orbit_analytics::ORBIT_CLI_SCHEMA);
+            assert_eq!(
+                cli["cli_version"],
+                env!("ORBIT_VERSION"),
+                "{}",
+                event.action()
+            );
+            assert_eq!(cli["os"], std::env::consts::OS, "{}", event.action());
+            assert_eq!(cli["arch"], std::env::consts::ARCH, "{}", event.action());
+        }
+    }
+
+    #[test]
     fn emit_leaves_deployment_to_the_server() {
         let event = emit_one(0, Duration::ZERO);
         let common = context_data(&event, orbit_analytics::ORBIT_COMMON_SCHEMA);
@@ -383,7 +421,7 @@ mod tests {
     }
 
     fn assert_contexts_match_iglu_schemas(event: &StructuredEvent) {
-        assert_eq!(event.contexts().len(), 2, "{}", event.action());
+        assert_eq!(event.contexts().len(), 3, "{}", event.action());
         for context in event.contexts() {
             let name = context
                 .schema

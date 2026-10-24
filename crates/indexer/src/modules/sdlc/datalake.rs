@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, QuerySummary};
+use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, ClickHouseError, QuerySummary};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -12,18 +12,31 @@ use thiserror::Error;
 use super::paging::PAGE_BYTE_BUDGET;
 use orbit_arrow::batch_slice_bytes;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub(crate) enum DatalakeError {
-    #[error("query failed: {0}")]
+    #[error("datalake query failed: {0}")]
     Query(String),
+
+    #[error("source table does not exist: {0}")]
+    SourceUnavailable(String),
+
+    #[error("datalake unavailable: {0}")]
+    Unavailable(String),
 
     #[error("arrow decode error: {0}")]
     ArrowDecode(#[from] arrow::error::ArrowError),
 }
 
-impl From<clickhouse::error::Error> for DatalakeError {
-    fn from(err: clickhouse::error::Error) -> Self {
-        DatalakeError::Query(err.to_string())
+impl From<ClickHouseError> for DatalakeError {
+    fn from(err: ClickHouseError) -> Self {
+        if err.is_unknown_table() {
+            DatalakeError::SourceUnavailable(err.to_string())
+        } else if matches!(err, ClickHouseError::CircuitOpen { .. }) {
+            DatalakeError::Unavailable(err.to_string())
+        } else {
+            DatalakeError::Query(err.to_string())
+        }
     }
 }
 
@@ -112,14 +125,11 @@ impl DatalakeQuery for Datalake {
         max_block_size: Option<u64>,
     ) -> Result<RecordBatchStream<'_>, DatalakeError> {
         let query = self.build_query(sql, params);
-        let stream = query
-            .fetch_arrow_streamed(max_block_size)
-            .await
-            .map_err(|e| DatalakeError::Query(e.to_string()))?;
+        let stream = query.fetch_arrow_streamed(max_block_size).await?;
 
-        Ok(Box::pin(stream.map(|result| {
-            result.map_err(|e| DatalakeError::Query(e.to_string()))
-        })))
+        Ok(Box::pin(
+            stream.map(|result| result.map_err(DatalakeError::from)),
+        ))
     }
 
     async fn query_batches(
@@ -158,14 +168,13 @@ impl DatalakeQuery for Datalake {
         }
         let (mut stream, summary) = query
             .fetch_arrow_streamed_with_summary(max_block_size)
-            .await
-            .map_err(|e| DatalakeError::Query(e.to_string()))?;
+            .await?;
 
         let mut batches = Vec::new();
         let mut bytes = 0;
         let mut truncated = false;
         while let Some(result) = stream.next().await {
-            let batch = result.map_err(|e| DatalakeError::Query(e.to_string()))?;
+            let batch = result?;
             if batch.num_rows() == 0 {
                 continue;
             }
@@ -248,5 +257,35 @@ mod tests {
         assert!(!is_arrow_string_overflow(&DatalakeError::Query(
             "Code: 159. DB::Exception: Timeout exceeded".to_string()
         )));
+    }
+
+    fn clickhouse_error(message: &str) -> ClickHouseError {
+        ClickHouseError::Query(clickhouse::error::Error::BadResponse(message.to_string()))
+    }
+
+    #[test]
+    fn a_missing_source_table_is_source_unavailable() {
+        let err = DatalakeError::from(clickhouse_error(
+            "Code: 60. DB::Exception: Unknown table expression identifier \
+             'siphon_ai_governance_sessions' in scope SELECT id FROM \
+             siphon_ai_governance_sessions. (UNKNOWN_TABLE) (version 26.4.5.143)",
+        ));
+        assert!(matches!(err, DatalakeError::SourceUnavailable(_)));
+    }
+
+    #[test]
+    fn an_open_circuit_makes_the_datalake_unavailable() {
+        let err = DatalakeError::from(ClickHouseError::CircuitOpen {
+            service: "datalake",
+        });
+        assert!(matches!(err, DatalakeError::Unavailable(_)));
+    }
+
+    #[test]
+    fn other_clickhouse_errors_stay_query_errors() {
+        let err = DatalakeError::from(clickhouse_error(
+            "Code: 241. DB::Exception: Memory limit (total) exceeded. (MEMORY_LIMIT_EXCEEDED)",
+        ));
+        assert!(matches!(err, DatalakeError::Query(_)));
     }
 }

@@ -14,13 +14,14 @@ workspace = true
 [dependencies]
 mimalloc = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
-code-graph = { path = "../code-graph" }
+code-graph-incremental = { path = "../code-graph-incremental" }
 duckdb-client = { path = "../duckdb-client" }
 labkit-events = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics" }
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-markers"] }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
+orbit-arrow = { path = "../utils/arrow" }
 ontology = { path = "../ontology" }
 gitalisk-core = { workspace = true }
 clap = { workspace = true }
@@ -38,13 +39,14 @@ grep-regex = { workspace = true }
 grep-searcher = { workspace = true }
 ignore = { workspace = true }
 globset = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["gzip", "brotli", "zstd"] }
 rmcp = { workspace = true }
 rust-embed = { workspace = true }
 rustls = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
+rustc-hash = { workspace = true }
 sha2 = { workspace = true }
 strum = { workspace = true }
 toml_edit = { workspace = true }
@@ -57,6 +59,7 @@ rustix = { workspace = true }
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 
 [dev-dependencies]
+flate2 = { workspace = true }
 jsonschema = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
 tempfile = { workspace = true }

@@ -66,9 +66,9 @@ e2e --> perf
 | Container tests | `crates/integration-tests/tests/` | `mise test:integration` |
 | E2E | `e2e/` | `e2e/scripts/setup.sh`, then `e2e/scripts/test.sh` |
 | Performance | `code-indexing-benchmark.yaml`, `crates/query-engine/profiler/` | `mise query:profile` |
-| Fuzzing | `crates/fuzz/` | `mise fuzz:<target>` |
+| Fuzzing | `crates/fuzz/` | `mise test:fuzz`, `mise fuzz:<target>` |
 
-The Rust test jobs run on every MR and every main commit, and none of them is allowed to fail.
+The Rust test jobs run on every MR and every main commit. Only `fuzz-smoke` is allowed to fail.
 
 ## Build scripts
 
@@ -264,7 +264,7 @@ The first suite makes an administrator bot, turns on feature flags, and indexes 
 
 The `e2e` job runs on every main commit and is manual on MRs. It saves diagnostics when it fails and always removes the stack. Two more jobs use the same suites:
 
-- `e2e-ha` runs the suites on a ClickHouse cluster with replicas, and kills replicas during the run. It runs on a daily schedule and is manual on MRs.
+- `e2e-ha` runs the suites on a ClickHouse cluster with replicas, and kills replicas during the run. It runs in the post-merge pipeline and on a daily schedule. It is manual on MRs.
 - `e2e-pin-bump` runs on a daily schedule. It moves the pins in `versions.yaml` to their latest versions and updates one MR. On that MR, `e2e` runs automatically and must pass before the MR can merge.
 
 For setup, debugging, and the list of key files, see [E2E testing harness](../dev/e2e-testing.md).
@@ -273,7 +273,9 @@ For setup, debugging, and the list of key files, see [E2E testing harness](../de
 
 ### Indexing benchmarks
 
-[`code-indexing-benchmark.yaml`](../../code-indexing-benchmark.yaml) lists real repositories, grouped by language. When an MR changes an indexing crate, CI uses [`gitlab-xtasks`](https://gitlab.com/gitlab-org/rust/gitlab-xtasks) and hyperfine to time `orbit index` on them. Then it posts the results as an MR comment. A slower result does not fail the MR.
+[`code-indexing-benchmark.yaml`](../../code-indexing-benchmark.yaml) lists real repositories, grouped by language. The local xtask reads this file, downloads pinned revisions, builds Orbit, and writes the timing results. Use `mise bench:run` for measured runs and `mise bench:smoke` for one indexing pass per repository.
+
+Repositories, Cargo output, and result JSON stay under `/tmp/orbit-code-indexing-benchmark` on Unix or `%TEMP%\orbit-code-indexing-benchmark` on Windows. Each invocation gets an isolated data directory and one database per repository. Set `ORBIT_BENCH_ROOT` to use another location. Shared CI runners do not produce stable timing results, so code-indexing benchmarks do not run in CI. Automated backfill measurements belong in a dedicated E2E cluster with controlled compute and Gitaly.
 
 ### Synthetic query load
 
@@ -302,7 +304,14 @@ Some failures only occur at production scale. Examples are evictions on the temp
 
 ## Fuzzing
 
-The [`orbit-fuzz`](../../crates/fuzz/README.md) crate has Bolero targets for the query frontends (JSON and GQL), the language parsers, and indexer message deserialization. Each target has a `mise fuzz:<target>` task and needs a nightly Rust toolchain. Fuzzing runs locally. CI compiles the targets but does not run them.
+The [`orbit-fuzz`](../../crates/fuzz/README.md) crate has Bolero targets for the query frontends (JSON and GQL), the language parsers, and indexer message deserialization. Each target keeps its seed inputs in `crates/fuzz/seeds.yaml` and its grown corpus in a private GCS bucket. Each target has a `mise fuzz:<target>` task that needs a nightly Rust toolchain.
+
+CI runs the targets in two tiers:
+
+- `fuzz-smoke` runs `mise test:fuzz` on every MR and main commit. It replays each corpus on stable Rust, then runs one second of random inputs. It may fail without failing the pipeline until the corpora have grown. Like `fuzz-deep`, it keeps fuzzer output out of the public job log.
+- `fuzz-deep` runs libFuzzer with AddressSanitizer on nightly Rust, in three shards, from a daily schedule with `SCHEDULE_ONLY=fuzz-deep`. The scheduled run writes the grown corpus back to the bucket. On an MR it is a manual job. It uploads crashes and fuzzer output to a private crash bucket, not to the public job log.
+
+The crate README covers corpus promotion and crash triage.
 
 ## Gates around the tests
 
@@ -324,7 +333,7 @@ Next to the tests, CI runs checks on each MR:
 
 ### Review automation
 
-- [GitLab Duo review agents](../../.gitlab/duo/mr-review-instructions.yml) review the Rust changes in each MR. They check Rust security, Rust performance, logging security, and the SOX billing boundary.
+- [GitLab Duo review agents](../../.gitlab/duo/mr-review-instructions.yaml) review the Rust changes in each MR. They check Rust security, Rust performance, logging security, the SOX billing boundary, project conventions, and the code-graph and indexer crate guidance.
 - The `ai-review-bot` component and the manual `ai:*` jobs review performance, security, and docs on request.
 - A daily job marks stale MRs and later closes them.
 

@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use labkit_events::StructuredEvent;
-use orbit_analytics::AnalyticsTracker;
+use orbit_analytics::{AnalyticsTracker, GitlabInstanceWatch};
 use orbit_server_config::AnalyticsConfig;
 use orbit_utils::traversal_path::TraversalPath;
 use uuid::Uuid;
@@ -22,6 +22,7 @@ const ACTION_INDEXING_COMPLETED: &str = "gkg_indexing_completed";
 pub struct SnowplowIndexingObserver {
     tracker: Arc<dyn AnalyticsTracker>,
     config: Arc<AnalyticsConfig>,
+    instance: GitlabInstanceWatch,
 
     pipeline_type: Option<PipelineType>,
     dispatch_id: Option<Uuid>,
@@ -57,10 +58,15 @@ pub struct SnowplowIndexingObserver {
 }
 
 impl SnowplowIndexingObserver {
-    pub fn new(tracker: Arc<dyn AnalyticsTracker>, config: Arc<AnalyticsConfig>) -> Self {
+    pub fn new(
+        tracker: Arc<dyn AnalyticsTracker>,
+        config: Arc<AnalyticsConfig>,
+        instance: GitlabInstanceWatch,
+    ) -> Self {
         Self {
             tracker,
             config,
+            instance,
             pipeline_type: None,
             dispatch_id: None,
             campaign_id: None,
@@ -126,10 +132,11 @@ impl SnowplowIndexingObserver {
         };
         let (namespace_id, root_namespace_id) = self.namespace_ids();
 
-        let common = match build_common(&self.config, root_namespace_id) {
+        let common = match build_common(&self.config, self.instance.identity(), root_namespace_id) {
             Ok(context) => context,
             Err(error) => {
                 orbit_log_fields::warn!(
+                    safe(ERROR_TYPE) = error.kind(),
                     expanded(ERROR_MESSAGE) = %error,
                     "failed to build orbit_common context, skipping indexing event"
                 );
@@ -194,6 +201,7 @@ impl SnowplowIndexingObserver {
             Ok(event) => self.tracker.track(event),
             Err(error) => {
                 orbit_log_fields::warn!(
+                    safe(ERROR_TYPE) = error.kind(),
                     expanded(ERROR_MESSAGE) = %error,
                     "failed to build indexing analytics event"
                 )
@@ -312,6 +320,7 @@ impl IndexingObserver for SnowplowIndexingObserver {
 mod tests {
     use std::sync::LazyLock;
 
+    use gitlab_client::{GitlabInstance, InstanceIdentity, InstanceSettings};
     use orbit_analytics::{
         InMemoryAnalyticsTracker, ORBIT_CODE_INDEXING_SCHEMA, ORBIT_COMMON_SCHEMA,
         ORBIT_SDLC_INDEXING_SCHEMA,
@@ -325,7 +334,7 @@ mod tests {
 
     fn analytics_config() -> Arc<AnalyticsConfig> {
         Arc::new(AnalyticsConfig {
-            enabled: true,
+            enabled: Some(true),
             collector_url: "https://collector.example".to_string(),
             deployment: DeploymentConfig {
                 kind: DeploymentKind::Com,
@@ -335,10 +344,27 @@ mod tests {
     }
 
     fn observer(tracker: &Arc<InMemoryAnalyticsTracker>) -> SnowplowIndexingObserver {
+        observer_on_instance(tracker, GitlabInstanceWatch::default())
+    }
+
+    fn observer_on_instance(
+        tracker: &Arc<InMemoryAnalyticsTracker>,
+        instance: GitlabInstanceWatch,
+    ) -> SnowplowIndexingObserver {
         SnowplowIndexingObserver::new(
             tracker.clone() as Arc<dyn AnalyticsTracker>,
             analytics_config(),
+            instance,
         )
+    }
+
+    fn finish_global_sdlc_run(mut obs: SnowplowIndexingObserver) {
+        obs.set_dispatch_id(Uuid::nil());
+        obs.set_pipeline_type(PipelineType::Sdlc);
+        obs.set_entity_type("User");
+        obs.set_indexing_mode(IndexingMode::Full);
+        obs.record_graph_write("gl_user", 10, 500);
+        obs.finish();
     }
 
     fn validator(schema_name: &str) -> jsonschema::Validator {
@@ -475,19 +501,33 @@ mod tests {
     #[test]
     fn global_sdlc_run_has_null_namespaces() {
         let tracker = Arc::new(InMemoryAnalyticsTracker::new());
-        let mut obs = observer(&tracker);
-        obs.set_dispatch_id(Uuid::nil());
-        obs.set_pipeline_type(PipelineType::Sdlc);
-        obs.set_entity_type("User");
-        obs.set_indexing_mode(IndexingMode::Full);
-        obs.record_graph_write("gl_user", 10, 500);
-        obs.finish();
+        finish_global_sdlc_run(observer(&tracker));
 
         let events = tracker.drain();
         let data = &events[0].contexts()[1].data;
         assert!(data["namespace_id"].is_null());
         assert!(data["root_namespace_id"].is_null());
         assert_valid("orbit_sdlc_indexing", data);
+    }
+
+    #[test]
+    fn run_carries_the_resolved_instance_identity() {
+        let tracker = Arc::new(InMemoryAnalyticsTracker::new());
+        let instance = GitlabInstanceWatch::fixed(GitlabInstance {
+            identity: InstanceIdentity {
+                instance_id: Some("a1b2".to_string()),
+                unique_instance_id: Some("c3d4".to_string()),
+                host_name: Some("gitlab.example.com".to_string()),
+            },
+            settings: InstanceSettings::default(),
+        });
+        finish_global_sdlc_run(observer_on_instance(&tracker, instance));
+
+        let events = tracker.drain();
+        let common = &events[0].contexts()[0].data;
+        assert_eq!(common["instance_id"], "a1b2");
+        assert_eq!(common["unique_instance_id"], "c3d4");
+        assert_eq!(common["host_name"], "gitlab.example.com");
     }
 
     #[test]
