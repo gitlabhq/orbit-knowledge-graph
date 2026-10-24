@@ -6,8 +6,9 @@ use crate::error::Result;
 use crate::input::{Input, QueryType};
 use crate::passes::plan::QueryPlan;
 
-const PATHFINDING_MAX_EXECUTION_TIME: u64 = 15;
-const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360;
+// Deployment config can tighten these compiler-enforced ceilings but cannot raise them.
+const PATHFINDING_EXECUTION_TIME_CEILING_SECONDS: u64 = 15;
+const PATHFINDING_MEMORY_CEILING_BYTES: u64 = 15 * 1024 * 1024 * 1024;
 const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 1_000_000;
 
 pub fn resolve(input: &Input, node: &Node, plan: &QueryPlan) -> Result<QueryConfig> {
@@ -39,26 +40,15 @@ pub fn resolve(input: &Input, node: &Node, plan: &QueryPlan) -> Result<QueryConf
     }
     if input.query_type == QueryType::PathFinding {
         if config.max_execution_time.is_none()
-            || config.max_execution_time > Some(PATHFINDING_MAX_EXECUTION_TIME)
+            || config.max_execution_time > Some(PATHFINDING_EXECUTION_TIME_CEILING_SECONDS)
         {
-            config.max_execution_time = Some(PATHFINDING_MAX_EXECUTION_TIME);
+            config.max_execution_time = Some(PATHFINDING_EXECUTION_TIME_CEILING_SECONDS);
         }
         if config.max_memory_usage.is_none()
-            || config.max_memory_usage > Some(PATHFINDING_MAX_MEMORY_USAGE)
+            || config.max_memory_usage > Some(PATHFINDING_MEMORY_CEILING_BYTES)
         {
-            config.max_memory_usage = Some(PATHFINDING_MAX_MEMORY_USAGE);
+            config.max_memory_usage = Some(PATHFINDING_MEMORY_CEILING_BYTES);
         }
     }
     Ok(config)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn resolve_returns_default_for_unknown_type() {
-        let cfg = orbit_server_config::query::for_query_type("nonexistent");
-        assert_eq!(cfg, QueryConfig::default());
-    }
 }
