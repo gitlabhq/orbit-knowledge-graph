@@ -48,8 +48,7 @@ This table shows a GQL example of each one, and the SQL that it produces.
 ## Walkthrough
 
 This section maps the parts of the engine, in the order that the rest of this document describes them.
-It starts with where the data lives and how the engine reads it.
-Then it follows one query through each phase, from text to SQL.
+It starts with where the data lives and how the engine reads it, and follows one query through each phase, from text to SQL.
 
 | Theme | Component | What it does |Query Engine Phases |
 | --- | --- | --- | --- |
@@ -57,18 +56,20 @@ Then it follows one query through each phase, from text to SQL.
 | Data | [Query data model](#query-data-model) | The engine's read-only view of one schema version: the graph, its tables, and its authorization rules | None |
 | Structure | [Pipelines](#pipelines) | Ordered lists of phases, built from reusable segments, one per frontend and backend | All |
 | Querying | [Frontends](querying.md) | Parse GQL or JSON into the shared input, in their own doc | `gql_parse`, `json_dsl_parse` |
-| Querying | [Validation](#validation) | Rejects bad queries early, then normalizes names and types | `validate`, `validate_relationships`, `normalize` |
-| Querying | [Restriction and scope](#restriction-and-scope) | Applies who is asking, and narrows the query to the namespaces it touches | `restrict` |
-| Querying | [Planning](#planning) | Picks how to read each node and relationship | `plan` |
-| Querying | [Current-state reads](#current-state-reads) | Makes sure every read sees the latest version of each row | `plan` |
-| Querying | [Lowering and code generation](#lowering-and-code-generation) | Turns the plan into a SQL syntax tree, then into SQL for one backend | `lower`, `response_policy`, `codegen` |
-| Querying | [Authorization](#authorization) | Adds authorization filters and redaction columns, then proves they are all there | `enforce`, `security`, `check` |
-| Querying | [Hydration](#hydration) | Plans a second, small query for the properties the main query didn't fetch | `hydrate_plan` |
-| Querying | [Pagination](#pagination) | Pages through results without keeping state between requests | `paginate` |
-| Querying | [Settings](#settings) | Picks time and memory limits for each query type | `settings` |
+| Querying | [Validation](#phases) | Rejects bad queries early, then normalizes names and types | `validate`, `validate_relationships`, `normalize` |
+| Querying | [Restriction and scope](#phases) | Applies who is asking, and narrows the query to the namespaces it touches | `restrict` |
+| Querying | [Planning](#phases) | Picks how to read each node and relationship | `plan` |
+| Querying | [Current-state reads](#phases) | Makes sure every read sees the latest version of each row | `plan` |
+| Querying | [Lowering and code generation](#phases) | Turns the plan into a SQL syntax tree, then into SQL for one backend | `lower`, `response_policy`, `codegen` |
+| Querying | [Authorization](#phases) | Adds authorization filters and redaction columns, then proves they are all there | `enforce`, `security`, `check` |
+| Querying | [Hydration](#phases) | Plans a second, small query for the properties the main query didn't fetch | `hydrate_plan` |
+| Querying | [Pagination](#phases) | Pages through results without keeping state between requests | `paginate` |
+| Querying | [Settings](#phases) | Picks time and memory limits for each query type | `settings` |
 | Summary | [Guarantees](#guarantees) | What the engine promises for every query | All |
 
-This diagram connects the components:
+---
+
+#### 
 
 ```mermaid
 flowchart TB
@@ -168,7 +169,9 @@ flowchart LR
     P --> S["SQL"]
 ```
 
-### How a model is put together
+<details>
+<summary><b>How a model is put together</b>: the graph catalog, the layout, and the policy</summary>
+
 
 Every model has the same three parts, and each part can be swapped on its own:
 
@@ -205,7 +208,11 @@ Orbit has two models:
 A new backend, like a document store, supplies its own schema and mapping.
 It does not have to look relational, and the graph catalog stays the same.
 
-### Who reads the model
+</details>
+
+<details>
+<summary><b>Data model consumers</b>: the engine through the mapping, and schema management through the schema</summary>
+
 
 The engine reads the model through the mapping.
 The planner uses the mapping to find the edge table for each relationship variant and the column behind each property.
@@ -225,13 +232,16 @@ flowchart LR
     S --> E["Engine, through the mapping"]
 ```
 
+</details>
+
+
 The code lives in `crates/query-data-model/`.
 
 ---
 
 ## Pipelines
 
-A pipeline is an ordered list of phases.
+A pipeline is a list of compiler phases that executes in order.
 `crates/query-engine/compiler/src/config.rs` declares every phase, the state it reads and writes, and every pipeline that uses it.
 Because each phase declares its inputs and outputs, the same run of phases can show up in several pipelines.
 
@@ -303,7 +313,14 @@ Segment reuse has these effects:
 
 ---
 
-## Validation
+## Phases
+
+A query runs through these phases in order.
+Expand a phase to see how it works.
+
+<details>
+<summary><b>Validation</b>: rejects invalid queries before planning starts</summary>
+
 
 Validation is the first phase after parsing.
 It rejects an invalid query before planning starts.
@@ -382,11 +399,18 @@ Validation checks these categories:
 The limits live as Rust constants, and a build script checks that the JSON schema states the same ones.
 The [query language reference](../../source/remote/queries/query-language.md#validation-limits) lists them all.
 
----
+</details>
 
-## Restriction and scope
+<details>
+<summary><b>Restriction and scope</b>: applies the caller's access, and narrows the query to the namespaces it touches</summary>
+
 
 Restriction is the first phase that reads the caller's security context: their organization, plus each traversal path they can read and their role on it.
+Restriction does three things:
+
+- It removes properties that the ontology marks as admin-only, like `User.email`, unless the caller is an admin.
+- It rejects any traversal path the caller asks for that isn't inside their authorized paths.
+- It derives the query's scope, so a project-scoped query reads only that project's rows.
 
 ```plantuml
 @startuml
@@ -411,13 +435,7 @@ end note
 @enduml
 ```
 
-Restriction does three things:
-
-- It removes properties that the ontology marks as admin-only, like `User.email`, unless the caller is an admin.
-- It rejects any traversal path the caller asks for that isn't inside their authorized paths.
-- It derives the query's scope, so a project-scoped query reads only that project's rows.
-
-### How scope works
+**How scope works**
 
 A scope starts at an anchor: a node with a known ID or path, like a project, group, merge request, or file.
 The anchor's traversal path becomes a `startsWith` filter, which lets ClickHouse prune most of the primary index.
@@ -467,13 +485,16 @@ The rules for scope:
 - Scope only narrows a query.
   It never widens what the caller can read.
 
----
+</details>
 
-## Planning
+<details>
+<summary><b>Planning</b>: picks how to read each node and relationship</summary>
+
 
 The planner decides how to read each node and relationship.
 It works from facts in the query data model, not from the shape of the query text.
-These are some of its strategies.
+
+The planner uses these strategies, among others.
 
 **Read edges first, and join nodes only when needed.** Edge tables already hold both endpoint IDs, so a query that only needs IDs never touches a node table.
 
@@ -550,16 +571,18 @@ The full set of planning decisions:
 - **Aggregations.** Filters run before grouping, and groups run on the smallest set of rows possible.
   A property group keeps its node table-backed, so security and current-row checks run before the aggregate.
 - **Current state.** The planner picks `FINAL` or a selective current-row read for each relation.
-  See [Current-state reads](#current-state-reads).
+  The current-state reads entry below explains the choice.
 - **Hydration.** The planner decides which properties the main query returns, and which ones hydration fetches later.
 
 The planner may change how a query reads data, but never what it returns.
 Plan-shape fixtures pin these choices for the common query shapes.
 A planner change that picks a different plan for one of them fails a test.
 
----
+</details>
 
-## Current-state reads
+<details>
+<summary><b>Current-state reads</b>: makes every read see the latest version of each row</summary>
+
 
 Node and edge tables keep several versions of a row until ClickHouse merges them.
 A correct query has to ask "does the current version match?", not "did any version ever match?".
@@ -629,9 +652,11 @@ Some more details:
 - On settled ClickHouse parts, `FINAL` was faster or equal in every measured case, and stayed bounded.
   A slow `FINAL` aggregation is a sign of fragmented parts, and the fix belongs in storage, not in the query.
 
----
+</details>
 
-## Lowering and code generation
+<details>
+<summary><b>Lowering and code generation</b>: turns the plan into SQL for one backend</summary>
+
 
 Lowering turns the plan into a SQL syntax tree.
 Code generation then renders that tree for one backend.
@@ -660,9 +685,11 @@ tree --> duckdb
 - When a backend can't support an operation, it rejects the query.
   DuckDB, for example, has no equivalent for ClickHouse's token search.
 
----
+</details>
 
-## Authorization
+<details>
+<summary><b>Authorization</b>: adds authorization filters, then proves that every read has one</summary>
+
 
 Three phases protect every remote query.
 `enforce` adds what redaction needs, `security` adds the authorization filters, and `check` verifies that every read has a filter.
@@ -715,9 +742,11 @@ end note
 
 The [Security](../security.md) design document describes the full authorization model and the redaction layer.
 
----
+</details>
 
-## Hydration
+<details>
+<summary><b>Hydration</b>: fetches the properties that the main query didn't return</summary>
+
 
 The main query returns identities, plus the properties it already joined.
 Hydration fetches the rest in one more small query.
@@ -746,9 +775,11 @@ end note
 - The hydration query compiles through `ch_hydration`, so it runs the same restrict and security phases as the main query.
 - The caller picks how many columns dynamic nodes return: the ontology defaults, or all columns.
 
----
+</details>
 
-## Pagination
+<details>
+<summary><b>Pagination</b>: pages through results without keeping server state</summary>
+
 
 The engine pages without keeping any state between requests.
 Every page is a new, bounded query.
@@ -778,13 +809,17 @@ end note
 - Redaction runs after SQL, so a page can hold fewer rows than its limit while `has_more` is still true.
   Callers stop when `has_more` is false.
 
----
+</details>
 
-## Settings
+<details>
+<summary><b>Settings</b>: sets time and memory limits for each query type</summary>
+
 
 The `settings` phase picks ClickHouse settings for each query type: time limits, memory limits, and caching.
 Path finding has hard ceilings of 15 seconds and 15 GiB.
 Server configuration can tighten these limits, but never raise them past the ceilings.
+
+</details>
 
 ---
 
