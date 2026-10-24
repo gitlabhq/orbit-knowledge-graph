@@ -41,7 +41,7 @@ cases:
       json: |
         {"query_type":"traversal","nodes":[{"id":"wi","entity":"WorkItem","not":{"id":{"in":[4000],"gte":4000,"lte":4010}}}],"limit":30}
       gql: MATCH (wi:WorkItem) WHERE NOT (wi.id IN [4000] AND wi.id >= 4000 AND wi.id <= 4010) RETURN wi.id
-    expect: { compile_error: add filters or node_ids to at least one node (NOT conditions do not count) }
+    expect: { compile_error: or WHERE mr.project_id = 42 (NOT conditions do not count) }
 
   - name: negation_complement_entry_cap_rejected
     description: Complemented NOT conditions count toward the per-property filter cap
@@ -216,7 +216,7 @@ cases:
         {"query_type":"traversal","nodes":[{"id":"u","entity":"User","not":{"id":{"in":[1]}}}],"limit":30}
       gql: |
         MATCH (u:User) WHERE NOT u.id IN [1] RETURN u
-    expect: { compile_error: add filters or node_ids to at least one node (NOT conditions do not count) }
+    expect: { compile_error: or WHERE mr.project_id = 42 (NOT conditions do not count) }
 
   - name: not_literal_comparison_rejected
     description: NOT over a comparison of two literals is rejected. A comparison must start with a property of a pattern variable, and a JSON not key must be a property name.
