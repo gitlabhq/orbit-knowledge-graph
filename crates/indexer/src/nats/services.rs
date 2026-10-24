@@ -29,7 +29,12 @@
 //!         "my-key",
 //!         Duration::from_secs(300),
 //!     )
-//!     .await?;
+//!     .await
+//!     .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?;
+//!     let Ok(guard) = guard else {
+//!         // Held by another indexer: defer or skip.
+//!         return Ok(());
+//!     };
 //!     // ...
 //!     Ok(())
 //! }
