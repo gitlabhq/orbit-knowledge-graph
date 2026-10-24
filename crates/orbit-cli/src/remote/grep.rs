@@ -241,14 +241,21 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         Ok(responses) => responses,
         Err(outcome) => return outcome,
     };
-    let words: Vec<String> = keywords
+    let mut words: Vec<String> = Vec::new();
+    for word in keywords
         .iter()
-        .flat_map(|keyword| keyword.split_whitespace().map(str::to_string))
-        .collect();
+        .flat_map(|keyword| keyword.split_whitespace())
+    {
+        if word.len() >= 2 && !words.iter().any(|seen| seen == word) {
+            words.push(word.to_string());
+        }
+    }
+    let budget = MAX_SEARCHES.saturating_sub(keywords.len());
     let mut any_word = false;
     if words.len() > keywords.len()
+        && budget > 0
         && responses.iter().all(|response| response.results.is_empty())
-        && let Ok(wider) = fetch(words).await
+        && let Ok(wider) = fetch(words.into_iter().take(budget).collect()).await
         && wider.iter().any(|response| !response.results.is_empty())
     {
         (responses, any_word) = (wider, true);
@@ -285,16 +292,41 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         }
     }
     if request.scopes.contains(&BRANCHES) {
+        let kind = responses
+            .iter()
+            .find_map(|response| response.target.as_ref())
+            .map(|target| target.kind.to_ascii_lowercase())
+            .unwrap_or_default();
         let project = match &home_project {
             Some(path) => path.clone(),
-            None if matches!(scope.0, "full_path" | "project_id") => scope.1.clone(),
-            None => return Outcome::Skipped("branches belong to a project; name one".into()),
+            None if matches!(scope.0, "full_path" | "project_id")
+                && (kind.is_empty() || kind == "project") =>
+            {
+                scope.1.clone()
+            }
+            None if found.is_empty() => {
+                return Outcome::Skipped(format!(
+                    "branches belong to a project; {} is not one",
+                    request.target.named()
+                ));
+            }
+            None => return Outcome::Found(found.join("\n")),
         };
         let shown = format!("{api_host}/{project}");
         let wanted = request.keywords.join(" ");
         match super::sdlc::search_text(&client, &shown, &project, &wanted).await {
             Ok(Some(text)) => found.push(text),
             Ok(None) => {}
+            Err(error)
+                if found.is_empty()
+                    && home_project.is_none()
+                    && first_line(&error.message).ends_with(" not found") =>
+            {
+                return Outcome::Skipped(format!(
+                    "branches belong to a project; no project named {}",
+                    request.target.named()
+                ));
+            }
             Err(error) if found.is_empty() => return outcome_for(&request.target, &error),
             Err(_) => {}
         }

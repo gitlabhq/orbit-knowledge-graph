@@ -19,6 +19,7 @@ const EDITED_MARK: &str = " (edited since index)";
 const FILE_INDEX_MIN: usize = 20;
 const FILE_INDEX_DIRECTORIES: usize = 30;
 const OUTSIDE: &str = "outside indexed definitions";
+const STALE: &str = "edited since index; definitions not shown";
 
 #[derive(PartialEq)]
 enum Scope<'a> {
@@ -26,6 +27,7 @@ enum Scope<'a> {
     Def(&'a Def),
     Imports(usize),
     Outside,
+    Stale,
 }
 
 fn definition_note(def: &Def) -> String {
@@ -132,11 +134,8 @@ pub(super) fn render(
         if index > 0 {
             out.push('\n');
         }
-        let mark = if edited.contains(file) {
-            EDITED_MARK
-        } else {
-            ""
-        };
+        let stale = edited.contains(file);
+        let mark = if stale { EDITED_MARK } else { "" };
         out.push_str(&format!("{file}{mark}\n"));
         let code = is_code(file);
         let mut scope = Scope::Start;
@@ -150,6 +149,7 @@ pub(super) fn render(
             }
             previous = Some(hit.line);
             let next = match (&hit.def, hit.imports.is_empty()) {
+                _ if stale => Scope::Stale,
                 (Some(def), _) => Scope::Def(def),
                 (None, false) => Scope::Imports(hit.line),
                 (None, true) if scope == Scope::Start && !code => Scope::Start,
@@ -168,6 +168,7 @@ pub(super) fn render(
                     Scope::Outside if !(matches!(scope, Scope::Imports(_)) && adjacent) => {
                         out.push_str(&format!("{}-{NOTE}{OUTSIDE}\n", hit.line))
                     }
+                    Scope::Stale => out.push_str(&format!("{}-{NOTE}{STALE}\n", hit.line)),
                     _ => {}
                 }
             }
@@ -417,7 +418,7 @@ src/a.rs
 40:go();
 
 src/b.rs (edited since index)
-2-» outside indexed definitions
+2-» edited since index; definitions not shown
 2:fn go() {}
 
 data.json
