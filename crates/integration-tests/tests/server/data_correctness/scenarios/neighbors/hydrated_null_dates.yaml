@@ -1,0 +1,24 @@
+description: Hydrated neighbor properties read a stored epoch date as null
+
+query:
+  json: |
+    {
+      "query_type": "neighbors",
+      "nodes": [{"id": "wi", "entity": "WorkItem", "node_ids": [4000]}],
+      "neighbors": {"direction": "outgoing", "rel_types": ["IN_MILESTONE"]},
+      "options": {"dynamic_columns": "*"}
+    }
+  gql: |
+    MATCH (wi:WorkItem {id: 4000})-[:IN_MILESTONE]->(n) RETURN wi, properties(n)
+
+expect:
+  node_count: 2
+  nodes:
+    WorkItem:
+      ids: [4000]
+    Milestone:
+      ids: [6000]
+      prop_present: [title]
+      prop_absent: [due_date, start_date]
+  edge_exists:
+    IN_MILESTONE: [[4000, 6000]]

@@ -1013,6 +1013,7 @@ fn apply_expect(view: &ResponseView, expect: &QueryExpect, label: &str) {
                 serde_json::Value::String(s) => {
                     view.assert_row_value_str(i, col, s);
                 }
+                serde_json::Value::Null => view.assert_row_value_null(i, col),
                 _ => panic!("{label}: unsupported row_values type for {col}"),
             }
         }

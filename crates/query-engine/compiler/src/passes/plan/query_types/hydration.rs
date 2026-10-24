@@ -1,6 +1,8 @@
 //! Hydration: per node, the table, ids, columns, and traversal-path filter that lowering reads
 //! properties with.
 
+use std::collections::HashSet;
+
 use orbit_utils::traversal_path::{TraversalPath, prune_to_leaves};
 use query_data_model::OrbitQueryModel;
 
@@ -29,6 +31,7 @@ pub struct HydrationNodePlan {
     pub columns: Vec<String>,
     pub path_filter: Option<HydrationPathFilter>,
     pub sort_key: Vec<String>,
+    pub null_as_epoch: HashSet<String>,
 }
 
 pub enum HydrationPathFilter {
@@ -101,6 +104,11 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
                 columns,
                 path_filter: path_filter(&node.traversal_paths, options),
                 sort_key: sort_key(model, table)?.to_vec(),
+                null_as_epoch: model
+                    .graph()
+                    .entity_id(entity)
+                    .map(|entity| model.null_as_epoch_properties(entity))
+                    .unwrap_or_default(),
             })
         })
         .collect::<Result<Vec<_>>>()?;

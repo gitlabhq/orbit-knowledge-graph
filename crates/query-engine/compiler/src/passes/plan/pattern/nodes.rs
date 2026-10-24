@@ -40,12 +40,21 @@ impl NodePlan {
             ),
             ColumnSelection::List(columns) => ColumnSelection::List(columns.clone()),
         });
+        let null_as_epoch = model.null_as_epoch_properties(entity_id);
+        let mut filters = ordered_filters(filters, FilterOwner::Entity(entity_id), model);
+        for (_, bound) in &mut filters {
+            if let Some((alias, property)) = &bound.filter.rhs_column
+                && *alias == node.id
+            {
+                bound.null_as_epoch.rhs = null_as_epoch.contains(property);
+            }
+        }
         Some(Self {
             alias: node.id.clone(),
             entity: node.entity.clone(),
             table: model.entity_table(entity).map(String::from),
             joined: false,
-            filters: ordered_filters(filters, FilterOwner::Entity(entity_id), model),
+            filters,
             predicates: Vec::new(),
             node_ids: node.node_ids.clone(),
             id_range: node.id_range.clone(),
@@ -56,6 +65,7 @@ impl NodePlan {
                 .to_string(),
             columns,
             emit_select: true,
+            null_as_epoch,
         })
     }
 
@@ -120,7 +130,7 @@ impl NodePlan {
             .into_iter()
             .map(|column| {
                 Projection::new(
-                    OutputValue::Column(Column::new(&self.alias, &column)),
+                    OutputValue::property(&self.null_as_epoch, Column::new(&self.alias, &column)),
                     format!("{}_{column}", self.alias),
                 )
             })

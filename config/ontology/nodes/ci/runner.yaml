@@ -125,8 +125,8 @@ storage:
     - {name: access_level, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: maximum_timeout, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: organization_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
-    - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: contacted_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: contacted_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_runner_type, column: runner_type, type: "set(4)", granularity: 2}

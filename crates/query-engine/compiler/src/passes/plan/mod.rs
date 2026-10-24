@@ -82,6 +82,17 @@ impl QueryPlan {
     }
 }
 
+pub(crate) fn property_value(
+    nodes: &HashMap<String, NodePlan>,
+    node: &str,
+    column: predicates::Column,
+) -> predicates::OutputValue {
+    match nodes.get(node) {
+        Some(plan) => predicates::OutputValue::property(&plan.null_as_epoch, column),
+        None => predicates::OutputValue::Column(column),
+    }
+}
+
 pub(crate) fn sort_key<'m>(
     model: &'m (impl OrbitQueryModel + ?Sized),
     table: &str,
