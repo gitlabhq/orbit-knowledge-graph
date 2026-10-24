@@ -109,13 +109,13 @@ For more information, see [local graph](cli.md#local-graph).
 
 <style>
 /* Product landing page. Visual wrappers only, with GitLab UI design tokens; the content above is Markdown. */
-/* Page title: the standard H1, with the GitLab Orbit logo before it. */
+/* Page title: the standard H1, with the GitLab Orbit logo after it. */
 body:has(.product-landing) h1#skipTarget {
   display: flex;
   align-items: center;
   gap: var(--gl-spacing-scale-4);
 }
-body:has(.product-landing) h1#skipTarget::before {
+body:has(.product-landing) h1#skipTarget::after {
   content: "";
   flex: none;
   width: 48px;
