@@ -160,10 +160,10 @@ async fn each_path_gets_one_plain_count_query(ctx: &TestContext) {
     let shapes = read_cached_query_log(
         &db,
         "QueryStart",
-        "concat(toString(position(query, 'ARRAY JOIN') > 0), Settings['enable_parallel_replicas'])",
+        "concat(toString(position(query, 'ARRAY JOIN') > 0), Settings['parallel_replicas_min_number_of_rows_per_replica'])",
     )
     .await;
-    assert_eq!(shapes, ["01", "01"]);
+    assert_eq!(shapes, ["050000000", "050000000"]);
 }
 
 async fn nested_scopes_count_rows_at_each_scope_once(ctx: &TestContext) {
