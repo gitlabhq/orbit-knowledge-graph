@@ -10,7 +10,6 @@ title: ClickHouse for GitLab Orbit
 
 - Tier: Premium, Ultimate
 - Offering: GitLab Self-Managed
-- Status: Beta
 
 {{< /details >}}
 
@@ -34,13 +33,13 @@ The migrations create the data lake tables that Siphon writes into.
 | `orbit` | GitLab Orbit | GitLab Orbit |
 
 The two databases can be on separate ClickHouse instances.
-In that case, [create the users manually](#create-the-users-manually).
 
 ## High availability
 
 GitLab Orbit can run on a ClickHouse cluster with ClickHouse Keeper and at least two replicas behind an HTTP load balancer.
-For the cluster setup, see
-[HA ClickHouse for GitLab Self-Managed](https://docs.gitlab.com/integration/clickhouse/?tab=HA+ClickHouse+for+GitLab+Self-Managed).
+For the cluster setup, see [HA ClickHouse for GitLab Self-Managed](https://docs.gitlab.com/integration/clickhouse/?tab=HA+ClickHouse+for+GitLab+Self-Managed).
+
+To set up high availability:
 
 1. Create the graph database with the `Replicated` engine:
 
@@ -112,12 +111,9 @@ To delete old rows, add a TTL for every log to `/etc/clickhouse-server/config.d/
 After the restart, ClickHouse keeps the old rows in renamed tables, such as `system.query_log_0`.
 Drop those tables to free the disk.
 
-## Create the users manually
+## Users
 
-Create the users yourself when the data lake and the graph are on separate ClickHouse instances, or when the chart cannot use an administrator account.
-Otherwise, the chart creates them when you [install GitLab Orbit](orbit-setup.md#install-gitlab-orbit).
-
-GitLab Orbit uses three users:
+GitLab Orbit uses three ClickHouse users:
 
 | User | Access |
 |------|--------|
@@ -125,20 +121,39 @@ GitLab Orbit uses three users:
 | `gkg_reader` | Read the graph database |
 | `gkg_siphon_reader` | Read the data lake |
 
-To create the users:
+Before every install and upgrade, the chart setup hook signs in to the graph instance as a ClickHouse administrator, and creates the graph database, the users, their roles, and their grants.
+For the grants of an administrator other than `default`, see [ClickHouse setup hook](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts#clickhouse-setup-hook).
+Create the users manually when the data lake is on a separate instance, or when the chart cannot use an administrator account.
 
-1. Read the setup statements from the GitLab Orbit image:
+### Create the users manually
+
+To create the users manually:
+
+1. Save the setup statements from the GitLab Orbit image:
 
    ```shell
    docker run --rm --entrypoint cat \
      registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg:<orbit_version> \
-     /usr/share/gkg/clickhouse-setup.sql
+     /usr/share/gkg/clickhouse-setup.sql > clickhouse-setup.sql
    ```
 
-   Replace `<orbit_version>` with the GitLab Orbit release that you deploy.
+   Replace the following values:
 
-1. In the statements, replace the database names.
-1. Set a password for each user.
-1. As a ClickHouse administrator, run the data lake statements on the data lake instance.
-1. Run the graph statements on the graph instance.
-1. In `orbit-values.yaml`, remove the `clickhouseSetup` block.
+   - `<orbit_version>`: The GitLab Orbit release that you deploy.
+
+1. In `clickhouse-setup.sql`, replace `${GRAPH_DB}` with `orbit` and `${DATALAKE_DB}` with `gitlab_clickhouse_main_production`.
+1. Replace `${GKG_WRITER_PASSWORD}`, `${GKG_READER_PASSWORD}`, and `${GKG_SIPHON_READER_PASSWORD}` with a new password for each user.
+1. Save the data lake statements, which name `gkg_siphon_reader`, to `datalake.sql`:
+
+   ```shell
+   grep gkg_siphon_reader clickhouse-setup.sql > datalake.sql
+   ```
+
+1. Save all other statements to `graph.sql`:
+
+   ```shell
+   grep -v gkg_siphon_reader clickhouse-setup.sql > graph.sql
+   ```
+
+1. As a ClickHouse administrator, run `datalake.sql` on the data lake instance and `graph.sql` on the graph instance.
+1. In `orbit-values.yaml`, set `clickhouseSetup.enabled` to `false`.
