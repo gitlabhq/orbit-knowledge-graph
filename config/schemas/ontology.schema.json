@@ -1478,19 +1478,20 @@
         "type": {
           "type": "string",
           "pattern": "^(Int64|UInt64|Bool|String|Date32|DateTime64\\(|Nullable\\(|LowCardinality\\().*$",
+          "not": { "pattern": "^Nullable\\(Date" },
           "description": "Exact ClickHouse type. Must start with a known type name."
         },
         "default": {
           "type": "string",
-          "pattern": "^[a-zA-Z0-9_()',./_ {}]+$",
-          "description": "DEFAULT expression. Only literals, function calls, and quoted strings allowed."
+          "pattern": "^[a-zA-Z0-9_()',./_ {}-]+$",
+          "description": "DEFAULT expression: literals, function calls, or quoted strings."
         },
         "codec": {
           "type": "array",
           "items": {
             "type": "string",
             "pattern": "^(ZSTD\\([0-9]+\\)|Delta\\([0-9]+\\)|DoubleDelta|T64|LZ4)$",
-            "description": "Codec. Must be ZSTD(N), Delta(N), DoubleDelta, T64, or LZ4."
+            "description": "Compression codec."
           }
         }
       },

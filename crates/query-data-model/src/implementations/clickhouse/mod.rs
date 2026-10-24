@@ -187,6 +187,12 @@ impl RelationalMapping for ClickHouseBindings {
             .is_some_and(|facts| facts.has_text_index)
     }
 
+    fn null_as_epoch(&self, property: PropertyId) -> bool {
+        self.property_facts
+            .get(property.index())
+            .is_some_and(|facts| facts.null_as_epoch)
+    }
+
     fn property_unique(&self, property: PropertyId) -> bool {
         self.property_facts
             .get(property.index())
