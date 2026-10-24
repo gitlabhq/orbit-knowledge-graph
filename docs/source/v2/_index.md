@@ -6,6 +6,9 @@ description: Give your agent a graph of your GitLab data and code, so the agent 
 title: GitLab Orbit
 ---
 
+Software lifecycle context graph for AI agents
+{.product-hero-title}
+
 {{< details >}}
 
 - Tier: Premium, Ultimate
@@ -23,9 +26,6 @@ title: GitLab Orbit
 {{< /history >}}
 
 <section class="product-landing product-hero">
-
-Software lifecycle context graph for AI agents
-{.product-hero-title}
 
 GitLab Orbit indexes your GitLab data and code into a graph your agent can query.
 Ask what breaks if you change a service, who should review a file, or why pipelines fail.
@@ -132,14 +132,15 @@ body:has(.product-landing) .docs-content .language-plaintext {
   margin: var(--gl-spacing-scale-5) 0 var(--gl-spacing-scale-6);
 }
 .docs-content .product-hero p { margin: 0; }
+/* Tagline: directly under the page title, smaller than a heading. */
 .docs-content .product-hero-title {
-  font-size: var(--gl-text-size-h3);
-  line-height: 1.25;
-  font-weight: 500;
-  color: var(--gl-text-color-default);
+  margin: calc(-1 * var(--gl-spacing-scale-4)) 0 var(--gl-spacing-scale-5);
+  font-size: 1.125rem;
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--gl-text-color-subtle);
 }
 .docs-content .product-hero-lead {
-  margin-top: var(--gl-spacing-scale-4) !important;
   max-width: 68ch;
 }
 .docs-content .product-hero-actions {
