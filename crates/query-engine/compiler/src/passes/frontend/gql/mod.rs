@@ -201,6 +201,13 @@ mod tests {
     }
 
     #[test]
+    fn limit_may_come_before_skip() {
+        let query = "MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid ORDER BY mr.iid LIMIT 20 SKIP 40";
+        let parsed = parse(query).expect("accepted");
+        assert_eq!((parsed.limit, parsed.skip), (20, Some(40)));
+    }
+
+    #[test]
     fn count_star_says_what_aggregates_take() {
         let message = error_of("MATCH (u:User {id: 1}) RETURN count(*)");
         assert!(
