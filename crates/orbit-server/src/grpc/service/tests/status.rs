@@ -11,10 +11,15 @@ async fn indexing_status_error(paths: &[&str]) -> tonic::Code {
         .code()
 }
 
-async fn item_counts_error(path: &str) -> tonic::Code {
-    let request = GetItemCountsRequest {
+#[allow(deprecated)]
+fn item_counts_request(path: &str, paths: &[&str]) -> GetItemCountsRequest {
+    GetItemCountsRequest {
         traversal_path: path.to_string(),
-    };
+        traversal_paths: paths.iter().map(|path| path.to_string()).collect(),
+    }
+}
+
+async fn item_counts_error(request: GetItemCountsRequest) -> tonic::Code {
     test_service()
         .get_item_counts(authed_request(request))
         .await
@@ -35,7 +40,7 @@ async fn graph_status_error(path: &str, claims: Claims) -> tonic::Code {
 }
 
 #[tokio::test]
-async fn indexing_status_rejects_an_empty_or_oversized_path_list() {
+async fn status_rpcs_reject_an_empty_or_oversized_path_list() {
     let paths: Vec<String> = (0..=MAX_STATUS_PATHS)
         .map(|id| format!("1/{id}/"))
         .collect();
@@ -47,6 +52,10 @@ async fn indexing_status_rejects_an_empty_or_oversized_path_list() {
             tonic::Code::InvalidArgument
         );
     }
+    assert_eq!(
+        item_counts_error(item_counts_request("", &oversized)).await,
+        tonic::Code::InvalidArgument
+    );
 }
 
 #[tokio::test]
@@ -58,7 +67,7 @@ async fn status_rpcs_reject_a_malformed_path() {
             "indexing status accepted {path:?}"
         );
         assert_eq!(
-            item_counts_error(path).await,
+            item_counts_error(item_counts_request(path, &[])).await,
             tonic::Code::InvalidArgument,
             "item counts accepted {path:?}"
         );
@@ -91,7 +100,36 @@ async fn status_rpcs_deny_a_path_outside_the_callers_groups() {
         tonic::Code::PermissionDenied
     );
     assert_eq!(
-        item_counts_error("1/22/").await,
+        item_counts_error(item_counts_request("1/22/", &[])).await,
         tonic::Code::PermissionDenied
     );
+}
+
+#[tokio::test]
+async fn item_counts_rejects_a_request_with_both_path_fields() {
+    assert_eq!(
+        item_counts_error(item_counts_request("1/22/", &["1/22/"])).await,
+        tonic::Code::InvalidArgument
+    );
+}
+
+#[tokio::test]
+async fn item_counts_fails_when_every_path_count_fails() {
+    let admin = Claims {
+        admin: true,
+        organization_id: Some(1),
+        ..test_claims()
+    };
+
+    for request in [
+        item_counts_request("1/22/", &[]),
+        item_counts_request("", &["1/22/", "1/33/"]),
+    ] {
+        let code = test_service()
+            .get_item_counts(signed_request(request, admin.clone()))
+            .await
+            .unwrap_err()
+            .code();
+        assert_eq!(code, tonic::Code::Internal);
+    }
 }

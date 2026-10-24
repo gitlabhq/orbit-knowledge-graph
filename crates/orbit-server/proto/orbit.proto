@@ -590,11 +590,18 @@ message DomainIndexingStatus {
 // ---------------------------------------------------------------------------
 
 message GetItemCountsRequest {
-  string traversal_path = 1;  // one group or project path (e.g. "1/2/")
+  string traversal_path = 1 [deprecated = true];  // deprecated: use traversal_paths; one path, read when traversal_paths is empty
+  repeated string traversal_paths = 2;  // 1 to 100 group or project paths
 }
 
 message GetItemCountsResponse {
-  repeated DomainItemCount domains = 1;  // only domains with an entity the caller can see
+  repeated DomainItemCount domains = 1;  // set for a traversal_path request
+  repeated NamespaceItemCounts namespaces = 2;  // set for a traversal_paths request, in request order
+}
+
+message NamespaceItemCounts {
+  string traversal_path = 1;
+  repeated DomainItemCount domains = 2;  // only domains with an entity the caller can see
 }
 
 message DomainItemCount {
