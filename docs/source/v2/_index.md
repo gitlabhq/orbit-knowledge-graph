@@ -116,8 +116,8 @@ body:has(.product-landing) h1#skipTarget {
 body:has(.product-landing) h1#skipTarget::after {
   content: "";
   flex: none;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   background: URL("img/orbit-logo-v19_6.svg") center / contain no-repeat;
 }
 body:has(.product-landing) .docs-content .language-plaintext {
