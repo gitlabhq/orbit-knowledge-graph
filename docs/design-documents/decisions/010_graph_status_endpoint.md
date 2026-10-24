@@ -11,7 +11,28 @@ Accepted
 
 ## Date
 
-2026-04-21 (state semantics updated 2026-08-10 and 2026-09-26, see the updates below)
+2026-04-21 (updated 2026-08-10, 2026-09-26, 2026-09-27, 2026-10-11, 2026-10-16 and 2026-10-23, see the updates below)
+
+## Update: batched item counts (2026-10-23)
+
+`GetItemCounts` takes 1 to 100 traversal paths in `traversal_paths` and returns one
+`namespaces` entry per path, in request order. Field 1 `traversal_path` is deprecated; the
+server still reads it while Rails moves to `traversal_paths`. A request that sets both fields
+is invalid.
+
+Each path gets its own count query, the same SQL as for one path, and up to 8 run at once. A
+first draft counted all paths in one query. In production, that query hit the 30 second
+ClickHouse limit when a request held several large groups, so the design changed.
+
+The count query sets `enable_parallel_replicas=1` with a threshold of 50 million rows per
+replica. A large path reads on all replicas, and a small path stays on one. It also sets
+`cancel_http_readonly_queries_on_client_close=1`, so a query stops when the caller leaves. In
+production, the largest group went from about 6.5 seconds to 4.1 seconds, and a median group
+saw no added latency.
+
+The count query sets its own 5 second query cache TTL and keeps the configured cache switch.
+This replaces the 10 second TTL below. A failed count fails the call. `GetGraphStatus` still
+shows zeros when the count fails.
 
 ## Update: cached item counts (2026-10-16)
 

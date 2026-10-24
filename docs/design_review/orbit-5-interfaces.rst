@@ -71,7 +71,7 @@ client, stub-cached):
    * - ``GetIndexingStatus``
      - Indexing phase and last completed time per namespace, for 1 to 100 paths
    * - ``GetItemCounts``
-     - Entity counts per domain that the caller can see
+     - Entity counts per domain that the caller can see, for 1 to 100 paths
 
 Thirteen RPCs in total.  The probe server serves ``GET /-/liveness`` and
 ``GET /-/readiness`` in every mode; HealthCheck mode also serves ``/health``.
