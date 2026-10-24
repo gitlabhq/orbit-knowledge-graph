@@ -10,7 +10,6 @@ title: Set up data replication
 
 - Tier: Premium, Ultimate
 - Offering: GitLab Self-Managed
-- Status: Beta
 
 {{< /details >}}
 
@@ -27,14 +26,11 @@ Siphon runs as three deployments on Kubernetes:
 
 Prerequisites:
 
-- The [prerequisites](getting-started.md#prerequisites) for GitLab Orbit on GitLab Self-Managed.
-- A ClickHouse instance set up for GitLab, with the GitLab ClickHouse migrations applied.
-  For more information, see [ClickHouse](clickhouse.md).
+- The prerequisites in [Get started with GitLab Orbit on GitLab Self-Managed](getting-started.md).
 - Superuser access to the GitLab PostgreSQL server.
-- A maintenance window for one PostgreSQL restart.
 - Helm 3 and `kubectl` access to the cluster.
 
-Use the latest [Siphon release](https://gitlab.com/gitlab-org/analytics-section/siphon/-/releases) and the latest Siphon Helm chart.
+Use the latest [Siphon release](https://gitlab.com/gitlab-org/analytics-section/siphon/-/releases) and the latest [Siphon Helm chart](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts/-/releases).
 
 Set up replication in this order:
 
@@ -50,6 +46,8 @@ Set up replication in this order:
 The Siphon producer stops at startup unless `wal_level` is `logical`.
 Changes to `wal_level`, `max_replication_slots`, and `max_wal_senders` all require a full PostgreSQL restart, not a reload, and `gitlab-ctl reconfigure` does not restart PostgreSQL.
 
+To turn on logical replication:
+
 {{< tabs >}}
 
 {{< tab title="Linux package (Omnibus)" >}}
@@ -61,9 +59,8 @@ Changes to `wal_level`, `max_replication_slots`, and `max_wal_senders` all requi
    postgresql['max_replication_slots'] = 10
    postgresql['max_wal_senders'] = 10
 
-   # Accept connections from the cluster. Replace with the address and CIDR for your network.
-   postgresql['listen_address'] = '0.0.0.0'
-   postgresql['md5_auth_cidr_addresses'] = ['10.0.0.0/8']
+   postgresql['listen_address'] = '<private_ip>'
+   postgresql['md5_auth_cidr_addresses'] = ['<cluster_cidr>']
 
    # Keep GitLab and the container registry on the local socket. Without these lines,
    # setting listen_address also repoints them at that address, and they lose their
@@ -72,17 +69,31 @@ Changes to `wal_level`, `max_replication_slots`, and `max_wal_senders` all requi
    registry['database']['host'] = '/var/opt/gitlab/postgresql'
    ```
 
-1. Save the file, reconfigure GitLab, then restart PostgreSQL:
+   Replace the following values:
+
+   - `<private_ip>`: The private IP address of the PostgreSQL server that the cluster reaches.
+     Do not use `0.0.0.0`, because PostgreSQL then listens on every interface, public interfaces included.
+   - `<cluster_cidr>`: The address range that Siphon connects from, such as the node or pod CIDR of the cluster.
+
+   For more information, see [Configure packaged PostgreSQL server to listen on TCP/IP](https://docs.gitlab.com/omnibus/settings/database/#configure-packaged-postgresql-server-to-listen-on-tcpip).
+
+1. Save the file and reconfigure GitLab:
 
    ```shell
    sudo gitlab-ctl reconfigure
+   ```
+
+1. Restart PostgreSQL:
+
+   ```shell
    sudo gitlab-ctl restart postgresql
    ```
+
+1. In your firewall or security group, allow only the cluster address range to reach port 5432.
 
 1. Confirm the settings:
 
    ```shell
-   sudo gitlab-psql -c 'SHOW wal_level'
    sudo gitlab-psql -c "SELECT name, setting, pending_restart FROM pg_settings WHERE name IN ('wal_level','max_wal_senders','max_replication_slots')"
    ```
 
@@ -109,7 +120,7 @@ The GitLab Helm chart does not manage a production PostgreSQL, so apply these se
 
 1. Restart the server.
 
-1. Allow connections from the cluster to reach port 5432.
+1. Expose PostgreSQL on a private network interface only, and allow only the cluster address range to reach port 5432.
 
 1. Confirm the settings:
 
@@ -117,6 +128,11 @@ The GitLab Helm chart does not manage a production PostgreSQL, so apply these se
    psql -h <postgresql_host> -U <admin_user> -d gitlabhq_production \
      -c "SELECT name, setting, pending_restart FROM pg_settings WHERE name IN ('wal_level','max_wal_senders','max_replication_slots')"
    ```
+
+   Replace the following values:
+
+   - `<postgresql_host>`: The PostgreSQL host name.
+   - `<admin_user>`: A PostgreSQL administrator user.
 
    `wal_level` returns `logical`, the other two match the values you set, and no row reports `pending_restart = t`.
 
@@ -152,6 +168,8 @@ The task is idempotent and creates:
 - The publication.
 - The helper function Siphon calls to add tables to the publication.
 - Read access to every GitLab schema.
+
+To run the Rake task:
 
 {{< tabs >}}
 
@@ -191,6 +209,11 @@ The task is idempotent and creates:
    kubectl -n <gitlab_namespace> exec -it deploy/<release>-toolbox -- gitlab-rake gitlab:siphon:setup
    ```
 
+Replace the following values:
+
+- `<gitlab_namespace>`: The namespace of the GitLab release.
+- `<release>`: The name of the GitLab Helm release.
+
 {{< /tab >}}
 
 {{< /tabs >}}
@@ -221,11 +244,6 @@ GRANT SELECT, INSERT, dictGet ON gitlab_clickhouse_main_production.* TO siphon_a
 GRANT siphon_app TO siphon;
 ```
 
-The `dictGet` grant is required.
-Without it, the pods still pass their health checks, because the probes check only that the consumer runs.
-The failure appears as permission errors in the consumer log.
-Every table backed by a dictionary stays empty.
-
 On a managed ClickHouse that restricts the `system` database, also run:
 
 ```sql
@@ -235,6 +253,8 @@ GRANT SELECT ON system.tables, SELECT ON system.columns TO siphon_app;
 ## Make the passwords available to Siphon
 
 Siphon reads both passwords from a Kubernetes Secret named `siphon-secrets`.
+
+To create the Secret:
 
 1. Create the namespace:
 
@@ -261,10 +281,12 @@ In production, sync the Secret from your secret manager, for example with the Ex
 
 In split mode, Siphon reads the GitLab table definitions from the `gitlab-siphon-tables` image, which GitLab publishes for recent releases.
 `global.gitlabVersion` selects the image tag, so the replicated tables match your GitLab version.
-The image is an [image volume](getting-started.md#image-volumes).
+Siphon mounts the image as an [image volume](getting-started.md#image-volumes).
 Before you install, confirm that the [`gitlab-siphon-tables` registry](https://gitlab.com/gitlab-org/build/CNG/container_registry/11611957) has a tag for your GitLab version.
 
-1. Save the following as `siphon-values.yaml` and replace the placeholders:
+To install Siphon:
+
+1. Save the following as `siphon-values.yaml`:
 
    ```yaml
    configMode: split
@@ -292,6 +314,10 @@ Before you install, confirm that the [`gitlab-siphon-tables` registry](https://g
            nats_config:
              replicas: 1
              max_age_seconds: 1296000
+           object_storage_config:
+             identifier: siphon-object-storage
+             type: s3
+             bucket_name: <bucket_name>
          clickhouse:
            host: <clickhouse_host>
            # Native protocol, not the HTTP port GitLab uses.
@@ -371,17 +397,26 @@ Before you install, confirm that the [`gitlab-siphon-tables` registry](https://g
 
    - `<gitlab_version>`: Your GitLab version, for example `19.5.0`.
    - `<siphon_version>`: The Siphon release tag.
-   - `<clickhouse_host>` and `<postgresql_host>`: The ClickHouse and PostgreSQL host names.
+   - `<bucket_name>`: The bucket for Siphon. For bucket types and credentials, see [Object storage for large rows](#object-storage-for-large-rows).
+   - `<clickhouse_host>`: The ClickHouse host name.
+   - `<postgresql_host>`: The PostgreSQL host name.
+
+1. Add the Siphon chart repository:
+
+   ```shell
+   helm repo add siphon https://gitlab.com/api/v4/projects/76780115/packages/helm/stable
+   ```
+
+1. Update the repository index:
+
+   ```shell
+   helm repo update
+   ```
 
 1. Install the chart:
 
    ```shell
-   helm repo add siphon https://gitlab.com/api/v4/projects/76780115/packages/helm/stable
-   helm repo update
-
-   helm upgrade --install siphon siphon/siphon \
-     --namespace siphon \
-     --values siphon-values.yaml
+   helm upgrade --install siphon siphon/siphon --namespace siphon --values siphon-values.yaml
    ```
 
 1. Confirm that all three deployments are running:
@@ -390,7 +425,7 @@ Before you install, confirm that the [`gitlab-siphon-tables` registry](https://g
    kubectl -n siphon get pods
    ```
 
-The output lists the `postgres-producer`, `clickhouse-consumer`, and `reconciler` pods in the `Running` state.
+   The output lists the `postgres-producer`, `clickhouse-consumer`, and `reconciler` pods in the `Running` state.
 
 Siphon does not restart its pods when you change the values file.
 To apply a change, restart the deployments:
@@ -401,34 +436,40 @@ kubectl -n siphon rollout restart deployment
 
 ### Values file settings
 
+The following settings in `siphon-values.yaml` have requirements.
+For all chart values, see the [Siphon Helm chart README](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts).
+
 | Setting | Requirement |
 |---------|-------------|
 | `database_mapping` | Required. The GitLab schema is split across three logical databases (`main`, `ci`, and `sec`), whether or not your instance stores them separately. Without the mapping, the generator fails. Do not remove the table definitions that reference `ci` and `sec` instead, because that silently drops every CI, vulnerability, and dependency table. |
 | `waitForMigrations.enabled` | Set to `false` for a Linux package instance. Otherwise, Siphon pods wait for a GitLab migrations job in the cluster that does not exist, and never start. For the GitLab Helm chart, you can set it to `true` and set `waitForMigrations.namespace` to the GitLab namespace. Siphon then starts only after GitLab completes the database migrations for `global.gitlabVersion`. |
-| `stream_name` | Must match the stream name GitLab Orbit reads. For the full list of values both sides share, see [Shared configuration values](getting-started.md#shared-configuration-values). |
+| `stream_name` | Must match the stream name GitLab Orbit reads. For the full list of values both sides share, see [Get started with GitLab Orbit on GitLab Self-Managed](getting-started.md). |
 | `advisory_lock_id` and the lock timeouts | Required. The producer stops at startup without them. |
 | `nats_config.replicas` | Must match your NATS cluster size. A single NATS server supports only one replica. |
+| `object_storage_config` | Set it to an S3-compatible or Google Cloud Storage bucket. When the block is present, `identifier`, `type`, and `bucket_name` are all required. |
 | `ssl_mode` | Must match what the PostgreSQL server offers. The example uses `require`, which works with a Linux package PostgreSQL because it serves TLS by default. A server that does not serve TLS refuses the connection, and the producer stops at startup with `server refused TLS connection`. |
 | `connection.replication.use_alter_publication_function` | Must stay `true`, which is the chart default. The `EXECUTE` grant on `public.siphon_alter_publication` exists for this setting: the publication belongs to the GitLab database user, so a direct `ALTER PUBLICATION` from a Siphon role fails. |
-| `connection.clickhouse.connection_settings` | Required on a replicated ClickHouse cluster: `insert_quorum: "auto"`, `insert_quorum_parallel: "0"`, and `async_insert: "0"`. Siphon reads with `select_sequential_consistency` by default, and these three make its delete and refresh queries safe against a lagging replica. Leave them out on a single node and on ClickHouse Cloud. See [High availability](clickhouse.md#high-availability). |
+| `connection.clickhouse.connection_settings` | Required on a replicated ClickHouse cluster: `insert_quorum: "auto"`, `insert_quorum_parallel: "0"`, and `async_insert: "0"`. Siphon reads with `select_sequential_consistency` by default, and these three make its delete and refresh queries safe against a lagging replica. Leave them out on a single node and on ClickHouse Cloud. For more information, see [ClickHouse for GitLab Orbit](clickhouse.md). |
 | `max_age_seconds` | Controls how far back a consumer can replay. The example keeps 15 days of changed rows, so size the NATS volume for the full window, or lower the value. |
 
 ### Object storage for large rows
 
-Rows too large for the stream go to an object store.
-The preceding values file does not configure one, so Siphon uses a NATS JetStream object store and needs no credentials.
+Give every Siphon pod credentials for the bucket:
 
-To use an external bucket, add `object_storage_config` under `queueing` with `identifier`, `type`, and `bucket_name`, and give every Siphon pod credentials for the bucket.
-With `type: s3`, Siphon follows the standard AWS SDK chain, so set `AWS_REGION` and either attach an instance role or pass `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` through `env` and `envFromSecrets`.
-For an S3-compatible service, also set `AWS_ENDPOINT_URL_S3`.
-For Google Cloud Storage, use `type: gcs` with application default credentials.
+- With `type: s3`, Siphon uses the standard AWS SDK credential chain.
+  Set `AWS_REGION`, then attach an instance role or pass `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` through `env` and `envFromSecrets`.
+- For an S3-compatible service, also set `AWS_ENDPOINT_URL_S3`.
+- With `type: gcs`, Siphon uses application default credentials.
+- For workload identity, set `serviceAccount.annotations` on each deployment.
 
 ## Verify replication
 
-The first copy processes one table at a time and pauses replication while each table is merged.
+The first copy processes one table at a time and pauses replication while ClickHouse merges each table.
 The duration therefore depends on the number of tables, not on the amount of data.
 These checks confirm that replication is running.
 They do not confirm that the first copy is complete.
+
+To verify replication:
 
 1. Confirm that Siphon is reading PostgreSQL.
    The slot must be active, and `confirmed_flush_lsn` must advance after a write in GitLab:
@@ -451,8 +492,8 @@ They do not confirm that the first copy is complete.
    The ClickHouse counts are usually slightly higher, because a table can receive a placeholder row on first write.
 
 > [!warning]
-> An inactive replication slot holds write-ahead log on the GitLab PostgreSQL disk and can fill it. If you
-> stop Siphon for longer than your disk headroom allows, drop the slot with
+> An inactive replication slot holds write-ahead log on the GitLab PostgreSQL disk and can fill it.
+> If you stop Siphon for longer than your disk headroom allows, drop the slot with
 > `SELECT pg_drop_replication_slot('siphon_main_1_slot');` and take a fresh snapshot later.
 
 ## Next step

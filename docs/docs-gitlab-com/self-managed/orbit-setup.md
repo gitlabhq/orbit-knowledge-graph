@@ -10,13 +10,10 @@ title: Set up GitLab Orbit
 
 - Tier: Premium, Ultimate
 - Offering: GitLab Self-Managed
-- Status: Beta
 
 {{< /details >}}
 
 GitLab Orbit runs as a Helm release next to your GitLab instance.
-GitLab calls GitLab Orbit over gRPC on port 50054, and GitLab Orbit calls GitLab over HTTPS.
-GitLab Orbit never connects to Gitaly directly.
 
 Prerequisites:
 
@@ -36,9 +33,8 @@ Set up GitLab Orbit in this order:
 GitLab and GitLab Orbit authenticate with one shared key, and GitLab owns it.
 Turn on GitLab Orbit in GitLab first, so that the key exists before you copy it to the cluster.
 
-GitLab connects to the gRPC endpoint on port 50054.
-An endpoint that begins with `tls://` uses TLS.
-To use a service mesh for encryption instead, see [Use a plaintext connection](#use-a-plaintext-connection).
+GitLab connects to the gRPC endpoint on port 50054, and an endpoint that begins with `tls://` uses TLS.
+To use a service mesh for encryption instead, see [Use a plaintext connection](networking.md#use-a-plaintext-connection).
 
 {{< tabs >}}
 
@@ -81,7 +77,12 @@ Create the Secret before you upgrade GitLab, or new GitLab pods stay in `Contain
    openssl rand -base64 32
    ```
 
-1. Store the key in a Secret in the GitLab namespace.
+1. Store the key in a Secret in the GitLab namespace:
+
+   ```shell
+   kubectl -n <gitlab_namespace> create secret generic gitlab-orbit-jwt --from-literal=secret='<key>'
+   ```
+
 1. Reference the Secret in the GitLab chart values:
 
    ```yaml
@@ -104,7 +105,9 @@ GitLab logs connection errors until you install GitLab Orbit.
 ## Create the Secrets
 
 GitLab Orbit reads the GitLab key and the ClickHouse passwords from a Kubernetes Secret.
-The chart uses the ClickHouse administrator account to create the GitLab Orbit users with these passwords.
+The chart setup hook uses the administrator password to create the GitLab Orbit users.
+
+To create the Secrets:
 
 1. Create the namespace:
 
@@ -146,6 +149,8 @@ kubectl -n gitlab-orbit rollout restart deployment
 
 ## Install GitLab Orbit
 
+To install GitLab Orbit:
+
 1. Save the following as `orbit-values.yaml`:
 
    ```yaml
@@ -179,7 +184,10 @@ kubectl -n gitlab-orbit rollout restart deployment
      url: nats://nats.nats.svc.cluster.local:4222
 
    gitlab:
+     # The GitLab address the cluster reaches, such as an internal address or load balancer.
+     # If it differs from the certificate host name, set resolveHost. See Networking.
      baseUrl: https://gitlab.example.com
+     # resolveHost: gitlab.internal
 
    tls:
      enabled: true
@@ -201,18 +209,17 @@ kubectl -n gitlab-orbit rollout restart deployment
    kubectl -n gitlab-orbit get pods
    ```
 
-Before each install and upgrade, the chart creates the GitLab Orbit users and their grants, and the graph database when it does not exist.
-
 Adjust the values for your environment:
 
 - For ClickHouse over TLS, such as ClickHouse Cloud, add `httpPort: 8443` and `ssl: true` to both ClickHouse connections.
 - If the ClickHouse certificate comes from your own CA, add the CA certificate to `trust.extraCAs`.
 - If a load balancer or a service mesh handles TLS, remove the `tls` block.
-- If NATS requires a password, set `nats.username`, and add `nats-password` to the Secret and `natsPassword` to `secrets`.
+- If NATS requires a password, set `nats.username`, add `nats-password` to the Secret and `natsPassword` to `secrets`, and turn on `nats.tls` so the password does not cross the network in clear text.
 - Snowplow analytics is on by default. To turn it off, set `analytics.enabled: false`.
 
+For TLS, private certificate authorities, NATS TLS, and plaintext connections, see [Networking for GitLab Orbit](networking.md).
 For every value and its default, see the [GitLab Orbit Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts).
-Give each indexer pool room to reach at least 8 CPU and 16 GiB of memory.
+For pod sizes, see [Reference architectures](getting-started.md#reference-architectures).
 
 ## Turn on indexing for a group
 
@@ -240,37 +247,37 @@ An hourly sweep picks up any data that indexing missed.
 
 ## Verify the installation
 
-Query the graph for a project in the group that you turned on.
+Query the graph for the projects in the group that you turned on.
+The API accepts GQL queries only when the `orbit_gql_queries` feature flag is on.
+With the flag on, the API parses every query as GQL, so JSON query objects fail.
 
-1. Save the request body as `request.json`:
+To verify the installation:
 
-   ```json orbit-query
-   {
-     "query": {
-       "query_type": "traversal",
-       "nodes": [{
-         "id": "p",
-         "entity": "Project",
-         "columns": ["name", "full_path"],
-         "filters": {
-           "full_path": {"starts_with": "your-group/"}
-         }
-       }],
-       "limit": 10
-     },
-     "response_format": "raw"
-   }
+1. In the [Rails console](https://docs.gitlab.com/administration/operations/rails_console/), turn on the feature flag:
+
+   ```ruby
+   Feature.enable(:orbit_gql_queries)
    ```
+
+1. Save the query as `query.gql`:
+
+   ```gql orbit-query
+   MATCH (p:Project) WHERE p.full_path STARTS WITH 'your-group/' RETURN p.name, p.full_path LIMIT 10
+   ```
+
+   Replace `your-group/` with the full path of your group, followed by `/`.
 
 1. Send the query:
 
    ```shell
-   curl --request POST \
+   jq -Rs '{query: ., response_format: "raw"}' query.gql | curl --request POST \
      --header "Authorization: Bearer <your_access_token>" \
      --header "Content-Type: application/json" \
-     --data @request.json \
+     --data @- \
      --url "https://gitlab.example.com/api/v4/orbit/query"
    ```
+
+   Replace `<your_access_token>` with your personal access token.
 
 The query returns rows after the first index finishes.
 Pod status and the `/-/readiness` endpoint pass before that point, so they do not confirm indexing.
@@ -310,3 +317,5 @@ To upgrade GitLab:
 - [What GitLab Orbit indexes](../indexed-data.md)
 - [Schema reference](../remote/schema.md)
 - [Query language](../remote/queries/_index.md)
+- [Networking for GitLab Orbit](networking.md)
+- [Troubleshooting GitLab Orbit on GitLab Self-Managed](troubleshooting.md)
