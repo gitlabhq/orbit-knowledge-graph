@@ -1,13 +1,17 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use clickhouse_client::FromArrowColumn;
 use integration_testkit::{load_ontology, t};
 use orbit_server::active_schema::{ActiveSchema, SchemaSnapshot};
+use orbit_server::item_counts::{ItemCountService, ScopeItemCounts};
 use orbit_server_config::AppConfig;
+use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
 use crate::common::TestContext;
 
+const QUERY_LOG_WAIT: Duration = Duration::from_secs(5);
 const NO_CURSOR: &str = "null";
 const FIRST_PASS_CURSOR: &str = r#"{"c":["1/100/","42"]}"#;
 const INCREMENTAL_CURSOR: &str = r#"{"c":["1/100/","42"],"f":"2026-09-22T00:00:00Z"}"#;
@@ -65,17 +69,68 @@ pub fn use_production_query_settings() {
 }
 
 pub async fn query_cache_usage(ctx: &TestContext) -> Vec<String> {
-    ctx.execute("SYSTEM FLUSH LOGS").await;
+    read_cached_query_log(ctx, "QueryFinish", "toString(query_cache_usage)").await
+}
+
+pub async fn query_cache_ttls(ctx: &TestContext) -> Vec<String> {
+    read_cached_query_log(ctx, "QueryStart", "Settings['query_cache_ttl']").await
+}
+
+pub async fn read_cached_query_log(ctx: &TestContext, row_type: &str, column: &str) -> Vec<String> {
+    let cached_queries = format!(
+        "current_database = '{}' AND Settings['use_query_cache'] = '1'",
+        ctx.config.database
+    );
+    match row_type {
+        "QueryFinish" => wait_for_finished_queries(ctx, &cached_queries).await,
+        _ => ctx.execute("SYSTEM FLUSH LOGS").await,
+    }
     let batches = ctx
         .query(&format!(
-            "SELECT toString(query_cache_usage) FROM system.query_log \
-             WHERE type = 'QueryFinish' AND current_database = '{}' \
-               AND Settings['use_query_cache'] = '1' \
-             ORDER BY event_time_microseconds",
-            ctx.config.database
+            "SELECT {column} FROM system.query_log \
+             WHERE type = '{row_type}' AND {cached_queries} \
+             ORDER BY event_time_microseconds"
         ))
         .await;
-    String::extract_column(&batches, 0).expect("query_cache_usage column")
+    String::extract_column(&batches, 0).expect("query log column")
+}
+
+async fn wait_for_finished_queries(ctx: &TestContext, queries: &str) {
+    let counts = format!(
+        "SELECT toString(countIf(type = 'QueryStart')), \
+                toString(countIf(type IN ('QueryFinish', 'ExceptionWhileProcessing'))) \
+           FROM system.query_log WHERE {queries}"
+    );
+    let deadline = Instant::now() + QUERY_LOG_WAIT;
+    loop {
+        ctx.execute("SYSTEM FLUSH LOGS").await;
+        let batches = ctx.query(&counts).await;
+        let started = String::extract_column(&batches, 0).expect("started count");
+        let finished = String::extract_column(&batches, 1).expect("finished count");
+        if started == finished {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "query_log logged {finished:?} of {started:?} started queries as finished within {QUERY_LOG_WAIT:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+pub async fn count_items(
+    ctx: &TestContext,
+    security_context: &SecurityContext,
+    scopes: &[&str],
+) -> Vec<ScopeItemCounts> {
+    let scopes: Vec<TraversalPath> = scopes
+        .iter()
+        .map(|scope| TraversalPath::new_unchecked(*scope))
+        .collect();
+    ItemCountService::new(Arc::new(ctx.create_client()))
+        .count_items(&load_ontology(), security_context, &scopes)
+        .await
+        .expect("item counts")
 }
 
 pub fn admin_context() -> SecurityContext {
