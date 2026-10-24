@@ -233,10 +233,6 @@ pub trait OrbitQueryModel {
         self.query_authorization().redaction_id_column(entity)
     }
 
-    fn table_path_scopable(&self, table: &str) -> bool {
-        self.query_backend().table_path_scopable(table)
-    }
-
     fn table_has_path_columns(&self, table: &str) -> bool {
         self.query_backend()
             .table_path_columns(table)

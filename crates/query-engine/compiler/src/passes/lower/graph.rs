@@ -8,24 +8,24 @@ use crate::passes::plan::graph::{
     ExecutionPlan, ReadOwner, RelationGraph, RelationId, RelationNode, RelationRef,
 };
 use crate::passes::plan::predicates::Column;
-use crate::scope::{QueryScope, scope_predicate};
+use crate::tp_bounds::{TpBounds, bound_predicate};
 
 pub(super) struct Reads<'a> {
     graph: &'a RelationGraph,
     materialized: HashSet<RelationId>,
-    scope: Option<&'a QueryScope>,
+    tp_bounds: Option<&'a TpBounds>,
 }
 
 pub(super) fn execute(
     plan: &ExecutionPlan,
     root_columns: &[Column],
-    scope: Option<&QueryScope>,
+    tp_bounds: Option<&TpBounds>,
 ) -> EmitOutput {
     let usage = plan.graph.usage(plan.root);
     let reads = Reads {
         graph: &plan.graph,
         materialized: usage.materialized().collect(),
-        scope,
+        tp_bounds,
     };
     let required = super::columns::required_columns(plan, &usage, root_columns);
     let source = emit_ref(&RelationRef::from(plan.root), &reads, None);
@@ -175,12 +175,12 @@ fn emit_node(id: RelationId, reads: &Reads<'_>, current: Option<RelationId>) -> 
             let mut reference = input.clone();
             reference.alias = Some(alias.clone());
             let mut output = emit_ref(&reference, reads, current);
-            let bound = reads.scope.and_then(|scope| match owner {
-                ReadOwner::Node(node) => scope.node(node),
-                ReadOwner::Relationship(index) => scope.relationship(*index),
+            let bound = reads.tp_bounds.and_then(|bounds| match owner {
+                ReadOwner::Node(node) => bounds.node(node),
+                ReadOwner::Relationship(index) => bounds.relationship(*index),
             });
-            if let Some(proof) = bound {
-                output.predicates.insert(0, scope_predicate(proof, alias));
+            if let Some(bound) = bound {
+                output.predicates.insert(0, bound_predicate(bound, alias));
             }
             output
         }

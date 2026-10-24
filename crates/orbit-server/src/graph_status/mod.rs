@@ -48,12 +48,17 @@ impl GraphStatusService {
         let (statuses, counts) = tokio::join!(
             self.indexing_status.read_scope_statuses(schema, scopes),
             self.item_counts
-                .count_items(&schema.ontology, security_context, scopes),
+                .count_items_or_zeros(&schema.ontology, security_context, scopes),
         );
         let status = statuses
             .into_iter()
             .next()
             .ok_or_else(|| Status::internal("indexing status returned no scope"))?;
+        let counts = counts
+            .into_iter()
+            .next()
+            .map(|scope_counts| scope_counts.counts)
+            .unwrap_or_default();
 
         info!(
             safe(PHASE) = <&str>::from(status.phase),

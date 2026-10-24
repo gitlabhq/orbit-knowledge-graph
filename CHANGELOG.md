@@ -1,3 +1,20 @@
+## [0.156.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.155.0...v0.156.0) (2026-10-24)
+
+### Features
+
+* **analytics:** follow the GitLab product usage data setting ([b7133c2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b7133c2afecd3552520b816d451b1e9738b86fde)) by Jean-Gabriel Doyon
+* **server:** count items for up to 100 paths in one call ([863136c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/863136c48b7ed50432a8c6805f22fef948edb2cd)) by Michael Angelo Rivera
+
+### Performance
+
+* **compiler:** pin both ends of a code-graph hop to the query's project ([1e5e5bb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1e5e5bb2bb22b4f4467aff198285718fc1ac2033)) by Michael Angelo Rivera
+* **schema:** add skip indexes on seven measured filter columns ([e38db98](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e38db98882c1966a83560c66c104e391f5548455)) by Michael Usachenko
+
+### Other
+
+* **e2e:** add a GitLab 19.4 lane ([3697b49](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3697b49bb41c32fb18809c35377bc2fda2ac4c52)) by Jean-Gabriel Doyon
+* **e2e:** run GitLab 19.5 suite post-merge ([c904d29](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c904d291549449a05f1fee61aa43adec15416d01)) by Michael Usachenko
+
 ## [0.155.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.154.1...v0.155.0) (2026-10-23)
 
 ### Features
