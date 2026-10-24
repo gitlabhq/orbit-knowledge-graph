@@ -57,13 +57,11 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 For more examples, see [prompt examples](prompt-examples.md).
 
-- <img src="img/orbit-video-overview-v19_6.png" alt="Thumbnail of the GitLab Orbit overview video." width="640" height="360">[GitLab Orbit in two minutes](https://www.youtube.com/watch?v=dKaPp-TWd_o)<br>How GitLab Orbit gives agents the context of your software development.
-- <img src="img/orbit-video-launch-v19_6.png" alt="Thumbnail of the GitLab Orbit launch video." width="640" height="360">[GitLab Orbit launch](https://www.youtube.com/watch?v=AaNukFEK6Zk)<br>What GitLab Orbit does for coding agents.
 - <img src="img/orbit-video-how-it-works-v19_6.png" alt="Thumbnail of the GitLab Orbit architecture video." width="640" height="360">[How GitLab Orbit works](https://www.youtube.com/watch?v=YtPc8kOmyi0)<br>The architecture of GitLab Orbit, from indexing to queries.
 - <img src="img/orbit-video-deep-dive-v19_6.png" alt="Thumbnail of the GitLab Orbit technical deep dive video." width="640" height="360">[How we built GitLab Orbit](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>A technical deep dive into the context graph.
 {.product-cards .product-cards-2 .product-video-cards}
 
-<!-- Videos published on 2026-09-03, 2026-07-06, 2026-07-06, and 2026-06-26 -->
+<!-- Videos published on 2026-07-06 and 2026-06-26 -->
 
 - [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
 - [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
