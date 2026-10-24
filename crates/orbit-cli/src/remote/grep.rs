@@ -332,9 +332,38 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         }
     }
     match found.is_empty() {
+        true if !request.scopes.is_empty() => {
+            Outcome::Skipped(nothing_found(&request, &api_scopes, &scope.1))
+        }
         true => Outcome::Empty,
         false => Outcome::Found(found.join("\n")),
     }
+}
+
+fn nothing_found(request: &Request, api_scopes: &[&str], project: &str) -> String {
+    let launcher = crate::commands::setup::spec::launcher();
+    let words = request.keywords.join(" ");
+    let searched = api_scopes
+        .iter()
+        .map(|scope| scope.replace('_', " "))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut message = format!("no {searched} match {words:?} in {project}");
+    if api_scopes.len() == 1 {
+        let (qualifier, sibling, label) = match api_scopes[0] {
+            "merge_requests" => ("mr", "issue", "issues"),
+            "work_items" => ("issue", "mr", "merge requests"),
+            _ => return message,
+        };
+        if words.chars().all(|c| c.is_ascii_digit()) {
+            message.push_str(&format!(
+                "; grep searches words, `{launcher} context {qualifier}:{words}` reads that one directly"
+            ));
+        } else {
+            message.push_str(&format!("; {label}: `{launcher} grep '{sibling}:{words}'`"));
+        }
+    }
+    message
 }
 
 fn outcome_for(target: &Target, error: &RemoteError) -> Outcome {
