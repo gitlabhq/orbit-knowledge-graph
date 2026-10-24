@@ -20,20 +20,6 @@ Start the first prompt with `Using GitLab Orbit`, and replace the values in `<an
 Each example also shows the [queries](queries/query-language.md) that the agent runs.
 To check an answer, run a query with `glab orbit query "<query>"`.
 
-The queries run on GitLab.com, in the `gitlab-org` group.
-They return rows only if you have the Reporter, Security Manager, Developer, Maintainer, or Owner role in that group.
-To run a query in your own group, change these values:
-
-- `project_id: 278964`, the ID of the `gitlab-org/gitlab` project, to the ID of your project.
-  To find the ID, see [bounded nodes](queries/query-language.md#bounded-nodes).
-- `gitlab-org/` in `full_path` and `import_path` filters, to the path of your group.
-- The values of `branch` and `ref` filters, to the default branch of your project.
-- `gprd`, the production environment of `gitlab-org/gitlab`, to the name of your production environment.
-- File paths, class names, job names, milestones, and dates, to values from your project.
-
-Each **Without GitLab Orbit** line counts the REST API calls for the same answer.
-With the GraphQL API, some of these lookups take fewer calls.
-
 ## Fix a vulnerability across every affected project
 
 Find every project that a vulnerability affects, fix each one, and follow the fixes to production.
@@ -76,11 +62,6 @@ RETURN p.full_path, v.state, d.status, count(v) AS vulns
 ORDER BY vulns DESC
 LIMIT 50
 ```
-
-To limit the follow-up to the CVE, the agent adds `AND v.id IN [...]` with the IDs of the vulnerabilities that it found.
-`FIXES` covers only the merge requests that are linked to a vulnerability,
-so tell your agent to link each fix to its vulnerability.
-A project from the first answer with no linked fix in production needs manual work.
 
 To query vulnerabilities, you must have the Security Manager, Developer, Maintainer, or Owner role.
 With the Reporter role, the queries return no rows.
@@ -162,9 +143,6 @@ ORDER BY import_sites DESC
 LIMIT 30
 ```
 
-Forks and mirrors import the library too, and they are often at the top of the results.
-The graph does not mark forks or mirrors, so tell your agent which projects to leave out.
-
 - **With GitLab Orbit:** one query for each question.
 - **Without GitLab Orbit:** no REST API call returns subclasses or callers.
   You check out the repository and run a call-graph tool for the language.
@@ -192,12 +170,6 @@ RETURN a.flow_type, mr.state, count(mr) AS mrs
 ORDER BY mrs DESC
 LIMIT 30
 ```
-
-The query language has no date arithmetic.
-For the time to merge, the agent returns `mr.created_at` and `mr.merged_at` for each merged merge request,
-and computes the median.
-The graph has agent sessions for GitLab Duo agents and flows only,
-so merge requests from other agents are not in the answer.
 
 - **With GitLab Orbit:** one query for each question.
 - **Without GitLab Orbit:** about 400 REST API calls for a project with about 400 agent merge requests in 30 days,
@@ -269,16 +241,6 @@ RETURN d.fqn, d.start_line, d.end_line, caller.fqn, caller.file_path, caller.sta
 LIMIT 100
 ```
 
-The agent matches the diff hunks to the `start_line` and `end_line` of each definition,
-then lists the callers whose files are not in the merge request.
-On [merge request 264595](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/264595),
-five callers are outside the merge request:
-two GraphQL mutations, two controller actions, and the work items discussions API.
-Each is a `CALLS` relationship on the default branch that the reviewer can open.
-
-Callers come from the default branch, so definitions that the merge request adds are not in the graph yet.
-Calls are resolved inside one project only.
-
 - **With GitLab Orbit:** two queries.
 - **Without GitLab Orbit:** no REST API call returns callers.
   A reviewer searches a local checkout, and an agent that reviews the merge request sees only the diff.
@@ -309,8 +271,6 @@ LIMIT 1000
 ```
 
 The answer lists the active projects that are missing each scan type.
-CI/CD configuration files are not indexed, so the answer covers the scans that ran,
-not the scans that a pipeline template defines.
 
 - **With GitLab Orbit:** two queries.
 - **Without GitLab Orbit:** at least 550 REST API calls for a group with about 280 active projects,
@@ -415,7 +375,6 @@ LIMIT 20
 `HAS_LATEST_DIFF` follows the current diff version of each merge request.
 `HAS_DIFF` covers every diff version, so it also matches a file that only an earlier version changed,
 and it can return one row for each version.
-Anchor the file on `old_path` and `project_id`, so the same path in another project does not match.
 
 - **With GitLab Orbit:** one query for each question.
 - **Without GitLab Orbit:** about 160 REST API calls for a file that about 80 merged merge requests changed,
