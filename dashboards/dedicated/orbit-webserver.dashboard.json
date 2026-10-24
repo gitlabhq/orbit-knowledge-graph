@@ -1463,7 +1463,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "sum by (failure_reason) (increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", failure_reason!~\"lowering|enforcement|codegen|pipeline|ontology_internal|security\"}[$__interval])) > 0",
+          "expr": "sum by (failure_reason) (increase(gkg_query_engine_compiler_rejected_total{container=~\"(gkg|orbit)-webserver\", cluster=~\".*\", failure_reason!~\"lowering|codegen|pipeline|ontology_internal|security\"}[$__interval])) > 0",
           "legendFormat": "{{failure_reason}}",
           "refId": "A"
         }
@@ -2027,7 +2027,7 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`: parse/schema/reference/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline. Renders a flat zero baseline when no rejections occur in the window.",
+      "description": "Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`: parse/schema/reference/ontology/ontology_internal/depth/limit/security/lowering/codegen/pipeline. Renders a flat zero baseline when no rejections occur in the window.",
       "fieldConfig": {
         "defaults": {
           "custom": {

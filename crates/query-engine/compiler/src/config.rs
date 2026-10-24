@@ -94,6 +94,10 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [input, tp_bounds]
             mutates: [query_plan, node, lowered_metadata]
         }
+        paginate {
+            reads_state: [input, lowered_metadata]
+            mutates: [node]
+        }
         response_policy {
             reads_env: [data_model]
             reads_state: [input]
@@ -104,18 +108,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [input]
             mutates: [node, lowered_metadata, result_ctx]
         }
-        security {
-            reads_env: [security_ctx, data_model]
-            mutates: [node]
-        }
-        paginate {
-            reads_state: [input, lowered_metadata]
-            mutates: [node]
-        }
-        security_check {
-            reads_env: [security_ctx, data_model]
-            reads_state: [node]
-        }
         hydrate_plan {
             reads_env: [security_ctx, data_model]
             reads_state: [input, node]
@@ -124,6 +116,14 @@ compiler_pipeline_macros::define_compiler_ctx! {
         settings {
             reads_state: [input, node]
             mutates: [query_plan, query_config]
+        }
+        security {
+            reads_env: [security_ctx, data_model]
+            mutates: [node]
+        }
+        security_check {
+            reads_env: [security_ctx, data_model]
+            reads_state: [node]
         }
         codegen {
             reads_state: [input]

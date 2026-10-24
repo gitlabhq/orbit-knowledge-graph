@@ -367,11 +367,7 @@ mod tests {
     use ontology::{DataType, FieldSource, Ontology, VirtualSource};
     use query_data_model::{ClickHouseDataModel, OrbitQueryModel};
 
-    fn model(
-        dependencies: &[&str],
-        disabled: bool,
-        default_columns: &[&str],
-    ) -> ClickHouseDataModel {
+    fn model(dependencies: &[&str], disabled: bool) -> ClickHouseDataModel {
         let ontology = Ontology::new()
             .with_nodes(["TestNode"])
             .with_fields(
@@ -390,8 +386,7 @@ mod tests {
                         .collect(),
                 });
             })
-            .unwrap()
-            .with_default_columns("TestNode", default_columns.iter().copied());
+            .unwrap();
         ClickHouseDataModel::derive(std::sync::Arc::new(ontology)).unwrap()
     }
 
@@ -401,7 +396,7 @@ mod tests {
 
     #[test]
     fn inject_adds_missing_dependencies() {
-        let model = model(&["project_id", "branch", "path"], false, &[]);
+        let model = model(&["project_id", "branch", "path"], false);
         let virtual_columns = vec![virtual_request(&model, entity(&model), "name").unwrap()];
         let mut columns = vec!["name".to_string()];
 
@@ -420,7 +415,7 @@ mod tests {
 
     #[test]
     fn inject_does_not_duplicate_existing_columns() {
-        let model = model(&["project_id", "branch"], false, &[]);
+        let model = model(&["project_id", "branch"], false);
         let virtual_columns = vec![virtual_request(&model, entity(&model), "name").unwrap()];
         let mut columns = vec!["project_id".to_string()];
 
@@ -439,7 +434,7 @@ mod tests {
 
     #[test]
     fn inject_noop_when_no_virtual_columns() {
-        let model = model(&[], false, &[]);
+        let model = model(&[], false);
         let virtual_columns = Vec::new();
         let mut columns = vec!["name".to_string()];
 
@@ -456,7 +451,7 @@ mod tests {
 
     #[test]
     fn inject_skips_deps_not_in_ontology() {
-        let model = model(&["branch", "nonexistent"], false, &[]);
+        let model = model(&["branch", "nonexistent"], false);
         let virtual_columns = vec![virtual_request(&model, entity(&model), "name").unwrap()];
         let mut columns = vec![];
 
@@ -468,7 +463,7 @@ mod tests {
 
     #[test]
     fn split_columns_separates_db_and_virtual() {
-        let model = model(&[], false, &[]);
+        let model = model(&[], false);
         let requested = vec!["id".to_string(), "name".to_string()];
 
         let (columns, virtual_columns) = split_model_columns(&requested, &model, entity(&model));
@@ -481,7 +476,7 @@ mod tests {
 
     #[test]
     fn split_columns_excludes_disabled_virtual() {
-        let model = model(&[], true, &[]);
+        let model = model(&[], true);
         let requested = vec!["name".to_string()];
 
         let (columns, virtual_columns) = split_model_columns(&requested, &model, entity(&model));
