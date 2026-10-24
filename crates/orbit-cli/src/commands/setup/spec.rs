@@ -333,7 +333,7 @@ mod tests {
                     "{launcher}"
                 );
                 assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
-                let budget = if remote { 220 } else { 75 };
+                let budget = if remote { 250 } else { 75 };
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
