@@ -1,3 +1,26 @@
+## [0.157.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.156.0...v0.157.0) (2026-10-24)
+
+### Features
+
+* **server:** enable gzip and zstd gRPC response compression ([97c7641](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/97c7641dceb3548215fdd11424c60c6245e4f4bc)) by Dmitry Gruzd
+
+### Fixes
+
+* **duo:** load MR review instructions and add project conventions ([55580b9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/55580b9c2f66f671f46f1694df4c5fd7f9587e83)) by Dmitry Gruzd
+* **indexer:** redeliver SDLC messages when a ClickHouse circuit is open ([a7b631a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a7b631a4623c585372aef2413ea3e8ffc6fd8650)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **compiler:** seed path proofs from every pinned node ([2537677](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2537677b500a15f2e74da4209fe49be487b3b7a2)) by Michael Usachenko
+* **schema:** store null times as the epoch and index every time column ([c19d83e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c19d83e3de639689539588df40e3515bdc896135)) by Michael Usachenko
+
+### Other
+
+* **compiler:** clean up post-lowering phases ([e995a9f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e995a9f5e35a65f66a1226c47111e97b7aa42cda)) by Michael Usachenko
+* **compiler:** isolate traversal path bounds ([cedf697](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cedf69737dc07e561c464ede7d1972d2c9ca3b81)) by Michael Usachenko
+* **e2e:** dump datalake commit and watermark read timing on failure ([318550c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/318550c38dca32e1454e6cd466c7a48476cdefc4)) by Jean-Gabriel Doyon
+* **server:** drop with_compression doc comment ([8733d67](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8733d67da22e3caba60565653f8cc58d02df354b)) by Dmitry Gruzd
+
 ## [0.156.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.155.0...v0.156.0) (2026-10-24)
 
 ### Features
