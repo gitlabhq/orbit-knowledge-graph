@@ -39,7 +39,7 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 </section>
 
-- {{< icon name="connected" >}}[Ask across code and lifecycle](prompt-examples.md)<br>One graph holds your projects, merge requests, pipelines, vulnerabilities, files, and definitions, so one question can cross all of them.
+- {{< icon name="connected" >}}[Ask across code and lifecycle](prompt-examples.md)<br>One graph connects your GitLab data and code, so one question can cross both.
 - {{< icon name="search" >}}[Run one query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
 - {{< icon name="lock" >}}[Get only the data you can access](security.md#how-gitlab-orbit-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions.
 {.product-cards .product-cards-icons}
@@ -73,7 +73,7 @@ For more examples, see [prompt examples](prompt-examples.md).
 
 {{< cards >}}
 
-- [GitLab Orbit CLI](cli.md)
+- [Connect your agent](agents/_index.md)
 - [Indexed data](schema.md)
 - [Queries](queries/_index.md)
 - [Security](security.md)
@@ -174,7 +174,7 @@ body:has(.product-landing) .docs-content .language-plaintext {
   justify-content: center;
   width: 2.25rem;
   height: 2.25rem;
-  margin-bottom: var(--gl-spacing-scale-4);
+  margin: 0 auto var(--gl-spacing-scale-4);
   border-radius: var(--gl-border-radius-lg);
   background-color: color-mix(in srgb, currentColor 12%, transparent);
   color: var(--gl-color-purple-600);

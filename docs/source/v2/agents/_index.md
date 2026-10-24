@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Connect your agent to GitLab Orbit with the GitLab Orbit CLI and the GitLab Orbit skill.
+description: Use GitLab Orbit in GitLab Duo, or connect any agent with the GitLab Orbit CLI or the GitLab Orbit MCP endpoint.
 title: Connect your agent to GitLab Orbit
 ---
 
