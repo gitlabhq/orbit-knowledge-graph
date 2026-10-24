@@ -15,11 +15,14 @@ use orbit_arrow::batch_slice_bytes;
 #[derive(Debug, Error, strum::IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 pub(crate) enum DatalakeError {
-    #[error("query failed: {0}")]
+    #[error("datalake query failed: {0}")]
     Query(String),
 
     #[error("source table does not exist: {0}")]
     SourceUnavailable(String),
+
+    #[error("datalake unavailable: {0}")]
+    Unavailable(String),
 
     #[error("arrow decode error: {0}")]
     ArrowDecode(#[from] arrow::error::ArrowError),
@@ -29,6 +32,8 @@ impl From<ClickHouseError> for DatalakeError {
     fn from(err: ClickHouseError) -> Self {
         if err.is_unknown_table() {
             DatalakeError::SourceUnavailable(err.to_string())
+        } else if matches!(err, ClickHouseError::CircuitOpen { .. }) {
+            DatalakeError::Unavailable(err.to_string())
         } else {
             DatalakeError::Query(err.to_string())
         }
@@ -266,6 +271,14 @@ mod tests {
              siphon_ai_governance_sessions. (UNKNOWN_TABLE) (version 26.4.5.143)",
         ));
         assert!(matches!(err, DatalakeError::SourceUnavailable(_)));
+    }
+
+    #[test]
+    fn an_open_circuit_makes_the_datalake_unavailable() {
+        let err = DatalakeError::from(ClickHouseError::CircuitOpen {
+            service: "datalake",
+        });
+        assert!(matches!(err, DatalakeError::Unavailable(_)));
     }
 
     #[test]

@@ -309,7 +309,7 @@ async fn resolve_default_projects(
         let batches = datalake
             .query_batches(&PROJECT_PATHS_SQL, params, None)
             .await
-            .map_err(|e| HandlerError::Processing(format!("project paths query failed: {e}")))?;
+            .map_err(|e| HandlerError::from(e).context("project paths query failed"))?;
 
         for batch in &batches {
             let source_id_col = col::<Int64Array>(batch, "source_id")?;
@@ -384,7 +384,7 @@ async fn query_routes(
         let batches = datalake
             .query_batches(&ROUTES_SQL, params, None)
             .await
-            .map_err(|e| HandlerError::Processing(format!("routes query failed: {e}")))?;
+            .map_err(|e| HandlerError::from(e).context("routes query failed"))?;
 
         for batch in &batches {
             let source_id_col = col::<Int64Array>(batch, "source_id")?;
@@ -424,7 +424,7 @@ async fn query_entities(
         let batches = datalake
             .query_batches(sql, params, None)
             .await
-            .map_err(|e| HandlerError::Processing(format!("entity query failed: {e}")))?;
+            .map_err(|e| HandlerError::from(e).context("entity query failed"))?;
 
         for batch in &batches {
             let id_col = col::<Int64Array>(batch, "id")?;

@@ -129,3 +129,40 @@ impl CheckpointStore for MockCheckpointStore {
         Ok(())
     }
 }
+
+pub(crate) struct UnavailableCheckpointStore;
+
+fn graph_unavailable() -> CheckpointError {
+    CheckpointError::Unavailable("circuit open for service graph".to_string())
+}
+
+#[async_trait]
+impl CheckpointStore for UnavailableCheckpointStore {
+    async fn load(&self, _key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
+        Err(graph_unavailable())
+    }
+
+    async fn save(
+        &self,
+        _key: &str,
+        _checkpoint: &Checkpoint,
+        _durability: WriteDurability,
+    ) -> Result<(), CheckpointError> {
+        Err(graph_unavailable())
+    }
+
+    async fn load_by_prefix(
+        &self,
+        _prefix: &str,
+    ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
+        Err(graph_unavailable())
+    }
+
+    async fn consolidate(
+        &self,
+        _parent_key: &str,
+        _watermark: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), CheckpointError> {
+        Err(graph_unavailable())
+    }
+}

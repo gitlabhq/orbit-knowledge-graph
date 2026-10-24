@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, TIMESTAMP_FORMAT};
+use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, ClickHouseError, TIMESTAMP_FORMAT};
 use crate::durability::WriteDurability;
 use crate::observer::IndexingMode;
 use async_trait::async_trait;
@@ -36,6 +36,18 @@ pub fn namespace_id_from_key(key: &str) -> Option<i64> {
 pub enum CheckpointError {
     #[error("checkpoint store operation failed: {0}")]
     Store(String),
+
+    #[error("checkpoint store unavailable: {0}")]
+    Unavailable(String),
+}
+
+impl From<ClickHouseError> for CheckpointError {
+    fn from(error: ClickHouseError) -> Self {
+        match error {
+            ClickHouseError::CircuitOpen { .. } => CheckpointError::Unavailable(error.to_string()),
+            _ => CheckpointError::Store(error.to_string()),
+        }
+    }
 }
 
 /// `floor` is `None` for a backfill (start of time); it is persisted so a resume rebuilds the window.
@@ -244,8 +256,7 @@ impl ClickHouseCheckpointStore {
             ))
             .param("key", keys.value())
             .fetch_arrow()
-            .await
-            .map_err(checkpoint_store_error)?;
+            .await?;
 
         let keys = String::extract_column(&batches, 0).map_err(checkpoint_store_error)?;
         let watermarks =
@@ -284,8 +295,7 @@ impl ClickHouseCheckpointStore {
         .param("watermark", formatted_watermark)
         .param("version", client_version())
         .execute()
-        .await
-        .map_err(checkpoint_store_error)?;
+        .await?;
 
         Ok(())
     }
@@ -403,8 +413,7 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         )
         .param("version", client_version())
         .execute()
-        .await
-        .map_err(checkpoint_store_error)?;
+        .await?;
 
         Ok(())
     }
@@ -451,6 +460,15 @@ mod tests {
 
     fn ts(s: &str) -> DateTime<Utc> {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn an_open_circuit_makes_the_checkpoint_store_unavailable() {
+        let error = CheckpointError::from(ClickHouseError::CircuitOpen { service: "graph" });
+        assert!(
+            matches!(error, CheckpointError::Unavailable(_)),
+            "got {error:?}"
+        );
     }
 
     #[test]

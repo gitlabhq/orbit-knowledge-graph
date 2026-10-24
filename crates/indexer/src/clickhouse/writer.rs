@@ -1,4 +1,3 @@
-use std::error::Error as StdError;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,15 +14,15 @@ use crate::retry::{Backoff, LocalRetry, RetryExhausted, Step, drive};
 #[strum(serialize_all = "snake_case")]
 pub enum WriteError {
     #[error("failed to write: {0}")]
-    Write(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
+    Write(String),
 
-    #[error("connection error: {0}")]
-    Connection(String, #[source] Option<Box<dyn StdError + Send + Sync>>),
+    #[error("graph store unavailable: {0}")]
+    Unavailable(String),
 }
 
 impl From<RetryExhausted> for WriteError {
     fn from(e: RetryExhausted) -> Self {
-        WriteError::Write(e.to_string(), None)
+        WriteError::Write(e.to_string())
     }
 }
 
@@ -155,6 +154,7 @@ impl ClickHouseWriter {
             async move {
                 match fut.await {
                     Ok(report) => Step::Done(report),
+                    Err(e @ WriteError::Unavailable(_)) => Step::GiveUp(e),
                     Err(e) => {
                         warn!(
                             safe(TABLE) = table,
@@ -180,7 +180,7 @@ impl ClickHouseWriter {
             .query(sql)
             .execute()
             .await
-            .map_err(|e| WriteError::Write(e.to_string(), None))
+            .map_err(WriteError::from)
     }
 }
 

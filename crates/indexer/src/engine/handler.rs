@@ -56,7 +56,7 @@ pub enum HandlerError {
     #[error("processing failed: {0}")]
     Processing(String),
 
-    /// Never got capacity to run; redelivered without spending an attempt or dead-lettering.
+    /// Never got capacity to run, here or in a dependency; redelivered without spending an attempt or dead-lettering.
     #[error("backpressure: {0}")]
     Backpressure(String),
 
@@ -89,6 +89,19 @@ impl HandlerError {
             HandlerError::Deferred { .. } => "deferred",
             HandlerError::Permanent { .. } => "permanent",
             HandlerError::Deserialization(_) => "deserialization",
+        }
+    }
+
+    /// Names the step that failed in the message, keeping the outcome.
+    pub fn context(self, step: impl std::fmt::Display) -> Self {
+        match self {
+            HandlerError::Processing(message) => {
+                HandlerError::Processing(format!("{step}: {message}"))
+            }
+            HandlerError::Backpressure(message) => {
+                HandlerError::Backpressure(format!("{step}: {message}"))
+            }
+            other => other,
         }
     }
 
