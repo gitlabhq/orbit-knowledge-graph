@@ -31,21 +31,35 @@ The CLI also indexes the code on your machine into a [local graph](#local-graph)
 
 ## Install the CLI
 
-Use the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) to install the GitLab Orbit CLI.
+Use the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) to install the GitLab Orbit CLI and connect your agents.
 `glab` is the recommended install method.
 It downloads and verifies the GitLab Orbit CLI, and tells you when a new version is available.
 
 Prerequisites:
 
-- `glab` 1.120 or later.
+- `glab` 1.120 or later. To check your version, run `glab version`.
 
-To install the CLI and set up your agents, run this command in a Git repository:
+To install the CLI and set up your agents:
+
+1. Go to a Git repository on your machine. Any repository works.
+1. Run `glab orbit setup`.
+   On first use, `glab` asks to download the GitLab Orbit CLI.
+1. In the list of agents, keep or clear the selection, then press <kbd>Enter</kbd>.
+   Setup selects the agents that it detects on your machine.
+
+Setup installs the GitLab Orbit skill for your agents and indexes the repository for code search.
+To update the setup, run the command again.
+For the setup options and the files that setup changes, see [connect your agent](agents/_index.md#setup-options).
+
+To run setup without a terminal, for example from an agent or a script, confirm both prompts with `--yes`:
 
 ```shell
-glab orbit setup
+glab orbit --yes setup --yes
 ```
 
-For the setup steps, see [connect your agent](agents/_index.md).
+The first `--yes` confirms the download. The second skips the list of agents.
+
+To query your GitLab data, also [sign in with `glab`](#query-the-remote-graph).
 
 `glab` handles these options itself:
 
@@ -99,7 +113,7 @@ Local commands use the local graph on your machine. They need no GitLab account 
 | `ontology` | Remote | Show the node types, properties, and relationships. |
 | `tools` | Remote | Show the Model Context Protocol (MCP) tool manifest. |
 | `graph-status` | Remote | Show the indexing progress of a group or project. |
-| `skills` | Remote when a GitLab credential is available, otherwise the built-in copy | List and print the [agent skill](agents/_index.md#gitlab-orbit-skill) files. |
+| `skills` | Remote when a GitLab credential is available, otherwise the built-in copy | List and print the agent skill files. |
 | `index` | Local | Index a repository, or a directory of repositories. |
 | `grep` | Local | Search every line of code, tests, configuration, and documentation, with the enclosing definitions. |
 | `context` | Local | Show source, callers, and callees. |

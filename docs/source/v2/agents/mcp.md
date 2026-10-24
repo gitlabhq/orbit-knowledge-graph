@@ -194,7 +194,7 @@ ORDER BY open_mrs DESC
 LIMIT 10
 ```
 
-For query recipes and the query language reference, install the [GitLab Orbit skill](_index.md#gitlab-orbit-skill).
+For query recipes and the query language reference, install the [GitLab Orbit skill](../cli.md#install-the-cli).
 
 ## GitLab Orbit tools in the GitLab MCP server
 
