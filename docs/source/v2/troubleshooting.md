@@ -85,11 +85,12 @@ You might not see the **GitLab Orbit** settings page.
 
 This issue occurs when you do not have the Owner role, or when you are in a subgroup.
 
-To resolve this issue, go to the top-level group, not a subgroup.
-If you do not have the Owner role for it, ask a user with the Owner role for the top-level group to turn on GitLab Orbit.
+To resolve this issue, ask a user with the Owner role for the top-level group to turn on GitLab Orbit.
 On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on GitLab Orbit in the **Admin** area.
 
-### Error: `Contact sales to get GitLab Orbit for this group`
+### The option to turn on GitLab Orbit is not available
+
+On GitLab.com, the **GitLab Orbit** settings page might show **Contact sales** in place of the toggle to turn on GitLab Orbit.
 
 This issue occurs when the group does not meet the conditions for a trial, or already has GitLab Orbit.
 
@@ -166,7 +167,7 @@ LIMIT 1
 
 The query fails with HTTP `402`, and `glab orbit query` exits with code 1.
 
-This issue occurs when no credits are left for the top-level group, for example after the free trial ends.
+This issue occurs when no GitLab Credits are left for the top-level group, for example after the free trial ends.
 
 To resolve this issue, [contact sales](https://about.gitlab.com/sales/).
 For more information, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
@@ -207,7 +208,7 @@ This issue occurs when the token has none of the `mcp_orbit`, `mcp`, `read_api`,
 
 To resolve this issue, create a token with the `mcp_orbit` or `read_api` scope, or sign in again to grant the `mcp_orbit` scope.
 
-### Error: `403 Forbidden - No Orbit enabled namespaces available`
+### Error: `403 Forbidden` for a service account
 
 A query from a service account might fail with `403 Forbidden - No Orbit enabled namespaces available`.
 

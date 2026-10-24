@@ -15,7 +15,7 @@ title: GitLab Orbit prompt examples
 
 Send these prompts to GitLab Duo Chat, or to an agent that uses the [GitLab Orbit CLI](cli.md)
 or the [GitLab Model Context Protocol (MCP) endpoint](agents/mcp.md).
-Start the first prompt with `Using GitLab Orbit`, and replace the values in `<angle brackets>`.
+Start the first prompt of a conversation with `Using GitLab Orbit` to make sure the agent uses GitLab Orbit, and replace the values in `<angle brackets>`.
 
 Each example also shows the [queries](queries/query-language.md) that the agent runs.
 To check an answer, run a query with `glab orbit query "<query>"`.
@@ -71,6 +71,52 @@ For more information, see [roles](security.md#roles).
 - **Without GitLab Orbit:** at least one REST API call for each project in a group with about 9,200 projects,
   to list its vulnerabilities and find the CVE.
   No REST API call goes from a vulnerability to the merge request that fixes it.
+
+## Respond to a production incident
+
+Find the changes to a failing component that reached production, and the components that it depends on.
+
+```plaintext
+Using GitLab Orbit, <app/models/ci/> in <my-group>/<my-project> throws errors
+in <production>. Which merge requests that changed it reached production in
+the last <seven days>, and when was each deployed?
+```
+
+```gql orbit-query
+MATCH (f:MergeRequestDiffFile)
+  <-[:HAS_FILE]-(md:MergeRequestDiff)
+  <-[:HAS_LATEST_DIFF]-(mr:MergeRequest)
+  -[:DEPLOYED_TO]->(d:Deployment)
+  -[:IN_ENVIRONMENT]->(e:Environment {name: 'gprd'})
+WHERE mr.project_id = 278964 AND d.created_at >= '2026-10-17T00:00:00Z'
+  AND f.old_path STARTS WITH 'app/models/ci/'
+RETURN d.created_at, mr.iid, f.old_path
+ORDER BY d.created_at DESC
+LIMIT 50
+```
+
+To find the related components that shipped too, ask a follow-up question:
+
+```plaintext
+Which components does <app/models/ci/build.rb> call, and which of them
+changed in production deployments in the same window?
+```
+
+```gql orbit-query
+MATCH (f:File {path: 'app/models/ci/build.rb', project_id: 278964, branch: 'master'})
+  -[:DEFINES]->(d:Definition)
+  -[:CALLS]->(callee:Definition)
+RETURN callee.file_path, count(callee) AS calls
+ORDER BY calls DESC
+LIMIT 20
+```
+
+The agent then runs the first query on those file paths.
+
+- **With GitLab Orbit:** one query for each question.
+- **Without GitLab Orbit:** about 1,800 REST API calls for a project that deploys about 1,800 merge requests
+  to production in a week, one for the changes of each deployed merge request.
+  No REST API call returns the code that a file calls.
 
 ## Change shared code safely
 
@@ -149,6 +195,48 @@ LIMIT 30
   For the projects that import a library, a group code search matches text, not parsed imports,
   so you clone each project that the search finds.
 
+## Review a merge request with proof
+
+Review a merge request against everything that it affects: the callers of the code that it changes,
+other open merge requests on the same files, the issues that it closes, and the projects that import its code.
+
+```plaintext
+Using GitLab Orbit, review merge request <!264595> in <my-group>/<my-project>:
+- Which definitions does it change, and which callers of those definitions
+  are outside the merge request? Show the file and line of each caller.
+- Which other open merge requests change the same files?
+- Which issues does it close, and which projects in <my-group> import the
+  code that it changes?
+```
+
+```gql orbit-query
+MATCH (mr:MergeRequest {iid: 264595, project_id: 278964})
+  -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
+  -[:HAS_FILE]->(f:MergeRequestDiffFile)
+RETURN f.old_path, f.new_path, f.diff
+LIMIT 100
+```
+
+A query cannot join two separate patterns, so the agent runs a second query on the files that the first one returns:
+
+```gql orbit-query
+MATCH (caller:Definition)
+  -[:CALLS]->(d:Definition)
+  <-[:DEFINES]-(f:File {project_id: 278964, branch: 'master'})
+WHERE f.path IN ['app/services/discussions/resolve_service.rb',
+  'app/services/discussions/unresolve_service.rb', 'app/services/notes/resolve_service.rb']
+RETURN d.fqn, d.start_line, d.end_line, caller.fqn, caller.file_path, caller.start_line
+LIMIT 100
+```
+
+For the other open merge requests and the importing projects, the agent runs the queries from
+[Change shared code safely](#change-shared-code-safely) on the same files.
+Calls are resolved inside one project, so imports show the other projects that depend on the code.
+
+- **With GitLab Orbit:** two queries for the callers, and one query for each other check.
+- **Without GitLab Orbit:** no REST API call returns callers.
+  A reviewer searches a local checkout, and an agent that reviews the merge request sees only the diff.
+
 ## Find out how agent-written code performs
 
 Find the share of merge requests from GitLab Duo agents and flows that merge, and how long they take.
@@ -176,78 +264,13 @@ LIMIT 30
   one for each merge request, after you find them.
   No REST API call lists the agent sessions of all users.
 
-## See what shipped to production this week
-
-Find the issues, tasks, and incidents that production deployments closed.
-
-```plaintext
-Using GitLab Orbit, which issues, tasks, and incidents did the merge
-requests deployed to <production> in <my-group>/<my-project> close this
-week? How many of them are bugs?
-```
-
-```gql orbit-query
-MATCH (wi:WorkItem)
-  <-[:CLOSES]-(mr:MergeRequest)
-  -[:DEPLOYED_TO]->(d:Deployment)
-  -[:IN_ENVIRONMENT]->(e:Environment {name: 'gprd'})
-WHERE mr.project_id = 278964 AND d.created_at >= '2026-10-16T00:00:00Z'
-RETURN wi.work_item_type, count(wi) AS shipped
-ORDER BY shipped DESC
-LIMIT 10
-```
-
-For the bugs, the agent adds the `type::bug` label to the query.
-During an incident, ask a follow-up question:
-
-```plaintext
-Which merge requests reached <production> in the four hours before
-<incident time>?
-```
-
-- **With GitLab Orbit:** one query for each question.
-- **Without GitLab Orbit:** about 1,800 REST API calls for a project that deploys about 1,800 merge requests
-  to production in a week, one for the merge requests of each deployment
-  and one for the closed issues of each merge request.
-
-## Review a merge request with proof
-
-Find the code outside a merge request that calls what the merge request changes, with the file and line of each caller.
-
-```plaintext
-Using GitLab Orbit, review merge request <!264595> in <my-group>/<my-project>:
-- Which definitions does it change?
-- Which callers of those definitions are outside the merge request?
-  Show the file and line of each caller.
-```
-
-```gql orbit-query
-MATCH (mr:MergeRequest {iid: 264595, project_id: 278964})
-  -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
-  -[:HAS_FILE]->(f:MergeRequestDiffFile)
-RETURN f.old_path, f.new_path, f.diff
-LIMIT 100
-```
-
-A query cannot join two patterns on a file path, so the agent runs a second query on the files that the first one returns:
-
-```gql orbit-query
-MATCH (caller:Definition)
-  -[:CALLS]->(d:Definition)
-  <-[:DEFINES]-(f:File {project_id: 278964, branch: 'master'})
-WHERE f.path IN ['app/services/discussions/resolve_service.rb',
-  'app/services/discussions/unresolve_service.rb', 'app/services/notes/resolve_service.rb']
-RETURN d.fqn, d.start_line, d.end_line, caller.fqn, caller.file_path, caller.start_line
-LIMIT 100
-```
-
-- **With GitLab Orbit:** two queries.
-- **Without GitLab Orbit:** no REST API call returns callers.
-  A reviewer searches a local checkout, and an agent that reviews the merge request sees only the diff.
-
 ## Check projects against your security scan standard
 
 Find the projects in a group that ran pipelines but skipped a required security scan.
+
+To query security scans, you must have the Security Manager, Developer, Maintainer, or Owner role.
+With the Reporter role, the scan query returns no rows.
+For more information, see [roles](security.md#roles).
 
 ```plaintext
 Using GitLab Orbit, which projects in <my-group> ran pipelines in the last

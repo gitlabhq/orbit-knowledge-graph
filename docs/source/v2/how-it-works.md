@@ -65,7 +65,7 @@ the indexer builds the graph from two sources:
   For code you have not merged, use the [local graph](cli.md#local-graph).
 
 Results show your data as of the last index cycle.
-The first index can take up to a few hours.
+The first index usually completes in a few minutes, and can take up to a few hours for large codebases.
 Later updates take seconds to minutes.
 To check the progress, see [check indexing progress with the GitLab Orbit CLI](cli.md#check-indexing-progress).
 

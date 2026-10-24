@@ -55,7 +55,7 @@ Relationship
 : A directed connection between two nodes, such as `AUTHORED` from a user to a merge request, or `CALLS` from one definition to another.
 
 Remote graph
-: The graph GitLab builds for each top-level group where GitLab Orbit is turned on. Queries run on GitLab and return only the data your role lets you see.
+: The graph GitLab builds for each top-level group where GitLab Orbit is turned on. It holds not only the code of your repositories, but also SDLC data such as merge requests, pipelines, work items, and security findings. Queries run on GitLab and return only the data your role lets you see.
 
 Software development lifecycle (SDLC) data
 : The part of the graph that holds GitLab objects: groups, projects, users, merge requests, pipelines, work items, packages, and security findings.

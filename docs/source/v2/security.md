@@ -98,24 +98,22 @@ Project membership, and membership of groups where GitLab Orbit is off, do not g
 
 ### Set up a service account
 
-Prerequisites:
-
-- The Owner role for the group.
-- GitLab Orbit [turned on for the group](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
+You must have the Owner role for the group, and GitLab Orbit must be [turned on for the group](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
 
 To set up a service account for GitLab Orbit:
 
-1. [Create a service account and a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account) for it.
-   Give the token the `read_api` scope. Service accounts cannot use fine-grained personal access tokens.
-1. Add the service account to the lowest subgroup that has the data, with the Reporter role.
-   If the service account must read security data, select the **Security Manager** role.
+1. [Create a service account and a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account) with the `read_api` scope.
+   Service accounts cannot use fine-grained personal access tokens.
+1. Add the service account with the Reporter role to the lowest subgroup that has the data.
+   To read security data, use the **Security Manager** role.
    Repeat this step for each group that the service account must query.
 
 ### Verify the scope of a service account
 
 Verify the scope after you set up the account, and each time you change its memberships:
 
-1. Save this request in a file named `request.json`. The query uses the [GitLab Orbit query language](queries/query-language.md).
+1. Save this request in a file named `request.json`.
+   The `query` value is a [GQL](queries/query-language.md) query.
 
    ```json
    {

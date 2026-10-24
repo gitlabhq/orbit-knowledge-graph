@@ -33,32 +33,7 @@ The CLI also indexes the code on your machine into a [local graph](#local-graph)
 You should use the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) to install the GitLab Orbit CLI and connect your agents.
 `glab` downloads and verifies the GitLab Orbit CLI, and tells you when a new version is available.
 
-Prerequisites:
-
-- `glab` 1.120 or later. To check your version, run `glab version`.
-
-To install the CLI and set up your agents:
-
-1. Go to a Git repository on your machine. Any repository works.
-1. Run `glab orbit setup`.
-   On first use, `glab` asks to download the GitLab Orbit CLI.
-1. In the list of agents, setup selects the agents that it detects on your machine.
-   Keep or clear the selection, then press <kbd>Enter</kbd>.
-
-Setup installs the GitLab Orbit skill for your agents and indexes the repository for code search.
-To check that the repository is indexed, run `glab orbit list`.
-To update the setup, run the command again.
-For the setup options and the files that setup changes, see [connect your agent](agents/_index.md#setup-options).
-
-To run setup without a terminal, for example from an agent or a script, confirm both prompts with `--yes`:
-
-```shell
-glab orbit --yes setup --yes
-```
-
-The first `--yes` confirms the download. The second skips the list of agents.
-
-To query your GitLab data, also [sign in with `glab`](#query-the-remote-graph).
+To install the CLI and set up your agents, see [set up your agent](agents/_index.md#set-up-your-agent).
 
 `glab` handles these options itself:
 

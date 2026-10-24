@@ -176,7 +176,7 @@ The endpoint has two tools. `list_commands` lists the GitLab Orbit commands with
 
 | Command | Description |
 |---------|-------------|
-| `query_graph` | Runs a query in the [query language](../queries/query-language.md). |
+| `query_graph` | Runs a [GQL](../queries/query-language.md) query. |
 | `get_graph_schema` | Returns the node types and relationship types, and the properties of the node types you pass in `expand_nodes`. |
 | `get_response_format` | Returns the response JSON Schema of `query_graph` and its version. |
 
@@ -194,7 +194,7 @@ ORDER BY open_mrs DESC
 LIMIT 10
 ```
 
-For query recipes and the query language reference, install the [GitLab Orbit skill](../cli.md#install-the-cli).
+For query recipes and the query language reference, install the [GitLab Orbit skill](_index.md#set-up-your-agent).
 
 ## GitLab Orbit tools in the GitLab MCP server
 

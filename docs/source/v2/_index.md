@@ -49,9 +49,9 @@ Your agent answers with a few graph queries in place of many file reads and API 
 ## Questions GitLab Orbit can answer
 
 - [Fix a vulnerability across every affected project](prompt-examples.md#fix-a-vulnerability-across-every-affected-project)<br>Which projects in my group does this CVE affect, and which fixes reached production?
+- [Respond to a production incident](prompt-examples.md#respond-to-a-production-incident)<br>Which changes to the failing component, and to the code that it calls, reached production this week?
 - [Change shared code safely](prompt-examples.md#change-shared-code-safely)<br>Which classes inherit from this base class, and what calls the method that I change?
-- [Find out how agent-written code performs](prompt-examples.md#find-out-how-agent-written-code-performs)<br>What share of the merge requests that agents created merged, and how long did they take?
-- [See what shipped to production this week](prompt-examples.md#see-what-shipped-to-production-this-week)<br>Which issues, tasks, and incidents did this week's production deployments close?
+- [Review a merge request with proof](prompt-examples.md#review-a-merge-request-with-proof)<br>Which callers of the code that this merge request changes are outside the merge request?
 {.product-cards .product-cards-2}
 
 For more examples, see [prompt examples](prompt-examples.md).

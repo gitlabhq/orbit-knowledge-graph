@@ -13,6 +13,12 @@ title: GitLab Orbit dashboard
 
 {{< /details >}}
 
+{{< history >}}
+
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+
+{{< /history >}}
+
 In the GitLab Orbit dashboard, you check the state of your graph and run queries in the GitLab UI.
 
 To open the dashboard, in the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
@@ -32,6 +38,63 @@ The dashboard has these tabs:
 | **Schema** | Shows **How your data connects**, with the entities by area: **Core**, **Work items**, **Merge requests**, **Pipelines**, **Code**, **Vulnerabilities**, **Packages**, **Container registry**, and **AI agents**. Select an entity to open **Entity details**, with its properties, its connected entities, and the count in your graph. |
 | **Query editor** | Runs GQL queries. Write a query, or select **Write it with GitLab Duo**. You can start from the **Examples**, open the **Query reference** for the schema and the **GQL syntax**, select **Run query**, and select **Export CSV**. When a query fails, select **Ask GitLab Duo to fix this query**. |
 | **Status** | Shows the GitLab Orbit status of your top-level groups, where you turn GitLab Orbit on or off. To change a group, you need the Owner role for the group. **View billing** links to a page outside the dashboard. |
+
+## Check indexing progress
+
+Check which projects GitLab Orbit is still indexing.
+
+To check indexing progress:
+
+1. In the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
+1. Select the **Overview** tab.
+
+The tab shows the entity counts **On your map** and the projects that are still indexing.
+
+## Explore the schema
+
+Find out which entities your graph holds and how they connect.
+
+To explore the schema:
+
+1. In the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
+1. Select the **Schema** tab.
+1. Under **How your data connects**, select an entity.
+
+**Entity details** shows the properties of the entity, its connected entities, and its count in your graph.
+
+## Run a query
+
+Run a query on your graph and export the results.
+
+To run a query:
+
+1. In the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
+1. Select the **Query editor** tab.
+1. Write a query, or select **Write it with GitLab Duo**.
+   To start from an example, select **Examples**.
+1. Select **Run query**.
+1. Optional. To download the results, select **Export CSV**.
+
+The tab shows the results of the query.
+If the query fails, select **Ask GitLab Duo to fix this query**.
+
+## Turn GitLab Orbit on or off for a group
+
+Turn GitLab Orbit on or off for one of your top-level groups.
+
+Prerequisites:
+
+- The Owner role for the top-level group.
+
+To turn GitLab Orbit on or off:
+
+1. In the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
+1. Select the **Status** tab.
+1. Find your top-level group, and turn GitLab Orbit on or off.
+
+The tab shows the new GitLab Orbit status of the group.
+When you turn off GitLab Orbit, GitLab keeps the indexed data for a limited time.
+For more information, see [data retention and deletion](how-it-works.md#data-retention-and-deletion).
 
 ## Related topics
 

@@ -15,8 +15,7 @@ title: GitLab Orbit query language
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/256465) in GitLab 19.4.
-- Generally available in GitLab 19.5.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/256465) in GitLab 19.5.
 
 {{< /history >}}
 

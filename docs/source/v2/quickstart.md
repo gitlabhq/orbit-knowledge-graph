@@ -27,18 +27,17 @@ about your GitLab data.
 
 To check whether GitLab Orbit is already on for your group, open the **Status** tab of the [GitLab Orbit dashboard](dashboard.md).
 If it is on, go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
-If it is off and you do not have the role that this step needs, ask a user with the Owner role for the top-level group to turn it on.
-On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn it on.
+If it is off and you do not have the Owner role for the top-level group, ask a user with that role to turn it on.
 
-{{< tabs >}}
+On GitLab Self-Managed and GitLab Dedicated, to get GitLab Orbit, [contact sales](https://about.gitlab.com/sales/).
 
-{{< tab title="GitLab.com" >}}
+On GitLab.com, if your group does not have GitLab Orbit yet, start a [free trial](trial.md).
 
 Prerequisites:
 
 - The Owner role for the top-level group.
 
-To turn on GitLab Orbit:
+To turn on GitLab Orbit on GitLab.com:
 
 1. In the top bar, select **Search or go to** and find your top-level group.
 1. In the left sidebar, select **Settings** > **GitLab Orbit**.
@@ -46,32 +45,7 @@ To turn on GitLab Orbit:
 1. In the **Turn on GitLab Orbit for `<my-group>`?** dialog, select **Turn on GitLab Orbit**.
 
 The page shows **GitLab Orbit is indexing `<my-group>`**, then **GitLab Orbit is ready for `<my-group>`**.
-
-{{< /tab >}}
-
-{{< tab title="GitLab Self-Managed and GitLab Dedicated" >}}
-
-Prerequisites:
-
-- Administrator access.
-- On GitLab Self-Managed, GitLab Orbit [set up for your instance](https://docs.gitlab.com/orbit/self-managed/).
-
-To turn on GitLab Orbit:
-
-1. In the upper-right corner, select **Admin**.
-1. In the left sidebar, select **GitLab Orbit**.
-1. Under **Top-level groups**, select your group.
-1. Select **Actions** > **Turn on GitLab Orbit**.
-
-To turn on GitLab Orbit for every top-level group, including new ones, turn on
-**Turn on GitLab Orbit for all top-level groups automatically**.
-For more information, see [turn on indexing for a group](https://docs.gitlab.com/orbit/self-managed/orbit-setup/#turn-on-indexing-for-a-group).
-
-{{< /tab >}}
-
-{{< /tabs >}}
-
-The first index can take up to a few hours.
+The first index usually completes in a few minutes, and can take up to a few hours for large codebases.
 Continue with the next steps while the index runs.
 
 ## Step 2: Set up your agent to use GitLab Orbit
@@ -121,12 +95,9 @@ To set up your agent:
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
-To run setup yourself, or for other install methods, see [install the CLI](cli.md#install-the-cli).
-For the setup options and what setup changes, see [connect your agent](agents/_index.md).
+To run setup yourself, see [connect your agent](agents/_index.md).
 
-To check the progress of the first index from step 1, run `glab orbit graph-status` in the clone.
-When indexing is complete, the summary ends with `Ready.`
-Until then, answers can miss data.
+To check indexing progress, run `glab orbit graph-status` until the summary ends with `Ready.`
 
 To ask your first question:
 
