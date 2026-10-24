@@ -39,10 +39,10 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 </section>
 
-- [Ask across code and lifecycle](prompt-examples.md)<br>One graph holds your projects, merge requests, pipelines, vulnerabilities, files, and definitions, so one question can cross all of them.
-- [Run one query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
-- [Get only the data you can access](security.md#how-gitlab-orbit-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions.
-{.product-cards}
+- {{< icon name="connected" >}}[Ask across code and lifecycle](prompt-examples.md)<br>One graph holds your projects, merge requests, pipelines, vulnerabilities, files, and definitions, so one question can cross all of them.
+- {{< icon name="search" >}}[Run one query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
+- {{< icon name="lock" >}}[Get only the data you can access](security.md#how-gitlab-orbit-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions.
+{.product-cards .product-cards-icons}
 
 ## About GitLab Orbit
 
@@ -164,6 +164,25 @@ body:has(.product-landing) .docs-content .language-plaintext {
 .docs-content .product-hero-actions a svg {
   width: 1rem;
   height: 1rem;
+  fill: currentColor;
+}
+
+/* Value cards: a GitLab icon in a tinted badge above the title. */
+.docs-content ul.product-cards-icons > li > span:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-bottom: var(--gl-spacing-scale-4);
+  border-radius: var(--gl-border-radius-lg);
+  background-color: color-mix(in srgb, currentColor 12%, transparent);
+  color: var(--gl-color-purple-600);
+}
+.gl-dark .docs-content ul.product-cards-icons > li > span:first-child { color: var(--gl-color-purple-300); }
+.docs-content ul.product-cards-icons > li > span:first-child svg {
+  width: 1.25rem;
+  height: 1.25rem;
   fill: currentColor;
 }
 
