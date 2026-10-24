@@ -8,7 +8,7 @@ output:
 commit-msg:
   jobs:
     - name: commitlint
-      run: mise exec -- npx --yes -p @commitlint/config-conventional -p @commitlint/cli commitlint --edit {1}
+      run: mise exec -- bun install --frozen-lockfile --silent && mise exec -- bun x commitlint --edit {1}
 
 pre-push:
   parallel: true
