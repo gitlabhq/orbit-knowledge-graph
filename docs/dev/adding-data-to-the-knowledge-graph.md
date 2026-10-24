@@ -302,8 +302,10 @@ This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql
 
 ### 5.6 Document
 
-Add a row to `docs/design-documents/data_model.md`: the node table, the mermaid
-relationship diagram, the `IN_PROJECT` source list, and a new relationship-types row.
+After the code MR merges, open a separate docs MR. Add the node to the user
+schema reference,
+[`docs/source/remote/schema.md`](../source/remote/schema.md), in the table for
+its domain. Update the node count in the page description and the intro.
 
 ### 5.7 Validate (toolchain matters)
 
@@ -354,7 +356,6 @@ knowledge-graph:
 - [ ] `mise schema:bump` run; `mise run schema:generate:ddl` run; `graph.sql` shows the new `gl_<node>`.
 - [ ] `config/seeds/siphon.sql` updated; SDLC YAML scenario(s) added.
 - [ ] Query-side YAML scenario(s) added under `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/` to verify the new entity is queryable end-to-end.
-- [ ] `data_model.md` updated.
 - [ ] `cargo test -p ontology` + `mise test:integration:indexer:sdlc:scenario <domain>/` green (correct toolchain).
 
 ---
@@ -377,8 +378,8 @@ knowledge-graph:
 
 When you finish adding a table / node / edge, **close the loop on this document**.
 Conventions drift between phases (§1). So if anything you hit diverged from what's
-written here, update the relevant section **in the same MR** (or an immediate
-fast-follow). Examples are a new generator flag, a changed CODEC default, an extra
-file maintainers required, a redaction wrinkle, or a toolchain gotcha. A stale playbook is how
+written here, update the relevant section in a separate docs MR. Examples are a new
+generator flag, a changed CODEC default, an extra file maintainers required, a
+redaction wrinkle, or a toolchain gotcha. A stale playbook is how
 the next agent re-burns the time you just spent. If nothing changed, say so
 explicitly in your summary so the next reader trusts the doc.

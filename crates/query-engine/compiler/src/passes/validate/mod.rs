@@ -39,13 +39,18 @@ use conditions::{check_condition_column, check_condition_counts};
 pub(crate) const BASE_SCHEMA_JSON: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
+static BASE_SCHEMA: OnceLock<serde_json::Value> = OnceLock::new();
 static BASE_SCHEMA_VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
+
+pub(crate) fn base_schema() -> &'static serde_json::Value {
+    BASE_SCHEMA.get_or_init(|| {
+        serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON")
+    })
+}
 
 pub(crate) fn base_validator() -> &'static jsonschema::Validator {
     BASE_SCHEMA_VALIDATOR.get_or_init(|| {
-        let schema: serde_json::Value =
-            serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
-        jsonschema::validator_for(&schema).expect("schema.json must be a valid JSON Schema")
+        jsonschema::validator_for(base_schema()).expect("schema.json must be a valid JSON Schema")
     })
 }
 
@@ -87,11 +92,12 @@ pub(crate) fn node_ref_regex() -> &'static regex::Regex {
 
 pub(crate) fn collect_schema_errors(
     validator: &jsonschema::Validator,
+    schema: &serde_json::Value,
     value: &serde_json::Value,
 ) -> Result<()> {
     let errors: Vec<_> = validator
         .iter_errors(value)
-        .map(|e| format_schema_error(&e))
+        .map(|e| format_schema_error(&e, schema))
         .collect();
 
     if errors.is_empty() {
@@ -214,6 +220,19 @@ fn wide_id_range_hint(wide: bool) -> String {
     } else {
         String::new()
     }
+}
+
+fn at_or_before_epoch(value: &str) -> bool {
+    value.get(..10).is_some_and(|date| {
+        let dated = date.bytes().enumerate().all(|(i, byte)| {
+            if i == 4 || i == 7 {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        });
+        dated && date <= "1970-01-01"
+    })
 }
 
 fn is_aggregate_scalar(data_type: DataType) -> bool {
@@ -936,6 +955,25 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             return Ok(());
         };
 
+        if self
+            .property_id(entity, prop)
+            .is_some_and(|property| self.model.get().null_as_epoch(property))
+        {
+            let values = value
+                .as_array()
+                .map_or(std::slice::from_ref(value), Vec::as_slice);
+            if values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .any(at_or_before_epoch)
+            {
+                return Err(QueryError::Validation(format!(
+                    "filter on \"{prop}\" for {entity}: \
+                     values on or before 1970-01-01 stand for null; use is_null or is_not_null"
+                )));
+            }
+        }
+
         // traversal_path is exempt: short paths like "1/" are valid hierarchical scopes.
         if (is_like_op || is_token_op) && prop != TRAVERSAL_PATH_COLUMN {
             let len = value.as_str().map_or(0, |s| s.chars().count());
@@ -1574,6 +1612,16 @@ mod tests {
             err.to_string().contains(expected),
             "expected error containing \"{expected}\", got: {err}"
         );
+    }
+
+    #[test]
+    fn epoch_boundary_rejects_dates_on_or_before_1970() {
+        for value in ["1970-01-01", "1970-01-01T00:00:00Z", "1969-12-31T23:59:59Z"] {
+            assert!(at_or_before_epoch(value), "{value}");
+        }
+        for value in ["1970-01-02", "2024-06-10T00:00:00Z", "now", "0"] {
+            assert!(!at_or_before_epoch(value), "{value}");
+        }
     }
 
     #[test]

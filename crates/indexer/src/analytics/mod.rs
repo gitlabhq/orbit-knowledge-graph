@@ -7,7 +7,9 @@ mod observer;
 
 use std::sync::Arc;
 
-use orbit_analytics::{AnalyticsTracker, SnowplowAnalyticsTracker};
+use gitlab_client::GitlabClient;
+use orbit_analytics::{ConsentGate, GitlabInstanceWatch, SnowplowAnalyticsTracker};
+use orbit_log_fields::warn;
 use orbit_server_config::{
     AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind,
 };
@@ -19,6 +21,7 @@ pub use observer::SnowplowIndexingObserver;
 pub struct IndexingAnalytics {
     tracker: Option<SnowplowAnalyticsTracker>,
     config: Arc<AnalyticsConfig>,
+    instance: GitlabInstanceWatch,
 }
 
 impl IndexingAnalytics {
@@ -26,6 +29,7 @@ impl IndexingAnalytics {
         Ok(Self {
             tracker: build_tracker(config)?,
             config: Arc::new(config.clone()),
+            instance: GitlabInstanceWatch::default(),
         })
     }
 
@@ -33,13 +37,14 @@ impl IndexingAnalytics {
         Self {
             tracker: None,
             config: Arc::new(AnalyticsConfig {
-                enabled: false,
+                enabled: Some(false),
                 collector_url: String::new(),
                 deployment: DeploymentConfig {
                     kind: DeploymentKind::SelfManaged,
                     environment: DeploymentEnvironment::Development,
                 },
             }),
+            instance: GitlabInstanceWatch::default(),
         }
     }
 
@@ -48,11 +53,22 @@ impl IndexingAnalytics {
     }
 
     pub fn observer(&self) -> Option<Box<dyn IndexingObserver>> {
-        let tracker: Arc<dyn AnalyticsTracker> = Arc::new(self.tracker.clone()?);
+        let tracker = ConsentGate::new(
+            Arc::new(self.tracker.clone()?),
+            &self.config,
+            &self.instance,
+        );
         Some(Box::new(SnowplowIndexingObserver::new(
-            tracker,
+            Arc::new(tracker),
             Arc::clone(&self.config),
+            self.instance.clone(),
         )))
+    }
+
+    pub fn watch_gitlab_instance(&self, client: Arc<GitlabClient>) {
+        if self.is_enabled() {
+            self.instance.spawn_refresh(client);
+        }
     }
 
     pub async fn shutdown(&self) {
@@ -65,13 +81,15 @@ impl IndexingAnalytics {
 fn build_tracker(
     config: &AnalyticsConfig,
 ) -> Result<Option<SnowplowAnalyticsTracker>, labkit_events::Error> {
-    if !config.enabled {
+    if !config.may_send_events() {
         return Ok(None);
     }
     if config.collector_url.trim().is_empty() {
-        orbit_log_fields::warn!(
-            "analytics.enabled=true but analytics.collector_url is empty; indexing analytics disabled"
-        );
+        if config.enabled == Some(true) {
+            warn!(
+                "analytics.enabled=true but analytics.collector_url is empty; indexing analytics disabled"
+            );
+        }
         return Ok(None);
     }
     SnowplowAnalyticsTracker::from_config(config).map(Some)

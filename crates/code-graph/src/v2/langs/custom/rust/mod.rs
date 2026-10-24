@@ -124,6 +124,7 @@ fn collect_ty_garbage(_exclusive: RwLockWriteGuard<'static, ()>) {
             "rust-analyzer type interner swept"
         ),
         Err(payload) => orbit_log_fields::warn!(
+            safe(ERROR_TYPE) = "panic",
             expanded(ERROR_MESSAGE) = rust_panic_message(&payload),
             "rust-analyzer type interner sweep panicked"
         ),
@@ -212,6 +213,7 @@ impl LanguagePipeline for RustPipeline {
             Ok(Ok(plan)) => Some(plan),
             Ok(Err(err)) => {
                 orbit_log_fields::debug!(
+                    safe(ERROR_TYPE) = "rust_workspace_discover",
                     expanded(ERROR_MESSAGE) = %err,
                     "rust v2 workspace load failed; falling back to standalone parsing"
                 );
@@ -220,6 +222,7 @@ impl LanguagePipeline for RustPipeline {
             Err(err) => {
                 let message = rust_panic_message(&err);
                 orbit_log_fields::warn!(
+                    safe(ERROR_TYPE) = "panic",
                     expanded(ERROR_MESSAGE) = message,
                     "rust v2 workspace load panicked; falling back to standalone parsing"
                 );
@@ -419,6 +422,7 @@ fn parse_rust_files_with_workspaces(
             Ok(Err(err)) => {
                 orbit_log_fields::warn!(
                     expanded(MANIFEST_PATH) = %plan.manifest_path(workspace_id).display(),
+                    safe(ERROR_TYPE) = "rust_workspace_load",
                     expanded(ERROR_MESSAGE) = %err,
                     "failed to load rust-analyzer workspace; continuing with others"
                 );
@@ -427,6 +431,7 @@ fn parse_rust_files_with_workspaces(
             Err(payload) => {
                 orbit_log_fields::warn!(
                     expanded(MANIFEST_PATH) = %plan.manifest_path(workspace_id).display(),
+                    safe(ERROR_TYPE) = "panic",
                     expanded(ERROR_MESSAGE) = rust_panic_message(&payload),
                     "rust-analyzer workspace load panicked; continuing with others"
                 );

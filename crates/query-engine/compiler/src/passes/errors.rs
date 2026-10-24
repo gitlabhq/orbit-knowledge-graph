@@ -11,7 +11,10 @@ use ontology::errors::format_candidate_list;
 /// and renders `oneOf` rejections as opaque prose, both of which leave an agent
 /// guessing the valid values. Reading the structured `ValidationErrorKind`
 /// recovers the full allowlist instead.
-pub(crate) fn format_schema_error(error: &jsonschema::ValidationError<'_>) -> String {
+pub(crate) fn format_schema_error(
+    error: &jsonschema::ValidationError<'_>,
+    schema: &serde_json::Value,
+) -> String {
     let path = error.instance_path().to_string();
 
     if let Some((instance, options)) = extract_enum_options(error) {
@@ -24,7 +27,38 @@ pub(crate) fn format_schema_error(error: &jsonschema::ValidationError<'_>) -> St
         return format_group_by_hint(&instance, &path);
     }
 
+    if let Some(description) = one_of_description(error, schema) {
+        // Some descriptions name the field rather than the accepted shape
+        // ("Start of ID range"), so say what went wrong before quoting one.
+        return if path.is_empty() {
+            description.to_string()
+        } else {
+            format!(
+                "invalid value at {path}: {}",
+                description.trim_end_matches('.')
+            )
+        };
+    }
+
     format!("{} at {path}", error.masked())
+}
+
+/// A `oneOf` with no allowlist to recover still has its schema's
+/// `description`, which reads better than jsonschema's prose.
+/// `schema_path` is the canonical location without `$ref` hops, so it
+/// points into `schema`.
+fn one_of_description<'s>(
+    error: &jsonschema::ValidationError<'_>,
+    schema: &'s serde_json::Value,
+) -> Option<&'s str> {
+    use jsonschema::error::ValidationErrorKind;
+
+    if !matches!(error.kind(), ValidationErrorKind::OneOfNotValid { .. }) {
+        return None;
+    }
+    let keyword = error.schema_path().to_string();
+    let parent = keyword.strip_suffix("/oneOf")?;
+    schema.pointer(parent)?.get("description")?.as_str()
 }
 
 /// Try to extract an enum allowlist from an error.
@@ -194,7 +228,7 @@ mod tests {
             .iter_errors(&value)
             .next()
             .expect("delta must be rejected");
-        let msg = format_schema_error(&err);
+        let msg = format_schema_error(&err, &schema);
         assert!(msg.contains("is not an allowed value"), "{msg}");
         assert!(msg.contains("alpha, beta, gamma"), "{msg}");
     }
@@ -212,7 +246,7 @@ mod tests {
             .iter_errors(&value)
             .next()
             .expect("delta must be rejected");
-        let msg = format_schema_error(&err);
+        let msg = format_schema_error(&err, &schema);
         assert!(msg.contains("Valid values: alpha, beta at"), "{msg}");
         assert!(!msg.contains("hidden"), "{msg}");
     }
@@ -229,8 +263,58 @@ mod tests {
             .iter_errors(&value)
             .next()
             .expect("short key must be rejected");
-        let msg = format_schema_error(&err);
+        let msg = format_schema_error(&err, &schema);
         assert!(msg.contains("ab"), "{msg}");
         assert!(msg.contains("at"), "{msg}");
+    }
+
+    fn first_error_message(schema: &serde_json::Value, value: &serde_json::Value) -> String {
+        let validator = jsonschema::validator_for(schema).expect("valid schema");
+        let err = validator
+            .iter_errors(value)
+            .next()
+            .expect("value must be rejected");
+        format_schema_error(&err, schema)
+    }
+
+    #[test]
+    fn one_of_without_enum_reports_the_schema_description() {
+        let schema = serde_json::json!({
+            "properties": {
+                "x": {
+                    "description": "A number or a boolean.",
+                    "oneOf": [{ "type": "number" }, { "type": "boolean" }]
+                }
+            }
+        });
+        let msg = first_error_message(&schema, &serde_json::json!({ "x": "s" }));
+        assert_eq!(msg, "invalid value at /x: A number or a boolean");
+    }
+
+    #[test]
+    fn root_one_of_description_is_not_suffixed_with_an_empty_path() {
+        let schema = serde_json::json!({
+            "description": "Either a or b.",
+            "oneOf": [{ "required": ["a"] }, { "required": ["b"] }]
+        });
+        let msg = first_error_message(&schema, &serde_json::json!({ "c": 1 }));
+        assert_eq!(msg, "Either a or b.");
+    }
+
+    #[test]
+    fn one_of_without_description_keeps_the_validator_message() {
+        let schema = serde_json::json!({
+            "properties": { "x": { "oneOf": [{ "type": "number" }, { "type": "boolean" }] } }
+        });
+        let msg = first_error_message(&schema, &serde_json::json!({ "x": "s" }));
+        assert!(msg.contains("oneOf"), "{msg}");
+    }
+    #[test]
+    fn other_errors_on_a_described_schema_keep_their_own_message() {
+        let schema = serde_json::json!({
+            "properties": { "x": { "description": "Hop count.", "maximum": 3 } }
+        });
+        let msg = first_error_message(&schema, &serde_json::json!({ "x": 5 }));
+        assert!(msg.contains("greater than the maximum of 3"), "{msg}");
     }
 }

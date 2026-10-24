@@ -110,6 +110,7 @@ impl NamespaceDeletionScheduler {
                     if let Some(error) = &outcome.error {
                         warn!(
                             safe(TABLE) = outcome.table.as_str(),
+                            safe(ERROR_TYPE) = "clickhouse_query",
                             expanded(ERROR_MESSAGE) = error.as_str(),
                             "failed to reconcile moved entities for table"
                         );

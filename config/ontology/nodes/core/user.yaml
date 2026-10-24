@@ -192,14 +192,14 @@ storage:
     - {name: avatar_url, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: public_email, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: preferred_language, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: last_activity_on, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
+    - {name: last_activity_on, type: "Date32", default: "'1970-01-01'", codec: ["Delta(4)", "ZSTD(1)"]}
     - {name: private_profile, type: "Bool", default: "false"}
     - {name: is_admin, type: "Bool", default: "false"}
     - {name: is_auditor, type: "Bool", default: "false"}
     - {name: is_external, type: "Bool", default: "false"}
     - {name: user_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: created_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "Nullable(DateTime64(0, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_state, column: state, type: "set(10)", granularity: 2}

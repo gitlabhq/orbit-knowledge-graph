@@ -127,6 +127,16 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "drop_tables": {
+          "type": "array",
+          "description": "Source tables dropped before this step seeds, to model a GitLab version that does not have them yet.",
+          "items": { "type": "string" }
+        },
+        "create_tables": {
+          "type": "array",
+          "description": "Source tables re-created from the schema SQL before this step seeds.",
+          "items": { "type": "string" }
+        },
         "seed": { "$ref": "#/definitions/seed" },
         "seed_settings": { "$ref": "#/definitions/seedSettings" },
         "run": { "$ref": "#/definitions/run" },
@@ -212,6 +222,17 @@
           "required": ["contains"],
           "properties": {
             "contains": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["not"],
+          "properties": {
+            "not": {
+              "type": ["string", "number", "boolean", "null"],
+              "description": "Any value except this one; `not: null` asserts the column is set."
+            }
           }
         }
       ]

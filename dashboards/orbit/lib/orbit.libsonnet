@@ -385,6 +385,41 @@ local sectionCollapsed(title, metrics, ds_var, selector) =
 
 // ---------- Story-shaped panel constructors ----------
 
+// "At a glance" tiles stay in text color until a threshold is crossed, so only
+// real trouble is coloured.
+local NEUTRAL = [{ color: 'text', value: null }];
+local steps(pairs) = NEUTRAL + [{ color: p[1], value: p[0] } for p in pairs];
+local stepsDown(red, amber) = [
+  { color: 'red', value: null },
+  { color: '#EAB839', value: red },
+  { color: 'green', value: amber },
+];
+
+local colored(names) = [
+  { matcher: { id: 'byName', options: n[0] }, properties: [{ id: 'color', value: { mode: 'fixed', fixedColor: n[1] } }] }
+  for n in names
+];
+
+local glanceTile(title, description, expr, ds_var, unit, thresholds, decimals=null) =
+  stat(title, description, target(expr, title, ds_var) + { instant: true, range: false }, unit, 3, 4) + {
+    fieldConfig+: {
+      defaults+: {
+        color: { mode: 'thresholds' },
+        thresholds: { mode: 'absolute', steps: thresholds },
+        // No value would otherwise take the lowest threshold color, red on success tiles.
+        mappings: [{ type: 'special', options: { match: 'null+nan', result: { text: '—', color: 'text', index: 0 } } }],
+        [if decimals != null then 'decimals']: decimals,
+      },
+    },
+    options+: {
+      textMode: 'value',
+      graphMode: 'none',
+      colorMode: 'value',
+      justifyMode: 'center',
+      text: { titleSize: 13, valueSize: 32 },
+    },
+  };
+
 // Single stat tile reading "X in dashboard window". The query uses
 // $__range so it always answers the user's current time picker.
 local counterRangeStat(prom_name, title, description, ds_var, selector, filter='', unit='short', w=PANEL_W, h=STAT_H, or_zero=true) = (
@@ -1064,6 +1099,11 @@ local deployAnnotation(ds_var, selector, name='Deploys', color='rgba(0, 211, 255
   section: section,
   sectionCollapsed: sectionCollapsed,
   // Story-shaped helpers
+  NEUTRAL: NEUTRAL,
+  steps: steps,
+  stepsDown: stepsDown,
+  colored: colored,
+  glanceTile: glanceTile,
   counterRangeStat: counterRangeStat,
   counterIncreaseBars: counterIncreaseBars,
   histogramHeatmap: histogramHeatmap,

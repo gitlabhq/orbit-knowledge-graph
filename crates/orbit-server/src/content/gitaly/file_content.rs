@@ -98,6 +98,7 @@ impl ColumnResolver for GitalyContentService {
                 if let Some(e) = err {
                     warn!(
                         safe(GL_PROJECT_ID) = project_id,
+                        safe(ERROR_TYPE) = "blob_decode",
                         expanded(ERROR_MESSAGE) = %e,
                         "blob stream decode error"
                     );

@@ -55,7 +55,8 @@ use std::time::Duration;
 
 use clickhouse::{ClickHouseClients, ClickHouseWriter};
 use engine::EngineBuilder;
-use engine::handler::HandlerRegistry;
+use engine::handler::{HandlerInitError, HandlerRegistry};
+use gitlab_client::GitlabClient;
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
@@ -67,8 +68,8 @@ use orchestrator::dispatch::{CodeBackfill, NamespaceIndexingDispatch};
 use orchestrator::max_deliveries::MaxDeliveriesReconciler;
 use orchestrator::scheduled::{
     CodeBackfillSweep, CodeStaleSweep, GlobalDispatcher, MigrationCompletionChecker,
-    NamespaceDeletionScheduler, NamespaceDispatcher, Scheduled, StaleEdgeReconciliation,
-    TableCleanup,
+    NamespaceDeletionScheduler, NamespaceDispatcher, NamespaceFreshness, Scheduled,
+    StaleEdgeReconciliation, TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
@@ -134,12 +135,23 @@ pub async fn run(
 
     let registry = Arc::new(HandlerRegistry::default());
 
+    let gitlab_client = config
+        .gitlab
+        .clone()
+        .map(GitlabClient::new)
+        .transpose()
+        .map_err(HandlerInitError::new)?
+        .map(Arc::new);
+
     let analytics = analytics::IndexingAnalytics::from_config(&config.analytics)?;
     if analytics.is_enabled() {
         info!(
             expanded(URL) = %config.analytics.collector_url,
             "indexing analytics enabled"
         );
+    }
+    if let Some(client) = &gitlab_client {
+        analytics.watch_gitlab_instance(Arc::clone(client));
     }
 
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {
@@ -168,6 +180,7 @@ pub async fn run(
             &ontology,
             writer.clone(),
             analytics.clone(),
+            gitlab_client,
             &resources,
         )
         .await?;
@@ -244,7 +257,11 @@ pub async fn run_dispatcher(
     )
     .await
     {
-        warn!(expanded(ERROR_MESSAGE) = %error, "release GC failed, will retry next startup");
+        warn!(
+            safe(ERROR_TYPE) = "nats_cleanup",
+            expanded(ERROR_MESSAGE) = %error,
+            "release GC failed, will retry next startup"
+        );
     }
 
     let datalake = clients.datalake.clone();
@@ -271,6 +288,7 @@ pub async fn run_dispatcher(
     .await?;
     if let Err(error) = catalog.sync_active_version(&graph).await {
         warn!(
+            safe(ERROR_TYPE) = <&str>::from(&error),
             expanded(ERROR_MESSAGE) = %error,
             "active version not mirrored at startup; retried every completion tick"
         );
@@ -289,27 +307,20 @@ pub async fn run_dispatcher(
                         .await
                 {
                     warn!(
+                        safe(ERROR_TYPE) = <&str>::from(&error),
                         expanded(ERROR_MESSAGE) = %error,
                         "failed to create unversioned tables at startup"
                     );
                 }
             }
-            if let Err(error) = orbit_migrations::execute::replace_refreshable_views(
-                &graph,
-                &ontology,
-                active_version,
-            )
-            .await
-            {
-                warn!(
-                    expanded(ERROR_MESSAGE) = %error,
-                    "failed to replace refreshable views at startup"
-                );
-            }
+            orbit_migrations::execute::replace_refreshable_views(&graph, &ontology, active_version)
+                .await
+                .map_err(schema::migration::DispatcherMigrationError::from)?;
         }
         Ok(_) => {}
         Err(error) => {
             warn!(
+                safe(ERROR_TYPE) = <&str>::from(&error),
                 expanded(ERROR_MESSAGE) = %error,
                 "failed to read active version for auxiliary tables and refreshable views"
             )
@@ -384,6 +395,13 @@ pub async fn run_dispatcher(
             ))),
             metrics.clone(),
             config.schedule.tasks.stale_edge_reconciliation.clone(),
+        )),
+        Box::new(NamespaceFreshness::new(
+            clients.graph.clone(),
+            clients.datalake.clone(),
+            catalog.clone(),
+            config.schedule.tasks.namespace_freshness.clone(),
+            config.schedule.tasks.namespace.sweep_interval_secs,
         )),
         Box::new(MigrationCompletionChecker::new(
             clients.graph.clone(),

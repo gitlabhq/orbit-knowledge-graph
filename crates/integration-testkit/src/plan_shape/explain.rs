@@ -224,7 +224,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
         QueryPlan::Aggregation(plan) => {
             let result = &plan.operation.result;
             let group = |value: &compiler::passes::plan::query_types::aggregation::Group| {
-                let column = planned_column(&value.column);
+                let column = planned_value(&value.value);
                 value.truncate.map_or_else(
                     || column.clone(),
                     |unit| format!("bucket({}, {column})", unit.name()),
@@ -257,7 +257,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                     let argument = measure
                         .argument
                         .as_ref()
-                        .map(planned_column)
+                        .map(planned_value)
                         .unwrap_or_default();
                     format!(
                         "{}({argument}){condition} AS {}",
@@ -620,10 +620,6 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             format!("{} <= {end}", planned_column(column)),
         ],
         Predicate::Live { alias } => vec![format!("{alias}._deleted = false")],
-        Predicate::OrTombstone(inner, alias) => vec![format!(
-            "{} OR {alias}._deleted = true",
-            planned_predicate(inner).join(" AND ")
-        )],
         Predicate::EntityKind { column, entity } => vec![format!(
             "{} = {}",
             planned_column(column),
@@ -657,7 +653,6 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             relation.0,
             membership_keys(keys)
         )],
-        Predicate::Scope { alias, .. } => vec![format!("scope({alias})")],
     }
 }
 
@@ -693,40 +688,43 @@ fn boolean_text<T>(
     )
 }
 
+fn planned_value(value: &OutputValue) -> String {
+    match value {
+        OutputValue::Column(value) | OutputValue::EpochAsNull(value) => planned_column(value),
+        OutputValue::Text(value) => text_literal(value),
+        OutputValue::Depth(value) => value.to_string(),
+        OutputValue::Path(steps) => format!(
+            "path[{}]",
+            steps
+                .iter()
+                .map(|(id, kind)| format!("({}, {})", planned_column(id), planned_column(kind)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        OutputValue::PathAppend { path, id, kind } => format!(
+            "append({}, ({}, {}))",
+            planned_column(path),
+            planned_column(id),
+            planned_column(kind)
+        ),
+        OutputValue::PathPrepend { path, id, kind } => format!(
+            "prepend(({}, {}), {})",
+            planned_column(id),
+            planned_column(kind),
+            planned_column(path)
+        ),
+    }
+}
+
 fn planned_projections(values: &[Projection]) -> String {
     values
         .iter()
         .map(|projection| {
-            let value = match &projection.value {
-                OutputValue::Column(value) => planned_column(value),
-                OutputValue::Text(value) => text_literal(value),
-                OutputValue::Depth(value) => value.to_string(),
-                OutputValue::Path(steps) => format!(
-                    "path[{}]",
-                    steps
-                        .iter()
-                        .map(|(id, kind)| format!(
-                            "({}, {})",
-                            planned_column(id),
-                            planned_column(kind)
-                        ))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                OutputValue::PathAppend { path, id, kind } => format!(
-                    "append({}, ({}, {}))",
-                    planned_column(path),
-                    planned_column(id),
-                    planned_column(kind)
-                ),
-                OutputValue::PathPrepend { path, id, kind } => format!(
-                    "prepend(({}, {}), {})",
-                    planned_column(id),
-                    planned_column(kind),
-                    planned_column(path)
-                ),
-            };
-            format!("{value} AS {}", projection.name)
+            format!(
+                "{} AS {}",
+                planned_value(&projection.value),
+                projection.name
+            )
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -832,8 +830,19 @@ fn expression(value: &Expr) -> String {
             membership_keys(columns)
         ),
         Expr::InSelect { expr, .. } => format!("{} IN subquery", expression(expr)),
-        Expr::Scalar(_) => "scalar(subquery)".into(),
+        Expr::Scalar(query) => format!("scalar({})", scalar(query)),
         Expr::Star => "*".into(),
+    }
+}
+
+fn scalar(value: &Query) -> String {
+    let source = match &value.from {
+        TableRef::Scan { table, alias, .. } => format!("{table} AS {alias}"),
+        _ => "subquery".into(),
+    };
+    match &value.where_clause {
+        Some(predicate) => format!("{source} WHERE {}", expression(predicate)),
+        None => source,
     }
 }
 

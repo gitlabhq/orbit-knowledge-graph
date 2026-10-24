@@ -37,3 +37,7 @@ invalid:
     }
   - 'info!(%req.branch, "dotted shorthand");'
   - 'info!(?self.state, "dotted debug shorthand");'
+  - |
+    tokio::select! {
+        _ = a => { warn!(error = %e, "lost"); }
+    }

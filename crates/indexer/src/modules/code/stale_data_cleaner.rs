@@ -22,7 +22,8 @@ pub trait StaleDataCleaner: Send + Sync {
     ) -> Result<(), StaleDataCleanerError>;
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum StaleDataCleanerError {
     #[error(
         "failed to delete stale rows from {table} (traversal_path={traversal_path}, project_id={project_id}, branch={branch}): {reason}"
@@ -47,7 +48,12 @@ impl ClickHouseStaleDataCleaner {
         let node_tables = table_names.node_tables();
         let node_queries = node_tables
             .iter()
-            .map(|table| (table.to_string(), Self::build_node_delete_query(table)))
+            .map(|table| {
+                (
+                    table.to_string(),
+                    Self::build_node_delete_query(table, table_names.immutable_columns(table)),
+                )
+            })
             .collect();
 
         let edge_queries = table_names
@@ -70,7 +76,11 @@ impl ClickHouseStaleDataCleaner {
         }
     }
 
-    fn build_node_delete_query(table: &str) -> String {
+    fn build_node_delete_query(table: &str, carried_columns: &[String]) -> String {
+        let carried = carried_columns
+            .iter()
+            .map(|column| format!("{column},\n                "))
+            .collect::<String>();
         format!(
             r#"
             SELECT
@@ -78,7 +88,7 @@ impl ClickHouseStaleDataCleaner {
                 project_id,
                 branch,
                 id,
-                {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
+                {carried}{{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                 true AS _deleted
             FROM {table} AS s FINAL
             WHERE traversal_path = {{traversal_path:String}}
@@ -249,5 +259,23 @@ pub mod test_utils {
             ));
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn node_tombstones_carry_the_unchanging_columns() {
+        let ontology = ontology::Ontology::load_embedded().expect("embedded ontology");
+        let names = CodeTableNames::from_ontology(&ontology).expect("code tables");
+        let carried = names.immutable_columns(&names.file);
+        assert!(carried.iter().any(|c| c == "path"), "{carried:?}");
+        let sql = ClickHouseStaleDataCleaner::build_node_delete_query(&names.file, carried);
+        for column in carried {
+            assert!(sql.contains(&format!("{column},")), "{sql}");
+        }
+        assert!(sql.contains("true AS _deleted"), "{sql}");
     }
 }

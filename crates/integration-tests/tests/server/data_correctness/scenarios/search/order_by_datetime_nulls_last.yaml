@@ -1,0 +1,23 @@
+description: Ascending order on a nullable DateTime keeps the null rows last instead of sorting the stored epoch first
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "mr", "entity": "MergeRequest",
+               "id_range": {"start": 2000, "end": 2005},
+               "columns": ["title", "merged_at"]}],
+      "order_by": "mr.merged_at",
+      "limit": 10
+    }
+  gql: |
+    MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2005 RETURN mr.title, mr.merged_at ORDER BY mr.merged_at ASC LIMIT 10
+
+expect:
+  node_count: 6
+  nodes:
+    MergeRequest:
+      order: [2002, 2004, 2005, 2000, 2001, 2003]
+      rows:
+        - { id: 2002, merged_at: "2024-03-15T12:00:00Z" }
+        - { id: 2000, merged_at: null }

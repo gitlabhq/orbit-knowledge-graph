@@ -11,9 +11,9 @@ PKG_PROJECT="${CI_PROJECT_ID:-gitlab-org%2Forbit%2Fknowledge-graph}"
 
 command -v yq >/dev/null 2>&1 || { echo "yq (mikefarah v4+) required"; exit 1; }
 
-GITLAB_REF="$(yq -r '.gitlab.ref' "$VERSIONS")"
+GITLAB_REF="$(yq -r "$GITLAB_PINS.ref" "$VERSIONS")"
 [[ -z "$GITLAB_REF" || "$GITLAB_REF" == "null" ]] \
-  && { echo "gitlab.ref missing in $VERSIONS"; exit 1; }
+  && { echo "$GITLAB_PINS.ref missing in $VERSIONS"; exit 1; }
 
 PKG_PATH="packages/generic/siphon-ssot-tables/${GITLAB_REF}/tables.tar.gz"
 PKG_URL="https://gitlab.com/api/v4/projects/${PKG_PROJECT}/${PKG_PATH}"
@@ -51,6 +51,8 @@ done
 
 count="$(find "$CLONE/$TABLES_PATH" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) | wc -l | tr -d ' ')"
 [[ "$count" -gt 0 ]] || { echo "no table files found at $TABLES_PATH in $GITLAB_REF"; exit 1; }
+# The siphon container reads the files as another user; a local umask of 077 breaks it.
+chmod -R u+rwX,go+rX "$CLONE/$TABLES_PATH"
 tar -czf "$TARBALL" -C "$CLONE/$TABLES_PATH" .
 log "packed $count table files ($(du -h "$TARBALL" | cut -f1 | tr -d ' '))"
 

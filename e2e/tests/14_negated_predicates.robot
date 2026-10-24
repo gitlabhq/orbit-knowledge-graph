@@ -113,16 +113,14 @@ Administrator Only Fields Under NOT Reject For Users And Work For The Admin
     Should Be Equal As Integers    ${resp["row_count"]}    1
 
 NOT Does Not Reopen The Vulnerability Aggregation Oracle
-    [Documentation]    A Reporter gets no Project row for every NOT form, and for the positive twin,
+    [Documentation]    A Reporter is refused every NOT form, and the positive twin, at compile time,
     ...                so a pair of counts never reveals the total. A Security Manager on the same
-    ...                project gets the real counts, which proves the Reporter result is not vacuous.
+    ...                project gets the real counts, which proves the refusal is about access.
     [Tags]    negation    authz    security
     FOR    ${predicate}    IN    @{NEG_ORACLE_PREDICATES}
-        ${reporter}=    Vulnerability Count    ${predicate}    ${NEG_TOKENS["reporter"]}
-        Should Be Equal As Integers    ${reporter}    0    Reporter counted ${predicate}
+        Reporter Cannot Count Vulnerability    ${predicate}
     END
-    ${twin}=    Vulnerability Count    v.severity = 'low'    ${NEG_TOKENS["reporter"]}
-    Should Be Equal As Integers    ${twin}    0
+    Reporter Cannot Count Vulnerability    v.severity = 'low'
     Within Budget    Security Manager Counts Vulnerability
 
 Victim Cannot See The Private Issue Through A NOT Filter On Explicit IDs
@@ -274,6 +272,15 @@ Vulnerability Count
     ${rows}=    Set Variable    ${resp["result"].get("rows", [])}
     ${count}=    Evaluate    sum(int(row.get("vuln_count", 0)) for row in $rows)
     RETURN    ${count}
+
+Reporter Cannot Count Vulnerability
+    [Arguments]    ${predicate}
+    ${headers}=    Create Dictionary    PRIVATE-TOKEN=${NEG_TOKENS["reporter"]}    Content-Type=application/json
+    ${body}=    Create Dictionary
+    ...    query=MATCH (p:Project {id: ${NEG_PUBLIC_PROJECT_ID}})<-[:IN_PROJECT]-(v:Vulnerability) WHERE ${predicate} RETURN p{.name}, count(v) AS vuln_count LIMIT 10
+    ${resp}=    Orbit Query POST    ${headers}    ${body}    expected_status=400
+    Should Contain    ${resp.json()["message"]}    Vulnerability requires access level 25
+    ...    Reporter was not refused for ${predicate}
 
 Security Manager Counts Vulnerability
     FOR    ${predicate}    IN    @{NEG_ORACLE_PREDICATES}

@@ -14,8 +14,8 @@ pub struct DeletionStatement {
 ///
 /// For each namespaced node table and the shared edge table, emits:
 /// ```sql
-/// INSERT INTO {prefixed_table} ({sort_key..., _deleted, _version})
-/// SELECT {sort_key..., true, now64(6)}
+/// INSERT INTO {prefixed_table} ({sort_key..., unchanging columns..., _deleted, _version})
+/// SELECT {sort_key..., unchanging columns..., true, now64(6)}
 /// FROM {prefixed_table}
 /// WHERE startsWith(traversal_path, {traversal_path:String})
 ///   AND _deleted = false
@@ -24,13 +24,29 @@ pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionS
     build_statements(ontology, None)
 }
 
-pub fn build_reconcile_statements(ontology: &ontology::Ontology) -> Vec<DeletionStatement> {
-    build_statements(ontology, Some(MOVED_ROW_PREDICATE))
+pub struct ReconcileStatement {
+    pub live_paths_sql: String,
+    pub tombstone: DeletionStatement,
 }
 
-const MOVED_ROW_PREDICATE: &str = "\
-AND length({current_paths:Array(String)}) > 0 \
-AND traversal_path NOT IN {current_paths:Array(String)}";
+pub fn build_reconcile_statements(ontology: &ontology::Ontology) -> Vec<ReconcileStatement> {
+    build_statements(ontology, Some(STALE_PATH_PREDICATE))
+        .into_iter()
+        .map(|tombstone| {
+            let prefixed = prefixed_table_name(&tombstone.table, *SCHEMA_VERSION);
+            ReconcileStatement {
+                live_paths_sql: format!(
+                    "SELECT DISTINCT {TRAVERSAL_PATH_COLUMN} FROM {prefixed} \
+                     WHERE startsWith({TRAVERSAL_PATH_COLUMN}, {{{TRAVERSAL_PATH_COLUMN}:String}}) \
+                     AND {DELETED_COLUMN} = false"
+                ),
+                tombstone,
+            }
+        })
+        .collect()
+}
+
+const STALE_PATH_PREDICATE: &str = "AND traversal_path IN {stale_paths:Array(String)}";
 
 #[expect(
     clippy::expect_used,
@@ -54,6 +70,7 @@ fn build_statements(
             &node.destination_table,
             &prefixed,
             sort_key,
+            &node.immutable_columns(),
             extra_predicate,
         ));
     }
@@ -67,6 +84,7 @@ fn build_statements(
             edge_table,
             &prefixed,
             &config.sort_key,
+            &[],
             extra_predicate,
         ));
     }
@@ -78,14 +96,20 @@ fn build_deletion_insert(
     unprefixed_table: &str,
     prefixed_table: &str,
     sort_key: &[String],
+    carried_columns: &[&str],
     extra_predicate: Option<&str>,
 ) -> DeletionStatement {
-    let sort_key_cols = sort_key.join(", ");
-    let insert_columns = format!("{sort_key_cols}, {DELETED_COLUMN}, {VERSION_COLUMN}");
+    let carried_cols = sort_key
+        .iter()
+        .map(String::as_str)
+        .chain(carried_columns.iter().copied())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let insert_columns = format!("{carried_cols}, {DELETED_COLUMN}, {VERSION_COLUMN}");
     let extra = extra_predicate.map(|p| format!(" {p}")).unwrap_or_default();
     let sql = format!(
         "INSERT INTO {prefixed_table} ({insert_columns}) \
-         SELECT {sort_key_cols}, true, now64(6) \
+         SELECT {carried_cols}, true, now64(6) \
          FROM {prefixed_table} \
          WHERE (startsWith({TRAVERSAL_PATH_COLUMN}, {{{TRAVERSAL_PATH_COLUMN}:String}}) \
          AND ({DELETED_COLUMN} = false){extra})"
@@ -223,6 +247,27 @@ mod tests {
     }
 
     #[test]
+    fn node_statements_carry_the_unchanging_columns() {
+        let ontology = load_ontology();
+        let statements = build_deletion_statements(&ontology);
+        let node = ontology
+            .nodes()
+            .find(|node| node.destination_table == "gl_file")
+            .expect("gl_file node");
+        let carried = node.immutable_columns();
+        assert!(carried.contains(&"path"), "{carried:?}");
+        let statement = find_statement(&statements, "gl_file");
+        for column in carried {
+            assert_eq!(
+                statement.sql.matches(&format!(", {column},")).count(),
+                2,
+                "{column} must appear in the INSERT list and the SELECT: {}",
+                statement.sql
+            );
+        }
+    }
+
+    #[test]
     fn edge_statements_select_sort_key_columns_for_all_tables() {
         let ontology = load_ontology();
         let statements = build_deletion_statements(&ontology);
@@ -254,39 +299,37 @@ mod tests {
 
         assert_eq!(deletion.len(), reconcile.len());
         for statement in &reconcile {
-            assert!(deletion.contains(&statement.table));
+            assert!(deletion.contains(&statement.tombstone.table));
         }
     }
 
     #[test]
-    fn reconcile_scopes_to_rows_absent_from_current_routes() {
+    fn reconcile_tombstones_only_the_stale_paths_it_reads() {
         let ontology = load_ontology();
         let statements = build_reconcile_statements(&ontology);
-        let statement = find_statement(&statements, "gl_project");
+        let statement = statements
+            .iter()
+            .find(|s| s.tombstone.table == "gl_project")
+            .expect("expected reconcile statement for gl_project");
+        let (live_paths_sql, sql) = (&statement.live_paths_sql, &statement.tombstone.sql);
 
         assert!(
-            statement.sql.contains("(_deleted = false)"),
-            "should keep the FINAL-safe non-deleted filter: {}",
-            statement.sql
+            live_paths_sql.starts_with("SELECT DISTINCT traversal_path FROM ")
+                && live_paths_sql.contains("startsWith(traversal_path, {traversal_path:String})")
+                && live_paths_sql.contains("_deleted = false"),
+            "should read the live paths under the root: {live_paths_sql}"
         );
         assert!(
-            statement
-                .sql
-                .contains("traversal_path NOT IN {current_paths:Array(String)}"),
-            "should exclude rows still present in the route set: {}",
-            statement.sql
+            sql.contains("(_deleted = false)"),
+            "should keep the FINAL-safe non-deleted filter: {sql}"
         );
         assert!(
-            statement
-                .sql
-                .contains("length({current_paths:Array(String)}) > 0"),
-            "should no-op when the root has no current routes yet: {}",
-            statement.sql
+            sql.contains("traversal_path IN {stale_paths:Array(String)}"),
+            "should tombstone only the stale paths: {sql}"
         );
         assert!(
-            !statement.sql.contains("traversal_paths"),
-            "should not embed a datalake route subquery in a graph-side query: {}",
-            statement.sql
+            !sql.contains("traversal_paths") && !live_paths_sql.contains("traversal_paths"),
+            "should not embed a datalake route subquery in a graph-side query: {sql}"
         );
     }
 }

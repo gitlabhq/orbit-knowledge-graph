@@ -32,6 +32,7 @@ struct PlannedNode {
     binding: Option<BindingSource>,
     ids: Option<IdSet>,
     bounded_read: Option<RelationId>,
+    read: Option<RelationId>,
 }
 
 impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
@@ -177,10 +178,6 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
         if let Some(ids) = self.reached_ids(alias) {
             node.predicates
                 .push(membership(Column::new(alias, DEFAULT_PRIMARY_KEY), ids));
-        } else if node.narrowed {
-            return Err(QueryError::Lowering(format!(
-                "node '{alias}' has no narrowing relation"
-            )));
         }
         self.attach_table(&node, |builder| {
             let binding = builder.binding(alias).ok_or_else(|| {
@@ -230,11 +227,15 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
 
     fn node_read(&mut self, node: &NodePlan) -> Result<RelationId> {
         let read = self.pattern.node_read(&mut self.graph, node)?;
-        if node.conditions().iter().any(Predicate::is_selective) {
-            self.nodes
-                .entry(node.alias.clone())
-                .or_default()
-                .bounded_read = Some(read);
+        let state = self.nodes.entry(node.alias.clone()).or_default();
+        state.read = Some(read);
+        if self
+            .pattern
+            .node_conditions(node)
+            .iter()
+            .any(Predicate::is_selective)
+        {
+            state.bounded_read = Some(read);
         }
         Ok(read)
     }
@@ -268,15 +269,18 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
     fn bind_relation_ids(&mut self, index: usize, relation: &EdgeRelation, source: RelationId) {
         let pattern = self.pattern;
         let (start, end) = relation.direction.edge_columns();
+        let bounded = [&relation.from_node, &relation.to_node]
+            .into_iter()
+            .any(|node| self.ids(node).is_some() || pattern.endpoint_is_selective(node));
         for (node, column) in [(&relation.from_node, start), (&relation.to_node, end)] {
             if self.ids(node).is_some() {
                 continue;
             }
             let other = relation.other_end(node);
-            let used_later = pattern.relations[index + 1..]
-                .iter()
-                .any(|next| next.endpoint_column(node).is_some())
-                || pattern.nodes[node].narrowed
+            let used_later = bounded
+                && pattern.relations[index + 1..]
+                    .iter()
+                    .any(|next| next.endpoint_column(node).is_some())
                 || pattern.model.supports_selective_latest_rows()
                     && pattern.nodes[node].joined
                     && (pattern.endpoint_is_selective(other) || self.ids(other).is_some());

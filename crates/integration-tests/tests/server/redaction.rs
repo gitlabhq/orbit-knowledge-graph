@@ -3339,7 +3339,7 @@ async fn neighbors_indirect_auth_definition_via_project(ctx: &TestContext) {
 ///
 /// Path: File 3000 → (DEFINES) → Definition 5000.
 /// Both authorize via Project 1000, but Project is not a node in the path.
-/// PathFinding has no static _orbit_* nodes (enforce.rs line 107), so all nodes
+/// PathFinding has no static _orbit_* nodes in the result contract, so all nodes
 /// are dynamic (from _orbit_path array) with their own entity IDs. find_owner_id
 /// can only find the owner if it's actually in the path. Since File and
 /// Definition store their own IDs (3000, 5000), not project_id, the owner

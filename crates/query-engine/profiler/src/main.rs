@@ -52,7 +52,8 @@ struct Cli {
     #[arg(long, env = "CLICKHOUSE_PASSWORD")]
     ch_password: Option<String>,
 
-    /// Traversal paths for security context (repeatable)
+    /// Authorized paths for the security context (repeatable), as `path` or `path@access_level`;
+    /// a bare path gets the default Reporter level
     #[arg(short = 't', long, required = true)]
     traversal_paths: Vec<String>,
 
@@ -390,6 +391,22 @@ fn query_entries(raw: &str, cli: &Cli) -> Result<Vec<(String, String)>> {
     Ok(entries)
 }
 
+fn authorized_path(entry: &str) -> Result<compiler::AuthorizedPath> {
+    let (path, level) = match entry.split_once('@') {
+        Some((path, level)) => (
+            path,
+            level
+                .parse::<u32>()
+                .with_context(|| format!("access level in {entry:?} is not a number"))?,
+        ),
+        None => (entry, compiler::DEFAULT_PATH_ACCESS_LEVEL),
+    };
+    Ok(compiler::AuthorizedPath::new(
+        orbit_utils::traversal_path::TraversalPath::new_unchecked(path),
+        level,
+    ))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -424,12 +441,17 @@ async fn main() -> Result<()> {
         }
     };
 
-    let org_id =
-        orbit_utils::traversal_path::TraversalPath::new_unchecked(cli.traversal_paths[0].as_str())
-            .organization_id()
-            .context("failed to parse org_id from first traversal path")?;
+    let authorized_paths = cli
+        .traversal_paths
+        .iter()
+        .map(|entry| authorized_path(entry))
+        .collect::<Result<Vec<_>>>()?;
+    let org_id = authorized_paths[0]
+        .path
+        .organization_id()
+        .context("failed to parse org_id from first traversal path")?;
 
-    let security_ctx = SecurityContext::new(org_id, cli.traversal_paths.clone())
+    let security_ctx = SecurityContext::new_with_roles(org_id, authorized_paths)
         .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;
 
     if let Some(show) = &cli.compile_only {
@@ -473,7 +495,11 @@ async fn main() -> Result<()> {
         match client.fetch_instance_health().await {
             Ok(health) => Some(serde_json::to_value(&health).unwrap_or_default()),
             Err(e) => {
-                orbit_log_fields::warn!(expanded(ERROR_MESSAGE) = %e, "failed to fetch instance health");
+                orbit_log_fields::warn!(
+                    safe(ERROR_TYPE) = <&str>::from(&e),
+                    expanded(ERROR_MESSAGE) = %e,
+                    "failed to fetch instance health"
+                );
                 None
             }
         }

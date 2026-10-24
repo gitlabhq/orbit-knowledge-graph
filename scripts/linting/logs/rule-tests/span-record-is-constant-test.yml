@@ -9,3 +9,4 @@ invalid:
   - 'tracing::Span::current().record("branch", branch.as_str());'
   - 'span.record(REASON, value);'
   - 'tracing::Span::current().record(orbit_log_fields::safe::REASON, value);'
+  - 'span.record(expanded::ERROR_MESSAGE, error.to_string());'

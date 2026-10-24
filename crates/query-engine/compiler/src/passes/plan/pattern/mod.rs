@@ -33,7 +33,7 @@ pub struct NodePlan {
     pub redaction_id_column: String,
     pub columns: Option<ColumnSelection>,
     pub emit_select: bool,
-    pub narrowed: bool,
+    pub null_as_epoch: HashSet<String>,
 }
 
 #[derive(Clone)]
@@ -85,9 +85,15 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             &node.alias,
             ReadOwner::Node(node.alias.clone()),
             sort_key(self.model, table)?,
-            node.conditions(),
+            self.node_conditions(node),
             self.model.supports_selective_latest_rows(),
         ))
+    }
+
+    fn node_conditions(&self, node: &NodePlan) -> Vec<Predicate> {
+        let mut conditions = node.conditions();
+        conditions.extend(self.shared_column_predicates(node));
+        conditions
     }
 
     fn entity_kind(&self, edge_alias: &str, node: &str, id_column: &str) -> Option<Predicate> {

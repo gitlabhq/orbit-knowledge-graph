@@ -21,5 +21,5 @@ physical:
   duckdb:
     planned:
       expect:
-        - (Filter e1.relationship_kind = 'CALLS', e1.project_id = 9, ... (_))
-        - (Filter e2.relationship_kind = 'CALLS', e2.project_id = 9, ... (_))
+        - (Filter e1._deleted = false, e1.project_id = 9 (Bind e1 (Filter ..., e1.relationship_kind = 'CALLS' (_))))
+        - (Filter e2._deleted = false, e2.project_id = 9 (Bind e2 (Filter ..., e2.relationship_kind = 'CALLS' (_))))

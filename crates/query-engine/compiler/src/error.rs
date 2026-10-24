@@ -36,9 +36,6 @@ pub enum QueryError {
     #[error("lowering error: {0}")]
     Lowering(String),
 
-    #[error("enforce error: {0}")]
-    Enforcement(String),
-
     #[error("codegen error: {0}")]
     Codegen(String),
 
@@ -82,7 +79,6 @@ impl QueryError {
             Self::LimitExceeded(_) => RejectionReason::Limit,
             Self::Security(_) => RejectionReason::Security,
             Self::Lowering(_) => RejectionReason::Lowering,
-            Self::Enforcement(_) => RejectionReason::Enforcement,
             Self::Codegen(_) => RejectionReason::Codegen,
             Self::PipelineInvariant(_) => RejectionReason::Pipeline,
         }
@@ -103,7 +99,6 @@ pub enum RejectionReason {
     Limit,
     Security,
     Lowering,
-    Enforcement,
     Codegen,
     Pipeline,
 }
@@ -132,7 +127,6 @@ mod tests {
             (QueryError::Authorization("bad".into()), true),
             (QueryError::Restrict("bad".into()), true),
             (QueryError::Lowering("bad".into()), false),
-            (QueryError::Enforcement("bad".into()), false),
             (QueryError::Codegen("bad".into()), false),
             (QueryError::Security("bad".into()), false),
             (QueryError::PipelineInvariant("bad".into()), false),

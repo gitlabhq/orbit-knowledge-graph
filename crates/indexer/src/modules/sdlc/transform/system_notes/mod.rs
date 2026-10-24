@@ -38,6 +38,7 @@ use crate::modules::sdlc::transform::{
     BlockTransform, TableBatch, TransformFactory, TransformRegistry,
 };
 use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
+use orbit_utils::clickhouse::strings_per_array_param;
 use orbit_utils::traversal_path::TraversalPath;
 
 /// Registry key for this transform; also the `etl.transform` value in
@@ -48,7 +49,7 @@ use emit::{EmittedEdge, NoteRow, NoteableKind, build_edges};
 use parse::{Action, Reference, extract as parse_body};
 use resolve::{
     EntityRow, MERGE_REQUESTS_SQL, PROJECT_PATHS_SQL, ROUTES_SQL, ResolutionPlan, ResolvedIndex,
-    ResolvedTarget, RouteRow, WORK_ITEMS_SQL, lookup_chunks, paths_per_routes_query,
+    ResolvedTarget, RouteRow, WORK_ITEMS_SQL, lookup_chunks,
 };
 
 /// The block outlives every stage that reads these, so owning the note bodies would
@@ -308,7 +309,7 @@ async fn resolve_default_projects(
         let batches = datalake
             .query_batches(&PROJECT_PATHS_SQL, params, None)
             .await
-            .map_err(|e| HandlerError::Processing(format!("project paths query failed: {e}")))?;
+            .map_err(|e| HandlerError::from(e).prefix_message_with("project paths query failed"))?;
 
         for batch in &batches {
             let source_id_col = col::<Int64Array>(batch, "source_id")?;
@@ -378,12 +379,12 @@ async fn query_routes(
 ) -> Result<Vec<RouteRow>, HandlerError> {
     let mut rows = Vec::new();
 
-    for paths in lookup_chunks(paths, paths_per_routes_query(paths)) {
+    for paths in lookup_chunks(paths, strings_per_array_param(paths)) {
         let params = json!({ "root_prefix": root_prefix.as_str(), "paths": paths });
         let batches = datalake
             .query_batches(&ROUTES_SQL, params, None)
             .await
-            .map_err(|e| HandlerError::Processing(format!("routes query failed: {e}")))?;
+            .map_err(|e| HandlerError::from(e).prefix_message_with("routes query failed"))?;
 
         for batch in &batches {
             let source_id_col = col::<Int64Array>(batch, "source_id")?;
@@ -423,7 +424,7 @@ async fn query_entities(
         let batches = datalake
             .query_batches(sql, params, None)
             .await
-            .map_err(|e| HandlerError::Processing(format!("entity query failed: {e}")))?;
+            .map_err(|e| HandlerError::from(e).prefix_message_with("entity query failed"))?;
 
         for batch in &batches {
             let id_col = col::<Int64Array>(batch, "id")?;

@@ -1,0 +1,70 @@
+name: "Go: a member named like a type in another file of the package"
+
+fixtures:
+  - path: go.mod
+    content: |
+      module example.com/m
+
+      go 1.22
+
+  - path: mgr/manager.go
+    content: |
+      package mgr
+
+      type Manager struct{}
+
+      func (m *Manager) Check() {}
+
+      type Store struct{}
+
+      func (s *Store) Save() {}
+
+  - path: mgr/runner.go
+    content: |
+      package mgr
+
+      type Runner struct {
+          Manager *Manager
+      }
+
+      type Backend interface {
+          Store() *Store
+      }
+
+      func helper() {
+          Check := 1
+          _ = Check
+      }
+
+  - path: mgr/manager_test.go
+    content: |
+      package mgr
+
+      func useLiteral() {
+          m := &Manager{}
+          m.Check()
+      }
+
+      func useVar() {
+          var s *Store
+          s.Save()
+      }
+
+tests:
+  - name: "A struct field named Manager leaves the Manager type to calls in other files"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'mgr.useLiteral'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "mgr.Check" } }
+
+  - name: "An interface method named Store leaves the Store type to calls in other files"
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.fqn = 'mgr.useVar'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "mgr.Save" } }

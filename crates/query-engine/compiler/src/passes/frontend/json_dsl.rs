@@ -8,12 +8,12 @@ use query_data_model::OrbitQueryModel;
 
 pub fn parse(json: &str, model: &impl OrbitQueryModel) -> Result<Input> {
     let value: serde_json::Value = serde_json::from_str(json)?;
-    validate::collect_schema_errors(validate::base_validator(), &value)?;
+    validate::collect_schema_errors(validate::base_validator(), validate::base_schema(), &value)?;
     let schema = derive_json_schema(model)?;
     let validator = jsonschema::validator_for(&schema).map_err(|error| {
         crate::error::QueryError::Validation(format!("invalid derived schema: {error}"))
     })?;
-    validate::collect_schema_errors(&validator, &value).map_err(|error| match error {
+    validate::collect_schema_errors(&validator, &schema, &value).map_err(|error| match error {
         crate::error::QueryError::Validation(message) => {
             crate::error::QueryError::AllowlistRejected(message)
         }

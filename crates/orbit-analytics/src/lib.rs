@@ -1,13 +1,15 @@
 mod context;
+mod gitlab_instance;
 mod tracker;
 
 pub use context::{
-    ORBIT_CLI_COMMAND_SCHEMA, ORBIT_CLI_SETUP_SCHEMA, ORBIT_CODE_INDEXING_SCHEMA,
+    ORBIT_CLI_COMMAND_SCHEMA, ORBIT_CLI_SCHEMA, ORBIT_CLI_SETUP_SCHEMA, ORBIT_CODE_INDEXING_SCHEMA,
     ORBIT_COMMON_SCHEMA, ORBIT_QUERY_SCHEMA, ORBIT_SDLC_INDEXING_SCHEMA, OrbitCliCommandContext,
-    OrbitCliSetupContext, OrbitCodeIndexingContext, OrbitCommonContext, OrbitQueryContext,
-    OrbitSdlcIndexingContext, orbit_cli_command, orbit_cli_setup, orbit_code_indexing,
-    orbit_common, orbit_query, orbit_sdlc_indexing, validation,
+    OrbitCliContext, OrbitCliSetupContext, OrbitCodeIndexingContext, OrbitCommonContext,
+    OrbitQueryContext, OrbitSdlcIndexingContext, orbit_cli, orbit_cli_command, orbit_cli_setup,
+    orbit_code_indexing, orbit_common, orbit_query, orbit_sdlc_indexing, parse_opt, validation,
 };
+pub use gitlab_instance::{ConsentGate, GitlabInstanceWatch};
 pub use tracker::{AnalyticsTracker, SnowplowAnalyticsTracker};
 
 #[cfg(any(test, feature = "testkit"))]

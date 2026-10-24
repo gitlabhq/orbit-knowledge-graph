@@ -779,6 +779,25 @@ fn scoped_traversal_injects_tight_prefix() {
 }
 
 #[test]
+fn scoped_authorization_join_injects_tight_prefix() {
+    let orbit_query = "MATCH (c:Definition)-[:CALLS]->(d:Definition) WHERE d.project_id = 5 AND d.name = 'compile' RETURN c.fqn, d.fqn LIMIT 100";
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "c", "entity": "Definition", "columns": ["fqn"]},
+            {"id": "d", "entity": "Definition", "columns": ["fqn"], "filters": {"project_id": {"eq": 5}, "name": {"eq": "compile"}}}
+        ],
+        "relationships": [{"type": "CALLS", "from": "c", "to": "d"}],
+        "limit": 100
+    }"#;
+    let sql = render_scoped(json, orbit_query);
+    assert!(
+        sql.contains("startsWith(c.traversal_path, (SELECT") && sql.contains("(_scope.id = 5)"),
+        "the caller's authorization scan must carry the project prefix: {sql}"
+    );
+}
+
+#[test]
 fn scoped_aggregation_injects_tight_prefix() {
     let orbit_query = "MATCH (wi:WorkItem)-[:IN_PROJECT]->(p:Project) WHERE p.id = 1 RETURN p, count(wi) AS c LIMIT 100";
     let json = r#"{
@@ -827,7 +846,7 @@ fn scoped_count_condition_excludes_the_scope_lookup() {
 }
 
 #[test]
-fn cross_namespace_related_to_edge_stays_unscoped() {
+fn cross_namespace_related_to_edge_scans_only_the_source_namespace() {
     let orbit_query = "MATCH (p:Project)<-[:IN_PROJECT]-(wi:WorkItem)-[:RELATED_TO]->(rel:WorkItem) WHERE p.id = 1 RETURN p, wi.id, rel.id, rel.title LIMIT 100";
     let json = r#"{
         "query_type": "traversal",
@@ -848,7 +867,11 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
 
     let related_scan = sql.split("FROM gl_edge AS _orbit_edge_1").nth(1).unwrap();
     let related_scope = related_scan.split(" ON ").next().unwrap();
-    assert!(!related_scope.contains(SCOPED_LOOKUP), "{sql}");
+    assert!(
+        related_scope.contains(SCOPED_LOOKUP)
+            && !sql.contains("startsWith(rel.traversal_path, (SELECT"),
+        "the RELATED_TO rows carry the source's path, the target may live anywhere: {sql}"
+    );
 
     let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
         panic!("expected static hydration");

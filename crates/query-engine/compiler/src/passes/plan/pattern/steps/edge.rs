@@ -36,13 +36,16 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             select_edge_layouts(pattern.model, &mut physical.edge_tables, &narrowed);
         }
         let mut predicates = self.edge_predicates(&physical);
-        for (node, ids) in endpoint_ids {
+        for (node, ids) in &endpoint_ids {
             if let Some(column) = relation.endpoint_column(node) {
-                predicates.push(membership(Column::new(alias, column), ids));
+                predicates.push(membership(Column::new(alias, column), ids.clone()));
             }
         }
         for node in endpoints {
-            if pattern.nodes[node].joined || !pattern.has_uncovered_filter(&pattern.nodes[node]) {
+            if pattern.nodes[node].joined
+                || !pattern.has_uncovered_filter(&pattern.nodes[node])
+                || endpoint_ids.iter().any(|(bound, _)| *bound == node)
+            {
                 continue;
             }
             let ids = self.node_ids(node)?;
@@ -55,12 +58,7 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
             self.edge_source(&physical, predicates)?
         };
         self.bind_relation_ids(index, relation, source);
-        if relation.max_hops == 1
-            && (pattern.relations.len() > 1
-                || endpoints
-                    .into_iter()
-                    .any(|node| pattern.nodes[node].narrowed))
-        {
+        if relation.max_hops == 1 && pattern.relations.len() > 1 {
             source = self.graph.bind(source, alias);
         }
         self.join_edge(relation, source)?;
@@ -129,7 +127,6 @@ impl<M: OrbitQueryModel + ?Sized> RelationBuilder<'_, M> {
                 .iter()
                 .filter(|predicate| predicate.filters_sort_key(key, true))
                 .cloned()
-                .map(|predicate| predicate.guard_tombstones(key, alias))
                 .collect();
             let rows = self.graph.filter(rows, identity);
             return Ok(self.graph.latest(rows, alias, key.to_vec(), predicates));

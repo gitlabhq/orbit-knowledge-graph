@@ -164,3 +164,22 @@ fn empty_span_fields_can_be_recorded_later() {
 
     assert!(logs.contains("work{gl_project_id=7}"), "{logs}");
 }
+
+#[test]
+fn error_type_takes_a_static_name() {
+    fn kind(timed_out: bool) -> &'static str {
+        if timed_out { "timed_out" } else { "network" }
+    }
+    let logs = capture(|| {
+        warn!(
+            safe(ERROR_TYPE) = kind(true),
+            expanded(ERROR_MESSAGE) = %"connect failed",
+            "query failed"
+        );
+        warn!(safe(ERROR_TYPE) = "panic", "task panicked");
+    });
+
+    assert!(logs.contains("error_type=\"timed_out\""), "{logs}");
+    assert!(logs.contains("error_type=\"panic\""), "{logs}");
+    assert!(logs.contains("error_message=connect failed"), "{logs}");
+}

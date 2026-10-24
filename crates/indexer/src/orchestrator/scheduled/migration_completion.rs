@@ -131,7 +131,11 @@ impl MigrationCompletionChecker {
     async fn run_inner(&self) -> Result<(), TaskError> {
         self.check_completion().await?;
         if let Err(error) = self.catalog.sync_active_version(&self.graph).await {
-            warn!(expanded(ERROR_MESSAGE) = %error, "active version mirror skipped this tick");
+            warn!(
+                safe(ERROR_TYPE) = <&str>::from(&error),
+                expanded(ERROR_MESSAGE) = %error,
+                "active version mirror skipped this tick"
+            );
         }
         self.reconcile_dead_versions().await?;
         Ok(())
@@ -233,6 +237,7 @@ impl MigrationCompletionChecker {
             {
                 warn!(
                     safe(SCHEMA_VERSION) = version,
+                    safe(ERROR_TYPE) = <&str>::from(&error),
                     expanded(ERROR_MESSAGE) = %error,
                     "failed to drop refreshable views for retired schema"
                 );
@@ -268,6 +273,7 @@ impl MigrationCompletionChecker {
             Err(error) => {
                 warn!(
                     safe(MIGRATING_SCHEMA_VERSION) = version,
+                    safe(ERROR_TYPE) = "code_coverage",
                     expanded(ERROR_MESSAGE) = %error,
                     "code coverage telemetry unavailable this tick"
                 );
@@ -443,6 +449,7 @@ impl MigrationCompletionChecker {
                 let e = e.to_string();
                 warn!(
                     safe(SCHEMA_VERSION) = version,
+                    safe(ERROR_TYPE) = "nats_cleanup",
                     expanded(ERROR_MESSAGE) = %e,
                     "GC: NATS cleanup failed, skipping mark_version_dropped"
                 );
@@ -454,6 +461,7 @@ impl MigrationCompletionChecker {
             {
                 warn!(
                     safe(SCHEMA_VERSION) = version,
+                    safe(ERROR_TYPE) = <&str>::from(&e),
                     expanded(ERROR_MESSAGE) = %e,
                     "GC: failed to mark dropped"
                 );

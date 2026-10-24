@@ -34,6 +34,21 @@ pub fn validation<E: std::fmt::Display>(
     }
 }
 
+pub fn parse_opt<T>(
+    value: &Option<String>,
+    field: &'static str,
+) -> Result<Option<T>, labkit_events::Error>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    value
+        .as_deref()
+        .map(str::parse::<T>)
+        .transpose()
+        .map_err(validation(field))
+}
+
 #[derive(Debug, Clone)]
 pub struct OrbitCommonContext {
     pub data: orbit_common::OrbitCommon,
@@ -121,6 +136,27 @@ impl SnowplowContext for OrbitCodeIndexingContext {
 }
 
 #[derive(Debug, Clone)]
+pub struct OrbitCliContext {
+    pub data: orbit_cli::OrbitCli,
+}
+
+impl OrbitCliContext {
+    pub fn new(data: orbit_cli::OrbitCli) -> Self {
+        Self { data }
+    }
+}
+
+impl SnowplowContext for OrbitCliContext {
+    fn schema(&self) -> &str {
+        orbit_cli::SCHEMA_URI
+    }
+
+    fn data(&self) -> serde_json::Value {
+        serde_json::to_value(&self.data).expect("generated OrbitCli is always serializable")
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct OrbitCliCommandContext {
     pub data: orbit_cli_command::OrbitCliCommand,
 }
@@ -168,6 +204,7 @@ pub const ORBIT_COMMON_SCHEMA: &str = orbit_common::SCHEMA_URI;
 pub const ORBIT_QUERY_SCHEMA: &str = orbit_query::SCHEMA_URI;
 pub const ORBIT_SDLC_INDEXING_SCHEMA: &str = orbit_sdlc_indexing::SCHEMA_URI;
 pub const ORBIT_CODE_INDEXING_SCHEMA: &str = orbit_code_indexing::SCHEMA_URI;
+pub const ORBIT_CLI_SCHEMA: &str = orbit_cli::SCHEMA_URI;
 pub const ORBIT_CLI_COMMAND_SCHEMA: &str = orbit_cli_command::SCHEMA_URI;
 pub const ORBIT_CLI_SETUP_SCHEMA: &str = orbit_cli_setup::SCHEMA_URI;
 
@@ -182,6 +219,7 @@ pub fn load_schema_json(name: &str) -> serde_json::Value {
         "orbit_query" => orbit_query::SCHEMA_JSON,
         "orbit_sdlc_indexing" => orbit_sdlc_indexing::SCHEMA_JSON,
         "orbit_code_indexing" => orbit_code_indexing::SCHEMA_JSON,
+        "orbit_cli" => orbit_cli::SCHEMA_JSON,
         "orbit_cli_command" => orbit_cli_command::SCHEMA_JSON,
         "orbit_cli_setup" => orbit_cli_setup::SCHEMA_JSON,
         other => panic!("unknown iglu schema {other:?}"),
