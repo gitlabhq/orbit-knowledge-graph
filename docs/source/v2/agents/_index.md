@@ -21,6 +21,7 @@ and vulnerabilities, and the local graph.
 
 GitLab Duo Agent Platform has GitLab Orbit built in. For more information, see [GitLab Orbit in GitLab Duo](duo.md).
 For agents that cannot run shell commands or that prefer the Model Context Protocol (MCP), use the [GitLab Orbit MCP endpoint](mcp.md).
+If your agent already connects to the GitLab MCP server, [add the GitLab Orbit tools](mcp.md#gitlab-orbit-tools-in-the-gitlab-mcp-server) to that connection.
 
 ## Set up your agent
 

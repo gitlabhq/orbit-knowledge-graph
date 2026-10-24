@@ -23,7 +23,8 @@ In the GitLab Orbit dashboard, you check the state of your graph and run queries
 
 To open the dashboard, in the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
 
-Administrators also see **Settings** in the page header.
+Administrators also see **Settings** in the page header. It opens the instance settings for GitLab Orbit,
+such as automatic indexing. For more information, see [administer GitLab Orbit](https://docs.gitlab.com/integration/orbit/).
 
 The dashboard has these tabs:
 

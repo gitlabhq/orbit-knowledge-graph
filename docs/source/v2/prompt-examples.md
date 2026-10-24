@@ -15,11 +15,112 @@ title: GitLab Orbit prompt examples
 
 Send these prompts to GitLab Duo Chat, or to an agent that uses the [GitLab Orbit CLI](cli.md)
 or the [GitLab Orbit Model Context Protocol (MCP) endpoint](agents/mcp.md).
-Start the first prompt of a conversation with `Using GitLab Orbit` to make sure the agent uses GitLab Orbit, and replace the values in `<angle brackets>`.
+Each example is one prompt that can have several steps.
+Start the prompt with `Using GitLab Orbit` to make sure the agent uses GitLab Orbit, and replace the values in `<angle brackets>`.
 
-Each example also shows the [queries](queries/query-language.md) that the agent runs, on the `gitlab-org` group and the `gitlab-org/gitlab` project on GitLab.com.
+Each example also shows the [queries](queries/query-language.md) that the agent runs, on projects in the `gitlab-org` group on GitLab.com.
 To check an answer, replace the group and project paths, IDs, branch and environment names, and dates with your own, then run the query with `glab orbit query "<query>"`.
 To find the IDs, see [bounded nodes](queries/query-language.md#bounded-nodes).
+
+## Review a merge request with proof
+
+An agent that reviews only the diff guesses what the change affects.
+With GitLab Orbit, the agent gets proof from the graph: the code that calls the changed definitions,
+the projects that import the changed package, and the issue, pipeline, and review history of the change.
+Each finding in the review points to the query result that shows it.
+
+```plaintext
+Using GitLab Orbit, review merge request <!769> in <my-group>/<my-project>.
+Back every finding with a query result, not a guess from the diff:
+1. Which definitions does it change, and which callers of those
+   definitions are outside the merge request? Give the file and line.
+2. Which projects in <my-group> import the changed package, and how many
+   files in each?
+3. Which other open merge requests change the same files?
+4. Which issue does it close, and did its head pipeline pass?
+5. Who approved earlier changes to these files?
+Then list the risks, each with the result that shows it.
+```
+
+For merge request `!769` in `gitlab-org/labkit`, which changes how the `v2/log` package reads its settings,
+the agent runs one query for each step.
+First, it gets the files that the merge request changes, with their diffs:
+
+```gql orbit-query
+MATCH (mr:MergeRequest {iid: 769, project_id: 9438583})
+  -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
+  -[:HAS_FILE]->(f:MergeRequestDiffFile)
+RETURN f.old_path, f.new_path, f.diff
+LIMIT 100
+```
+
+A query cannot join two separate patterns, so the agent runs the next query on the files that the first one returns.
+It compares the lines of each definition with the diff to find the definitions that changed:
+
+```gql orbit-query
+MATCH (caller:Definition)
+  -[:CALLS]->(d:Definition)
+  <-[:DEFINES]-(f:File {project_id: 9438583, branch: 'master'})
+WHERE f.path IN ['v2/log/log.go', 'v2/log/doc.go']
+RETURN d.fqn, d.start_line, d.end_line, caller.fqn, caller.file_path, caller.start_line
+LIMIT 100
+```
+
+Calls are resolved inside one project, so imports show the other projects that depend on the code:
+
+```gql orbit-query
+MATCH (s:ImportedSymbol {import_path: 'gitlab.com/gitlab-org/labkit/v2/log'})
+  <-[:IMPORTS]-(f:File)
+  -[:ON_BRANCH]->(b:Branch)
+  <-[:CONTAINS]-(p:Project)
+WHERE p.full_path STARTS WITH 'gitlab-org/' AND b.is_default = true
+RETURN p.full_path, count(f) AS files
+ORDER BY files DESC
+LIMIT 100
+```
+
+The other open merge requests on the same files:
+
+```gql orbit-query
+MATCH (mr:MergeRequest)
+  -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
+  -[:HAS_FILE]->(f:MergeRequestDiffFile {project_id: 9438583})
+WHERE mr.state = 'opened'
+  AND f.old_path IN ['v2/log/log.go', 'v2/log/doc.go']
+RETURN mr.iid, mr.title, f.old_path
+LIMIT 50
+```
+
+The issue that the merge request closes, and its head pipeline:
+
+```gql orbit-query
+MATCH (mr:MergeRequest {iid: 769, project_id: 9438583})
+  -[:CLOSES]->(w:WorkItem)
+MATCH (mr)-[:HAS_HEAD_PIPELINE]->(pl:Pipeline)
+RETURN w.iid, w.title, pl.status
+LIMIT 10
+```
+
+The people who approved earlier changes to the file, who are likely reviewers:
+
+```gql orbit-query
+MATCH (u:User)
+  -[:APPROVED]->(mr:MergeRequest)
+  -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
+  -[:HAS_FILE]->(f:MergeRequestDiffFile {project_id: 9438583, old_path: 'v2/log/log.go'})
+WHERE mr.state = 'merged'
+RETURN u.username, count(mr) AS approvals
+ORDER BY approvals DESC
+LIMIT 10
+```
+
+Inside `gitlab-org/labkit`, most callers of the changed code are tests.
+But 59 projects in `gitlab-org` import `v2/log` in 1,050 files, so the review reports a behavior change
+that reaches each of them.
+
+- **With GitLab Orbit:** one prompt and six queries, and each finding cites the rows that show it.
+- **Without GitLab Orbit:** no REST API call returns callers, or the projects that import a package.
+  An agent that reviews the merge request sees only the diff, and a group code search matches text, not parsed imports.
 
 ## Fix a vulnerability across every affected project
 
@@ -30,13 +131,15 @@ With the Reporter role, the queries return no rows.
 For more information, see [roles](security.md#roles).
 
 ```plaintext
-Using GitLab Orbit, find every project in <my-group> affected by
-<CVE-2025-58183>. Create an issue in each project, and start an agent
-session to fix it.
+Using GitLab Orbit, for <CVE-2025-58183> in <my-group>:
+1. Which projects have open vulnerabilities for the CVE?
+2. Which fixes for it reached <production>?
+3. For each project with no fix in production, create an issue and start
+   an agent session to fix it.
 ```
 
 GitLab Orbit is read-only, so your agent creates the issues and starts the sessions with `glab` or GitLab Duo.
-GitLab Orbit finds the projects and tracks the deployments.
+GitLab Orbit finds the projects and tracks the deployments, with one query for each of the first two steps:
 
 ```gql orbit-query
 MATCH (v:Vulnerability)-[:HAS_FINDING]->(o:VulnerabilityOccurrence)
@@ -47,13 +150,6 @@ WHERE p.full_path STARTS WITH 'gitlab-org/'
 RETURN p.full_path, count(v) AS open_vulnerabilities
 ORDER BY open_vulnerabilities DESC
 LIMIT 50
-```
-
-To follow the fixes, ask a follow-up question:
-
-```plaintext
-Which of those fixes reached <production>, and which projects need manual
-work?
 ```
 
 ```gql orbit-query
@@ -68,7 +164,7 @@ ORDER BY vulns DESC
 LIMIT 50
 ```
 
-- **With GitLab Orbit:** one query for each question.
+- **With GitLab Orbit:** one prompt and two queries.
 - **Without GitLab Orbit:** at least one REST API call for each project in a group with about 9,200 projects,
   to list its vulnerabilities and find the CVE.
   No REST API call goes from a vulnerability to the merge request that fixes it.
@@ -79,9 +175,15 @@ Find the changes to a failing component that reached production, and the compone
 
 ```plaintext
 Using GitLab Orbit, <app/models/ci/> in <my-group>/<my-project> throws errors
-in <production>. Which merge requests that changed it reached production in
-the last <seven days>, and when was each deployed?
+in <production>:
+1. Which merge requests that changed it reached production in the last
+   <seven days>, and when was each deployed?
+2. Which components does <app/models/ci/build.rb> call, and which of them
+   changed in production deployments in the same window?
+Then rank the changes by how likely they are to cause the errors.
 ```
+
+For the first step, the agent runs one query:
 
 ```gql orbit-query
 MATCH (f:MergeRequestDiffFile)
@@ -96,12 +198,7 @@ ORDER BY d.created_at DESC
 LIMIT 50
 ```
 
-To find the related components that reached production in the same window, ask a follow-up question:
-
-```plaintext
-Which components does <app/models/ci/build.rb> call, and which of them
-changed in production deployments in the same window?
-```
+For the second step, it finds the code that the file calls:
 
 ```gql orbit-query
 MATCH (f:File {path: 'app/models/ci/build.rb', project_id: 278964, branch: 'master'})
@@ -114,7 +211,7 @@ LIMIT 20
 
 The agent then runs the first query on those file paths.
 
-- **With GitLab Orbit:** one query for each question.
+- **With GitLab Orbit:** one prompt and one query for each step.
 - **Without GitLab Orbit:** about 1,800 REST API calls for a project that deploys about 1,800 merge requests
   to production in a week, one for the changes of each deployed merge request.
   No REST API call returns the code that a file calls.
@@ -124,9 +221,17 @@ The agent then runs the first query on those file paths.
 Find what depends on a class or a library before you change it.
 
 ```plaintext
-Using GitLab Orbit, in <my-group>/<my-project>, which classes inherit from
-<BasePolicy>, directly or through other classes?
+Using GitLab Orbit, before I change <BasePolicy> and <Ability::allowed?> in
+<my-group>/<my-project>:
+1. Which classes inherit from <BasePolicy>, directly or through other
+   classes?
+2. Which definitions call <Ability::allowed?>?
+3. Which open merge requests touch <app/policies/base_policy.rb> right now?
+4. If the code is in a library, which projects in <my-group> import
+   <gitlab.com/my-group/my-sdk> on their default branch?
 ```
+
+For the first step, the agent finds the subclasses:
 
 ```gql orbit-query
 MATCH (child:Definition)
@@ -138,11 +243,7 @@ LIMIT 500
 ```
 
 On `gitlab-org/gitlab`, 366 classes inherit from `BasePolicy`.
-To see more of what the change affects, ask follow-up questions:
-
-```plaintext
-Which definitions call <Ability::allowed?>, and how many callers does it have?
-```
+Then it finds the callers:
 
 ```gql orbit-query
 MATCH (caller:Definition)
@@ -153,9 +254,7 @@ ORDER BY caller.file_path
 LIMIT 1000
 ```
 
-```plaintext
-Which open merge requests touch <app/policies/base_policy.rb> right now?
-```
+The open merge requests on the policy files:
 
 ```gql orbit-query
 MATCH (mr:MergeRequest)
@@ -172,10 +271,7 @@ LIMIT 100
 The query filters on `old_path`, because `new_path` is empty when a merge request changes a file
 but does not rename the file.
 
-```plaintext
-Which projects in <my-group> import <gitlab.com/my-group/my-sdk> on their
-default branch, and how many import sites does each have?
-```
+The projects that import a library:
 
 ```gql orbit-query
 MATCH (s:ImportedSymbol)
@@ -190,53 +286,11 @@ ORDER BY import_sites DESC
 LIMIT 30
 ```
 
-- **With GitLab Orbit:** one query for each question.
+- **With GitLab Orbit:** one prompt and one query for each step.
 - **Without GitLab Orbit:** no REST API call returns subclasses or callers.
   You check out the repository and run a call-graph tool for the language.
   For the projects that import a library, a group code search matches text, not parsed imports,
   so you clone each project that the search finds.
-
-## Review a merge request with proof
-
-Review a merge request against everything that it affects: the callers of the code that it changes,
-other open merge requests on the same files, the issues that it closes, and the projects that import its code.
-
-```plaintext
-Using GitLab Orbit, review merge request <!264595> in <my-group>/<my-project>:
-- Which definitions does it change, and which callers of those definitions
-  are outside the merge request? Show the file and line of each caller.
-- Which other open merge requests change the same files?
-- Which issues does it close, and which projects in <my-group> import the
-  code that it changes?
-```
-
-```gql orbit-query
-MATCH (mr:MergeRequest {iid: 264595, project_id: 278964})
-  -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
-  -[:HAS_FILE]->(f:MergeRequestDiffFile)
-RETURN f.old_path, f.new_path, f.diff
-LIMIT 100
-```
-
-A query cannot join two separate patterns, so the agent runs a second query on the files that the first one returns:
-
-```gql orbit-query
-MATCH (caller:Definition)
-  -[:CALLS]->(d:Definition)
-  <-[:DEFINES]-(f:File {project_id: 278964, branch: 'master'})
-WHERE f.path IN ['app/services/discussions/resolve_service.rb',
-  'app/services/discussions/unresolve_service.rb', 'app/services/notes/resolve_service.rb']
-RETURN d.fqn, d.start_line, d.end_line, caller.fqn, caller.file_path, caller.start_line
-LIMIT 100
-```
-
-For the other open merge requests and the importing projects, the agent runs the queries from
-[Change shared code safely](#change-shared-code-safely) on the same files.
-Calls are resolved inside one project, so imports show the other projects that depend on the code.
-
-- **With GitLab Orbit:** two queries for the callers, and one query for each other check.
-- **Without GitLab Orbit:** no REST API call returns callers.
-  A reviewer searches a local checkout, and an agent that reviews the merge request sees only the diff.
 
 ## Find out how agent-written code performs
 
@@ -310,6 +364,8 @@ job <docs-lint markdown>. Is it my change or a flaky job?
 - How often did the job pass on <master> in the last <14 days>, and how
   did it fail?
 - Which other open merge requests fail the job now?
+- Which projects in <my-group> failed the job in the last <seven days>,
+  and how many times each?
 ```
 
 ```gql orbit-query
@@ -320,12 +376,7 @@ ORDER BY jobs DESC
 LIMIT 10
 ```
 
-To find out if the job fails in other projects too, ask a follow-up question:
-
-```plaintext
-Which projects in <my-group> failed the job <docs-lint markdown> in the
-last <seven days>, and how many times each?
-```
+To find out if the job fails in other projects too:
 
 ```gql orbit-query
 MATCH (j:Job {status: 'failed', name: 'docs-lint markdown'})
@@ -337,7 +388,7 @@ ORDER BY failures DESC
 LIMIT 20
 ```
 
-- **With GitLab Orbit:** one query for each question.
+- **With GitLab Orbit:** one prompt and one query for each question.
 - **Without GitLab Orbit:** at least 890 REST API calls for a project that ran the job about 890 times
   on the default branch in 14 days, one page of jobs for each pipeline,
   because the jobs API does not filter by job name.

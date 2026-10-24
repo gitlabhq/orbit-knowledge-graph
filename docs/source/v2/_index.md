@@ -46,10 +46,10 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 ## Questions GitLab Orbit can answer
 
+- [Review a merge request with proof](prompt-examples.md#review-a-merge-request-with-proof)<br>Which code and projects does this merge request affect? Each finding comes with the graph result that shows it.
 - [Fix a vulnerability across every affected project](prompt-examples.md#fix-a-vulnerability-across-every-affected-project)<br>Which projects in my group does this CVE affect, and which fixes reached production?
 - [Respond to a production incident](prompt-examples.md#respond-to-a-production-incident)<br>Which changes to the failing component, and to the code that it calls, reached production this week?
 - [Change shared code safely](prompt-examples.md#change-shared-code-safely)<br>Which classes inherit from this base class, and what calls the method that I change?
-- [Review a merge request with proof](prompt-examples.md#review-a-merge-request-with-proof)<br>Which callers of the code that this merge request changes are outside the merge request?
 {.product-cards .product-cards-2}
 
 For more examples, see [prompt examples](prompt-examples.md).
@@ -77,6 +77,7 @@ Choose how your agent connects:
 - In GitLab Duo Agent Platform, GitLab Orbit is built in.
   For more information, see [GitLab Orbit in GitLab Duo](agents/duo.md).
 - For agents that support the Model Context Protocol (MCP) but cannot run shell commands, use the [GitLab Orbit MCP endpoint](agents/mcp.md#gitlab-orbit-mcp-endpoint).
+  If your agent already connects to the GitLab MCP server, [add the GitLab Orbit tools](agents/mcp.md#gitlab-orbit-tools-in-the-gitlab-mcp-server) to that connection.
 - For scripts, scheduled reports, and custom tools, use the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
 
 ## Code on your machine
