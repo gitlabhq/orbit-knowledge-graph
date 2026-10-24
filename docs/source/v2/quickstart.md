@@ -24,7 +24,7 @@ about your GitLab data.
 - GitLab Duo, or an agent that [setup supports](agents/_index.md#setup-options), such as Claude Code, Codex, or OpenCode.
   For other agents, see the [GitLab Orbit MCP endpoint](agents/mcp.md).
 
-## Step 1: Turn on GitLab Orbit for your group
+## Step 1: Turn on GitLab Orbit
 
 A user with the Owner role for the top-level group turns on GitLab Orbit in the [GitLab Orbit dashboard](dashboard.md).
 If GitLab Orbit is already on for your group, go to [step 2](#step-2-connect-your-agent).

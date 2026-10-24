@@ -24,7 +24,7 @@ When you turn on GitLab Orbit, existing access does not change.
 |--------|-------|
 | Query groups, projects, users, merge requests, CI/CD, and work items | Reporter, Security Manager, Developer, Maintainer, or Owner |
 | Query security data | Security Manager, Developer, Maintainer, or Owner |
-| [Turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) | The Owner role for the top-level group. On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on GitLab Orbit. |
+| [Turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit) | The Owner role for the top-level group. On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on GitLab Orbit. |
 
 Security data is vulnerabilities, security findings, security scans, scanners,
 and Common Vulnerabilities and Exposures (CVE) and Common Weakness Enumeration (CWE) identifiers.
@@ -93,7 +93,7 @@ Project membership, and membership of groups where GitLab Orbit is off, do not g
 Prerequisites:
 
 - The Owner role for the group.
-- GitLab Orbit is [turned on for the group](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
+- GitLab Orbit is [turned on for the group](quickstart.md#step-1-turn-on-gitlab-orbit).
 
 To set up a service account for GitLab Orbit:
 

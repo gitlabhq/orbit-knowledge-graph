@@ -32,7 +32,7 @@ On GitLab Self-Managed and GitLab Dedicated, replace `gitlab.com` with the hostn
 
 Prerequisites:
 
-- GitLab Orbit is [turned on](../quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) for a group where you have the Reporter, Security Manager, Developer, Maintainer, or Owner role.
+- GitLab Orbit is [turned on](../quickstart.md#step-1-turn-on-gitlab-orbit) for a group where you have the Reporter, Security Manager, Developer, Maintainer, or Owner role.
 - Your client signs in with OAuth.
   A client that connects over native HTTP must request the `mcp_orbit` scope.
   You can also [use a personal access token](#connect-with-a-personal-access-token).

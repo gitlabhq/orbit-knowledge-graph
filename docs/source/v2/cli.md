@@ -125,7 +125,7 @@ Sign in once with `glab`, then run queries and check indexing progress from the 
 
 Prerequisites:
 
-- GitLab Orbit is [turned on for your group](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
+- GitLab Orbit is [turned on for your group](quickstart.md#step-1-turn-on-gitlab-orbit).
 - The Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
 
 To sign in:

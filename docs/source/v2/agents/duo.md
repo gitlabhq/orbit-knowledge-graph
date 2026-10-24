@@ -38,7 +38,7 @@ GitLab Orbit is on in GitLab Duo by default for these users:
 
 Prerequisites:
 
-- GitLab Orbit is [turned on for your group](../quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group), and you have the Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
+- GitLab Orbit is [turned on for your group](../quickstart.md#step-1-turn-on-gitlab-orbit), and you have the Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
 - You have access to [GitLab Duo Agent Platform](https://docs.gitlab.com/user/duo_agent_platform/).
 
 <!-- vale orbit.StandaloneProductName = NO -->

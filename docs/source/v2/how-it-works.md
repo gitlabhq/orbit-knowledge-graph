@@ -45,7 +45,7 @@ For the full list of node types and relationships, see [indexed data](schema.md)
 
 ## Indexing
 
-After you [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) for a group,
+After you [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit) for a group,
 the indexer builds the graph from two sources:
 
 - SDLC data. GitLab streams changes through a change data capture (CDC) pipeline to the
