@@ -380,7 +380,7 @@ For debugging: `--no-fail-fast --retries 0`.
 
 - Title: `feat(code-graph): add <Lang> language support`
 - Body: `Closes #NNN`
-- CI checks: see [Testing](../design-documents/testing.md#ci-checks).
+- CI checks: see [Testing](../architecture/testing.md#gates).
 
 ### Step 8 — Update the user docs
 

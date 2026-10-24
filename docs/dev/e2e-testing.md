@@ -1,7 +1,7 @@
 # E2E Testing Harness
 
 The e2e harness deploys the full GitLab stack and every Orbit component on a shared GKE cluster. Then it runs Robot Framework suites against the stack.
-For the purpose and scope of e2e tests, see [Testing strategy](../design-documents/testing.md#end-to-end-tests).
+For the purpose and scope of e2e tests, see [Testing](../architecture/testing.md#layers).
 
 ## Architecture
 
@@ -127,7 +127,7 @@ Then `scripts/ci/open-e2e-bump-mr.sh` pushes `automation/e2e-pin-bump` and opens
 Every suite sends GQL text to `POST /api/v4/orbit/query`. Suite 01 turns on the
 `orbit_gql_queries` feature flag for the instance, so Rails selects the GQL
 frontend for every user. With the flag on, Orbit rejects JSON DSL queries. See
-[Orbit query frontend](../design-documents/querying/orbit_query_frontend.md).
+[Orbit query frontend](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/querying/orbit_query_frontend.md).
 
 ## Parallel execution
 

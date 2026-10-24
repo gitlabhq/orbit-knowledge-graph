@@ -338,6 +338,6 @@ prompt fetch would break pinning while adding a query to every workflow.
 - [ADR 011: Agent command surface](011_agent_command_surface.md),
   `list_commands` and `invoke_command`
 - [ADR 012: GOON format](012_goon_format.md)
-- [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md),
+- [Duo / Orbit prompt routing architecture](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/duo_orbit_prompt_routing.md),
   the consumer-side map of the Rails routing seams
-- [Security](../security.md), the redaction and authorization model
+- [Security](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md), the redaction and authorization model

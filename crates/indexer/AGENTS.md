@@ -39,7 +39,7 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 The **dispatcher** publishes its ontology archive and requires the active archive before migration.
 Missing active archives are bootstrapped from the test-validated release bundle; existing entries
 are never replaced, and unsupported missing versions fail before versioned DDL.
-See `docs/design-documents/schema_management.md` for rollout prerequisites and recovery.
+See the [pre-rewrite schema management doc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md) for rollout prerequisites and recovery.
 
 The dispatcher owns schema migration. At boot, `schema::migration::run_if_needed()` compares
 the embedded `SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a
@@ -90,7 +90,7 @@ the FK changes. The reason: `target_id` is part of the `ReplacingMergeTree` iden
 `IN` on the edge PK prunes it to the changed set. The swept set is ontology-derived (edges marked
 `mutable: true`), as is each variant's metadata. It runs directly in the dispatcher (not dispatched to indexer workers):
 one cheap global sweep, off the insert hot path. See
-`docs/design-documents/indexing/sdlc_indexing.md` ("Stale FK-edge reconciliation").
+the [pre-rewrite SDLC indexing doc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md) ("Stale FK-edge reconciliation").
 
 ### Entry point
 

@@ -163,7 +163,7 @@ The [feature flag](#feature-flag) governs new preauthorizations.
 ### Capacity
 
 A NATS KV lease also caps archive downloads per Gitaly storage across all pods
-(`archive_storage_budget`, see [code indexing](../indexing/code_indexing.md)).
+(`archive_storage_budget`, see [code indexing](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/code_indexing.md)).
 The figure below is the fleet bound only when the budgets are 0 (off) or larger
 than `fetch_concurrency × pods`.
 
