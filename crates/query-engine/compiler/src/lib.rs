@@ -781,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_clamps_settings_to_safety_floor() {
+    fn path_finding_clamps_settings_to_safety_ceiling() {
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -797,11 +797,11 @@ mod tests {
 
         assert!(
             sql.contains("max_execution_time = 15"),
-            "pathfinding must clamp max_execution_time to 15, got:\n{sql}"
+            "pathfinding max_execution_time must not exceed 15, got:\n{sql}"
         );
         assert!(
             sql.contains("max_memory_usage = 16106127360"),
-            "pathfinding must clamp max_memory_usage to 15 GiB, got:\n{sql}"
+            "pathfinding max_memory_usage must not exceed 15 GiB, got:\n{sql}"
         );
     }
 
