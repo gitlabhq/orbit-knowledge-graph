@@ -770,9 +770,10 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 }
             }
         }
-        let Some(data_type) = self.field_type(entity, prop) else {
+        let Some(property) = self.property(entity, prop) else {
             return Ok(());
         };
+        let data_type = property.data_type;
         for filter in filters {
             if is_traversal_path_filter {
                 Self::check_traversal_path_filter(
@@ -785,8 +786,57 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 continue;
             }
             self.check_one_filter(entity, prop, filter, data_type)?;
+            self.check_enum_filter(entity, prop, filter, property)?;
         }
         Ok(())
+    }
+
+    fn check_enum_filter(
+        &self,
+        entity: &str,
+        prop: &str,
+        filter: &InputFilter,
+        property: &query_data_model::Property,
+    ) -> Result<()> {
+        if property.data_type != DataType::Enum {
+            return Ok(());
+        }
+        let Some(enum_values) = property
+            .enum_values
+            .as_ref()
+            .filter(|values| !values.is_empty())
+        else {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: enum has no declared values"
+            )));
+        };
+        if filter.op.is_some_and(FilterOp::is_text) {
+            return Ok(());
+        }
+        let Some(value) = filter.value.as_ref() else {
+            return Ok(());
+        };
+        let values = value
+            .as_array()
+            .map_or(std::slice::from_ref(value), Vec::as_slice);
+        let invalid = values.iter().find(|value| match value {
+            serde_json::Value::String(label) => !enum_values.values().any(|value| value == label),
+            serde_json::Value::Number(number) if property.enum_type == ontology::EnumType::Int => {
+                number
+                    .as_i64()
+                    .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok()))
+                    .is_none_or(|key| !enum_values.contains_key(&key))
+            }
+            _ => true,
+        });
+        let Some(invalid) = invalid else {
+            return Ok(());
+        };
+        let valid: Vec<_> = enum_values.values().map(String::as_str).collect();
+        Err(QueryError::Validation(format!(
+            "filter on \"{prop}\" for {entity}: invalid enum value {invalid}{}",
+            ontology::errors::format_candidate_list("values", &valid)
+        )))
     }
 
     fn check_relationship_filters(
@@ -1561,6 +1611,7 @@ mod tests {
     }
     use crate::input::parse_input;
     use ontology::{DataType, FieldSource, VirtualSource};
+    use std::collections::BTreeMap;
 
     fn test_ontology() -> Ontology {
         Ontology::new()
@@ -1596,6 +1647,20 @@ mod tests {
                 ("target_id", DataType::Int),
                 ("target_kind", DataType::String),
             ])
+            .modify_field("User", "user_type", |field| {
+                field.enum_values = Some(BTreeMap::from([
+                    (0, "human".into()),
+                    (6, "project_bot".into()),
+                ]));
+            })
+            .unwrap()
+            .modify_field("Project", "visibility_level", |field| {
+                field.enum_values = Some(BTreeMap::from([
+                    (0, "private".into()),
+                    (20, "public".into()),
+                ]));
+            })
+            .unwrap()
     }
 
     fn assert_ok(json: &str) {
@@ -2366,6 +2431,30 @@ mod tests {
     }
 
     #[test]
+    fn rejects_enum_without_declared_values() {
+        for enum_values in [None, Some(BTreeMap::new())] {
+            let ontology = Ontology::new()
+                .with_nodes(["User"])
+                .with_fields("User", [("user_type", DataType::Enum)])
+                .modify_field("User", "user_type", |field| {
+                    field.enum_values = enum_values;
+                })
+                .unwrap();
+            for filter in [r#""human""#, r#"{"contains":"hum"}"#] {
+                let input = parse_input(&format!(
+                    r#"{{
+                        "query_type": "traversal",
+                        "nodes": [{{"id": "u", "entity": "User", "filters": {{"user_type": {filter}}}}}]
+                    }}"#
+                ))
+                .unwrap();
+                let error = validator(&ontology).check_references(&input).unwrap_err();
+                assert!(error.to_string().contains("enum has no declared values"));
+            }
+        }
+    }
+
+    #[test]
     fn filter_type_mismatch_fails_closed() {
         let ontology = test_ontology();
         let validator = validator(&ontology);
@@ -2989,7 +3078,11 @@ mod tests {
                     ("created_at", DataType::DateTime),
                     ("state", DataType::Enum),
                 ],
-            );
+            )
+            .modify_field("User", "state", |field| {
+                field.enum_values = Some(BTreeMap::from([(0, "active".into())]));
+            })
+            .unwrap();
         let validator = validator(&ont);
         let input = parse_input(
             r#"{
