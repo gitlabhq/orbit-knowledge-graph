@@ -179,3 +179,34 @@ fn check_nesting(query: &str) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse;
+
+    fn error_of(query: &str) -> String {
+        parse(query).expect_err("rejected").to_string()
+    }
+
+    #[test]
+    fn an_aggregate_in_order_by_names_the_alias_form() {
+        let message = error_of(
+            "MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.state, count(mr) ORDER BY count(mr) LIMIT 10",
+        );
+        assert!(
+            message.contains("count() is not supported in ORDER BY"),
+            "{message}"
+        );
+        assert!(message.contains("count(mr) AS n ORDER BY n"), "{message}");
+    }
+
+    #[test]
+    fn count_star_says_what_aggregates_take() {
+        let message = error_of("MATCH (u:User {id: 1}) RETURN count(*)");
+        assert!(
+            message.contains("aggregates take one variable or property"),
+            "{message}"
+        );
+        assert!(message.contains("count(mr) AS n"), "{message}");
+    }
+}
