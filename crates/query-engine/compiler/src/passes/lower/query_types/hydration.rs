@@ -158,8 +158,8 @@ mod tests {
     use super::*;
     use crate::input::{ColumnSelection, Input, InputNode, QueryType};
     use crate::passes::codegen::codegen;
-    use crate::passes::enforce::ResultContext;
     use crate::passes::plan::{HydrationCompileOptions, plan_clickhouse};
+    use crate::passes::result_contract::ResultContext;
     use orbit_server_config::QueryConfig;
     use std::sync::Arc;
 

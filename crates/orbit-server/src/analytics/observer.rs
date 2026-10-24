@@ -216,7 +216,7 @@ mod tests {
             base: query_engine::compiler::passes::codegen::ParameterizedQuery {
                 sql: String::new(),
                 params: Default::default(),
-                result_context: query_engine::compiler::passes::enforce::ResultContext::new(),
+                result_context: query_engine::compiler::ResultContext::new(),
                 query_config: Default::default(),
                 dialect: query_engine::compiler::passes::codegen::SqlDialect::ClickHouse,
             },

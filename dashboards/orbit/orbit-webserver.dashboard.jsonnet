@@ -50,7 +50,7 @@ local Q = pipelineQueries.prom_name;
 local DUR = pipelineDuration.prom_name;
 local VALID = 'outcome!="caller_error"';
 local SERVER = 'outcome="server_error"';
-local COMPILER_FAULT = 'lowering|enforcement|codegen|pipeline|ontology_internal|security';
+local COMPILER_FAULT = 'lowering|codegen|pipeline|ontology_internal|security';
 local OK = 'status="ok", query_type!="unknown"';
 local SCHEMA = 'status="ok", query_type="unknown"';
 local REJECTED = 'status=~"compile_error|security_error"';
@@ -296,7 +296,7 @@ local reliability = [
   ),
   o.timeseries(
     'Server: compiler rejections by reason (1h windows)',
-    'Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`: parse/schema/reference/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline. Renders a flat zero baseline when no rejections occur in the window.',
+    'Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`: parse/schema/reference/ontology/ontology_internal/depth/limit/security/lowering/codegen/pipeline. Renders a flat zero baseline when no rejections occur in the window.',
     [
       o.target(
         'sum by (failure_reason) (increase(%s{%s}[1h]))' % [compilerRejected, SEL],
