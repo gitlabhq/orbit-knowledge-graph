@@ -182,6 +182,10 @@ gRPC status codes map to application errors: `UNAVAILABLE` triggers retry with b
 
 Request logging, tracing (via LabKit), and metrics collection use gRPC interceptors, same as Gitaly.
 
+## Response compression
+
+The server compresses responses with gzip or zstd and accepts either on requests. It answers with the first of those encodings in the client's `grpc-accept-encoding` list, and with identity when the client lists neither. Ruby and Python C-core clients advertise `identity, deflate, gzip` and decode gzip transparently, so they get gzip. zstd only applies to clients that advertise it, such as tonic or Go.
+
 ## Security
 
 ### Authentication: JWT + mTLS
