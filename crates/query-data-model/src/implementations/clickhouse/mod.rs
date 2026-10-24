@@ -19,7 +19,6 @@ pub struct TableLayout {
     pub sort_key: Vec<String>,
     pub entity: Option<EntityId>,
     pub path_columns: Vec<PathColumn>,
-    pub path_scopable: bool,
 }
 
 impl TableLayout {
@@ -31,7 +30,6 @@ impl TableLayout {
         table: &layout::Table,
         entity: Option<EntityId>,
         path_columns: Vec<PathColumn>,
-        path_scopable: bool,
     ) -> Self {
         Self {
             name: table.name.clone(),
@@ -48,7 +46,6 @@ impl TableLayout {
             sort_key: table.sort_key.clone(),
             entity,
             path_columns,
-            path_scopable,
         }
     }
 }
@@ -206,10 +203,6 @@ impl RelationalMapping for ClickHouseBindings {
         self.property_facts
             .get(property.index())
             .is_none_or(|facts| facts.mutable)
-    }
-
-    fn table_path_scopable(&self, table: &str) -> bool {
-        self.table(table).is_some_and(|layout| layout.path_scopable)
     }
 
     fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]> {
