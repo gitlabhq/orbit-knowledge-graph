@@ -5,13 +5,18 @@
 //!
 //! # Usage
 //!
-//! Handlers receive `NatsServices` via [`HandlerContext`](crate::handler::HandlerContext):
+//! Handlers receive `NatsServices` via [`HandlerContext`](crate::engine::handler::HandlerContext):
 //!
 //! ```ignore
 //! async fn handle(&self, ctx: HandlerContext, envelope: Envelope) -> Result<(), HandlerError> {
 //!     let derived = DerivedEvent { /* ... */ };
 //!     let subscription = Subscription::new("stream", "subject");
-//!     ctx.nats.publish(&subscription, &Envelope::new(&derived)?).await?;
+//!     let envelope = Envelope::new(&derived)
+//!         .map_err(|e| HandlerError::Processing(format!("serialize failed: {e}")))?;
+//!     ctx.nats
+//!         .publish(&subscription, &envelope)
+//!         .await
+//!         .map_err(|e| HandlerError::Processing(format!("publish failed: {e}")))?;
 //!     Ok(())
 //! }
 //! ```
@@ -24,16 +29,18 @@
 //!
 //! ```ignore
 //! async fn handle(&self, ctx: HandlerContext, envelope: Envelope) -> Result<(), HandlerError> {
-//!     let guard = crate::locking::LockGuard::acquire(
-//!         ctx.lock_service.clone(),
-//!         "my-key",
-//!         Duration::from_secs(300),
-//!     )
-//!     .await
-//!     .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?;
-//!     let Ok(guard) = guard else {
-//!         // Held by another indexer: defer or skip.
-//!         return Ok(());
+//!     let ttl = Duration::from_secs(300);
+//!     let acquired = crate::locking::LockGuard::acquire(ctx.lock_service.clone(), "my-key", ttl)
+//!         .await
+//!         .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?;
+//!     let guard = match acquired {
+//!         Ok(guard) => guard,
+//!         Err(held) => {
+//!             return Err(HandlerError::Deferred {
+//!                 reason: "lock my-key held by another indexer".into(),
+//!                 delay: held.time_left.unwrap_or(ttl),
+//!             });
+//!         }
 //!     };
 //!     // ...
 //!     Ok(())
@@ -46,7 +53,11 @@
 //!
 //! ```ignore
 //! let mock_nats = MockNatsServices::new();
-//! let ctx = HandlerContext::new(destination, metrics, Arc::new(mock_nats.clone()));
+//! let ctx = HandlerContext::new(
+//!     Arc::new(mock_nats.clone()),
+//!     Arc::new(MockLockService::new()),
+//!     ProgressNotifier::noop(),
+//! );
 //!
 //! handler.handle(ctx, envelope).await?;
 //!
