@@ -32,53 +32,12 @@ Ask what breaks if you change a service, who should review a file, or why pipeli
 Your agent answers with a few graph queries in place of many file reads and API calls.
 {.product-hero-lead}
 
-</section>
-
-<div class="product-video-main">
-<div class="video-fallback">
-  See the video: <a href="https://www.youtube.com/watch?v=dKaPp-TWd_o">GitLab Orbit Overview: Giving AI Agents Full Software Development Context</a>.
-</div>
-<figure class="video-container">
-  <iframe src="https://www.youtube-nocookie.com/embed/dKaPp-TWd_o" frameborder="0" allowfullscreen> </iframe>
-</figure>
-<!-- Video published on 2026-09-03 -->
-</div>
-
-<div class="product-videos">
-<div class="product-video">
-<div class="video-fallback">
-  See the video: <a href="https://www.youtube.com/watch?v=AaNukFEK6Zk">GitLab Orbit Launch: Powering AI Coding Agents with Lifecycle Context</a>.
-</div>
-<figure class="video-container">
-  <iframe src="https://www.youtube-nocookie.com/embed/AaNukFEK6Zk" frameborder="0" allowfullscreen> </iframe>
-</figure>
-<p class="product-video-title">GitLab Orbit launch</p>
-<!-- Video published on 2026-07-06 -->
-</div>
-<div class="product-video">
-<div class="video-fallback">
-  See the video: <a href="https://www.youtube.com/watch?v=YtPc8kOmyi0">How GitLab Orbit Works (Architectural Overview)</a>.
-</div>
-<figure class="video-container">
-  <iframe src="https://www.youtube-nocookie.com/embed/YtPc8kOmyi0" frameborder="0" allowfullscreen> </iframe>
-</figure>
-<p class="product-video-title">How GitLab Orbit works</p>
-<!-- Video published on 2026-07-06 -->
-</div>
-<div class="product-video">
-<div class="video-fallback">
-  See the video: <a href="https://www.youtube.com/watch?v=wddpf0rDGnA">GitLab Orbit Technical Deep Dive: The AI Context Graph Layer</a>.
-</div>
-<figure class="video-container">
-  <iframe src="https://www.youtube-nocookie.com/embed/wddpf0rDGnA" frameborder="0" allowfullscreen> </iframe>
-</figure>
-<p class="product-video-title">How we built GitLab Orbit</p>
-<!-- Video published on 2026-06-26 -->
-</div>
-</div>
-
-[Quickstart](quickstart.md)
+[Quickstart](quickstart.md) [Connect your agent](agents/_index.md) [{{< icon name="play" >}} Watch the deep dive video](https://www.youtube.com/watch?v=wddpf0rDGnA)
 {.product-hero-actions}
+
+<!-- Video published on 2026-06-26 -->
+
+</section>
 
 - [Ask across code and lifecycle](prompt-examples.md)<br>One graph holds your projects, merge requests, pipelines, vulnerabilities, files, and definitions, so one question can cross all of them.
 - [Run one query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
@@ -95,32 +54,6 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 For more examples, see [prompt examples](prompt-examples.md).
 
-## The query language
-
-GitLab Orbit queries use [GQL](queries/query-language.md), a graph query language that large language models
-already know from their training data.
-A short GQL pattern describes connections, for example from a merge request to its pipelines and to the files
-it changed.
-
-Your agent reads the [schema](queries/query-language.md#discover-the-schema), then writes its own query for each question.
-One query replaces a chain of API calls, so the agent puts less load on your GitLab instance.
-
-## Connect your agent
-
-To get GitLab Orbit, [contact sales](https://about.gitlab.com/sales/).
-On GitLab.com, you can also [start a free trial](trial.md).
-For information about GitLab Orbit pricing and usage, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
-
-Choose how your agent connects:
-
-- For agents that run shell commands, such as Claude Code, Codex, and OpenCode, use the [GitLab Orbit CLI](agents/_index.md).
-  For the steps, see the [quickstart](quickstart.md#use-gitlab-orbit-with-your-agent).
-- In GitLab Duo Agent Platform, GitLab Orbit is built in.
-  For more information, see [GitLab Orbit in GitLab Duo](agents/duo.md).
-- For agents that support the Model Context Protocol (MCP) but cannot run shell commands, use the [GitLab Orbit MCP endpoint](agents/mcp.md#gitlab-orbit-mcp-endpoint).
-  If your agent already connects to the GitLab MCP server, [add the GitLab Orbit tools](agents/mcp.md#gitlab-orbit-tools-in-the-gitlab-mcp-server) to that connection.
-- For scripts, scheduled reports, and custom tools, use the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
-
 ## Code on your machine
 
 The GitLab Orbit CLI also indexes repositories on your machine.
@@ -128,6 +61,14 @@ Your agent can then search code you have not pushed, offline and with no GitLab 
 For more information, see [local graph](cli.md#local-graph).
 
 ## Learn more
+
+- <img src="img/orbit-video-overview-v19_6.png" alt="Thumbnail of the GitLab Orbit overview video." width="640" height="360">[GitLab Orbit in two minutes](https://www.youtube.com/watch?v=dKaPp-TWd_o)<br>How GitLab Orbit gives agents the context of your software development.
+- <img src="img/orbit-video-launch-v19_6.png" alt="Thumbnail of the GitLab Orbit launch video." width="640" height="360">[GitLab Orbit launch](https://www.youtube.com/watch?v=AaNukFEK6Zk)<br>What GitLab Orbit does for coding agents.
+- <img src="img/orbit-video-how-it-works-v19_6.png" alt="Thumbnail of the GitLab Orbit architecture video." width="640" height="360">[How GitLab Orbit works](https://www.youtube.com/watch?v=YtPc8kOmyi0)<br>The architecture of GitLab Orbit, from indexing to queries.
+- <img src="img/orbit-video-deep-dive-v19_6.png" alt="Thumbnail of the GitLab Orbit technical deep dive video." width="640" height="360">[How we built GitLab Orbit](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>A technical deep dive into the context graph.
+{.product-cards .product-cards-2 .product-video-cards}
+
+<!-- Videos published on 2026-09-03, 2026-07-06, 2026-07-06, and 2026-06-26 -->
 
 - [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
 - [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
@@ -214,12 +155,12 @@ body:has(.product-landing) .docs-content .language-plaintext {
   border-color: var(--gl-button-confirm-primary-border-color-hover);
   color: var(--gl-button-confirm-primary-foreground-color-hover) !important;
 }
-.docs-content .product-hero-actions a:nth-child(2) {
+.docs-content .product-hero-actions a:not(:first-child) {
   background-color: var(--gl-button-default-primary-background-color-default);
   border-color: var(--gl-button-default-primary-border-color-default);
   color: var(--gl-button-default-primary-foreground-color-default) !important;
 }
-.docs-content .product-hero-actions a:nth-child(2):hover {
+.docs-content .product-hero-actions a:not(:first-child):hover {
   background-color: var(--gl-button-default-primary-background-color-hover);
   border-color: var(--gl-button-default-primary-border-color-hover);
   color: var(--gl-button-default-primary-foreground-color-hover) !important;
@@ -231,25 +172,18 @@ body:has(.product-landing) .docs-content .language-plaintext {
   fill: currentColor;
 }
 
-/* Videos: the overview at full width, then three smaller videos in a row. */
-.docs-content .product-video-main .video-container {
-  max-width: 100%;
-  margin: var(--gl-spacing-scale-5) 0;
-}
-.docs-content .product-videos {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-  gap: 1.25rem;
-  margin: 0 0 var(--gl-spacing-scale-5);
-}
-.docs-content .product-videos .video-container {
-  max-width: 100%;
-  margin: 0;
-}
-.docs-content .product-video-title {
-  margin: var(--gl-spacing-scale-3) 0 0;
-  font-weight: 600;
-  color: var(--gl-text-color-heading);
+/* Video cards: the thumbnail fills the top of the card, edge to edge, clipped to the card's rounded corners. */
+.docs-content ul.product-video-cards > li { overflow: hidden; }
+.docs-content ul.product-video-cards > li > img {
+  display: block;
+  width: calc(100% + 2.5rem);
+  max-width: none;
+  margin: -1.25rem -1.25rem var(--gl-spacing-scale-4);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
 }
 
 /* Cards: same metrics as the cards shortcode (.card-body.card.gl-rounded-lg): 1.25rem padding, 8px radius, neutral-100 border, subtle hover. */
