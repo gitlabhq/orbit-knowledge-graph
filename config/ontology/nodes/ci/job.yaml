@@ -397,4 +397,4 @@ storage:
     - {name: idx_pipeline_id, column: pipeline_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_runner_id, column: runner_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_auto_canceled_by_id, column: auto_canceled_by_id, type: "bloom_filter(0.0001)", granularity: 1}
-    - {name: idx_failure_reason, column: failure_reason, type: "set(32)", granularity: 2}
+    - {name: idx_failure_reason, column: failure_reason, type: "set(64)", granularity: 2}

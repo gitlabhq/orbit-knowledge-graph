@@ -402,7 +402,7 @@ CREATE TABLE IF NOT EXISTS gl_job (
     INDEX idx_pipeline_id pipeline_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_runner_id runner_id TYPE bloom_filter(0.0001) GRANULARITY 1,
     INDEX idx_auto_canceled_by_id auto_canceled_by_id TYPE bloom_filter(0.0001) GRANULARITY 1,
-    INDEX idx_failure_reason failure_reason TYPE set(32) GRANULARITY 2
+    INDEX idx_failure_reason failure_reason TYPE set(64) GRANULARITY 2
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_cleanup = 1, enable_block_number_column = 1, enable_block_offset_column = 1, add_minmax_index_for_temporal_columns = 1;
