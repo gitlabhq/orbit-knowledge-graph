@@ -9,8 +9,8 @@ use orbit_server_config::QueryConfig;
 
 use crate::ast::Node;
 use crate::input::{Input, QueryType};
-use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
+use crate::passes::result_contract::ResultContext;
 pub use orbit_utils::query_types::ParamValue;
 use std::collections::HashMap;
 use std::sync::LazyLock;
