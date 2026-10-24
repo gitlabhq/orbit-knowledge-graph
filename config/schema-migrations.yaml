@@ -16,6 +16,9 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 116
+  scope: none
+  note: "Drops 26 mutable: false marks the planner used to filter before the latest-row pick, on columns that do change between versions of a row: author ids move to the ghost user, several foreign keys are nulled on delete, diff commit SHAs are written after insert, scanner ids are rewritten on ingest, and code-graph positions and types change with the indexer. Planner metadata only: no table DDL or indexed row changes."
 - version: 115
   scope: "*"
   note: >-
