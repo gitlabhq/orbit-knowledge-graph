@@ -206,3 +206,4 @@ storage:
     - {name: idx_noteable_id, column: noteable_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_author_id, column: author_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}

@@ -241,3 +241,4 @@ storage:
     - {name: idx_milestone_id, column: milestone_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_namespace_id, column: namespace_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_closed_by_id, column: closed_by_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_iid, column: iid, type: "bloom_filter(0.0001)", granularity: 1}
