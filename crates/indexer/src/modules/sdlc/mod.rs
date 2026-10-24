@@ -1,4 +1,5 @@
 mod datalake;
+mod error;
 mod handler;
 mod metrics;
 pub(crate) mod observer;

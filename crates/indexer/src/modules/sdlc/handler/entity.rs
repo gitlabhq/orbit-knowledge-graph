@@ -140,8 +140,7 @@ impl EntityHandler {
         let mut checkpoint = self
             .checkpoint_store
             .load(&checkpoint_key)
-            .await
-            .map_err(|err| HandlerError::Processing(err.to_string()))?
+            .await?
             .unwrap_or_else(|| Checkpoint::new(request.watermark));
         let window = checkpoint.pull_window(request.watermark);
         let synced_until = checkpoint.synced_until();
@@ -155,8 +154,7 @@ impl EntityHandler {
                 &checkpoint,
                 RunDurability::for_mode(mode).attempt_start,
             )
-            .await
-            .map_err(|err| HandlerError::Processing(err.to_string()))?;
+            .await?;
 
         let observer: Arc<Mutex<dyn IndexingObserver>> = Arc::new(Mutex::new(observer));
         let pipeline_context = PipelineContext {
@@ -235,8 +233,7 @@ impl EntityHandler {
                             "{checkpoint_key}{}",
                             PartitionAssignment::CHECKPOINT_PREFIX
                         ))
-                        .await
-                        .map_err(|err| HandlerError::Processing(err.to_string()))?;
+                        .await?;
 
                     match consolidated_watermark(&partition_checkpoints, request.watermark) {
                         Ok(watermark) => self
@@ -244,7 +241,7 @@ impl EntityHandler {
                             .consolidate(&checkpoint_key, &watermark)
                             .await
                             .map(|()| stats)
-                            .map_err(|err| HandlerError::Processing(err.to_string())),
+                            .map_err(HandlerError::from),
                         // A parent still at its first-pass start re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
                         Err(incomplete) => {
                             info!(
@@ -309,8 +306,7 @@ impl EntityHandler {
                 checkpoint_key,
                 &synced_until.unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
             )
-            .await
-            .map_err(|err| HandlerError::Processing(err.to_string()))?;
+            .await?;
         Ok(PipelineStats::default())
     }
 
@@ -329,11 +325,7 @@ impl EntityHandler {
         for (assignment, query) in partitions {
             let position_key = format!("{checkpoint_key}{}", assignment.position_suffix());
 
-            let existing = self
-                .checkpoint_store
-                .load(&position_key)
-                .await
-                .map_err(|err| HandlerError::Processing(err.to_string()))?;
+            let existing = self.checkpoint_store.load(&position_key).await?;
             let checkpoint = match existing {
                 Some(cp) if cp.is_completed() => {
                     info!(
@@ -370,22 +362,31 @@ impl EntityHandler {
         }
 
         let mut errors = Vec::new();
+        let mut all_failures_backpressure = true;
         let mut total = PipelineStats::default();
         while let Some(result) = set.join_next().await {
             match result {
                 Ok(Ok(stats)) => total.merge(stats),
-                Ok(Err(err)) => errors.push(err.to_string()),
-                Err(join_err) => errors.push(format!("partition task panicked: {join_err}")),
+                Ok(Err(err)) => {
+                    all_failures_backpressure &=
+                        matches!(err, PipelineError::Failed(HandlerError::Backpressure(_)));
+                    errors.push(err.to_string());
+                }
+                Err(join_err) => {
+                    all_failures_backpressure = false;
+                    errors.push(format!("partition task panicked: {join_err}"));
+                }
             }
         }
 
         if errors.is_empty() {
-            Ok(total)
+            return Ok(total);
+        }
+        let message = format!("partition failures: {}", errors.join("; "));
+        if all_failures_backpressure {
+            Err(HandlerError::Backpressure(message))
         } else {
-            Err(HandlerError::Processing(format!(
-                "partition failures: {}",
-                errors.join("; ")
-            )))
+            Err(HandlerError::Processing(message))
         }
     }
 }
@@ -486,7 +487,9 @@ mod tests {
     use super::*;
 
     use crate::modules::sdlc::plan::build_plans;
-    use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
+    use crate::modules::sdlc::test_helpers::{
+        EmptyDatalake, MockCheckpointStore, UnavailableCheckpointStore, test_metrics,
+    };
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockLockService, MockNatsServices, TestEnvelopeFactory};
     use crate::types::Event;
@@ -503,6 +506,14 @@ mod tests {
     }
 
     fn build_handler(entity_name: &str, scope: EtlScope) -> EntityHandler {
+        build_handler_with_checkpoint_store(entity_name, scope, Arc::new(MockCheckpointStore))
+    }
+
+    fn build_handler_with_checkpoint_store(
+        entity_name: &str,
+        scope: EtlScope,
+        checkpoint_store: Arc<dyn CheckpointStore>,
+    ) -> EntityHandler {
         let ontology = Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(
             &ontology,
@@ -523,7 +534,6 @@ mod tests {
             .unwrap_or_else(|| panic!("entity plan not found: {entity_name}"));
 
         let datalake: Arc<dyn DatalakeQuery> = Arc::new(EmptyDatalake);
-        let checkpoint_store: Arc<dyn CheckpointStore> = Arc::new(MockCheckpointStore);
         let pipeline = Arc::new(Pipeline::new(
             Arc::clone(&datalake),
             Arc::clone(&checkpoint_store),
@@ -562,6 +572,25 @@ mod tests {
 
         let result = handler.handle(handler_context(), envelope).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_checkpoint_store_redelivers_without_spending_an_attempt() {
+        let handler = build_handler_with_checkpoint_store(
+            "User",
+            EtlScope::Global,
+            Arc::new(UnavailableCheckpointStore),
+        );
+        let envelope = TestEnvelopeFactory::simple(
+            &serde_json::json!({ "watermark": "2024-01-21T00:00:00Z" }).to_string(),
+        );
+
+        let result = handler.handle(handler_context(), envelope).await;
+
+        assert!(
+            matches!(result, Err(HandlerError::Backpressure(_))),
+            "got {result:?}"
+        );
     }
 
     #[tokio::test]
