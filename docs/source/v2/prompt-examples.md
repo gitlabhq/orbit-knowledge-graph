@@ -52,15 +52,17 @@ RETURN f.old_path, f.new_path, f.diff
 LIMIT 100
 ```
 
-A query cannot join two separate patterns, so the agent runs the next query on the files that the first one returns.
-It compares the lines of each definition with the diff to find the definitions that changed:
+A query cannot join two separate patterns, so the agent reads the changed definitions from the diff,
+then finds their callers outside the files that the merge request changes:
 
 ```gql orbit-query
 MATCH (caller:Definition)
   -[:CALLS]->(d:Definition)
   <-[:DEFINES]-(f:File {project_id: 9438583, branch: 'master'})
-WHERE f.path IN ['v2/log/log.go', 'v2/log/doc.go']
-RETURN d.fqn, d.start_line, d.end_line, caller.fqn, caller.file_path, caller.start_line
+WHERE f.path = 'v2/log/log.go'
+  AND d.fqn IN ['log.NewWithConfig', 'log.applyConfigOverrides']
+  AND NOT caller.file_path IN ['v2/log/log.go', 'v2/log/log_test.go', 'v2/log/doc.go']
+RETURN d.fqn, d.start_line, caller.fqn, caller.file_path, caller.start_line
 LIMIT 100
 ```
 
@@ -71,7 +73,7 @@ MATCH (s:ImportedSymbol {import_path: 'gitlab.com/gitlab-org/labkit/v2/log'})
   <-[:IMPORTS]-(f:File)
   -[:ON_BRANCH]->(b:Branch)
   <-[:CONTAINS]-(p:Project)
-WHERE p.full_path STARTS WITH 'gitlab-org/' AND b.is_default = true
+WHERE p.full_path STARTS WITH 'gitlab-org/' AND p.id <> 9438583 AND b.is_default = true
 RETURN p.full_path, count(f) AS files
 ORDER BY files DESC
 LIMIT 100
@@ -92,9 +94,9 @@ LIMIT 50
 The query filters on `old_path`, because `new_path` is empty when a merge request changes a file
 but does not rename the file.
 
-Inside `gitlab-org/labkit`, most callers of the changed code are tests.
-But 59 projects in `gitlab-org` import `v2/log` in 1,050 files, so the review reports a behavior change
-that reaches each of them.
+Inside `gitlab-org/labkit`, the only caller outside the merge request is a test.
+But 23 other public projects in `gitlab-org` import `v2/log` in 481 files,
+so the review reports a behavior change that reaches each of them.
 
 - **With GitLab Orbit:** one prompt and four queries, and each finding cites the rows that show it.
 - **Without GitLab Orbit:** no REST API call returns callers, or the projects that import a package.
@@ -117,15 +119,15 @@ Using GitLab Orbit, for <CVE-2025-58183> in <my-group>:
 ```
 
 GitLab Orbit is read-only, so your agent creates the issues and starts the sessions with `glab` or GitLab Duo.
-GitLab Orbit finds the projects and tracks the deployments, with one query for each of the first two steps:
+GitLab Orbit finds the projects and tracks the deployments, with one query for each of the first two steps.
+The first query returns the vulnerabilities in every state, because a fix that reached production usually resolves its vulnerability:
 
 ```gql orbit-query
 MATCH (v:Vulnerability)-[:HAS_FINDING]->(o:VulnerabilityOccurrence)
   -[:HAS_IDENTIFIER]->(i:VulnerabilityIdentifier {external_id: 'CVE-2025-58183'})
 MATCH (v)-[:IN_PROJECT]->(p:Project)
 WHERE p.full_path STARTS WITH 'gitlab-org/'
-  AND v.state IN ['detected', 'confirmed']
-RETURN p.full_path, v.id, v.severity
+RETURN p.full_path, v.id, v.state, v.severity
 ORDER BY p.full_path
 LIMIT 50
 ```
@@ -136,18 +138,19 @@ MATCH (v:Vulnerability)
   -[:DEPLOYED_TO]->(d:Deployment)
   -[:IN_ENVIRONMENT]->(e:Environment {tier: 'production'})
 MATCH (v)-[:IN_PROJECT]->(p:Project)
-WHERE v.id IN [236746171, 287006695, 234562423, 234562740, 241357118, 241981811]
+WHERE v.id IN [236746171, 234672550, 241357118, 241981811, 234562423, 234562740, 234563175]
 RETURN p.full_path, v.id, mr.iid, d.status
 LIMIT 50
 ```
 
 The agent passes the vulnerability IDs from the first query to the second.
-On GitLab.com, no fix for this CVE reached production, so the agent creates an issue in each affected project.
+In the public projects of `gitlab-org`, the CVE has 5 open vulnerabilities in 3 projects, and no fix for it reached production,
+so the agent creates an issue in each of those projects.
 
 - **With GitLab Orbit:** one prompt and two queries.
-- **Without GitLab Orbit:** at least one REST API call for each project in a group with about 9,200 projects,
-  to list its vulnerabilities and find the CVE.
-  No REST API call goes from a vulnerability to the merge request that fixes it.
+- **Without GitLab Orbit:** a group vulnerability export lists the vulnerabilities for the CVE in a group with about 9,200 projects,
+  but no REST API call goes from a vulnerability to the merge request that fixes it,
+  so you cannot tell which fixes reached production.
 
 ## Respond to a production incident
 
@@ -184,7 +187,9 @@ For the second step, it finds the code that the file calls:
 MATCH (f:File {path: 'app/models/ci/build.rb', project_id: 278964, branch: 'master'})
   -[:DEFINES]->(d:Definition)
   -[:CALLS]->(callee:Definition)
-RETURN callee.file_path, count(callee) AS calls
+  <-[:DEFINES]-(cf:File)
+WHERE cf.branch = 'master'
+RETURN cf.path, count(callee) AS calls
 ORDER BY calls DESC
 LIMIT 20
 ```
@@ -192,8 +197,8 @@ LIMIT 20
 The agent then runs the first query on those file paths.
 
 - **With GitLab Orbit:** one prompt and one query for each step.
-- **Without GitLab Orbit:** about 1,800 REST API calls for a project that deploys about 1,800 merge requests
-  to production in a week, one for the changes of each deployed merge request.
+- **Without GitLab Orbit:** about 1,550 REST API calls for a project that deploys about 1,500 merge requests
+  to production in a week: about 15 to list the deployed merge requests, and one for the changes of each.
   No REST API call returns the code that a file calls.
 
 ## Change shared code safely
@@ -221,7 +226,8 @@ ORDER BY child.file_path
 LIMIT 500
 ```
 
-On `gitlab-org/gitlab`, 366 classes inherit from `BasePolicy`.
+A pattern follows up to three levels of inheritance.
+On `gitlab-org/gitlab`, 366 classes inherit from `BasePolicy` in up to three levels.
 Then it finds the callers:
 
 ```gql orbit-query
@@ -245,7 +251,7 @@ WHERE s.import_path STARTS WITH 'gitlab.com/gitlab-org/labkit'
   AND b.is_default = true
 RETURN p.full_path, count(s) AS import_sites
 ORDER BY import_sites DESC
-LIMIT 30
+LIMIT 200
 ```
 
 - **With GitLab Orbit:** one prompt and one query for each step.
@@ -267,19 +273,44 @@ created in <my-group>/<my-project> in the last <30 days>:
   failing?
 ```
 
+For the share that merged, the agent counts the merge requests by flow type and state:
+
 ```gql orbit-query
 MATCH (a:AgentSession)
   -[:CREATED_MR]->(mr:MergeRequest)
-WHERE mr.project_id = 278964 AND mr.created_at >= '2026-09-23T00:00:00Z'
+WHERE mr.project_id = 278964 AND mr.created_at >= '2026-09-24T00:00:00Z'
 RETURN a.flow_type, mr.state, count(mr) AS mrs
 ORDER BY mrs DESC
 LIMIT 30
 ```
 
-- **With GitLab Orbit:** one query for each question.
-- **Without GitLab Orbit:** about 400 REST API calls for a project with about 400 agent merge requests in 30 days,
-  one for each merge request, after you find them.
-  No REST API call lists the sessions of all users.
+The query language has no median function, so the agent gets the merged merge requests with their timestamps
+and computes the median time to merge itself:
+
+```gql orbit-query
+MATCH (a:AgentSession)
+  -[:CREATED_MR]->(mr:MergeRequest)
+WHERE mr.project_id = 278964 AND mr.created_at >= '2026-09-24T00:00:00Z'
+  AND mr.state = 'merged'
+RETURN a.flow_type, mr.iid, mr.created_at, mr.merged_at
+LIMIT 1000
+```
+
+For the merge requests that are still open after two weeks, with a failed head pipeline:
+
+```gql orbit-query
+MATCH (a:AgentSession)
+  -[:CREATED_MR]->(mr:MergeRequest)
+  -[:HAS_HEAD_PIPELINE]->(pl:Pipeline {status: 'failed'})
+WHERE mr.project_id = 278964 AND mr.state = 'opened'
+  AND mr.created_at >= '2026-09-24T00:00:00Z' AND mr.created_at < '2026-10-10T00:00:00Z'
+RETURN mr.iid, mr.title, a.flow_type
+LIMIT 100
+```
+
+- **With GitLab Orbit:** one prompt and three queries.
+- **Without GitLab Orbit:** no REST API call lists agent sessions or links a merge request to the flow that created it,
+  so you cannot find these merge requests or group them by flow type.
 
 ## Check projects against your security scan standard
 
@@ -306,6 +337,7 @@ The query language has no subqueries, so the agent runs a second query for the s
 ```gql orbit-query
 MATCH (s:SecurityScan)-[:IN_PROJECT]->(p:Project)
 WHERE p.full_path STARTS WITH 'gitlab-org/ci-cd/' AND s.created_at >= '2026-09-24T00:00:00Z'
+  AND s.status = 'succeeded'
 RETURN p.full_path, s.scan_type, count(s) AS scans
 LIMIT 1000
 ```
@@ -313,8 +345,9 @@ LIMIT 1000
 The answer lists the active projects that are missing each scan type.
 
 - **With GitLab Orbit:** two queries.
-- **Without GitLab Orbit:** at least 550 REST API calls for a group with about 280 active projects,
-  one for the pipelines and one for the security reports of each project.
+- **Without GitLab Orbit:** about 4,800 REST API calls for a group with about 230 public projects:
+  one to list the pipelines of each project, and one to list the jobs of each of the about 4,600 pipelines,
+  because no REST API call lists the security scans that ran.
 
 ## Find out if a failed job is flaky
 
@@ -332,10 +365,21 @@ job <docs-lint markdown>. Is it my change or a flaky job?
 
 ```gql orbit-query
 MATCH (j:Job {project_id: 278964, name: 'docs-lint markdown', ref: 'master'})
-WHERE j.created_at >= '2026-10-09T00:00:00Z'
+WHERE j.created_at >= '2026-10-10T00:00:00Z'
 RETURN j.status, j.failure_reason, count(j) AS jobs
 ORDER BY jobs DESC
 LIMIT 10
+```
+
+The other open merge requests that fail the job in their head pipeline:
+
+```gql orbit-query
+MATCH (mr:MergeRequest {project_id: 278964, state: 'opened'})
+  -[:HAS_HEAD_PIPELINE]->(pl:Pipeline)
+  -[:HAS_JOB]->(j:Job {name: 'docs-lint markdown', status: 'failed'})
+RETURN mr.iid, mr.title, j.failure_reason, j.created_at
+ORDER BY j.created_at DESC
+LIMIT 20
 ```
 
 To find out if the job fails in other projects too:
@@ -344,16 +388,16 @@ To find out if the job fails in other projects too:
 MATCH (j:Job {status: 'failed', name: 'docs-lint markdown'})
   -[:IN_PROJECT]->(p:Project)
 WHERE p.full_path STARTS WITH 'gitlab-org/'
-  AND j.created_at >= '2026-10-16T00:00:00Z'
+  AND j.created_at >= '2026-10-17T00:00:00Z'
 RETURN p.full_path, count(j) AS failures
 ORDER BY failures DESC
 LIMIT 20
 ```
 
 - **With GitLab Orbit:** one prompt and one query for each question.
-- **Without GitLab Orbit:** at least 890 REST API calls for a project that ran the job about 890 times
-  on the default branch in 14 days, one page of jobs for each pipeline,
-  because the jobs API does not filter by job name.
+- **Without GitLab Orbit:** at least 2,900 REST API calls for a project that ran about 2,900 pipelines
+  on the default branch in 14 days, one or more pages of jobs for each pipeline,
+  because the jobs API does not filter by job name. The job ran in about 800 of those pipelines.
 
 ## Unblock a release
 
@@ -366,24 +410,38 @@ Using GitLab Orbit, for the open merge requests in milestone <19.6> of
 - Who is assigned to the merge requests that fail each job?
 ```
 
+For the jobs in common, the agent gets the failed jobs of each head pipeline.
+It leaves out retried jobs and jobs that are allowed to fail:
+
 ```gql orbit-query
-MATCH (u:User)
-  -[:ASSIGNED]->(mr:MergeRequest)
+MATCH (mr:MergeRequest {project_id: 278964, state: 'opened'})
   -[:IN_MILESTONE]->(m:Milestone {title: '19.6'})
 MATCH (mr)-[:HAS_HEAD_PIPELINE]->(pl:Pipeline {status: 'failed'})
-  -[:HAS_JOB]->(j:Job {status: 'failed'})
-WHERE mr.state = 'opened' AND mr.project_id = 278964
-  AND j.allow_failure = false
-RETURN j.name, mr.iid, u.username
+  -[:HAS_JOB]->(j:Job {status: 'failed', allow_failure: false, retried: false})
+WHERE pl.created_at >= '2026-10-17T00:00:00Z'
+RETURN j.name, mr.iid
 ORDER BY j.name
-LIMIT 100
+LIMIT 1000
 ```
 
 The agent groups the rows by `j.name`, so a job that fails on many merge requests stands out.
+Then, for each of those jobs, it finds who is assigned to the merge requests that fail it:
 
-- **With GitLab Orbit:** one query.
-- **Without GitLab Orbit:** about 1,500 REST API calls for a milestone with about 1,250 open merge requests,
-  one for the head pipeline of each and one for the failed jobs of each failed pipeline.
+```gql orbit-query
+MATCH (u:User)
+  -[:ASSIGNED]->(mr:MergeRequest {project_id: 278964, state: 'opened'})
+  -[:IN_MILESTONE]->(m:Milestone {title: '19.6'})
+MATCH (mr)-[:HAS_HEAD_PIPELINE]->(pl:Pipeline {status: 'failed'})
+  -[:HAS_JOB]->(j:Job {name: 'e2e:test-on-cng', status: 'failed', allow_failure: false, retried: false})
+WHERE pl.created_at >= '2026-10-17T00:00:00Z'
+RETURN u.username, count(mr) AS mrs
+ORDER BY mrs DESC
+LIMIT 20
+```
+
+- **With GitLab Orbit:** one prompt and two queries.
+- **Without GitLab Orbit:** about 1,700 REST API calls for a milestone with about 1,400 open merge requests,
+  one for the head pipeline of each and one for the failed jobs of each of the about 280 failed pipelines.
   You then compare the jobs across merge requests.
 
 ## Find the right reviewer for a file
@@ -409,14 +467,26 @@ ORDER BY mr.iid DESC
 LIMIT 20
 ```
 
+Then it finds who approved the merged merge requests that changed the file:
+
+```gql orbit-query
+MATCH (u:User)
+  -[:APPROVED]->(mr:MergeRequest {state: 'merged'})
+  -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
+  -[:HAS_FILE]->(f:MergeRequestDiffFile {project_id: 278964, old_path: 'app/models/ability.rb'})
+RETURN u.username, count(mr) AS approvals
+ORDER BY approvals DESC
+LIMIT 10
+```
+
 `HAS_LATEST_DIFF` follows the current diff version of each merge request.
 `HAS_DIFF` covers every diff version, so it also matches a file that only an earlier version changed,
 and it can return one row for each version.
 
 - **With GitLab Orbit:** one query for each question.
-- **Without GitLab Orbit:** about 160 REST API calls for a file that about 80 merged merge requests changed,
-  one to find each merge request from its commit and one for its comments.
-  No REST API call searches review comments by file.
+- **Without GitLab Orbit:** about 470 REST API calls for a file that about 300 commits and about 80 merged merge requests changed:
+  one for each commit to find its merge request, then one for the comments and one for the approvals of each merge request.
+  No REST API call filters comments by the file that a merge request changed.
 
 ## Related topics
 
