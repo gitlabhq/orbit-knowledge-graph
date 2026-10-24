@@ -13,7 +13,9 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Image signing (keyless cosign, canonical project only) | `scripts/release/publish-manifest.sh`, `scripts/release/sign-image.sh`; runbook in `docs/dev/runbooks/image_signing.md` |
 | Image hardening (non-root user, Dockerfile scan, release gate, Vulnerability Report) | `Dockerfile`, `dockerfile-scan`, `release-image-scan`, `container_scanning` in `.gitlab-ci.yml`; runbook in `docs/dev/runbooks/image_signing.md` |
 | Query language reference | `docs/source/remote/queries/query-language.md` |
-| Orbit query frontend | `crates/query-engine/compiler/src/passes/frontend/`; design in `docs/architecture/querying.md` |
+| Query architecture overview | `docs/architecture/querying.md` |
+| Query frontends (JSON Query DSL and GQL) | `crates/query-engine/compiler/src/passes/frontend/`; design in `docs/architecture/query-languages.md` |
+| Graph query engine (data model, pipelines, phases) | `crates/query-engine/compiler/src/config.rs`, `crates/query-data-model/`; design in `docs/architecture/query-engine.md` |
 | SDLC indexing pipeline | `docs/architecture/sdlc-indexing.md`, `docs/dev/runbooks/sdlc_indexing.md` |
 | Code indexing pipeline | `docs/architecture/code-indexing.md`, `docs/dev/runbooks/code_indexing.md` |
 | Namespace deletion pipeline | `docs/architecture/sdlc-indexing.md` |
@@ -44,7 +46,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Ontology overlays for speculative schema shapes | `config/seeds/overlays/<name>/` (a directory mirroring `config/ontology/`, deep-merged over it; run data correctness against one with `mise test:integration:overlay <name>`) |
 | Graph DDL (ClickHouse, versioned) | `config/graph.sql` |
 | Graph DDL (ClickHouse, persistent) | `config/graph_persistent.sql` (durable unversioned tables + materialized views created once at boot); `build_unversioned_definitions` in `crates/orbit-migrations/src/schema/translate.rs` builds all kinds |
-| Denormalized joins (`settings.denormalized_joins` in `schema.yaml`) | `crates/ontology/src/denormalized.rs` (declarations), `crates/query-data-model/src/implementations/clickhouse/layout/derive.rs` (tables and source bindings), `crates/orbit-migrations/src/schema/translate.rs` (DDL rendering); design in the [pre-rewrite graph engine doc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/querying/graph_engine.md#denormalized-joins) |
+| Denormalized joins (`settings.denormalized_joins` in `schema.yaml`) | `crates/ontology/src/denormalized.rs` (declarations), `crates/query-data-model/src/implementations/clickhouse/layout/derive.rs` (tables and source bindings), `crates/orbit-migrations/src/schema/translate.rs` (DDL rendering); design in `docs/architecture/query-engine.md` (storage model) |
 | Refreshable-view MiniJinja SQL templates | `config/ontology/sql/*.sql.j2` (ClickHouse SELECT templates rendered from the schema version and ontology-derived graph table metadata) |
 | Pinned versions | `config/versions.yaml` (`schema` u32 bumped via `mise schema:bump`; `query_dsl`, `raw_output_format`, `toon_output_format`, `gql_output_format` semvers enforced by `scripts/checks/check-pinned-version.sh`; `gitlab_system_note_actions` upstream SHA; `vendored:` section for DuckDB and other vendored deps with sub-pins, artifact dirs, and scripts; embedded at compile time as `orbit_versions::VERSIONS`) |
 | Vendored dependency system | `docs/dev/runbooks/vendored_dependencies.md` (lifecycle, YAML contract, script contract, validation layers); generic runner in `scripts/vendored/run.sh` |
