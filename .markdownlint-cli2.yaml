@@ -3,6 +3,7 @@
 ignores:
   - "CHANGELOG.md"
   - "LICENSE.md"
+  - "docs/site/**"
 config:
   # First, set the default
   default: true

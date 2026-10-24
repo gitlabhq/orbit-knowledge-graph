@@ -1,17 +1,11 @@
-<!-- markdownlint-disable MD041 -->
-<div align="center">
+---
+title: Querying
+description: How Orbit turns a graph question into one bounded, authorized query.
+authors:
+  - michaelusa
+---
 
-<img src="../../assets/orbit-logo.png" width="120" height="120" alt="GitLab Orbit logo">
-
-# GitLab Orbit: Querying
-
-**How a graph question becomes one bounded, authorized query**
-
-[Overview](README.md) · [Query languages](querying.md) · [Graph query engine](engine.md) · [Query language reference](../../source/remote/queries/query-language.md)
-
-</div>
-
-Orbit answers a graph question with one bounded, authorized ClickHouse query.
+**TL;DR:** Orbit answers a graph question with one bounded, authorized ClickHouse query.
 
 1. A caller writes a query in the JSON Query DSL or in GQL, a read-only text language based on openCypher 9.
 1. GitLab Rails authenticates the caller and finds the namespaces they can read.
@@ -97,8 +91,8 @@ web --> rails : redaction checks
 | Hydration | Fetches the properties of discovered nodes, under the same authorization rules. |
 | Output | Formats the result as raw JSON, as compact text for LLMs, or as a GQL table. |
 
-The [Security](../security.md) design document covers the authorization layers.
-[ADR 008](../decisions/008_workhorse_query_acceleration.md) explains why the gRPC stream runs in Workhorse.
+The [Security](security.md) design document covers the authorization layers.
+[ADR 008](../design-documents/decisions/008_workhorse_query_acceleration.md) explains why the gRPC stream runs in Workhorse.
 
 ---
 
@@ -123,7 +117,7 @@ Queries can also:
 - Page through results with `SKIP` and `LIMIT`.
 - Return the compiled SQL to authorized users for debugging.
 
-The [query language reference](../../source/remote/queries/query-language.md) lists every field, operator, and limit.
+The [query language reference](../source/remote/queries/query-language.md) lists every field, operator, and limit.
 
 ---
 
@@ -135,7 +129,7 @@ Each part can change on its own.
 - **Query languages.** A frontend parses one language into the shared input.
   Adding a language adds one frontend.
   Retiring the JSON Query DSL removes one frontend, and the other phases do not change.
-  See [Query languages](querying.md).
+  See [Query languages](query-languages.md).
 - **Storage backends.** The compiler reads a query data model, not table names.
   ClickHouse serves Orbit Remote.
   DuckDB compiles the same queries against the local graph schema, and the code-graph test suites use it.
@@ -155,9 +149,9 @@ Each part can change on its own.
 - **gRPC.** `ExecuteQuery` is the only path from a query to SQL.
   Rails and Workhorse are its callers.
 - **REST and MCP.** Rails serves `/api/v4/orbit/*` and the Orbit MCP tools.
-  The [API reference](../../source/remote/access/api.md) lists the endpoints.
+  The [API reference](../source/remote/access/api.md) lists the endpoints.
 - **Agent commands.** Agents discover graph capabilities through a short command catalog instead of long tool descriptions.
-  See [ADR 011](../decisions/011_agent_command_surface.md).
+  See [ADR 011](../design-documents/decisions/011_agent_command_surface.md).
 - **Named queries.** `config/named_queries/` holds server-defined queries in both languages.
   Clients pass a name and parameters, and the server compiles the spelling for the active language.
   The Orbit dashboard and entity context expansion use them.
@@ -165,7 +159,7 @@ Each part can change on its own.
   The JSON mode uses `get_graph_schema`, and GQL uses `CALL db.schema()`.
 
 Each user has one active language, which a per-user flag in Rails selects.
-[Query languages](querying.md#language-selection) describes the rules.
+[Query languages](query-languages.md#language-selection) describes the rules.
 
 ---
 
@@ -173,16 +167,15 @@ Each user has one active language, which a per-user flag in Rails selects.
 
 Every query type returns the same envelope: nodes, edges, optional aggregation columns and rows, and pagination metadata.
 Nodes appear once, and edges connect node instances.
-[ADR 004](../decisions/004_unified_response_schema.md) defines the contract, and its version is the `raw_output_format` pin in `config/versions.yaml`.
+[ADR 004](../design-documents/decisions/004_unified_response_schema.md) defines the contract, and its version is the `raw_output_format` pin in `config/versions.yaml`.
 
-The same result can render as raw JSON, as [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text for LLMs, or as a cypher-shell style table for GQL callers ([ADR 019](../decisions/019_gql_response_format.md)).
+The same result can render as raw JSON, as [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text for LLMs, or as a cypher-shell style table for GQL callers ([ADR 019](../design-documents/decisions/019_gql_response_format.md)).
 
 ---
 
-## Design documents
+## Pages
 
 | Document | Covers |
 | --- | --- |
-| [Query languages](querying.md) | The JSON Query DSL and GQL: why each exists, how each lowers to the shared input, and how Rails picks one |
-| [Graph query engine](engine.md) | Data model and storage, compiler phases, planning, current-state reads, and guarantees |
-| [Duo and Orbit prompt routing](../duo_orbit_prompt_routing.md) | When Duo agents reach the Orbit MCP tools |
+| [Query languages](query-languages.md) | The JSON Query DSL and GQL: why each exists, how each lowers to the shared input, and how Rails picks one |
+| [Graph query engine](query-engine.md) | Data model and storage, compiler phases, planning, current-state reads, and guarantees |

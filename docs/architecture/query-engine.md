@@ -1,24 +1,16 @@
-<!-- markdownlint-disable MD041 -->
-<div align="center">
+---
+title: Graph query engine
+description: How the engine turns a graph query into parameterized SQL.
+authors:
+  - michaelusa
+---
 
-<img src="../../assets/orbit-logo.png" width="120" height="120" alt="GitLab Orbit logo">
-
-# GitLab Orbit: Graph Query Engine
-
-**From a graph query to parameterized SQL**
-
-[Overview](README.md) · [Query languages](querying.md) · [Graph query engine](engine.md) · [Query language reference](../../source/remote/queries/query-language.md)
-
-</div>
-
-## Overview
-
-GitLab Orbit's query engine turns a graph query into parameterized SQL over typed node tables and adjacency-ordered edge tables.
+**TL;DR:** GitLab Orbit's query engine turns a graph query into parameterized SQL over typed node tables and adjacency-ordered edge tables.
 
 Data flows through the engine in these steps:
 
 1. A frontend like JSON or GQL parses a graph query into a shared input.
-   The [Query languages](querying.md) doc describes the frontends.
+   The [Query languages](query-languages.md) doc describes the frontends.
 1. The engine validates the shared input against Orbit's GitLab ontology, GitLab permissions, and general querying limits.
 1. The query planner attempts to pick the most efficient way to execute a graph query.
 1. The selected query plan is turned into a SQL syntax tree.
@@ -29,7 +21,7 @@ Data flows through the engine in these steps:
 ClickHouse gives Orbit fast aggregations for analytical queries.
 The engine adds property-graph semantics on top: traversals, paths, neighborhoods, and grouped counts.
 Orbit needs no separate graph database.
-[ADR 000](../decisions/000_clickhouse_graph_storage.md) records that decision.
+[ADR 000](../design-documents/decisions/000_clickhouse_graph_storage.md) records that decision.
 
 Every query gets these guarantees:
 
@@ -68,7 +60,7 @@ It starts with the data model, and follows one query through each phase, from te
 | Data | [Query data model](#query-data-model) | The engine's read-only view of one schema version: the graph, the ClickHouse tables that store it, and its authorization rules | None |
 | Data | [Storage model](#storage-model) | Node tables, edge tables, and row versions in ClickHouse, inside the query data model | None |
 | Structure | [Pipelines](#pipelines) | Ordered lists of phases, built from reusable segments, one per frontend and backend | All |
-| Querying | [Frontends](querying.md) | Parse GQL or JSON into the shared input, in their own doc | `gql_parse`, `json_dsl_parse` |
+| Querying | [Frontends](query-languages.md) | Parse GQL or JSON into the shared input, in their own doc | `gql_parse`, `json_dsl_parse` |
 | Querying | [Validation](#phases) | Rejects bad queries early, then normalizes names and types | `validate`, `validate_relationships`, `normalize` |
 | Querying | [Restriction and scope](#phases) | Applies who is asking, and narrows the query to the namespaces it touches | `restrict` |
 | Querying | [Planning](#phases) | Picks how to read each node and relationship | `plan` |
@@ -262,7 +254,6 @@ The DuckDB data model follows the same path for local compilation and the code-g
 
 </details>
 
-
 The code lives in `crates/query-data-model/`.
 
 ### Storage model
@@ -320,8 +311,8 @@ erDiagram
     gl_merge_request ||--o{ gl_edge : "target_id = id"
 ```
 
-[Data model](../data_model.md) describes the entities and relationships.
-[Schema management](../schema_management.md) describes how tables change between versions.
+[Data model](data-model.md) describes the entities and relationships.
+[Schema management](schema-evolution.md) describes how tables change between versions.
 
 ---
 
@@ -482,7 +473,7 @@ Validation checks these categories:
   It also orders filters into stable predicate lists, so the same query always produces the same SQL.
 
 The limits live as Rust constants, and a build script checks that the JSON schema states the same ones.
-The [query language reference](../../source/remote/queries/query-language.md#validation-limits) lists them all.
+The [query language reference](../source/remote/queries/query-language.md#validation-limits) lists them all.
 
 </details>
 
@@ -820,7 +811,7 @@ end note
   If any namespaced read lacks a valid filter, the engine rejects the query instead of running it.
 - `enforce` adds the columns that redaction needs, so Rails can check rows that SQL can't decide on its own, like confidential items.
 
-The [Security](../security.md) design document describes the full authorization model and the redaction layer.
+The [Security](security.md) design document describes the full authorization model and the redaction layer.
 
 </details>
 
@@ -918,20 +909,19 @@ Server configuration can tighten these limits, but never raise them past the cei
 
 Each query reports the time of each phase, the rows it returned, and the rows, bytes, and memory that ClickHouse used.
 Authorized callers can see the compiled SQL and its parameters.
-[Observability](../observability.md) lists the metrics.
 
 ### Testing
 
 Query scenarios check results in both languages.
 Plan-shape fixtures check the plan the engine picks.
 Fuzz targets check the frontends.
-[Testing](../testing.md) describes each layer and its CI job.
+[Testing](testing.md) describes each layer and its CI job.
 
 ### Related documents
 
-- [Querying overview](README.md)
-- [Query languages](querying.md)
-- [Security](../security.md)
-- [Data model](../data_model.md)
-- [Schema management](../schema_management.md)
-- [ADR 000: ClickHouse as graph storage](../decisions/000_clickhouse_graph_storage.md)
+- [Querying overview](querying.md)
+- [Query languages](query-languages.md)
+- [Security](security.md)
+- [Data model](data-model.md)
+- [Schema management](schema-evolution.md)
+- [ADR 000: ClickHouse as graph storage](../design-documents/decisions/000_clickhouse_graph_storage.md)

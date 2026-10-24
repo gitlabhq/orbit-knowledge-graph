@@ -1,17 +1,11 @@
-<!-- markdownlint-disable MD041 -->
-<div align="center">
+---
+title: Query languages
+description: The JSON Query DSL and GQL, and how both compile through one engine.
+authors:
+  - michaelusa
+---
 
-<img src="../../assets/orbit-logo.png" width="120" height="120" alt="GitLab Orbit logo">
-
-# GitLab Orbit: Query Languages
-
-**Two query languages, one engine**
-
-[Overview](README.md) · [Query languages](querying.md) · [Graph query engine](engine.md) · [Query language reference](../../source/remote/queries/query-language.md)
-
-</div>
-
-Orbit Remote accepts two query languages.
+**TL;DR:** Orbit Remote accepts two query languages.
 Both compile through one shared compiler.
 
 1. The JSON Query DSL is a JSON object that follows a published schema.
@@ -19,7 +13,7 @@ Both compile through one shared compiler.
 1. GQL is read-only text based on openCypher 9 syntax, such as `MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)`.
 1. Each language has its own frontend.
    The frontend parses the query and lowers it into the shared input.
-1. From the shared input on, the [graph query engine](engine.md) treats every query the same way.
+1. From the shared input on, the [graph query engine](query-engine.md) treats every query the same way.
    It validates, secures, plans, and renders it.
 
 A language changes how a caller writes a query, not what the engine can do.
@@ -106,7 +100,7 @@ JSON names the type, and GQL infers it from the statement.
 | Path finding | What is the shortest path between these nodes? | A named `ANY SHORTEST` pattern |
 | Neighbors | What is connected to this node? | One relationship to an unlabeled, unfiltered endpoint |
 
-The [query language reference](../../source/remote/queries/query-language.md) documents every field, operator, and limit.
+The [query language reference](../source/remote/queries/query-language.md) documents every field, operator, and limit.
 
 ---
 
@@ -264,4 +258,4 @@ Every language-specific step lives in its frontend, so each language is one modu
 
 Query scenarios state each query once in each language, and both spellings must return the same result.
 A grammar fuzz target generates statements from the GQL grammar, and other fuzz targets send arbitrary input through both frontends.
-[Testing](../testing.md) describes these layers.
+[Testing](testing.md) describes these layers.

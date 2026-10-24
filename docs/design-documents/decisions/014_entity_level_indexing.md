@@ -310,8 +310,8 @@ for the same scope. Hash cannot benefit from ClickHouse's primary key index.
 
 ## References
 
-- [SDLC indexing design document](../indexing/sdlc_indexing.md)
-- [Observability design document](../observability.md)
+- [SDLC indexing design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md)
+- [Observability design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/observability.md)
 - Handler implementation: `crates/indexer/src/modules/sdlc/handler/entity.rs`
 - Partitioning logic: `crates/indexer/src/modules/sdlc/partitioning.rs`
 - Range vs hash partition benchmarks: `siphon_p_ci_builds` (100M rows, ClickHouse Cloud dev instance, 2026-05-08)

@@ -17,7 +17,7 @@ Accepted (recorded retroactively; this decision predates the numbered ADR series
 
 Orbit was originally built on [Kuzu](https://docs.kuzudb.com/), a
 file-embedded graph database, as a local-only desktop tool (see
-[previous design](../previous_design/README.md)). In October 2025, KuzuDB
+[previous design](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/previous_design/README.md)). In October 2025, KuzuDB
 [was archived](https://www.theregister.com/2025/10/14/kuzudb_abandoned/) by its
 maintainers, forcing a storage decision for the deployed service.
 
@@ -105,8 +105,8 @@ maintenance perspective to be too high. We keep an eye on
 
 - Graph nodes live in typed `gl_*` ClickHouse tables; relationships live in
   ontology-configured edge tables with adjacency-optimized ordering and
-  projections. See the [data model](../data_model.md) and
-  [Graph Query Engine](../querying/engine.md) design documents for the
+  projections. See the [data model](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/data_model.md) and
+  [Graph Query Engine](../../architecture/query-engine.md) design documents for the
   as-built implementation.
 - The query layer compiles an intermediate JSON query language into
   parameterized ClickHouse SQL instead of executing Cypher natively.

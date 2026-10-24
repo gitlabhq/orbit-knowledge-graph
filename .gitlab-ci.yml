@@ -705,9 +705,9 @@ check_docs_markdown:
     - vale --minAlertLevel error docs/source
     # Lint Markdown. docs/source is user-facing; root and docs/dev are contributor
     # docs that previously reached CI unlinted (design-documents deferred: #981).
-    - markdownlint-cli2 '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'
+    - markdownlint-cli2 '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md' 'docs/architecture/**/*.md'
     # Check links
-    - lychee --offline --include-fragments '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'
+    - lychee --offline --include-fragments '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md' 'docs/architecture/**/*.md'
 
 check_docs_i18n_markdown:
   stage: docs
@@ -727,6 +727,54 @@ check_docs_i18n_markdown:
     - markdownlint-cli2 "docs-locale/${LOCALE_CODE}/source/**/*.md"
     # Check links
     - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/source/**/*.md
+
+.architecture-site:
+  stage: docs
+  needs: []
+  image: oven/bun:1.3.14
+  variables:
+    GIT_DEPTH: "0"
+  cache:
+    key:
+      files:
+        - docs/site/bun.lock
+    paths:
+      - docs/site/.bun-cache
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git > /dev/null
+    - cd docs/site
+    - bun install --frozen-lockfile --cache-dir .bun-cache
+  script:
+    - bun run test
+    - bun run build
+    - bun run typecheck
+    - mv packages/web/public "$CI_PROJECT_DIR/public"
+  artifacts:
+    paths:
+      - public
+
+pages:
+  extends: .architecture-site
+  rules:
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
+      changes:
+        - docs/architecture/**/*
+        - docs/site/**/*
+
+pages:preview:
+  extends: .architecture-site
+  pages:
+    path_prefix: "$CI_COMMIT_REF_SLUG"
+    expire_in: 1 week
+  environment:
+    name: "architecture/$CI_COMMIT_REF_SLUG"
+    url: "$CI_PAGES_URL"
+  rules:
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - docs/architecture/**/*
+        - docs/site/**/*
+      interruptible: true
 
 .docs-gitlab-com:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
