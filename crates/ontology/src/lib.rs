@@ -1835,21 +1835,8 @@ mod tests {
 
     fn all_pipelines(ontology: &Ontology) -> Vec<&Pipeline> {
         ontology
-            .nodes
-            .values()
-            .flat_map(|node| node.pipelines.iter())
-            .chain(
-                ontology
-                    .edge_pipelines
-                    .values()
-                    .flat_map(|pipelines| pipelines.iter()),
-            )
-            .chain(
-                ontology
-                    .derived_entities
-                    .values()
-                    .flat_map(|derived| derived.pipelines.iter()),
-            )
+            .iter_pipelines_by_owner()
+            .map(|(_, pipeline)| pipeline)
             .collect()
     }
 

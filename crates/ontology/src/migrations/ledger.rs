@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+use super::EdgeRows;
 use super::scope::{LedgerScope, MigrationScope, sdlc_entity_names};
 use crate::Ontology;
 
@@ -125,6 +126,8 @@ pub struct MigrationEntry {
     pub scope: LedgerScope,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub entities: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "EdgeRows::is_changed")]
+    pub edge_rows: EdgeRows,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -157,12 +160,14 @@ mod tests {
                     version: 5,
                     scope: LedgerScope::All,
                     entities: BTreeSet::new(),
+                    edge_rows: EdgeRows::Changed,
                     note: None,
                 },
                 MigrationEntry {
                     version: 5,
                     scope: LedgerScope::All,
                     entities: BTreeSet::new(),
+                    edge_rows: EdgeRows::Changed,
                     note: None,
                 },
             ],
@@ -180,12 +185,14 @@ mod tests {
                     version: 82,
                     scope: LedgerScope::Code,
                     entities: BTreeSet::new(),
+                    edge_rows: EdgeRows::Changed,
                     note: None,
                 },
                 MigrationEntry {
                     version: 81,
                     scope: LedgerScope::All,
                     entities: BTreeSet::new(),
+                    edge_rows: EdgeRows::Changed,
                     note: None,
                 },
             ],
@@ -201,6 +208,7 @@ mod tests {
                 version: 5,
                 scope: LedgerScope::All,
                 entities: BTreeSet::new(),
+                edge_rows: EdgeRows::Changed,
                 note: None,
             }],
         };
@@ -216,6 +224,7 @@ mod tests {
                 version: 1,
                 scope: LedgerScope::Code,
                 entities: entities(&["Note"]),
+                edge_rows: EdgeRows::Changed,
                 note: None,
             }],
         };
@@ -231,6 +240,7 @@ mod tests {
                 version: 1,
                 scope: LedgerScope::None,
                 entities: BTreeSet::new(),
+                edge_rows: EdgeRows::Changed,
                 note: None,
             }],
         };
@@ -246,6 +256,7 @@ mod tests {
                 version: 1,
                 scope: LedgerScope::None,
                 entities: BTreeSet::new(),
+                edge_rows: EdgeRows::Changed,
                 note: Some("   ".to_string()),
             }],
         };
@@ -261,6 +272,7 @@ mod tests {
                 version: 1,
                 scope: LedgerScope::None,
                 entities: BTreeSet::new(),
+                edge_rows: EdgeRows::Changed,
                 note: Some("output-neutral extract-SQL refactor".to_string()),
             }],
         };
@@ -281,6 +293,7 @@ mod tests {
                 version: 1,
                 scope: LedgerScope::Sdlc,
                 entities: entities(&["Ghost"]),
+                edge_rows: EdgeRows::Changed,
                 note: None,
             }],
         };

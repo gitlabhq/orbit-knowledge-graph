@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use crate::Ontology;
-use crate::etl::EtlScope;
+use crate::etl::{EtlScope, Pipeline};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PipelineDescriptor {
@@ -15,43 +15,35 @@ pub struct PipelineDescriptor {
 
 impl Ontology {
     pub fn pipeline_descriptors(&self) -> Vec<PipelineDescriptor> {
-        let mut descriptors = Vec::new();
-        for node in self.nodes() {
-            for pipeline in &node.pipelines {
-                descriptors.push(self.pipeline_descriptor(
-                    pipeline.name.clone(),
-                    pipeline.scope,
-                    &node.name,
-                ));
-            }
-        }
-        for (kind, pipeline) in self.edge_etl_configs() {
-            descriptors.push(self.pipeline_descriptor(pipeline.name.clone(), pipeline.scope, kind));
-        }
-        for derived in self.derived_entities() {
-            for pipeline in &derived.pipelines {
-                descriptors.push(self.pipeline_descriptor(
-                    pipeline.name.clone(),
-                    pipeline.scope,
-                    &derived.name,
-                ));
-            }
-        }
-        descriptors
+        self.iter_pipelines_by_owner()
+            .map(|(owner, pipeline)| self.describe_pipeline(owner, pipeline))
+            .collect()
     }
 
-    fn pipeline_descriptor(
-        &self,
-        name: String,
-        scope: EtlScope,
-        entity: &str,
-    ) -> PipelineDescriptor {
-        let mut reindex_targets = self.relationship_kinds_emitted_by(entity);
-        reindex_targets.insert(entity.to_string());
+    pub fn iter_pipelines_by_owner(&self) -> impl Iterator<Item = (&str, &Pipeline)> {
+        let node_pipelines = self.nodes().flat_map(|node| {
+            node.pipelines
+                .iter()
+                .map(move |pipeline| (node.name.as_str(), pipeline))
+        });
+        let derived_pipelines = self.derived_entities().flat_map(|derived| {
+            derived
+                .pipelines
+                .iter()
+                .map(move |pipeline| (derived.name.as_str(), pipeline))
+        });
+        node_pipelines
+            .chain(self.edge_etl_configs())
+            .chain(derived_pipelines)
+    }
+
+    fn describe_pipeline(&self, owner: &str, pipeline: &Pipeline) -> PipelineDescriptor {
+        let mut reindex_targets = self.relationship_kinds_emitted_by(owner);
+        reindex_targets.insert(owner.to_string());
         PipelineDescriptor {
-            name,
-            scope,
-            entity: entity.to_string(),
+            name: pipeline.name.clone(),
+            scope: pipeline.scope,
+            entity: owner.to_string(),
             reindex_targets,
         }
     }

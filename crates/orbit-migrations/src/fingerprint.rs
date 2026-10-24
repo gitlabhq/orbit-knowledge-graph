@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
 use ontology::Ontology;
-use ontology::migrations::{Fingerprints, sha256_hex, source_fingerprints};
+use ontology::migrations::{
+    Fingerprints, hash_pipeline_edge_rows, sha256_hex, source_fingerprints,
+};
 use query_data_model::DataModelError;
 
 use crate::schema::{GraphSchema, translate};
@@ -10,6 +12,7 @@ pub fn current_fingerprints(ontology: &Ontology) -> Result<Fingerprints, DataMod
     Ok(Fingerprints {
         sources: source_fingerprints(),
         ddl: ddl_fingerprints(ontology)?,
+        edge_rows: hash_pipeline_edge_rows(ontology),
         auxiliary_schema: auxiliary_schema_fingerprints(ontology)?,
     })
 }

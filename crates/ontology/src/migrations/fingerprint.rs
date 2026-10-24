@@ -23,6 +23,8 @@ pub struct Fingerprints {
     pub sources: BTreeMap<String, String>,
     pub ddl: BTreeMap<String, String>,
     #[serde(default)]
+    pub edge_rows: BTreeMap<String, String>,
+    #[serde(default)]
     pub auxiliary_schema: BTreeMap<String, String>,
 }
 
@@ -47,6 +49,11 @@ impl Fingerprints {
             get_diff_keys_between(&self.sources, &base.sources),
             get_diff_keys_between(&self.ddl, &base.ddl),
         )
+    }
+
+    #[must_use]
+    pub fn get_edge_row_diff_keys_between(&self, base: &Fingerprints) -> BTreeSet<String> {
+        get_diff_keys_between(&self.edge_rows, &base.edge_rows)
     }
 
     #[must_use]
@@ -305,6 +312,7 @@ mod tests {
         let base = Fingerprints {
             sources: BTreeMap::from([("a".into(), "1".into()), ("b".into(), "2".into())]),
             ddl: BTreeMap::from([("t".into(), "9".into())]),
+            edge_rows: BTreeMap::new(),
             auxiliary_schema: BTreeMap::new(),
         };
         let current = Fingerprints {
@@ -314,6 +322,7 @@ mod tests {
                 ("c".into(), "3".into()),
             ]),
             ddl: BTreeMap::new(),
+            edge_rows: BTreeMap::new(),
             auxiliary_schema: BTreeMap::new(),
         };
         let (sources, ddl) = current.get_versioned_diff_keys_between(&base);
