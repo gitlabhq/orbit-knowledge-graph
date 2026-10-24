@@ -16,11 +16,22 @@ title: GitLab Orbit prompt examples
 Send these prompts to GitLab Duo Chat, or to an agent that uses the [GitLab Orbit CLI](cli.md)
 or the [GitLab Model Context Protocol (MCP) endpoint](agents/mcp.md).
 Start the first prompt with `Using GitLab Orbit`, and replace the values in `<angle brackets>`.
-To check an answer, run the [query](queries/query-language.md) with `glab orbit query "<query>"`.
-The queries run on GitLab.com, in the `gitlab-org` group and the `gitlab-org/gitlab` project
-(`project_id: 278964`), where the production environment is `gprd`.
-To find your project ID, see [bounded nodes](queries/query-language.md#bounded-nodes).
-Each **Without GitLab Orbit** line counts REST API calls.
+
+Each example also shows the [queries](queries/query-language.md) that the agent runs.
+To check an answer, run a query with `glab orbit query "<query>"`.
+
+The queries run on GitLab.com, in the `gitlab-org` group.
+They return rows only if you have the Reporter, Security Manager, Developer, Maintainer, or Owner role in that group.
+To run a query in your own group, change these values:
+
+- `project_id: 278964`, the ID of the `gitlab-org/gitlab` project, to the ID of your project.
+  To find the ID, see [bounded nodes](queries/query-language.md#bounded-nodes).
+- `gitlab-org/` in `full_path` and `import_path` filters, to the path of your group.
+- The values of `branch` and `ref` filters, to the default branch of your project.
+- `gprd`, the production environment of `gitlab-org/gitlab`, to the name of your production environment.
+- File paths, class names, job names, milestones, and dates, to values from your project.
+
+Each **Without GitLab Orbit** line counts the REST API calls for the same answer.
 With the GraphQL API, some of these lookups take fewer calls.
 
 ## Change a class hierarchy safely
