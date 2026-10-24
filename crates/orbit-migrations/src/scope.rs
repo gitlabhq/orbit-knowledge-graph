@@ -50,7 +50,6 @@ impl MigrationScope {
         }
     }
 
-    #[must_use]
     pub fn keeps_edge_rows(&self) -> bool {
         matches!(
             self,

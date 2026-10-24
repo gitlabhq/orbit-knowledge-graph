@@ -15,17 +15,14 @@ pub enum EdgeRows {
 }
 
 impl EdgeRows {
-    #[must_use]
     pub fn is_changed(&self) -> bool {
         *self == Self::Changed
     }
 
-    #[must_use]
     pub fn covers(self, required: Self) -> bool {
         self.is_changed() || !required.is_changed()
     }
 
-    #[must_use]
     pub fn widened_with(self, other: Self) -> Self {
         if self.is_changed() || other.is_changed() {
             Self::Changed
@@ -35,7 +32,6 @@ impl EdgeRows {
     }
 }
 
-#[must_use]
 pub fn hash_pipeline_edge_rows(ontology: &Ontology) -> BTreeMap<String, String> {
     ontology
         .iter_pipelines_by_owner()
@@ -46,7 +42,6 @@ pub fn hash_pipeline_edge_rows(ontology: &Ontology) -> BTreeMap<String, String> 
         .collect()
 }
 
-#[must_use]
 pub fn derive_edge_rows(
     ontology: &Ontology,
     current: &Fingerprints,

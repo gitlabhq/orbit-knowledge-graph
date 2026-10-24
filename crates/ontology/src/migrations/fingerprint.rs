@@ -51,7 +51,6 @@ impl Fingerprints {
         )
     }
 
-    #[must_use]
     pub fn get_edge_row_diff_keys_between(&self, base: &Fingerprints) -> BTreeSet<String> {
         get_diff_keys_between(&self.edge_rows, &base.edge_rows)
     }
