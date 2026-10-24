@@ -6,12 +6,12 @@ use crate::passes::lower::predicates::{column, predicate};
 use crate::passes::lower::{EmitOutput, graph};
 use crate::passes::plan::query_types::aggregation::{AggregationPlan, Group};
 use crate::passes::plan::{Aggregation, Plan};
-use crate::scope::QueryScope;
+use crate::tp_bounds::TpBounds;
 
 pub(crate) fn emit(
     plan: &Plan<Aggregation>,
     input: &Input,
-    scope: Option<&QueryScope>,
+    tp_bounds: Option<&TpBounds>,
 ) -> Result<Emitted> {
     let result = &plan.operation.result;
     let mut read = super::super::redaction_columns(plan, &plan.operation.execution);
@@ -25,7 +25,7 @@ pub(crate) fn emit(
             .iter()
             .filter_map(|measure| measure.argument.clone()),
     );
-    let mut output = graph::execute(&plan.operation.execution, &read, scope);
+    let mut output = graph::execute(&plan.operation.execution, &read, tp_bounds);
     let nodes = output.take_bindings(plan, input)?;
     let query = aggregation(&plan.operation.result, output, input.limit);
     let stable_order = query.group_by.iter().cloned().map(OrderExpr::asc).collect();
