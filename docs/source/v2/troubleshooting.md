@@ -59,16 +59,18 @@ On Linux, `orbit` might fail to start with an error that states:
 orbit: /lib64/libc.so.6: version `GLIBC_2.28' not found (required by orbit)
 ```
 
-This issue occurs when the glibc version is earlier than 2.28.
+This issue occurs when the glibc version is earlier than 2.28, with the standalone `orbit` binary.
 The default build needs glibc 2.28 or later, for example RHEL 8, Debian 10, or Ubuntu 20.04.
+`glab orbit` and the `@gitlab/orbit` npm package always use the static musl build on Linux, so they do not have this issue.
 
-To resolve this issue, install the static musl build:
+To resolve this issue, use `glab orbit`, or install the static musl build:
 
 ```shell
 curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash -s -- --libc musl
 ```
 
-The `@gitlab/orbit` npm package always uses the musl build on Linux.
+Then run `orbit` commands directly.
+`glab orbit` uses its own copy of the GitLab Orbit CLI, not the binary that `install.sh` installs.
 
 ## GitLab Orbit setup and agent connection
 
