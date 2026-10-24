@@ -44,6 +44,18 @@ Your agent answers with a few graph queries in place of many file reads and API 
 - [Get only the data you can access](security.md#how-gitlab-orbit-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions.
 {.product-cards}
 
+## About GitLab Orbit
+
+- <img src="img/orbit-video-how-it-works-v19_6.png" alt="Thumbnail of the GitLab Orbit architecture video." width="640" height="360">[How GitLab Orbit works](https://www.youtube.com/watch?v=YtPc8kOmyi0)<br>The architecture of GitLab Orbit, from indexing to queries.
+- <img src="img/orbit-video-deep-dive-v19_6.png" alt="Thumbnail of the GitLab Orbit technical deep dive video." width="640" height="360">[How we built GitLab Orbit](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>A technical deep dive into the context graph.
+{.product-cards .product-cards-2 .product-video-cards}
+
+<!-- Videos published on 2026-07-06 and 2026-06-26 -->
+
+- [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
+- [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
+{.product-cards .product-cards-2}
+
 ## Questions GitLab Orbit can answer
 
 - [Review a merge request with proof](prompt-examples.md#review-a-merge-request-with-proof):
@@ -57,24 +69,18 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 For more examples, see [prompt examples](prompt-examples.md).
 
-- <img src="img/orbit-video-how-it-works-v19_6.png" alt="Thumbnail of the GitLab Orbit architecture video." width="640" height="360">[How GitLab Orbit works](https://www.youtube.com/watch?v=YtPc8kOmyi0)<br>The architecture of GitLab Orbit, from indexing to queries.
-- <img src="img/orbit-video-deep-dive-v19_6.png" alt="Thumbnail of the GitLab Orbit technical deep dive video." width="640" height="360">[How we built GitLab Orbit](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>A technical deep dive into the context graph.
-{.product-cards .product-cards-2 .product-video-cards}
-
-<!-- Videos published on 2026-07-06 and 2026-06-26 -->
-
-- [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
-- [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
-{.product-cards .product-cards-2}
-
 ## Reference
+
+{{< cards >}}
 
 - [GitLab Orbit CLI](cli.md)
 - [Indexed data](schema.md)
 - [Queries](queries/_index.md)
 - [Security](security.md)
-- [Set up GitLab Orbit on GitLab Self-Managed](https://docs.gitlab.com/orbit/self-managed/orbit-setup/)
+- [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/ "Install GitLab Orbit on Kubernetes, connect GitLab to it, and index your first group.")
 - [Troubleshooting](troubleshooting.md)
+
+{{< /cards >}}
 
 <style>
 /* Product landing page. Visual wrappers only, with GitLab UI design tokens; the content above is Markdown. */
@@ -162,7 +168,6 @@ body:has(.product-landing) .docs-content .language-plaintext {
 }
 
 /* Video cards: the thumbnail fills the top of the card, edge to edge, clipped to the card's rounded corners. */
-.docs-content ul.product-cards.product-video-cards { margin-top: var(--gl-spacing-scale-6); }
 .docs-content ul.product-video-cards > li { overflow: hidden; }
 .docs-content ul.product-video-cards > li > img {
   display: block;
