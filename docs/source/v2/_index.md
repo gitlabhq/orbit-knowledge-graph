@@ -32,12 +32,53 @@ Ask what breaks if you change a service, who should review a file, or why pipeli
 Your agent answers with a few graph queries in place of many file reads and API calls.
 {.product-hero-lead}
 
-[Quickstart](quickstart.md) [{{< icon name="play" >}} Watch the deep dive video](https://www.youtube.com/watch?v=wddpf0rDGnA)
-{.product-hero-actions}
-
-<!-- Video published on 2026-06-26 -->
-
 </section>
+
+<div class="product-video-main">
+<div class="video-fallback">
+  See the video: <a href="https://www.youtube.com/watch?v=dKaPp-TWd_o">GitLab Orbit Overview: Giving AI Agents Full Software Development Context</a>.
+</div>
+<figure class="video-container">
+  <iframe src="https://www.youtube-nocookie.com/embed/dKaPp-TWd_o" frameborder="0" allowfullscreen> </iframe>
+</figure>
+<!-- Video published on 2026-09-03 -->
+</div>
+
+<div class="product-videos">
+<div class="product-video">
+<div class="video-fallback">
+  See the video: <a href="https://www.youtube.com/watch?v=AaNukFEK6Zk">GitLab Orbit Launch: Powering AI Coding Agents with Lifecycle Context</a>.
+</div>
+<figure class="video-container">
+  <iframe src="https://www.youtube-nocookie.com/embed/AaNukFEK6Zk" frameborder="0" allowfullscreen> </iframe>
+</figure>
+<p class="product-video-title">GitLab Orbit launch</p>
+<!-- Video published on 2026-07-06 -->
+</div>
+<div class="product-video">
+<div class="video-fallback">
+  See the video: <a href="https://www.youtube.com/watch?v=YtPc8kOmyi0">How GitLab Orbit Works (Architectural Overview)</a>.
+</div>
+<figure class="video-container">
+  <iframe src="https://www.youtube-nocookie.com/embed/YtPc8kOmyi0" frameborder="0" allowfullscreen> </iframe>
+</figure>
+<p class="product-video-title">How GitLab Orbit works</p>
+<!-- Video published on 2026-07-06 -->
+</div>
+<div class="product-video">
+<div class="video-fallback">
+  See the video: <a href="https://www.youtube.com/watch?v=wddpf0rDGnA">GitLab Orbit Technical Deep Dive: The AI Context Graph Layer</a>.
+</div>
+<figure class="video-container">
+  <iframe src="https://www.youtube-nocookie.com/embed/wddpf0rDGnA" frameborder="0" allowfullscreen> </iframe>
+</figure>
+<p class="product-video-title">How we built GitLab Orbit</p>
+<!-- Video published on 2026-06-26 -->
+</div>
+</div>
+
+[Quickstart](quickstart.md)
+{.product-hero-actions}
 
 - [Ask across code and lifecycle](prompt-examples.md)<br>One graph holds your projects, merge requests, pipelines, vulnerabilities, files, and definitions, so one question can cross all of them.
 - [Run one query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
@@ -145,7 +186,7 @@ body:has(.product-landing) .docs-content .language-plaintext {
   display: flex;
   flex-wrap: wrap;
   gap: var(--gl-spacing-scale-3);
-  margin-top: var(--gl-spacing-scale-5) !important;
+  margin: var(--gl-spacing-scale-5) 0 var(--gl-spacing-scale-6) !important;
 }
 /* Same metrics and tokens as .btn.gl-button.btn-md: 2rem tall, 0.875rem text, 8px radius. */
 .docs-content .product-hero-actions a {
@@ -188,6 +229,27 @@ body:has(.product-landing) .docs-content .language-plaintext {
   width: 1rem;
   height: 1rem;
   fill: currentColor;
+}
+
+/* Videos: the overview at full width, then three smaller videos in a row. */
+.docs-content .product-video-main .video-container {
+  max-width: 100%;
+  margin: var(--gl-spacing-scale-5) 0;
+}
+.docs-content .product-videos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 1.25rem;
+  margin: 0 0 var(--gl-spacing-scale-5);
+}
+.docs-content .product-videos .video-container {
+  max-width: 100%;
+  margin: 0;
+}
+.docs-content .product-video-title {
+  margin: var(--gl-spacing-scale-3) 0 0;
+  font-weight: 600;
+  color: var(--gl-text-color-heading);
 }
 
 /* Cards: same metrics as the cards shortcode (.card-body.card.gl-rounded-lg): 1.25rem padding, 8px radius, neutral-100 border, subtle hover. */
@@ -243,8 +305,8 @@ body:has(.product-landing) .docs-content .language-plaintext {
   background-color: var(--gl-text-color-default);
   translate: 0 0;
 }
-/* Links outside gitlab.com get the site's external-link icon instead of the arrow. A larger offset keeps a gap while the icon sits half a width to the left; it still slides right on hover. */
-.docs-content ul.product-cards > li > a[href^="http"]:not([href*="gitlab.com"])::after {
+/* Links outside GitLab.com get the site's external-link icon instead of the arrow. A larger offset keeps a gap while the icon sits half a width to the left; it still slides right on hover. */
+.docs-content ul.product-cards > li > a[href^="http"]:not([href*="GitLab.com" i])::after {
   left: var(--gl-spacing-scale-3);
 }
 </style>
