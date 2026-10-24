@@ -11,6 +11,8 @@
 
 </div>
 
+## Overview
+
 GitLab Orbit's query engine turns a graph query into parameterized SQL over typed node tables and adjacency-ordered edge tables.
 
 Data flows through the engine in these steps:
@@ -28,6 +30,17 @@ ClickHouse gives Orbit fast aggregations for analytical queries.
 The engine adds property-graph semantics on top: traversals, paths, neighborhoods, and grouped counts.
 Orbit needs no separate graph database.
 [ADR 000](../decisions/000_clickhouse_graph_storage.md) records that decision.
+
+Every query gets these guarantees:
+
+| Guarantee | Meaning |
+| --- | --- |
+| **Parameterized SQL** | Values are bound parameters, and names must match the ontology. |
+| **Fail-closed authorization** | Every namespaced read has an authorization filter, or the query is rejected. |
+| **Bounded queries** | Hard limits on query shape, result size, time, and memory. |
+| **Current state** | Every read sees the latest version of each row. |
+| **Stable results** | The plan changes how data is read, never what is returned. |
+| **Read-only access** | The webserver can only run `SELECT`. |
 
 The engine supports four query types: traversal, aggregation, path finding, and neighbors.
 This table shows a GQL example of each one, and the SQL that it produces.
@@ -48,12 +61,12 @@ This table shows a GQL example of each one, and the SQL that it produces.
 ## Walkthrough
 
 This section maps the parts of the engine, in the order that the rest of this document describes them.
-It starts with where the data lives and how the engine reads it, and follows one query through each phase, from text to SQL.
+It starts with the data model, and follows one query through each phase, from text to SQL.
 
 | Theme | Component | What it does | Query Engine Phases |
 | --- | --- | --- | --- |
-| Data | [Storage model](#storage-model) | Typed node tables and shared edge tables in ClickHouse, all declared by the ontology | None |
-| Data | [Query data model](#query-data-model) | The engine's read-only view of one schema version: the graph, its tables, and its authorization rules | None |
+| Data | [Query data model](#query-data-model) | The engine's read-only view of one schema version: the graph, the ClickHouse tables that store it, and its authorization rules | None |
+| Data | [Storage model](#storage-model) | Node tables, edge tables, and row versions in ClickHouse, inside the query data model | None |
 | Structure | [Pipelines](#pipelines) | Ordered lists of phases, built from reusable segments, one per frontend and backend | All |
 | Querying | [Frontends](querying.md) | Parse GQL or JSON into the shared input, in their own doc | `gql_parse`, `json_dsl_parse` |
 | Querying | [Validation](#phases) | Rejects bad queries early, then normalizes names and types | `validate`, `validate_relationships`, `normalize` |
@@ -65,7 +78,6 @@ It starts with where the data lives and how the engine reads it, and follows one
 | Querying | [Hydration](#phases) | Plans a second, small query for the properties the main query didn't fetch | `hydrate_plan` |
 | Querying | [Pagination](#phases) | Pages through results without keeping state between requests | `paginate` |
 | Querying | [Settings](#phases) | Picks time and memory limits for each query type | `settings` |
-| Summary | [Guarantees](#guarantees) | What the engine promises for every query | All |
 
 ---
 
@@ -75,14 +87,12 @@ It starts with where the data lives and how the engine reads it, and follows one
 %%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 36, "rankSpacing": 40, "padding": 12}}}%%
 flowchart TB
     accTitle: How the graph query engine fits together
-    accDescr: Once per schema version, the ontology produces the query data model and the ClickHouse storage model. For each request, the query text enters the frontend, and the security context feeds restriction and authorization. The query data model feeds validation, planning, and authorization. The pipeline generates parameterized SQL. Outside the engine, ClickHouse runs the SQL, Rails redacts the rows, and a hydration query fetches the remaining properties before the response goes back.
+    accDescr: Once per schema version, the ontology produces the query data model, including the ClickHouse tables that store the graph. For each request, the query text enters the frontend, and the security context feeds restriction and authorization. The query data model feeds validation, planning, and authorization. The pipeline generates parameterized SQL. Outside the engine, ClickHouse runs the SQL, Rails redacts the rows, and a hydration query fetches the remaining properties before the response goes back.
 
     subgraph schema_version["Once per schema version"]
         ontology["Ontology"]
-        model["Query data model<br/>graph, layout, and policy"]
-        storage[("Storage model<br/>node and edge tables")]
+        model["Query data model<br/>graph, tables, and policy"]
         ontology --> model
-        ontology --> storage
     end
 
     subgraph request["Once per request"]
@@ -104,7 +114,7 @@ flowchart TB
 
     subgraph execution["Execution, outside the engine"]
         sql["Parameterized SQL"]
-        clickhouse[("ClickHouse<br/>runs the SQL")]
+        clickhouse[("ClickHouse<br/>node and edge tables")]
         redaction["Rails redaction<br/>drops denied rows"]
         hydration["Hydration query<br/>through ch_hydration"]
         response["Response"]
@@ -124,7 +134,7 @@ flowchart TB
     classDef phase fill:#DCFCE7,stroke:#15803D,color:#14532D
     classDef outside fill:#F3F4F6,stroke:#6B7280,color:#111827,stroke-dasharray:4 3
 
-    class ontology,model,storage,clickhouse data
+    class ontology,model,clickhouse data
     class query_text,context input
     class frontend,validation,restriction,planning,lowering,authorization,finishing,codegen phase
     class sql,redaction,hydration,response outside
@@ -134,28 +144,9 @@ flowchart TB
     style pipeline fill:#F0FDF4,stroke:#86EFAC
     style execution fill:#F9FAFB,stroke:#D1D5DB
 
-    linkStyle 13,14,15 stroke:#B45309,stroke-width:2px
-    linkStyle 16,17,18 stroke:#2563EB,stroke-width:2px
+    linkStyle 13,14 stroke:#B45309,stroke-width:2px
+    linkStyle 15,16,17 stroke:#2563EB,stroke-width:2px
 ```
-
----
-
-## Storage model
-
-The ontology defines every table, sort key, and index.
-
-- Each entity has its own node table.
-  Namespaced tables lead their sort key with the traversal path, so authorization filters prune the primary index.
-- Relationships share edge tables.
-  The ontology routes each relationship to a table, with `gl_edge` as the default.
-  Edge tables sort by traversal path, relationship kind, and source, so one-hop lookups read a narrow range.
-- Every row has a version and a deleted flag.
-  The indexer appends new versions, and ClickHouse merges old ones away in the background.
-- The ontology can declare a denormalized join: a pre-joined chain of tables that answers several hops in one scan.
-  Every table in the chain keeps its own traversal path, and each one is filtered on its own.
-
-[Data model](../data_model.md) describes the entities and relationships.
-[Schema management](../schema_management.md) describes how tables change between versions.
 
 ---
 
@@ -168,7 +159,7 @@ The model splits the ontology into three kinds of facts:
 
 - The **logical graph**: entities, properties, relationships, and relationship variants.
   A variant is one relationship between one pair of entity types, like `(User)-[:AUTHORED]->(MergeRequest)`.
-- The **backend facts**: tables, columns, sort keys, foreign keys, and which edge table each relationship variant lives in.
+- The **backend facts**: the ClickHouse tables, columns, sort keys, and foreign keys, and which edge table each relationship variant lives in.
 - The **authorization facts**: role requirements, redaction rules, and scope rules.
 
 ```mermaid
@@ -234,29 +225,103 @@ It does not have to look relational, and the graph catalog stays the same.
 </details>
 
 <details>
-<summary><b>Data model consumers</b>: the engine through the mapping, and schema management through the schema</summary>
+<summary><b>Data model consumers</b>: the query server, the engine phases, and schema management</summary>
 
-The engine reads the model through the mapping.
-The planner uses the mapping to find the edge table for each relationship variant and the column behind each property.
-It also uses the mapping to find sorted copies of a table for a faster lookup.
+The query server builds one ClickHouse data model when it loads a schema version.
+It keeps the model next to the ontology and the named queries for that version.
+The compilation and hydration stages pass it to the engine, and every phase reads it as read-only input.
 
-Schema management reads the physical schema directly.
-DDL, migrations, cleanup, and view lifecycle all come from the same ClickHouse schema that the engine queries, so the two cannot drift apart.
+Each phase asks the model different questions:
+
+| Phase | Asks the data model |
+| --- | --- |
+| `validate`, `normalize` | Does this entity, property, or relationship exist? Is the property filterable or text-indexed? Which foreign key links these nodes? |
+| `restrict` | Which table and column hold an anchor's traversal path? |
+| `plan` | Which table stores this entity, and which edge tables does this relationship route to? Is there a foreign key, a sort key, or a sorted copy? Is the property mutable or selective? |
+| `lower` | Is this column in the table's sort key? |
+| `security`, `check` | Which columns hold a traversal path, and what role floor does each table need? |
+| `hydrate_plan` | Which table stores each entity, and which properties are virtual, hidden, or admin-only? |
+
+Schema management doesn't need the mapping or the policy.
+It derives only the physical ClickHouse schema from the same ontology.
+DDL, view lifecycle, migration scope, and the indexer's table cleanup all read that schema, so they can't drift from what the engine queries.
 
 ```mermaid
 flowchart LR
-    accTitle: Who reads the ClickHouse schema
-    accDescr: DDL rendering, migrations, cleanup, view lifecycle, and the engine all read the same ClickHouse schema.
-    S["ClickHouse schema"] --> D["DDL rendering"]
-    S --> M["Migration inventory"]
-    S --> C["Cleanup inventory"]
-    S --> V["View lifecycle"]
-    S --> E["Engine, through the mapping"]
+    accTitle: Who reads the query data model
+    accDescr: The query server builds the full data model for the engine. Schema management and the indexer read only the physical ClickHouse schema.
+    O["Ontology"] --> M["ClickHouse data model"]
+    O --> S["ClickHouse schema only"]
+    M --> E["Engine phases"]
+    S --> D["DDL and views"]
+    S --> G["Migration scope"]
+    S --> C["Indexer table cleanup"]
 ```
+
+The DuckDB data model follows the same path for local compilation and the code-graph test suites.
 
 </details>
 
+
 The code lives in `crates/query-data-model/`.
+
+### Storage model
+
+The storage model is the physical schema inside the data model's layout.
+The ontology defines every table, sort key, and index in it.
+
+- Each entity has its own node table.
+  Namespaced tables lead their sort key with the traversal path, so authorization filters prune the primary index.
+- Relationships share edge tables.
+  The ontology routes each relationship to a table, with `gl_edge` as the default.
+  Edge tables sort by traversal path, relationship kind, and source, so one-hop lookups read a narrow range.
+- Every row has a version and a deleted flag.
+  The indexer appends new versions, and ClickHouse merges old ones away in the background.
+- The ontology can declare a denormalized join: a pre-joined chain of tables that answers several hops in one scan.
+  Every table in the chain keeps its own traversal path, and each one is filtered on its own.
+
+This diagram shows how ClickHouse stores one relationship, `(User)-[:AUTHORED]->(MergeRequest)`.
+`PK` marks the primary key columns.
+`gl_ci_edge` and `gl_sec_edge` have the same columns.
+`gl_code_edge` adds `project_id` and `branch` to its sort key, so code queries can pin one project and branch.
+
+```mermaid
+erDiagram
+    accTitle: How ClickHouse stores one relationship
+    accDescr: gl_edge stores the AUTHORED relationship with a primary key of traversal path, relationship kind, and source ID. Its source_id points to gl_user, a global table keyed by ID only. Its target_id points to gl_merge_request, keyed by traversal path and ID. Every table carries a version and a deleted flag.
+
+    gl_user {
+        Int64 id PK "global table, no traversal path"
+        String username
+        DateTime64 _version "newest version wins"
+        Bool _deleted "tombstone flag"
+    }
+
+    gl_edge {
+        String traversal_path PK "authorization filters prune here"
+        String relationship_kind PK "AUTHORED"
+        Int64 source_id PK "bloom filter index"
+        Int64 target_id "bloom filter index"
+        String source_kind "User"
+        String target_kind "MergeRequest"
+        DateTime64 _version
+        Bool _deleted
+    }
+
+    gl_merge_request {
+        String traversal_path PK "like 1/9970/278964/"
+        Int64 id PK
+        String state "can change, so it filters after the latest pick"
+        DateTime64 _version
+        Bool _deleted
+    }
+
+    gl_user ||--o{ gl_edge : "source_id = id"
+    gl_merge_request ||--o{ gl_edge : "target_id = id"
+```
+
+[Data model](../data_model.md) describes the entities and relationships.
+[Schema management](../schema_management.md) describes how tables change between versions.
 
 ---
 
@@ -832,26 +897,6 @@ Path finding has hard ceilings of 15 seconds and 15 GiB.
 Server configuration can tighten these limits, but never raise them past the ceilings.
 
 </details>
-
----
-
-## Guarantees
-
-The engine guarantees these properties for every query:
-
-- **One path to SQL.** The engine is the only path from a query to SQL.
-  Every safety rule lives in one place.
-- **Values never become SQL.** Query values are bound parameters, and names must match the ontology.
-  The SQL tree accepts only a closed set of functions.
-- **Authorization fails closed.** Every namespaced node and edge read carries an authorization filter at the role floor of its entity.
-  The `check` phase rejects any query with a read that lacks one.
-- **Every query is bounded.** Shape limits cap nodes, relationships, hops, path depth, predicates, ID lists, and result size.
-  The `settings` phase adds a time and memory limit for each query type.
-- **Reads see current state.** A query reads the latest version of each row.
-  A faster plan never returns stale rows.
-- **The plan does not change the result.** The planner may change how a query reads data, but never what it returns.
-- **Phases declare their state.** A phase reads and writes only the state that it declares.
-- **The query tier is read-only.** The webserver connects to ClickHouse as a user that can only run `SELECT`.
 
 ---
 
