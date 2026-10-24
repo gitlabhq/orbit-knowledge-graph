@@ -284,27 +284,6 @@ glab orbit sql -F json "SELECT count(*) AS n FROM gl_definition"
 
 To list the tables and columns, run `glab orbit schema`. To list the indexed repositories, run `glab orbit list`.
 
-#### Local tables
-
-| Table | Node type or content |
-|-------|----------------------|
-| `gl_directory` | `Directory` |
-| `gl_file` | `File` |
-| `gl_definition` | `Definition` |
-| `gl_imported_symbol` | `ImportedSymbol` |
-| `gl_edge` | All relationships, with `source_kind`, `relationship_kind`, and `target_kind` columns |
-| `_orbit_manifest` | One row for each indexed commit of each repository, with its path (`repo_path`), branch, commit, and status |
-
-The local graph uses these relationships: `CONTAINS`, `DEFINES`, `IMPORTS`, `CALLS`, and `EXTENDS`.
-It has no `Branch`, `Project`, or other software development lifecycle (SDLC) nodes.
-
-The local tables differ from the remote graph in these ways:
-
-- `project_id` comes from the absolute path of the checkout. It is not a GitLab project ID.
-- A `Definition` ID comes from the file path. The same function in two indexed repositories has two different IDs.
-- `File.reason` tells why the indexer skipped a file or could not parse it, such as `skip_excluded_extension`.
-- `Definition.definition_type` and `ImportedSymbol.import_type` values are specific to the language, such as `Class`, `Method`, or `NamedImport`.
-
 ## Settings, storage, and telemetry
 
 The CLI keeps its settings and the local graph in `~/.gitlab/orbit/`.
