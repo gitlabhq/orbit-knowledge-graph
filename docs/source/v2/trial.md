@@ -15,13 +15,9 @@ title: Start a GitLab Orbit trial
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/258545) in GitLab 19.5 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `orbit_trial`. Disabled by default.
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/258545) in GitLab 19.5.
 
 {{< /history >}}
-
-> [!flag]
-> The availability of this feature is controlled by a feature flag.
-> For more information, see the history.
 
 On GitLab.com, you can start a free GitLab Orbit trial yourself in an eligible top-level group that does not already have GitLab Orbit.
 The trial turns on GitLab Orbit for the group, its subgroups, and its projects, through every [access method](agents/_index.md).
