@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use integration_testkit::{load_ontology, run_subtests_shared, t};
-use orbit_server::item_counts::ItemCountService;
+use orbit_server::item_counts::{ItemCountService, ScopeItemCounts};
 use orbit_utils::traversal_path::TraversalPath;
 use query_engine::compiler::{AuthorizedPath, SecurityContext};
 
@@ -26,6 +26,8 @@ async fn item_counts() {
         reporter_gets_no_vulnerability_count,
         security_manager_gets_vulnerability_count,
         missing_table_fails_the_count_and_zeroes_the_graph_status,
+        a_failed_path_is_left_out,
+        every_failed_path_fails_the_count,
         repeated_counts_read_the_cache_with_a_five_second_ttl,
         each_scope_gets_its_own_cache_entry,
         each_path_gets_one_plain_count_query,
@@ -198,4 +200,52 @@ async fn a_hundred_scopes_get_a_hundred_queries(ctx: &TestContext) {
     let projects: Vec<i64> = counts.iter().take(3).map(|c| c.counts["Project"]).collect();
     assert_eq!((counts.len(), projects), (100, vec![2, 1, 0]));
     assert_eq!(query_cache_usage(&db).await, vec!["Write"; 100]);
+}
+
+async fn count_with_dropped_table(
+    ctx: &TestContext,
+    name: &str,
+    table: &str,
+    security_context: &SecurityContext,
+) -> Result<Vec<ScopeItemCounts>, tonic::Status> {
+    let db = ctx.fork(name).await;
+    db.execute(&format!("DROP TABLE {}", t(table))).await;
+    let scopes = [
+        TraversalPath::new_unchecked("1/100/"),
+        TraversalPath::new_unchecked("1/101/"),
+    ];
+    ItemCountService::new(Arc::new(db.create_client()))
+        .count_items(&load_ontology(), security_context, &scopes)
+        .await
+}
+
+async fn a_failed_path_is_left_out(ctx: &TestContext) {
+    let security_context = role_on(&[("1/100/", 25), ("1/101/", 20)]);
+
+    let counts = count_with_dropped_table(
+        ctx,
+        "item_counts_failed_path",
+        "gl_vulnerability",
+        &security_context,
+    )
+    .await
+    .unwrap();
+
+    let paths: Vec<&str> = counts.iter().map(|c| c.scope.as_str()).collect();
+    assert_eq!(
+        (paths, counts[0].counts["MergeRequest"]),
+        (vec!["1/101/"], 1)
+    );
+}
+
+async fn every_failed_path_fails_the_count(ctx: &TestContext) {
+    let failed = count_with_dropped_table(
+        ctx,
+        "item_counts_every_path_failed",
+        "gl_merge_request",
+        &admin_context(),
+    )
+    .await;
+
+    assert!(failed.is_err());
 }

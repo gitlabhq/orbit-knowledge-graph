@@ -37,7 +37,10 @@ impl ItemCountService {
         scopes: &[TraversalPath],
     ) -> Result<Vec<ScopeItemCounts>, Status> {
         let plan = CountPlan::new(ontology, security_context, scopes);
-        let counts = self.read_counts(&plan).await?;
+        let counts = self.read_counts(&plan).await;
+        if !counts.is_empty() && counts.values().all(Result::is_err) {
+            return Err(Status::internal("item counts could not be read"));
+        }
         Ok(plan.answer(scopes, &counts))
     }
 
@@ -48,23 +51,29 @@ impl ItemCountService {
         scopes: &[TraversalPath],
     ) -> Vec<ScopeItemCounts> {
         let plan = CountPlan::new(ontology, security_context, scopes);
-        plan.answer(scopes, &self.read_counts(&plan).await.unwrap_or_default())
+        let counts = self
+            .read_counts(&plan)
+            .await
+            .into_iter()
+            .map(|(scope, counts)| (scope, Ok(counts.unwrap_or_default())))
+            .collect();
+        plan.answer(scopes, &counts)
     }
 
-    async fn read_counts(&self, plan: &CountPlan<'_>) -> Result<ScopeCounts, Status> {
+    async fn read_counts(&self, plan: &CountPlan<'_>) -> ScopeCounts {
         if plan.visibility.entities.is_empty() {
-            return Ok(ScopeCounts::new());
+            return ScopeCounts::new();
         }
-        counts::count_visible_entities(&self.client, &plan.scopes, &plan.visibility)
-            .await
-            .map_err(|error| {
-                warn!(
-                    safe(ERROR_TYPE) = "clickhouse_query",
-                    expanded(ERROR_MESSAGE) = %error,
-                    "Item counts could not be read"
-                );
-                Status::internal("item counts could not be read")
-            })
+        let counts =
+            counts::count_visible_entities(&self.client, &plan.scopes, &plan.visibility).await;
+        for error in counts.values().filter_map(|counts| counts.as_ref().err()) {
+            warn!(
+                safe(ERROR_TYPE) = "clickhouse_query",
+                expanded(ERROR_MESSAGE) = %error,
+                "Item counts could not be read"
+            );
+        }
+        counts
     }
 }
 
@@ -88,20 +97,26 @@ impl<'a> CountPlan<'a> {
     fn answer(&self, requested: &[TraversalPath], counts: &ScopeCounts) -> Vec<ScopeItemCounts> {
         requested
             .iter()
-            .map(|scope| ScopeItemCounts {
-                scope: scope.clone(),
-                counts: self.build_scope_counts(counts, scope),
+            .filter_map(|scope| {
+                let scope_counts = counts
+                    .get(scope.as_str())
+                    .map(Result::as_ref)
+                    .transpose()
+                    .ok()?;
+                Some(ScopeItemCounts {
+                    scope: scope.clone(),
+                    counts: self.build_scope_counts(scope_counts, scope),
+                })
             })
             .collect()
     }
 
     fn build_scope_counts(
         &self,
-        counts: &ScopeCounts,
+        scope_counts: Option<&HashMap<String, i64>>,
         scope: &TraversalPath,
     ) -> HashMap<String, i64> {
         let index = self.scopes.partition_point(|distinct| *distinct < scope);
-        let scope_counts = counts.get(scope.as_str());
         self.visibility
             .entities_in_scope(index)
             .into_iter()

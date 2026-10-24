@@ -112,3 +112,24 @@ async fn item_counts_rejects_a_request_with_both_path_fields() {
         tonic::Code::InvalidArgument
     );
 }
+
+#[tokio::test]
+async fn item_counts_fails_when_every_path_count_fails() {
+    let admin = Claims {
+        admin: true,
+        organization_id: Some(1),
+        ..test_claims()
+    };
+
+    for request in [
+        item_counts_request("1/22/", &[]),
+        item_counts_request("", &["1/22/", "1/33/"]),
+    ] {
+        let code = test_service()
+            .get_item_counts(signed_request(request, admin.clone()))
+            .await
+            .unwrap_err()
+            .code();
+        assert_eq!(code, tonic::Code::Internal);
+    }
+}

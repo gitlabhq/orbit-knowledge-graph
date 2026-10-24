@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use clickhouse_client::{ArrowClickHouseClient, FromArrowColumn};
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use orbit_server_config::QueryConfig;
 use orbit_utils::traversal_path::TraversalPath;
 use tonic::Status;
@@ -23,13 +23,13 @@ const PARALLEL_REPLICA_SETTINGS: [(&str, &str); 3] = [
     ("cancel_http_readonly_queries_on_client_close", "1"),
 ];
 
-pub type ScopeCounts = HashMap<String, HashMap<String, i64>>;
+pub type ScopeCounts = HashMap<String, Result<HashMap<String, i64>, Status>>;
 
 pub async fn count_visible_entities(
     client: &ArrowClickHouseClient,
     scopes: &[&TraversalPath],
     visibility: &Visibility,
-) -> Result<ScopeCounts, Status> {
+) -> ScopeCounts {
     let queries: Vec<_> = scopes
         .iter()
         .enumerate()
@@ -37,7 +37,7 @@ pub async fn count_visible_entities(
         .collect();
     futures::stream::iter(queries)
         .buffer_unordered(MAX_CONCURRENT_COUNT_QUERIES)
-        .try_collect()
+        .collect()
         .await
 }
 
@@ -45,9 +45,20 @@ async fn count_scope(
     client: &ArrowClickHouseClient,
     scope: &TraversalPath,
     entities: Vec<&VisibleEntity>,
-) -> Result<(String, HashMap<String, i64>), Status> {
+) -> (String, Result<HashMap<String, i64>, Status>) {
+    (
+        scope.as_str().to_string(),
+        read_scope_counts(client, scope, entities).await,
+    )
+}
+
+async fn read_scope_counts(
+    client: &ArrowClickHouseClient,
+    scope: &TraversalPath,
+    entities: Vec<&VisibleEntity>,
+) -> Result<HashMap<String, i64>, Status> {
     if entities.is_empty() {
-        return Ok((scope.as_str().to_string(), HashMap::new()));
+        return Ok(HashMap::new());
     }
     let sql = entities
         .iter()
@@ -75,10 +86,7 @@ async fn count_scope(
 
     let names = String::extract_column(&batches, 0).map_err(map_column_extraction_error)?;
     let counts = i64::extract_column(&batches, 1).map_err(map_column_extraction_error)?;
-    Ok((
-        scope.as_str().to_string(),
-        names.into_iter().zip(counts).collect(),
-    ))
+    Ok(names.into_iter().zip(counts).collect())
 }
 
 fn build_entity_count_query(index: usize, entity: &VisibleEntity) -> String {
