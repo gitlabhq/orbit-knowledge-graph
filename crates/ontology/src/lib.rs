@@ -5,15 +5,18 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
 //! use ontology::Ontology;
 //!
+//! # fn load() -> Result<(), ontology::OntologyError> {
 //! // Load from embedded files (compiled into binary)
 //! let ontology = Ontology::load_embedded()?;
 //!
 //! // Or load from a directory on disk
 //! let ontology = Ontology::load_from_dir("config/ontology")?;
 //! let user = ontology.get_node("User").expect("User node exists");
+//! # Ok(())
+//! # }
 //! ```
 
 pub mod archive;

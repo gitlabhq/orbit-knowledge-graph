@@ -7,7 +7,7 @@
 //! `Node::find`. A step is either **required** (pipeline fails on miss)
 //! or **optional** (stays at current node on miss).
 //!
-//! ```ignore
+//! ```text
 //! use treesitter_visit::extract::*;
 //!
 //! field("name")
