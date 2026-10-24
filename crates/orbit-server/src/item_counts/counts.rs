@@ -30,8 +30,12 @@ pub async fn count_visible_entities(
     scopes: &[&TraversalPath],
     visibility: &Visibility,
 ) -> Result<ScopeCounts, Status> {
-    futures::stream::iter(scopes.iter().enumerate())
+    let queries: Vec<_> = scopes
+        .iter()
+        .enumerate()
         .map(|(index, scope)| count_scope(client, scope, visibility.entities_in_scope(index)))
+        .collect();
+    futures::stream::iter(queries)
         .buffer_unordered(MAX_CONCURRENT_COUNT_QUERIES)
         .try_collect()
         .await
