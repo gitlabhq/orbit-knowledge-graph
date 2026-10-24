@@ -124,7 +124,7 @@ To edit the flow in VS Code, see
 {{< /history >}}
 
 When a flow has a checkout of the project, the [GitLab Orbit CLI](../cli.md) installs the
-[GitLab Orbit skill](_index.md#gitlab-orbit-skill) and indexes the checkout before the agent starts.
+[GitLab Orbit skill](_index.md) and indexes the checkout before the agent starts.
 The agent can then search the code of the current branch with the [local graph](../cli.md#local-graph).
 The skill also covers your GitLab data when **Other Foundational Agents** is selected
 in the GitLab Orbit preferences of the user who triggers the flow.
