@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use labkit_events::Error as LabkitError;
 use orbit_analytics::{
-    OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query, validation,
+    OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query, parse_opt, validation,
 };
 use orbit_server_config::AnalyticsConfig;
 use orbit_versions::VERSIONS;
@@ -276,18 +276,6 @@ fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
 
 /// Bounds are 255 chars for instance/host fields; exceeding that surfaces a
 /// typed validation error rather than truncating silently.
-fn parse_opt<T>(value: &Option<String>, field: &'static str) -> Result<Option<T>, LabkitError>
-where
-    T: std::str::FromStr,
-    T::Err: std::fmt::Display,
-{
-    value
-        .as_deref()
-        .map(str::parse::<T>)
-        .transpose()
-        .map_err(validation(field))
-}
-
 /// Same as [`parse_opt`] but for orbit_query newtypes (maxLength 64).
 fn parse_opt_query(
     value: &Option<String>,

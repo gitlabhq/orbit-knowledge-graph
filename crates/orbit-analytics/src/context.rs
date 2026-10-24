@@ -34,6 +34,21 @@ pub fn validation<E: std::fmt::Display>(
     }
 }
 
+pub fn parse_opt<T>(
+    value: &Option<String>,
+    field: &'static str,
+) -> Result<Option<T>, labkit_events::Error>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    value
+        .as_deref()
+        .map(str::parse::<T>)
+        .transpose()
+        .map_err(validation(field))
+}
+
 #[derive(Debug, Clone)]
 pub struct OrbitCommonContext {
     pub data: orbit_common::OrbitCommon,
