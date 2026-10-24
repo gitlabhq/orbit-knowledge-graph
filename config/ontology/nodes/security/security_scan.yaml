@@ -160,3 +160,4 @@ storage:
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_pipeline_id, column: pipeline_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_build_id, column: build_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_status, column: status, type: "set(8)", granularity: 2}

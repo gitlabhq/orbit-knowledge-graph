@@ -43,7 +43,7 @@ pub mod input;
 pub mod metrics;
 pub(crate) mod query_limits;
 
-pub mod scope;
+pub mod tp_bounds;
 pub mod types;
 
 pub mod config;
@@ -81,7 +81,6 @@ pub use passes::hydrate::{
 };
 pub use passes::normalize::build_entity_auth;
 pub use passes::plan::HydrationCompileOptions;
-pub use scope::ScopeProof;
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;
@@ -1123,69 +1122,6 @@ mod tests {
                     if message == "cross-node property comparisons are only supported in traversal queries"),
                 "{error}"
             );
-        }
-    }
-
-    #[test]
-    fn scope_proofs_preserve_deeper_authorization_filters() {
-        let mut context = SecurityContext::new(1, vec!["1/2/3/".into(), "1/2/4/".into()]).unwrap();
-        context.scope_proofs =
-            std::collections::HashMap::from([("p".into(), ScopeProof::literal("1/2/"))]);
-        for (query, lookup, alias, literal_proof) in [
-            (
-                "MATCH (p:Project {name: 'example'}) RETURN p LIMIT 20",
-                false,
-                "p",
-                true,
-            ),
-            (
-                "MATCH (p:Project {id: 100}) RETURN p LIMIT 20",
-                true,
-                "p",
-                true,
-            ),
-            (
-                "MATCH (p:Project {full_path: 'parent/project'}) RETURN p LIMIT 20",
-                true,
-                "p",
-                true,
-            ),
-            (
-                "MATCH (p:MergeRequest {project_id: 100}) RETURN p LIMIT 20",
-                true,
-                "p",
-                true,
-            ),
-            (
-                "MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) RETURN count(p) AS c LIMIT 20",
-                true,
-                "_orbit_edge_0",
-                false,
-            ),
-        ] {
-            let compiled = compile(query, Frontend::Gql, &ONTOLOGY, &context).unwrap();
-            let sql = compiled.base.render();
-            for path in ["1/2/3/", "1/2/4/"] {
-                assert!(
-                    sql.contains(&format!("startsWith({alias}.traversal_path, '{path}')")),
-                    "{query}: {sql}"
-                );
-            }
-            if literal_proof {
-                assert!(
-                    sql.contains(&format!("startsWith({alias}.traversal_path, '1/2/')")),
-                    "{query}: {sql}"
-                );
-            }
-            if lookup {
-                assert!(sql.contains("argMaxOrNull"), "{query}: {sql}");
-                for path in ["1/2/3/", "1/2/4/"] {
-                    assert!(
-                        sql.contains(&format!("startsWith(_scope.traversal_path, '{path}')")),
-                        "{query}: {sql}"
-                    );
-                }
-            }
         }
     }
 

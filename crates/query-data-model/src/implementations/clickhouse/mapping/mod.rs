@@ -72,10 +72,6 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                         })
                         .into_iter()
                         .collect(),
-                    node.has_traversal_path
-                        && !node.global
-                        && table.sort_key.first().map(String::as_str)
-                            == Some(ontology::constants::TRAVERSAL_PATH_COLUMN),
                 ),
             );
         }
@@ -101,7 +97,6 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                         name: ontology::constants::TRAVERSAL_PATH_COLUMN.to_string(),
                         entity: None,
                     }],
-                    false,
                 ),
             );
         }
@@ -243,12 +238,8 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                     })
                 })
                 .collect();
-            let layout = TableLayout::from_storage(
-                storage.require_table(&join.table)?,
-                None,
-                path_columns,
-                true,
-            );
+            let layout =
+                TableLayout::from_storage(storage.require_table(&join.table)?, None, path_columns);
             tables.insert(join.table.clone(), layout);
         }
 
@@ -266,16 +257,8 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                         name: copy.source.clone(),
                     })?;
             let physical = storage.require_table(&copy.table)?;
-            let layout = TableLayout::from_storage(
-                physical,
-                source.entity,
-                source.path_columns.clone(),
-                source.path_scopable
-                    && physical
-                        .sort_key
-                        .first()
-                        .is_some_and(|column| column == ontology::TRAVERSAL_PATH_COLUMN),
-            );
+            let layout =
+                TableLayout::from_storage(physical, source.entity, source.path_columns.clone());
             tables.insert(layout.name.clone(), layout);
         }
         Ok(ClickHouseBindings {
