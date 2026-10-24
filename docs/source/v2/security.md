@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Learn how GitLab Orbit protects your data, which roles you need to query it, and how to set up programmatic access.
+description: See how GitLab Orbit protects your data, and which roles you need.
 title: GitLab Orbit security
 ---
 

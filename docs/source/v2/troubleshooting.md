@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Find and fix common errors in GitLab Orbit queries, the GitLab Orbit CLI, and the local graph.
+description: Fix common errors in queries, the CLI, and the local graph.
 title: Troubleshooting GitLab Orbit
 ---
 

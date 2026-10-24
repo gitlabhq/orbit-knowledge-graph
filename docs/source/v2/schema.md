@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Learn which GitLab data and source code GitLab Orbit indexes, and where to see the node types and relationships of the graph.
+description: See which GitLab data and code GitLab Orbit indexes.
 title: GitLab Orbit indexed data
 ---
 
