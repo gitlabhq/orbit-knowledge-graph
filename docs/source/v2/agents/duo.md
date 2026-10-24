@@ -134,19 +134,6 @@ Prerequisites:
 - The flow does not set [`coding_environment: none`](https://docs.gitlab.com/user/duo_agent_platform/flows/custom_flows_schema/#coding_environment).
 - The agent components that use the skill have the `run_command` tool, so they can run `glab orbit` commands.
 
-## Example prompts
-
-Ask these questions in any agent or flow that uses GitLab Orbit:
-
-```plaintext
-Which projects import the payments-service library?
-What are the most common job failure reasons in this group?
-Show me all critical and high severity open vulnerabilities in this group.
-What work items are blocking this epic?
-```
-
-For more prompts, see [prompt examples](../prompt-examples.md).
-
 ## Known issues
 
 - GitLab Orbit answers only about groups that have it turned on and that you can access.
