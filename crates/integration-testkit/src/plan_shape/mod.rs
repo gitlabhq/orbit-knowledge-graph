@@ -289,7 +289,9 @@ fn check<M: OrbitQueryModel>(
                 continue;
             }
         };
-        let mut lowered = match lower::emit(&plan, &input, None) {
+        let tp_bounds =
+            (backend == "clickhouse").then(|| compiler::tp_bounds::TpBounds::derive(&input, model));
+        let mut lowered = match lower::emit(&plan, &input, tp_bounds.as_ref()) {
             Ok(lowered) => lowered,
             Err(error) => {
                 failures.push(format!("{label}: {error}"));

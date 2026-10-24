@@ -5,19 +5,32 @@ query:
     {
         "query_type": "traversal",
         "nodes": [
-            {"id": "p", "entity": "Project", "node_ids": [1000, 1002], "columns": ["name"]},
+            {"id": "p", "entity": "Project", "node_ids": [1000, 1004], "columns": ["name"]},
             {"id": "mr", "entity": "MergeRequest", "columns": ["iid"]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
         "limit": 10
     }
   gql: |
-    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.id IN [1000, 1002] RETURN mr.iid, p.name LIMIT 10
+    MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.id IN [1000, 1004] RETURN mr.iid, p.name LIMIT 10
 
 expect:
-  compile_only: true
   sql_contains:
     - "(_scope.id = 1000)"
-    - "(_scope.id = 1002)"
+    - "(_scope.id = 1004)"
     - ") OR startsWith(mr.traversal_path, (SELECT"
     - ") OR startsWith(p.traversal_path, (SELECT"
+  node_count: 7
+  nodes:
+    Project:
+      ids: [1000, 1004]
+      rows:
+        - { id: 1000, name: Public Project }
+        - { id: 1004, name: Shared Project }
+    MergeRequest:
+      ids: [2000, 2001, 2003, 2004, 2005]
+      rows:
+        - { id: 2001, iid: 2 }
+        - { id: 2003, iid: 4 }
+  edges:
+    IN_PROJECT: [[2000, 1000], [2001, 1000], [2004, 1000], [2005, 1000], [2003, 1004]]

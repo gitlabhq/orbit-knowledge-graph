@@ -8,7 +8,7 @@ pub struct TpBounds {
 }
 
 impl TpBounds {
-    pub(crate) fn derive(
+    pub fn derive(
         input: &Input,
         model: &(impl query_data_model::OrbitQueryModel + ?Sized),
     ) -> Self {
@@ -27,11 +27,7 @@ impl TpBounds {
             .nodes
             .iter()
             .filter(|node| {
-                let keys = bound_keys(node, &anchor_fks);
-                !keys.is_empty()
-                    && keys
-                        .iter()
-                        .all(|key| Some(key.entity.as_str()) == node.entity.as_deref())
+                pinned_only_by_own_keys(node, &anchor_fks)
                     && nodes
                         .get(&node.id)
                         .is_some_and(|bound| !shared(&node.id, bound))
@@ -163,6 +159,14 @@ fn derive_node_bounds(
             .is_some_and(|entity| model.entity_has_traversal_path(entity))
     });
     bounds
+}
+
+fn pinned_only_by_own_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> bool {
+    let keys = bound_keys(node, anchor_fks);
+    !keys.is_empty()
+        && keys
+            .iter()
+            .all(|key| Some(key.entity.as_str()) == node.entity.as_deref())
 }
 
 fn anchor_fks(model: &(impl query_data_model::OrbitQueryModel + ?Sized)) -> Vec<(&str, &str)> {

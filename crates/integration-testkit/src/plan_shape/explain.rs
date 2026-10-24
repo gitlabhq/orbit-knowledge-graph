@@ -827,8 +827,19 @@ fn expression(value: &Expr) -> String {
             membership_keys(columns)
         ),
         Expr::InSelect { expr, .. } => format!("{} IN subquery", expression(expr)),
-        Expr::Scalar(_) => "scalar(subquery)".into(),
+        Expr::Scalar(query) => format!("scalar({})", scalar(query)),
         Expr::Star => "*".into(),
+    }
+}
+
+fn scalar(value: &Query) -> String {
+    let source = match &value.from {
+        TableRef::Scan { table, alias, .. } => format!("{table} AS {alias}"),
+        _ => "subquery".into(),
+    };
+    match &value.where_clause {
+        Some(predicate) => format!("{source} WHERE {}", expression(predicate)),
+        None => source,
     }
 }
 
