@@ -7,15 +7,17 @@
 //! `Node::find`. A step is either **required** (pipeline fails on miss)
 //! or **optional** (stays at current node on miss).
 //!
-//! ```text
+//! ```
 //! use treesitter_visit::extract::*;
 //!
-//! field("name")
-//! field("function").field("object")
+//! # let _ = [
+//! field("name"),
+//! field("function").field("object"),
 //! field("receiver")
 //!     .child_of_kind("parameter_declaration")
 //!     .field("type")
-//!     .inner("pointer_type", "type_identifier")
+//!     .inner("pointer_type", "type_identifier"),
+//! # ];
 //! ```
 
 use crate::node::{Axis, Match, Node};

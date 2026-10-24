@@ -6,13 +6,17 @@
 //!
 //! # Usage
 //!
-//! ```text
-//! use integration_testkit::visitor::{ResponseView, NodeExt};
+//! ```no_run
+//! use integration_testkit::visitor::ResponseView;
+//! # use query_engine::compiler::input::Input;
+//! # use query_engine::formatters::GraphResponse;
+//! # fn check(input: &Input, pipeline_response: GraphResponse) {
 //!
 //! // With assertion enforcement — parses the query and requires matching assertions:
-//! let resp = ResponseView::for_query(query_json, pipeline_response);
+//! let resp = ResponseView::for_query(input, pipeline_response);
 //! resp.assert_node_order("User", &[1, 2, 3]); // required because query has order_by
 //! // Drop panics if required assertions were not called.
+//! # }
 //! ```
 
 mod enforcement;

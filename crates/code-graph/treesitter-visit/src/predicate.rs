@@ -2,12 +2,14 @@
 //!
 //! `Pred` = `Exists(Extract)` + boolean logic. That's it.
 //!
-//! ```text
+//! ```
 //! use treesitter_visit::predicate::*;
 //!
-//! has_name()
-//! parent_is("module") & has_child(&["decorator"])
-//! !kind_ends_with("_statement")
+//! # let _ = [
+//! has_name(),
+//! parent_is("module").and(has_child(&["decorator"])),
+//! !kind_ends_with("_statement"),
+//! # ];
 //! ```
 
 use crate::extract::{self, Extract};
