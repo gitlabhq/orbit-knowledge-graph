@@ -362,18 +362,18 @@ impl EntityHandler {
         }
 
         let mut errors = Vec::new();
-        let mut all_failures_unavailable = true;
+        let mut all_failures_backpressure = true;
         let mut total = PipelineStats::default();
         while let Some(result) = set.join_next().await {
             match result {
                 Ok(Ok(stats)) => total.merge(stats),
                 Ok(Err(err)) => {
-                    all_failures_unavailable &=
+                    all_failures_backpressure &=
                         matches!(err, PipelineError::Failed(HandlerError::Backpressure(_)));
                     errors.push(err.to_string());
                 }
                 Err(join_err) => {
-                    all_failures_unavailable = false;
+                    all_failures_backpressure = false;
                     errors.push(format!("partition task panicked: {join_err}"));
                 }
             }
@@ -383,7 +383,7 @@ impl EntityHandler {
             return Ok(total);
         }
         let message = format!("partition failures: {}", errors.join("; "));
-        if all_failures_unavailable {
+        if all_failures_backpressure {
             Err(HandlerError::Backpressure(message))
         } else {
             Err(HandlerError::Processing(message))
