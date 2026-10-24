@@ -70,7 +70,7 @@ To see the current schema, use one of these methods:
 - In a terminal, run `glab orbit ontology`. To show the properties and relationships of node types,
   add their names, for example `glab orbit ontology MergeRequest Project`.
 - Over HTTP, call `GET /api/v4/orbit/schema`. For more information, see the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
-- In a query, run `CALL db.schema()`.
+- In a query, for example in the **Query editor** tab of the [GitLab Orbit dashboard](dashboard.md) or with `glab orbit query`, run `CALL db.schema()`.
 
 ## Supported languages
 
@@ -104,7 +104,7 @@ Most languages also get imports and cross-file calls.
 Some languages have limits:
 
 - Bash/Shell: function definitions and `source` or `.` imports only. No cross-file calls.
-- Rust: cross-file `CALLS` and `EXTENDS` edges. No other reference edges.
+- Rust: cross-file `CALLS` and `EXTENDS` relationships. No other reference relationships.
 - YAML: anchors and aliases. Mapping keys become definitions only in GitLab CI, ArgoCD,
   Helm, and Docker Compose files. No cross-file references.
 

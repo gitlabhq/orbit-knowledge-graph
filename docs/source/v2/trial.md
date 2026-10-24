@@ -51,7 +51,7 @@ To connect your agent, continue with the [quickstart](quickstart.md#step-2-set-u
 
 ## When the trial ends
 
-At the end of the trial, GitLab Orbit pauses for the group, and queries fail.
+At the end of the trial, GitLab turns off GitLab Orbit for the group, and queries fail.
 To continue with GitLab Orbit, contact sales.
 For information about GitLab Orbit pricing and usage, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
 

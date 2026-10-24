@@ -15,13 +15,12 @@ title: GitLab Orbit CLI
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
-- [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 19.0.
+- [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) from experiment to beta in GitLab 19.1.
 - Commands that call the GitLab server:
   - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-  - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-  - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Generally available in GitLab 19.5.
+  - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
 
 {{< /history >}}
 
@@ -31,9 +30,8 @@ The CLI also indexes the code on your machine into a [local graph](#local-graph)
 
 ## Install the CLI
 
-Use the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) to install the GitLab Orbit CLI and connect your agents.
-`glab` is the recommended install method.
-It downloads and verifies the GitLab Orbit CLI, and tells you when a new version is available.
+You should use the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) to install the GitLab Orbit CLI and connect your agents.
+`glab` downloads and verifies the GitLab Orbit CLI, and tells you when a new version is available.
 
 Prerequisites:
 
@@ -44,10 +42,11 @@ To install the CLI and set up your agents:
 1. Go to a Git repository on your machine. Any repository works.
 1. Run `glab orbit setup`.
    On first use, `glab` asks to download the GitLab Orbit CLI.
-1. In the list of agents, keep or clear the selection, then press <kbd>Enter</kbd>.
-   Setup selects the agents that it detects on your machine.
+1. In the list of agents, setup selects the agents that it detects on your machine.
+   Keep or clear the selection, then press <kbd>Enter</kbd>.
 
 Setup installs the GitLab Orbit skill for your agents and indexes the repository for code search.
+To check that the repository is indexed, run `glab orbit list`.
 To update the setup, run the command again.
 For the setup options and the files that setup changes, see [connect your agent](agents/_index.md#setup-options).
 
@@ -69,13 +68,20 @@ To query your GitLab data, also [sign in with `glab`](#query-the-remote-graph).
 | `--install` | Download the CLI, but do not run it. |
 | `--update` | Update the CLI to the latest version. |
 
-To skip the prompts on every run, set the `glab` options `orbit_cli_auto_download` and `orbit_cli_auto_run` to `true`
-with `glab config set`. Setup sets `orbit_cli_auto_run` for you.
+To skip the prompts on every run, set the `glab` options `orbit_cli_auto_download` and `orbit_cli_auto_run` to `true`:
 
-### Other install methods
+```shell
+glab config set orbit_cli_auto_download true
+glab config set orbit_cli_auto_run true
+```
+
+Setup sets `orbit_cli_auto_run` for you.
+
+### Install the standalone binary
 
 If you cannot use `glab`, install the standalone `orbit` binary.
 The binary runs the same commands as `glab orbit`.
+In the commands on this page, replace `glab orbit` with `orbit`, for example `orbit setup`.
 
 - On macOS and Linux:
 
@@ -83,7 +89,11 @@ The binary runs the same commands as `glab orbit`.
   curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
   ```
 
-  To update, end the command with `bash -s -- --force`.
+  To update, run the command with `--force`:
+
+  ```shell
+  curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash -s -- --force
+  ```
 
 - On Windows:
 
@@ -141,6 +151,7 @@ Sign in once with `glab`, then run queries and check indexing progress from the 
 Prerequisites:
 
 - GitLab Orbit is [turned on for your group](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
+- The Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
 
 To sign in:
 
@@ -150,7 +161,8 @@ To sign in:
    run `glab config set --global host <gitlab.example.com>`.
 
 `glab orbit` passes your `glab` credential to the CLI on every run.
-The standalone `orbit` binary uses `GITLAB_TOKEN` if you set it, otherwise your `glab` credential.
+The standalone `orbit` binary uses a personal access token with the `read_api` scope in `GITLAB_TOKEN` if you set it, otherwise your `glab` credential.
+On GitLab Self-Managed or GitLab Dedicated, also set `GITLAB_URL` to the URL of your instance.
 
 ### Run a query
 
@@ -315,7 +327,7 @@ The CLI reads these environment variables:
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Success. |
-| `1` | Other error, for example a missing credential, or HTTP `402`, `422`, or `503`. See stderr. `grep` also exits with `1`, and prints nothing, when nothing matches. |
+| `1` | Other error, for example a missing credential, or HTTP `402`, `422`, or `503`. See stderr. `grep` also exits with `1`, with no error message, when nothing matches. |
 | `2` | A command-line usage error, or HTTP `404`: the path does not exist, or the endpoint is not available. |
 | `3` | HTTP `401`. The token is missing or expired. |
 | `4` | HTTP `403`. No group with GitLab Orbit turned on is available to you. |

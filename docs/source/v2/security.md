@@ -36,9 +36,8 @@ When you turn on GitLab Orbit, existing access does not change.
 
 Security data is vulnerabilities, security findings, security scans, scanners,
 and Common Vulnerabilities and Exposures (CVE) and Common Weakness Enumeration (CWE) identifiers.
-To query security data, you must have the Security Manager, Developer, Maintainer, or Owner role,
-because GitLab cannot filter aggregate results after the query runs.
-For a user with the Reporter role, the response leaves out security entities, even from aggregate counts.
+Because GitLab cannot filter aggregate results after a query runs, the response for a user with the Reporter role
+leaves out security entities, even from aggregate counts.
 
 Queries from administrators and auditors return data from each group where GitLab Orbit is on, not only their own groups.
 
@@ -102,14 +101,15 @@ Project membership, and membership of groups where GitLab Orbit is off, do not g
 Prerequisites:
 
 - The Owner role for the group.
+- GitLab Orbit [turned on for the group](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
 
 To set up a service account for GitLab Orbit:
 
 1. [Create a service account and a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account) for it.
    Give the token the `read_api` scope. Service accounts cannot use fine-grained personal access tokens.
 1. Add the service account to the lowest subgroup that has the data, with the Reporter role.
-   If the tool must read security data, select the **Security Manager** role.
-   Repeat this step for each group that the tool must query.
+   If the service account must read security data, select the **Security Manager** role.
+   Repeat this step for each group that the service account must query.
 
 ### Verify the scope of a service account
 
@@ -134,7 +134,8 @@ Verify the scope after you set up the account, and each time you change its memb
      --url "https://gitlab.example.com/api/v4/orbit/query"
    ```
 
-1. Make sure that the `full_path` values include only the groups where you added the account.
+1. Make sure that the `full_path` values include only the groups where you added the account, and their subgroups.
+   If you see other groups, check the memberships of the account, including groups that its groups are shared with.
 
 ## Related topics
 

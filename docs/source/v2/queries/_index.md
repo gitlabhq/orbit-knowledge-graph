@@ -16,7 +16,7 @@ title: GitLab Orbit queries
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
 
 {{< /history >}}
@@ -34,7 +34,7 @@ glab orbit query "MATCH (p:Project {full_path: '<my-group/my-project>'}) RETURN 
 ```
 
 The CLI prints compact [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text. For JSON, add `--response-format raw`.
-Agents on the [Model Context Protocol (MCP) endpoint](../agents/mcp.md) send the same text with the `query_graph` command.
+Agents on the [Model Context Protocol (MCP) endpoint](../agents/mcp.md) send the same text with the `query_graph` tool.
 
 ## Use the GitLab Orbit API
 
@@ -52,14 +52,15 @@ Results include only the data that the token owner can access.
 | Use case | Query shape |
 |----------|-------------|
 | Fetch nodes of one type | `MATCH (n:Label {property: value}) RETURN n` |
-| Follow relationships between node types | `MATCH (a:Label)-[:RELATIONSHIP]->(b:Label) RETURN a, b` |
-| Count, sum, or average results by group | `RETURN key, count(n) AS total ORDER BY total DESC` |
+| Follow relationships between node types | `MATCH (a:Label {id: 1})-[:RELATIONSHIP]->(b:Label) RETURN a, b` |
+| Count, sum, or average results by group key | `RETURN key, count(n) AS total ORDER BY total DESC` |
 | Find a path between two bounded nodes | `MATCH path = ANY SHORTEST (a:Label {id: 1})-[:RELATIONSHIP*1..3]->(b:Label {id: 2}) RETURN path` |
 | Find what is connected to one bounded node | `MATCH (a:Label {id: 1})--(n) RETURN n` |
 
 To search, filter one node type with `WHERE`, for example with `CONTAINS` or `all_tokens`.
 For the syntax, see [filters](query-language.md#filters).
 
+Every query needs at least one node bounded by an ID or a literal property filter.
 The query shapes use numeric IDs. To find the ID of a merge request or a project, see
 [bounded nodes](query-language.md#bounded-nodes).
 

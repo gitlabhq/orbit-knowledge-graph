@@ -16,7 +16,7 @@ title: GitLab Orbit
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
 - [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) for GitLab Self-Managed in GitLab 19.2.2.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
 
@@ -29,7 +29,7 @@ title: GitLab Orbit
 Software lifecycle context graph for AI agents
 {.product-hero-title}
 
-GitLab Orbit indexes your GitLab data and code into a graph that your agent can query.
+GitLab Orbit indexes your GitLab data and code into a graph your agent can query.
 Ask what breaks if you change a service, who should review a file, or why pipelines fail.
 Your agent answers with a few graph queries in place of many file reads and API calls.
 {.product-hero-lead}
@@ -43,10 +43,10 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 - [Ask across code and lifecycle](prompt-examples.md)<br>One graph holds your projects, merge requests, pipelines, vulnerabilities, files, and definitions, so one question can cross all of them.
 - [Run one query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
-- [Get only the data that you can access](security.md#how-gitlab-orbit-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions, on GitLab.com, GitLab Self-Managed, and GitLab Dedicated.
+- [Get only the data you can access](security.md#how-gitlab-orbit-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions.
 {.product-cards}
 
-## Questions that GitLab Orbit can answer
+## Questions GitLab Orbit can answer
 
 - [Change a class hierarchy safely](prompt-examples.md#change-a-class-hierarchy-safely)
 - [See what shipped to production this week](prompt-examples.md#see-what-shipped-to-production-this-week)
@@ -61,11 +61,9 @@ Your agent answers with a few graph queries in place of many file reads and API 
 GitLab Orbit queries use [GQL](queries/query-language.md), a graph query language that large language models
 already know from their training data.
 A short GQL pattern describes connections, for example from a merge request to its pipelines and to the files
-that it changed.
+it changed.
 
 Your agent reads the [schema](queries/query-language.md#discover-the-schema), then writes its own query for each question.
-A retrieval-augmented generation (RAG) system gives the agent only the text that a search selected.
-With GitLab Orbit, the agent selects the exact data that it needs.
 One query replaces a chain of API calls, so the agent puts less load on your GitLab instance and makes fewer errors.
 
 ## Connect your agent
@@ -74,67 +72,25 @@ To get GitLab Orbit, [contact sales](https://about.gitlab.com/sales/).
 On GitLab.com, you can also [start a free trial](trial.md).
 For information about GitLab Orbit pricing and usage, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
 
-For agents that run shell commands, the GitLab Orbit CLI is the recommended method.
+Choose how your agent connects:
 
-{{< tabs >}}
-
-{{< tab title="Claude Code, Codex, OpenCode" >}}
-
-Sign in with `glab auth login`, then run one command in a Git repository:
-
-```shell
-glab orbit setup
-```
-
-`glab orbit setup` tells your agent to search code with the graph and installs the GitLab Orbit skill,
-which teaches your agent to query your GitLab data.
-For the full steps, see the [quickstart](quickstart.md#use-gitlab-orbit-with-your-agent).
-For the setup options, see [connect your agent](agents/_index.md).
-
-{{< /tab >}}
-
-{{< tab title="GitLab Duo" >}}
-
-GitLab Duo Agent Platform has GitLab Orbit built in.
-You do not install anything.
-Agents call the GitLab Orbit tools when the graph can answer a question.
-For more information, see [GitLab Orbit in GitLab Duo](agents/duo.md).
-
-{{< /tab >}}
-
-{{< tab title="MCP" >}}
-
-If your agent supports the Model Context Protocol (MCP) and cannot run shell commands, add the GitLab MCP endpoint.
-For example, in Claude Code:
-
-```shell
-claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
-```
-
-On GitLab Self-Managed and GitLab Dedicated, replace `gitlab.com` with the hostname of your instance.
-For other clients, see [GitLab MCP endpoint](agents/mcp.md#gitlab-mcp-endpoint).
-
-{{< /tab >}}
-
-{{< tab title="REST API" >}}
-
-To build a script, a scheduled report, or a custom tool on the graph, query it over HTTP.
-For the endpoints, authentication, and examples, see the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
-
-{{< /tab >}}
-
-{{< /tabs >}}
+- For agents that run shell commands, such as Claude Code, Codex, and OpenCode, use the [GitLab Orbit CLI](agents/_index.md).
+  For the steps, see the [quickstart](quickstart.md#use-gitlab-orbit-with-your-agent).
+- In GitLab Duo Agent Platform, GitLab Orbit is built in.
+  For more information, see [GitLab Orbit in GitLab Duo](agents/duo.md).
+- For agents that support the Model Context Protocol (MCP) but cannot run shell commands, use the [GitLab MCP endpoint](agents/mcp.md#gitlab-mcp-endpoint).
+- For scripts, scheduled reports, and custom tools, use the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
 
 ## Code on your machine
 
 The GitLab Orbit CLI also indexes repositories on your machine.
-Your agent can then search code that you have not pushed, offline and with no GitLab account.
+Your agent can then search code you have not pushed, offline and with no GitLab account.
 For more information, see [local graph](cli.md#local-graph).
 
 ## Learn more
 
 - [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
-- [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work that the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
+- [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
 {.product-cards .product-cards-2}
 
 ## Reference

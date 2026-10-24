@@ -22,7 +22,7 @@ If your agent can run shell commands, use the [CLI and the GitLab Orbit skill](_
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
 
 {{< /history >}}
@@ -32,7 +32,7 @@ On GitLab Self-Managed and GitLab Dedicated, replace `gitlab.com` with the hostn
 
 Prerequisites:
 
-- GitLab Orbit is [turned on](../quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) for a group that you can access.
+- GitLab Orbit is [turned on](../quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) for a group where you have the Reporter, Security Manager, Developer, Maintainer, or Owner role.
 - Your client signs in with OAuth.
   A client that connects over native HTTP must request the `mcp_orbit` scope.
   You can also [use a personal access token](#connect-with-a-personal-access-token).
@@ -161,7 +161,7 @@ In your agent, ask:
 Use GitLab Orbit to list the 5 most recently updated projects in my group.
 ```
 
-The first call opens your browser to sign in. Until you sign in, the client shows `Needs authentication`.
+If your client uses OAuth, the first call opens your browser to sign in. Until you sign in, the client shows `Needs authentication`.
 Then the agent returns project names and paths.
 
 If the browser does not open, sign in again from your client.
@@ -177,7 +177,7 @@ The endpoint has two tools. `list_commands` lists the GitLab Orbit commands with
 | Command | Description |
 |---------|-------------|
 | `query_graph` | Runs a query in the [query language](../queries/query-language.md). |
-| `get_graph_schema` | Returns the node types and relationship types, and the properties of the node types that you pass in `expand_nodes`. |
+| `get_graph_schema` | Returns the node types and relationship types, and the properties of the node types you pass in `expand_nodes`. |
 | `get_response_format` | Returns the response JSON Schema of `query_graph` and its version. |
 
 To get the properties and relationships of a node type, pass its name in `expand_nodes`,
@@ -200,7 +200,7 @@ For query recipes and the query language reference, install the [GitLab Orbit sk
 
 {{< history >}}
 
-- [Added](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/261207) to the GitLab MCP server in GitLab 19.6.
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/261207) in GitLab 19.6.
 
 {{< /history >}}
 

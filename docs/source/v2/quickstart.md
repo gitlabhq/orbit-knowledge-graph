@@ -25,8 +25,10 @@ about your GitLab data.
 
 ## Step 1: Turn on GitLab Orbit for your group
 
-If GitLab Orbit is already on for your group, go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
-To check, open the **Status** tab of the [GitLab Orbit dashboard](dashboard.md).
+To check whether GitLab Orbit is already on for your group, open the **Status** tab of the [GitLab Orbit dashboard](dashboard.md).
+If it is on, go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
+If it is off and you do not have the role that this step needs, ask a user with the Owner role for the top-level group to turn it on.
+On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn it on.
 
 {{< tabs >}}
 
@@ -41,6 +43,7 @@ To turn on GitLab Orbit:
 1. In the top bar, select **Search or go to** and find your top-level group.
 1. In the left sidebar, select **Settings** > **GitLab Orbit**.
 1. Turn on the **Turn on GitLab Orbit** toggle.
+1. In the **Turn on GitLab Orbit for `<my-group>`?** dialog, select **Turn on GitLab Orbit**.
 
 The page shows **GitLab Orbit is indexing `<my-group>`**, then **GitLab Orbit is ready for `<my-group>`**.
 
@@ -78,10 +81,10 @@ Other agents, such as Claude Code or Codex, need a one-time setup on your machin
 
 ### Use GitLab Orbit in GitLab Duo
 
-GitLab Orbit is on in GitLab Duo by default.
 After you complete [step 1](#step-1-turn-on-gitlab-orbit-for-your-group),
-GitLab Duo Agent Platform agents use the graph to answer questions about your GitLab data.
+GitLab Duo Agent Platform agents use GitLab Orbit by default to answer questions about your GitLab data.
 You do not install anything.
+To ask your first question, open GitLab Duo Chat and use one of the prompts at the end of this page.
 To choose which agents use GitLab Orbit, see [GitLab Orbit in GitLab Duo](agents/duo.md).
 
 ### Use GitLab Orbit with your agent
@@ -121,8 +124,9 @@ To set up your agent:
 To run setup yourself, or for other install methods, see [install the CLI](cli.md#install-the-cli).
 For the setup options and what setup changes, see [connect your agent](agents/_index.md).
 
-To check the indexing progress again, run `glab orbit graph-status` in the clone.
+To check the progress of the first index from step 1, run `glab orbit graph-status` in the clone.
 When indexing is complete, the summary ends with `Ready.`
+Until then, answers can miss data.
 
 To ask your first question:
 
@@ -134,6 +138,7 @@ To ask your first question:
    Group them by job, and show who authored each one.
    ```
 
+   Replace `<my-group>/<my-project>` with the full path of your project.
    The agent writes a graph query, runs it with `glab orbit query`, and answers with only the data that you can access.
 
 1. Ask about your code:

@@ -16,7 +16,7 @@ title: GitLab Orbit architecture
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
 
 {{< /history >}}
@@ -62,7 +62,7 @@ the indexer builds the graph from two sources:
 - Source code. The indexer fetches the files of the default branch through the GitLab internal API and
   [Gitaly](https://docs.gitlab.com/administration/gitaly/), parses them, and indexes again when the default branch changes.
   You cannot select another branch. An answer about code on another branch reflects the default branch.
-  For code that you have not merged, use the [local graph](cli.md#local-graph).
+  For code you have not merged, use the [local graph](cli.md#local-graph).
 
 Results show your data as of the last index cycle.
 The first index can take up to a few hours.
@@ -77,7 +77,7 @@ Every query follows the same path:
 1. GitLab receives the query from the CLI, the REST API, the MCP endpoint, or GitLab Duo Agent Platform.
 1. The query engine validates the query against the schema and compiles it to SQL.
 1. The graph database runs the SQL.
-1. GitLab removes each result that you cannot access. For more information, see [Security](security.md).
+1. GitLab removes each result you cannot access. For more information, see [Security](security.md).
 
 ## Hosting
 

@@ -15,23 +15,24 @@ title: GitLab Orbit prompt examples
 
 Send these prompts to GitLab Duo Chat, or to an agent that uses the [GitLab Orbit CLI](cli.md)
 or the [GitLab Model Context Protocol (MCP) endpoint](agents/mcp.md).
-Start the first prompt with `Using GitLab Orbit`, and replace the values in `<angle brackets>`.
+Start the first prompt of a conversation with `Using GitLab Orbit`, and replace the values in `<angle brackets>`.
 
 Each example also shows the [queries](queries/query-language.md) that the agent runs.
 To check an answer, run a query with `glab orbit query "<query>"`.
 
 The queries run on GitLab.com, in the `gitlab-org` group.
-They return rows only if you have the Reporter, Security Manager, Developer, Maintainer, or Owner role in that group.
+They return rows only if you have the Reporter, Security Manager, Developer, Maintainer, or Owner role for that group.
 To run a query in your own group, change these values:
 
 - `project_id: 278964`, the ID of the `gitlab-org/gitlab` project, to the ID of your project.
   To find the ID, see [bounded nodes](queries/query-language.md#bounded-nodes).
-- `gitlab-org/` in `full_path` and `import_path` filters, to the path of your group.
+- `gitlab-org/` in `full_path` filters, to the path of your group.
+- `gitlab.com/gitlab-org/labkit` in the `import_path` filter, to the import path of your library.
 - The values of `branch` and `ref` filters, to the default branch of your project.
 - `gprd`, the production environment of `gitlab-org/gitlab`, to the name of your production environment.
 - File paths, class names, job names, milestones, and dates, to values from your project.
 
-Each **Without GitLab Orbit** line counts the REST API calls for the same answer.
+Each example also counts the REST API calls for the same answer without GitLab Orbit.
 With the GraphQL API, some of these lookups take fewer calls.
 
 ## Change a class hierarchy safely
@@ -71,8 +72,8 @@ ORDER BY mr.iid DESC
 LIMIT 100
 ```
 
-- **With GitLab Orbit:** two queries, one for the subclasses and one for the open merge requests.
-- **Without GitLab Orbit:** about 2,300 REST API calls for a project with about 2,300 open merge requests,
+- With GitLab Orbit: two queries, one for the subclasses and one for the open merge requests.
+- Without GitLab Orbit: about 2,300 REST API calls for a project with about 2,300 open merge requests,
   one for the changes of each, after you clone and parse the repository.
 
 ## See what shipped to production this week
@@ -104,8 +105,8 @@ Which merge requests reached <production> in the four hours before
 <incident time>?
 ```
 
-- **With GitLab Orbit:** one query for each question.
-- **Without GitLab Orbit:** about 1,800 REST API calls for a project that deploys about 1,800 merge requests
+- With GitLab Orbit: one query for each question.
+- Without GitLab Orbit: about 1,800 REST API calls for a project that deploys about 1,800 merge requests
   to production in a week, one for the merge requests of each deployment
   and one for the closed issues of each merge request.
 
@@ -134,13 +135,13 @@ LIMIT 30
 The query language has no date arithmetic.
 For the time to merge, the agent returns `mr.created_at` and `mr.merged_at` for each merged merge request,
 and computes the median.
-The graph has agent sessions for GitLab Duo agents and flows only,
+The graph has sessions for GitLab Duo agents and flows only,
 so merge requests from other agents are not in the answer.
 
-- **With GitLab Orbit:** one query for each question.
-- **Without GitLab Orbit:** about 400 REST API calls for a project with about 400 agent merge requests in 30 days,
+- With GitLab Orbit: one query for each question.
+- Without GitLab Orbit: about 400 REST API calls for a project with about 400 agent merge requests in 30 days,
   one for each merge request, after you find them.
-  No REST API call lists the agent sessions of all users.
+  No REST API call lists the sessions of all users.
 
 ## Find the right reviewer for a file
 
@@ -170,8 +171,8 @@ LIMIT 20
 and it can return one row for each version.
 Anchor the file on `old_path` and `project_id`, so the same path in another project does not match.
 
-- **With GitLab Orbit:** one query for each question.
-- **Without GitLab Orbit:** about 160 REST API calls for a file that about 80 merged merge requests changed,
+- With GitLab Orbit: one query for each question.
+- Without GitLab Orbit: about 160 REST API calls for a file that about 80 merged merge requests changed,
   one to find each merge request from its commit and one for its comments.
   No REST API call searches review comments by file.
 
@@ -201,8 +202,8 @@ LIMIT 100
 
 The agent groups the rows by `j.name`, so a job that fails on many merge requests stands out.
 
-- **With GitLab Orbit:** one query.
-- **Without GitLab Orbit:** about 1,500 REST API calls for a milestone with about 1,250 open merge requests,
+- With GitLab Orbit: one query.
+- Without GitLab Orbit: about 1,500 REST API calls for a milestone with about 1,250 open merge requests,
   one for the head pipeline of each and one for the failed jobs of each failed pipeline.
   You then compare the jobs across merge requests.
 
@@ -243,14 +244,18 @@ ORDER BY failures DESC
 LIMIT 20
 ```
 
-- **With GitLab Orbit:** one query for each question.
-- **Without GitLab Orbit:** at least 890 REST API calls for a project that ran the job about 890 times
+- With GitLab Orbit: one query for each question.
+- Without GitLab Orbit: at least 890 REST API calls for a project that ran the job about 890 times
   on the default branch in 14 days, one page of jobs for each pipeline,
   because the jobs API does not filter by job name.
 
 ## Fix a vulnerability across every affected project
 
 Find every project that a vulnerability affects, fix each one, and follow the fixes to production.
+
+To query vulnerabilities, you must have the Security Manager, Developer, Maintainer, or Owner role.
+With the Reporter role, the queries return no rows.
+For more information, see [roles](security.md#roles).
 
 ```plaintext
 Using GitLab Orbit, find every project in <my-group> affected by
@@ -292,12 +297,8 @@ ORDER BY vulns DESC
 LIMIT 50
 ```
 
-To query vulnerabilities, you must have the Security Manager, Developer, Maintainer, or Owner role.
-With the Reporter role, the queries return no rows.
-For more information, see [roles](security.md#roles).
-
-- **With GitLab Orbit:** two queries, one to find the projects and one to follow the fixes.
-- **Without GitLab Orbit:** at least one REST API call for each project in a group with about 9,200 projects,
+- With GitLab Orbit: two queries, one to find the projects and one to follow the fixes.
+- Without GitLab Orbit: at least one REST API call for each project in a group with about 9,200 projects,
   to list its vulnerabilities and find the CVE.
   No REST API call goes from a vulnerability to the merge request that fixes it.
 
@@ -321,8 +322,8 @@ ORDER BY callers DESC
 LIMIT 30
 ```
 
-- **With GitLab Orbit:** one query for each question.
-- **Without GitLab Orbit:** no count, because no REST API call returns callers.
+- With GitLab Orbit: one query for each question.
+- Without GitLab Orbit: no count, because no REST API call returns callers.
   You check out the repository and run a call-graph tool for the language.
 
 ## Find the consumers of a shared library
@@ -351,8 +352,8 @@ LIMIT 30
 Forks and mirrors import the library too, and they are often at the top of the results.
 The graph does not mark forks or mirrors, so tell your agent which projects to leave out.
 
-- **With GitLab Orbit:** one query.
-- **Without GitLab Orbit:** a group code search for the import path, in a group with about 9,200 projects.
+- With GitLab Orbit: one query.
+- Without GitLab Orbit: a group code search for the import path, in a group with about 9,200 projects.
   Code search matches text, so it cannot count the parsed imports on the default branch of each project.
   To count them, you clone each project that the search finds.
 

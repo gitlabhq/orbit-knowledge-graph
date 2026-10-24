@@ -17,17 +17,12 @@ In the GitLab Orbit dashboard, you check the state of your graph and run queries
 
 To open the dashboard, in the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
 
-If GitLab Orbit is not on for any of your groups, the dashboard lists your groups.
-The heading is **Try GitLab Orbit** when a group is eligible for a free trial.
-Otherwise, the heading is **GitLab Orbit is not turned on for your groups yet**.
-To turn on GitLab Orbit, select the groups, then select **Turn on GitLab Orbit**.
-On GitLab.com, you can also try GitLab Orbit with a free trial.
-For more information, see [Start a free trial](trial.md).
+If GitLab Orbit is not turned on for any of your groups, the dashboard lists your groups.
+To turn on GitLab Orbit, you need the Owner role for the top-level group.
+Select the groups, then select **Turn on GitLab Orbit**.
+On GitLab.com, you can also try GitLab Orbit with a [free trial](trial.md).
 
-The page header has **Leave feedback** and **Quickstart**.
-**Quickstart** shows the cards **Use GitLab Orbit in GitLab Duo** and **Use GitLab Orbit with your own agents**,
-with **Copy command** and a **Connect an MCP client** link.
-For administrators, the header also has **Settings**.
+Administrators also see **Settings** in the page header.
 
 The dashboard has these tabs:
 
