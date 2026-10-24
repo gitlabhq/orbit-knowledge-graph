@@ -18,35 +18,10 @@ fn serve_once(
     response_body: &'static str,
     content_type: &'static str,
 ) -> (String, thread::JoinHandle<CapturedRequest>) {
-    serve_status_once("200 OK", "", response_body, content_type)
+    serve_once_encoded(response_body.as_bytes().to_vec(), content_type, None)
 }
 
 fn serve_once_encoded(
-    response_body: Vec<u8>,
-    content_type: &'static str,
-    content_encoding: Option<&'static str>,
-) -> (String, thread::JoinHandle<CapturedRequest>) {
-    serve_response("200 OK", "", response_body, content_type, content_encoding)
-}
-
-fn serve_status_once(
-    status: &'static str,
-    extra_headers: &'static str,
-    response_body: &'static str,
-    content_type: &'static str,
-) -> (String, thread::JoinHandle<CapturedRequest>) {
-    serve_response(
-        status,
-        extra_headers,
-        response_body.as_bytes().to_vec(),
-        content_type,
-        None,
-    )
-}
-
-fn serve_response(
-    status: &'static str,
-    extra_headers: &'static str,
     response_body: Vec<u8>,
     content_type: &'static str,
     content_encoding: Option<&'static str>,
@@ -96,7 +71,7 @@ fn serve_response(
             .map(|encoding| format!("Content-Encoding: {encoding}\r\n"))
             .unwrap_or_default();
         let head = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\n{extra_headers}{encoding_header}Content-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n{encoding_header}Content-Length: {}\r\nConnection: close\r\n\r\n",
             response_body.len()
         );
         stream.write_all(head.as_bytes()).expect("write head");
@@ -429,31 +404,35 @@ fn ontology_advertises_compression_and_decodes_gzip_response() {
     assert_eq!(stdout["schema_version"], "gzipped");
 }
 
-fn git_clone_with_origin(origin: &str) -> tempfile::TempDir {
-    let clone = tempfile::tempdir().expect("tempdir");
-    for args in [
-        ["init", "--quiet"].as_slice(),
-        &["remote", "add", "origin", origin],
-    ] {
+fn committed_repo(origin: &str, files: &[(&str, &str)]) -> tempfile::TempDir {
+    let repo = tempfile::tempdir().expect("tempdir");
+    for (path, text) in files {
+        let path = repo.path().join(path);
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        std::fs::write(path, text).expect("write file");
+    }
+    let commit = [
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-qm",
+        "init",
+    ];
+    let remote = ["remote", "add", "origin", origin];
+    let mut steps = vec![&["init", "-q"][..], &remote];
+    if !files.is_empty() {
+        steps.extend([&["add", "-A"][..], &commit]);
+    }
+    for args in steps {
         let status = Command::new("git")
             .args(args)
-            .current_dir(clone.path())
-            .status()
-            .expect("run git");
-        assert!(status.success(), "git {args:?} failed");
+            .current_dir(repo.path())
+            .status();
+        assert!(status.expect("run git").success(), "git {args:?} failed");
     }
-    clone
-}
-
-fn run_orbit_with_data(
-    dir: &Path,
-    data: &Path,
-    base_url: &str,
-    args: &[&str],
-) -> std::process::Output {
-    orbit_command(dir, data, base_url, args)
-        .output()
-        .expect("run orbit binary")
+    repo
 }
 
 fn orbit_command(dir: &Path, data: &Path, base_url: &str, args: &[&str]) -> Command {
@@ -475,13 +454,15 @@ const GREP_RESPONSE: &str = r#"{"version":"1.0.0","target":{"type":"project","id
 fn grep_for_a_hosted_kind_searches_the_origin_group() {
     let (base_url, handle) = serve_once(GREP_RESPONSE, "application/json");
     let base_url = base_url.replace("127.0.0.1", "localhost");
-    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
-    let output = run_orbit_with_data(
+    let clone = committed_repo("https://localhost/my-group/my-project", &[]);
+    let output = orbit_command(
         clone.path(),
         clone.path(),
         &base_url,
         &["grep", "mr:runner"],
-    );
+    )
+    .output()
+    .expect("run orbit binary");
     let request = handle.join().expect("join mock");
     assert_eq!(
         request.request_line,
@@ -546,14 +527,16 @@ fn context_branch_target_reads_its_merge_request() {
         ("merge_requests?", r#"[{"id":42,"iid":4,"state":"opened"}]"#),
         ("orbit/context", "- found=true\n"),
     ]);
-    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
+    let clone = committed_repo("https://localhost/my-group/my-project", &[]);
     let base_url = base_url.replace("127.0.0.1", "localhost");
-    let output = run_orbit_with_data(
+    let output = orbit_command(
         clone.path(),
         clone.path(),
         &base_url,
         &["context", "branch:fix-ci"],
-    );
+    )
+    .output()
+    .expect("run orbit binary");
     let requests = handle.join().expect("join mock");
     assert!(
         requests[1].body.contains("my-group/my-project!4"),
@@ -568,39 +551,22 @@ fn context_branch_target_reads_its_merge_request() {
 
 #[test]
 fn context_appends_the_local_code_a_merge_request_changes() {
-    let clone = git_clone_with_origin("https://localhost/my-group/my-project");
+    let clone = committed_repo(
+        "https://localhost/my-group/my-project",
+        &[(
+            "src/app.py",
+            "def total(items):\n    count = len(items)\n    return count\n",
+        )],
+    );
     let data = tempfile::tempdir().expect("tempdir");
-    std::fs::create_dir_all(clone.path().join("src")).expect("mkdir");
-    std::fs::write(
-        clone.path().join("src/app.py"),
-        "def total(items):\n    count = len(items)\n    return count\n",
-    )
-    .expect("write source");
-    for args in [
-        ["add", "-A"].as_slice(),
-        &[
-            "-c",
-            "user.name=t",
-            "-c",
-            "user.email=t@t",
-            "commit",
-            "-qm",
-            "init",
-        ],
-    ] {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(clone.path())
-            .status()
-            .expect("git");
-        assert!(status.success(), "git {args:?} failed");
-    }
-    let indexed = run_orbit_with_data(
+    let indexed = orbit_command(
         clone.path(),
         data.path(),
         "http://localhost:1",
         &["index", "."],
-    );
+    )
+    .output()
+    .expect("run orbit binary");
     assert!(
         indexed.status.success(),
         "{}",
@@ -611,12 +577,14 @@ fn context_appends_the_local_code_a_merge_request_changes() {
         "- mr:my-group/my-project!4 found=true\n  changed_files[1]:\n    M src/app.py @ 2-3\n",
     )]);
     let base_url = base_url.replace("127.0.0.1", "localhost");
-    let output = run_orbit_with_data(
+    let output = orbit_command(
         clone.path(),
         data.path(),
         &base_url,
         &["context", "my-group/my-project!4"],
-    );
+    )
+    .output()
+    .expect("run orbit binary");
     handle.join().expect("join mock");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -627,31 +595,11 @@ fn context_appends_the_local_code_a_merge_request_changes() {
 
 #[test]
 fn grep_refreshes_an_edited_file_inline_or_detached() {
-    let repo = tempfile::tempdir().expect("tempdir");
+    let repo = committed_repo(
+        "https://localhost/my-group/my-project",
+        &[("util.py", "def helper():\n    return 1\n")],
+    );
     let write = |name: &str, text: &str| std::fs::write(repo.path().join(name), text).unwrap();
-    write("util.py", "def helper():\n    return 1\n");
-    for args in [
-        &["init", "-q"][..],
-        &["add", "."],
-        &[
-            "-c",
-            "user.name=t",
-            "-c",
-            "user.email=t@t",
-            "commit",
-            "-qm",
-            "init",
-        ],
-    ] {
-        assert!(
-            Command::new("git")
-                .args(args)
-                .current_dir(repo.path())
-                .status()
-                .unwrap()
-                .success()
-        );
-    }
     let (edited, fresh) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let orbit = |data: &Path, args: &[&str], wait: &str| {
         let output = orbit_command(repo.path(), data, "http://localhost:1", args)
