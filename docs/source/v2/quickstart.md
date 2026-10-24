@@ -20,17 +20,13 @@ about your GitLab data.
 
 - Access to GitLab Orbit for the top-level group.
   To get access, start a [free trial on GitLab.com](trial.md), or [contact sales](https://about.gitlab.com/sales/).
-- To query the graph, the Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
-- To use your own coding agent, an agent on your machine, such as Claude Code, Codex, or OpenCode.
-
-To check whether GitLab Orbit is on for your group, in the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
-Then select the **Status** tab.
-For more information, see [GitLab Orbit dashboard](dashboard.md).
-If the page shows **GitLab Orbit is not turned on for your groups yet**, ask a user with the Owner role to turn on GitLab Orbit for the group.
-If GitLab Orbit is already on for your group, skip [step 1](#step-1-turn-on-gitlab-orbit-for-your-group),
-and go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
+- Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
+- GitLab Duo or an agent of your choice such as Claude Code, Codex, or OpenCode.
 
 ## Step 1: Turn on GitLab Orbit for your group
+
+If GitLab Orbit is already on for your group, go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
+To check, open the **Status** tab of the [GitLab Orbit dashboard](dashboard.md).
 
 {{< tabs >}}
 
@@ -92,15 +88,6 @@ To choose which agents use GitLab Orbit, see [GitLab Orbit in GitLab Duo](agents
 
 Connect an agent on your machine to GitLab Orbit, then ask your first question.
 
-If your agent already runs on your machine, install `glab` and sign in with `glab auth login`.
-Then paste this prompt, and the agent completes the rest of the setup for you:
-
-```plaintext
-Install the GitLab Orbit CLI and connect it to this agent. Follow https://docs.gitlab.com/orbit/quickstart/
-(the GitLab Orbit documentation index is https://docs.gitlab.com/llms.txt). Run `glab orbit setup`
-in this repository. When you finish, run `glab orbit graph-status` and show me the result.
-```
-
 To set up your agent:
 
 <!-- vale orbit.StandaloneProductName = NO -->
@@ -117,35 +104,27 @@ To set up your agent:
    To use `glab orbit` outside a clone of a project on your instance, also run
    `glab config set --global host <gitlab.example.com>`.
 
-1. Go to a Git repository on your machine.
-   Any repository works.
+1. In a clone of a project in your group, start your agent and paste this prompt:
 
-   ```shell
-   cd path/to/your/repo
+   ```plaintext
+   Set up GitLab Orbit for this agent. In this repository, run
+   `glab orbit --yes setup --yes`, then run `glab orbit graph-status` and
+   show me the result. If a command fails, see
+   https://docs.gitlab.com/orbit/troubleshooting/.
    ```
 
-1. Run setup.
-   On first use, `glab` asks to download the GitLab Orbit CLI.
-   In the list, keep the agents that setup found, and press <kbd>Enter</kbd>.
-
-   ```shell
-   glab orbit setup
-   ```
+   The agent downloads the GitLab Orbit CLI, installs the GitLab Orbit skill for the agents
+   that setup detects on your machine, and indexes the repository for code search.
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
-Setup installs the GitLab Orbit skill for your agents, and indexes the repository for code search.
-For other install methods, see [the GitLab Orbit CLI](cli.md#other-install-methods).
+To run setup yourself, or for other install methods, see [install the CLI](cli.md#install-the-cli).
 For the setup options and what setup changes, see [connect your agent](agents/_index.md).
 
+To check the indexing progress again, run `glab orbit graph-status` in the clone.
+When indexing is complete, the summary ends with `Ready.`
+
 To ask your first question:
-
-1. In a clone of a project in your group, check the indexing progress.
-   When indexing is complete, the summary ends with `Ready.`
-
-   ```shell
-   glab orbit graph-status
-   ```
 
 1. Start a new session of your agent in the repository and ask about your GitLab data:
 
