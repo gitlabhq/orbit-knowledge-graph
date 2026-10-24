@@ -23,21 +23,16 @@ In the GitLab Orbit dashboard, you check the state of your graph and run queries
 
 To open the dashboard, in the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
 
-If GitLab Orbit is not turned on for any of your groups, the dashboard lists your groups.
-To turn on GitLab Orbit, you need the Owner role for the top-level group.
-Select the groups, then select **Turn on GitLab Orbit**.
-On GitLab.com, you can also try GitLab Orbit with a [free trial](trial.md).
-
 Administrators also see **Settings** in the page header.
 
 The dashboard has these tabs:
 
 | Tab | Description |
 |-----|-------------|
-| **Overview** | Shows a map of your graph, the entity counts **On your map**, and the projects that are still indexing. |
-| **Schema** | Shows **How your data connects**, with the entities by area: **Core**, **Work items**, **Merge requests**, **Pipelines**, **Code**, **Vulnerabilities**, **Packages**, **Container registry**, and **AI agents**. Select an entity to open **Entity details**, with its properties, its connected entities, and the count in your graph. |
-| **Query editor** | Runs GQL queries. Write a query, or select **Write it with GitLab Duo**. You can start from the **Examples**, open the **Query reference** for the schema and the **GQL syntax**, select **Run query**, and select **Export CSV**. When a query fails, select **Ask GitLab Duo to fix this query**. |
-| **Status** | Shows the GitLab Orbit status of your top-level groups, where you turn GitLab Orbit on or off. To change a group, you need the Owner role for the group. **View billing** links to a page outside the dashboard. |
+| **Overview** | Shows a map of your graph and the projects that are still indexing. |
+| **Schema** | Shows the entities in your graph and how they connect. |
+| **Query editor** | Runs GQL queries, with examples and a query reference. |
+| **Status** | Shows the GitLab Orbit status of your top-level groups. |
 
 ## Check indexing progress
 
@@ -73,7 +68,7 @@ To run a query:
 1. Write a query, or select **Write it with GitLab Duo**.
    To start from an example, select **Examples**.
 1. Select **Run query**.
-1. Optional. To download the results, select **Export CSV**.
+1. Optional. To export the results to a CSV file, select **Export CSV**.
 
 The tab shows the results of the query.
 If the query fails, select **Ask GitLab Duo to fix this query**.
@@ -90,11 +85,17 @@ To turn GitLab Orbit on or off:
 
 1. In the top bar, select **Search or go to** > **Your work** > **GitLab Orbit**.
 1. Select the **Status** tab.
-1. Find your top-level group, and turn GitLab Orbit on or off.
+1. Select the checkbox next to your top-level group.
+1. Select **Actions** > **Turn on GitLab Orbit** or **Actions** > **Turn off GitLab Orbit**.
+1. On the confirmation dialog, select **Turn on GitLab Orbit** or **Turn off GitLab Orbit**.
 
 The tab shows the new GitLab Orbit status of the group.
 When you turn off GitLab Orbit, GitLab keeps the indexed data for a limited time.
 For more information, see [data retention and deletion](how-it-works.md#data-retention-and-deletion).
+
+If GitLab Orbit is not turned on for any of your groups, the dashboard lists your groups.
+To turn on GitLab Orbit, select the groups, then select **Turn on GitLab Orbit**.
+On GitLab.com, you can also try GitLab Orbit with a [free trial](trial.md).
 
 ## Related topics
 

@@ -13,14 +13,6 @@ title: GitLab Orbit indexed data
 
 {{< /details >}}
 
-{{< history >}}
-
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-
-{{< /history >}}
-
 GitLab Orbit indexes two kinds of data into one graph:
 
 - Software development lifecycle (SDLC) objects from GitLab, such as groups, projects, users,
@@ -129,7 +121,7 @@ Use these properties to read code without a separate call to the GitLab API.
 
 - Query responses return all entity IDs as strings, even when the stored value is an integer.
   String IDs prevent precision loss in JavaScript clients for values above `Number.MAX_SAFE_INTEGER`.
-- On the server, a `Definition` ID is a content hash scoped to the project and branch.
+- On the server, a `Definition` ID is a hash of the project, branch, file path, fully qualified name, and position of the definition.
   The same function in two projects has two different IDs.
 
 ## Related topics

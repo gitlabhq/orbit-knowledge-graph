@@ -17,12 +17,17 @@ Send these prompts to GitLab Duo Chat, or to an agent that uses the [GitLab Orbi
 or the [GitLab Model Context Protocol (MCP) endpoint](agents/mcp.md).
 Start the first prompt of a conversation with `Using GitLab Orbit` to make sure the agent uses GitLab Orbit, and replace the values in `<angle brackets>`.
 
-Each example also shows the [queries](queries/query-language.md) that the agent runs.
-To check an answer, run a query with `glab orbit query "<query>"`.
+Each example also shows the [queries](queries/query-language.md) that the agent runs, on the `gitlab-org/gitlab` project on GitLab.com.
+To check an answer, replace the paths and IDs with those of your project, then run the query with `glab orbit query "<query>"`.
+To find the IDs, see [bounded nodes](queries/query-language.md#bounded-nodes).
 
 ## Fix a vulnerability across every affected project
 
 Find every project that a vulnerability affects, fix each one, and follow the fixes to production.
+
+To query vulnerabilities, you must have the Security Manager, Developer, Maintainer, or Owner role.
+With the Reporter role, the queries return no rows.
+For more information, see [roles](security.md#roles).
 
 ```plaintext
 Using GitLab Orbit, find every project in <my-group> affected by
@@ -63,10 +68,6 @@ ORDER BY vulns DESC
 LIMIT 50
 ```
 
-To query vulnerabilities, you must have the Security Manager, Developer, Maintainer, or Owner role.
-With the Reporter role, the queries return no rows.
-For more information, see [roles](security.md#roles).
-
 - **With GitLab Orbit:** one query for each question.
 - **Without GitLab Orbit:** at least one REST API call for each project in a group with about 9,200 projects,
   to list its vulnerabilities and find the CVE.
@@ -95,7 +96,7 @@ ORDER BY d.created_at DESC
 LIMIT 50
 ```
 
-To find the related components that shipped too, ask a follow-up question:
+To find the related components that reached production in the same window, ask a follow-up question:
 
 ```plaintext
 Which components does <app/models/ci/build.rb> call, and which of them

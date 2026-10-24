@@ -13,14 +13,6 @@ title: Connect your agent to GitLab Orbit
 
 {{< /details >}}
 
-{{< history >}}
-
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 19.0.
-- [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) from experiment to beta in GitLab 19.1.
-- Generally available in GitLab 19.5.
-
-{{< /history >}}
-
 The GitLab Orbit CLI connects the agents on your machine to GitLab Orbit.
 Setup installs the CLI and the GitLab Orbit skill, tells your agents to search code with the
 [local graph](../cli.md#local-graph), and indexes the repository.
@@ -28,7 +20,7 @@ The GitLab Orbit skill teaches your agent to query your GitLab data, such as mer
 and vulnerabilities, and the local graph.
 
 GitLab Duo Agent Platform has GitLab Orbit built in. For more information, see [GitLab Orbit in GitLab Duo](duo.md).
-For agents that cannot run shell commands or prefer MCP, use the [GitLab Orbit MCP endpoint](mcp.md).
+For agents that cannot run shell commands or that prefer the Model Context Protocol (MCP), use the [GitLab Orbit MCP endpoint](mcp.md).
 
 ## Set up your agent
 
@@ -38,17 +30,18 @@ For a short walkthrough, see the [quickstart](../quickstart.md).
 Prerequisites:
 
 - `glab` 1.120 or later. To check your version, run `glab version`.
+- An agent that setup supports. For the list, see [setup options](#setup-options).
 
 To set up your agent:
 
 1. Go to a Git repository on your machine. Any repository works.
 1. Run `glab orbit setup`.
    On first use, `glab` asks to download the GitLab Orbit CLI.
-1. In the list of agents, setup selects the agents that it detects on your machine.
-   Keep or clear the selection, then press <kbd>Enter</kbd>.
+1. In the list of agents, keep or clear the agents that setup selected, then press <kbd>Enter</kbd>.
 
 Setup installs the GitLab Orbit skill for your agents and indexes the repository for code search.
 To check that the repository is indexed, run `glab orbit list`.
+To load the skill, start a new session of your agent.
 To update the setup, run the command again.
 
 To run setup without a terminal, for example from an agent or a script, confirm both prompts with `--yes`:
@@ -76,7 +69,7 @@ glab orbit setup [<agent>...] [options]
 |--------|-------------|
 | `<agent>` | Set up only these agents, for example `claude codex`. Setup adds a named agent even when it does not detect it. |
 | `--all` | Set up every supported agent. |
-| `--yes`, `-y` | Skip the list of agents. In scripts and other places without a terminal, also put `--yes` before `setup` to confirm the download: `glab orbit --yes setup --yes`. |
+| `--yes`, `-y` | Skip the list of agents. |
 | `--skip <component>` | Leave out `instructions`, `hooks`, or `skill`. You can repeat it. |
 | `--skill full` | Install the full skill files in place of the wrapper skill. |
 | `--no-index` | Do not index the repository. |

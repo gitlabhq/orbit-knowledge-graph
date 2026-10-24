@@ -46,11 +46,11 @@ To install the CLI and set up your agents, see [set up your agent](agents/_index
 To skip the prompts on every run, set the `glab` options `orbit_cli_auto_download` and `orbit_cli_auto_run` to `true`:
 
 ```shell
-glab config set orbit_cli_auto_download true
-glab config set orbit_cli_auto_run true
+glab config set --global orbit_cli_auto_download true
+glab config set --global orbit_cli_auto_run true
 ```
 
-Setup sets `orbit_cli_auto_run` for you.
+When you run setup in a repository, it sets `orbit_cli_auto_run` only for that repository.
 
 ### Install the standalone binary
 
@@ -210,7 +210,7 @@ and writes definitions, imports, and cross-file references to the graph.
 The parser and [supported languages](schema.md#supported-languages) are the same as for the remote graph.
 
 - When you pass the path of a directory, the CLI indexes each repository in the directory.
-- Each indexed commit keeps its own graph. When you index the same commit again, the CLI replaces its graph.
+- Each indexed commit keeps its own graph. When you index the same commit again, the CLI re-indexes only the files that changed since the last run, including uncommitted edits.
 - After you switch branches, `grep` and `context` index the new commit for you.
   Before you use `repo-map` or `sql` on the new commit, run `glab orbit index .`.
 
@@ -295,7 +295,7 @@ The CLI reads these environment variables:
 |----------|---------|
 | `GITLAB_TOKEN`, `GITLAB_URL` | Token and instance for remote commands when you run the CLI without `glab`. Default URL: `https://gitlab.com`. Without `GITLAB_TOKEN`, the CLI gets the token and instance of your `glab` sign-in from `glab auth credential-helper`. |
 | `ORBIT_DATA_DIR` | A directory for the settings and the local graph, instead of `~/.gitlab/orbit/`. |
-| `ORBIT_TELEMETRY_ENABLED` | `false` or `true`. Overrides the saved telemetry setting, for example in CI. |
+| `ORBIT_TELEMETRY_ENABLED` | `false` or `true`. Overrides the saved telemetry setting, for example in a CI/CD job. |
 
 ## Exit codes
 

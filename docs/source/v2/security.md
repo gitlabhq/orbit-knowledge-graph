@@ -13,14 +13,6 @@ title: GitLab Orbit security
 
 {{< /details >}}
 
-{{< history >}}
-
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-
-{{< /history >}}
-
 A query returns only the data that your role lets you see in GitLab, even when an agent sends it.
 
 ## Roles
@@ -98,14 +90,17 @@ Project membership, and membership of groups where GitLab Orbit is off, do not g
 
 ### Set up a service account
 
-You must have the Owner role for the group, and GitLab Orbit must be [turned on for the group](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
+Prerequisites:
+
+- The Owner role for the group.
+- GitLab Orbit is [turned on for the group](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group).
 
 To set up a service account for GitLab Orbit:
 
 1. [Create a service account and a personal access token](https://docs.gitlab.com/user/profile/service_accounts/#create-a-service-account) with the `read_api` scope.
    Service accounts cannot use fine-grained personal access tokens.
 1. Add the service account with the Reporter role to the lowest subgroup that has the data.
-   To read security data, use the **Security Manager** role.
+   To read security data, use the Security Manager role.
    Repeat this step for each group that the service account must query.
 
 ### Verify the scope of a service account

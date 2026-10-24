@@ -34,7 +34,8 @@ Prerequisites:
 
 - GitLab Orbit is [turned on](../quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) for a group where you have the Reporter, Security Manager, Developer, Maintainer, or Owner role.
 - Your client signs in with OAuth.
-  A client that connects over native HTTP must request the `mcp_orbit` scope.
+  When a client that connects over native HTTP names the endpoint as the OAuth resource, GitLab gives its token the `mcp_orbit` scope.
+  Other clients must request the `mcp_orbit` scope.
   You can also [use a personal access token](#connect-with-a-personal-access-token).
 
 ### Connect a client to the endpoint

@@ -13,14 +13,6 @@ title: GitLab Orbit architecture
 
 {{< /details >}}
 
-{{< history >}}
-
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
-- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-
-{{< /history >}}
-
 GitLab Orbit is a read-only property graph of your GitLab data and code.
 GitLab builds it for each top-level group where GitLab Orbit is turned on, keeps it current,
 and checks your permissions on every query.
@@ -74,7 +66,7 @@ To check the progress, see [check indexing progress with the GitLab Orbit CLI](c
 Queries use [GQL](queries/query-language.md), the GitLab Orbit query language.
 Every query follows the same path:
 
-1. GitLab receives the query from the CLI, the REST API, the MCP endpoint, or GitLab Duo Agent Platform.
+1. GitLab receives the query from the CLI, the REST API, the Model Context Protocol (MCP) endpoint, or GitLab Duo Agent Platform.
 1. The query engine validates the query against the schema and compiles it to SQL.
 1. The graph database runs the SQL.
 1. GitLab removes each result you cannot access. For more information, see [Security](security.md).

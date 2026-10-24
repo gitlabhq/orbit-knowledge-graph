@@ -21,17 +21,15 @@ about your GitLab data.
 - Access to GitLab Orbit for the top-level group.
   To get access, start a [free trial on GitLab.com](trial.md), or [contact sales](https://about.gitlab.com/sales/).
 - Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
-- GitLab Duo or an agent of your choice such as Claude Code, Codex, or OpenCode.
+- GitLab Duo, or an agent that [setup supports](agents/_index.md#setup-options), such as Claude Code, Codex, or OpenCode.
+  For other agents, see the [GitLab Orbit MCP endpoint](agents/mcp.md).
 
 ## Step 1: Turn on GitLab Orbit for your group
 
-To check whether GitLab Orbit is already on for your group, open the **Status** tab of the [GitLab Orbit dashboard](dashboard.md).
+To check whether GitLab Orbit is already on for your group, open the [GitLab Orbit dashboard](dashboard.md).
+If GitLab Orbit is on for any of your groups, the **Status** tab shows the state of each group.
 If it is on, go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
 If it is off and you do not have the Owner role for the top-level group, ask a user with that role to turn it on.
-
-On GitLab Self-Managed and GitLab Dedicated, to get GitLab Orbit, [contact sales](https://about.gitlab.com/sales/).
-
-On GitLab.com, if your group does not have GitLab Orbit yet, start a [free trial](trial.md).
 
 Prerequisites:
 
@@ -55,9 +53,6 @@ Other agents, such as Claude Code or Codex, need a one-time setup on your machin
 
 ### Use GitLab Orbit in GitLab Duo
 
-After you complete [step 1](#step-1-turn-on-gitlab-orbit-for-your-group),
-GitLab Duo Agent Platform agents use GitLab Orbit by default to answer questions about your GitLab data.
-You do not install anything.
 To ask your first question, open GitLab Duo Chat and use one of the prompts at the end of this page.
 To choose which agents use GitLab Orbit, see [GitLab Orbit in GitLab Duo](agents/duo.md).
 

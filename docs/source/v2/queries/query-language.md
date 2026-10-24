@@ -241,13 +241,9 @@ LIMIT 12
 
 ## Pagination
 
-To get results page by page, use `SKIP` and `LIMIT`.
-`OFFSET` is the same as `SKIP`.
-Put `SKIP` before `LIMIT`.
-Start at `SKIP 0`.
-For each next page, add the page size to `SKIP`:
+To get results page by page, put `SKIP` before `LIMIT`, and add the page size to `SKIP` for each next page:
 `SKIP 0 LIMIT 20`, then `SKIP 20 LIMIT 20`, then `SKIP 40 LIMIT 20`.
-Write `SKIP` on every page, also on the first page, so that all pages use the same sort order.
+Write `SKIP` on every page, including `SKIP 0` on the first page, so that all pages use the same sort order.
 Do not change other parts of the query between pages.
 
 ```gql orbit-query

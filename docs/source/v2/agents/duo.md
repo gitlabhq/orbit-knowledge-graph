@@ -47,9 +47,9 @@ To choose which agents use GitLab Orbit:
 
 1. In the upper-right corner, select your avatar.
 1. Select **Preferences**.
+1. If your preferences page has tabs, select the **AI assistance** tab.
 1. In the **GitLab Orbit** section, select or clear the checkboxes.
-   If your preferences page has tabs, the section is on the **AI assistance** tab.
-   All of them are selected by default.
+   All checkboxes are selected by default.
 
    | Checkbox | Agents that get the GitLab Orbit tools |
    |----------|----------------------------------------|
@@ -98,7 +98,7 @@ Prerequisites:
 To add the tools:
 
 1. In the top bar, select **Search or go to** and find your group or project.
-1. Select **AI** > **Flows**.
+1. In the left sidebar, select **AI** > **Flows**.
 1. Select the flow you want to edit.
 1. In the upper-right corner, select **Edit**.
 1. Add the GitLab Orbit tools to the `toolset` of each agent component that needs them:

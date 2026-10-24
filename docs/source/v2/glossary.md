@@ -15,8 +15,8 @@ title: GitLab Orbit glossary
 
 This glossary provides definitions for terms related to GitLab Orbit.
 
-Code graph
-: The part of the graph that holds source code structure: files, directories, definitions, imported symbols, and the calls, imports, and inheritance between them.
+Code layer
+: The layer of the graph that holds source code structure: files, directories, definitions, imported symbols, and the calls, imports, and inheritance between them.
 
 Definition
 : A named code element, such as a class, function, method, or module. Its fully qualified name (`fqn`) includes the enclosing names.
@@ -39,9 +39,6 @@ Indexing
 Local graph
 : The graph the GitLab Orbit CLI builds from a repository on your machine. It holds code only and works offline.
 
-Named query
-: A query GitLab provides on the server. You run it by name with parameters.
-
 Node
 : One entity in the graph, such as a project, a user, a merge request, a file, or a code definition. Each node type has a fixed set of properties.
 
@@ -55,7 +52,7 @@ Relationship
 : A directed connection between two nodes, such as `AUTHORED` from a user to a merge request, or `CALLS` from one definition to another.
 
 Remote graph
-: The graph GitLab builds for each top-level group where GitLab Orbit is turned on. It holds not only the code of your repositories, but also SDLC data such as merge requests, pipelines, work items, and security findings. Queries run on GitLab and return only the data your role lets you see.
+: The graph GitLab builds for each top-level group where GitLab Orbit is turned on. It holds the code of your repositories and software development lifecycle (SDLC) data, such as merge requests, pipelines, work items, and security findings. Queries run on GitLab and return only the data your role lets you see.
 
 Software development lifecycle (SDLC) data
 : The part of the graph that holds GitLab objects: groups, projects, users, merge requests, pipelines, work items, packages, and security findings.

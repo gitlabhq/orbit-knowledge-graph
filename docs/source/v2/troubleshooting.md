@@ -13,19 +13,6 @@ title: Troubleshooting GitLab Orbit
 
 {{< /details >}}
 
-{{< history >}}
-
-- Remote graph:
-  - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-  - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-  - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Local graph:
-  - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 19.0.
-  - [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-  - Generally available in GitLab 19.5.
-
-{{< /history >}}
-
 When working with GitLab Orbit, you might encounter the following issues.
 
 ## CLI install and update
@@ -88,13 +75,14 @@ You might not see the **GitLab Orbit** settings page.
 This issue occurs when you do not have the Owner role, or when you are in a subgroup.
 
 To resolve this issue, ask a user with the Owner role for the top-level group to turn on GitLab Orbit.
-On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on GitLab Orbit in the **Admin** area.
+On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on GitLab Orbit.
+For more information, see [administer GitLab Orbit](https://docs.gitlab.com/integration/orbit/).
 
 ### The option to turn on GitLab Orbit is not available
 
 On GitLab.com, the **GitLab Orbit** settings page might show **Contact sales** in place of the toggle to turn on GitLab Orbit.
 
-This issue occurs when the group does not meet the conditions for a trial, or already has GitLab Orbit.
+This issue occurs when the group does not meet the conditions for a trial, or when its trial has ended.
 
 To resolve this issue, contact sales.
 For more information, see [start a GitLab Orbit trial](trial.md).
