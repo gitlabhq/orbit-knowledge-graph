@@ -14,10 +14,8 @@ title: Connect your agent to GitLab Orbit
 {{< /details >}}
 
 The GitLab Orbit CLI connects the agents on your machine to GitLab Orbit.
-Setup installs the CLI and the GitLab Orbit skill, tells your agents to search code with the
-[local graph](../cli.md#local-graph), and indexes the repository.
 The GitLab Orbit skill teaches your agent to query your GitLab data, such as merge requests, pipelines,
-and vulnerabilities, and the local graph.
+and vulnerabilities, and the [local graph](../cli.md#local-graph).
 
 GitLab Duo Agent Platform has GitLab Orbit built in. For more information, see [GitLab Orbit in GitLab Duo](duo.md).
 For agents that cannot run shell commands or that prefer the Model Context Protocol (MCP), use the [GitLab Orbit MCP endpoint](mcp.md).

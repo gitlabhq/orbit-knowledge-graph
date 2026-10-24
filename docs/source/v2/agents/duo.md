@@ -139,7 +139,7 @@ To give a flow the local graph, in the flow configuration:
 
 ## Known issues
 
-- GitLab Orbit answers only about groups that have it turned on and that you can access.
+- GitLab Orbit answers questions only about groups that have it turned on and that you can access.
 - A complex question might need a follow-up question to narrow the scope.
 - For large results, the answer might leave out source code. To get it, ask the agent to show the source.
 

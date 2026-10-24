@@ -127,6 +127,8 @@ Verify the scope after you set up the account, and each time you change its memb
      --url "https://gitlab.example.com/api/v4/orbit/query"
    ```
 
+   Replace `<your_access_token>` with the token of the service account, and `gitlab.example.com` with your instance, or `gitlab.com` on GitLab.com.
+
 1. Make sure that the `full_path` values include only the groups where you added the account, and their subgroups.
    If you see other groups, check the memberships of the account, including groups that its groups are shared with.
 

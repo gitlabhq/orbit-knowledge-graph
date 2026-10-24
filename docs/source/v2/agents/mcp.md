@@ -194,6 +194,8 @@ ORDER BY open_mrs DESC
 LIMIT 10
 ```
 
+Replace `my-group` with the full path of your group.
+
 For query recipes and the query language reference, install the [GitLab Orbit skill](_index.md#set-up-your-agent).
 
 ## GitLab Orbit tools in the GitLab MCP server

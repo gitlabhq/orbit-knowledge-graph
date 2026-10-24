@@ -62,7 +62,7 @@ A short GQL pattern describes connections, for example from a merge request to i
 it changed.
 
 Your agent reads the [schema](queries/query-language.md#discover-the-schema), then writes its own query for each question.
-One query replaces a chain of API calls, so the agent puts less load on your GitLab instance and makes fewer errors.
+One query replaces a chain of API calls, so the agent puts less load on your GitLab instance.
 
 ## Connect your agent
 

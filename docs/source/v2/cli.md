@@ -282,7 +282,7 @@ and a `local/manifest.duckdb` file that lists them.
 - When an update of the CLI changes the format of the local graph, the next `index` rebuilds the graph file.
   Index your other repositories again after you update.
 
-The CLI sends usage events to GitLab product analytics, such as the command, the result, the duration, and the CLI version.
+The CLI sends usage events, such as the command, the result, the duration, and the CLI version, to GitLab product analytics.
 It never sends repository content, file paths, or query text.
 Telemetry is on by default. To turn it off, run:
 

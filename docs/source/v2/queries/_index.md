@@ -25,6 +25,8 @@ Pass the query text to the [GitLab Orbit CLI](../cli.md):
 glab orbit query "MATCH (p:Project {full_path: '<my-group/my-project>'}) RETURN p.name, p.full_path LIMIT 1"
 ```
 
+Replace `<my-group/my-project>` with the full path of your project.
+
 The CLI prints compact [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text. For JSON, add `--response-format raw`.
 Agents on the [Model Context Protocol (MCP) endpoint](../agents/mcp.md) send the same text with the `query_graph` tool.
 

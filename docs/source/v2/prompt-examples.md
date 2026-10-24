@@ -125,8 +125,8 @@ MATCH (v:Vulnerability)-[:HAS_FINDING]->(o:VulnerabilityOccurrence)
 MATCH (v)-[:IN_PROJECT]->(p:Project)
 WHERE p.full_path STARTS WITH 'gitlab-org/'
   AND v.state IN ['detected', 'confirmed']
-RETURN p.full_path, count(v) AS open_vulnerabilities
-ORDER BY open_vulnerabilities DESC
+RETURN p.full_path, v.id, v.severity
+ORDER BY p.full_path
 LIMIT 50
 ```
 
@@ -136,11 +136,13 @@ MATCH (v:Vulnerability)
   -[:DEPLOYED_TO]->(d:Deployment)
   -[:IN_ENVIRONMENT]->(e:Environment {tier: 'production'})
 MATCH (v)-[:IN_PROJECT]->(p:Project)
-WHERE p.full_path STARTS WITH 'gitlab-org/'
-RETURN p.full_path, v.state, d.status, count(v) AS vulns
-ORDER BY vulns DESC
+WHERE v.id IN [236746171, 287006695, 234562423, 234562740, 241357118, 241981811]
+RETURN p.full_path, v.id, mr.iid, d.status
 LIMIT 50
 ```
+
+The agent passes the vulnerability IDs from the first query to the second.
+On GitLab.com, no fix for this CVE reached production, so the agent creates an issue in each affected project.
 
 - **With GitLab Orbit:** one prompt and two queries.
 - **Without GitLab Orbit:** at least one REST API call for each project in a group with about 9,200 projects,
@@ -277,7 +279,7 @@ LIMIT 30
 - **With GitLab Orbit:** one query for each question.
 - **Without GitLab Orbit:** about 400 REST API calls for a project with about 400 agent merge requests in 30 days,
   one for each merge request, after you find them.
-  No REST API call lists the agent sessions of all users.
+  No REST API call lists the sessions of all users.
 
 ## Check projects against your security scan standard
 
