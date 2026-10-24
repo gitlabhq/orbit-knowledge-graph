@@ -32,10 +32,10 @@ Ask what breaks if you change a service, who should review a file, or why pipeli
 Your agent answers with a few graph queries in place of many file reads and API calls.
 {.product-hero-lead}
 
-[Quickstart](quickstart.md) [Connect your agent](agents/_index.md) [{{< icon name="play" >}} Watch the deep dive video](https://www.youtube.com/watch?v=wddpf0rDGnA)
+[Quickstart](quickstart.md) [{{< icon name="play" >}} Watch GitLab Orbit in two minutes](https://www.youtube.com/watch?v=dKaPp-TWd_o)
 {.product-hero-actions}
 
-<!-- Video published on 2026-06-26 -->
+<!-- Video published on 2026-09-03 -->
 
 </section>
 
