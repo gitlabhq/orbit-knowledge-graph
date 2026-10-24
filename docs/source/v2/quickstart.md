@@ -26,24 +26,10 @@ about your GitLab data.
 
 ## Step 1: Turn on GitLab Orbit for your group
 
-To check whether GitLab Orbit is already on for your group, open the [GitLab Orbit dashboard](dashboard.md).
-If the dashboard has no tabs, GitLab Orbit is off for all of your groups.
-Otherwise, find your top-level group on the **Status** tab.
-If GitLab Orbit is on for your top-level group, go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
-If it is off and you do not have the Owner role for the top-level group, ask a user with that role to turn it on.
+A user with the Owner role for the top-level group turns on GitLab Orbit in the [GitLab Orbit dashboard](dashboard.md).
+If GitLab Orbit is already on for your group, go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
+Otherwise, see [turn GitLab Orbit on or off for a group](dashboard.md#turn-gitlab-orbit-on-or-off-for-a-group).
 
-Prerequisites:
-
-- The Owner role for the top-level group.
-
-To turn on GitLab Orbit on GitLab.com:
-
-1. In the top bar, select **Search or go to** and find your top-level group.
-1. In the left sidebar, select **Settings** > **GitLab Orbit**.
-1. Turn on the **Turn on GitLab Orbit** toggle.
-1. In the **Turn on GitLab Orbit for `<my-group>`?** dialog, select **Turn on GitLab Orbit**.
-
-The page shows **GitLab Orbit is indexing `<my-group>`**, then **GitLab Orbit is ready for `<my-group>`**.
 The first index usually completes in a few minutes, and can take up to a few hours for large codebases.
 Continue with the next steps while the index runs.
 

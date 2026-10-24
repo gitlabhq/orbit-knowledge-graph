@@ -26,15 +26,6 @@ To open the dashboard, in the top bar, select **Search or go to** > **Your work*
 Administrators also see **Settings** in the page header. It opens the instance settings for GitLab Orbit,
 such as automatic indexing. For more information, see [administer GitLab Orbit](https://docs.gitlab.com/integration/orbit/).
 
-The dashboard has these tabs:
-
-| Tab | Description |
-|-----|-------------|
-| **Overview** | Shows a map of your graph and the projects that are still indexing. |
-| **Schema** | Shows the entities in your graph and how they connect. |
-| **Query editor** | Runs GQL queries, with examples and a query reference. |
-| **Status** | Shows the GitLab Orbit status of your top-level groups. |
-
 ## Check indexing progress
 
 Check which projects GitLab Orbit is still indexing.
