@@ -499,7 +499,7 @@ run = "vale --minAlertLevel error *.md docs docs-locale"
 description = "Run Vale prose linting on markdown files"
 
 [tasks."lint:links"]
-run = "lychee --offline --include-fragments --exclude-path output --exclude-path .claude --exclude-path .opencode --exclude-path .ai/principles/distilled '**/*.md'"
+run = "lychee --offline --include-fragments --exclude-path output --exclude-path .claude --exclude-path .opencode --exclude-path .ai/principles/distilled --exclude-path docs/site '**/*.md'"
 description = "Check for broken links in markdown files"
 
 [tasks."lint:prose"]

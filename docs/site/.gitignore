@@ -1,0 +1,6 @@
+node_modules/
+content/
+packages/web/public/
+.tanstack/
+.bun-cache/
+packages/web/src/routeTree.gen.ts
