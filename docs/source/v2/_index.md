@@ -48,13 +48,13 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 ## Questions that GitLab Orbit can answer
 
-- [Change a class hierarchy safely](prompt-examples.md#change-a-class-hierarchy-safely)
-- [See what shipped to production this week](prompt-examples.md#see-what-shipped-to-production-this-week)
-- [Find out how agent-written code performs](prompt-examples.md#find-out-how-agent-written-code-performs)
-- [Find the right reviewer for a file](prompt-examples.md#find-the-right-reviewer-for-a-file)
-- [Unblock a release](prompt-examples.md#unblock-a-release)
-- [Find out if a failed job is flaky](prompt-examples.md#find-out-if-a-failed-job-is-flaky)
+- [Fix a vulnerability across every affected project](prompt-examples.md#fix-a-vulnerability-across-every-affected-project)<br>Which projects in my group does this CVE affect, and which fixes reached production?
+- [Change shared code safely](prompt-examples.md#change-shared-code-safely)<br>Which classes inherit from this base class, and what calls the method that I change?
+- [Find out how agent-written code performs](prompt-examples.md#find-out-how-agent-written-code-performs)<br>What share of the merge requests that agents created merged, and how long did they take?
+- [See what shipped to production this week](prompt-examples.md#see-what-shipped-to-production-this-week)<br>Which issues, tasks, and incidents did this week's production deployments close?
 {.product-cards .product-cards-2}
+
+For more examples, see [prompt examples](prompt-examples.md).
 
 ## The query language
 
