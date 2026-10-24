@@ -101,7 +101,7 @@ impl PartitionStrategy {
                 None,
             )
             .await
-            .map_err(|err| HandlerError::from(err).context("partition probe failed"))?;
+            .map_err(|err| HandlerError::from(err).prefix_message_with("partition probe failed"))?;
         let cuts = parse_cut_tuples(&batches, self.key_columns.len());
 
         if cuts.len() < self.count as usize {

@@ -498,7 +498,8 @@ impl Pipeline {
             .save(position_key, checkpoint, WriteDurability::FireAndForget)
             .await
             .map_err(|err| {
-                HandlerError::from(err).context(format!("failed to save cursor for {position_key}"))
+                HandlerError::from(err)
+                    .prefix_message_with(format!("failed to save cursor for {position_key}"))
             })?;
         progress.notify_in_progress().await;
         Ok(())

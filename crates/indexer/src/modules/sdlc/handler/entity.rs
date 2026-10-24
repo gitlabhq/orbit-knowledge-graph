@@ -362,18 +362,18 @@ impl EntityHandler {
         }
 
         let mut errors = Vec::new();
-        let mut all_unavailable = true;
+        let mut all_failures_unavailable = true;
         let mut total = PipelineStats::default();
         while let Some(result) = set.join_next().await {
             match result {
                 Ok(Ok(stats)) => total.merge(stats),
                 Ok(Err(err)) => {
-                    all_unavailable &=
+                    all_failures_unavailable &=
                         matches!(err, PipelineError::Failed(HandlerError::Backpressure(_)));
                     errors.push(err.to_string());
                 }
                 Err(join_err) => {
-                    all_unavailable = false;
+                    all_failures_unavailable = false;
                     errors.push(format!("partition task panicked: {join_err}"));
                 }
             }
@@ -383,7 +383,7 @@ impl EntityHandler {
             return Ok(total);
         }
         let message = format!("partition failures: {}", errors.join("; "));
-        if all_unavailable {
+        if all_failures_unavailable {
             Err(HandlerError::Backpressure(message))
         } else {
             Err(HandlerError::Processing(message))
@@ -506,10 +506,10 @@ mod tests {
     }
 
     fn build_handler(entity_name: &str, scope: EtlScope) -> EntityHandler {
-        build_handler_with(entity_name, scope, Arc::new(MockCheckpointStore))
+        build_handler_with_checkpoint_store(entity_name, scope, Arc::new(MockCheckpointStore))
     }
 
-    fn build_handler_with(
+    fn build_handler_with_checkpoint_store(
         entity_name: &str,
         scope: EtlScope,
         checkpoint_store: Arc<dyn CheckpointStore>,
@@ -576,7 +576,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unavailable_checkpoint_store_redelivers_without_spending_an_attempt() {
-        let handler = build_handler_with(
+        let handler = build_handler_with_checkpoint_store(
             "User",
             EtlScope::Global,
             Arc::new(UnavailableCheckpointStore),
