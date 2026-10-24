@@ -248,3 +248,4 @@ storage:
     - {name: idx_scanner_id, column: scanner_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_vulnerability_id, column: vulnerability_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_primary_identifier_id, column: primary_identifier_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_report_type, column: report_type, type: "set(16)", granularity: 2}

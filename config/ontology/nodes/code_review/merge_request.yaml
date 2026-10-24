@@ -498,3 +498,4 @@ storage:
     - {name: idx_head_pipeline_id, column: head_pipeline_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_latest_merge_request_diff_id, column: latest_merge_request_diff_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_merged_commit_id, column: merged_commit_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_iid, column: iid, type: "bloom_filter(0.0001)", granularity: 1}
