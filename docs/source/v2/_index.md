@@ -9,7 +9,7 @@ title: GitLab Orbit
 <!-- The tagline sits directly under the page title, above the availability details, on purpose. -->
 <!-- gitlab-docs-review-disable lint.details-placement -->
 
-Software lifecycle context graph for AI agents
+The context layer for AI agents
 {.product-hero-title}
 
 {{< details >}}
