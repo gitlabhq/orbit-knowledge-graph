@@ -13,14 +13,6 @@ title: GitLab Orbit architecture
 
 {{< /details >}}
 
-{{< history >}}
-
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-
-{{< /history >}}
-
 GitLab Orbit is a read-only property graph of your GitLab data and code.
 GitLab builds it for each top-level group where GitLab Orbit is turned on, keeps it current,
 and checks your permissions on every query.
@@ -53,7 +45,7 @@ For the full list of node types and relationships, see [indexed data](schema.md)
 
 ## Indexing
 
-After you [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group) for a group,
+After you [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit) for a group,
 the indexer builds the graph from two sources:
 
 - SDLC data. GitLab streams changes through a change data capture (CDC) pipeline to the
@@ -62,10 +54,10 @@ the indexer builds the graph from two sources:
 - Source code. The indexer fetches the files of the default branch through the GitLab internal API and
   [Gitaly](https://docs.gitlab.com/administration/gitaly/), parses them, and indexes again when the default branch changes.
   You cannot select another branch. An answer about code on another branch reflects the default branch.
-  For code that you have not merged, use the [local graph](cli.md#local-graph).
+  For code you have not merged, use the [local graph](cli.md#local-graph).
 
 Results show your data as of the last index cycle.
-The first index can take up to a few hours.
+The first index usually completes in a few minutes, and can take up to a few hours for large codebases.
 Later updates take seconds to minutes.
 To check the progress, see [check indexing progress with the GitLab Orbit CLI](cli.md#check-indexing-progress).
 
@@ -74,10 +66,10 @@ To check the progress, see [check indexing progress with the GitLab Orbit CLI](c
 Queries use [GQL](queries/query-language.md), the GitLab Orbit query language.
 Every query follows the same path:
 
-1. GitLab receives the query from the CLI, the REST API, the MCP endpoint, or GitLab Duo Agent Platform.
+1. GitLab receives the query from the CLI, the REST API, the Model Context Protocol (MCP) endpoint, or GitLab Duo Agent Platform.
 1. The query engine validates the query against the schema and compiles it to SQL.
 1. The graph database runs the SQL.
-1. GitLab removes each result that you cannot access. For more information, see [Security](security.md).
+1. GitLab removes each result you cannot access. For more information, see [Security](security.md).
 
 ## Hosting
 

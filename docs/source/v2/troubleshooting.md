@@ -2,7 +2,7 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Find and fix common errors in GitLab Orbit queries, the GitLab Orbit CLI, and the local graph.
+description: Fix common errors in queries, the CLI, and the local graph.
 title: Troubleshooting GitLab Orbit
 ---
 
@@ -12,19 +12,6 @@ title: Troubleshooting GitLab Orbit
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
-
-{{< history >}}
-
-- Remote graph:
-  - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
-  - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
-  - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Local graph:
-  - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an experiment.
-  - [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to beta in GitLab 19.1.
-  - Generally available in GitLab 19.5.
-
-{{< /history >}}
 
 When working with GitLab Orbit, you might encounter the following issues.
 
@@ -49,7 +36,7 @@ error: unrecognized subcommand 'repo-map'
 This issue occurs when your `orbit` binary is from a release earlier than the one that added the command.
 
 To resolve this issue, run `glab orbit --update`.
-If you installed `orbit` without `glab`, run the [installer](cli.md#other-install-methods) again.
+If you installed `orbit` without `glab`, run the [installer](cli.md#install-the-standalone-binary) again.
 
 ### Error: `GLIBC_2.28' not found`
 
@@ -59,28 +46,46 @@ On Linux, `orbit` might fail to start with an error that states:
 orbit: /lib64/libc.so.6: version `GLIBC_2.28' not found (required by orbit)
 ```
 
-This issue occurs when the glibc version is earlier than 2.28.
+This issue occurs when the glibc version is earlier than 2.28, with the standalone `orbit` binary.
 The default build needs glibc 2.28 or later, for example RHEL 8, Debian 10, or Ubuntu 20.04.
+`glab orbit` and the `@gitlab/orbit` npm package always use the static musl build on Linux, so they do not have this issue.
 
-To resolve this issue, install the static musl build:
+To resolve this issue, use `glab orbit`, or install the static musl build:
 
 ```shell
 curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash -s -- --libc musl
 ```
 
-The `@gitlab/orbit` npm package always uses the musl build on Linux.
+Then run `orbit` commands directly.
+`glab orbit` uses its own copy of the GitLab Orbit CLI, not the binary that `install.sh` installs.
 
 ## GitLab Orbit setup and agent connection
 
 ### The GitLab Orbit settings page is missing
 
+{{< details >}}
+
+- Tier: Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
+
+{{< /details >}}
+
 You might not see the **GitLab Orbit** settings page.
-The page appears only for users with the Owner role for a top-level group.
 
 This issue occurs when you do not have the Owner role, or when you are in a subgroup.
 
 To resolve this issue, ask a user with the Owner role for the top-level group to turn on GitLab Orbit.
-On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on GitLab Orbit in the **Admin** area.
+On GitLab Self-Managed and GitLab Dedicated, an administrator can also turn on GitLab Orbit.
+For more information, see [administer GitLab Orbit](https://docs.gitlab.com/integration/orbit/).
+
+### The option to turn on GitLab Orbit is not available
+
+On GitLab.com, the **GitLab Orbit** settings page might show **Contact sales** in place of the toggle to turn on GitLab Orbit.
+
+This issue occurs when the group does not meet the conditions for a trial, or when its trial has ended.
+
+To resolve this issue, contact sales.
+For more information, see [start a GitLab Orbit trial](trial.md).
 
 ### Your agent does not use GitLab Orbit
 
@@ -113,7 +118,7 @@ To see what setup configured, run `glab orbit setup --dry-run`.
 | `2` | `Orbit endpoint not available` | GitLab Orbit is not available on your instance. | Ask your administrator to [set up GitLab Orbit](https://docs.gitlab.com/orbit/self-managed/). |
 | `2` | Ends with `not found`, such as `Project not found` or `Namespace not found` | The path or ID is wrong, or you are not a member. | Check the path or ID. |
 | `3` | `not authenticated` | You are not signed in, or your token expired. | Run `glab auth login`. |
-| `4` | `Orbit access denied` | No top-level group that you belong to has GitLab Orbit turned on. | Ask a user with the Owner role for the group to [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit-for-your-group). |
+| `4` | `Orbit access denied` | No top-level group that you belong to has GitLab Orbit turned on. | Ask a user with the Owner role for the group to [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit). |
 | `5` | `rate limited` | You sent too many requests in a short time. | Wait for the time in the `Retry-After` header. Combine small queries into one aggregation. |
 
 For all exit codes, see [exit codes](cli.md#exit-codes).
@@ -130,24 +135,6 @@ To resolve this issue, do one of the following:
 - Sign in with `glab auth login`.
 - Set `GITLAB_TOKEN`. For an instance other than GitLab.com, also set `GITLAB_URL`.
 
-### Error: `compile_error` for a JSON query
-
-You might get an error that states:
-
-```plaintext
-Orbit API error (HTTP 400): {"code":"compile_error","message":"schema violation: Orbit query syntax at line 1, column 1: expected Statement ..."}
-```
-
-This issue occurs when the query is not written in GQL, for example a JSON query.
-
-To resolve this issue, rewrite the query in [GQL](queries/query-language.md), for example:
-
-```gql orbit-query
-MATCH (p:Project {full_path: 'gitlab-org/gitlab'})
-RETURN p.name, p.full_path
-LIMIT 1
-```
-
 ### Error: `GitLab credits exhausted`
 
 The query fails with HTTP `402`, and `glab orbit query` exits with code 1.
@@ -157,15 +144,11 @@ This issue occurs when no GitLab Credits are left for the top-level group, for e
 To resolve this issue, [contact sales](https://about.gitlab.com/sales/).
 For more information, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
 
-If the message is `Unable to verify GitLab credits`, GitLab could not check whether the group can run queries.
+### Error: `Unable to verify GitLab credits`
+
+This issue occurs when GitLab cannot check whether the group can run queries.
+
 The workaround is to wait a few minutes, then send the query again.
-
-### Error: `This group is not eligible for a GitLab Orbit trial`
-
-This issue occurs when the group does not meet the conditions for a trial, or already has GitLab Orbit.
-
-To resolve this issue, contact sales.
-For more information, see [start a GitLab Orbit trial](trial.md).
 
 ### Results are missing recent data
 
@@ -202,7 +185,7 @@ To resolve this issue, create a token with the `mcp_orbit` or `read_api` scope, 
 A query from a service account might fail with `403 Forbidden - No Orbit enabled namespaces available`.
 
 This issue occurs when the account does not have the Reporter, Security Manager, Developer, Maintainer,
-or Owner role in a group where GitLab Orbit is turned on.
+or Owner role for a group where GitLab Orbit is turned on.
 
 To resolve this issue, add the account to a group where GitLab Orbit is turned on, with one of these roles.
 For more information, see [service accounts](security.md#service-accounts).
@@ -243,7 +226,20 @@ An agent in a custom flow does not call GitLab Orbit, and might say that it has 
 This issue occurs when the flow configuration does not list the GitLab Orbit tools, or when the user who triggered the flow
 cleared **Other Foundational Agents** in the **GitLab Orbit** section of their preferences.
 
-To resolve this issue, [add the tools to the flow](agents/duo.md#use-gitlab-orbit-in-a-custom-flow), and ask the user to select the option again.
+To resolve this issue, [add the tools to the flow](agents/duo.md#use-gitlab-orbit-in-a-custom-flow), and ask the user to select **Other Foundational Agents** again in their preferences.
+
+### The status dot next to Orbit is not green
+
+In GitLab Duo Chat, the status dot next to **Orbit** in the chat header is an empty circle, and the agent does not use GitLab Orbit.
+
+This issue occurs when GitLab Orbit is turned off for the type of agent you chat with: Agentic Chat, foundational agents, or custom agents.
+
+To resolve this issue, in the chat header, select **Orbit**, then turn on the toggle for that type of agent.
+You can also select the matching checkbox in the **GitLab Orbit** section of your preferences.
+
+If **Orbit** does not appear in the chat header, GitLab Orbit in GitLab Duo is not on for you.
+On GitLab.com, GitLab Orbit must be turned on for a group that you belong to.
+On GitLab Self-Managed and GitLab Dedicated, an administrator can turn off GitLab Orbit in GitLab Duo for the instance.
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
@@ -263,6 +259,7 @@ This issue occurs when the repository is not indexed, or when the path you gave 
 Earlier versions report `Table 'Definition' does not exist`.
 
 To resolve this issue, run `glab orbit index <repository_path>`.
+If you passed `--db`, check that the path exists.
 
 ### Error: `current commit is not indexed`
 
@@ -327,7 +324,7 @@ To resolve this issue, index your repositories again.
 
 ## Related topics
 
-- [CLI](cli.md)
+- [GitLab Orbit CLI](cli.md)
 - [Security](security.md)
 - [GitLab Orbit architecture](how-it-works.md)
-- [MCP](agents/mcp.md)
+- [GitLab Orbit MCP endpoint](agents/mcp.md)

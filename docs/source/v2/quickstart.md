@@ -21,74 +21,41 @@ about your GitLab data.
 - Access to GitLab Orbit for the top-level group.
   To get access, start a [free trial on GitLab.com](trial.md), or [contact sales](https://about.gitlab.com/sales/).
 - Reporter, Security Manager, Developer, Maintainer, or Owner role for the group.
-- GitLab Duo or an agent of your choice such as Claude Code, Codex, or OpenCode.
+- GitLab Duo, or an agent that [setup supports](agents/_index.md#setup-options), such as Claude Code, Codex, or OpenCode.
+  For other agents, see the [GitLab Orbit MCP endpoint](agents/mcp.md).
 
-## Step 1: Turn on GitLab Orbit for your group
+## Step 1: Turn on GitLab Orbit
 
-If GitLab Orbit is already on for your group, go to [step 2](#step-2-set-up-your-agent-to-use-gitlab-orbit).
-To check, open the **Status** tab of the [GitLab Orbit dashboard](dashboard.md).
+A user with the Owner role for the top-level group turns on GitLab Orbit in the [GitLab Orbit dashboard](dashboard.md).
+If GitLab Orbit is already on for your group, go to [step 2](#step-2-connect-your-agent).
+Otherwise, see [turn GitLab Orbit on or off for a group](dashboard.md#turn-gitlab-orbit-on-or-off-for-a-group).
 
-{{< tabs >}}
-
-{{< tab title="GitLab.com" >}}
-
-Prerequisites:
-
-- The Owner role for the top-level group.
-
-To turn on GitLab Orbit:
-
-1. In the top bar, select **Search or go to** and find your top-level group.
-1. In the left sidebar, select **Settings** > **GitLab Orbit**.
-1. Turn on the **Turn on GitLab Orbit** toggle.
-
-The page shows **GitLab Orbit is indexing `<my-group>`**, then **GitLab Orbit is ready for `<my-group>`**.
-
-{{< /tab >}}
-
-{{< tab title="GitLab Self-Managed and GitLab Dedicated" >}}
-
-Prerequisites:
-
-- Administrator access.
-- On GitLab Self-Managed, GitLab Orbit [set up for your instance](https://docs.gitlab.com/orbit/self-managed/).
-
-To turn on GitLab Orbit:
-
-1. In the upper-right corner, select **Admin**.
-1. In the left sidebar, select **GitLab Orbit**.
-1. Under **Top-level groups**, select your group.
-1. Select **Actions** > **Turn on GitLab Orbit**.
-
-To turn on GitLab Orbit for every top-level group, including new ones, turn on
-**Turn on GitLab Orbit for all top-level groups automatically**.
-For more information, see [turn on indexing for a group](https://docs.gitlab.com/orbit/self-managed/orbit-setup/#turn-on-indexing-for-a-group).
-
-{{< /tab >}}
-
-{{< /tabs >}}
-
-The first index can take up to a few hours.
+The first index usually completes in a few minutes, and can take up to a few hours for large codebases.
 Continue with the next steps while the index runs.
 
-## Step 2: Set up your agent to use GitLab Orbit
+## Step 2: Connect your agent
 
-GitLab Duo uses GitLab Orbit automatically.
+GitLab Duo uses GitLab Orbit with no setup.
 Other agents, such as Claude Code or Codex, need a one-time setup on your machine.
 
-### Use GitLab Orbit in GitLab Duo
+### GitLab Duo
 
-GitLab Orbit is on in GitLab Duo by default.
-After you complete [step 1](#step-1-turn-on-gitlab-orbit-for-your-group),
-GitLab Duo Agent Platform agents use the graph to answer questions about your GitLab data.
-You do not install anything.
+<!-- vale orbit.StandaloneProductName = NO -->
+
+GitLab Orbit is on by default in GitLab Duo.
+To check, open GitLab Duo Chat and find **Orbit** in the chat header:
+
+- If the status dot is green, GitLab Orbit is on. Go to [step 3](#step-3-ask-your-first-question).
+- If the status dot is empty, select **Orbit**, then turn on the toggle for the agent you chat with.
+  For more information, see [troubleshooting](troubleshooting.md#the-status-dot-next-to-orbit-is-not-green).
+
+<!-- vale orbit.StandaloneProductName = YES -->
+
 To choose which agents use GitLab Orbit, see [GitLab Orbit in GitLab Duo](agents/duo.md).
 
-### Use GitLab Orbit with your agent
+### Other agents
 
-Connect an agent on your machine to GitLab Orbit, then ask your first question.
-
-To set up your agent:
+To set up an agent on your machine:
 
 <!-- vale orbit.StandaloneProductName = NO -->
 
@@ -118,33 +85,50 @@ To set up your agent:
 
 <!-- vale orbit.StandaloneProductName = YES -->
 
-To run setup yourself, or for other install methods, see [install the CLI](cli.md#install-the-cli).
-For the setup options and what setup changes, see [connect your agent](agents/_index.md).
+To run setup yourself, see [connect your agent](agents/_index.md).
 
-To check the indexing progress again, run `glab orbit graph-status` in the clone.
-When indexing is complete, the summary ends with `Ready.`
+To check indexing progress, run `glab orbit graph-status` until the summary ends with `Ready.`
 
-To ask your first question:
+## Step 3: Ask your first question
 
-1. Start a new session of your agent in the repository and ask about your GitLab data:
+Ask GitLab Duo Chat or your agent about your GitLab data.
+Replace `<my-group>` and `<my-group>/<my-project>` with the full paths of your group and project.
 
-   ```plaintext
-   Using GitLab Orbit, which open merge requests in <my-group>/<my-project> are blocked
-   by a failed job? Include only merge requests updated in the last 7 days.
-   Group them by job, and show who authored each one.
-   ```
+- Find the merge requests that a failing job blocks:
 
-   The agent writes a graph query, runs it with `glab orbit query`, and answers with only the data that you can access.
+  ```plaintext
+  Using GitLab Orbit, which open merge requests in <my-group>/<my-project> are blocked
+  by a failed job? Include only merge requests updated in the last 7 days.
+  Group them by job, and show who authored each one.
+  ```
 
-1. Ask about your code:
+- Find the open vulnerabilities to fix first:
 
-   ```plaintext
-   Using GitLab Orbit, what does this project do, and how is it structured?
-   ```
+  ```plaintext
+  Using GitLab Orbit, which projects in <my-group> have open critical or high
+  vulnerabilities, and how many does each have?
+  ```
+
+- Check what a merge request affects before you approve it:
+
+  ```plaintext
+  Using GitLab Orbit, review merge request <!123> in <my-group>/<my-project>.
+  Which callers of the code that it changes are outside the merge request?
+  ```
+
+The agent writes a graph query, runs it, and answers with only the data that you can access.
+
+In a clone of the project, your agent can also answer questions about the code:
+
+```plaintext
+Using GitLab Orbit, what does this project do, and how is it structured?
+```
+
+For more prompts, see [prompt examples](prompt-examples.md).
 
 ## Next steps
 
 - [Prompt examples](prompt-examples.md): prompts by goal
-- [GitLab MCP endpoint](agents/mcp.md): connect agents that cannot run shell commands
+- [GitLab Orbit MCP endpoint](agents/mcp.md): connect agents that cannot run shell commands
 - [Local graph](cli.md#local-graph): index and search code on your machine, with no GitLab account
 - [Troubleshooting](troubleshooting.md): fix common errors

@@ -19,9 +19,9 @@ title: Start a GitLab Orbit trial
 
 {{< /history >}}
 
-On GitLab.com, you can start a free GitLab Orbit trial yourself in an eligible top-level group that does not already have GitLab Orbit.
+On GitLab.com, you can start a free GitLab Orbit trial yourself in a top-level group.
 The trial turns on GitLab Orbit for the group, its subgroups, and its projects, through every [access method](agents/_index.md).
-On GitLab Self-Managed and GitLab Dedicated, contact your GitLab account team.
+On GitLab Self-Managed and GitLab Dedicated, [contact sales](https://about.gitlab.com/sales/).
 
 ## Start a free trial
 
@@ -47,11 +47,11 @@ The page shows **GitLab Orbit is indexing `<my-group>`**, then **GitLab Orbit is
 
 If none of your groups has GitLab Orbit turned on, you can also start the trial from the [GitLab Orbit dashboard](dashboard.md).
 
-To connect your agent, continue with the [quickstart](quickstart.md#step-2-set-up-your-agent-to-use-gitlab-orbit).
+To connect your agent, continue with the [quickstart](quickstart.md#step-2-connect-your-agent).
 
 ## When the trial ends
 
-At the end of the trial, GitLab Orbit pauses for the group, and queries fail.
+At the end of the trial, GitLab turns off GitLab Orbit for the group, and queries fail.
 To continue with GitLab Orbit, contact sales.
 For information about GitLab Orbit pricing and usage, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
 
