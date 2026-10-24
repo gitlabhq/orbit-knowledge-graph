@@ -685,7 +685,7 @@ enum Commands {
 
         #[arg(
             long,
-            help = "Server response format. Default: a summary in a terminal, raw JSON otherwise.",
+            help = "Output format. Default: a summary in a terminal, raw JSON otherwise.",
             value_parser = clap::builder::PossibleValuesParser::new(["llm", "raw"])
                 .map(|value| match value.as_str() {
                     "raw" => remote::ResponseFormat::Raw,

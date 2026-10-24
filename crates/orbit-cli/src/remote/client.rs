@@ -17,7 +17,7 @@ const SCHEMA_PATH: &str = "/api/v4/orbit/schema";
 const DSL_PATH: &str = "/api/v4/orbit/schema/dsl";
 const TOOLS_PATH: &str = "/api/v4/orbit/tools";
 const QUERY_PATH: &str = "/api/v4/orbit/query";
-const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
+const GRAPHQL_PATH: &str = "/api/graphql";
 const SKILLS_PATH: &str = "/api/v4/orbit/skills";
 
 pub(crate) struct SkillHttpResponse {
@@ -147,18 +147,19 @@ impl OrbitClient {
         self.get_bytes(TOOLS_PATH, &[]).await
     }
 
-    pub(crate) async fn get_graph_status(
-        &self,
-        params: &[(&str, String)],
-    ) -> Result<Vec<u8>, RemoteError> {
-        self.get_bytes(GRAPH_STATUS_PATH, params).await
+    pub(crate) async fn query_raw(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+        self.post_json(QUERY_PATH, body).await
     }
 
-    pub(crate) async fn query_raw(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+    pub(crate) async fn query_graphql(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+        self.post_json(GRAPHQL_PATH, body).await
+    }
+
+    async fn post_json(&self, path: &str, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
         let response = self
             .send(
                 self.http
-                    .post(self.url(QUERY_PATH))
+                    .post(self.url(path))
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
                     .body(body),
             )
@@ -166,7 +167,7 @@ impl OrbitClient {
         read_body(response).await
     }
 
-    async fn get_bytes(
+    pub(crate) async fn get_bytes(
         &self,
         path: &str,
         params: &[(&str, String)],

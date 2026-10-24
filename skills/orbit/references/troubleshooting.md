@@ -22,13 +22,13 @@ Read this when a command fails with "command not found", an auth error, or a fea
    glab auth login    # if not authenticated
    ```
 
-3. Orbit Remote: the feature flag is on for your namespace:
+3. Orbit Remote: Orbit is on for your group:
 
    ```sh
    glab orbit graph-status --full-path GROUP_NAMESPACE
    ```
 
-   Exit 0 means ready to query. Exit 2 means the flag is off; ask your GitLab admin.
+   Exit 0: ready. Exit 2: Orbit is not available to you. Exit 4: Orbit is off here, or your role is below Reporter. Rate limits exit 1.
 
 4. Orbit Local: no server needed:
 

@@ -4,18 +4,43 @@ mod summary;
 use std::io::IsTerminal;
 
 use serde::Deserialize;
-use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
+use toon_format::{EncodeOptions, encode};
 
 use self::scope::Scope;
 use self::summary::GraphStatus;
 use super::client::OrbitClient;
-use super::error::{EXIT_GENERIC, RemoteError};
-use super::{ResponseFormat, pretty_json, write_stdout};
+use super::error::{EXIT_FORBIDDEN, EXIT_GENERIC, RemoteError, build_not_found_error};
+use super::status::select_status_output;
+use super::{ResponseFormat, pretty_value, write_stdout};
 use crate::tui;
 
+const GRAPH_STATUS_QUERY: &str = "query($fullPath: ID!) { \
+     group(fullPath: $fullPath) { orbit { ...status } } \
+     project(fullPath: $fullPath) { orbit { ...status } } } \
+     fragment status on OrbitNamespace { \
+     indexing { state areas { name state } projects { indexed totalKnown gaps } } \
+     itemCounts { domains { name entities { name count } } } }";
+const SCOPE_POINTERS: [&str; 2] = ["/group", "/project"];
+const DAP_SCOPES_RELEASE: &str = "the GitLab release that includes gitlab-org/gitlab!264673";
+
 #[derive(Deserialize)]
-struct FormattedText {
-    formatted_text: String,
+struct GraphqlResponse {
+    #[serde(default)]
+    data: Value,
+    #[serde(default)]
+    errors: Vec<GraphqlError>,
+}
+
+#[derive(Deserialize)]
+struct GraphqlError {
+    message: String,
+    path: Option<Vec<Value>>,
+}
+
+struct OrbitStatus {
+    status: Value,
+    field_errors: Vec<String>,
 }
 
 pub(crate) async fn run_graph_status(
@@ -29,47 +54,138 @@ pub(crate) async fn run_graph_status(
         Some(scope) => scope,
         None => Scope::read_origin_project(&client.get_host()?)?,
     };
-    let mut params = vec![scope.to_query_param()];
-    if let Some(format) = format {
-        params.push(("response_format", format.as_str().to_string()));
-    }
 
-    match (format, std::io::stdout().is_terminal()) {
-        (None, true) => show_summary(&client, &scope, &params).await,
-        (Some(ResponseFormat::Llm), _) => {
-            let body = client.get_graph_status(&params).await?;
-            let text: FormattedText = parse_response(&body)?;
-            write_stdout(text.formatted_text.as_bytes())
+    let status = match (format, std::io::stdout().is_terminal()) {
+        (None, true) => show_summary(&client, &scope).await?,
+        (format, _) => {
+            let status = read_orbit_status(&client, &scope).await?;
+            let output = match format {
+                Some(ResponseFormat::Llm) => encode(&status.status, &EncodeOptions::default())
+                    .map_err(|error| {
+                        RemoteError::new(
+                            EXIT_GENERIC,
+                            format!("could not format graph status: {error}"),
+                        )
+                    })?
+                    .into_bytes(),
+                _ => pretty_value(&status.status),
+            };
+            write_stdout(&output)?;
+            status
         }
-        _ => write_stdout(&pretty_json(&client.get_graph_status(&params).await?)),
-    }
+    };
+    status.check_complete()
 }
 
-async fn show_summary(
-    client: &OrbitClient,
-    scope: &Scope,
-    params: &[(&'static str, String)],
-) -> Result<(), RemoteError> {
+async fn show_summary(client: &OrbitClient, scope: &Scope) -> Result<OrbitStatus, RemoteError> {
     tui::intro(format!("Orbit graph status · {scope}"))?;
     let spinner = tui::spinner("Reading graph status");
-    let body = client
-        .get_graph_status(params)
+    let status = read_orbit_status(client, scope)
         .await
         .inspect_err(|_| spinner.fail("Could not read graph status"))?;
     spinner.clear();
 
-    let status: GraphStatus = parse_response(&body)?;
-    tui::card("Indexing", status.format_indexing())?;
-    tui::card("In the graph", status.format_contents())?;
-    tui::outro(status.describe_next_step())?;
-    Ok(())
+    let summary = GraphStatus::deserialize(&status.status).map_err(map_parse_error)?;
+    tui::card("Indexing", summary.format_indexing())?;
+    tui::card("In the graph", summary.format_contents())?;
+    tui::outro(summary.describe_next_step())?;
+    Ok(status)
 }
 
-fn parse_response<T: DeserializeOwned>(body: &[u8]) -> Result<T, RemoteError> {
-    serde_json::from_slice(body).map_err(|error| {
-        RemoteError::new(
+impl OrbitStatus {
+    fn check_complete(self) -> Result<(), RemoteError> {
+        if self.field_errors.is_empty() {
+            return Ok(());
+        }
+        Err(RemoteError::new(
             EXIT_GENERIC,
-            format!("unexpected graph status response: {error}"),
+            format!(
+                "graph status is incomplete: {}",
+                self.field_errors.join("; ")
+            ),
+        ))
+    }
+}
+
+async fn read_orbit_status(
+    client: &OrbitClient,
+    scope: &Scope,
+) -> Result<OrbitStatus, RemoteError> {
+    let full_path = scope.resolve_full_path(client).await?;
+    let request = json!({ "query": GRAPH_STATUS_QUERY, "variables": { "fullPath": full_path } });
+    let body = client
+        .query_graphql(request.to_string().into_bytes())
+        .await?;
+    let mut response: GraphqlResponse = serde_json::from_slice(&body).map_err(map_parse_error)?;
+    let scope_data = SCOPE_POINTERS
+        .into_iter()
+        .find(|pointer| {
+            response
+                .data
+                .pointer(pointer)
+                .is_some_and(|data| !data.is_null())
+        })
+        .and_then(|pointer| response.data.pointer_mut(pointer));
+    let scope_found = scope_data.is_some();
+    let status = scope_data
+        .and_then(|data| data.get_mut("orbit"))
+        .filter(|status| !status.is_null())
+        .map(Value::take);
+    let all_under_orbit = response.errors.iter().all(is_orbit_field_error);
+    let messages: Vec<String> = response
+        .errors
+        .into_iter()
+        .map(|error| error.message)
+        .collect();
+
+    match status {
+        Some(status) if all_under_orbit => {
+            if messages.is_empty() && status["indexing"].is_null() {
+                return Err(explain_missing_status(client, scope).await);
+            }
+            Ok(OrbitStatus {
+                status,
+                field_errors: messages,
+            })
+        }
+        _ if !messages.is_empty() => Err(RemoteError::new(
+            EXIT_GENERIC,
+            format!("graph status query failed: {}", messages.join("; ")),
+        )),
+        None if scope_found => Err(RemoteError::new(
+            EXIT_FORBIDDEN,
+            format!(
+                "This token cannot read Orbit status on this GitLab version. \
+                 Duo Agent Platform tokens need {DAP_SCOPES_RELEASE}."
+            ),
+        )),
+        _ => Err(build_not_found_error("Group or project")),
+    }
+}
+
+fn is_orbit_field_error(error: &GraphqlError) -> bool {
+    error
+        .path
+        .as_deref()
+        .is_some_and(|path| path.len() > 2 && path[1] == "orbit")
+}
+
+async fn explain_missing_status(client: &OrbitClient, scope: &Scope) -> RemoteError {
+    let unavailable = match client.get_status().await {
+        Ok(body) => select_status_output(&body).err(),
+        Err(error) => Some(error),
+    };
+    unavailable.unwrap_or_else(|| {
+        RemoteError::new(
+            EXIT_FORBIDDEN,
+            format!("Orbit is not turned on for {scope}, or your role is below Reporter."),
         )
     })
+}
+
+fn map_parse_error(error: serde_json::Error) -> RemoteError {
+    RemoteError::new(
+        EXIT_GENERIC,
+        format!("unexpected graph status response: {error}"),
+    )
 }

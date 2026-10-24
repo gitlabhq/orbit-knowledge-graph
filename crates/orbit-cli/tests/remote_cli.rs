@@ -26,67 +26,89 @@ fn serve_once_encoded(
     content_type: &'static str,
     content_encoding: Option<&'static str>,
 ) -> (String, thread::JoinHandle<CapturedRequest>) {
+    serve_with(move |listener| {
+        answer_request(&listener, &response_body, content_type, content_encoding)
+    })
+}
+
+fn serve_in_order(
+    response_bodies: &'static [&'static str],
+) -> (String, thread::JoinHandle<Vec<CapturedRequest>>) {
+    serve_with(move |listener| {
+        response_bodies
+            .iter()
+            .map(|body| answer_request(&listener, body.as_bytes(), "application/json", None))
+            .collect()
+    })
+}
+
+fn serve_with<T: Send + 'static>(
+    answer: impl FnOnce(TcpListener) -> T + Send + 'static,
+) -> (String, thread::JoinHandle<T>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
-    let addr = listener.local_addr().expect("mock addr");
-    let base_url = format!("http://{addr}");
+    let base_url = format!("http://{}", listener.local_addr().expect("mock addr"));
+    (base_url, thread::spawn(move || answer(listener)))
+}
 
-    let handle = thread::spawn(move || {
-        let mut stream = accept_within(&listener, ACCEPT_TIMEOUT);
-        let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+fn answer_request(
+    listener: &TcpListener,
+    response_body: &[u8],
+    content_type: &str,
+    content_encoding: Option<&str>,
+) -> CapturedRequest {
+    let mut stream = accept_within(listener, ACCEPT_TIMEOUT);
+    let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
 
-        let mut request_line = String::new();
-        reader
-            .read_line(&mut request_line)
-            .expect("read request line");
+    let mut request_line = String::new();
+    reader
+        .read_line(&mut request_line)
+        .expect("read request line");
 
-        let mut auth_header = None;
-        let mut accept_encoding = None;
-        let mut content_length = 0usize;
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).expect("read header line");
-            let trimmed = line.trim_end();
-            if trimmed.is_empty() {
-                break;
+    let mut auth_header = None;
+    let mut accept_encoding = None;
+    let mut content_length = 0usize;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("read header line");
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = trimmed.split_once(':') {
+            let name = name.trim().to_ascii_lowercase();
+            let value = value.trim().to_string();
+            if name == "private-token" {
+                auth_header = Some(value.clone());
+            } else if name == "accept-encoding" {
+                accept_encoding = Some(value);
+            } else if name == "content-length" {
+                content_length = value.parse().expect("parse content-length");
             }
-            if let Some((name, value)) = trimmed.split_once(':') {
-                let name = name.trim().to_ascii_lowercase();
-                let value = value.trim().to_string();
-                if name == "private-token" {
-                    auth_header = Some(value.clone());
-                } else if name == "accept-encoding" {
-                    accept_encoding = Some(value);
-                } else if name == "content-length" {
-                    content_length = value.parse().expect("parse content-length");
-                }
-            }
         }
+    }
 
-        let mut body = vec![0u8; content_length];
-        if content_length > 0 {
-            reader.read_exact(&mut body).expect("read request body");
-        }
+    let mut body = vec![0u8; content_length];
+    if content_length > 0 {
+        reader.read_exact(&mut body).expect("read request body");
+    }
 
-        let encoding_header = content_encoding
-            .map(|encoding| format!("Content-Encoding: {encoding}\r\n"))
-            .unwrap_or_default();
-        let head = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n{encoding_header}Content-Length: {}\r\nConnection: close\r\n\r\n",
-            response_body.len()
-        );
-        stream.write_all(head.as_bytes()).expect("write head");
-        stream.write_all(&response_body).expect("write response");
-        stream.flush().expect("flush response");
+    let encoding_header = content_encoding
+        .map(|encoding| format!("Content-Encoding: {encoding}\r\n"))
+        .unwrap_or_default();
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n{encoding_header}Content-Length: {}\r\nConnection: close\r\n\r\n",
+        response_body.len()
+    );
+    stream.write_all(head.as_bytes()).expect("write head");
+    stream.write_all(response_body).expect("write response");
+    stream.flush().expect("flush response");
 
-        CapturedRequest {
-            request_line: request_line.trim_end().to_string(),
-            auth_header,
-            accept_encoding,
-            body: String::from_utf8(body).expect("utf8 body"),
-        }
-    });
-
-    (base_url, handle)
+    CapturedRequest {
+        request_line: request_line.trim_end().to_string(),
+        auth_header,
+        accept_encoding,
+        body: String::from_utf8(body).expect("utf8 body"),
+    }
 }
 
 fn accept_within(listener: &TcpListener, timeout: Duration) -> std::net::TcpStream {
@@ -183,9 +205,17 @@ fn dsl_endpoint_is_get_orbit_schema_dsl() {
     );
 }
 
+const GRAPH_STATUS_RESPONSE: &str =
+    r#"{"data":{"group":null,"project":{"orbit":{"indexing":{"state":"READY"}}}}}"#;
+
+fn graphql_variables(request: &CapturedRequest) -> serde_json::Value {
+    let body: serde_json::Value = serde_json::from_str(&request.body).expect("json body");
+    body["variables"].clone()
+}
+
 #[test]
-fn graph_status_sends_full_path_query() {
-    let (base_url, handle) = serve_once(r#"{"projects":{"indexed":1}}"#, "application/json");
+fn graph_status_asks_graphql_for_the_full_path() {
+    let (base_url, handle) = serve_once(GRAPH_STATUS_RESPONSE, "application/json");
     let output = run_orbit(
         &base_url,
         &["graph-status", "--full-path", "gitlab-org/gitlab"],
@@ -197,10 +227,13 @@ fn graph_status_sends_full_path_query() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert_eq!(request.request_line, "POST /api/graphql HTTP/1.1");
     assert_eq!(
-        request.request_line,
-        "GET /api/v4/orbit/graph_status?full_path=gitlab-org%2Fgitlab HTTP/1.1"
+        graphql_variables(&request),
+        serde_json::json!({"fullPath": "gitlab-org/gitlab"})
     );
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(stdout, serde_json::json!({"indexing": {"state": "READY"}}));
 }
 
 #[test]
@@ -211,7 +244,7 @@ fn graph_status_without_scope_inspects_the_origin_remote_project() {
         "ssh://git@localhost:2222/my-group/my-project.git",
         "https://localhost/my-group/my-project",
     ] {
-        let (base_url, handle) = serve_once(r#"{"projects":{"indexed":1}}"#, "application/json");
+        let (base_url, handle) = serve_once(GRAPH_STATUS_RESPONSE, "application/json");
         let base_url = base_url.replace("127.0.0.1", "localhost");
         let clone = tempfile::tempdir().expect("tempdir");
         for args in [
@@ -235,19 +268,17 @@ fn graph_status_without_scope_inspects_the_origin_remote_project() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            request.request_line,
-            "GET /api/v4/orbit/graph_status?full_path=my-group%2Fmy-project HTTP/1.1",
+            graphql_variables(&request),
+            serde_json::json!({"fullPath": "my-group/my-project"}),
             "{remote}"
         );
     }
 }
 
 #[test]
-fn graph_status_llm_format_prints_the_formatted_text() {
-    let (base_url, handle) = serve_once(
-        r#"{"formatted_text":"projects:\n  indexed: 1"}"#,
-        "application/json",
-    );
+fn graph_status_llm_format_prints_the_namespace_status_as_toon() {
+    let (base_url, handle) =
+        serve_in_order(&[r#"{"full_path":"gsd-alpha"}"#, GRAPH_STATUS_RESPONSE]);
     let output = run_orbit(
         &base_url,
         &[
@@ -258,17 +289,126 @@ fn graph_status_llm_format_prints_the_formatted_text() {
             "llm",
         ],
     );
-    let request = handle.join().expect("join mock");
+    let requests = handle.join().expect("join mock");
 
     assert!(output.status.success());
     assert_eq!(
-        request.request_line,
-        "GET /api/v4/orbit/graph_status?namespace_id=9970&response_format=llm HTTP/1.1"
+        requests[0].request_line,
+        "GET /api/v4/groups/9970?with_projects=false HTTP/1.1"
+    );
+    assert_eq!(
+        graphql_variables(&requests[1]),
+        serde_json::json!({"fullPath": "gsd-alpha"})
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "projects:\n  indexed: 1\n"
+        "indexing:\n  state: READY\n"
     );
+}
+
+#[test]
+fn graph_status_resolves_a_project_id_to_its_full_path() {
+    let (base_url, handle) = serve_in_order(&[
+        r#"{"path_with_namespace":"gsd-alpha/app"}"#,
+        r#"{"data":{"group":null,"project":null}}"#,
+    ]);
+    let output = run_orbit(&base_url, &["graph-status", "--project-id", "2"]);
+    let requests = handle.join().expect("join mock");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Group or project not found"));
+    assert_eq!(requests[0].request_line, "GET /api/v4/projects/2 HTTP/1.1");
+    assert_eq!(
+        graphql_variables(&requests[1]),
+        serde_json::json!({"fullPath": "gsd-alpha/app"})
+    );
+}
+
+const STATUS_WITHOUT_ORBIT: &str =
+    r#"{"data":{"group":{"orbit":{"indexing":null,"itemCounts":null}},"project":null}}"#;
+
+fn run_graph_status_without_orbit(bodies: &'static [&'static str]) -> std::process::Output {
+    let (base_url, handle) = serve_in_order(bodies);
+    let output = run_orbit(&base_url, &["graph-status", "--full-path", "gsd-alpha"]);
+    let requests = handle.join().expect("join mock");
+    assert_eq!(
+        requests[1].request_line,
+        "GET /api/v4/orbit/status HTTP/1.1"
+    );
+    output
+}
+
+#[test]
+fn graph_status_without_orbit_for_the_scope_exits_forbidden() {
+    let output = run_graph_status_without_orbit(&[
+        STATUS_WITHOUT_ORBIT,
+        r#"{"user":{"available":true},"system":{"status":"healthy"}}"#,
+    ]);
+
+    assert_eq!(output.status.code(), Some(4));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("Orbit is not turned on for gsd-alpha, or your role is below Reporter.")
+    );
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn graph_status_without_orbit_for_the_user_exits_unavailable() {
+    let output = run_graph_status_without_orbit(&[
+        STATUS_WITHOUT_ORBIT,
+        r#"{"user":{"available":false},"system":null}"#,
+    ]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Orbit is not available for your user")
+    );
+}
+
+#[test]
+fn graph_status_with_a_token_that_cannot_read_orbit_exits_forbidden() {
+    let (base_url, handle) = serve_once(
+        r#"{"data":{"group":{"orbit":null},"project":null}}"#,
+        "application/json",
+    );
+    let output = run_orbit(&base_url, &["graph-status", "--full-path", "gsd-alpha"]);
+    handle.join().expect("join mock");
+
+    assert_eq!(output.status.code(), Some(4));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("This token cannot read Orbit status")
+    );
+}
+
+#[test]
+fn graph_status_prints_the_data_and_fails_on_a_field_error() {
+    let (base_url, handle) = serve_once(
+        r#"{"data":{"group":{"orbit":{"indexing":{"state":"READY"},"itemCounts":null}},"project":null},
+            "errors":[{"message":"requested too many times","path":["group","orbit","itemCounts"]}]}"#,
+        "application/json",
+    );
+    let output = run_orbit(&base_url, &["graph-status", "--full-path", "gsd-alpha"]);
+    handle.join().expect("join mock");
+
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(stdout["indexing"]["state"], "READY");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requested too many times"));
+}
+
+#[test]
+fn graph_status_prints_nothing_on_a_query_error() {
+    let (base_url, handle) = serve_once(
+        r#"{"errors":[{"message":"Field 'unknownField' doesn't exist on type 'OrbitIndexing'"}]}"#,
+        "application/json",
+    );
+    let output = run_orbit(&base_url, &["graph-status", "--full-path", "gsd-alpha"]);
+    handle.join().expect("join mock");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknownField"));
 }
 
 #[test]
