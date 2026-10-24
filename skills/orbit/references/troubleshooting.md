@@ -28,7 +28,7 @@ Read this when a command fails with "command not found", an auth error, or a fea
    glab orbit graph-status --full-path GROUP_NAMESPACE
    ```
 
-   Exit 0: ready. Exit 2: Orbit is not available to you. Exit 4: Orbit is off here, or your role is below Reporter. Rate limits exit 1.
+   Exit 0: ready. 2: no Orbit for you. 4: Orbit off here, or role below Reporter. 1: rate limit.
 
 4. Orbit Local: no server needed:
 
