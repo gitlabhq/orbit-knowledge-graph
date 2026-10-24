@@ -54,12 +54,6 @@ Your agent answers with a few graph queries in place of many file reads and API 
 
 For more examples, see [prompt examples](prompt-examples.md).
 
-## Code on your machine
-
-The GitLab Orbit CLI also indexes repositories on your machine.
-Your agent can then search code you have not pushed, offline and with no GitLab account.
-For more information, see [local graph](cli.md#local-graph).
-
 ## Learn more
 
 - <img src="img/orbit-video-overview-v19_6.png" alt="Thumbnail of the GitLab Orbit overview video." width="640" height="360">[GitLab Orbit in two minutes](https://www.youtube.com/watch?v=dKaPp-TWd_o)<br>How GitLab Orbit gives agents the context of your software development.
