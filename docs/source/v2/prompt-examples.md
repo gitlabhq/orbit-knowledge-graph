@@ -26,7 +26,7 @@ To find the IDs, see [bounded nodes](queries/query-language.md#bounded-nodes).
 
 An agent that reviews only the diff guesses what the change affects.
 With GitLab Orbit, the agent gets proof from the graph: the code that calls the changed definitions,
-the projects that import the changed package, and the issue, pipeline, and review history of the change.
+the projects that import the changed package, and the other open merge requests on the same files.
 Each finding in the review points to the query result that shows it.
 
 ```plaintext
@@ -37,13 +37,11 @@ Back every finding with a query result, not a guess from the diff:
 2. Which projects in <my-group> import the changed package, and how many
    files in each?
 3. Which other open merge requests change the same files?
-4. Which issue does it close, and did its head pipeline pass?
-5. Who approved earlier changes to these files?
 Then list the risks, each with the result that shows it.
 ```
 
 For merge request `!769` in `gitlab-org/labkit`, which changes how the `v2/log` package reads its settings,
-the agent runs one query for each step.
+the agent runs four queries: two for the first step, and one for each other step.
 First, it gets the files that the merge request changes, with their diffs:
 
 ```gql orbit-query
@@ -91,34 +89,14 @@ RETURN mr.iid, mr.title, f.old_path
 LIMIT 50
 ```
 
-The issue that the merge request closes, and its head pipeline:
-
-```gql orbit-query
-MATCH (mr:MergeRequest {iid: 769, project_id: 9438583})
-  -[:CLOSES]->(w:WorkItem)
-MATCH (mr)-[:HAS_HEAD_PIPELINE]->(pl:Pipeline)
-RETURN w.iid, w.title, pl.status
-LIMIT 10
-```
-
-The people who approved earlier changes to the file, who are likely reviewers:
-
-```gql orbit-query
-MATCH (u:User)
-  -[:APPROVED]->(mr:MergeRequest)
-  -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
-  -[:HAS_FILE]->(f:MergeRequestDiffFile {project_id: 9438583, old_path: 'v2/log/log.go'})
-WHERE mr.state = 'merged'
-RETURN u.username, count(mr) AS approvals
-ORDER BY approvals DESC
-LIMIT 10
-```
+The query filters on `old_path`, because `new_path` is empty when a merge request changes a file
+but does not rename the file.
 
 Inside `gitlab-org/labkit`, most callers of the changed code are tests.
 But 59 projects in `gitlab-org` import `v2/log` in 1,050 files, so the review reports a behavior change
 that reaches each of them.
 
-- **With GitLab Orbit:** one prompt and six queries, and each finding cites the rows that show it.
+- **With GitLab Orbit:** one prompt and four queries, and each finding cites the rows that show it.
 - **Without GitLab Orbit:** no REST API call returns callers, or the projects that import a package.
   An agent that reviews the merge request sees only the diff, and a group code search matches text, not parsed imports.
 
@@ -226,8 +204,7 @@ Using GitLab Orbit, before I change <BasePolicy> and <Ability::allowed?> in
 1. Which classes inherit from <BasePolicy>, directly or through other
    classes?
 2. Which definitions call <Ability::allowed?>?
-3. Which open merge requests touch <app/policies/base_policy.rb> right now?
-4. If the code is in a library, which projects in <my-group> import
+3. If the code is in a library, which projects in <my-group> import
    <gitlab.com/my-group/my-sdk> on their default branch?
 ```
 
@@ -253,23 +230,6 @@ RETURN caller.fqn, caller.file_path, caller.start_line
 ORDER BY caller.file_path
 LIMIT 1000
 ```
-
-The open merge requests on the policy files:
-
-```gql orbit-query
-MATCH (mr:MergeRequest)
-  -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)
-  -[:HAS_FILE]->(f:MergeRequestDiffFile {project_id: 278964})
-WHERE mr.state = 'opened'
-  AND f.old_path IN ['app/policies/base_policy.rb',
-    'app/policies/group_policy.rb', 'app/policies/project_policy.rb']
-RETURN mr.iid, f.old_path
-ORDER BY mr.iid DESC
-LIMIT 100
-```
-
-The query filters on `old_path`, because `new_path` is empty when a merge request changes a file
-but does not rename the file.
 
 The projects that import a library:
 
