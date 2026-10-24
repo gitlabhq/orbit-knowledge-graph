@@ -24,8 +24,6 @@ title: GitLab Orbit
 
 <section class="product-landing product-hero">
 
-<p class="product-hero-brand"><img src="img/orbit-logo-v19_6.svg" alt="GitLab Orbit logo" width="48" height="48"> GitLab Orbit</p>
-
 Software lifecycle context graph for AI agents
 {.product-hero-title}
 
@@ -110,44 +108,30 @@ For more information, see [local graph](cli.md#local-graph).
 
 <style>
 /* Product landing page. Visual wrappers only, with GitLab UI design tokens; the content above is Markdown. */
+/* Page title: the standard H1, with the GitLab Orbit logo before it. */
 body:has(.product-landing) h1#skipTarget {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: var(--gl-spacing-scale-4);
+}
+body:has(.product-landing) h1#skipTarget::before {
+  content: "";
+  flex: none;
+  width: 48px;
+  height: 48px;
+  background: URL("img/orbit-logo-v19_6.svg") center / contain no-repeat;
 }
 body:has(.product-landing) .docs-content .language-plaintext {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* Hero: a flat bordered panel. */
+/* Hero: tagline, lead, and actions, with no panel. */
 .docs-content .product-hero {
   margin: var(--gl-spacing-scale-5) 0 var(--gl-spacing-scale-6);
-  padding: var(--gl-spacing-scale-6);
-  border: 1px solid var(--gl-border-color-default);
-  border-radius: var(--gl-border-radius-lg);
 }
 .docs-content .product-hero p { margin: 0; }
-.docs-content .product-hero img {
-  border: 0;
-  padding: 0;
-  border-radius: 0;
-}
-.docs-content .product-hero-brand {
-  display: flex;
-  align-items: center;
-  gap: var(--gl-spacing-scale-4);
-  font-size: var(--gl-text-size-h1);
-  line-height: 1.15;
-  font-weight: 600;
-  color: var(--gl-text-color-heading);
-}
 .docs-content .product-hero-title {
-  margin-top: var(--gl-spacing-scale-4) !important;
   font-size: var(--gl-text-size-h3);
   line-height: 1.25;
   font-weight: 500;
@@ -204,9 +188,6 @@ body:has(.product-landing) .docs-content .language-plaintext {
   width: 1rem;
   height: 1rem;
   fill: currentColor;
-}
-@media (max-width: 640px) {
-  .docs-content .product-hero { padding: var(--gl-spacing-scale-5); }
 }
 
 /* Cards: same metrics as the cards shortcode (.card-body.card.gl-rounded-lg): 1.25rem padding, 8px radius, neutral-100 border, subtle hover. */
