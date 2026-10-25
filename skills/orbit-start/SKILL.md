@@ -1,6 +1,6 @@
 ---
 name: orbit-start
-description: Walk a user through their first GitLab Orbit session. Check the setup, then answer a simple first question and a workflow from the prompt examples with Orbit. Offer to compare one answer without and with Orbit. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
+description: Walk a user through their first GitLab Orbit session. Check the setup, then answer a simple first question and a workflow from the prompt examples with Orbit. Offer to run a prompt again without Orbit and compare the cost. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
 version: 0.1.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance. Works best in agents that can ask the user multiple-choice questions.
@@ -16,7 +16,7 @@ metadata:
 
 Guide the user through real questions about their own GitLab data, answered with GitLab Orbit.
 Start with a simple question, then try a full workflow from the prompt examples.
-Then offer to answer one question twice, once without Orbit and once with it, and show the raw numbers side by side.
+After an answer, offer to run the same prompt again without Orbit, and compare what each run cost.
 
 Keep the session short and read-only. Do not create issues, merge requests, comments, or commits.
 
@@ -28,9 +28,11 @@ If you have no such tool, print the options as a numbered list, then stop and wa
 
 ## Answer with Orbit
 
+1. Note the start time in UTC with `date -u +%Y-%m-%dT%H:%M:%SZ`.
 1. Run each query with `glab orbit query`.
 1. Give the answer, and list each finding with the query result that shows it.
 1. Show the queries that you ran, so the user can run them again.
+1. Note the end time.
 
 ## Step 1: Check the setup
 
@@ -54,6 +56,7 @@ Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
 
 - **Try a full workflow**: go to step 3.
+- **Run it again without Orbit**: go to step 4.
 - **Ask another simple question**: go back to step 2.
 - **Done**: go to step 5.
 
@@ -79,48 +82,49 @@ Offer real values from the project as options when you can, such as recent merge
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
 
-- **Compare with and without Orbit**: go to step 4.
+- **Run it again without Orbit**: go to step 4.
 - **Try another workflow**: go back to step 3.
 - **Done**: go to step 5.
 
-## Step 4: Compare with and without Orbit
+## Step 4: Run it again without Orbit
 
-Ask which question to compare: one that you already answered, or a new one from step 3.
-
-Answer the question twice, once without Orbit and once with Orbit.
+Run the same prompt again, in this session, so that the user sees each call.
 
 1. Note the start time in UTC with `date -u +%Y-%m-%dT%H:%M:%SZ`.
-1. If you can start a background subagent, start the answer without Orbit there.
-   Give it the question, the scope, the inputs, and the rules from below.
-1. Answer with Orbit yourself, in this session, so that the user sees each query as it runs.
-1. If the answer without Orbit is still running, tell the user, and wait for it.
+1. Use only the tools that the user had before Orbit.
+   These are `glab` commands, the REST API through `glab api`, and `git` and file reads in the local clone.
+1. Do not use `glab orbit`, the GitLab Orbit MCP endpoint, or any other Orbit tool.
+1. Stop after 15 tool calls or 3 minutes, whichever comes first, and keep what you have.
+1. Give the answer, and note the end time.
 
-If you cannot start a background subagent, answer with Orbit first, then without Orbit.
+Then show a short summary of both runs:
 
-Without Orbit:
+| | With Orbit | Without Orbit |
+|---|---|---|
+| Tool calls | | |
+| API requests | | |
+| Tokens | | |
+| Time | | |
+| What it found | | |
 
-- Use only the tools that the user had before Orbit.
-  These are `glab` commands, the REST API through `glab api`, and `git` and file reads in the local clone.
-- Do not use `glab orbit`, the GitLab Orbit MCP endpoint, or any other Orbit tool.
-- Stop after 15 tool calls or 3 minutes, whichever comes first, and keep what you have.
+In **What it found**, give a count that the user can check, such as "14 callers in 6 projects".
+Count the rest as described in [Count tool calls and tokens](#count-tool-calls-and-tokens).
+Keep it to the table. Do not say which run is better.
 
-With Orbit:
+Then ask the user what to do next. Offer these options:
 
-- Follow the query rules from the Orbit skill that you loaded in step 1.
-- Run each query with `glab orbit query`.
-
-Each answer reports the answer, and lists what it could not find and what it had to guess.
-Count the tool calls, tokens, and time from the session transcripts, as described in the next section.
+- **Try another workflow**: go back to step 3.
+- **Done**: go to step 5.
 
 ### Count tool calls and tokens
 
-Read the counts from the transcripts that your agent writes, not from memory.
-The token counts in them come from the model API, so the counts are the same every time you read them.
+Read the counts from the transcript that your agent writes, not from memory.
+The token counts in it come from the model API, so the counts are the same every time you read them.
+For each run, count only the lines between its start and end times.
 
 - **Claude Code**: the session is `~/.claude/projects/<project>/<session-id>.jsonl`.
   `<project>` is the working directory, with each character other than a letter or digit replaced by `-`.
   The newest `.jsonl` file there is the current session.
-  A subagent writes `<session-id>/subagents/agent-<agent-id>.jsonl`.
   Count the `tool_use` blocks in the `assistant` lines, and add up `message.usage` once for each `message.id`.
   One message can span several lines.
 - **Codex**: the session is `~/.codex/sessions/<year>/<month>/<day>/rollout-<time>-<id>.jsonl`.
@@ -128,38 +132,9 @@ The token counts in them come from the model API, so the counts are the same eve
   The tokens are in `payload.info.total_token_usage` of the `event_msg` lines with `payload.type` `token_count`.
   This total grows during the session, so subtract the last total before the start time.
 - **Other agents**: use the transcript if your agent keeps one with token counts.
-  Otherwise, count your tool calls as you make them, and say that the token counts are not known.
+  Otherwise, count your tool calls as you make them, and write `Not known` for tokens.
 
-For the answer with Orbit, count only the lines after the start time.
-Take the time from the first and last timestamps that you count.
-
-Show the raw comparison in two tables. First, what each answer cost:
-
-| | Without Orbit | With Orbit |
-|---|---|---|
-| Tool calls and API requests | | |
-| Tokens | | |
-| Time | | |
-
-Then the results, one row for each thing that the question asks about.
-For example, for a merge request question:
-
-| Result | Without Orbit | With Orbit |
-|---|---|---|
-| Callers outside the merge request | 2, in this project only | 14, in 6 projects |
-| Projects that import the changed code | Not found | 6 |
-
-In each cell, give a count or a fact that the user can check, or write `Not found` or `Guessed`.
-A cell can name the items when there are only a few, or add a short sentence of context.
-Pick the rows that answer the question. Leave out details that do not change the answer.
-
-After the tables, list any important findings that do not fit in a row.
-For example, a caller in a critical service, or a failing job that blocks a release.
-Say which answer found each one, and show the query result or API response behind it.
-
-Do not show the full answers. Offer to show either one if the user asks.
-
-Do not add a verdict, a score, or a summary of which answer is better. Let the user compare.
+API requests are the `glab orbit query` and `glab api` calls, and any other call to the GitLab instance.
 
 ## Step 5: Offer next steps
 
