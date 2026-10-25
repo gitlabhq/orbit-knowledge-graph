@@ -21,7 +21,7 @@ of the SQL that it produces.
 > These SQL fragments show only the core of each query.
 > The full SQL also has authorization filters, page limits, and query settings.
 
-<table>
+<table width="100%">
 
 <thead>
 
@@ -38,7 +38,8 @@ of the SQL that it produces.
 <td>
 
 ```cypher
-MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'}) RETURN u.username, mr.title
+MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
+RETURN u.username, mr.title
 ```
 
 </td>
@@ -48,7 +49,9 @@ MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'}) RETURN u.usernam
 <td>
 
 ```sql
-FROM gl_edge AS e JOIN gl_merge_request AS mr ON mr.id = e.target_id WHERE e.relationship_kind = ? AND mr.state = ?
+FROM gl_edge AS e
+JOIN gl_merge_request AS mr ON mr.id = e.target_id
+WHERE e.relationship_kind = ? AND mr.state = ?
 ```
 
 </td>
@@ -62,7 +65,8 @@ FROM gl_edge AS e JOIN gl_merge_request AS mr ON mr.id = e.target_id WHERE e.rel
 <td>
 
 ```cypher
-MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964}) RETURN mr.state, count(mr) AS mrs
+MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964})
+RETURN mr.state, count(mr) AS mrs
 ```
 
 </td>
@@ -72,7 +76,8 @@ MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964}) RETURN mr.state,
 <td>
 
 ```sql
-SELECT mr.state, COUNT(mr.id) AS mrs ... GROUP BY mr.state
+SELECT mr.state, COUNT(mr.id) AS mrs ...
+GROUP BY mr.state
 ```
 
 </td>
@@ -86,7 +91,9 @@ SELECT mr.state, COUNT(mr.id) AS mrs ... GROUP BY mr.state
 <td>
 
 ```cypher
-MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {id: 278964}) RETURN path
+MATCH path = ANY SHORTEST
+  (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {id: 278964})
+RETURN path
 ```
 
 </td>
@@ -96,7 +103,11 @@ MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {id:
 <td>
 
 ```sql
-WITH forward AS (...), backward AS (...) SELECT ... FROM forward JOIN backward ON ...
+WITH forward AS (...),
+     backward AS (...)
+SELECT ...
+FROM forward
+JOIN backward ON ...
 ```
 
 </td>
@@ -110,7 +121,8 @@ WITH forward AS (...), backward AS (...) SELECT ... FROM forward JOIN backward O
 <td>
 
 ```cypher
-MATCH (mr:MergeRequest {id: 42})--(n) RETURN n
+MATCH (mr:MergeRequest {id: 42})--(n)
+RETURN n
 ```
 
 </td>
@@ -120,7 +132,13 @@ MATCH (mr:MergeRequest {id: 42})--(n) RETURN n
 <td>
 
 ```sql
-SELECT ... FROM gl_edge WHERE source_id = ? UNION ALL SELECT ... FROM gl_edge WHERE target_id = ?
+SELECT ...
+FROM gl_edge
+WHERE source_id = ?
+UNION ALL
+SELECT ...
+FROM gl_edge
+WHERE target_id = ?
 ```
 
 </td>
