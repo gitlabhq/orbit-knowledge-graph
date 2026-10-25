@@ -1,6 +1,6 @@
 ---
 name: orbit-start
-description: Walk a user through their first GitLab Orbit session. Check the setup, offer a few first questions, and answer the chosen one without Orbit and with Orbit, side by side. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
+description: Walk a user through their first GitLab Orbit session. Check the setup, answer one or two first questions with Orbit, then offer to answer one without Orbit and with Orbit, side by side. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
 version: 0.1.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance. Works best in agents that can ask the user multiple-choice questions.
@@ -14,9 +14,8 @@ metadata:
 
 # Get started with GitLab Orbit
 
-Guide the user through one real question about their own GitLab data. Answer it twice, in parallel when you can:
-once with only the tools that the user already has, and once with GitLab Orbit.
-End with a side-by-side comparison, so the user sees on their first try what Orbit changes.
+Guide the user through one or two real questions about their own GitLab data, answered with GitLab Orbit.
+Then offer to answer one question twice, once without Orbit and once with it, and show the raw numbers side by side.
 
 Keep the session short and read-only. Do not create issues, merge requests, comments, or commits.
 
@@ -33,10 +32,11 @@ If you have no such tool, print the options as a numbered list, then stop and wa
    and run `glab orbit status` again. If it still fails, tell the user what failed and stop.
 1. Find the scope. In a clone, read the project from `git remote get-url origin`.
    Otherwise, ask the user for the full path of a group or project that has GitLab Orbit turned on.
+1. Load the Orbit skill with `glab orbit skills get orbit`, and follow its query rules for the rest of the session.
 
-## Step 2: Pick a first question
+## Step 2: Pick a question
 
-Ask the user what they want to see first. Offer these options:
+Ask the user what they want to see. Offer these options:
 
 - **What a merge request affects**: the callers of the changed code outside the merge request,
   and the projects that import it.
@@ -47,14 +47,28 @@ Ask the user what they want to see first. Offer these options:
 - **What depends on code you want to change**: the subclasses and callers of a class or method.
 
 Then ask only for the inputs that the question needs and that you cannot find yourself.
-For example, ask for a merge request number, a CVE ID, a job name, or a class name. Offer real values from the project as options when you
-can, such as recent merge requests or the jobs that failed most recently.
+For example, ask for a merge request number, a CVE ID, a job name, or a class name.
+Offer real values from the project as options when you can, such as recent merge requests or recently failed jobs.
 
-## Step 3: Answer the question twice, in parallel
+## Step 3: Answer with Orbit
 
-Answer the question once without Orbit and once with Orbit.
+1. Run each query with `glab orbit query`.
+1. Give the answer, and list each finding with the query result that shows it.
+1. Show the queries that you ran, so the user can run them again.
+
+Then ask the user what to do next. Offer these options:
+
+- **Ask another question**: go back to step 2. Offer this only after the first question.
+- **Compare with and without Orbit**: go to step 4.
+- **Done**: go to step 5.
+
+## Step 4: Compare with and without Orbit
+
+Ask which question to compare: one that you already answered, or a new one from step 2.
+
+Answer the question twice, once without Orbit and once with Orbit, so that both answers are measured the same way.
 If you can start subagents, for example with the Agent tool in Claude Code, start both in parallel in one turn.
-Give each subagent the question, the scope, and the inputs from step 2, and its rules from below.
+Give each subagent the question, the scope, the inputs, and its rules from below.
 If you cannot start subagents, answer without Orbit first, then with Orbit.
 
 Without Orbit:
@@ -67,33 +81,30 @@ Without Orbit:
 With Orbit:
 
 - Load the Orbit skill with `glab orbit skills get orbit`, and follow its query rules.
-- Run each query with `glab orbit query`, and keep each query to show the user.
+- Run each query with `glab orbit query`.
 
-Each answer gives the answer, the number of tool calls and API requests, and the time.
-It also says what it could not find, and what it had to guess.
+Each answer reports the answer, the number of tool calls and API requests, and the time.
+It also lists what it could not find, and what it had to guess.
 
-## Step 4: Show the difference
-
-Show the two answers side by side:
+Show the raw comparison:
 
 | | Without Orbit | With Orbit |
 |---|---|---|
 | Tool calls and API requests | | |
 | Time | | |
 | What the answer covers | | |
-| Evidence | | |
+| Could not find | | |
+| Had to guess | | |
 
 In **What the answer covers**, give counts that the user can check, such as projects, files, callers,
-or merge requests. In **Evidence**, say whether each finding comes from a query result or from a guess.
+or merge requests. Then show both answers in full, one after the other.
 
-Then list the findings from the Orbit answer, each with the query result that shows it.
-
-Be honest. If the answer without Orbit was as good, or the Orbit answer missed something, say so.
+Do not add a verdict, a score, or a summary of which answer is better. Let the user compare.
 
 ## Step 5: Offer next steps
 
 Ask the user what to do next. Offer these options:
 
-- Try another first question: go back to step 2.
+- Ask another question: go back to step 2.
 - Set up Orbit for every session: run `glab orbit setup`.
 - See more prompts: <https://docs.gitlab.com/orbit/>.
