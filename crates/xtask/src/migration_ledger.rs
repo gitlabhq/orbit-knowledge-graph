@@ -274,7 +274,11 @@ pub fn bump(
         &changed_sources,
         &changed_tables,
     );
-    let derived_edge_rows = derive_edge_rows(&ontology, &current, &committed);
+    let entry_edge_rows = if explicit.is_some() {
+        EdgeRows::Changed
+    } else {
+        derive_edge_rows(&ontology, &current, &committed)
+    };
 
     let entry_declaration = if matches!(explicit, Some(MigrationScope::None)) {
         if note.as_ref().is_none_or(|n| n.trim().is_empty()) {
@@ -330,7 +334,7 @@ pub fn bump(
             bail!("ledger already has an entry for version {new_version}");
         }
         let (scope, entities, edge_rows) =
-            split_scope_into_ledger_fields(entry_declaration, derived_edge_rows);
+            split_scope_into_ledger_fields(entry_declaration, entry_edge_rows);
         ledger.migrations.insert(
             0,
             MigrationEntry {
@@ -348,10 +352,8 @@ pub fn bump(
             .first_mut()
             .ok_or_else(|| anyhow!("cannot amend: the ledger has no entries"))?;
         let widened = widen_amended_entry_scope(&latest.migration_scope(), &entry_declaration)?;
-        let (scope, entities, edge_rows) = split_scope_into_ledger_fields(
-            widened,
-            latest.edge_rows.widened_with(derived_edge_rows),
-        );
+        let (scope, entities, edge_rows) =
+            split_scope_into_ledger_fields(widened, latest.edge_rows.widened_with(entry_edge_rows));
         latest.scope = scope;
         latest.entities = entities;
         latest.edge_rows = edge_rows;
