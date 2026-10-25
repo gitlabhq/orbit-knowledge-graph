@@ -27,8 +27,13 @@ When this skill asks the user something, use your interactive question tool if y
 `AskUserQuestion` in Claude Code. Offer two to four options, and put the recommended option first.
 If you have no such tool, print the options as a numbered list, then stop and wait for the answer.
 
-Before each question, write out what the user needs to see, as text in your reply: the welcome screen, the answer, or the summary.
-Never go from a command's output straight to the next question. The user does not see command output, only your text.
+### Show before you ask
+
+Several steps tell you to show something: the welcome screen, an answer, a part of step 6, or a summary.
+Each one is text that you write in full in your reply, and then you ask the next question.
+The user sees only your text, not command output and not this skill.
+A question with no text before it shows the user nothing, so never send one.
+This applies even when the content comes from this skill and needs no command.
 
 ## Answer with Orbit
 
@@ -52,8 +57,11 @@ Never go from a command's output straight to the next question. The user does no
 
 ## Step 2: Welcome the user
 
-Before you ask the user anything, print this welcome screen as text in a `text` code block.
-Fill in each `<value>` from the commands in step 1, and never invent one:
+1. Write this welcome screen in your reply, in a `text` code block.
+   Fill in each `<value>` from the commands in step 1, and never invent one.
+1. Then go to step 3, and ask the first question in the same reply.
+
+The welcome screen:
 
 ```text
              .        *         .
@@ -74,8 +82,6 @@ Fill in each `<value>` from the commands in step 1, and never invent one:
 `<status>` and `<version>` come from `glab orbit status`.
 The rest comes from `graph-status`: `<total>` is the sum of every count, and `<types>` counts the node types above zero.
 `Largest` lists the three largest node types.
-
-Then go to step 3.
 
 ## Step 3: Ask a simple first question
 
@@ -201,15 +207,17 @@ API requests are the `glab orbit query` and `glab api` calls, and any other call
 
 ## Step 6: See how GitLab Orbit works
 
-Walk the user through five short parts, one at a time. Each part uses text diagrams in `text` code blocks.
+Walk the user through the five parts below, one part for each reply.
 Do not run new commands in this step, so that each part shows at once.
 Use this skill, the `graph-status` output from step 1, and the last query.
-End each part with its **Read more** link.
-Write each part in your reply, then ask the user what to do next. Offer these options:
 
-- **Next: <title of the next part>**: show the next part. Leave this out after the last part.
-- **Ask a question**: go to step 4.
-- **Done**: go to step 7.
+For each part:
+
+1. Write the part in your reply: its explanation, its diagram in a `text` code block, and its **Read more** link.
+1. Then, in the same reply, ask the user what to do next. Offer these options:
+   - **Next: <title of the next part>**: show the next part. Leave this out after the last part.
+   - **Ask a question**: go to step 4.
+   - **Done**: go to step 7.
 
 ### Part 1: From GitLab data to answers
 
