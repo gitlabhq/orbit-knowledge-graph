@@ -3,6 +3,11 @@ title: Orbit architecture
 description: What Orbit is, why it exists, and the contracts that hold across every part of it.
 authors:
   - michaelangeloio
+  - dgruzd
+  - jgdoyon1
+  - bohdanpk
+  - michaelusa
+  - aalgutifan
 ---
 
 **TL;DR:** Orbit turns GitLab code and lifecycle data into one property
