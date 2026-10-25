@@ -5,5 +5,5 @@ order: 7
 authors: []
 ---
 
-**TL;DR:** This page is not written yet. Until it is, read the
+This page isn't written yet. Until it is, read the
 [Orbit Local quickstart](../development/orbit-local-quickstart.md).
