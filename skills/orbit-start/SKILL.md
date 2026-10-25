@@ -1,6 +1,6 @@
 ---
 name: orbit-start
-description: Walk a user through their first GitLab Orbit session. Check the setup, answer one or two first questions with Orbit, then offer to answer one without Orbit and with Orbit, side by side. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
+description: Walk a user through their first GitLab Orbit session. Check the setup, then answer a simple first question and a workflow from the prompt examples with Orbit. Offer to compare one answer without and with Orbit. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
 version: 0.1.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance. Works best in agents that can ask the user multiple-choice questions.
@@ -14,7 +14,8 @@ metadata:
 
 # Get started with GitLab Orbit
 
-Guide the user through one or two real questions about their own GitLab data, answered with GitLab Orbit.
+Guide the user through real questions about their own GitLab data, answered with GitLab Orbit.
+Start with a simple question, then try a full workflow from the prompt examples.
 Then offer to answer one question twice, once without Orbit and once with it, and show the raw numbers side by side.
 
 Keep the session short and read-only. Do not create issues, merge requests, comments, or commits.
@@ -25,6 +26,12 @@ When this skill asks the user something, use your interactive question tool if y
 `AskUserQuestion` in Claude Code. Offer two to four options, and put the recommended option first.
 If you have no such tool, print the options as a numbered list, then stop and wait for the answer.
 
+## Answer with Orbit
+
+1. Run each query with `glab orbit query`.
+1. Give the answer, and list each finding with the query result that shows it.
+1. Show the queries that you ran, so the user can run them again.
+
 ## Step 1: Check the setup
 
 1. Run `glab orbit status`.
@@ -34,8 +41,25 @@ If you have no such tool, print the options as a numbered list, then stop and wa
    Otherwise, ask the user for the full path of a group or project that has GitLab Orbit turned on.
 1. Load the Orbit skill with `glab orbit skills get orbit`, and follow its query rules for the rest of the session.
 
-## Step 2: Pick a question
+## Step 2: Ask a simple first question
 
+Start with a question that one query answers, about the scope from step 1. Offer these options:
+
+- **What is open in this project**: the open merge requests, newest first.
+- **Which vulnerabilities this project has**: the open vulnerabilities, counted by severity.
+- **Who reviews this project**: the people who approved the most merge requests in the last month.
+- **What calls a function**: the callers of a function or method that the user names.
+
+Answer it as described in [Answer with Orbit](#answer-with-orbit).
+Then ask the user what to do next. Offer these options:
+
+- **Try a full workflow**: go to step 3.
+- **Ask another simple question**: go back to step 2.
+- **Done**: go to step 5.
+
+## Step 3: Try a workflow from the prompt examples
+
+Now try a bigger question that takes several queries.
 Read the prompt examples at <https://docs.gitlab.com/orbit/prompt-examples/>.
 Offer two to four examples that fit the scope, and use the prompt of the one that the user picks.
 If you cannot read the page, offer these:
@@ -52,21 +76,16 @@ Then ask only for the inputs that the question needs and that you cannot find yo
 For example, ask for a merge request number, a CVE ID, a job name, or a class name.
 Offer real values from the project as options when you can, such as recent merge requests or recently failed jobs.
 
-## Step 3: Answer with Orbit
-
-1. Run each query with `glab orbit query`.
-1. Give the answer, and list each finding with the query result that shows it.
-1. Show the queries that you ran, so the user can run them again.
-
+Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
 
-- **Ask another question**: go back to step 2. Offer this only after the first question.
 - **Compare with and without Orbit**: go to step 4.
+- **Try another workflow**: go back to step 3.
 - **Done**: go to step 5.
 
 ## Step 4: Compare with and without Orbit
 
-Ask which question to compare: one that you already answered, or a new one from step 2.
+Ask which question to compare: one that you already answered, or a new one from step 3.
 
 Answer the question twice, once without Orbit and once with Orbit.
 
@@ -146,6 +165,6 @@ Do not add a verdict, a score, or a summary of which answer is better. Let the u
 
 Ask the user what to do next. Offer these options:
 
-- Ask another question: go back to step 2.
+- Try another workflow: go back to step 3.
 - Set up Orbit for every session: run `glab orbit setup`.
 - See more prompts: <https://docs.gitlab.com/orbit/prompt-examples/>.
