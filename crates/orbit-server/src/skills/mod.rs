@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 const SKILL_NAME: &str = "orbit";
+const START_HERE_SKILL_NAME: &str = "orbit-start-here";
 const MANIFEST: &str = "SKILL.md";
 const GQL_MANIFEST: &str = "SKILL.gql.md";
 
@@ -18,14 +19,18 @@ const GQL_MANIFEST: &str = "SKILL.gql.md";
 #[folder = "$SKILLS_DIR/orbit"]
 struct SkillAssets;
 
+#[derive(Embed)]
+#[folder = "$SKILLS_DIR/orbit-start-here"]
+struct StartHereAssets;
+
 static JSON_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
     SkillCatalog::load_embedded(Frontend::JsonDsl)
-        .expect("embedded Orbit skill passed full frontmatter and tree validation in tests")
+        .expect("embedded skills passed full frontmatter and tree validation in tests")
 });
 
 static GQL_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
     SkillCatalog::load_embedded(Frontend::Gql)
-        .expect("embedded Orbit GQL manifest has valid frontmatter")
+        .expect("embedded skills have valid frontmatter in GQL mode")
 });
 
 fn served_in(path: &str, frontend: Frontend) -> bool {
@@ -90,43 +95,21 @@ struct SkillCatalog {
 
 impl SkillCatalog {
     fn load_embedded(frontend: Frontend) -> Result<Self, String> {
-        let mut files = Vec::new();
-        for path in SkillAssets::iter() {
-            if !served_in(&path, frontend) {
-                continue;
-            }
-            let source = if path == MANIFEST && frontend == Frontend::Gql {
-                GQL_MANIFEST
-            } else {
-                &path
-            };
-            let asset = SkillAssets::get(source)
-                .ok_or_else(|| format!("embedded skill file {source:?} is unreadable"))?;
-            let content = String::from_utf8(asset.data.into_owned())
-                .map_err(|error| format!("embedded skill file {path:?} is not UTF-8: {error}"))?;
-            files.push(SkillFile {
-                path: path.into_owned(),
-                sha256: sha256_hex(content.as_bytes()),
-                content,
-            });
-        }
-        files.sort_by(|left, right| left.path.cmp(&right.path));
-
-        let manifest = files
-            .iter()
-            .find(|file| file.path == MANIFEST)
-            .ok_or_else(|| format!("embedded {SKILL_NAME} skill is missing {MANIFEST}"))?;
-        let frontmatter = orbit_prompts::parse_skill_frontmatter(&manifest.content, SKILL_NAME)
-            .map_err(|error| format!("embedded {error}"))?;
-
-        let metadata = SkillMetadata {
-            name: frontmatter.name,
-            version: frontmatter.version.to_string(),
-            description: frontmatter.description,
-            compatibility: frontmatter.compatibility,
-        };
-        let mut skills = BTreeMap::new();
-        skills.insert(metadata.name.clone(), EmbeddedSkill { metadata, files });
+        // Only the orbit skill teaches a query language, so only it has per-frontend files.
+        let orbit = load_skill::<SkillAssets>(SKILL_NAME, |path| {
+            served_in(path, frontend).then(|| {
+                if path == MANIFEST && frontend == Frontend::Gql {
+                    GQL_MANIFEST
+                } else {
+                    path
+                }
+            })
+        })?;
+        let start_here = load_skill::<StartHereAssets>(START_HERE_SKILL_NAME, |path| Some(path))?;
+        let skills = [orbit, start_here]
+            .into_iter()
+            .map(|skill| (skill.metadata.name.clone(), skill))
+            .collect();
         Ok(Self { skills })
     }
 
@@ -147,6 +130,45 @@ impl SkillCatalog {
             files: (!metadata_only).then(|| skill.files.clone()),
         })
     }
+}
+
+/// Loads one embedded skill. `source_for` maps each served path to the embedded file that
+/// holds its content, or returns `None` to leave the path out.
+fn load_skill<A: Embed>(
+    name: &str,
+    source_for: impl Fn(&str) -> Option<&str>,
+) -> Result<EmbeddedSkill, String> {
+    let mut files = Vec::new();
+    for path in A::iter() {
+        let Some(source) = source_for(&path) else {
+            continue;
+        };
+        let asset = A::get(source)
+            .ok_or_else(|| format!("embedded skill file {source:?} is unreadable"))?;
+        let content = String::from_utf8(asset.data.into_owned())
+            .map_err(|error| format!("embedded skill file {path:?} is not UTF-8: {error}"))?;
+        files.push(SkillFile {
+            path: path.into_owned(),
+            sha256: sha256_hex(content.as_bytes()),
+            content,
+        });
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+
+    let manifest = files
+        .iter()
+        .find(|file| file.path == MANIFEST)
+        .ok_or_else(|| format!("embedded {name} skill is missing {MANIFEST}"))?;
+    let frontmatter = orbit_prompts::parse_skill_frontmatter(&manifest.content, name)
+        .map_err(|error| format!("embedded {error}"))?;
+
+    let metadata = SkillMetadata {
+        name: frontmatter.name,
+        version: frontmatter.version.to_string(),
+        description: frontmatter.description,
+        compatibility: frontmatter.compatibility,
+    };
+    Ok(EmbeddedSkill { metadata, files })
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -182,7 +204,13 @@ mod tests {
     #[test]
     fn list_exposes_manifest_metadata() {
         let skills = list_skills(Frontend::JsonDsl);
-        assert_eq!(skills.len(), 1);
+        assert_eq!(
+            skills
+                .iter()
+                .map(|skill| skill.name.as_str())
+                .collect::<Vec<_>>(),
+            [SKILL_NAME, START_HERE_SKILL_NAME]
+        );
         let skill = &skills[0];
         assert_eq!(skill.name, "orbit");
         let manifest = SkillAssets::get(MANIFEST).unwrap();
@@ -325,6 +353,30 @@ mod tests {
     fn unknown_skill_error_carries_sorted_known_names() {
         let error = get_skill("unknown", Frontend::JsonDsl, false).unwrap_err();
         assert_eq!(error.name, "unknown");
-        assert_eq!(error.known_names, ["orbit"]);
+        assert_eq!(error.known_names, [SKILL_NAME, START_HERE_SKILL_NAME]);
+    }
+
+    #[test]
+    fn start_here_skill_is_served_unchanged_in_both_modes() {
+        let json = get_skill(START_HERE_SKILL_NAME, Frontend::JsonDsl, false).unwrap();
+        let gql = get_skill(START_HERE_SKILL_NAME, Frontend::Gql, false).unwrap();
+        assert_eq!(json, gql);
+        assert_eq!(json.metadata.name, START_HERE_SKILL_NAME);
+        assert!(json.metadata.description.starts_with("Walk a user through"));
+
+        let files = json.files.unwrap();
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            [MANIFEST]
+        );
+        let manifest = &files[0];
+        assert_eq!(manifest.sha256, sha256_hex(manifest.content.as_bytes()));
+        let source = StartHereAssets::get(MANIFEST).unwrap();
+        assert_eq!(manifest.content.as_bytes(), source.data.as_ref());
+        assert!(manifest.content.contains("glab orbit skills get orbit"));
+        assert!(manifest.content.contains("Do not use `glab orbit`"));
     }
 }
