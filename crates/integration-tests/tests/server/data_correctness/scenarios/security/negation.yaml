@@ -241,9 +241,9 @@ cases:
         paths: [1/100/]
     query:
       json: |
-        {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100,101,102],"not":{"visibility_level":"private"}}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["*"]}}
+        {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100,101,102],"not":{"visibility_level":"private"}}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}
       gql: |
-        MATCH p = ANY SHORTEST (u:User {id: 1})-[*1..2]->(g:Group)
+        MATCH p = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(g:Group)
         WHERE g.id IN [100, 101, 102] AND NOT g.visibility_level = 'private'
         RETURN p
     expect:

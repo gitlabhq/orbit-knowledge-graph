@@ -112,9 +112,10 @@ impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
         &self,
         input: &Input,
         lhs: (&str, &str),
+        op: FilterOp,
         rhs: (&str, &str),
     ) -> Result<()> {
-        let mut types = Vec::new();
+        let mut properties = Vec::new();
         for (node_id, prop) in [lhs, rhs] {
             let entity = predicate_entity(input, node_id)?;
             self.check_field(entity, prop)?;
@@ -128,13 +129,30 @@ impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
                     "property comparison cannot reference virtual column \"{prop}\" on {entity}"
                 )));
             }
-            types.push(self.field_type(entity, prop));
+            properties.push(self.property(entity, prop));
         }
-        if let [Some(lt), Some(rt)] = types[..]
-            && lt != rt
-        {
+        let [Some(left), Some(right)] = properties[..] else {
+            return Ok(());
+        };
+        let (lt, rt) = (left.data_type, right.data_type);
+        if lt != rt {
             return Err(QueryError::Validation(format!(
                 "type mismatch in join predicate: {}.{} is {lt:?} but {}.{} is {rt:?}",
+                lhs.0, lhs.1, rhs.0, rhs.1
+            )));
+        }
+        if lt != DataType::Enum {
+            return Ok(());
+        }
+        if op.is_ordering() {
+            return Err(QueryError::Validation(format!(
+                "{}.{} and {}.{} are enums; compare them with = or <>, not <, >, <=, or >=",
+                lhs.0, lhs.1, rhs.0, rhs.1
+            )));
+        }
+        if (left.enum_type, &left.enum_values) != (right.enum_type, &right.enum_values) {
+            return Err(QueryError::Validation(format!(
+                "{}.{} and {}.{} are enums with different values and cannot be compared",
                 lhs.0, lhs.1, rhs.0, rhs.1
             )));
         }

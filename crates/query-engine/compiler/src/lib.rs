@@ -730,35 +730,6 @@ mod tests {
     }
 
     #[test]
-    fn wildcard_path_finding_filters_only_endpoint_hops_by_relationship_kind() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["*"]},
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("gl_ci_edge") && sql.contains("gl_code_edge") && sql.contains("gl_edge"),
-            "wildcard path finding should UNION ALL across all edge tables, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("e1.source_kind = 'User'"),
-            "forward start must constrain source_kind = User, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("e1.target_kind = 'Project'"),
-            "backward end must constrain target_kind = Project, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn wildcard_traversal_infers_relationship_kinds_from_endpoint_entities() {
         let query = r#"{
             "query_type": "traversal",
@@ -1569,5 +1540,187 @@ mod tests {
             let sql = compile_gql_sql(query);
             assert!(!sql.contains("lower(d."), "{query}:\n{sql}");
         }
+    }
+
+    fn assert_compiles(queries: &[(Frontend, &str)]) {
+        for (frontend, query) in queries {
+            if let Err(error) = compile(query, *frontend, &ONTOLOGY, &security_ctx()) {
+                panic!("{query} should compile, got: {error:?}");
+            }
+        }
+    }
+
+    fn assert_rejected(queries: &[(Frontend, &str)], expected: &str) {
+        for (frontend, query) in queries {
+            let error = compile(query, *frontend, &ONTOLOGY, &security_ctx()).expect_err(query);
+            assert!(
+                error.is_client_safe() && error.to_string().contains(expected),
+                "{query} should be rejected with \"{expected}\", got: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shortest_paths_require_named_relationship_types() {
+        assert_rejected(
+            &[
+                (
+                    Frontend::Gql,
+                    "MATCH p = ANY SHORTEST (a:Project {id: 1})-[*1..3]->(b:Project {id: 2}) RETURN p",
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "path_finding", "nodes": [{"id": "a", "entity": "Project", "node_ids": [1]}, {"id": "b", "entity": "Project", "node_ids": [2]}], "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3, "rel_types": ["*"]}}"#,
+                ),
+            ],
+            "shortest paths require named relationship types",
+        );
+        assert_compiles(&[(
+            Frontend::Gql,
+            "MATCH p = ANY SHORTEST (a:Group {id: 1})-[:CONTAINS*1..3]->(b:Project {id: 2}) RETURN p",
+        )]);
+    }
+
+    #[test]
+    fn enum_values_have_no_order() {
+        assert_rejected(
+            &[
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.state > 1 RETURN m",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.state >= 'merged' RETURN m",
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "traversal", "nodes": [{"id": "m", "entity": "MergeRequest", "node_ids": [1], "filters": {"state": {"lt": "opened"}}}]}"#,
+                ),
+            ],
+            "enum values have no order",
+        );
+        assert_rejected(
+            &[(
+                Frontend::Gql,
+                "MATCH (p:Project {id: 1})<-[:IN_PROJECT]-(m:MergeRequest) RETURN p, min(m.state) AS s",
+            )],
+            "because enum values have no order",
+        );
+        assert_rejected(
+            &[(
+                Frontend::Gql,
+                "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project) WHERE g.visibility_level < p.visibility_level RETURN p",
+            )],
+            "not <, >, <=, or >=",
+        );
+        assert_rejected(
+            &[(
+                Frontend::Gql,
+                "MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) WHERE u.user_type = p.visibility_level RETURN p",
+            )],
+            "enums with different values",
+        );
+        assert_compiles(&[
+            (
+                Frontend::Gql,
+                "MATCH (m:MergeRequest {id: 1}) WHERE m.state IN ['opened', 'merged'] RETURN m ORDER BY m.state",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project) WHERE g.visibility_level = p.visibility_level RETURN p",
+            ),
+        ]);
+    }
+
+    #[test]
+    fn date_filters_take_only_valid_dates() {
+        assert_rejected(
+            &[
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at >= datetime('not-a-date') RETURN m",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at >= '2024-13-45' RETURN m",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at < date('2023-02-29') RETURN m",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at < '2024-06-10T10:00:00+02:00' RETURN m",
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "traversal", "nodes": [{"id": "m", "entity": "MergeRequest", "node_ids": [1], "filters": {"created_at": {"in": ["2024-06-10", "yesterday"]}}}]}"#,
+                ),
+            ],
+            "is not a valid date",
+        );
+        assert_rejected(
+            &[
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.title = datetime('2024-01-01') RETURN m",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1, title: date('2024-01-01')}) RETURN m",
+                ),
+            ],
+            "datetime() and date() compare only with date fields",
+        );
+        assert_compiles(&[
+            (
+                Frontend::Gql,
+                "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at >= '2024-06-10' AND m.created_at < datetime('2024-06-11T00:00:00Z') RETURN m",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at < '2024-06-10 12:30:45.123456' RETURN m",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at < date('2024-02-29') RETURN m",
+            ),
+        ]);
+    }
+
+    #[test]
+    fn integers_must_fit_in_a_signed_64_bit_value() {
+        assert_rejected(
+            &[
+                (
+                    Frontend::Gql,
+                    "MATCH (n:Note) WHERE n.noteable_id = 18446744073709551615 RETURN n",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (n:Note) WHERE n.noteable_id = 0xFFFFFFFFFFFFFFFF RETURN n",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (n:Note {id: 9223372036854775808}) RETURN n",
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 9223372036854775808}}]}"#,
+                ),
+            ],
+            "out of range for a signed 64-bit integer",
+        );
+        assert_compiles(&[
+            (
+                Frontend::Gql,
+                "MATCH (n:Note) WHERE n.noteable_id = 9223372036854775807 RETURN n",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (n:Note) WHERE n.noteable_id = -0x8000000000000000 RETURN n",
+            ),
+        ]);
     }
 }

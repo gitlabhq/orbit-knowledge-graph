@@ -110,22 +110,40 @@ pub(crate) fn collect_schema_errors(
 /// Returns `None` if compatible, or `Some(reason)` describing the mismatch.
 fn check_value_type(value: &serde_json::Value, expected: DataType) -> Option<String> {
     match expected {
-        DataType::String | DataType::Date | DataType::DateTime | DataType::Uuid => {
+        DataType::String | DataType::Uuid => {
             if !value.is_string() {
                 return Some(format!("is {}, not a string", json_type_name(value)));
             }
         }
+        DataType::Date | DataType::DateTime => match value.as_str() {
+            Some(text) if is_date_literal(text) => {}
+            Some(_) => {
+                return Some(
+                    "is not a valid date; use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS[.ffffff][Z]"
+                        .to_string(),
+                );
+            }
+            None => return Some(format!("is {}, not a string", json_type_name(value))),
+        },
         // Int-based enums are coerced to string labels by normalization before lowering.
-        DataType::Enum => {
-            if !value.is_string() && !value.is_i64() && !value.is_u64() {
+        DataType::Enum => match value {
+            serde_json::Value::String(_) => {}
+            serde_json::Value::Number(n) if n.is_i64() => {}
+            serde_json::Value::Number(n) if n.is_u64() => {
+                return Some(OUT_OF_INT64_RANGE.to_string());
+            }
+            _ => {
                 return Some(format!(
                     "is {}, not a string or integer",
                     json_type_name(value)
                 ));
             }
-        }
+        },
         DataType::Int => match value {
-            serde_json::Value::Number(n) if n.is_i64() || n.is_u64() => {}
+            serde_json::Value::Number(n) if n.is_i64() => {}
+            serde_json::Value::Number(n) if n.is_u64() => {
+                return Some(OUT_OF_INT64_RANGE.to_string());
+            }
             serde_json::Value::Number(_) => {
                 return Some("is a float, not an integer".to_string());
             }
@@ -146,6 +164,8 @@ fn check_value_type(value: &serde_json::Value, expected: DataType) -> Option<Str
     }
     None
 }
+
+const OUT_OF_INT64_RANGE: &str = "is out of range for a signed 64-bit integer";
 
 fn json_type_name(value: &serde_json::Value) -> &'static str {
     match value {
@@ -220,28 +240,39 @@ fn wide_id_range_hint(wide: bool) -> String {
     }
 }
 
-fn at_or_before_epoch(value: &str) -> bool {
-    value.get(..10).is_some_and(|date| {
-        let dated = date.bytes().enumerate().all(|(i, byte)| {
+fn calendar_prefix(value: &str) -> Option<&str> {
+    value.get(..10).filter(|date| {
+        date.bytes().enumerate().all(|(i, byte)| {
             if i == 4 || i == 7 {
                 byte == b'-'
             } else {
                 byte.is_ascii_digit()
             }
-        });
-        dated && date <= "1970-01-01"
+        })
     })
+}
+
+fn at_or_before_epoch(value: &str) -> bool {
+    calendar_prefix(value).is_some_and(|date| date <= "1970-01-01")
+}
+
+/// Matches what the ClickHouse HTTP parameter parser accepts once the client strips a trailing `Z`.
+fn is_date_literal(value: &str) -> bool {
+    let value = value.strip_suffix('Z').unwrap_or(value);
+    calendar_prefix(value).is_some()
+        && if value.len() == 10 {
+            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
+        } else {
+            ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S%.f"]
+                .iter()
+                .any(|format| chrono::NaiveDateTime::parse_from_str(value, format).is_ok())
+        }
 }
 
 fn is_aggregate_scalar(data_type: DataType) -> bool {
     matches!(
         data_type,
-        DataType::Int
-            | DataType::Float
-            | DataType::Bool
-            | DataType::Date
-            | DataType::DateTime
-            | DataType::Enum
+        DataType::Int | DataType::Float | DataType::Bool | DataType::Date | DataType::DateTime
     )
 }
 
@@ -773,7 +804,12 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         };
         for filter in filters {
             if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
-                self.check_property_comparison(input, (&node.id, prop), (rhs_node, rhs_prop))?;
+                self.check_property_comparison(
+                    input,
+                    (&node.id, prop),
+                    filter.op.unwrap_or(FilterOp::Eq),
+                    (rhs_node, rhs_prop),
+                )?;
                 continue;
             }
             self.check_one_filter(entity, prop, filter, data_type)?;
@@ -859,6 +895,19 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
 
         if matches!(op, FilterOp::IsNull | FilterOp::IsNotNull) {
             return Ok(());
+        }
+
+        if filter.from_temporal_literal && !matches!(data_type, DataType::Date | DataType::DateTime)
+        {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: datetime() and date() compare only with date fields, but this field is {data_type}"
+            )));
+        }
+
+        if data_type == DataType::Enum && op.is_ordering() {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: enum values have no order; use = or IN instead of <, >, <=, or >="
+            )));
         }
 
         let is_like_op = op.is_like();
@@ -1152,6 +1201,13 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                         )));
                     }
 
+                    if data_type == DataType::Enum {
+                        return Err(QueryError::Validation(format!(
+                            "aggregation \"{alias}\": \"{}\" does not apply to enum {entity}.{prop}, because enum values have no order; group by it instead",
+                            function.to_string().to_uppercase(),
+                        )));
+                    }
+
                     if !is_aggregate_scalar(data_type) {
                         return Err(QueryError::Validation(format!(
                             "aggregation \"{alias}\": aggregates are restricted to scalars, got {entity}.{prop} ({data_type})"
@@ -1312,15 +1368,10 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             )));
         }
 
-        // rel_types is always required for pathfinding. Without it, each
-        // seed fans out through every edge type from high-degree nodes,
-        // producing unbounded fan-out that no runtime limit can cheaply cap.
-        // Even pinned endpoints can hit hub nodes (e.g. a project with
-        // millions of IN_PROJECT edges).
-        if path.rel_types.is_empty() {
+        if crate::passes::normalize::is_wildcard(&path.rel_types) {
             return Err(QueryError::Validation(
-                "path_finding requires rel_types to bound fan-out; \
-                 without it the frontier expands over every edge type"
+                "shortest paths require named relationship types, such as \
+                 -[:CONTAINS*1..3]-> or [\"CONTAINS\"]; a wildcard expands over every edge type"
                     .into(),
             ));
         }
@@ -2143,17 +2194,6 @@ mod tests {
     }
 
     #[test]
-    fn accepts_large_u64_on_int_column() {
-        // u64 values beyond i64::MAX are still valid integers
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 9223372036854775808}}]
-            }"#,
-        );
-    }
-
-    #[test]
     fn accepts_bool_filter_on_bool_column() {
         assert_ok(
             r#"{
@@ -2652,7 +2692,7 @@ mod tests {
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
             }"#,
-            "requires rel_types",
+            "require named relationship types",
         );
         assert_rejects(
             r#"{
@@ -2663,7 +2703,7 @@ mod tests {
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
             }"#,
-            "requires rel_types",
+            "require named relationship types",
         );
 
         assert_ok(

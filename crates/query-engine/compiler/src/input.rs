@@ -303,6 +303,7 @@ pub struct InputFilter {
     /// When set, compare against another node's column instead of a literal.
     /// Format: `(node_alias, property_name)`. Mutually exclusive with `value`.
     pub rhs_column: Option<(String, String)>,
+    pub from_temporal_literal: bool,
 }
 
 impl InputFilter {
