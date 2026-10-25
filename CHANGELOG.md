@@ -1,3 +1,13 @@
+## [0.158.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.157.0...v0.158.0) (2026-10-25)
+
+### Features
+
+* **site:** publish the engineering pages from a root Bun workspace ([2ba9364](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2ba93646831188fb4b6883ce9dd666e35e700ff0)) by Michael Angelo Rivera
+
+### Fixes
+
+* **ci:** install git before the release job uses it ([db8898d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/db8898de07c43811f7721298356fe1ee1aaceca5)) by Michael Angelo Rivera
+
 ## [0.157.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.156.0...v0.157.0) (2026-10-24)
 
 ### Features
