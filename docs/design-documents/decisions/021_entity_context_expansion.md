@@ -178,7 +178,7 @@ explicit MCP tool and agent command are deferred.
   pass their group as the boundary. A fine-grained token therefore needs
   `read_merge_request` or `read_work_item` (and `read_pipeline` for pipeline
   status) in addition to `read_orbit`. This is stricter than the
-  [security design](../security.md) rule that token scopes gate endpoints and do not
+  [security design](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md) rule that token scopes gate endpoints and do not
   filter results. Reconciling the two is a follow-up.
 - Each `entities[]` entry has `token` (as sent), `resolved_token` (only when
   found), `type`, `id`, `found`, `summary` (when found), `error` (when not

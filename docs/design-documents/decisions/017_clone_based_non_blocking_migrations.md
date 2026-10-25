@@ -17,7 +17,7 @@ Accepted
 
 Breaking schema changes write to a new set of `v<N>_`-prefixed tables. The old
 version keeps serving queries. The new set promotes once it is populated.
-That layout is described in [`schema_management.md`](../schema_management.md) and
+That layout is described in [`schema_management.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md) and
 this ADR does not change it.
 
 The problem is cost. The original flow rebuilt *every* table on every
@@ -100,7 +100,7 @@ migration gates only on what it re-dispatched.
 
 The gate is checkpoint-based, not row-count-based; full correctness validation
 stays in staging E2E (see
-[`schema_management.md`](../schema_management.md#known-trade-off-checkpoint-based-validation)).
+[`schema_management.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md#known-trade-off-checkpoint-based-validation)).
 
 ## Enabling blue-green deployment
 
@@ -109,8 +109,8 @@ queries and streaming updates from its `v<N>_` tables while the migrating versio
 fills its own set. Promotion flips reads over in one step. The two run side by
 side down to their NATS streams and locks, which are version-segmented.
 `/-/readiness` holds the new pods out of rotation until their version is active (see
-[`schema_management.md`](../schema_management.md) and
-[`indexing/sdlc_indexing.md`](../indexing/sdlc_indexing.md)).
+[`schema_management.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md) and
+[`indexing/sdlc_indexing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md)).
 
 What clone-based migration buys is a green side that is cheap to stand up. A full
 rebuild has to re-index from epoch before it can promote. So for hours the blue
@@ -143,7 +143,7 @@ What gets harder:
 ## Non-goals
 
 - **Changing the prefix layout or promotion mechanism.** Unchanged; see
-  [`schema_management.md`](../schema_management.md).
+  [`schema_management.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md).
 - **Row-count validation at the gate.** Stays in staging E2E.
 - **Runtime ontology diffing.** Scope is declared, only ever widened at runtime.
 - **Per-row cleanup for shared SDLC edge tables.** Not built; those changes widen
@@ -151,8 +151,8 @@ What gets harder:
 
 ## References
 
-- Schema management as-built: [`schema_management.md`](../schema_management.md)
-- SDLC migration section: [`indexing/sdlc_indexing.md`](../indexing/sdlc_indexing.md)
+- Schema management as-built: [`schema_management.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md)
+- SDLC migration section: [`indexing/sdlc_indexing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md)
 - Ledger and scope union: `crates/ontology/src/migrations/ledger.rs`, `scope.rs`;
   `config/schema-migrations.yaml`
 - Clone/rebuild classification and widening:

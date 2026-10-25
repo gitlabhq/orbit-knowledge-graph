@@ -36,7 +36,7 @@ git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"
 
 List these directories and read the relevant owner before you act:
 
-- `docs/design-documents/` for architecture, security, schema, querying, indexing, and testing (`testing.md`).
+- `docs/architecture/` for the architecture overview and the contract of each area, and `docs/design-documents/decisions/` for the ADRs.
 - `docs/dev/` for runbooks, the crate map, and the reference index.
 - Before working in a crate, check for and read `crates/<crate>/AGENTS.md`.
 - `docs/design-documents/decisions/020_billing_sox_scope.md` documents the SOX scope for billing emission. Read it before touching `crates/orbit-billing/`, `billing_adapter.rs`, or the hook points enumerated in `.gitlab/CODEOWNERS`.
