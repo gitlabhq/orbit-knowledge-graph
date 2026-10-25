@@ -268,8 +268,22 @@ Read more: <https://docs.gitlab.com/orbit/remote/schema/>
 
 ### Part 4: How your last query walked the graph
 
-Draw the nodes and edges that the last query used. Under the diagram, match each part of the query to it, in one line each.
-Then count the hops, and say that each hop without Orbit is at least one REST API call.
+Draw the path that the last query walked, in the same aligned format as part 3.
+Write one line for each hop, with the edge pointing the way it does in the graph.
+Then add a **Filters** line and a **Result** line. For example:
+
+```text
+Hop  From             Edge              To
+1    (User)           --APPROVED-->     (MergeRequest)
+2    (MergeRequest)   --IN_PROJECT-->   (Project)
+3    (Group)          --CONTAINS-->     (Project)
+
+Filters  Group.full_path = 'my-group'
+         MergeRequest.first_approved_at >= 30 days ago
+Result   count of merge requests for each User.username
+```
+
+Then say how many hops the query took, and that each hop without Orbit is at least one REST API call.
 If the user has not asked a question yet, use the first question in step 2 as the example.
 
 Read more: <https://docs.gitlab.com/orbit/remote/queries/query-language/>
