@@ -28,11 +28,13 @@ If you have no such tool, print the options as a numbered list, then stop and wa
 
 ### Show before you ask
 
-Several steps tell you to show something: an answer, the parts of step 5, or a summary.
-Each one is text that you write in full in your reply, and then you ask the next question.
 The user sees only your text, not command output and not this skill.
-A question with no text before it shows the user nothing, so never send one.
-This applies even when the content comes from this skill and needs no command.
+In some clients, text that you write right before your question tool is hidden or lost.
+So when you ask with the question tool:
+
+- Write what the user needs to see first: an answer or a summary.
+- Also put a one-line summary of it in the question text, so the user sees the result even if your text is hidden.
+- Step 5 puts its content in the option previews instead, because the previews are part of the question.
 
 ## Answer with Orbit
 
@@ -178,7 +180,8 @@ API requests are the `glab orbit query` and `glab api` calls, and any other call
 
 ## Step 5: See how GitLab Orbit works
 
-Show all five parts below in one reply.
+Show the five parts below inside your question tool, in the option previews.
+Content in a preview is part of the question, so the user sees it even when text before the question is hidden.
 
 1. First, run one command to get the data:
 
@@ -186,27 +189,38 @@ Show all five parts below in one reply.
    glab orbit graph-status --full-path <scope>; glab orbit ontology Project MergeRequest Pipeline Job Vulnerability File Definition User
    ```
 
-1. Then write all five parts in your reply, in order.
-   Each part has its explanation, its diagram in a `text` code block, and its **Read more** link.
-1. Then ask the user what to do next. Offer these options:
+1. Write the five parts as one Markdown text, in order.
+   Each part has a heading, its diagram in a `text` code block, its explanation, and its **Read more** link.
+   Keep every line under 60 characters, so that it fits the preview panel.
+1. Ask with your question tool. Use the question "How GitLab Orbit works is in the panel. What next?"
+   Offer these two options, and set the full Markdown text as the `preview` of both, so it shows whichever option is selected:
    - **Ask a question**: go to step 3.
    - **Done**: go to step 6.
+
+   If you have no question tool, or it has no previews, write the five parts as text instead, then list the options.
 
 ### Part 1: From GitLab data to answers
 
 Show this diagram:
 
 ```text
-GitLab                        GitLab Orbit                          Your agent
-+--------------------+        +-----------------------------+       +------------------+
-| groups, projects   | index  | indexer --> graph database  | query | glab orbit query |
-| merge requests     | -----> |                             | <---- | MCP endpoint     |
-| pipelines, jobs    |        | GitLab authorizes each      | ----> | REST API         |
-| work items         |        | query                       | rows  | GitLab Duo       |
-| vulnerabilities    |        |                             |       |                  |
-| code on the        |        |                             |       |                  |
-| default branch     |        |                             |       |                  |
-+--------------------+        +-----------------------------+       +------------------+
+GitLab
+  groups, projects, merge requests,
+  pipelines, jobs, work items,
+  vulnerabilities, and code on the
+  default branch
+       |
+       | index
+       v
+GitLab Orbit
+  indexer --> graph database
+  GitLab authorizes each query
+     ^            |
+     | query      | rows
+     |            v
+Your agent
+  glab orbit query, MCP endpoint,
+  REST API, or GitLab Duo
 ```
 
 Then explain, in a short list:
@@ -222,13 +236,13 @@ Read more: <https://docs.gitlab.com/orbit/remote/how-it-works/>
 
 ### Part 2: What is in your graph
 
-Use the `graph-status` output. Draw the node counts as a bar chart, grouped by domain.
-Show the eight largest node types, and scale the bars to the largest count. For example:
+Use the `graph-status` output. Draw the node counts as a bar chart.
+Show the eight largest node types, with the domain after each count. Scale the bars to the largest count. For example:
 
 ```text
-ci            Job           ########################  600,000
-source_code   Definition    ##########                250,000
-ci            Pipeline      #                          25,000
+Job         ################  600,000  ci
+Definition  #######           250,000  source_code
+Pipeline    #                  25,000  ci
 ```
 
 Then say how many projects in the scope are indexed, and name any domain with no data.
@@ -240,13 +254,19 @@ Read more: <https://docs.gitlab.com/orbit/remote/schema/>
 Show this diagram of some of the main node types and the edges between them:
 
 ```text
-(User) --AUTHORED--> (MergeRequest) --IN_PROJECT--> (Project)
-                          |                            ^
-                          | FIXES                      | IN_PROJECT
-                          v                            |
-                   (Vulnerability)                (Pipeline) --HAS_JOB--> (Job)
+(User)
+   | AUTHORED
+   v
+(MergeRequest) --FIXES--> (Vulnerability)
+   | IN_PROJECT
+   v
+(Project) <--IN_PROJECT-- (Pipeline)
+                              | HAS_JOB
+                              v
+                            (Job)
 
-(File) --DEFINES--> (Definition) --CALLS--> (Definition)
+(File) --DEFINES--> (Definition)
+(Definition) --CALLS--> (Definition)
 ```
 
 From the `ontology` output, say how many edges one of these node types has, and name a few.
