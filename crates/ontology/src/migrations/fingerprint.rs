@@ -23,7 +23,7 @@ pub struct Fingerprints {
     pub sources: BTreeMap<String, String>,
     pub ddl: BTreeMap<String, String>,
     #[serde(default)]
-    pub edge_rows: BTreeMap<String, String>,
+    pub edge_rows: String,
     #[serde(default)]
     pub auxiliary_schema: BTreeMap<String, String>,
 }
@@ -51,10 +51,6 @@ impl Fingerprints {
         )
     }
 
-    pub fn get_edge_row_diff_keys_between(&self, base: &Fingerprints) -> BTreeSet<String> {
-        get_diff_keys_between(&self.edge_rows, &base.edge_rows)
-    }
-
     #[must_use]
     pub fn get_auxiliary_schema_diff_keys_between(&self, base: &Fingerprints) -> BTreeSet<String> {
         get_diff_keys_between(&self.auxiliary_schema, &base.auxiliary_schema)
@@ -72,21 +68,53 @@ pub fn source_fingerprints() -> BTreeMap<String, String> {
         .into_iter()
         .filter(|(path, _)| !path.starts_with("sql/"))
         .map(|(path, content)| {
-            let hash = if path == ONTOLOGY_SCHEMA_FILE {
-                stable_versioned_schema_hash(&content)
-            } else if path.ends_with(".yaml") || path.ends_with(".yml") {
-                stable_yaml_hash(&content)
-            } else {
-                sha256_hex(&content)
-            };
+            let hash = hash_source(&path, &content);
             (path, hash)
         })
         .collect()
 }
 
+pub fn hash_edge_row_sources(sources: &BTreeMap<String, String>) -> String {
+    let hashes: String = sources
+        .iter()
+        .filter(|(path, _)| !path.starts_with("sql/"))
+        .map(|(path, content)| {
+            let hash = if path.starts_with("nodes/") {
+                hash_node_without_storage(content)
+            } else {
+                hash_source(path, content)
+            };
+            format!("{path}={hash}\n")
+        })
+        .collect();
+    sha256_hex(&hashes)
+}
+
 #[must_use]
 pub fn embedded_sources() -> BTreeMap<String, String> {
     crate::loading::embedded_files().into_iter().collect()
+}
+
+fn hash_source(path: &str, content: &str) -> String {
+    if path == ONTOLOGY_SCHEMA_FILE {
+        stable_versioned_schema_hash(content)
+    } else if path.ends_with(".yaml") || path.ends_with(".yml") {
+        stable_yaml_hash(content)
+    } else {
+        sha256_hex(content)
+    }
+}
+
+fn hash_node_without_storage(content: &str) -> String {
+    let Ok(mut value) = orbit_utils::yaml::from_str::<serde_json::Value>(content) else {
+        return sha256_hex(content);
+    };
+    if let serde_json::Value::Object(node) = &mut value {
+        node.remove("storage");
+    }
+    remove_runtime_extract_fields(&mut value);
+    sort_json_keys(&mut value);
+    sha256_hex(&value.to_string())
 }
 
 #[must_use]
@@ -307,11 +335,35 @@ mod tests {
     }
 
     #[test]
+    fn edge_row_hash_ignores_only_node_storage() {
+        let sources = embedded_sources();
+        let hash_after_note_edit = |from: &str, to: &str| {
+            let mut edited = sources.clone();
+            let note = edited
+                .get_mut("nodes/core/note.yaml")
+                .expect("note source exists");
+            assert!(note.contains(from), "note.yaml must contain {from:?}");
+            *note = note.replacen(from, to, 1);
+            hash_edge_row_sources(&edited)
+        };
+        let unedited = hash_edge_row_sources(&sources);
+
+        assert_eq!(
+            hash_after_note_edit("type: text, granularity: 1}", "type: text, granularity: 2}"),
+            unedited
+        );
+        assert_ne!(
+            hash_after_note_edit("field: author_id", "field: project_id"),
+            unedited
+        );
+    }
+
+    #[test]
     fn diff_reports_changed_added_and_removed() {
         let base = Fingerprints {
             sources: BTreeMap::from([("a".into(), "1".into()), ("b".into(), "2".into())]),
             ddl: BTreeMap::from([("t".into(), "9".into())]),
-            edge_rows: BTreeMap::new(),
+            edge_rows: String::new(),
             auxiliary_schema: BTreeMap::new(),
         };
         let current = Fingerprints {
@@ -321,7 +373,7 @@ mod tests {
                 ("c".into(), "3".into()),
             ]),
             ddl: BTreeMap::new(),
-            edge_rows: BTreeMap::new(),
+            edge_rows: String::new(),
             auxiliary_schema: BTreeMap::new(),
         };
         let (sources, ddl) = current.get_versioned_diff_keys_between(&base);

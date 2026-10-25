@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt};
 
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::etl::{EdgeMapping, NodeRef, Pipeline, ReindexSource};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeColumn {
@@ -456,7 +456,7 @@ pub struct DerivedEntity {
     pub reindex_on: Vec<ReindexSource>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DenormDirection {
     Source,
     Target,
@@ -472,7 +472,7 @@ impl DenormDirection {
 }
 
 /// A node property denormalized onto an edge table for query optimization.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DenormalizedProperty {
     pub relationship_kind: String,
     pub node_kind: String,
@@ -496,13 +496,13 @@ impl fmt::Display for EdgeEntity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldSource {
     DatabaseColumn(String),
     Virtual(VirtualSource),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VirtualSource {
     pub service: String,
     pub lookup: String,
@@ -637,7 +637,7 @@ impl fmt::Display for Field {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DataType {
     String,
     Int,

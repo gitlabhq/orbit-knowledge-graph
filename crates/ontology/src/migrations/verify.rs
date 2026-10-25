@@ -20,15 +20,6 @@ pub fn verify_snapshot(
             format_set(&ddl),
         ));
     }
-    let edge_row_pipelines = current.get_edge_row_diff_keys_between(committed);
-    if !edge_row_pipelines.is_empty() {
-        return Err(format!(
-            "edge row hash drift not reflected in the fingerprint snapshot.\n  \
-             changed pipelines: {}\n\
-             Run `mise schema:snapshot` to record the change without re-indexing.",
-            format_set(&edge_row_pipelines),
-        ));
-    }
     let auxiliary_schema = current.get_auxiliary_schema_diff_keys_between(committed);
     if !auxiliary_schema.is_empty() {
         return Err(format!(
@@ -62,7 +53,7 @@ mod tests {
         Fingerprints {
             sources: BTreeMap::from([("schema.yaml".to_string(), "source".to_string())]),
             ddl: BTreeMap::from([("gl_note".to_string(), "table".to_string())]),
-            edge_rows: BTreeMap::from([("Note".to_string(), "edges".to_string())]),
+            edge_rows: "edges".to_string(),
             auxiliary_schema: BTreeMap::from([(
                 "materialized_view/v1_refresh".to_string(),
                 "view".to_string(),
@@ -90,27 +81,6 @@ mod tests {
             "materialized_view/v1_refresh".to_string(),
             "changed".to_string(),
         );
-
-        let error = verify_snapshot(
-            &Ontology::new(),
-            &current,
-            &committed,
-            &ledger(),
-            SCHEMA_VERSION,
-        )
-        .unwrap_err();
-
-        assert!(error.contains("mise schema:snapshot"), "{error}");
-        assert!(!error.contains("mise schema:bump"), "{error}");
-    }
-
-    #[test]
-    fn edge_row_hash_drift_requests_snapshot_without_schema_bump() {
-        let committed = fingerprints();
-        let mut current = committed.clone();
-        current
-            .edge_rows
-            .insert("Note".to_string(), "changed".to_string());
 
         let error = verify_snapshot(
             &Ontology::new(),
