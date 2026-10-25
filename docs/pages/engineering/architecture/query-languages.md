@@ -5,27 +5,156 @@ authors:
   - michaelusa
 ---
 
-**TL;DR:** Orbit Remote accepts two query languages.
-Both compile through one shared compiler.
+## What the query languages are
 
-1. The JSON Query DSL is a JSON object that follows a published schema.
-   It is the default.
-1. GQL is read-only text based on openCypher 9 syntax, such as `MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)`.
-1. Each language has its own frontend.
-   The frontend parses the query and lowers it into the shared input.
-1. From the shared input on, the [graph query engine](query-engine.md) treats every query the same way.
-   It validates, secures, plans, and renders it.
+Orbit has two query languages. The JSON Query DSL is a JSON object that
+follows a published schema, and it is the default. GQL is read-only text based
+on openCypher 9. Both describe the same queries and return the same results.
 
-A language changes how a caller writes a query, not what the engine can do.
-Authorization, limits, and results are the same in both languages.
+Here is the same question in both languages: merged merge requests and the
+users who wrote them.
 
-> [!note]
-> GQL is off by default.
-> Rails turns it on for each user with the `orbit_gql_queries` feature flag.
+```json orbit-query
+{
+  "query_type": "traversal",
+  "nodes": [
+    {"id": "u", "entity": "User"},
+    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}
+  ],
+  "relationships": [
+    {"type": "AUTHORED", "from": "u", "to": "mr"}
+  ],
+  "limit": 25,
+  "order_by": "-mr.merged_at"
+}
+```
 
----
+```gql orbit-query
+MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
+RETURN u.username, mr.title
+LIMIT 10
+```
 
-## Language principles
+## How it works
+
+```mermaid
+flowchart LR
+    JSON[JSON query] --> JF[JSON frontend]
+    GQL[GQL text] --> GF[GQL frontend]
+    JF --> Input[Shared input]
+    GF --> Input
+    Input --> Engine[Graph query engine]
+```
+
+Each language has its own frontend. A frontend parses the query and turns it
+into one shared input. From there on, the engine treats every query the same
+way. The steps below follow a query through its frontend.
+
+### 1. Rails picks the language
+
+```mermaid
+flowchart LR
+    Flag[Per-user flag] --> Rails
+    Rails -- language --> Webserver
+    Webserver --> Frontend
+```
+
+A default-off feature flag in Rails picks the language for each user. With the
+flag off, every surface accepts only JSON. With the flag on, the query
+endpoint, named queries, and discovery all use GQL, and JSON queries fail.
+Rails sets the language on each request. Callers can't choose it, and the
+server never guesses it from the query.
+
+### 2. The frontend parses the query
+
+```mermaid
+flowchart LR
+    Object[JSON object] --> Schema[JSON schema check] --> Input[Shared input]
+    Text[GQL text] --> Grammar --> Tree[Syntax tree] --> Lower --> Input
+```
+
+A JSON query is checked against its JSON schema, then read into the shared
+input. A GQL query goes through a grammar adapted from the official openCypher
+9 grammar. The frontend builds a typed syntax tree, then lowers it into the
+shared input. Lowering checks the whole statement: the pattern must be one
+connected tree, each variable must be unique, and the query type must be
+clear.
+
+A frontend never drops part of a query and runs the rest. Anything it can't
+support fails with an error that names the problem.
+
+### 3. Shared validation
+
+```mermaid
+flowchart LR
+    Input[Shared input] --> Validator
+    Ontology --> Validator
+    Validator --> Checked[Checked input]
+```
+
+Both languages end in the same validator. It checks the query's limits, then
+checks every entity, relationship, and property against the ontology. A JSON
+query is checked twice, by its schema and by this validator, so every JSON
+test also tests the shared validator.
+
+### 4. Schema discovery
+
+```mermaid
+flowchart LR
+    Caller -- discovery call --> Webserver
+    Ontology --> Webserver
+    Webserver -- compact schema --> Caller
+```
+
+Callers read the graph schema before they write a query. In JSON mode, they
+call `get_graph_schema`. In GQL mode, they run `CALL db.schema()`. Both
+answers come from the ontology, sized for an LLM context window, and never
+show the ClickHouse tables underneath. A schema call runs no SQL.
+
+### 5. Named queries
+
+```mermaid
+flowchart LR
+    Name[Name and parameters] --> Server
+    Server -- active language --> Frontend
+    Frontend --> Engine
+```
+
+Some clients, like the Orbit dashboard, call queries by name instead of
+writing them. Each named query is stored in both languages. The server picks
+the spelling for the caller's active language and compiles it with that
+language's frontend. Named queries follow the same rules as any other query.
+
+## When things go wrong
+
+- **The query is in the wrong language.** It's rejected. There is no fallback
+  to the other language.
+- **GQL uses syntax that Orbit doesn't support,** like `OPTIONAL MATCH` or
+  `OR`. The error names the unsupported part.
+- **A name doesn't match the ontology.** The error lists the valid names.
+- **The query goes over a limit.** The error names the limit.
+- **A named query no longer fits a new schema version.** The server leaves it
+  out of that version and logs a warning.
+
+## Why we built it this way
+
+JSON came first because LLMs fill in a JSON schema more reliably than they
+write free-form text. The schema also documents every field and limit in one
+file that tools can read. GQL came next because agents already know Cypher,
+and a short pattern costs fewer tokens than the same query in JSON.
+
+Both languages lower into one shared input, so each capability exists once. A
+new language is one new frontend. Retiring the JSON Query DSL means deleting
+its frontend and its schema, and nothing after the frontend changes.
+
+## Decisions
+
+- [ADR 011: Agent command surface](../adr/011_agent_command_surface.md)
+- [ADR 019: GQL response format](../adr/019_gql_response_format.md)
+
+## Appendix
+
+### Language principles
 
 - Both languages lower to one input.
   A capability that exists in the input works in every language that can express it.
@@ -41,9 +170,7 @@ Authorization, limits, and results are the same in both languages.
 - Rails picks the language for each user.
   The server never guesses the language from the payload.
 
----
-
-## Terms
+### Terms
 
 - A **frontend** is the part of the compiler that parses one query language.
 - The **input** is the language-neutral form of a query: node selectors, relationship selectors, filters, aggregations, ordering, and limits.
@@ -51,29 +178,7 @@ Authorization, limits, and results are the same in both languages.
 - A **relationship selector** connects two node selectors, with a relationship type, a direction, and a hop range.
 - A **pattern** is the GQL form of node and relationship selectors, such as `(u:User)-[:AUTHORED]->(mr)`.
 
----
-
-## The languages at a glance
-
-```plantuml
-@startuml
-left to right direction
-skinparam componentStyle rectangle
-component "JSON Query DSL" as json
-component "GQL text" as gql
-component "JSON frontend\nschema check and parse" as json_frontend
-component "GQL frontend\nparse and lower" as gql_frontend
-component "Schema metadata" as schema
-component "Shared input" as input
-component "Shared compiler" as compiler
-json --> json_frontend
-gql --> gql_frontend
-gql_frontend --> schema : CALL db.schema
-json_frontend --> input
-gql_frontend --> input : MATCH
-input --> compiler
-@enduml
-```
+### The languages side by side
 
 | | JSON Query DSL | GQL |
 | --- | --- | --- |
@@ -86,9 +191,7 @@ input --> compiler
 
 Both frontends live under `crates/query-engine/compiler/src/passes/frontend/`.
 
----
-
-## Query types
+### Query types
 
 Every query is one of four types.
 JSON names the type, and GQL infers it from the statement.
@@ -100,11 +203,9 @@ JSON names the type, and GQL infers it from the statement.
 | Path finding | What is the shortest path between these nodes? | A named `ANY SHORTEST` pattern |
 | Neighbors | What is connected to this node? | One relationship to an unlabeled, unfiltered endpoint |
 
-The [query language reference](../source/remote/queries/query-language.md) documents every field, operator, and limit.
+The [query language reference](../../../docs-gitlab-com/remote/queries/query-language.md) documents every field, operator, and limit.
 
----
-
-## JSON Query DSL
+### JSON Query DSL details
 
 JSON is the default language.
 It is designed for LLMs and services:
@@ -127,30 +228,12 @@ The other fields depend on the type:
 | `limit` and ordering | The size and order of the result |
 | `options` | Presentation settings that do not change what the query matches |
 
-For example, this query returns merged merge requests with their authors:
-
-```json orbit-query
-{
-  "query_type": "traversal",
-  "nodes": [
-    {"id": "u", "entity": "User"},
-    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}
-  ],
-  "relationships": [
-    {"type": "AUTHORED", "from": "u", "to": "mr"}
-  ],
-  "limit": 25,
-  "order_by": "-mr.merged_at"
-}
-```
 
 The DSL has a version: the `query_dsl` pin in `config/versions.yaml`.
 Its major version is part of the schema `$id`.
 `get_query_dsl` returns the current schema.
 
----
-
-## GQL
+### GQL details
 
 GQL is the text language.
 It is designed for agents that know Cypher:
@@ -177,13 +260,6 @@ RETURN projections
 [DEBUG]
 ```
 
-For example, this statement asks the same question as the JSON example:
-
-```gql orbit-query
-MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
-RETURN u.username, mr.title
-LIMIT 10
-```
 
 The pattern must form one connected tree.
 Several `MATCH` clauses join into one pattern, and their `WHERE` predicates combine with `AND`.
@@ -205,9 +281,7 @@ Orbit adds these extensions to openCypher 9:
 
 The frontend rejects writes, `OPTIONAL MATCH`, `WITH`, `UNION`, `OR`, cycles, and other syntax outside this shape.
 
----
-
-## Validation
+### Validation
 
 Both languages end in the same shared validator.
 It checks the limits, then checks every entity, relationship, and property against the ontology.
@@ -216,33 +290,7 @@ The limits are Rust constants, and a build script checks that the JSON schema st
 A JSON query is checked twice: first by the JSON schema, then by the shared validator.
 Every JSON test therefore also tests the shared validator.
 
----
-
-## Schema discovery
-
-Callers read the graph schema before they write a query.
-Both languages read it from the ontology, sized for an LLM context window:
-
-- In JSON mode, `get_graph_schema` lists node types by domain and relationship types with their endpoints.
-  A caller expands the node types it needs to see their properties.
-- In GQL mode, `CALL db.schema()` lists the same types, and `CALL db.schema('MergeRequest')` expands one node type.
-  A schema call runs no SQL and emits no billing event.
-
----
-
-## Language selection
-
-Each user has one active language.
-The default-off, per-user `orbit_gql_queries` flag in Rails selects it, and Rails sets the language on the gRPC request.
-
-- With the flag off, every surface accepts only JSON.
-- With the flag on, the query endpoint, named queries, and discovery use GQL, and JSON queries fail.
-- Discovery describes only the active language.
-- Agents and public callers cannot choose the language, and there is no fallback between languages.
-
----
-
-## Adding or retiring a language
+### Adding or retiring a language
 
 Every language-specific step lives in its frontend, so each language is one module:
 
@@ -252,10 +300,8 @@ Every language-specific step lives in its frontend, so each language is one modu
 - A check that reads only the input works for every language.
   For example, the relationship-direction check runs on GQL today, and the JSON pipelines can add it without frontend changes.
 
----
-
-## Testing
+### Testing
 
 Query scenarios state each query once in each language, and both spellings must return the same result.
 A grammar fuzz target generates statements from the GQL grammar, and other fuzz targets send arbitrary input through both frontends.
-[Testing](../design-documents/testing.md) describes these layers.
+[Testing](../testing/README.md) describes these layers.

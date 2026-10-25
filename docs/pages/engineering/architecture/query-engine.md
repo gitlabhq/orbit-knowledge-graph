@@ -5,23 +5,195 @@ authors:
   - michaelusa
 ---
 
-**TL;DR:** GitLab Orbit's query engine turns a graph query into parameterized SQL over typed node tables and adjacency-ordered edge tables.
+## What the engine does
 
-Data flows through the engine in these steps:
+The graph query engine turns one graph query into one parameterized SQL
+statement. It works over typed node tables and shared edge tables in
+ClickHouse. Every query it emits is bounded, reads only the caller's
+namespaces, and sees only the current version of each row.
 
-1. A frontend like JSON or GQL parses a graph query into a shared input.
-   The [Query languages](query-languages.md) doc describes the frontends.
-1. The engine validates the shared input against Orbit's GitLab ontology, GitLab permissions, and general querying limits.
-1. The query planner attempts to pick the most efficient way to execute a graph query.
-1. The selected query plan is turned into a SQL syntax tree.
-1. Additional engine passes add authorization filters, response formatting, and query settings.
-1. A final validation pass is executed to ensure all authorization filters and redaction metadata are present.
-1. Code generation renders the syntax tree as SQL for a particular backend, like ClickHouse.
+The engine is a compiler. Each query runs through a fixed list of small
+phases, and each phase does one job. The same phases also compile queries for
+DuckDB, which the local graph and the code-graph tests use.
 
-ClickHouse gives Orbit fast aggregations for analytical queries.
-The engine adds property-graph semantics on top: traversals, paths, neighborhoods, and grouped counts.
-Orbit needs no separate graph database.
-[ADR 000](../design-documents/decisions/000_clickhouse_graph_storage.md) records that decision.
+## How it works
+
+```mermaid
+flowchart LR
+    Query --> Parse --> Check[Validate and restrict]
+    Check --> Plan --> Bound[Scope bounds]
+    Bound --> Build[Build SQL tree] --> Secure[Secure and check]
+    Secure --> SQL
+    Model[(Data model)] --> Check
+    Model --> Plan
+    Model --> Secure
+```
+
+The engine never takes table names from the query, and never reads the
+ontology directly. It reads one data model per schema version, which says what
+the graph holds and how ClickHouse stores it. The steps below follow one query
+through the engine.
+
+### 1. One data model per schema version
+
+```mermaid
+flowchart LR
+    Ontology --> Model[(Data model)]
+    Model --> Engine
+    Ontology --> Tables[(ClickHouse tables)]
+```
+
+When the query server loads a schema version, it builds one data model from
+that version's ontology. The model holds three kinds of facts: the logical
+graph, the tables and columns that store it, and the authorization rules.
+Every phase reads the model and never changes it. Schema management builds the
+same tables from the same ontology, so the engine and the stored data can't
+drift apart.
+
+### 2. Parse and validate
+
+```mermaid
+flowchart LR
+    Text[GQL or JSON] --> Frontend --> Input[Shared input]
+    Input --> Validate --> Normalize
+```
+
+A frontend parses the query into a shared input. The
+[query languages](query-languages.md) page covers the two frontends.
+Validation then checks the query's shape and limits, and checks every name
+against the data model. Normalization resolves names to tables and turns
+filter values into their property types, so the same query always produces the
+same SQL.
+
+### 3. Apply the caller's access
+
+```mermaid
+flowchart LR
+    Input --> Restrict
+    Caller[Caller paths and roles] --> Restrict
+    Restrict --> Restricted[Restricted input]
+```
+
+Restriction is the first step that knows who is asking. It drops admin-only
+properties for callers who aren't admins, and rejects filters or sorts on
+them. It rejects a query on an entity that needs a role the caller holds on no
+namespace. It also rejects an aggregation that no namespaced node can reach,
+because aggregations return counts that GitLab redaction can't check.
+
+### 4. Plan the reads
+
+```mermaid
+flowchart LR
+    Input --> Planner
+    Model[(Data model)] --> Planner
+    Planner --> Plan[Query plan]
+```
+
+The planner decides how to read each node and relationship. It reads edge
+tables first, and joins a node table only when the query needs that node's
+data. A relationship stored in several edge tables becomes a union. In a
+selective chain, each hop reads only the endpoints that the hop before it
+found. The planner may change how a query reads data, but never what it
+returns.
+
+The planner also decides how each read sees the current version of a row.
+Tables keep old versions until ClickHouse merges them away, and a query must
+never match an old one. By default the read merges versions as a stream, which
+keeps memory bounded. For a small, exact set of keys, it reads all versions of
+only those keys and keeps the newest.
+
+### 5. Narrow to the query's namespaces
+
+```mermaid
+flowchart LR
+    Project[Project with known ID] --> MR[Merge requests]
+    MR --> Note[Notes]
+    MR -. crosses namespaces .-> WI[Work items]
+```
+
+A query about one project should read only that project's rows. Some nodes
+have a known ID or path, like a project or a merge request. For those, the
+engine reads the node's namespace path inside the same statement. It then
+filters each read on that path, so ClickHouse skips most of each table. The
+bound spreads along relationships that stay inside one namespace, and stops at
+relationships that can cross namespaces. A bound only narrows a query. It
+never widens what the caller can read.
+
+### 6. Build the SQL tree and shape the result
+
+```mermaid
+flowchart LR
+    Plan --> Tree[SQL tree]
+    Tree --> Page[Page window]
+    Page --> Shape[Result columns]
+    Shape --> Extras[Hydration plan and limits]
+```
+
+The plan becomes a SQL syntax tree. Then the engine sets the page window, with
+one extra row to tell whether more rows exist. It caps large text values so a
+page fits in one response, and adds the ID and type columns that GitLab
+redaction needs. It plans the second, small query that fetches the properties
+the main query didn't return. Last, it picks time and memory limits for the
+query type.
+
+### 7. Secure, check, and render
+
+```mermaid
+flowchart LR
+    Tree[SQL tree] --> Secure
+    Secure --> Check
+    Check -- every read filtered --> Render
+    Check -- a read is missing a filter --> Reject
+    Render --> SQL
+```
+
+Authorization runs last, on the finished tree. It adds a namespace filter to
+every node and edge read, at the role that each entity needs. A final check
+walks the tree and rejects the query if any read lacks its filter. Only then
+does the engine render the tree as SQL for one backend. Every value is a bound
+parameter, so nothing a caller sends ever becomes SQL text.
+
+## When things go wrong
+
+- **A name doesn't exist.** Validation rejects the query before planning
+  starts.
+- **The caller holds no namespace at the role an entity needs.** The query is
+  rejected, or that entity's reads match nothing.
+- **A read lacks its authorization filter.** The final check rejects the query
+  instead of running it.
+- **A bound's anchor isn't indexed yet.** The read falls back to the caller's
+  authorization filter, so indexed rows still come back.
+- **A query is too expensive.** Validation limits its shape up front, and
+  ClickHouse stops it at its time or memory limit.
+- **A backend can't run an operation,** like token search on DuckDB. The
+  engine rejects the query instead of guessing.
+
+## Why we built it this way
+
+A compiler with one path to SQL keeps every safety rule in one place. Each
+phase declares the state it reads and writes, so phases can't interfere with
+each other, and pipelines can reuse them in new combinations. Hydration and
+local queries reuse the same phases instead of copying them.
+
+We kept streaming version merges as the default for current-state reads.
+Grouping every row by ID can be faster on small results. But its memory grows
+with the result, and the result size is unknown when the query compiles. On
+settled ClickHouse parts, streaming merges were as fast or faster in every
+case we measured. When they get slow, the fix belongs in storage, not in the
+query.
+
+Scope bounds read the anchor's path inside the same statement, not in a lookup
+before the query. That means no cache and no stale paths, and a moved project
+uses its new path as soon as its rows are indexed.
+
+## Decisions
+
+- [ADR 000: ClickHouse as graph storage](../adr/000_clickhouse_graph_storage.md)
+- [ADR 016: Column statistics for join ordering](../adr/016_column_statistics_for_join_ordering.md)
+
+## Appendix
+
+### Guarantees
 
 Every query gets these guarantees:
 
@@ -33,6 +205,8 @@ Every query gets these guarantees:
 | **Current state** | Every read sees the latest version of each row. |
 | **Stable results** | The plan changes how data is read, never what is returned. |
 | **Read-only access** | The webserver can only run `SELECT`. |
+
+### Query types and their SQL
 
 The engine supports four query types: traversal, aggregation, path finding, and neighbors.
 This table shows a GQL example of each one, and the SQL that it produces.
@@ -48,12 +222,9 @@ This table shows a GQL example of each one, and the SQL that it produces.
 | **Path finding** | `MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {id: 278964}) RETURN path` | The shortest path from a group to a project | `WITH forward AS (...), backward AS (...) SELECT ... FROM forward JOIN backward ON ...` |
 | **Neighbors** | `MATCH (mr:MergeRequest {id: 42})--(n) RETURN n` | Everything directly connected to one merge request, in either direction | `SELECT ... FROM gl_edge WHERE source_id = ? UNION ALL SELECT ... FROM gl_edge WHERE target_id = ?` |
 
----
+### Phase map
 
-## Walkthrough
-
-This section maps the parts of the engine, in the order that the rest of this document describes them.
-It starts with the data model, and follows one query through each phase, from text to SQL.
+Each step in the walkthrough maps to one or more engine phases.
 
 | Theme | Component | What it does | Query Engine Phases |
 | --- | --- | --- | --- |
@@ -145,9 +316,7 @@ flowchart TB
     linkStyle 16,17,18,19 stroke:#2563EB,stroke-width:2px
 ```
 
----
-
-## Query data model
+### Query data model
 
 The query engine never reads the ontology directly.
 Instead, each schema version of Orbit derives one immutable query data model from its ontology, and every engine phase reads from that model.
@@ -263,7 +432,7 @@ The DuckDB data model follows the same path for local compilation and the code-g
 
 The code lives in `crates/query-data-model/`.
 
-### Storage model
+#### Storage model
 
 The storage model is the physical schema inside the data model's layout.
 The ontology defines every table, sort key, and index in it.
@@ -318,12 +487,10 @@ erDiagram
     gl_merge_request ||--o{ gl_edge : "target_id = id"
 ```
 
-[Data model](../design-documents/data_model.md) describes the entities and relationships.
-[Schema management](../design-documents/schema_management.md) describes how tables change between versions.
+[Data model](data-model.md) describes the entities and relationships.
+[Schema management](schema-evolution.md) describes how tables change between versions.
 
----
-
-## Pipelines
+### Pipelines
 
 A pipeline is a list of compiler phases that executes in order.
 `crates/query-engine/compiler/src/config.rs` declares every phase, the state it reads and writes, and every pipeline that uses it.
@@ -412,9 +579,7 @@ Segment reuse has these effects:
 | `duckdb_gql`, `duckdb_json_dsl` | Either | DuckDB | The local graph schema and the code-graph test suites |
 | `validate_normalize_gql`, `validate_normalize` | Either | None | Named-query checks when a schema version loads |
 
----
-
-## Phases
+### Phases
 
 A query runs through these phases in order.
 Expand a phase to see how it works.
@@ -497,7 +662,7 @@ Validation checks these categories:
   It also orders filters into stable predicate lists, so the same query always produces the same SQL.
 
 The limits live as Rust constants, and a build script checks that the JSON schema states the same ones.
-The [query language reference](../source/remote/queries/query-language.md#validation-limits) lists them all.
+The [query language reference](../../../docs-gitlab-com/remote/queries/query-language.md#validation-limits) lists them all.
 
 </details>
 
@@ -923,7 +1088,7 @@ end note
 - `security_check` walks the final SQL tree.
   If any namespaced read lacks a valid filter, the engine rejects the query instead of running it.
 
-The [Security](../design-documents/security.md) design document describes the full authorization model and the redaction layer.
+The [Security](security.md) design document describes the full authorization model and the redaction layer.
 
 </details>
 
@@ -951,10 +1116,6 @@ tree --> duckdb
 
 </details>
 
----
-
-## Appendix
-
 ### Glossary
 
 - An **anchor** is a node with a known ID or path, like a project, that a query's scope starts from.
@@ -971,20 +1132,19 @@ tree --> duckdb
 
 Each query reports the time of each phase, the rows it returned, and the rows, bytes, and memory that ClickHouse used.
 Authorized callers can see the compiled SQL and its parameters.
-[Observability](../design-documents/observability.md) lists the metrics.
 
 ### Testing
 
 Query scenarios check results in both languages.
 Plan-shape fixtures check the plan the engine picks.
 Fuzz targets check the frontends.
-[Testing](../design-documents/testing.md) describes each layer and its CI job.
+[Testing](../testing/README.md) describes each layer and its CI job.
 
 ### Related documents
 
 - [Querying overview](querying.md)
 - [Query languages](query-languages.md)
-- [Security](../design-documents/security.md)
-- [Data model](../design-documents/data_model.md)
-- [Schema management](../design-documents/schema_management.md)
-- [ADR 000: ClickHouse as graph storage](../design-documents/decisions/000_clickhouse_graph_storage.md)
+- [Security](security.md)
+- [Data model](data-model.md)
+- [Schema management](schema-evolution.md)
+- [ADR 000: ClickHouse as graph storage](../adr/000_clickhouse_graph_storage.md)
