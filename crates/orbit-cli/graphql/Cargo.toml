@@ -12,5 +12,6 @@ cynic = { workspace = true }
 
 [build-dependencies]
 cynic-codegen = { workspace = true }
+cynic-querygen = { workspace = true }
 prettyplease = { workspace = true }
 syn = { workspace = true }
