@@ -7,6 +7,57 @@ authors:
 
 ## What the engine does
 
+```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 24, "rankSpacing": 64, "padding": 14}}}%%
+flowchart LR
+    accTitle: Query languages and backends of the graph query engine
+    accDescr: A user query arrives in GQL or the JSON Query DSL, with SQL and GLQL planned. The graph query compiler turns it into SQL for ClickHouse or DuckDB, with PostgreSQL planned.
+
+    user(["User query"])
+
+    subgraph languages["Query languages"]
+        gql["GQL"]
+        json["JSON Query DSL"]
+        sql["SQL"]
+        glql["GLQL"]
+    end
+
+    compiler[["Graph query compiler"]]
+
+    subgraph backends["Backends"]
+        clickhouse[("ClickHouse")]
+        duckdb[("DuckDB")]
+        postgres[("PostgreSQL")]
+    end
+
+    user --> gql
+    user --> json
+    user -.-> sql
+    user -.-> glql
+    gql --> compiler
+    json --> compiler
+    sql -.-> compiler
+    glql -.-> compiler
+    compiler --> clickhouse
+    compiler --> duckdb
+    compiler -.-> postgres
+
+    classDef language fill:#FEF3C7,stroke:#B45309,color:#78350F
+    classDef engine fill:#DCFCE7,stroke:#15803D,color:#14532D
+    classDef backend fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
+    classDef future fill:#F9FAFB,stroke:#9CA3AF,color:#6B7280,stroke-dasharray:5 4
+
+    class user,gql,json language
+    class compiler engine
+    class clickhouse,duckdb backend
+    class sql,glql,postgres future
+
+    style languages fill:#FFFBEB,stroke:#FCD34D
+    style backends fill:#EFF6FF,stroke:#93C5FD
+```
+
+Dashed boxes are planned and not yet supported.
+
 The graph query engine is a multi-pass compiler. It turns a JSON Query DSL or
 GQL query into one parameterized SQL statement over the ontology's node and
 edge tables. Every statement it emits is bounded, carries a traversal-path
