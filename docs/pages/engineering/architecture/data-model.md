@@ -1,6 +1,7 @@
 ---
 title: Data model
 description: The property graph that Orbit builds and the ontology that defines it.
+order: 1
 authors:
   - michaelangeloio
 ---

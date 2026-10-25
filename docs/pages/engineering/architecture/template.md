@@ -1,6 +1,7 @@
 ---
 title: Page template
 description: The structure and the rules for every Orbit architecture page.
+order: 99
 authors:
   - michaelangeloio
 ---
@@ -30,6 +31,7 @@ Copy this skeleton. Leave out a section that has nothing to say.
 ---
 title: <Name>
 description: <One sentence for search results.>
+order: <Position in the Architecture sidebar.>
 authors:
   - <gitlab-username>
 ---

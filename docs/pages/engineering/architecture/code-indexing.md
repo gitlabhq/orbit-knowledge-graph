@@ -1,6 +1,7 @@
 ---
 title: Code indexing
 description: How Orbit builds the code graph from repositories.
+order: 3
 authors: []
 ---
 

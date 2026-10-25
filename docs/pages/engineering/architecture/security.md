@@ -1,6 +1,7 @@
 ---
 title: Security
 description: How Orbit makes sure each caller sees only the data that GitLab lets them see.
+order: 6
 authors:
   - michaelangeloio
 ---
