@@ -28,8 +28,8 @@ function Hero() {
           <Link to="/roadmap" className={PRIMARY}>
             See the roadmap
           </Link>
-          <Link to="/content/demos" className={SECONDARY}>
-            Demos
+          <Link to="/content" className={SECONDARY}>
+            Content
           </Link>
           <Link {...pageLink("engineering")} className={SECONDARY}>
             Engineering

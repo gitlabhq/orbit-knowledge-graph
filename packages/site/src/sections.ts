@@ -9,11 +9,11 @@ export const TABS: Tab[] = [
     route: "content",
     label: "Content",
     menu: [
+      { route: "content", label: "Overview", description: "Posts, demos, and talks about Orbit" },
       { route: "content/blog", label: "Blog", description: "Engineering notes and product updates" },
       { route: "content/demos", label: "Demos", description: "Videos and talks about Orbit" },
     ],
   },
-  { route: "team", label: "Team" },
   {
     route: "engineering",
     label: "Engineering",
@@ -25,6 +25,7 @@ export const TABS: Tab[] = [
       { route: "engineering/testing", label: "Testing", description: "How Orbit is tested" },
     ],
   },
+  { route: "team", label: "Team" },
 ];
 
 export const USER_DOCS = { label: "User docs", href: "https://docs.gitlab.com/orbit/" };
