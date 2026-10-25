@@ -7,7 +7,7 @@ const ITEM = "block rounded-control px-3 py-1.5 text-sm no-underline transition-
 const sectionPages = (section: string) =>
   pages
     .filter((page) => page.path === section || page.path.startsWith(`${section}/`))
-    .sort((a, b) => Number(b.path === section) - Number(a.path === section) || a.source.localeCompare(b.source));
+    .sort((a, b) => Number(b.path === section) - Number(a.path === section) || (a.meta.order ?? Infinity) - (b.meta.order ?? Infinity) || a.source.localeCompare(b.source));
 
 const homePages = () => SECTIONS.flatMap(({ route }) => pages.filter((page) => page.path === route));
 

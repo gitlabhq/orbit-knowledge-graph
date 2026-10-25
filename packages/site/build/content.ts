@@ -96,5 +96,6 @@ export function engineeringMeta(route: string, frontmatter: Record<string, unkno
       .filter((author): author is string => typeof author === "string")
       .map((author) => author.replace(/^@/, "")),
     lastChanged: changedOn.get(source),
+    order: typeof frontmatter.order === "number" ? frontmatter.order : undefined,
   };
 }

@@ -16,6 +16,7 @@ declare module "@gitlab-org/orbit-site" {
     sourceUrl: string;
     authors: string[];
     lastChanged?: string;
+    order?: number;
   }
 }
 
