@@ -37,7 +37,7 @@ members = [
   "crates/health-check",
   "crates/gitaly-protos",
   "crates/gitlab-client",
-  "crates/gitlab-graphql",
+  "crates/orbit-cli/graphql",
   "crates/xtask",
   "crates/integration-testkit",
   "crates/integration-tests-codegraph",
@@ -224,7 +224,7 @@ rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs
 aws-lc-rs = { version = "1.18.1", default-features = false }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
-gitlab-graphql = { path = "crates/gitlab-graphql" }
+orbit-cli-graphql = { path = "crates/orbit-cli/graphql" }
 
 [profile.dev]
 debug = "line-tables-only"

@@ -3493,17 +3493,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gitlab-graphql"
-version = "0.1.0"
-dependencies = [
- "cynic",
- "cynic-codegen",
- "prettyplease",
- "serde_json",
- "syn 2.0.118",
-]
-
-[[package]]
 name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5871,6 +5860,17 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "orbit-cli-graphql"
+version = "0.1.0"
+dependencies = [
+ "cynic",
+ "cynic-codegen",
+ "prettyplease",
+ "serde_json",
+ "syn 2.0.118",
 ]
 
 [[package]]

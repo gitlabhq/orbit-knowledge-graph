@@ -1,2 +1,2 @@
 crates/duckdb-client/third_party/duckdb-fts-sources.tar.gz binary
-crates/gitlab-graphql/schema/gitlab.graphql gitlab-generated
+crates/orbit-cli/graphql/schema/gitlab.graphql gitlab-generated

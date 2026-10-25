@@ -25,7 +25,7 @@ vendored:
     check_script: scripts/vendored/gitlab_system_note_actions/check.sh
   gitlab_graphql_schema:
     version: "17448481030"
-    vendor_dir: crates/gitlab-graphql/schema
+    vendor_dir: crates/orbit-cli/graphql/schema
     vendor_script: scripts/vendored/gitlab_graphql_schema/vendor.sh
   # Iglu schema version pins. Edit a pin here, then run `mise vendor -- iglu`
   # to fetch the schema JSON from the upstream Iglu registry.
