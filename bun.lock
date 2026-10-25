@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "orbit-knowledge-graph",
+      "name": "orbit",
       "devDependencies": {
         "@commitlint/cli": "21.2.0",
         "@commitlint/config-conventional": "21.2.0",
