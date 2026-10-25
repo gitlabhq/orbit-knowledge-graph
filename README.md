@@ -13,7 +13,7 @@
 [![license](https://img.shields.io/badge/license-GitLab%20EE-blue)](LICENSE.md)
 [![Community fork](https://img.shields.io/badge/Contribute-community%20fork-blue)](https://gitlab.com/gitlab-community/gitlab-org/orbit/knowledge-graph)
 
-[Documentation](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Use cases](docs/source/remote/cookbook.md) · [CLI](docs/source/remote/access/glab.md) · [Contribute](#contribute)
+[Documentation](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Use cases](docs/docs-gitlab-com/remote/cookbook.md) · [CLI](docs/docs-gitlab-com/remote/access/glab.md) · [Contribute](#contribute)
 
 </div>
 
@@ -46,17 +46,17 @@ Using GitLab Orbit, what does this project do, and how is it structured?
 ```
 
 To ask about merge requests, pipelines, and vulnerabilities, a user with the Owner role for the top-level group must
-[turn on GitLab Orbit](docs/source/remote/getting-started.md#step-1-enable-gitlab-orbit) first.
+[turn on GitLab Orbit](docs/docs-gitlab-com/remote/getting-started.md#step-1-enable-gitlab-orbit) first.
 
 ## Ways to use GitLab Orbit
 
 | Surface | Use it to |
 |---------|-----------|
-| [`glab orbit`](docs/source/remote/access/glab.md) | Search code, read definitions with their callers, and query the graph from a terminal. |
-| [AI coding agents](docs/source/ai_coding_agents.md) | Give your coding agents the graph and the GitLab Orbit skill through `glab orbit setup`. |
-| [MCP](docs/source/remote/access/mcp.md) | Connect any Model Context Protocol (MCP) client to the graph. |
-| [GitLab Duo Agent Platform](docs/source/remote/access/duo.md) | Ask questions in the GitLab UI. |
-| [REST API](docs/source/remote/access/api.md) | Query the graph from scripts, pipelines, and your own tools. |
+| [`glab orbit`](docs/docs-gitlab-com/remote/access/glab.md) | Search code, read definitions with their callers, and query the graph from a terminal. |
+| [AI coding agents](docs/docs-gitlab-com/ai_coding_agents.md) | Give your coding agents the graph and the GitLab Orbit skill through `glab orbit setup`. |
+| [MCP](docs/docs-gitlab-com/remote/access/mcp.md) | Connect any Model Context Protocol (MCP) client to the graph. |
+| [GitLab Duo Agent Platform](docs/docs-gitlab-com/remote/access/duo.md) | Ask questions in the GitLab UI. |
+| [REST API](docs/docs-gitlab-com/remote/access/api.md) | Query the graph from scripts, pipelines, and your own tools. |
 
 For the query language, the schema, security, and troubleshooting, see the [GitLab Orbit documentation](https://docs.gitlab.com/orbit/).
 
@@ -78,7 +78,7 @@ flowchart LR
 1. GitLab checks your permissions, runs the query on the graph, and returns only the data that you can read.
 
 `glab orbit` also indexes the repository on your machine, so code questions work offline.
-For the components, see [how GitLab Orbit works](docs/source/remote/how-it-works.md).
+For the components, see [how GitLab Orbit works](docs/docs-gitlab-com/remote/how-it-works.md).
 
 ## Contribute
 

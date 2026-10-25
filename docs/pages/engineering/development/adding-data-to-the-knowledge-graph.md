@@ -304,7 +304,7 @@ This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql
 
 After the code MR merges, open a separate docs MR. Add the node to the user
 schema reference,
-[`docs/source/remote/schema.md`](../../../source/remote/schema.md), in the table for
+[`docs/docs-gitlab-com/remote/schema.md`](../../../docs-gitlab-com/remote/schema.md), in the table for
 its domain. Update the node count in the page description and the intro.
 
 ### 5.7 Validate (toolchain matters)
