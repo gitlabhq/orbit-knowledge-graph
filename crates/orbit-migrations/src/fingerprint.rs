@@ -9,10 +9,17 @@ use query_data_model::DataModelError;
 use crate::schema::{GraphSchema, translate};
 
 pub fn current_fingerprints(ontology: &Ontology) -> Result<Fingerprints, DataModelError> {
+    fingerprints_for(ontology, &embedded_sources())
+}
+
+fn fingerprints_for(
+    ontology: &Ontology,
+    sources: &BTreeMap<String, String>,
+) -> Result<Fingerprints, DataModelError> {
     Ok(Fingerprints {
-        sources: source_fingerprints(),
+        sources: source_fingerprints(sources),
         ddl: ddl_fingerprints(ontology)?,
-        edge_rows: hash_edge_row_sources(&embedded_sources()),
+        edge_rows: hash_edge_row_sources(sources),
         auxiliary_schema: auxiliary_schema_fingerprints(ontology)?,
     })
 }
@@ -84,4 +91,40 @@ pub fn auxiliary_schema_fingerprints(
     }
 
     Ok(fingerprints)
+}
+
+#[cfg(test)]
+mod tests {
+    use ontology::archive::OntologyArchive;
+    use ontology::migrations::{EdgeRows, derive_edge_rows};
+
+    use super::*;
+
+    fn load_archive(version: u32) -> (Ontology, Fingerprints) {
+        let archive = OntologyArchive::bundled(version)
+            .unwrap()
+            .unwrap_or_else(|| panic!("v{version} archive is bundled"));
+        let ontology = archive.load_ontology().unwrap();
+        let fingerprints = fingerprints_for(&ontology, archive.sources()).unwrap();
+        (ontology, fingerprints)
+    }
+
+    #[test]
+    fn only_node_storage_bumps_keep_edge_rows() {
+        let archives: Vec<_> = (93..=115)
+            .map(|version| (version, load_archive(version)))
+            .collect();
+
+        let kept: Vec<u32> = archives
+            .windows(2)
+            .filter(|pair| {
+                let (_, (_, base)) = &pair[0];
+                let (_, (ontology, current)) = &pair[1];
+                derive_edge_rows(ontology, current, base) == EdgeRows::Unchanged
+            })
+            .map(|pair| pair[1].0)
+            .collect();
+
+        assert_eq!(kept, [101, 113, 115]);
+    }
 }

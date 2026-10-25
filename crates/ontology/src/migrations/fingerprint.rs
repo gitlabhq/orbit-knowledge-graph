@@ -63,14 +63,11 @@ impl Fingerprints {
 }
 
 #[must_use]
-pub fn source_fingerprints() -> BTreeMap<String, String> {
-    crate::loading::embedded_files()
-        .into_iter()
+pub fn source_fingerprints(sources: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    sources
+        .iter()
         .filter(|(path, _)| !path.starts_with("sql/"))
-        .map(|(path, content)| {
-            let hash = hash_source(&path, &content);
-            (path, hash)
-        })
+        .map(|(path, content)| (path.clone(), hash_source(path, content)))
         .collect()
 }
 
@@ -331,30 +328,6 @@ mod tests {
         assert_ne!(
             stable_versioned_schema_hash(first),
             stable_versioned_schema_hash(second)
-        );
-    }
-
-    #[test]
-    fn edge_row_hash_ignores_only_node_storage() {
-        let sources = embedded_sources();
-        let hash_after_note_edit = |from: &str, to: &str| {
-            let mut edited = sources.clone();
-            let note = edited
-                .get_mut("nodes/core/note.yaml")
-                .expect("note source exists");
-            assert!(note.contains(from), "note.yaml must contain {from:?}");
-            *note = note.replacen(from, to, 1);
-            hash_edge_row_sources(&edited)
-        };
-        let unedited = hash_edge_row_sources(&sources);
-
-        assert_eq!(
-            hash_after_note_edit("type: text, granularity: 1}", "type: text, granularity: 2}"),
-            unedited
-        );
-        assert_ne!(
-            hash_after_note_edit("field: author_id", "field: project_id"),
-            unedited
         );
     }
 

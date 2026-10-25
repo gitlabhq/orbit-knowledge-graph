@@ -234,9 +234,8 @@ fn check_under_declaration(
         );
     }
 
-    if !entry
-        .edge_rows
-        .covers(derive_edge_rows(ontology, committed, &base_fps))
+    if !entry.edge_rows.is_changed()
+        && derive_edge_rows(ontology, committed, &base_fps).is_changed()
     {
         bail!(
             "ledger entry for version {schema_version} declares `edge_rows: unchanged`, \

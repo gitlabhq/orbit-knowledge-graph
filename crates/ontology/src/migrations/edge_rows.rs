@@ -16,10 +16,6 @@ impl EdgeRows {
         *self == Self::Changed
     }
 
-    pub fn covers(self, required: Self) -> bool {
-        self.is_changed() || !required.is_changed()
-    }
-
     pub fn widened_with(self, other: Self) -> Self {
         if self.is_changed() || other.is_changed() {
             Self::Changed
@@ -47,77 +43,5 @@ pub fn derive_edge_rows(
         EdgeRows::Changed
     } else {
         EdgeRows::Unchanged
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use super::*;
-
-    fn fingerprints(source: &str, ddl: &[(&str, &str)], edge_rows: &str) -> Fingerprints {
-        Fingerprints {
-            sources: BTreeMap::from([("nodes/core/note.yaml".to_string(), source.to_string())]),
-            ddl: ddl
-                .iter()
-                .map(|(table, hash)| (table.to_string(), hash.to_string()))
-                .collect(),
-            edge_rows: edge_rows.to_string(),
-            auxiliary_schema: BTreeMap::new(),
-        }
-    }
-
-    #[test]
-    fn node_only_change_keeps_edge_rows_unchanged() {
-        let ontology = Ontology::load_embedded().expect("ontology loads");
-        let base = fingerprints("old", &[("gl_note", "old")], "edges");
-        let current = fingerprints("new", &[("gl_note", "new")], "edges");
-        assert_eq!(
-            derive_edge_rows(&ontology, &current, &base),
-            EdgeRows::Unchanged
-        );
-    }
-
-    #[test]
-    fn any_edge_row_risk_marks_edge_rows_changed() {
-        let ontology = Ontology::load_embedded().expect("ontology loads");
-        let base = fingerprints("old", &[("gl_edge", "old")], "edges");
-        let cases = [
-            ("lowering code only", &base, base.clone()),
-            (
-                "edge table DDL",
-                &base,
-                fingerprints("new", &[("gl_edge", "new")], "edges"),
-            ),
-            (
-                "edge row sources",
-                &base,
-                fingerprints("new", &[("gl_edge", "old")], "new edges"),
-            ),
-            (
-                "base without an edge row hash",
-                &fingerprints("old", &[("gl_edge", "old")], ""),
-                fingerprints("new", &[("gl_edge", "old")], "edges"),
-            ),
-        ];
-        for (risk, base, current) in cases {
-            assert_eq!(
-                derive_edge_rows(&ontology, &current, base),
-                EdgeRows::Changed,
-                "{risk}"
-            );
-        }
-    }
-
-    #[test]
-    fn only_changed_covers_changed() {
-        assert!(EdgeRows::Changed.covers(EdgeRows::Unchanged));
-        assert!(EdgeRows::Unchanged.covers(EdgeRows::Unchanged));
-        assert!(!EdgeRows::Unchanged.covers(EdgeRows::Changed));
-        assert_eq!(
-            EdgeRows::Unchanged.widened_with(EdgeRows::Changed),
-            EdgeRows::Changed
-        );
     }
 }

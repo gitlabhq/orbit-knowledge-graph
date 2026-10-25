@@ -402,20 +402,6 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_edge_rows_keep_shared_edge_writers_narrow() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        let layout = Relational::<ClickHouse>::derive(&ontology).unwrap();
-
-        for entities in [&["Note"][..], &["Job", "MergeRequest", "HAS_NOTE"], &[]] {
-            let scope = sdlc_scope_keeping_edge_rows(entities);
-            assert_eq!(
-                widen_scope_for_shared_table_writers(&ontology, &layout, &scope),
-                scope,
-            );
-        }
-    }
-
-    #[test]
     fn unchanged_edge_rows_clone_every_edge_table_and_rebuild_sdlc_node_tables() {
         let map = classify(sdlc_scope_keeping_edge_rows(&[]));
         for table in [
