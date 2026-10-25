@@ -9,8 +9,8 @@
       "packages/*"
     ],
     "catalog": {
-      "@gitlab-org/orbit-markdown": "0.7.1",
-      "@gitlab-org/orbit-site": "0.7.1",
+      "@gitlab-org/orbit-markdown": "0.8.1",
+      "@gitlab-org/orbit-site": "0.8.1",
       "@tanstack/react-router": "1.170.17",
       "@types/bun": "1.4.4",
       "@types/react": "19.2.17",

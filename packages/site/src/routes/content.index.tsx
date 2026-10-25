@@ -14,7 +14,7 @@ type Choice = { to: "/content/blog" | "/content/demos"; icon: string; title: str
 
 function ChoiceCard({ to, icon, title, description, count, latest }: Choice) {
   return (
-    <Link to={to} className="card group flex h-full flex-col gap-3 bg-surface-subtle p-5 no-underline">
+    <Link to={to} className="card group flex h-full flex-col gap-3 p-5 no-underline">
       <span className="flex items-center gap-3">
         <Icon name={icon} size={16} className="text-subtle" />
         <span className="text-base font-semibold text-default">{title}</span>
