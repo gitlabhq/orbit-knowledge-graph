@@ -270,6 +270,7 @@ Read more: <https://docs.gitlab.com/orbit/remote/schema/>
 
 Draw the path that the last query walked, in the same aligned format as part 3.
 Write one line for each hop, with the edge pointing the way it does in the graph.
+For a hop of variable length, write the range in the edge, such as `--CONTAINS*1..3-->`.
 Then add a **Filters** line and a **Result** line. For example:
 
 ```text
