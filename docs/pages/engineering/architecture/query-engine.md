@@ -31,19 +31,43 @@ of the SQL that it produces.
 ## How it works
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 40, "rankSpacing": 70, "padding": 16}}}%%
 flowchart LR
-    Query[JSON or GQL query] --> Frontend
-    Frontend --> IR[Intermediate representation]
-    IR --> Validate[Validate and normalize]
-    Validate --> Restrict
-    Restrict --> Plan
-    Plan --> Bounds[Traversal-path bounds]
-    Bounds --> Lower[Lower and shape]
-    Lower --> Secure[Secure and verify]
-    Secure --> Codegen
-    Model[(Data model)] --> Validate
-    Model --> Plan
-    Model --> Secure
+    accTitle: How the graph query engine compiles a query
+    accDescr: A JSON or GQL query passes through four stages. The frontend parses and lowers it into the intermediate representation. Check validates, normalizes, and restricts it. Plan picks access paths, latest-state reads, and traversal-path bounds. Emit lowers, secures, verifies, and renders it as parameterized SQL with a hydration plan. The data model feeds check, plan, and emit, and the security context feeds check and emit.
+
+    model[("<b>Data model</b><br/>graph, tables, policy")]
+    front["<b>Frontend</b><br/>JSON or GQL query<br/>parse and lower<br/>intermediate representation"]
+    context["<b>Security context</b><br/>caller paths and roles"]
+    check["<b>Check</b><br/>validate and normalize<br/>restrict"]
+    plan["<b>Plan</b><br/>access paths<br/>latest-state reads<br/>traversal-path bounds"]
+    emit["<b>Emit</b><br/>lower and shape<br/>secure and verify<br/>code generation"]
+    sql["<b>Output</b><br/>parameterized SQL<br/>hydration plan"]
+
+    front --> check --> plan --> emit --> sql
+
+    model -. "names and types" .-> check
+    model -. "tables and routes" .-> plan
+    model -. "role floors" .-> emit
+    context -- "paths and roles" --> check
+    context -- "eligible paths" --> emit
+
+    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
+    classDef input fill:#FEF3C7,stroke:#B45309,color:#78350F
+    classDef checking fill:#DCFCE7,stroke:#15803D,color:#14532D
+    classDef planner fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
+    classDef emitter fill:#FCE7F3,stroke:#BE185D,color:#831843
+    classDef output fill:#F3F4F6,stroke:#6B7280,color:#111827,stroke-dasharray:4 3
+
+    class model data
+    class front,context input
+    class check checking
+    class plan planner
+    class emit emitter
+    class sql output
+
+    linkStyle 4,5,6 stroke:#2563EB,stroke-width:2px
+    linkStyle 7,8 stroke:#B45309,stroke-width:2px
 ```
 
 The engine compiles in passes, and each pass has one job. A pass declares the
