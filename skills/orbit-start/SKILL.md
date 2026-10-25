@@ -45,12 +45,17 @@ If you have no such tool, print the options as a numbered list, then stop and wa
 
 ## Step 2: Ask a simple first question
 
-Start with a question that one query answers, about the scope from step 1. Offer these options:
+Start with a question that one query answers, about the scope from step 1.
+Offer these options, with the bold text as the label and the rest as the description:
 
-- **What is open in this project**: the open merge requests, newest first.
-- **Which vulnerabilities this project has**: the open vulnerabilities, counted by severity.
-- **Who reviews this project**: the people who approved the most merge requests in the last month.
-- **What calls a function**: the callers of a function or method that the user names.
+- **What is open in this project**: the open merge requests, newest first, with their titles and authors.
+  A quick check that Orbit sees your project.
+- **Which vulnerabilities this project has**: the open vulnerabilities, counted by severity from critical to info.
+  One query counts them all, with no paging through results.
+- **Who reviews this project**: the people who approved the most merge requests in the last 30 days, with a count for each.
+  Useful when you need a reviewer.
+- **What calls a function**: every function or method that calls one you name, with the file it is in.
+  Shows that Orbit indexes your code, not only merge requests and pipelines.
 
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
