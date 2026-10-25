@@ -84,6 +84,13 @@ impl MigrationLedger {
                 ));
             }
 
+            if !entry.edge_rows.is_changed() && entry.scope != LedgerScope::Sdlc {
+                return Err(format!(
+                    "version {}: `edge_rows: unchanged` is only valid with `scope: sdlc`",
+                    entry.version
+                ));
+            }
+
             if entry.scope == LedgerScope::None
                 && entry.note.as_ref().is_none_or(|n| n.trim().is_empty())
             {
@@ -231,6 +238,25 @@ mod tests {
         let ontology = Ontology::new();
         let err = ledger.validate(&ontology, 1).unwrap_err();
         assert!(err.contains("only valid with `scope: sdlc`"), "{err}");
+    }
+
+    #[test]
+    fn unchanged_edge_rows_require_sdlc_scope() {
+        let ledger = MigrationLedger {
+            migrations: vec![MigrationEntry {
+                version: 1,
+                scope: LedgerScope::All,
+                entities: BTreeSet::new(),
+                edge_rows: EdgeRows::Unchanged,
+                note: None,
+            }],
+        };
+        let ontology = Ontology::new();
+        let err = ledger.validate(&ontology, 1).unwrap_err();
+        assert!(
+            err.contains("`edge_rows: unchanged` is only valid with `scope: sdlc`"),
+            "{err}"
+        );
     }
 
     #[test]

@@ -39,7 +39,10 @@
         },
         "if": { "properties": { "scope": { "const": "sdlc" } }, "required": ["scope"] },
         "then": true,
-        "else": { "not": { "required": ["entities"] } }
+        "else": {
+          "not": { "required": ["entities"] },
+          "properties": { "edge_rows": { "const": "changed" } }
+        }
       }
     }
   }
