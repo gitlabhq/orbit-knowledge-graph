@@ -88,6 +88,14 @@ pub const FRESHNESS_LAG: MetricSpec = MetricSpec::histogram_f64(
     DOMAIN,
 );
 
+pub const FRESHNESS_OLDEST_SYNC: MetricSpec = MetricSpec::observable_gauge(
+    "gkg.indexer.sdlc.freshness.oldest_sync_timestamp",
+    "One sample per SDLC plan on the served schema version: Unix time up to which its indexed data is known to match the datalake, in the least synced enabled namespace for namespaced plans.",
+    Some("s"),
+    &[labels::ENTITY],
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
     &PIPELINE_DURATION,
     &PIPELINE_ROWS_PROCESSED,
@@ -98,4 +106,5 @@ pub const CATALOG: &[&MetricSpec] = &[
     &TRANSFORM_DURATION,
     &WATERMARK_LAG,
     &FRESHNESS_LAG,
+    &FRESHNESS_OLDEST_SYNC,
 ];

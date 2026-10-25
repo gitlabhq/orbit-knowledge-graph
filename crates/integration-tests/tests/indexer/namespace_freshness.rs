@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use chrono::{TimeDelta, Utc};
 use indexer::checkpoint::{
-    Checkpoint, CheckpointStore, ClickHouseCheckpointStore, namespace_position_key,
+    Checkpoint, CheckpointStore, ClickHouseCheckpointStore, GLOBAL_SCOPE_KEY,
+    namespace_position_key,
 };
 use indexer::durability::WriteDurability;
 use indexer::orchestrator::scheduled::{NamespaceFreshness, ScheduledTask};
@@ -104,20 +105,37 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
         .await;
 
     let ontology = ontology::Ontology::load_embedded().unwrap();
-    let plans: Vec<String> = ontology
-        .pipeline_descriptors()
-        .into_iter()
-        .filter(|plan| plan.scope == EtlScope::Namespaced)
-        .map(|plan| plan.name)
-        .collect();
+    let plans_in = |scope: EtlScope| -> Vec<String> {
+        ontology
+            .pipeline_descriptors()
+            .into_iter()
+            .filter(|plan| plan.scope == scope)
+            .map(|plan| plan.name)
+            .collect()
+    };
+    let plans = plans_in(EtlScope::Namespaced);
+    let global_plans = plans_in(EtlScope::Global);
+    let (synced_global, never_synced_global) = global_plans.split_first().unwrap();
     let served_store = ClickHouseCheckpointStore::for_version(Arc::new(graph.clone()), served);
     let unserved_store = ClickHouseCheckpointStore::new(Arc::new(graph.clone()));
+    let started = Utc::now();
     for plan in &plans {
         for (id, synced_minutes_ago) in [(IN_SYNC, 0), (PENDING, 10), (STALE, 180)] {
-            complete(&served_store, id, plan, synced_minutes_ago).await;
+            complete(&served_store, &namespace_key(id, plan), synced_minutes_ago).await;
         }
-        complete(&unserved_store, NEVER_SYNCED, plan, 0).await;
+        complete(&unserved_store, &namespace_key(NEVER_SYNCED, plan), 0).await;
     }
+    complete(
+        &served_store,
+        &format!("{GLOBAL_SCOPE_KEY}.{synced_global}"),
+        30,
+    )
+    .await;
+    let seeded = Utc::now();
+    let synced_while_seeding = |minutes_ago| {
+        let ago = TimeDelta::minutes(minutes_ago);
+        (started - ago).timestamp()..=(seeded - ago).timestamp()
+    };
 
     let config = AppConfig::embedded_defaults().schedule.tasks;
     let task = NamespaceFreshness::new(
@@ -151,23 +169,34 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
         1,
         "a stopped or failing task must be visible without its samples"
     );
+
+    for plan in &plans {
+        let oldest = oldest_sync(&metrics, plan).unwrap();
+        assert!(
+            synced_while_seeding(180).contains(&oldest),
+            "{plan} is only as fresh as its stalest namespace, synced 3h ago: {oldest}"
+        );
+    }
+    let global = oldest_sync(&metrics, synced_global).unwrap();
+    assert!(
+        synced_while_seeding(30).contains(&global),
+        "a global plan is as fresh as its own checkpoint: {global}"
+    );
+    for plan in never_synced_global {
+        assert_eq!(oldest_sync(&metrics, plan), None, "{plan} has never synced");
+    }
 }
 
-async fn complete(
-    store: &ClickHouseCheckpointStore,
-    namespace: i64,
-    plan: &str,
-    synced_minutes_ago: i64,
-) {
+fn namespace_key(namespace: i64, plan: &str) -> String {
+    format!("{}.{plan}", namespace_position_key(namespace))
+}
+
+async fn complete(store: &ClickHouseCheckpointStore, key: &str, synced_minutes_ago: i64) {
     let synced = Utc::now() - TimeDelta::minutes(synced_minutes_ago);
     let mut checkpoint = Checkpoint::new(synced);
     checkpoint.complete(synced);
     store
-        .save(
-            &format!("{}.{plan}", namespace_position_key(namespace)),
-            &checkpoint,
-            WriteDurability::Durable,
-        )
+        .save(key, &checkpoint, WriteDurability::Durable)
         .await
         .unwrap();
 }
@@ -191,6 +220,27 @@ fn lag_buckets(metrics: &[ResourceMetrics], entity: &str) -> Vec<u64> {
             _ => panic!("freshness lag is not an f64 histogram"),
         })
         .collect()
+}
+
+fn oldest_sync(metrics: &[ResourceMetrics], entity: &str) -> Option<i64> {
+    metrics
+        .last()?
+        .scope_metrics()
+        .flat_map(|scope| scope.metrics())
+        .filter(|metric| metric.name() == "gkg.indexer.sdlc.freshness.oldest_sync_timestamp")
+        .flat_map(|metric| match metric.data() {
+            AggregatedMetrics::I64(MetricData::Gauge(gauge)) => gauge
+                .data_points()
+                .filter(|point| {
+                    point
+                        .attributes()
+                        .any(|kv| kv.key.as_str() == "entity" && kv.value.as_str() == entity)
+                })
+                .map(|point| point.value())
+                .collect::<Vec<_>>(),
+            _ => panic!("oldest sync is not an i64 gauge"),
+        })
+        .next()
 }
 
 fn task_runs(metrics: &[ResourceMetrics], task: &str, outcome: &str) -> u64 {
