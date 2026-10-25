@@ -31,7 +31,7 @@ fn generate_queries(target: &Path) {
             let name = path
                 .file_stem()
                 .and_then(|stem| stem.to_str())
-                .expect("query file name");
+                .unwrap_or_else(|| panic!("{}: query file name must be UTF-8", path.display()));
             let query = fs::read_to_string(path).expect("query file must be readable");
             let structs = generator
                 .generate(&query)

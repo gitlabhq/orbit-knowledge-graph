@@ -22,5 +22,5 @@ fi
 
 mkdir -p "$VENDOR_DIR"
 mv "$download" "$VENDOR_DIR/gitlab.graphql"
-JOB_ID="$job_id" yq -i ".vendored.${VENDOR_NAME}.version = strenv(JOB_ID)" "$VERSIONS_FILE"
+JOB_ID="$job_id" perl -0pi -e 's/(\n  \Q$ENV{VENDOR_NAME}\E:\n(?:    .*\n)*?    version: )"[^"]*"/$1"$ENV{JOB_ID}"/' "$VERSIONS_FILE"
 echo "Vendored the GitLab GraphQL schema from job $job_id."
