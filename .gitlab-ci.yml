@@ -67,7 +67,6 @@ workflow:
           - docs/runbooks/**/*
           - docs/architecture/**/*
           - docs/design-documents/decisions/**/*
-          - docs/disaster-recovery/**/*
           - docs/testing/**/*
           - packages/**/*
           - package.json
