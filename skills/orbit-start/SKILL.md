@@ -28,7 +28,7 @@ If you have no such tool, print the options as a numbered list, then stop and wa
 
 ### Show before you ask
 
-Several steps tell you to show something: the welcome screen, an answer, the parts of step 6, or a summary.
+Several steps tell you to show something: an answer, the parts of step 5, or a summary.
 Each one is text that you write in full in your reply, and then you ask the next question.
 The user sees only your text, not command output and not this skill.
 A question with no text before it shows the user nothing, so never send one.
@@ -54,42 +54,10 @@ This applies even when the content comes from this skill and needs no command.
 1. Run `glab orbit graph-status --full-path <scope>`.
    If no project in the scope is indexed yet, tell the user, and ask for another scope.
 
-## Step 2: Welcome the user
-
-Do not use your interactive question tool in this step.
-When the tool is available, agents tend to call it without writing the welcome screen first.
-
-1. Write this welcome screen in your reply, in a `text` code block.
-   Fill in each `<value>` from the commands in step 1, and never invent one.
-1. In the same reply, list the four first questions from step 3 as a numbered list, with their descriptions.
-   Then stop and wait for the answer, and answer it as described in step 3.
-
-The welcome screen:
-
-```text
-             .        *         .
-      *          _.-----._            .
-          .    .'    .    '.     *        GitLab Orbit
-   ===========/====( o )====\===========  Software lifecycle context graph
-          *    '.    '    .'      .       for AI agents
-      .          '-.___.-'          *
-             *        .        .
-
-   Status    <status> · Orbit <version>
-   Scope     <scope>
-   Indexed   <indexed> of <total_known> projects
-   Graph     <total> nodes in <types> node types
-   Largest   <type> <count> · <type> <count> · <type> <count>
-```
-
-`<status>` and `<version>` come from `glab orbit status`.
-The rest comes from `graph-status`: `<total>` is the sum of every count, and `<types>` counts the node types above zero.
-`Largest` lists the three largest node types.
-
-## Step 3: Ask a simple first question
+## Step 2: Ask a simple first question
 
 Start with a question that one query answers, about the scope from step 1.
-Step 2 lists these options for the user, with the bold text as the label and the rest as the description:
+Offer these options with your question tool, with the bold text as the label and the rest as the description:
 
 - **Open merge requests and their authors**:
   the open merge requests, newest first, with their titles and authors. A quick check that Orbit sees your project.
@@ -103,12 +71,12 @@ Step 2 lists these options for the user, with the bold text as the label and the
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
 
-- **Ask a bigger question**: go to step 4.
-- **Run it again without Orbit**: go to step 5.
-- **See how GitLab Orbit works**: go to step 6.
-- **Done**: go to step 7.
+- **Ask a bigger question**: go to step 3.
+- **Run it again without Orbit**: go to step 4.
+- **See how GitLab Orbit works**: go to step 5.
+- **Done**: go to step 6.
 
-## Step 4: Ask a bigger question
+## Step 3: Ask a bigger question
 
 Now try a bigger question that takes several queries, such as a workflow from the prompt examples.
 The user can also ask their own question.
@@ -131,12 +99,12 @@ Offer real values from the project as options when you can, such as recent merge
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
 
-- **Ask another question**: go back to step 4.
-- **Run it again without Orbit**: go to step 5.
-- **See how GitLab Orbit works**: go to step 6.
-- **Done**: go to step 7.
+- **Ask another question**: go back to step 3.
+- **Run it again without Orbit**: go to step 4.
+- **See how GitLab Orbit works**: go to step 5.
+- **Done**: go to step 6.
 
-## Step 5: Run it again without Orbit
+## Step 4: Run it again without Orbit
 
 Run the same prompt again, in this session, so that the user sees each call.
 
@@ -164,9 +132,9 @@ Keep it to the table. Do not say which run is better.
 
 Then ask the user what to do next. Offer these options:
 
-- **Ask another question**: go to step 4.
-- **See how GitLab Orbit works**: go to step 6.
-- **Done**: go to step 7.
+- **Ask another question**: go to step 3.
+- **See how GitLab Orbit works**: go to step 5.
+- **Done**: go to step 6.
 
 ### Count tool calls and tokens
 
@@ -208,7 +176,7 @@ EOF
 
 API requests are the `glab orbit query` and `glab api` calls, and any other call to the GitLab instance.
 
-## Step 6: See how GitLab Orbit works
+## Step 5: See how GitLab Orbit works
 
 Show all five parts below in one reply.
 
@@ -221,8 +189,8 @@ Show all five parts below in one reply.
 1. Then write all five parts in your reply, in order.
    Each part has its explanation, its diagram in a `text` code block, and its **Read more** link.
 1. Then ask the user what to do next. Offer these options:
-   - **Ask a question**: go to step 4.
-   - **Done**: go to step 7.
+   - **Ask a question**: go to step 3.
+   - **Done**: go to step 6.
 
 ### Part 1: From GitLab data to answers
 
@@ -290,7 +258,7 @@ Read more: <https://docs.gitlab.com/orbit/remote/schema/>
 
 Draw the nodes and edges that the last query used. Under the diagram, match each part of the query to it, in one line each.
 Then count the hops, and say that each hop without Orbit is at least one REST API call.
-If the user has not asked a question yet, use the first question in step 3 as the example.
+If the user has not asked a question yet, use the first question in step 2 as the example.
 
 Read more: <https://docs.gitlab.com/orbit/remote/queries/query-language/>
 
@@ -306,10 +274,10 @@ Explain, in a short list:
 
 Read more: <https://docs.gitlab.com/orbit/remote/security/>
 
-## Step 7: Offer next steps
+## Step 6: Offer next steps
 
 Ask the user what to do next. Offer these options:
 
-- Ask another question: go back to step 4.
+- Ask another question: go back to step 3.
 - Set up Orbit for every session: run `glab orbit setup`.
 - See more prompts: <https://docs.gitlab.com/orbit/remote/cookbook/>.
