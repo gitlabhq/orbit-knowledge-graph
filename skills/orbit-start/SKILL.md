@@ -36,15 +36,17 @@ If you have no such tool, print the options as a numbered list, then stop and wa
 
 ## Step 2: Pick a question
 
-Ask the user what they want to see. Offer these options:
+Read the prompt examples at <https://docs.gitlab.com/orbit/prompt-examples/>.
+Offer two to four examples that fit the scope, and use the prompt of the one that the user picks.
+If you cannot read the page, offer these:
 
-- **What a merge request affects**: the callers of the changed code outside the merge request,
+- **Review a merge request with proof**: the callers of the changed code outside the merge request,
   and the projects that import it.
-- **Where a vulnerability is**: which projects a CVE or open critical vulnerabilities affect,
+- **Fix a vulnerability across every affected project**: which projects a CVE affects,
   and whether a fix reached production.
-- **Why a pipeline fails**: whether a failing job also fails on the default branch, and which open
+- **Find out if a failed job is flaky**: whether a failing job also fails on the default branch, and which open
   merge requests it blocks.
-- **What depends on code you want to change**: the subclasses and callers of a class or method.
+- **Change shared code safely**: the subclasses and callers of a class or method.
 
 Then ask only for the inputs that the question needs and that you cannot find yourself.
 For example, ask for a merge request number, a CVE ID, a job name, or a class name.
@@ -68,11 +70,10 @@ Ask which question to compare: one that you already answered, or a new one from 
 
 Answer the question twice, once without Orbit and once with Orbit.
 
-1. Run `date +%s` to note the start time.
-1. If you can start a background subagent, for example with the Agent tool in Claude Code, start the answer without Orbit there.
+1. Note the start time in UTC with `date -u +%Y-%m-%dT%H:%M:%SZ`.
+1. If you can start a background subagent, start the answer without Orbit there.
    Give it the question, the scope, the inputs, and the rules from below.
 1. Answer with Orbit yourself, in this session, so that the user sees each query as it runs.
-   Count your tool calls, and run `date +%s` again when you finish.
 1. If the answer without Orbit is still running, tell the user, and wait for it.
 
 If you cannot start a background subagent, answer with Orbit first, then without Orbit.
@@ -89,14 +90,36 @@ With Orbit:
 - Follow the query rules from the Orbit skill that you loaded in step 1.
 - Run each query with `glab orbit query`.
 
-Each answer reports the answer, the number of tool calls and API requests, and the time.
-It also lists what it could not find, and what it had to guess.
+Each answer reports the answer, and lists what it could not find and what it had to guess.
+Count the tool calls, tokens, and time from the session transcripts, as described in the next section.
+
+### Count tool calls and tokens
+
+Read the counts from the transcripts that your agent writes, not from memory.
+The token counts in them come from the model API, so the counts are the same every time you read them.
+
+- **Claude Code**: the session is `~/.claude/projects/<project>/<session-id>.jsonl`.
+  `<project>` is the working directory, with each character other than a letter or digit replaced by `-`.
+  The newest `.jsonl` file there is the current session.
+  A subagent writes `<session-id>/subagents/agent-<agent-id>.jsonl`.
+  Count the `tool_use` blocks in the `assistant` lines, and add up `message.usage` once for each `message.id`.
+  One message can span several lines.
+- **Codex**: the session is `~/.codex/sessions/<year>/<month>/<day>/rollout-<time>-<id>.jsonl`.
+  Count the `response_item` lines whose `payload.type` ends in `_call`.
+  The tokens are in `payload.info.total_token_usage` of the `event_msg` lines with `payload.type` `token_count`.
+  This total grows during the session, so subtract the last total before the start time.
+- **Other agents**: use the transcript if your agent keeps one with token counts.
+  Otherwise, count your tool calls as you make them, and say that the token counts are not known.
+
+For the answer with Orbit, count only the lines after the start time.
+Take the time from the first and last timestamps that you count.
 
 Show the raw comparison in two tables. First, what each answer cost:
 
 | | Without Orbit | With Orbit |
 |---|---|---|
 | Tool calls and API requests | | |
+| Tokens | | |
 | Time | | |
 
 Then the results, one row for each thing that the question asks about.
@@ -125,4 +148,4 @@ Ask the user what to do next. Offer these options:
 
 - Ask another question: go back to step 2.
 - Set up Orbit for every session: run `glab orbit setup`.
-- See more prompts: <https://docs.gitlab.com/orbit/>.
+- See more prompts: <https://docs.gitlab.com/orbit/prompt-examples/>.

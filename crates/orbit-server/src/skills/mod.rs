@@ -94,7 +94,6 @@ struct SkillCatalog {
 }
 
 impl SkillCatalog {
-    /// Only the orbit skill teaches a query language, so only it has per-frontend files.
     fn load_embedded(frontend: Frontend) -> Result<Self, String> {
         let orbit = load_skill::<SkillAssets>(SKILL_NAME, |path| {
             served_in(path, frontend).then(|| {
@@ -132,8 +131,6 @@ impl SkillCatalog {
     }
 }
 
-/// Loads one embedded skill. `source_for` maps each served path to the embedded file that
-/// holds its content, or returns `None` to leave the path out.
 fn load_skill<A: Embed>(
     name: &str,
     source_for: impl Fn(&str) -> Option<&str>,
