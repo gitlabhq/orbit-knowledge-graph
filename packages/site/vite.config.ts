@@ -17,8 +17,10 @@ function syncSources(): Plugin {
   };
 }
 
-process.env.VITE_ORBIT_VERSION = JSON.parse(readFileSync(join(siteRoot, "../../package.json"), "utf8")).version;
-process.env.VITE_ORBIT_RELEASE = process.env.CI_COMMIT_TAG ?? "";
+const version: string = JSON.parse(readFileSync(join(siteRoot, "../../package.json"), "utf8")).version;
+const onDefaultBranch = process.env.CI_COMMIT_BRANCH !== undefined && process.env.CI_COMMIT_BRANCH === process.env.CI_DEFAULT_BRANCH;
+process.env.VITE_ORBIT_VERSION = version;
+process.env.VITE_ORBIT_RELEASE = process.env.CI_COMMIT_TAG ?? (onDefaultBranch ? `v${version}` : "");
 
 
 export default defineConfig(async () => {
