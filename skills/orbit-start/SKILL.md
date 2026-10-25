@@ -68,7 +68,7 @@ Offer these options with your question tool. Use the bold text as the label, exa
 - **Count the open vulnerabilities by severity**:
   a count for each severity, from critical to info. One query counts them all, with no paging through results.
 - **Find who approved the most merge requests this month**:
-  the top approvers, with a count for each. Useful when you need a reviewer.
+  the top approvers in the last 30 days, with a count for each. Useful when you need a reviewer.
 - **Find every caller of a function you name**:
   each caller, with the file it is in. Shows that Orbit indexes your code, not only merge requests and pipelines.
 
