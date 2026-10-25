@@ -3,7 +3,7 @@ name: orbit-start
 description: Walk a user through their first GitLab Orbit session. Check the setup, then answer a simple first question and a workflow from the prompt examples with Orbit. Offer to run a prompt again without Orbit, and to show how Orbit works. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
 version: 0.1.0
 license: MIT
-compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance. Works best in agents that can ask the user multiple-choice questions.
+compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance.
 metadata:
   audience: developers
   keywords: orbit, knowledge-graph, onboarding, getting-started, glab
@@ -22,21 +22,16 @@ Keep the session short and read-only. Do not create issues, merge requests, comm
 
 ## Ask questions the right way
 
-When this skill asks the user something, use your interactive question tool if you have one, for example
-`AskUserQuestion` in Claude Code. Offer two to four options, and put the recommended option first.
-If you have no such tool, print the options as a numbered list, then stop and wait for the answer.
+Ask every question as a numbered list at the end of your reply, then stop and wait for the answer.
+Do not use an interactive question tool, such as `AskUserQuestion`.
+In Claude Code, the text before that tool is often hidden, so the user sees the options but not the answer.
 
-### Show before you ask
+- Offer two to four options, and put the recommended option first.
+- Write each option as a bold label, then a short description.
+- The user replies with a number, or with their own question.
 
-The user sees only your text, not command output and not this skill.
-Write every answer, summary, and diagram as visible text in your reply, never only in your thinking.
-The user cannot see your thinking, so content that is only there is lost.
-In some clients, text that you write right before your question tool is hidden or lost.
-So when you ask with the question tool:
-
-- Write what the user needs to see first: an answer or a summary.
-- Also put a one-line summary of it in the question text, so the user sees the result even if your text is hidden.
-- Step 5 puts its content in the option previews instead, because the previews are part of the question.
+Write every answer, summary, and diagram as visible text in your reply.
+The user sees only your text, not command output, your thinking, or this skill.
 
 ## Answer with Orbit
 
@@ -61,7 +56,7 @@ So when you ask with the question tool:
 ## Step 2: Ask a simple first question
 
 Start with a question that one query answers, about the scope from step 1.
-Offer these options with your question tool. Use the bold text as the label, exactly as written, and the rest as the description:
+Offer these options. Use the bold labels exactly as written:
 
 - **See the open merge requests and who wrote them**:
   the open merge requests, newest first, with their titles and authors. A quick check that Orbit sees your project.
@@ -182,8 +177,7 @@ API requests are the `glab orbit query` and `glab api` calls, and any other call
 
 ## Step 5: See how GitLab Orbit works
 
-Show the five parts below inside your question tool, in the option previews.
-Content in a preview is part of the question, so the user sees it even when text before the question is hidden.
+Show all five parts below in one reply.
 
 1. First, run one command to get the data:
 
@@ -191,15 +185,11 @@ Content in a preview is part of the question, so the user sees it even when text
    glab orbit graph-status --full-path <scope>; glab orbit ontology Project MergeRequest Pipeline Job Vulnerability File Definition User
    ```
 
-1. Write the five parts as one Markdown text, in order.
+1. Write all five parts in your reply, in order.
    Each part has a heading, its diagram in a `text` code block, its explanation, and its **Read more** link.
-   Keep every line under 60 characters, so that it fits the preview panel.
-1. Ask with your question tool. Use the question "How GitLab Orbit works is in the panel. What next?"
-   Offer these two options, and set the full Markdown text as the `preview` of both, so it shows whichever option is selected:
+1. Then ask the user what to do next. Offer these options:
    - **Ask a question**: go to step 3.
    - **Done**: go to step 6.
-
-   If you have no question tool, or it has no previews, write the five parts as text instead, then list the options.
 
 ### Part 1: From GitLab data to answers
 
