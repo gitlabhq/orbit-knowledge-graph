@@ -1,0 +1,141 @@
+cases:
+  - name: invalid_calendar_date_rejected
+    description: A month or day outside the calendar is rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "filters": {"created_at": {"gte": "2024-13-45"}}}]}
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at >= '2024-02-30' RETURN n
+    expect:
+      compile_error: is not a valid date
+
+  - name: non_leap_day_rejected
+    description: February 29 is rejected outside a leap year
+    query:
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at >= date('2023-02-29') RETURN n
+    expect:
+      compile_error: is not a valid date
+
+  - name: invalid_time_rejected
+    description: An hour outside the day, or a time without seconds, is rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "filters": {"created_at": {"gte": "2024-01-15T25:00:00Z"}}}]}
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at >= '2024-01-15T10:30' RETURN n
+    expect:
+      compile_error: is not a valid date
+
+  - name: offset_rejected
+    description: A time with a UTC offset is rejected; send UTC with Z instead
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "filters": {"created_at": {"gte": "2024-01-15T12:30:00+02:00"}}}]}
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at >= datetime('2024-01-15T12:30:00+02:00') RETURN n
+    expect:
+      compile_error: is not a valid date
+
+  - name: free_text_rejected
+    description: Words and unix seconds are not dates
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "filters": {"created_at": {"in": ["2024-01-15", "yesterday"]}}}]}
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at >= '1705314600' RETURN n
+    expect:
+      compile_error: is not a valid date
+
+  - name: temporal_literal_on_text_rejected
+    description: datetime() and date() compare only with date fields
+    query:
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.note = datetime('2024-01-15T10:30:00Z') RETURN n
+    expect:
+      compile_error: datetime() and date() compare only with date fields
+
+  - name: temporal_literal_on_integer_rejected
+    description: date() is rejected against an integer field
+    query:
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.noteable_id > date('2024-01-15') RETURN n
+    expect:
+      compile_error: datetime() and date() compare only with date fields
+
+  - name: temporal_literal_in_property_map_rejected
+    description: A property map cannot compare a text field with date()
+    query:
+      gql: |
+        MATCH (n:Note {id: 3000, note: date('2024-01-15')}) RETURN n
+    expect:
+      compile_error: datetime() and date() compare only with date fields
+
+  - name: date_only_bound_matches
+    description: A date-only bound compares at midnight UTC, with or without a trailing Z
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "filters": {"created_at": [{"gte": "2024-01-15"}, {"lt": "2024-01-16Z"}]}}]}
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at >= date('2024-01-15') AND n.created_at < '2024-01-16Z' RETURN n
+    expect:
+      node_count: 1
+      nodes:
+        Note:
+          ids: [3000]
+          filters:
+            created_at: { gte: "2024-01-15T00:00:00Z", lt: "2024-01-16T00:00:00Z" }
+
+  - name: exact_timestamp_formats_match
+    description: The T, space, and trailing Z forms all match the same UTC timestamp
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "filters": {"created_at": [{"eq": "2024-01-15T10:30:00Z"}, {"eq": "2024-01-15 10:30:00"}, {"eq": "2024-01-15T10:30:00"}]}}]}
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at = datetime('2024-01-15T10:30:00Z') AND n.created_at = '2024-01-15 10:30:00' AND n.created_at = '2024-01-15T10:30:00' RETURN n
+    expect:
+      node_count: 1
+      nodes:
+        Note:
+          ids: [3000]
+          filters:
+            created_at: { eq: "2024-01-15T10:30:00Z" }
+
+  - name: fractional_seconds_match
+    description: Fractional seconds up to microseconds bound the timestamp precisely
+    query:
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at > '2024-01-15T10:29:59.999999Z' AND n.created_at < '2024-01-15 10:30:00.5' RETURN n
+    expect:
+      node_count: 1
+      nodes:
+        Note:
+          ids: [3000]
+          filters:
+            created_at: { eq: "2024-01-15T10:30:00Z" }
+
+  - name: nanosecond_fraction_executes
+    description: A nine-digit fraction is accepted and runs in ClickHouse
+    query:
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at > '2024-01-15T10:29:59.123456789Z' RETURN n
+    expect:
+      node_count: 1
+      nodes:
+        Note:
+          ids: [3000]
+          filters:
+            created_at: { gt: "2024-01-15T10:29:59Z" }
+
+  - name: later_bound_excludes_the_row
+    description: A valid bound after the timestamp returns nothing
+    query:
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at > datetime('2024-01-15T10:30:00Z') RETURN n
+    expect:
+      node_count: 0
+      nodes:
+        Note:
+          ids: []
+          filters:
+            created_at: { gt: "2024-01-15T10:30:00Z" }

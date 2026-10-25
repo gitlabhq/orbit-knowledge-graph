@@ -341,90 +341,245 @@ mod tests {
         );
     }
 
-    #[test]
-    fn user_queries_cannot_reference_traversal_path() {
-        let ctx = SecurityContext::new(1, vec!["1/100/".to_string()]).expect("valid context");
-        let queries = [
-            (
-                Frontend::JsonDsl,
-                r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"traversal_path": {"starts_with": "1/100/"}}}]}"#,
-            ),
-            (
-                Frontend::JsonDsl,
-                r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "not": {"traversal_path": "1/100/200/"}}]}"#,
-            ),
-            (
-                Frontend::JsonDsl,
-                r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "p", "entity": "Project"}], "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "filters": {"traversal_path": "1/100/"}}]}"#,
-            ),
-            (
-                Frontend::Gql,
-                "MATCH (p:Project) WHERE p.traversal_path = '1/100/' RETURN p",
-            ),
-            (
-                Frontend::Gql,
-                "MATCH (p:Project) WHERE p.traversal_path STARTS WITH '1/100/' RETURN p",
-            ),
-            (
-                Frontend::Gql,
-                "MATCH (p:Project) WHERE p.traversal_path IN ['1/100/'] RETURN p",
-            ),
-            (
-                Frontend::Gql,
-                "MATCH (p:Project {traversal_path: '1/100/'}) RETURN p",
-            ),
-            (
-                Frontend::Gql,
-                "MATCH (p:Project {id: 1}) WHERE NOT p.traversal_path STARTS WITH '1/100/200/' RETURN p",
-            ),
-            (
-                Frontend::Gql,
-                "MATCH (u:User {id: 1})-[r:MEMBER_OF]->(p:Project) WHERE r.traversal_path = '1/100/' RETURN p",
-            ),
-            (
-                Frontend::Gql,
-                "MATCH (u:User {id: 1})-[:MEMBER_OF {traversal_path: '1/100/'}]->(p:Project) RETURN p",
-            ),
-            (
-                Frontend::JsonDsl,
-                r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name", "traversal_path"]}]}"#,
-            ),
-            (
-                Frontend::JsonDsl,
-                r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}], "order_by": "p.traversal_path"}"#,
-            ),
-            (
-                Frontend::JsonDsl,
-                r#"{"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}], "aggregations": [{"count": "p.traversal_path", "as": "n"}]}"#,
-            ),
-            (
-                Frontend::Gql,
-                "MATCH (p:Project {id: 1}) RETURN p.name, p.traversal_path",
-            ),
-            (
-                Frontend::Gql,
-                "MATCH (p:Project {id: 1}) RETURN p{.name, .traversal_path}",
-            ),
-            (
-                Frontend::Gql,
-                "MATCH (p:Project {id: 1}) RETURN p ORDER BY p.traversal_path",
-            ),
-            (
-                Frontend::Gql,
-                "MATCH (p:Project {id: 1}) RETURN count(p.traversal_path) AS n",
-            ),
-            (
-                Frontend::Gql,
-                "MATCH (p:Project {id: 1}) WHERE p.full_path = p.traversal_path RETURN p",
-            ),
-        ];
-        for (frontend, query) in queries {
-            let err = compile(query, frontend, &ONTOLOGY, &ctx).expect_err(query);
+    const HIDDEN_FIELD_QUERIES: &[(Frontend, &str)] = &[
+        (
+            Frontend::JsonDsl,
+            r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "{A}", "node_ids": [1], "columns": ["id", "traversal_path"]}]}"#,
+        ),
+        (
+            Frontend::JsonDsl,
+            r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "{A}", "node_ids": [1]}], "order_by": "a.traversal_path"}"#,
+        ),
+        (
+            Frontend::JsonDsl,
+            r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "{A}", "node_ids": [1], "id_property": "traversal_path"}]}"#,
+        ),
+        (
+            Frontend::JsonDsl,
+            r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "{A}", "filters": {"traversal_path": {"starts_with": "1/100/"}}}]}"#,
+        ),
+        (
+            Frontend::JsonDsl,
+            r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "{A}", "filters": {"traversal_path": {"in": ["1/100/"]}}}]}"#,
+        ),
+        (
+            Frontend::JsonDsl,
+            r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "{A}", "node_ids": [1], "not": {"traversal_path": "1/100/200/"}}]}"#,
+        ),
+        (
+            Frontend::JsonDsl,
+            r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "{A}", "node_ids": [1], "not": {"traversal_path": {"is_null": true}}}]}"#,
+        ),
+        (
+            Frontend::JsonDsl,
+            r#"{"query_type": "aggregation", "nodes": [{"id": "a", "entity": "{A}", "node_ids": [1]}], "aggregations": [{"count": "a.traversal_path", "as": "n"}]}"#,
+        ),
+        (
+            Frontend::JsonDsl,
+            r#"{"query_type": "aggregation", "nodes": [{"id": "a", "entity": "{A}", "node_ids": [1]}, {"id": "b", "entity": "{B}"}], "relationships": [{"type": "{REL}", "from": "a", "to": "b"}], "group_by": ["a.traversal_path"], "aggregations": [{"count": "b", "as": "n"}]}"#,
+        ),
+        (
+            Frontend::JsonDsl,
+            r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "{A}", "node_ids": [1]}, {"id": "b", "entity": "{B}"}], "relationships": [{"type": "{REL}", "from": "a", "to": "b", "filters": {"traversal_path": "1/100/"}}]}"#,
+        ),
+        (
+            Frontend::JsonDsl,
+            r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "{A}", "node_ids": [1]}, {"id": "b", "entity": "{B}"}], "relationships": [{"type": "{REL}", "from": "a", "to": "b", "filters": {"traversal_path": {"in": ["1/100/"]}}}]}"#,
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1}) RETURN a.id, a.traversal_path",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1}) RETURN a{.id, .traversal_path}",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1}) RETURN a ORDER BY a.traversal_path",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1}) RETURN count(a.traversal_path) AS n",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1})-[:{REL}]->(b:{B}) RETURN a.traversal_path AS path, count(b) AS n",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A}) WHERE a.traversal_path = '1/100/' RETURN a",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A}) WHERE a.traversal_path STARTS WITH '1/100/' RETURN a",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A}) WHERE a.traversal_path IN ['1/100/'] RETURN a",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A}) WHERE a.traversal_path IS NOT NULL RETURN a",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {traversal_path: '1/100/'}) RETURN a",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1}) WHERE NOT a.traversal_path STARTS WITH '1/100/200/' RETURN a",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1}) WHERE NOT NOT a.traversal_path STARTS WITH '2/' RETURN a",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1}) WHERE NOT (a.traversal_path STARTS WITH '1/100/' AND a.id = 2) RETURN a",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1}) WHERE a.id = a.traversal_path RETURN a",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1})-[:{REL}]->(b:{B}) WHERE a.traversal_path = b.traversal_path RETURN b",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1})-[r:{REL}]->(b:{B}) WHERE r.traversal_path = '1/100/' RETURN b",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1})-[r:{REL}]->(b:{B}) WHERE NOT r.traversal_path = '1/100/' RETURN b",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A} {id: 1})-[:{REL} {traversal_path: '1/100/'}]->(b:{B}) RETURN b",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH p = ANY SHORTEST (a:{A} {id: 1})-[:{REL}*1..2]->(b:{B}) WHERE b.traversal_path STARTS WITH '1/100/' RETURN p",
+        ),
+        (
+            Frontend::Gql,
+            "MATCH (a:{A})-[]-(x) WHERE a.traversal_path = '1/100/' RETURN x",
+        ),
+    ];
+
+    const HIDDEN_FIELD_CONTROL: &str =
+        "MATCH (a:{A} {id: 1})-[r:{REL}]->(b:{B}) WHERE b.id >= 1 RETURN a, b ORDER BY b.id";
+
+    fn with_entities(template: &str, (a, relationship, b): (&str, &str, &str)) -> String {
+        template
+            .replace("{A}", a)
+            .replace("{B}", b)
+            .replace("{REL}", relationship)
+    }
+
+    fn assert_hidden_fields_rejected(
+        entities: (&str, &str, &str),
+        compile_with: impl Fn(&str, Frontend) -> Result<CompiledQueryContext>,
+    ) {
+        let control = with_entities(HIDDEN_FIELD_CONTROL, entities);
+        compile_with(&control, Frontend::Gql).unwrap_or_else(|error| panic!("{control}: {error}"));
+        for (frontend, template) in HIDDEN_FIELD_QUERIES {
+            let query = with_entities(template, entities);
+            let error = compile_with(&query, *frontend).expect_err(&query);
+            let message = error.to_string();
             assert!(
-                err.is_client_safe() && err.to_string().contains("traversal_path"),
-                "{query} should be rejected with a client-safe traversal_path error, got: {err:?}"
+                error.is_client_safe()
+                    && message.contains("traversal_path")
+                    && !message.contains("1/100/"),
+                "{query} should be rejected with a client-safe error that names the field and no path, got: {error:?}"
             );
         }
+    }
+
+    #[test]
+    fn user_queries_cannot_reference_hidden_fields() {
+        let ctx = SecurityContext::new(1, vec!["1/100/".to_string()]).expect("valid context");
+        assert_hidden_fields_rejected(("Group", "CONTAINS", "Project"), |query, frontend| {
+            compile(query, frontend, &ONTOLOGY, &ctx)
+        });
+        let global = "MATCH (u:User) WHERE u.traversal_path = '1/100/' RETURN u";
+        let error = compile(global, Frontend::Gql, &ONTOLOGY, &ctx).expect_err(global);
+        assert!(error.to_string().contains("does not exist"), "{error}");
+    }
+
+    #[test]
+    fn local_queries_cannot_reference_hidden_fields() {
+        assert_hidden_fields_rejected(("Directory", "CONTAINS", "File"), |query, frontend| {
+            compile_local(query, frontend, &ONTOLOGY)
+        });
+    }
+
+    #[test]
+    fn default_and_wildcard_columns_leave_out_hidden_fields() {
+        let queries = [
+            (Frontend::Gql, "MATCH (a:{A} {id: 1}) RETURN a"),
+            (Frontend::Gql, "MATCH (a:{A} {id: 1}) RETURN properties(a)"),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "{A}", "node_ids": [1], "columns": "*"}]}"#,
+            ),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "{A}", "node_ids": [1]}]}"#,
+            ),
+        ];
+        for (frontend, template) in queries {
+            for (query, compiled) in [
+                {
+                    let query = with_entities(template, ("Project", "CONTAINS", "Project"));
+                    let compiled = compile(&query, frontend, &ONTOLOGY, &security_ctx());
+                    (query, compiled)
+                },
+                {
+                    let query = with_entities(template, ("File", "CONTAINS", "File"));
+                    let compiled = compile_local(&query, frontend, &ONTOLOGY);
+                    (query, compiled)
+                },
+            ] {
+                let compiled = compiled.unwrap_or_else(|error| panic!("{query}: {error}"));
+                let columns = compiled.input.nodes[0].columns.clone();
+                assert!(
+                    matches!(&columns, Some(ColumnSelection::List(list)) if !list.is_empty() && !list.iter().any(|c| c == "traversal_path")),
+                    "{query} must select visible columns only, got {columns:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn role_floor_rejection_is_an_observable_authorization_error() {
+        use std::sync::atomic::Ordering;
+        let reporter = SecurityContext::new_with_roles(
+            1,
+            vec![AuthorizedPath::new("1/100/", DEFAULT_PATH_ACCESS_LEVEL)],
+        )
+        .expect("valid context");
+        let query = "MATCH (v:Vulnerability {id: 1}) RETURN v";
+        let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
+        let error = compile(query, Frontend::Gql, &ONTOLOGY, &reporter).expect_err(query);
+        let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
+        assert!(
+            matches!(error, crate::error::QueryError::Authorization(_)) && error.is_client_safe(),
+            "{error:?}"
+        );
+        assert_eq!(
+            error.rejection_reason(),
+            crate::error::RejectionReason::Authorization
+        );
+        assert!(
+            error.to_string().contains("requires access level 25"),
+            "{error}"
+        );
+        assert!(
+            after > before,
+            "count_err must run on authorization rejections"
+        );
     }
 
     #[test]
@@ -1569,8 +1724,20 @@ mod tests {
                     "MATCH p = ANY SHORTEST (a:Project {id: 1})-[*1..3]->(b:Project {id: 2}) RETURN p",
                 ),
                 (
+                    Frontend::Gql,
+                    "MATCH p = ANY SHORTEST (a:Project {id: 1})-[r*1..2]->(b:Project {id: 2}) RETURN p",
+                ),
+                (
                     Frontend::JsonDsl,
                     r#"{"query_type": "path_finding", "nodes": [{"id": "a", "entity": "Project", "node_ids": [1]}, {"id": "b", "entity": "Project", "node_ids": [2]}], "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3, "rel_types": ["*"]}}"#,
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH p = ANY SHORTEST (u:User {id: 1})-[r*1]->(g:Group {id: 100}) WHERE NOT type(r) = 'CONTAINS' RETURN p",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH p = ANY SHORTEST (u:User {id: 1})-[r*1]->(g:Group {id: 100}) WHERE type(r) <> 'CONTAINS' RETURN p",
                 ),
             ],
             "shortest paths require named relationship types",
@@ -1578,9 +1745,26 @@ mod tests {
         assert_rejected(
             &[(
                 Frontend::Gql,
-                "MATCH p = ANY SHORTEST (u:User {id: 1})-[r*1]->(g:Group {id: 100}) WHERE NOT type(r) = 'CONTAINS' RETURN p",
+                "MATCH p = shortestPath((a:Group {id: 1})-[*1..3]->(b:Project {id: 2})) RETURN p",
             )],
-            "shortest paths require named relationship types",
+            "-[:CONTAINS*1..3]->",
+        );
+        assert_rejected(
+            &[
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "path_finding", "nodes": [{"id": "a", "entity": "Group", "node_ids": [1]}, {"id": "b", "entity": "Project", "node_ids": [2]}], "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3, "rel_types": ["*", "CONTAINS"]}}"#,
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "Group", "node_ids": [1]}, {"id": "b", "entity": "Project"}], "relationships": [{"type": ["CONTAINS", "*"], "from": "a", "to": "b"}]}"#,
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "neighbors", "nodes": [{"id": "a", "entity": "Group", "node_ids": [1]}], "neighbors": {"direction": "outgoing", "rel_types": ["*", "CONTAINS"]}}"#,
+                ),
+            ],
+            "cannot be combined with named types",
         );
         assert_compiles(&[
             (
@@ -1589,8 +1773,25 @@ mod tests {
             ),
             (
                 Frontend::Gql,
+                "MATCH p = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(b:Project {id: 2}) RETURN p",
+            ),
+            (
+                Frontend::Gql,
                 "MATCH p = ANY SHORTEST (u:User {id: 1})-[r*1]->(g:Group {id: 100}) WHERE type(r) = 'MEMBER_OF' RETURN p",
             ),
+            (
+                Frontend::Gql,
+                "MATCH p = ANY SHORTEST (u:User {id: 1})-[r*1]->(g:Group {id: 100}) WHERE type(r) IN ['MEMBER_OF', 'CONTAINS'] RETURN p",
+            ),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "path_finding", "nodes": [{"id": "a", "entity": "Group", "node_ids": [1]}, {"id": "b", "entity": "Project", "node_ids": [2]}], "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3, "rel_types": ["CONTAINS"]}}"#,
+            ),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "traversal", "nodes": [{"id": "a", "entity": "Group", "node_ids": [1]}, {"id": "b", "entity": "Project"}], "relationships": [{"type": "*", "from": "a", "to": "b"}]}"#,
+            ),
+            (Frontend::Gql, "MATCH (g:Group {id: 1})-[]-(x) RETURN x"),
         ]);
     }
 
@@ -1607,31 +1808,89 @@ mod tests {
                     "MATCH (m:MergeRequest {id: 1}) WHERE m.state >= 'merged' RETURN m",
                 ),
                 (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.state < 'opened' RETURN m",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.state <= 3 RETURN m",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE NOT m.state > 1 RETURN m",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (u:User {id: 1}) WHERE u.state > 'active' RETURN u",
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "traversal", "nodes": [{"id": "m", "entity": "MergeRequest", "node_ids": [1], "filters": {"state": {"gt": 1}}}]}"#,
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "traversal", "nodes": [{"id": "m", "entity": "MergeRequest", "node_ids": [1], "filters": {"state": {"gte": "merged"}}}]}"#,
+                ),
+                (
                     Frontend::JsonDsl,
                     r#"{"query_type": "traversal", "nodes": [{"id": "m", "entity": "MergeRequest", "node_ids": [1], "filters": {"state": {"lt": "opened"}}}]}"#,
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "traversal", "nodes": [{"id": "m", "entity": "MergeRequest", "node_ids": [1], "filters": {"state": {"lte": 3}}}]}"#,
                 ),
             ],
             "enum values have no order",
         );
         assert_rejected(
-            &[(
-                Frontend::Gql,
-                "MATCH (p:Project {id: 1})<-[:IN_PROJECT]-(m:MergeRequest) RETURN p, min(m.state) AS s",
-            )],
+            &[
+                (
+                    Frontend::Gql,
+                    "MATCH (p:Project {id: 1})<-[:IN_PROJECT]-(m:MergeRequest) RETURN p, min(m.state) AS s",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (p:Project {id: 1})<-[:IN_PROJECT]-(m:MergeRequest) RETURN p, max(m.state) AS s",
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}, {"id": "m", "entity": "MergeRequest"}], "relationships": [{"type": "IN_PROJECT", "from": "m", "to": "p"}], "group_by": ["p"], "aggregations": [{"min": "m.state", "as": "s"}]}"#,
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}, {"id": "m", "entity": "MergeRequest"}], "relationships": [{"type": "IN_PROJECT", "from": "m", "to": "p"}], "group_by": ["p"], "aggregations": [{"max": "m.state", "as": "s"}]}"#,
+                ),
+            ],
             "because enum values have no order",
         );
         assert_rejected(
-            &[(
-                Frontend::Gql,
-                "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project) WHERE g.visibility_level < p.visibility_level RETURN p",
-            )],
+            &[
+                (
+                    Frontend::Gql,
+                    "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project) WHERE g.visibility_level < p.visibility_level RETURN p",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project) WHERE g.visibility_level >= p.visibility_level RETURN p",
+                ),
+            ],
             "not <, >, <=, or >=",
         );
         assert_rejected(
-            &[(
-                Frontend::Gql,
-                "MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) WHERE u.user_type = p.visibility_level RETURN p",
-            )],
+            &[
+                (
+                    Frontend::Gql,
+                    "MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) WHERE u.user_type = p.visibility_level RETURN p",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) WHERE u.user_type <> p.visibility_level RETURN p",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) WHERE u.state = p.visibility_level RETURN p",
+                ),
+            ],
             "enums with different values",
         );
         assert_compiles(&[
@@ -1641,34 +1900,96 @@ mod tests {
             ),
             (
                 Frontend::Gql,
+                "MATCH (m:MergeRequest {id: 1}) WHERE m.state = 3 AND m.state <> 'opened' RETURN m",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (u:User {id: 1}) WHERE u.state = 'active' RETURN u ORDER BY u.state DESC",
+            ),
+            (
+                Frontend::Gql,
                 "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project) WHERE g.visibility_level = p.visibility_level RETURN p",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (g:Group {id: 1})-[:CONTAINS]->(p:Project) WHERE g.visibility_level <> p.visibility_level RETURN p",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (p:Project {id: 1})<-[:IN_PROJECT]-(m:MergeRequest) RETURN p, m.state AS state, count(m) AS n, count(m.state) AS with_state",
+            ),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "traversal", "nodes": [{"id": "m", "entity": "MergeRequest", "node_ids": [1], "filters": {"state": {"in": [1, "merged"]}}}], "order_by": "m.state"}"#,
             ),
         ]);
     }
 
     #[test]
     fn date_filters_take_only_valid_dates() {
+        let filter_on = |field: &str, value: &str| {
+            format!("MATCH (w:WorkItem {{id: 1}}) WHERE w.{field} >= '{value}' RETURN w")
+        };
+        let invalid = [
+            "not-a-date",
+            "",
+            "2024-13-45",
+            "2024-06-31",
+            "2023-02-29",
+            "2024-06-10T25:00:00",
+            "2024-06-10T10:00",
+            "2024-06-10T10:00:00+02:00",
+            "2024-06-10t10:00:00z",
+            " 2024-06-10",
+            "2024-06-10 garbage",
+            "0.0",
+            "-86400",
+            "1718000000",
+        ];
+        let valid = [
+            "2024-06-10",
+            "2024-02-29",
+            "2024-06-10Z",
+            "2024-06-10T10:00:00",
+            "2024-06-10T10:00:00Z",
+            "2024-06-10 10:00:00",
+            "2024-06-10T10:00:00.123456Z",
+            "2024-06-10 10:00:00.5",
+        ];
+        for field in ["created_at", "due_date"] {
+            let rejected: Vec<_> = invalid
+                .iter()
+                .map(|value| filter_on(field, value))
+                .collect();
+            let rejected: Vec<_> = rejected
+                .iter()
+                .map(|query| (Frontend::Gql, query.as_str()))
+                .collect();
+            assert_rejected(&rejected, "is not a valid date");
+            let accepted: Vec<_> = valid.iter().map(|value| filter_on(field, value)).collect();
+            let accepted: Vec<_> = accepted
+                .iter()
+                .map(|query| (Frontend::Gql, query.as_str()))
+                .collect();
+            assert_compiles(&accepted);
+        }
         assert_rejected(
             &[
                 (
                     Frontend::Gql,
-                    "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at >= datetime('not-a-date') RETURN m",
+                    "MATCH (w:WorkItem {id: 1}) WHERE w.created_at >= datetime('not-a-date') RETURN w",
                 ),
                 (
                     Frontend::Gql,
-                    "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at >= '2024-13-45' RETURN m",
-                ),
-                (
-                    Frontend::Gql,
-                    "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at < date('2023-02-29') RETURN m",
-                ),
-                (
-                    Frontend::Gql,
-                    "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at < '2024-06-10T10:00:00+02:00' RETURN m",
+                    "MATCH (w:WorkItem {id: 1}) WHERE w.due_date IN [date('2024-06-10'), date('2024-06-31')] RETURN w",
                 ),
                 (
                     Frontend::JsonDsl,
-                    r#"{"query_type": "traversal", "nodes": [{"id": "m", "entity": "MergeRequest", "node_ids": [1], "filters": {"created_at": {"in": ["2024-06-10", "yesterday"]}}}]}"#,
+                    r#"{"query_type": "traversal", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [1], "filters": {"created_at": {"in": ["2024-06-10", "yesterday"]}}}]}"#,
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "traversal", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [1], "filters": {"due_date": "2024-06-10T10:00:00+02:00"}}]}"#,
                 ),
             ],
             "is not a valid date",
@@ -1683,21 +2004,41 @@ mod tests {
                     Frontend::Gql,
                     "MATCH (m:MergeRequest {id: 1, title: date('2024-01-01')}) RETURN m",
                 ),
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.title IN [datetime('2024-01-01')] RETURN m",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.state = date('2024-01-01') RETURN m",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (w:WorkItem {id: 1}) WHERE w.weight > date('2024-01-01') RETURN w",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.draft = datetime('2024-01-01') RETURN m",
+                ),
             ],
             "datetime() and date() compare only with date fields",
         );
         assert_compiles(&[
             (
                 Frontend::Gql,
-                "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at >= '2024-06-10' AND m.created_at < datetime('2024-06-11T00:00:00Z') RETURN m",
+                "MATCH (w:WorkItem {id: 1}) WHERE w.created_at >= date('2024-06-10') AND w.created_at < datetime('2024-06-11T00:00:00Z') RETURN w",
             ),
             (
                 Frontend::Gql,
-                "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at < '2024-06-10 12:30:45.123456' RETURN m",
+                "MATCH (w:WorkItem {id: 1}) WHERE w.due_date IN [date('2024-06-10'), datetime('2024-06-11T00:00:00')] RETURN w",
             ),
             (
                 Frontend::Gql,
-                "MATCH (m:MergeRequest {id: 1}) WHERE m.created_at < date('2024-02-29') RETURN m",
+                "MATCH (w:WorkItem {id: 1, due_date: date('2024-06-10')}) RETURN w",
+            ),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "traversal", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [1], "filters": {"created_at": [{"gte": "2024-06-10"}, {"lt": "2024-06-11T00:00:00Z"}]}}]}"#,
             ),
         ]);
     }
@@ -1708,7 +2049,19 @@ mod tests {
             &[
                 (
                     Frontend::Gql,
+                    "MATCH (n:Note) WHERE n.noteable_id = 9223372036854775808 RETURN n",
+                ),
+                (
+                    Frontend::Gql,
                     "MATCH (n:Note) WHERE n.noteable_id = 18446744073709551615 RETURN n",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (n:Note) WHERE n.noteable_id = -9223372036854775809 RETURN n",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (n:Note) WHERE n.noteable_id = 0x8000000000000000 RETURN n",
                 ),
                 (
                     Frontend::Gql,
@@ -1716,11 +2069,35 @@ mod tests {
                 ),
                 (
                     Frontend::Gql,
+                    "MATCH (n:Note) WHERE n.noteable_id = -0x8000000000000001 RETURN n",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (n:Note) WHERE n.noteable_id = 0o1777777777777777777777 RETURN n",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (n:Note) WHERE n.noteable_id IN [1, 9223372036854775808] RETURN n",
+                ),
+                (
+                    Frontend::Gql,
                     "MATCH (n:Note {id: 9223372036854775808}) RETURN n",
+                ),
+                (
+                    Frontend::Gql,
+                    "MATCH (m:MergeRequest {id: 1}) WHERE m.state = 18446744073709551615 RETURN m",
                 ),
                 (
                     Frontend::JsonDsl,
                     r#"{"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 9223372036854775808}}]}"#,
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": {"in": [1, 18446744073709551615]}}}]}"#,
+                ),
+                (
+                    Frontend::JsonDsl,
+                    r#"{"query_type": "traversal", "nodes": [{"id": "m", "entity": "MergeRequest", "node_ids": [1], "filters": {"state": 18446744073709551615}}]}"#,
                 ),
             ],
             "out of range for a signed 64-bit integer",
@@ -1732,7 +2109,23 @@ mod tests {
             ),
             (
                 Frontend::Gql,
+                "MATCH (n:Note) WHERE n.noteable_id = -9223372036854775808 RETURN n",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (n:Note) WHERE n.noteable_id = 0x7FFFFFFFFFFFFFFF RETURN n",
+            ),
+            (
+                Frontend::Gql,
                 "MATCH (n:Note) WHERE n.noteable_id = -0x8000000000000000 RETURN n",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (n:Note) WHERE n.noteable_id IN [1, 9223372036854775807] RETURN n",
+            ),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": {"in": [-9223372036854775808, 9223372036854775807]}}}]}"#,
             ),
         ]);
     }
