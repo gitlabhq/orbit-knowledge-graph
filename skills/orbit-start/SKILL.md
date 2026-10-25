@@ -188,6 +188,7 @@ Walk the user through the five parts below, one part for each reply.
 
    Do not run other commands in this step, so that each later part shows at once.
 1. For each part, write it in your reply: a heading, its diagram in a `text` code block, its explanation, and its **Read more** link.
+   Keep to the points that the part lists, and do not add other figures or ratios.
 1. End each reply with these options:
    - **Next: <title of the next part>**: show the next part. Leave this out after the last part.
    - **Ask a question**: go to step 3.
