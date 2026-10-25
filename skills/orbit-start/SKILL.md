@@ -202,6 +202,9 @@ API requests are the `glab orbit query` and `glab api` calls, and any other call
 ## Step 6: See how GitLab Orbit works
 
 Walk the user through five short parts, one at a time. Each part uses text diagrams in `text` code blocks.
+Do not run new commands in this step, so that each part shows at once.
+Use this skill, the `graph-status` output from step 1, and the last query.
+End each part with its **Read more** link.
 Write each part in your reply, then ask the user what to do next. Offer these options:
 
 - **Next: <title of the next part>**: show the next part. Leave this out after the last part.
@@ -230,12 +233,15 @@ Then explain, in a short list:
 - A new merge request, work item, or pipeline is in the graph within minutes.
 - Code comes from the default branch. Orbit indexes it again when the default branch changes.
   For code you have not merged, the local graph indexes a clone on your machine with `glab orbit index`.
+  See <https://docs.gitlab.com/orbit/cli/#local-graph>.
 - One query can follow many edges, for example from a merge request to the changed code, and on to its callers.
   Without Orbit, each of those hops is at least one REST API call.
 
+Read more: <https://docs.gitlab.com/orbit/how-it-works/>
+
 ### Part 2: What is in your graph
 
-Run `glab orbit graph-status --full-path <scope>`. Draw the node counts as a bar chart, grouped by domain.
+Use the `graph-status` output from step 1. Draw the node counts as a bar chart, grouped by domain.
 Show the eight largest node types, and scale the bars to the largest count. For example:
 
 ```text
@@ -246,24 +252,33 @@ ci            Pipeline      #                          25,000
 
 Then say how many projects in the scope are indexed, and name any domain with no data.
 
+Read more: <https://docs.gitlab.com/orbit/dashboard/>
+
 ### Part 3: How the graph connects
 
-Run `glab orbit ontology Project MergeRequest Pipeline Job Vulnerability File Definition User`.
-Draw these nodes, and only the edges that the ontology lists between them.
-Keep one edge for each pair of nodes, the one most users would ask about, so the diagram stays readable. For example:
+Show this diagram of some of the main node types and the edges between them:
 
 ```text
 (User) --AUTHORED--> (MergeRequest) --IN_PROJECT--> (Project)
-(Definition) --CALLS--> (Definition)
+                          |                            ^
+                          | FIXES                      | IN_PROJECT
+                          v                            |
+                   (Vulnerability)                (Pipeline) --HAS_JOB--> (Job)
+
+(File) --DEFINES--> (Definition) --CALLS--> (Definition)
 ```
 
-Then say that `glab orbit ontology` lists every node type and edge, so the user can see what else they can ask.
+Then say that the graph has more node types and edges, and that `glab orbit ontology` lists all of them.
+
+Read more: <https://docs.gitlab.com/orbit/schema/>
 
 ### Part 4: How your last query walked the graph
 
 Draw the nodes and edges that the last query used. Under the diagram, match each part of the query to it, in one line each.
 Then count the hops, and say that each hop without Orbit is at least one REST API call.
 If the user has not asked a question yet, use the first question in step 3 as the example.
+
+Read more: <https://docs.gitlab.com/orbit/queries/query-language/>
 
 ### Part 5: Who can see what
 
@@ -274,6 +289,8 @@ Explain, in a short list:
 - To query security data, you need the Security Manager, Developer, Maintainer, or Owner role.
 - A role for a top-level group applies to each subgroup and project in it.
   A role for a project alone does not give access to that project.
+
+Read more: <https://docs.gitlab.com/orbit/security/>
 
 ## Step 7: Offer next steps
 
