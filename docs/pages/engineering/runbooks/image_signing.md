@@ -1,6 +1,6 @@
 # Image signing
 
-`gkg` images published from the canonical project carry a keyless cosign signature. This runbook covers verifying a signature, mirroring signed images, keeping signatures in the registry, bumping the pinned cosign, and handling a failed signing step. The contract is in [Security](../architecture/security.md#supply-chain).
+`gkg` images published from the canonical project carry a keyless cosign signature. This runbook covers verifying a signature, mirroring signed images, keeping signatures in the registry, bumping the pinned cosign, and handling a failed signing step. The contract is in [Security](../architecture/security.md#between-the-services).
 
 ## How signing works
 
