@@ -22,13 +22,17 @@ Keep the session short and read-only. Do not create issues, merge requests, comm
 
 ## Ask questions the right way
 
-Ask every question as a numbered list at the end of your reply, then stop and wait for the answer.
-Do not use an interactive question tool, such as `AskUserQuestion`.
-In Claude Code, the text before that tool is often hidden, so the user sees the options but not the answer.
+Use your interactive question tool, such as `AskUserQuestion`, for two questions only:
+the scope in step 1 and the first question in step 2.
+Those replies have nothing else to show.
+
+Ask every later question as a numbered list at the end of your reply, then stop and wait for the answer.
+In Claude Code, the text before the question tool is often hidden, so the user would see the options but not the answer.
 
 - Offer two to four options, and put the recommended option first.
 - Write each option as a bold label, then a short description.
-- The user replies with a number, or with their own question.
+- With a numbered list, the user replies with a number, or with their own question.
+- If you have no question tool, use a numbered list for the first two questions too.
 
 Write every answer, summary, and diagram as visible text in your reply.
 The user sees only your text, not command output, your thinking, or this skill.
@@ -48,8 +52,12 @@ The user sees only your text, not command output, your thinking, or this skill.
 1. Run `glab orbit status`.
    If it fails, run `glab orbit skills get orbit references/troubleshooting.md`, follow the first-run setup,
    and run `glab orbit status` again. If it still fails, tell the user what failed and stop.
-1. Find the scope. In a clone, read the project from `git remote get-url origin`.
-   Otherwise, ask the user for the full path of a group or project that has GitLab Orbit turned on.
+1. Ask the user for the scope with your question tool. Offer these options:
+   - **This project**: the project from `git remote get-url origin`, when you are in a clone. Recommended.
+   - **Its top-level group**: the first part of that project path, to query across every project in it.
+   - **Another project or group**: the user types its full path.
+
+   Outside a clone, ask for the full path of a group or project that has GitLab Orbit turned on.
 1. Load the Orbit skill with `glab orbit skills get orbit`, and follow its query rules for the rest of the session.
 1. Run `glab orbit graph-status --full-path <scope>`.
    If no project in the scope is indexed yet, tell the user, and ask for another scope.
@@ -57,7 +65,7 @@ The user sees only your text, not command output, your thinking, or this skill.
 ## Step 2: Ask a simple first question
 
 Start with a question that one query answers, about the scope from step 1.
-Offer these options. Use the bold labels exactly as written:
+Offer these options with your question tool. Use the bold labels exactly as written:
 
 - **See the open merge requests and who wrote them**:
   the open merge requests, newest first, with their titles and authors. A quick check that Orbit sees your project.
