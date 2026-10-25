@@ -6,7 +6,8 @@
 //! globally-scoped node (no `traversal_path` column) is not reachable through
 //! `relationships` or `path` from a `traversal_path`-scoped node, since
 //! aggregation bypasses the Rails redaction layer that protects other query
-//! types. Runs after normalization (columns are expanded) and before lowering.
+//! types. Rejects entities whose minimum access level no authorized path
+//! meets. Runs after normalization (columns are expanded) and before lowering.
 
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, Input, QueryType};

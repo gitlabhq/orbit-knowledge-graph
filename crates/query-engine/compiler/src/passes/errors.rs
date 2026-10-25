@@ -74,10 +74,6 @@ fn extract_enum_options<'a>(
         ValidationErrorKind::Enum { options } => Some((error.instance().to_string(), options)),
         ValidationErrorKind::PropertyNames { error: inner } => match inner.kind() {
             ValidationErrorKind::Enum { options } => Some((inner.instance().to_string(), options)),
-            ValidationErrorKind::AnyOf { context } => {
-                let options = find_inner_enum_options(context)?;
-                Some((inner.instance().to_string(), options))
-            }
             _ => None,
         },
         ValidationErrorKind::OneOfNotValid { context } => {

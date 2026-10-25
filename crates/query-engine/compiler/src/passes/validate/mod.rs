@@ -514,6 +514,11 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
     }
 
     fn check_relationship_types(&self, types: &[String]) -> Result<()> {
+        if types.len() > 1 && types.iter().any(|kind| kind == "*") {
+            return Err(QueryError::Validation(
+                "the \"*\" relationship type cannot be combined with named types; list only the types to follow".into(),
+            ));
+        }
         for kind in types {
             if kind != "*" && !self.model.get().relationship_exists(kind) {
                 return Err(QueryError::AllowlistRejected(format!(
