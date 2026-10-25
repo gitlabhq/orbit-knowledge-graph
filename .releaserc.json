@@ -91,6 +91,7 @@
     [
       "@semantic-release/exec",
       {
+        "prepareCmd": "bun pm pkg set version=${nextRelease.version}",
         "publishCmd": "git tag clients/orbitpb/v${nextRelease.version} && git push origin clients/orbitpb/v${nextRelease.version}"
       }
     ],
@@ -99,7 +100,8 @@
       {
         "assets": [
           "CHANGELOG.md",
-          "config/schemas/config.schema.json"
+          "config/schemas/config.schema.json",
+          "package.json"
         ],
         "message": "chore(release): ${nextRelease.version}\n\n${nextRelease.notes}"
       }
