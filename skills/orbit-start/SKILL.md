@@ -246,22 +246,19 @@ Read more: <https://docs.gitlab.com/orbit/remote/schema/>
 
 ### Part 3: How the graph connects
 
-Show this diagram of some of the main node types and the edges between them:
+Show these edges between some of the main node types. Keep the columns aligned:
 
 ```text
-(User)
-   | AUTHORED
-   v
-(MergeRequest) --FIXES--> (Vulnerability)
-   | IN_PROJECT
-   v
-(Project) <--IN_PROJECT-- (Pipeline)
-                              | HAS_JOB
-                              v
-                            (Job)
+GitLab data
+  (User)          --AUTHORED-->    (MergeRequest)
+  (MergeRequest)  --IN_PROJECT-->  (Project)
+  (MergeRequest)  --FIXES-->       (Vulnerability)
+  (Pipeline)      --IN_PROJECT-->  (Project)
+  (Pipeline)      --HAS_JOB-->     (Job)
 
-(File) --DEFINES--> (Definition)
-(Definition) --CALLS--> (Definition)
+Code
+  (File)          --DEFINES-->     (Definition)
+  (Definition)    --CALLS-->       (Definition)
 ```
 
 From the `ontology` output, say how many edges one of these node types has, and name a few.
