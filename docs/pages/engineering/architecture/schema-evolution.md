@@ -94,12 +94,6 @@ switch.
 
 ### 4. The switch
 
-```mermaid
-flowchart LR
-    Check{All namespaces done?} -- yes --> Active[N+1 active]
-    Active --> Web[Query service]
-```
-
 A scheduled check decides when N+1 is ready. It waits until every enabled
 top-level group has finished the indexing that the change required, and until
 the instance-wide data is done too. Groups that were turned off in the
@@ -112,12 +106,6 @@ without a restart. Requests that are already running finish on the version
 they started with.
 
 ### 5. Cleanup
-
-```mermaid
-flowchart LR
-    Older[Older versions] --> Dropped
-    Retired[Version N] --> Kept[Kept for rollback]
-```
 
 Old versions don't stay forever. By default, Orbit keeps the active version,
 the most recently retired one, and any version that is still migrating.
