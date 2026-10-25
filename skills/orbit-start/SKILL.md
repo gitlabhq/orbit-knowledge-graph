@@ -86,19 +86,76 @@ Then ask the user what to do next. Offer these options:
 
 ## Step 3: Ask a bigger question
 
-Now try a bigger question that takes several queries, such as a workflow from the prompt examples.
+Now try a bigger question that takes several queries, such as a workflow from the GitLab Orbit prompt examples.
 The user can also ask their own question.
-Read the workflows at <https://docs.gitlab.com/orbit/remote/cookbook/>.
-Offer two to four examples that fit the scope, and use the prompt of the one that the user picks.
-If you cannot read the page, offer these:
+Offer two to four of these examples that fit the scope. Use the prompt of the one that the user picks,
+with each `<placeholder>` replaced by a real value:
 
-- **Review a merge request with proof**: the callers of the changed code outside the merge request,
-  and the projects that import it.
-- **Fix a vulnerability across every affected project**: which projects a CVE affects,
-  and whether a fix reached production.
-- **Find out if a failed job is flaky**: whether a failing job also fails on the default branch, and which open
-  merge requests it blocks.
-- **Change shared code safely**: the subclasses and callers of a class or method.
+- **Review a merge request with proof**: the callers of the changed code outside the merge request, and the projects that import it.
+
+  ```plaintext
+  Using GitLab Orbit, review merge request <!769> in <my-group>/<my-project>.
+  Back every finding with a query result, not a guess from the diff:
+  1. Which definitions does it change, and which callers of those
+     definitions are outside the merge request? Give the file and line.
+  2. Which projects in <my-group> import the changed package, and how many
+     files in each?
+  3. Which other open merge requests change the same files?
+  Then list the risks, each with the result that shows it.
+  ```
+
+- **Change shared code safely**: the subclasses and callers of code that you want to change.
+
+  ```plaintext
+  Using GitLab Orbit, before I change <BasePolicy> and <Ability::allowed?> in
+  <my-group>/<my-project>:
+  1. Which classes inherit from <BasePolicy>, directly or through other
+     classes?
+  2. Which definitions call <Ability::allowed?>?
+  3. If the code is in a library, which projects in <my-group> import
+     <gitlab.com/my-group/my-sdk> on their default branch?
+  ```
+
+- **Find out if a failed job is flaky**: whether a failing job also fails on the default branch.
+
+  ```plaintext
+  Using GitLab Orbit, my merge request in <my-group>/<my-project> fails the
+  job <docs-lint markdown>. Is it my change or a flaky job?
+  - How often did the job pass on <master> in the last <14 days>, and how
+    did it fail?
+  - Which other open merge requests fail the job now?
+  - Which projects in <my-group> failed the job in the last <seven days>,
+    and how many times each?
+  ```
+
+- **Respond to a production incident**: the recent changes to a failing component that reached production.
+
+  ```plaintext
+  Using GitLab Orbit, <app/models/ci/> in <my-group>/<my-project> throws errors
+  in <production>:
+  1. Which merge requests that changed it reached production in the last
+     <seven days>, and when was each deployed?
+  2. Which components does <app/models/ci/build.rb> call, and which of them
+     changed in production deployments in the same window?
+  Then rank the changes by how likely they are to cause the errors.
+  ```
+
+- **Find the right reviewer for a file**: what reviewers said about earlier changes to a file, and who approved them.
+
+  ```plaintext
+  Using GitLab Orbit, in <my-group>/<my-project>:
+  - What did reviewers say about <N+1 queries> on the merge requests that
+    changed <app/models/ability.rb>?
+  - Who approved those merge requests?
+  ```
+
+- **Fix a vulnerability across every affected project**: which projects have open vulnerabilities for a CVE, and which fixes reached production.
+
+  ```plaintext
+  Using GitLab Orbit, for <CVE-2025-58183> in <my-group>:
+  1. Which projects have open vulnerabilities for the CVE?
+  2. Which fixes for it reached <production>?
+  ```
 
 Then ask only for the inputs that the question needs and that you cannot find yourself.
 For example, ask for a merge request number, a CVE ID, a job name, or a class name.
@@ -305,6 +362,6 @@ Read more: <https://docs.gitlab.com/orbit/remote/security/>
 
 Ask the user what to do next. Offer these options:
 
-- Ask another question: go back to step 3.
-- Set up Orbit for every session: run `glab orbit setup`.
-- See more prompts: <https://docs.gitlab.com/orbit/remote/cookbook/>.
+- **Ask another question**: go back to step 3.
+- **Set up Orbit for every session**: run `glab orbit setup`.
+- **Done**: end the session.
