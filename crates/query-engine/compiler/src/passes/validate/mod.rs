@@ -1368,7 +1368,11 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             )));
         }
 
-        if crate::passes::normalize::is_wildcard(&path.rel_types) {
+        let named_by_type_condition = input.predicates.iter().any(|root| {
+            root.relationship_type()
+                .is_some_and(|(_, negated)| !negated)
+        });
+        if crate::passes::normalize::is_wildcard(&path.rel_types) && !named_by_type_condition {
             return Err(QueryError::Validation(
                 "shortest paths require named relationship types, such as \
                  -[:CONTAINS*1..3]-> or [\"CONTAINS\"]; a wildcard expands over every edge type"

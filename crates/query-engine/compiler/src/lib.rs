@@ -1575,10 +1575,23 @@ mod tests {
             ],
             "shortest paths require named relationship types",
         );
-        assert_compiles(&[(
-            Frontend::Gql,
-            "MATCH p = ANY SHORTEST (a:Group {id: 1})-[:CONTAINS*1..3]->(b:Project {id: 2}) RETURN p",
-        )]);
+        assert_rejected(
+            &[(
+                Frontend::Gql,
+                "MATCH p = ANY SHORTEST (u:User {id: 1})-[r*1]->(g:Group {id: 100}) WHERE NOT type(r) = 'CONTAINS' RETURN p",
+            )],
+            "shortest paths require named relationship types",
+        );
+        assert_compiles(&[
+            (
+                Frontend::Gql,
+                "MATCH p = ANY SHORTEST (a:Group {id: 1})-[:CONTAINS*1..3]->(b:Project {id: 2}) RETURN p",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH p = ANY SHORTEST (u:User {id: 1})-[r*1]->(g:Group {id: 100}) WHERE type(r) = 'MEMBER_OF' RETURN p",
+            ),
+        ]);
     }
 
     #[test]

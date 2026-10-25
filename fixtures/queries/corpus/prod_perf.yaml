@@ -961,21 +961,21 @@ g02_user_to_project_path:
   desc: "User to project path"
   category: path_finding
   query: |
-    MATCH path = ANY SHORTEST (u:User {id: {{MEMBER_USER_ID}}})-[*1..3]->(p:Project {id: {{KG_PROJECT_ID}}})
+    MATCH path = ANY SHORTEST (u:User {id: {{MEMBER_USER_ID}}})-[:MEMBER_OF|CONTAINS*1..3]->(p:Project {id: {{KG_PROJECT_ID}}})
     RETURN path
 
 g03_user_to_mr_path:
   desc: "User to MR path"
   category: path_finding
   query: |
-    MATCH path = ANY SHORTEST (u:User {id: {{APPROVER_USER_ID}}})-[*1..2]->(mr:MergeRequest {id: {{KG_MR_ID}}})
+    MATCH path = ANY SHORTEST (u:User {id: {{APPROVER_USER_ID}}})-[:APPROVED|AUTHORED|MENTIONS*1..2]->(mr:MergeRequest {id: {{KG_MR_ID}}})
     RETURN path
 
 g04_mr_to_wi_path:
   desc: "MR to work item path"
   category: path_finding
   query: |
-    MATCH path = ANY SHORTEST (mr:MergeRequest {id: {{MR_ID}}})-[*1..3]->(w:WorkItem {id: {{WORK_ITEM_ID}}})
+    MATCH path = ANY SHORTEST (mr:MergeRequest {id: {{MR_ID}}})-[:CLOSES|MENTIONS|CONTAINS*1..3]->(w:WorkItem {id: {{WORK_ITEM_ID}}})
     RETURN path
 
 h01_page_mrs_project:
