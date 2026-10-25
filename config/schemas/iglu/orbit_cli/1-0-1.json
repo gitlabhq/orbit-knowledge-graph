@@ -4,7 +4,7 @@
   "self": {
     "vendor": "com.gitlab",
     "name": "orbit_cli",
-    "version": "1-0-0",
+    "version": "1-0-1",
     "format": "jsonschema"
   },
   "type": "object",
@@ -24,6 +24,11 @@
       "description": "CPU architecture the CLI binary was built for, such as `aarch64` or `x86_64`.",
       "type": ["string", "null"],
       "maxLength": 32
+    },
+    "distribution": {
+      "description": "Tool that launched the CLI binary, such as `glab`. Null when the binary ran on its own.",
+      "type": ["string", "null"],
+      "maxLength": 64
     }
   }
 }

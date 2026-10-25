@@ -819,6 +819,8 @@ fn mint_token(secret_b64: &str, admin: bool) -> Result<String> {
         deployment_type: None,
         realm: None,
         is_gitlab_team_member: None,
+        user_type: None,
+        token_type: None,
         license_checksum: None,
     };
     // Rails base64-decodes the secret before signing; mirror that so the

@@ -5,11 +5,12 @@ use tracing::field::Empty;
 
 use super::Claims;
 use crate::expanded_logs::VERBOSE_LOGS;
+use crate::user_agent::UserAgent;
 
 #[derive(Debug)]
 pub struct RequestContext {
     pub claims: Claims,
-    pub user_agent: Option<String>,
+    pub user_agent: UserAgent,
 }
 
 pub(crate) fn request_span() -> tracing::Span {
@@ -29,13 +30,6 @@ pub(crate) fn request_span() -> tracing::Span {
 }
 
 impl RequestContext {
-    pub fn coding_agent(&self) -> Option<&str> {
-        self.user_agent.as_deref().and_then(|ua| {
-            ua.split_whitespace()
-                .find_map(|token| token.strip_prefix("Coding-Agent/"))
-        })
-    }
-
     pub fn record_in_current_span(&self) {
         let span = tracing::Span::current();
         span.record(safe::GL_USER_ID, self.claims.user_id);
@@ -65,7 +59,10 @@ impl RequestContext {
             expanded::CLIENT_REQUEST_ID,
             self.claims.request_id.as_deref(),
         );
-        span.record(expanded::CODING_AGENT, self.coding_agent());
+        span.record(
+            expanded::CODING_AGENT,
+            self.user_agent.coding_agent.as_deref(),
+        );
     }
 }
 
