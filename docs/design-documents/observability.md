@@ -221,7 +221,6 @@ Metrics flow through Prometheus scraping PodMonitor endpoints exposed by the Orb
 |---|---|---|---|---|---|
 | `OrbitAuthFilterMissing` | `gkg_query_engine_compiler_rejected_total{failure_reason="security"}` | > 0 in 5m | critical | 1m | A query reached compilation without a valid security context, meaning authorization filtering would have been bypassed |
 | `OrbitPipelineInvariantViolated` | `gkg_query_engine_compiler_rejected_total{failure_reason=~"lowering\|enforcement\|codegen\|pipeline"}` | > 0 in 5m | critical | 1m | The query compiler reached a state that upstream validation should have prevented, which may produce incorrect SQL |
-| `OrbitSecurityRejected` | `gkg_query_pipeline_failed_total{failure_reason="security"}` | > 0 in 5m | warning | 5m | Pipeline rejected a request due to invalid or missing security context |
 
 **Query health alerts** (sustained error rates or latency degradation):
 
@@ -229,18 +228,7 @@ Metrics flow through Prometheus scraping PodMonitor endpoints exposed by the Orb
 |---|---|---|---|---|---|
 | `OrbitQueryingErrorRateHigh` | `gkg_query_pipeline_queries_total{status!="ok"}` / `gkg_query_pipeline_queries_total` | > 5% | warning | 5m | Aggregate error rate across all failure modes exceeds threshold (the availability SLI) |
 | `OrbitPipelinePostCompileErrorRateHigh` | `gkg_query_pipeline_queries_total{status!~"ok\|compile_error"}` / `gkg_query_pipeline_queries_total{status!="compile_error"}` | > 1% | warning | 5m | Post-compile failure rate isolates server-side reliability from client-input quality. Mirrors the "Pipeline success rate (1h), post-compile" gauge. |
-| `OrbitValidationFailedBurst` | `gkg_query_engine_compiler_rejected_total{failure_reason=~"parse\|schema\|reference\|pagination"}` | > 10/min | warning | 5m | Sustained burst of structural validation failures (broken client or probing) |
-| `OrbitAllowlistRejectedBurst` | `gkg_query_engine_compiler_rejected_total{failure_reason=~"ontology\|ontology_internal"}` | > 5/min | warning | 5m | Sustained ontology violations (schema drift or enumeration attempt) |
-| `OrbitExecutionFailureRate` | `gkg_query_pipeline_failed_total{failure_reason="execution"}` | > 1/min | warning | 5m | ClickHouse query execution is failing |
-| `OrbitAuthorizationFailureRate` | `gkg_query_pipeline_failed_total{failure_reason="authorization"}` | > 1/min | warning | 5m | Rails authorization exchange is failing |
 | `OrbitPipelineLatencyP95High` | `gkg_query_pipeline_duration_seconds` (histogram) | > 5s | warning | 10m | p95 end-to-end pipeline latency exceeds threshold |
-
-**Resilience alerts** (circuit breaker):
-
-| Alert | Metric | Default Threshold | Severity | `for` | Fires when |
-|---|---|---|---|---|---|
-| `OrbitCircuitBreakerOpen` | `gkg_circuit_breaker_state_transitions_total{to="open"}` | > 0 in 5m | warning | 1m | A circuit breaker opened, meaning an external service is unreachable and calls are being shed |
-| `OrbitCircuitBreakerRejectRateHigh` | `gkg_circuit_breaker_calls_rejected_total` | > 10/min | warning | 5m | High rate of rejected calls — circuit is open and shedding significant traffic |
 
 **Capacity alerts** (traffic and limit pressure):
 
