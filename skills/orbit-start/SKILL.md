@@ -67,16 +67,37 @@ The user sees only your text, not command output, your thinking, or this skill.
 ## Step 2: Ask a simple first question
 
 Start with a question that one query answers, about the scope from step 1.
-Offer these options with your question tool. Use the bold labels exactly as written:
+Make each option name something real in the scope, so the first answer is about something the user knows.
 
-- **See the open merge requests and who wrote them**:
-  the open merge requests, newest first, with their titles and authors. A quick check that Orbit sees your project.
-- **Count the open vulnerabilities by severity**:
-  a count for each severity, from critical to info. One query counts them all, with no paging through results.
-- **Find who approved the most merge requests this month**:
-  the top approvers in the last 30 days, with a count for each. Useful when you need a reviewer.
-- **Find every caller of a function you name**:
-  each caller, with the file it is in. Shows that Orbit indexes your code, not only merge requests and pipelines.
+1. Find the values with up to two quick queries:
+   - The project to use. For a project scope, it is that project.
+     For a group scope, use the project with the most open merge requests:
+
+     ```plaintext
+     MATCH (g:Group {full_path: '<group>'})-[:CONTAINS*1..3]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)
+     WHERE mr.state = 'opened'
+     RETURN p.full_path, count(mr) AS open_mrs ORDER BY open_mrs DESC LIMIT 5
+     ```
+
+   - A function that many definitions call, in that project:
+
+     ```plaintext
+     MATCH (c:Definition)-[:CALLS]->(d:Definition)
+     WHERE d.project_id = <project ID> AND d.definition_type IN ['Function', 'Method']
+       AND NOT d.file_path CONTAINS 'test'
+     RETURN d.name, d.file_path, count(c) AS callers ORDER BY callers DESC LIMIT 8
+     ```
+
+     Pick one that a developer would recognize. Skip macros and generated code, such as `*.pb.go` files.
+1. Offer these options with your question tool. Fill in the real values, as in the examples:
+   - **See the open merge requests in <project>**, for example "See the open merge requests in my-project":
+     the newest first, with their titles and authors. A quick check that Orbit sees your project.
+   - **Count the open vulnerabilities in <scope> by severity**:
+     a count for each severity, from critical to info. One query counts them all, with no paging through results.
+   - **Find who approved the most merge requests in <scope>**:
+     the top approvers in the last 30 days, with a count for each. Useful when you need a reviewer.
+   - **Find every caller of <function>**, for example "Find every caller of compile":
+     each caller, with the file it is in. Shows that Orbit indexes your code, not only merge requests and pipelines.
 
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
