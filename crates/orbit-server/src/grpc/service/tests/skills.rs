@@ -27,7 +27,7 @@ async fn list_skills_returns_deployed_skill_metadata() {
             .iter()
             .map(|skill| skill.name.as_str())
             .collect::<Vec<_>>(),
-        ["orbit", "orbit-start-here"]
+        ["orbit", "orbit-start"]
     );
     let skill = &response.skills[0];
     assert_eq!(skill.name, "orbit");
@@ -105,7 +105,7 @@ async fn get_skill_unknown_name_lists_sorted_known_names() {
     assert_eq!(error.code(), tonic::Code::NotFound);
     assert_eq!(
         error.message(),
-        "Unknown skill \"missing\". Known skills: [\"orbit\", \"orbit-start-here\"]"
+        "Unknown skill \"missing\". Known skills: [\"orbit\", \"orbit-start\"]"
     );
 }
 
@@ -139,10 +139,10 @@ async fn skill_requests_select_the_query_language() {
 }
 
 #[tokio::test]
-async fn get_skill_serves_the_start_here_skill() {
+async fn get_skill_serves_the_start_skill() {
     let response = test_service()
         .get_skill(authed_request(GetSkillRequest {
-            name: "orbit-start-here".into(),
+            name: "orbit-start".into(),
             metadata_only: false,
             ..Default::default()
         }))
@@ -150,7 +150,7 @@ async fn get_skill_serves_the_start_here_skill() {
         .unwrap()
         .into_inner();
 
-    assert_eq!(response.name, "orbit-start-here");
+    assert_eq!(response.name, "orbit-start");
     assert_eq!(response.files.len(), 1);
     assert_eq!(response.files[0].path, "SKILL.md");
     assert_eq!(

@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 const SKILL_NAME: &str = "orbit";
-const START_HERE_SKILL_NAME: &str = "orbit-start-here";
+const START_SKILL_NAME: &str = "orbit-start";
 const MANIFEST: &str = "SKILL.md";
 const GQL_MANIFEST: &str = "SKILL.gql.md";
 
@@ -20,8 +20,8 @@ const GQL_MANIFEST: &str = "SKILL.gql.md";
 struct SkillAssets;
 
 #[derive(Embed)]
-#[folder = "$SKILLS_DIR/orbit-start-here"]
-struct StartHereAssets;
+#[folder = "$SKILLS_DIR/orbit-start"]
+struct StartAssets;
 
 static JSON_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
     SkillCatalog::load_embedded(Frontend::JsonDsl)
@@ -105,8 +105,8 @@ impl SkillCatalog {
                 }
             })
         })?;
-        let start_here = load_skill::<StartHereAssets>(START_HERE_SKILL_NAME, |path| Some(path))?;
-        let skills = [orbit, start_here]
+        let start = load_skill::<StartAssets>(START_SKILL_NAME, |path| Some(path))?;
+        let skills = [orbit, start]
             .into_iter()
             .map(|skill| (skill.metadata.name.clone(), skill))
             .collect();
@@ -209,7 +209,7 @@ mod tests {
                 .iter()
                 .map(|skill| skill.name.as_str())
                 .collect::<Vec<_>>(),
-            [SKILL_NAME, START_HERE_SKILL_NAME]
+            [SKILL_NAME, START_SKILL_NAME]
         );
         let skill = &skills[0];
         assert_eq!(skill.name, "orbit");
@@ -353,15 +353,15 @@ mod tests {
     fn unknown_skill_error_carries_sorted_known_names() {
         let error = get_skill("unknown", Frontend::JsonDsl, false).unwrap_err();
         assert_eq!(error.name, "unknown");
-        assert_eq!(error.known_names, [SKILL_NAME, START_HERE_SKILL_NAME]);
+        assert_eq!(error.known_names, [SKILL_NAME, START_SKILL_NAME]);
     }
 
     #[test]
-    fn start_here_skill_is_served_unchanged_in_both_modes() {
-        let json = get_skill(START_HERE_SKILL_NAME, Frontend::JsonDsl, false).unwrap();
-        let gql = get_skill(START_HERE_SKILL_NAME, Frontend::Gql, false).unwrap();
+    fn start_skill_is_served_unchanged_in_both_modes() {
+        let json = get_skill(START_SKILL_NAME, Frontend::JsonDsl, false).unwrap();
+        let gql = get_skill(START_SKILL_NAME, Frontend::Gql, false).unwrap();
         assert_eq!(json, gql);
-        assert_eq!(json.metadata.name, START_HERE_SKILL_NAME);
+        assert_eq!(json.metadata.name, START_SKILL_NAME);
         assert!(json.metadata.description.starts_with("Walk a user through"));
 
         let files = json.files.unwrap();
@@ -374,7 +374,7 @@ mod tests {
         );
         let manifest = &files[0];
         assert_eq!(manifest.sha256, sha256_hex(manifest.content.as_bytes()));
-        let source = StartHereAssets::get(MANIFEST).unwrap();
+        let source = StartAssets::get(MANIFEST).unwrap();
         assert_eq!(manifest.content.as_bytes(), source.data.as_ref());
         assert!(manifest.content.contains("glab orbit skills get orbit"));
         assert!(manifest.content.contains("Do not use `glab orbit`"));

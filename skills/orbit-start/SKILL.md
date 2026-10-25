@@ -1,22 +1,22 @@
 ---
-name: orbit-start-here
-description: Walk a user through their first GitLab Orbit session. Check the setup, offer a few first questions, and answer the chosen one without Orbit and then with Orbit. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
+name: orbit-start
+description: Walk a user through their first GitLab Orbit session. Check the setup, offer a few first questions, and answer the chosen one without Orbit and with Orbit, side by side. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
 version: 0.1.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance. Works best in agents that can ask the user multiple-choice questions.
 metadata:
   audience: developers
-  keywords: orbit, knowledge-graph, onboarding, start-here, glab
+  keywords: orbit, knowledge-graph, onboarding, getting-started, glab
   workflow: ai
   source-project: gitlab-org/orbit/knowledge-graph
-  source-path: skills/orbit-start-here
+  source-path: skills/orbit-start
 ---
 
-# Start here with GitLab Orbit
+# Get started with GitLab Orbit
 
-Guide the user through one real question about their own GitLab data. Answer it twice: first with only the
-tools that the user already has, then with GitLab Orbit. End with a side-by-side comparison, so the user sees
-on their first try what Orbit changes.
+Guide the user through one real question about their own GitLab data. Answer it twice, in parallel when you can:
+once with only the tools that the user already has, and once with GitLab Orbit.
+End with a side-by-side comparison, so the user sees on their first try what Orbit changes.
 
 Keep the session short and read-only. Do not create issues, merge requests, comments, or commits.
 
@@ -31,8 +31,6 @@ If you have no such tool, print the options as a numbered list, then stop and wa
 1. Run `glab orbit status`.
    If it fails, run `glab orbit skills get orbit references/troubleshooting.md`, follow the first-run setup,
    and run `glab orbit status` again. If it still fails, tell the user what failed and stop.
-1. Load the Orbit skill, so you write valid queries later: `glab orbit skills get orbit`.
-   Follow its query rules for the rest of the session.
 1. Find the scope. In a clone, read the project from `git remote get-url origin`.
    Otherwise, ask the user for the full path of a group or project that has GitLab Orbit turned on.
 
@@ -52,26 +50,29 @@ Then ask only for the inputs that the question needs and that you cannot find yo
 For example, ask for a merge request number, a CVE ID, a job name, or a class name. Offer real values from the project as options when you
 can, such as recent merge requests or the jobs that failed most recently.
 
-## Step 3: Answer without Orbit
+## Step 3: Answer the question twice, in parallel
 
-Answer the question with only the tools that the user had before Orbit:
+Answer the question once without Orbit and once with Orbit.
+If you can start subagents, for example with the Agent tool in Claude Code, start both in parallel in one turn.
+Give each subagent the question, the scope, and the inputs from step 2, and its rules from below.
+If you cannot start subagents, answer without Orbit first, then with Orbit.
 
-- `glab` commands and the REST API through `glab api`.
-- `git` and file reads in the local clone.
+Without Orbit:
 
-Do not use `glab orbit`, the GitLab Orbit MCP endpoint, or any other Orbit tool in this step.
+- Use only the tools that the user had before Orbit.
+  These are `glab` commands, the REST API through `glab api`, and `git` and file reads in the local clone.
+- Do not use `glab orbit`, the GitLab Orbit MCP endpoint, or any other Orbit tool.
+- Stop after 15 tool calls or 3 minutes, whichever comes first, and keep what you have.
 
-Stop after 15 tool calls or 3 minutes, whichever comes first, and keep what you have.
-While you work, count the tool calls and API requests, and note the time.
-Write down what you could not find, and what you had to guess.
+With Orbit:
 
-## Step 4: Answer with Orbit
+- Load the Orbit skill with `glab orbit skills get orbit`, and follow its query rules.
+- Run each query with `glab orbit query`, and keep each query to show the user.
 
-Answer the same question again with GitLab Orbit, using the Orbit skill that you loaded in step 1.
-Run each query with `glab orbit query`, and keep each query to show the user.
-Count the tool calls and note the time, as in step 3.
+Each answer gives the answer, the number of tool calls and API requests, and the time.
+It also says what it could not find, and what it had to guess.
 
-## Step 5: Show the difference
+## Step 4: Show the difference
 
 Show the two answers side by side:
 
@@ -89,7 +90,7 @@ Then list the findings from the Orbit answer, each with the query result that sh
 
 Be honest. If the answer without Orbit was as good, or the Orbit answer missed something, say so.
 
-## Step 6: Offer next steps
+## Step 5: Offer next steps
 
 Ask the user what to do next. Offer these options:
 
