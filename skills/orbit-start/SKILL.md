@@ -29,6 +29,8 @@ If you have no such tool, print the options as a numbered list, then stop and wa
 ### Show before you ask
 
 The user sees only your text, not command output and not this skill.
+Write every answer, summary, and diagram as visible text in your reply, never only in your thinking.
+The user cannot see your thinking, so content that is only there is lost.
 In some clients, text that you write right before your question tool is hidden or lost.
 So when you ask with the question tool:
 
