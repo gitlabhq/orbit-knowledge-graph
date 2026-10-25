@@ -3,6 +3,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { PostCard } from "../content/PostCard";
 import { Board } from "../roadmap/Board";
 import { posts } from "../content/blog";
+import { videos } from "../content/demos";
+import { Video } from "../ui/Video";
 import { ENGINEERING, USER_DOCS } from "../sections";
 import { formatDate, quarterLabel, quarterMonths } from "../roadmap/calendar";
 import { items, roadmapQuarter, roadmapUpdated, themes } from "../roadmap/model";
@@ -123,6 +125,18 @@ function HomePage() {
           <SectionHeading title="Engineering" description="How the Orbit team builds, tests, and runs Orbit." action={{ label: "Engineering docs", to: "/engineering" }} />
           <Engineering />
         </section>
+        {videos.length > 0 && (
+          <section>
+            <SectionHeading title="Demos" description="Videos and talks that show how Orbit works." action={{ label: "All demos", to: "/content/demos" }} />
+            <ul className="m-0 grid list-none gap-4 p-0 md:grid-cols-3">
+              {videos.slice(0, 3).map((video) => (
+                <li key={video.id}>
+                  <Video video={video} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         {posts.length > 0 && (
           <section>
             <SectionHeading title="From the blog" description="Engineering notes and product updates." action={{ label: "All content", to: "/content" }} />
