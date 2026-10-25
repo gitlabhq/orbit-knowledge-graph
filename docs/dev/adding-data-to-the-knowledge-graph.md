@@ -213,7 +213,7 @@ Model it on the closest existing node (e.g. `nodes/packages/package.yaml`). Requ
 - `properties:` block: **every property needs a `description`** (CI-enforced). **`nullable` must match the siphon source column**. Don't mark a `NOT NULL` source nullable. Don't mark a `Nullable(...)` source `nullable: false` without a comment explaining the NULL→default coercion. Reviewers flag both directions.
 - `etl: { type: table, scope: namespaced, source: siphon_<table>, order_by: [traversal_path, id], edges: { project_id: { to: Project, as: IN_PROJECT, direction: outgoing } } }`.
   - **Which edge mechanism to use:** the inline `edges:` block here is for edges derived from an **FK column on this node's own source table**. An example is `IN_PROJECT` from `project_id`. Use a **separate edge YAML (§5.2)** only for **join-table edges** (e.g. `DECLARES_DEPENDENCY` from `packages_dependency_links`), where the relationship lives in its own table.
-  - **How the ETL uses this (read before adding a mapping):** the `etl:` block declares an extraction plus a row-wise transform. The transform covers source columns → graph columns, FK-edge resolution, and type discriminators. Most nodes are a straight column projection. But some properties need a **mapping**: an Integer-to-Enum column, a computed value, or a non-trivial rename. Declare it here, so it does not fail at index time. See [SDLC indexing → ETL](../design-documents/indexing/sdlc_indexing.md#etl) (and the Integer-to-Enum mapping note in that doc) for how plans, transforms, and column mappings are derived from the ontology.
+  - **How the ETL uses this (read before adding a mapping):** the `etl:` block declares an extraction plus a row-wise transform. The transform covers source columns → graph columns, FK-edge resolution, and type discriminators. Most nodes are a straight column projection. But some properties need a **mapping**: an Integer-to-Enum column, a computed value, or a non-trivial rename. Declare it here, so it does not fail at index time. See [SDLC indexing → ETL](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md#etl) (and the Integer-to-Enum mapping note in that doc) for how plans, transforms, and column mappings are derived from the ontology.
 - `storage:` block: `primary_key`, `columns`, `indexes`, `projections`. Copy the shape from the template node.
 
 ### 5.2 Edge YAML — `config/ontology/edges/<edge>.yaml`
@@ -239,7 +239,7 @@ If either FK column is `Nullable` in the source, the ETL can emit null-target ed
 Filter or document it (reviewers will ask). Prefer NOT-NULL join columns.
 
 Hot query shapes can be pre-joined by declaring a chain under `settings.denormalized_joins`
-in `schema.yaml` (see `docs/design-documents/querying/graph_engine.md`, Denormalized joins).
+in `schema.yaml` (see the [Denormalized joins](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/querying/graph_engine.md#denormalized-joins) section of the pre-rewrite graph engine doc).
 This emits a `gl_denorm_<name>` table composed from the chain's own DDL plus one feeding
 materialized view per table. The table stores every column of every table in the chain and
 each declaration is a schema bump, so weigh write amplification before adding one.

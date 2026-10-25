@@ -190,7 +190,7 @@ The server compresses responses with gzip or zstd and accepts either on requests
 
 ### Authentication: JWT + mTLS
 
-Service-to-service authentication uses two layers, matching the model described in the [security design document](../security.md):
+Service-to-service authentication uses two layers, matching the model described in the [security design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md):
 
 - JWT tokens carry user context (`user_id`, `organization_id`, `traversal_ids`) and are signed with a shared secret (HS256). Tokens expire after 5 minutes.
 - mTLS provides transport-layer identity verification via Kubernetes service mesh or manual TLS configuration with cert-manager.
@@ -270,7 +270,7 @@ If Rails is down or slow, GKG cannot complete any query that requires Layer 3 ch
 ## References
 
 - [Proto definition: `orbit.proto`](../../../crates/orbit-server/proto/orbit.proto)
-- [Security design document](../security.md)
+- [Security design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md)
 - [MR !273: gRPC service implementation](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/273)
 - [Gitaly client in Rails](https://gitlab.com/gitlab-org/gitlab/-/tree/master/lib/gitlab/gitaly_client)
 - [Gitaly proto definitions](https://gitlab.com/gitlab-org/gitaly/-/tree/master/proto)

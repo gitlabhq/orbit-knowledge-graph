@@ -718,9 +718,9 @@ check_docs_markdown:
     - vale --minAlertLevel error docs/source
     # Lint Markdown. docs/source is user-facing; root and docs/dev are contributor
     # docs that previously reached CI unlinted (design-documents deferred: #981).
-    - markdownlint-cli2 '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'
+    - markdownlint-cli2 '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md' 'docs/architecture/**/*.md'
     # Check links
-    - lychee --offline --include-fragments '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md'
+    - lychee --offline --include-fragments '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md' 'docs/architecture/**/*.md'
 
 check_docs_i18n_markdown:
   stage: docs
