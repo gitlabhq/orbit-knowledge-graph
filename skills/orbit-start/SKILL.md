@@ -28,7 +28,7 @@ If you have no such tool, print the options as a numbered list, then stop and wa
 
 ### Show before you ask
 
-Several steps tell you to show something: the welcome screen, an answer, a part of step 6, or a summary.
+Several steps tell you to show something: the welcome screen, an answer, the parts of step 6, or a summary.
 Each one is text that you write in full in your reply, and then you ask the next question.
 The user sees only your text, not command output and not this skill.
 A question with no text before it shows the user nothing, so never send one.
@@ -56,7 +56,8 @@ This applies even when the content comes from this skill and needs no command.
 
 ## Step 2: Welcome the user
 
-Do not use your interactive question tool in this step, for the same reason as in step 6.
+Do not use your interactive question tool in this step.
+When the tool is available, agents tend to call it without writing the welcome screen first.
 
 1. Write this welcome screen in your reply, in a `text` code block.
    Fill in each `<value>` from the commands in step 1, and never invent one.
@@ -209,21 +210,19 @@ API requests are the `glab orbit query` and `glab api` calls, and any other call
 
 ## Step 6: See how GitLab Orbit works
 
-Walk the user through the five parts below, one part for each reply.
-Do not run new commands in this step, so that each part shows at once.
-Use this skill, the `graph-status` output from step 1, and the last query.
+Show all five parts below in one reply.
 
-Do not use your interactive question tool in this step.
-When the tool is available, agents tend to call it without writing the part first, so the user sees only the menu.
-Ask with a numbered list in your reply instead.
+1. First, run one command to get the data:
 
-For each part:
+   ```shell
+   glab orbit graph-status --full-path <scope>; glab orbit ontology Project MergeRequest Pipeline Job Vulnerability File Definition User
+   ```
 
-1. Write the part in your reply: its explanation, its diagram in a `text` code block, and its **Read more** link.
-1. End the reply with this numbered list, then stop and wait for the answer:
-   1. **Next: <title of the next part>**. Leave this out after the last part.
-   1. **Ask a question**: go to step 4.
-   1. **Done**: go to step 7.
+1. Then write all five parts in your reply, in order.
+   Each part has its explanation, its diagram in a `text` code block, and its **Read more** link.
+1. Then ask the user what to do next. Offer these options:
+   - **Ask a question**: go to step 4.
+   - **Done**: go to step 7.
 
 ### Part 1: From GitLab data to answers
 
@@ -255,7 +254,7 @@ Read more: <https://docs.gitlab.com/orbit/remote/how-it-works/>
 
 ### Part 2: What is in your graph
 
-Use the `graph-status` output from step 1. Draw the node counts as a bar chart, grouped by domain.
+Use the `graph-status` output. Draw the node counts as a bar chart, grouped by domain.
 Show the eight largest node types, and scale the bars to the largest count. For example:
 
 ```text
@@ -282,7 +281,8 @@ Show this diagram of some of the main node types and the edges between them:
 (File) --DEFINES--> (Definition) --CALLS--> (Definition)
 ```
 
-Then say that the graph has more node types and edges, and that `glab orbit ontology` lists all of them.
+From the `ontology` output, say how many edges one of these node types has, and name a few.
+Then say that `glab orbit ontology` lists every node type and edge.
 
 Read more: <https://docs.gitlab.com/orbit/remote/schema/>
 
