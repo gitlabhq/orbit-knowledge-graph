@@ -59,6 +59,8 @@ The user sees only your text, not command output, your thinking, or this skill.
 
    Outside a clone, ask for the full path of a group or project that has GitLab Orbit turned on.
 1. Load the Orbit skill with `glab orbit skills get orbit`, and follow its query rules for the rest of the session.
+1. Run `glab orbit ontology MergeRequest MergeRequestDiffFile Definition File` once, and keep the output.
+   It lists the properties and edges of the node types that most questions use, so later queries need no schema lookups.
 1. Run `glab orbit graph-status --full-path <scope>`.
    If no project in the scope is indexed yet, tell the user, and ask for another scope.
 
@@ -103,6 +105,8 @@ with each `<placeholder>` replaced by a real value:
   3. Which other open merge requests change the same files?
   Then list the risks, each with the result that shows it.
   ```
+
+  If the merge request changes more than 50 files, send the file paths in batches of 50 or fewer.
 
 - **Change shared code safely**: the subclasses and callers of code that you want to change.
 
@@ -177,7 +181,8 @@ Run the same prompt again, in this session, so that the user sees each call.
 1. Use only the tools that the user had before Orbit.
    These are `glab` commands, the REST API through `glab api`, and `git` and file reads in the local clone.
 1. Do not use `glab orbit`, the GitLab Orbit MCP endpoint, or any other Orbit tool.
-1. Stop after 15 tool calls or 3 minutes, whichever comes first, and keep what you have.
+1. Stop after 15 tool calls, 50 API requests, or 3 minutes, whichever comes first, and keep what you have.
+   When one command sends more than one request, for example a loop, make it print `requests=N` with the count.
 1. Run `date -u +%Y-%m-%dT%H:%M:%SZ` again after the last call, and keep it as the end time.
 1. Give the answer.
 
@@ -188,10 +193,15 @@ Then count both runs, and show the summary in the same reply:
 | Tool calls | | |
 | API requests | | |
 | Tokens | | |
+| Tokens per call | | |
 | Time | | |
+| What it searched | | |
 | What it found | | |
 
-In **What it found**, give a count that the user can check, such as "14 callers in 6 projects".
+- In **API requests**, say whether the count comes from `requests=N` lines or from the commands.
+- In **What it searched**, say what each run covered, such as "all 73 open merge requests" or "98 sampled projects".
+  A partial run must not look like a full one.
+- In **What it found**, give a count that the user can check, such as "14 callers in 6 projects".
 Count the rest as described in [Count tool calls and tokens](#count-tool-calls-and-tokens).
 Keep it to the table. Do not say which run is better.
 
@@ -216,15 +226,16 @@ For each run, count only the lines between its start and end times. Never guess 
 - **Other agents**: use the transcript if your agent keeps one with token counts.
   Otherwise, count your tool calls as you make them, and write `Not known` for tokens.
 
-Claude Code script. It adds up `message.usage` once for each `message.id`, because one message can span several lines:
+Claude Code script. It adds up `message.usage` once for each `message.id`, because one message can span several lines.
+For a command that printed `requests=N`, it uses that count instead of counting the commands:
 
 ```shell
 python3 - <start> <end> ~/.claude/projects/*/"$CLAUDE_CODE_SESSION_ID".jsonl <<'EOF'
-import json, sys
+import json, re, sys
 start, end, path = sys.argv[1][:19], sys.argv[2][:19], sys.argv[3]
-calls, api, usage = 0, 0, {}
-for line in open(path):
-    e = json.loads(line)
+lines = [json.loads(line) for line in open(path)]
+calls, usage, counted, reported = 0, {}, {}, {}
+for e in lines:
     if e.get("type") != "assistant" or not start <= e.get("timestamp", "")[:19] <= end:
         continue
     m = e["message"]
@@ -233,9 +244,18 @@ for line in open(path):
         if c.get("type") == "tool_use":
             calls += 1
             cmd = json.dumps(c.get("input"))
-            api += cmd.count("glab api") + cmd.count("glab orbit query")
+            counted[c["id"]] = cmd.count("glab api") + cmd.count("glab orbit query")
+for e in lines:
+    content = (e.get("message") or {}).get("content") if e.get("type") == "user" else None
+    for c in content if isinstance(content, list) else []:
+        if isinstance(c, dict) and c.get("tool_use_id") in counted:
+            found = re.findall(r"requests=(\d+)", json.dumps(c.get("content")))
+            if found:
+                reported[c["tool_use_id"]] = sum(int(n) for n in found)
+api = sum(reported.get(k, v) for k, v in counted.items())
 tokens = sum(sum(v for k, v in u.items() if k.endswith("_tokens") and isinstance(v, int)) for u in usage.values())
-print(f"tool calls {calls}, API requests {api}, tokens {tokens}")
+source = f"{len(reported)} of {calls} calls printed requests=N" if reported else "counted from the commands"
+print(f"tool calls {calls}, API requests {api} ({source}), tokens {tokens}, tokens per call {tokens // max(calls, 1)}")
 EOF
 ```
 
