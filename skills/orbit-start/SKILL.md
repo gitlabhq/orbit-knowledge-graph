@@ -49,6 +49,7 @@ Never go from a command's output straight to the next question. The user does no
 1. Load the Orbit skill with `glab orbit skills get orbit`, and follow its query rules for the rest of the session.
 1. Run `glab orbit graph-status --full-path <scope>`.
    If no project in the scope is indexed yet, tell the user, and ask for another scope.
+
 ## Step 2: Welcome the user
 
 Before you ask the user anything, print this welcome screen as text in a `text` code block.
