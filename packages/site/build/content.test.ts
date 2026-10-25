@@ -24,8 +24,8 @@ describe("site links", () => {
   });
 
   test("sends links to other repository files to the repository", () => {
-    expect(siteLinks("[Security](../security.md) ![Logo](../../assets/orbit-logo.png)", adr, routes)).toBe(
-      `[Security](${repoBlob}docs/design-documents/security.md) ![Logo](${repoRaw}docs/assets/orbit-logo.png)`,
+    expect(siteLinks("[Local development](../../dev/local-development.md) ![Logo](../../assets/orbit-logo.png)", adr, routes)).toBe(
+      `[Local development](${repoBlob}docs/dev/local-development.md) ![Logo](${repoRaw}docs/assets/orbit-logo.png)`,
     );
   });
 
