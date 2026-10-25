@@ -4,7 +4,7 @@ export const STATUSES = ["shipped", "in-progress", "planned", "exploring"] as co
 export type Status = (typeof STATUSES)[number];
 export type Horizon = "now" | "next" | "later";
 
-export type ItemFields = { theme: string; status: Status; start: string; end: string; link?: string };
+export type ItemFields = { theme: string; status: Status; start: string; end: string; link?: string; tracking?: string };
 export type PostFields = { date: string; authors: string[]; tags: string[] };
 
 type Frontmatter = Record<string, unknown>;
@@ -18,12 +18,14 @@ export function itemFields(data: Frontmatter, themes: string[]): ItemFields {
   const end = data.end ?? data.start;
   if (quarterIndex(parseQuarter(end)) < quarterIndex(parseQuarter(data.start))) throw new Error(`end ${String(end)} is before start ${String(data.start)}`);
   if (data.link !== undefined && !String(data.link).startsWith("https://")) throw new Error(`link must be an https URL, got ${JSON.stringify(data.link)}`);
+  if (data.tracking !== undefined && !String(data.tracking).startsWith("https://gitlab.com/")) throw new Error(`tracking must be a https://gitlab.com/ URL, got ${JSON.stringify(data.tracking)}`);
   return {
     theme: String(data.theme),
     status: data.status as Status,
     start: String(data.start),
     end: String(end),
     ...(data.link === undefined ? {} : { link: String(data.link) }),
+    ...(data.tracking === undefined ? {} : { tracking: String(data.tracking) }),
   };
 }
 
@@ -41,4 +43,13 @@ export function horizonOf(status: Exclude<Status, "shipped">, start: Quarter, no
   if (status === "in-progress") return "now";
   if (status === "exploring") return "later";
   return quarterIndex(start) <= quarterIndex(now) + 1 ? "next" : "later";
+}
+
+export function trackingLabel(url: string): string {
+  const { pathname } = new URL(url);
+  const group = /^\/groups\/(?:.+\/)?([^/]+)\/-\/(?:epics|work_items)\/(\d+)/.exec(pathname);
+  if (group) return `${group[1]}&${group[2]}`;
+  const project = /^\/(?:.+\/)?([^/]+)\/-\/(?:issues|work_items)\/(\d+)/.exec(pathname);
+  if (project) return `${project[1]}#${project[2]}`;
+  return "Tracking work item";
 }

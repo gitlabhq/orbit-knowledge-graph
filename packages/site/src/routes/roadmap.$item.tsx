@@ -3,6 +3,7 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { PageView } from "../components/PageView";
 import { itemRange } from "../roadmap/ItemCard";
 import { findItem } from "../roadmap/model";
+import { trackingLabel } from "../roadmap/schema";
 import { StatusBadge } from "../roadmap/StatusBadge";
 
 export const Route = createFileRoute("/roadmap/$item")({
@@ -40,6 +41,12 @@ function ItemPage() {
           <span className="tone-dot" />
           {item.theme.title}
         </span>
+        {item.tracking && (
+          <SiteLink href={item.tracking} className="inline-flex items-center gap-1.5 font-medium text-link no-underline hover:underline">
+            Tracking: {trackingLabel(item.tracking)}
+            <Icon name="external-link" size={12} />
+          </SiteLink>
+        )}
         {item.link && (
           <SiteLink href={item.link} className="inline-flex items-center gap-1.5 font-medium text-link no-underline hover:underline">
             {linkLabel(item.link)}
