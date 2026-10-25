@@ -66,6 +66,19 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
         ))
         .await;
 
+    let config = AppConfig::embedded_defaults().schedule.tasks;
+    let task = NamespaceFreshness::new(
+        graph.clone(),
+        clickhouse.create_client(),
+        catalog,
+        config.namespace_freshness,
+        config.namespace.sweep_interval_secs,
+    );
+    task.run().await.unwrap();
+    provider.force_flush().unwrap();
+    let before_enabling = exporter.get_finished_metrics().unwrap();
+    exporter.reset();
+
     for (id, enabled_minutes_ago) in [
         (IN_SYNC, 1440),
         (PENDING, 1440),
@@ -137,14 +150,6 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
         (started - ago).timestamp()..=(seeded - ago).timestamp()
     };
 
-    let config = AppConfig::embedded_defaults().schedule.tasks;
-    let task = NamespaceFreshness::new(
-        graph,
-        clickhouse.create_client(),
-        catalog,
-        config.namespace_freshness,
-        config.namespace.sweep_interval_secs,
-    );
     task.run().await.unwrap();
     provider.force_flush().unwrap();
     let metrics = exporter.get_finished_metrics().unwrap();
@@ -166,7 +171,7 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     assert_eq!(observations, 4 * plans.len() as u64);
     assert_eq!(
         task_runs(&metrics, "namespace_freshness", "success"),
-        1,
+        2,
         "a stopped or failing task must be visible without its samples"
     );
 
@@ -184,6 +189,13 @@ async fn records_how_far_each_enabled_namespace_trails_the_datalake() {
     );
     for plan in never_synced_global {
         assert_eq!(oldest_sync(&metrics, plan), None, "{plan} has never synced");
+    }
+    for plan in &plans {
+        assert_eq!(
+            oldest_sync(&before_enabling, plan),
+            None,
+            "{plan} has no enabled namespace to measure"
+        );
     }
 }
 

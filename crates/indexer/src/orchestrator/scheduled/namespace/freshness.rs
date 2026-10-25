@@ -221,7 +221,7 @@ impl NamespaceFreshness {
         let mut oldest_sync = Vec::new();
         for plan in ontology.pipeline_descriptors() {
             let synced_until = match plan.scope {
-                EtlScope::Namespaced => Some(self.record_plan_lag(&plan, &state)),
+                EtlScope::Namespaced => self.record_plan_lag(&plan, &state),
                 EtlScope::Global => global_synced_until(&plan, &state),
             };
             if let Some(synced_until) = synced_until {
@@ -233,7 +233,15 @@ impl NamespaceFreshness {
     }
 
     /// Records one lag sample per enabled root and returns the time up to which every root is in sync.
-    fn record_plan_lag(&self, plan: &PipelineDescriptor, state: &SyncState) -> DateTime<Utc> {
+    /// Without enabled roots there is no data to measure, so the plan reports nothing.
+    fn record_plan_lag(
+        &self,
+        plan: &PipelineDescriptor,
+        state: &SyncState,
+    ) -> Option<DateTime<Utc>> {
+        if state.roots.is_empty() {
+            return None;
+        }
         let labels = [KeyValue::new(sdlc::labels::ENTITY, plan.name.clone())];
         let mut most_behind = TimeDelta::zero();
         for root in &state.roots {
@@ -257,7 +265,7 @@ impl NamespaceFreshness {
             self.lag.record(behind.as_seconds_f64(), &labels);
             most_behind = most_behind.max(behind);
         }
-        state.now - most_behind
+        Some(state.now - most_behind)
     }
 }
 
