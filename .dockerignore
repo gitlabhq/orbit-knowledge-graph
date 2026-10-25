@@ -3,7 +3,7 @@ target/**
 !.cargo/
 CHANGELOG.md
 package.json
-package-lock.json
+bun.lock
 docs/
 e2e/
 fixtures/

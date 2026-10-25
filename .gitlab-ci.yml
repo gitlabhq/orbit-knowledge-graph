@@ -59,6 +59,18 @@ workflow:
         SECRET_DETECTION_DISABLED: "true"
         DEPENDENCY_SCANNING_DISABLED: "true"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS == null
+      changes:
+        compare_to: refs/heads/main
+        paths: &engineering-site-changes
+          - docs/README.md
+          - docs/runbooks/**/*
+          - docs/architecture/**/*
+          - docs/design-documents/decisions/**/*
+          - docs/testing/**/*
+          - packages/**/*
+          - package.json
+          - bun.lock
 
 include:
   - template: Jobs/SAST.gitlab-ci.yml
@@ -280,13 +292,13 @@ docs-in-code-mr-check:
 
 mr-title-check:
   stage: lint
-  image: node:26-alpine
+  image: oven/bun:1.4.4-alpine
   tags:
     - saas-linux-medium-amd64
   extends:
     - .mr-only-rules
   before_script:
-    - npm ci --ignore-scripts
+    - bun install --frozen-lockfile --ignore-scripts
   script:
     - ./scripts/checks/check-mr-title.sh
 
@@ -680,6 +692,7 @@ semgrep-sast:
 gitlab-advanced-sast:
   stage: security
   needs: []
+  rules: !reference [.mr-and-main-rules, rules]
 
 # Override the default secret_detection rules so the job runs on MR pipelines.
 # The Jobs/Secret-Detection.gitlab-ci.yml template defaults to branch pipelines
@@ -727,6 +740,55 @@ check_docs_i18n_markdown:
     - markdownlint-cli2 "docs-locale/${LOCALE_CODE}/source/**/*.md"
     # Check links
     - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/source/**/*.md
+
+.engineering-site:
+  stage: docs
+  needs: []
+  image: oven/bun:1.4.4
+  variables:
+    GIT_DEPTH: "0"
+  cache:
+    key:
+      files:
+        - bun.lock
+    paths:
+      - .bun-cache
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git > /dev/null
+    - bun install --frozen-lockfile --cache-dir .bun-cache
+  script:
+    - bun run test
+    - bun run build
+    - bun run typecheck
+    - mv packages/site/public public
+  artifacts:
+    paths:
+      - public
+
+pages:
+  extends: .engineering-site
+  rules:
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+pages:preview:
+  extends: .engineering-site
+  allow_failure: true
+  pages:
+    path_prefix: "$CI_COMMIT_REF_SLUG"
+    expire_in: 1 week
+  environment:
+    name: "engineering/$CI_COMMIT_REF_SLUG"
+    url: "$CI_PAGES_URL"
+    auto_stop_in: 1 week
+  rules:
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes: *engineering-site-changes
+      interruptible: true
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_OPEN_MERGE_REQUESTS == null
+      changes:
+        paths: *engineering-site-changes
+        compare_to: refs/heads/main
+      interruptible: true
 
 .docs-gitlab-com:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.154.5
@@ -1165,7 +1227,8 @@ check-go-proto:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
     - if: $CI_COMMIT_TAG
       when: never
-    - changes:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
         - crates/orbit-server/proto/**/*
         - clients/orbitpb/**/*
 
@@ -1189,7 +1252,8 @@ build-proto-gem:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
     - if: $CI_COMMIT_TAG
       when: never
-    - changes:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
         - crates/orbit-server/proto/**/*
         - clients/protogem/**/*
   artifacts:
@@ -1219,7 +1283,7 @@ publish-proto-gem:
 
 semantic-release:
   stage: release
-  image: node:26
+  image: oven/bun:1.4.4
   tags:
     - saas-linux-medium-amd64
   id_tokens:
@@ -1246,9 +1310,10 @@ semantic-release:
     - test -n "${SEMANTIC_RELEASE_GITLAB_TOKEN}" || (echo "Missing SEMANTIC_RELEASE_GITLAB_TOKEN from Vault" && exit 1)
     - export GITLAB_TOKEN="${SEMANTIC_RELEASE_GITLAB_TOKEN}"
     - git remote set-url origin "https://semantic-release:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
-    - npm ci
+    - apt-get update -qq && apt-get install -y -qq git > /dev/null
+    - bun install --frozen-lockfile
   script:
-    - npx semantic-release
+    - bun x --bun semantic-release
 
 .docker-release:
   stage: build
