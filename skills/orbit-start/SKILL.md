@@ -103,7 +103,7 @@ Then ask the user what to do next. Offer these options:
 
 Now try a bigger question that takes several queries, such as a workflow from the prompt examples.
 The user can also ask their own question.
-Read the prompt examples at <https://docs.gitlab.com/orbit/prompt-examples/>.
+Read the workflows at <https://docs.gitlab.com/orbit/remote/cookbook/>.
 Offer two to four examples that fit the scope, and use the prompt of the one that the user picks.
 If you cannot read the page, offer these:
 
@@ -233,11 +233,11 @@ Then explain, in a short list:
 - A new merge request, work item, or pipeline is in the graph within minutes.
 - Code comes from the default branch. Orbit indexes it again when the default branch changes.
   For code you have not merged, the local graph indexes a clone on your machine with `glab orbit index`.
-  See <https://docs.gitlab.com/orbit/cli/#local-graph>.
+  See <https://docs.gitlab.com/orbit/local/>.
 - One query can follow many edges, for example from a merge request to the changed code, and on to its callers.
   Without Orbit, each of those hops is at least one REST API call.
 
-Read more: <https://docs.gitlab.com/orbit/how-it-works/>
+Read more: <https://docs.gitlab.com/orbit/remote/how-it-works/>
 
 ### Part 2: What is in your graph
 
@@ -252,7 +252,7 @@ ci            Pipeline      #                          25,000
 
 Then say how many projects in the scope are indexed, and name any domain with no data.
 
-Read more: <https://docs.gitlab.com/orbit/dashboard/>
+Read more: <https://docs.gitlab.com/orbit/remote/schema/>
 
 ### Part 3: How the graph connects
 
@@ -270,7 +270,7 @@ Show this diagram of some of the main node types and the edges between them:
 
 Then say that the graph has more node types and edges, and that `glab orbit ontology` lists all of them.
 
-Read more: <https://docs.gitlab.com/orbit/schema/>
+Read more: <https://docs.gitlab.com/orbit/remote/schema/>
 
 ### Part 4: How your last query walked the graph
 
@@ -278,7 +278,7 @@ Draw the nodes and edges that the last query used. Under the diagram, match each
 Then count the hops, and say that each hop without Orbit is at least one REST API call.
 If the user has not asked a question yet, use the first question in step 3 as the example.
 
-Read more: <https://docs.gitlab.com/orbit/queries/query-language/>
+Read more: <https://docs.gitlab.com/orbit/remote/queries/query-language/>
 
 ### Part 5: Who can see what
 
@@ -290,7 +290,7 @@ Explain, in a short list:
 - A role for a top-level group applies to each subgroup and project in it.
   A role for a project alone does not give access to that project.
 
-Read more: <https://docs.gitlab.com/orbit/security/>
+Read more: <https://docs.gitlab.com/orbit/remote/security/>
 
 ## Step 7: Offer next steps
 
@@ -298,4 +298,4 @@ Ask the user what to do next. Offer these options:
 
 - Ask another question: go back to step 4.
 - Set up Orbit for every session: run `glab orbit setup`.
-- See more prompts: <https://docs.gitlab.com/orbit/prompt-examples/>.
+- See more prompts: <https://docs.gitlab.com/orbit/remote/cookbook/>.
