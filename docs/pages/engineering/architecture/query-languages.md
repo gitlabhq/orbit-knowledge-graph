@@ -108,7 +108,7 @@ direction.
 
 ```mermaid
 flowchart LR
-    Caller -- get_graph_schema or CALL db.schema --> Webserver
+    Caller -->|"get_graph_schema or CALL db.schema"| Webserver
     Ontology --> Webserver
     Webserver -- logical schema --> Caller
 ```

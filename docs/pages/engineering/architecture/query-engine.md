@@ -165,6 +165,17 @@ Every statement that the engine emits has these guarantees:
 The steps below follow one GQL query through the remote ClickHouse pipeline,
 from the data model it compiles against to the statement that ClickHouse runs.
 
+Each step's diagram traces this query through that step, and the italic text
+in each box shows what happens to it. The colors mean the same thing in every
+step. Green is a compiler pass, and purple is the query as it moves between
+passes. Amber comes from the caller, blue is the data model, and gray is
+outside the compiled statement.
+
+```gql orbit-query
+MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
+RETURN u.username, mr.title
+```
+
 ### 1. The query data model
 
 ```mermaid
@@ -202,10 +213,30 @@ apart.
 ### 2. Intermediate representation
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
 flowchart LR
-    JSON[JSON object] --> JF[JSON frontend] --> IR[Intermediate representation]
-    GQL[GQL statement] --> GF[GQL frontend] --> IR
-    GF -- CALL db.schema --> Schema[Ontology metadata]
+    accTitle: Frontends and the intermediate representation, with the example query
+    accDescr: The JSON and GQL frontends both produce the intermediate representation. The example GQL statement becomes a traversal with two node selectors, one AUTHORED relationship, and the default limit.
+    JSON["<b>JSON object</b>"]
+    JF["<b>JSON frontend</b><br/>schema check, deserialize"]
+    GQL["<b>GQL statement</b><hr/><i>MATCH (u:User)-[:AUTHORED]-><br/>(mr:MergeRequest {state: 'merged'})<br/>RETURN u.username, mr.title</i>"]
+    GF["<b>GQL frontend</b><br/>parse, typed tree, lower"]
+    IR["<b>Intermediate representation</b><hr/><i>• a traversal<br/>• u is a User<br/>• mr is a MergeRequest where state = 'merged'<br/>• u AUTHORED mr<br/>• limit 30, the default</i>"]
+    Schema["<b>Ontology metadata</b>"]
+    JSON --> JF --> IR
+    GQL --> GF --> IR
+    GF -.->|"CALL db.schema"| Schema
+
+    classDef pass fill:#DCFCE7,stroke:#15803D,color:#14532D
+    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
+    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
+    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
+    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
+    classDef reject fill:#FEE2E2,stroke:#B91C1C,color:#7F1D1D
+    class JSON,GQL caller
+    class JF,GF pass
+    class IR state
+    class Schema external
 ```
 
 Every pass after the frontend works on one intermediate representation (IR):
@@ -228,9 +259,23 @@ detail.
 ### 3. Validation and normalization
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
 flowchart LR
-    Input --> Validate[Shape, limits, references, types]
-    Validate --> Normalize[Tables, coerced values, expanded columns]
+    accTitle: Validation and normalization, with the example query
+    accDescr: Validation checks shape, limits, references, and types. Normalization resolves tables and coerces values. For the example, every name exists, AUTHORED runs from User to MergeRequest, and both entities resolve to their tables.
+    Input["<b>Intermediate representation</b>"]
+    Validate["<b>Validate</b><br/>shape, limits, references, types<hr/><i>• all names exist<br/>• AUTHORED goes from User to MergeRequest</i>"]
+    Normalize["<b>Normalize</b><br/>tables, coerced values, expanded columns<hr/><i>• User → gl_user<br/>• MergeRequest → gl_merge_request<br/>• 'merged' cast to the type of state</i>"]
+    Input --> Validate --> Normalize
+
+    classDef pass fill:#DCFCE7,stroke:#15803D,color:#14532D
+    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
+    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
+    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
+    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
+    classDef reject fill:#FEE2E2,stroke:#B91C1C,color:#7F1D1D
+    class Input state
+    class Validate,Normalize pass
 ```
 
 Validation checks the input's shape and bounds, resolves every reference
@@ -242,10 +287,27 @@ equal queries produce byte-identical SQL and parameters.
 ### 4. Restriction
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
 flowchart LR
+    accTitle: Restriction, with the example query
+    accDescr: Restriction reads the security context and the intermediate representation. The example needs no raised role and asks for no admin-only column, so it passes unchanged.
+    Input["<b>Intermediate representation</b>"]
+    Context["<b>Security context</b><br/>paths and access levels<hr/><i>for example, Reporter on 1/9970/</i>"]
+    Restrict["<b>Restrict</b><br/>role floors, admin-only fields,<br/>path filters, aggregation reach<hr/><i>• no special role needed<br/>• no admin-only fields</i>"]
+    Restricted["<b>Restricted input</b><hr/><i>unchanged</i>"]
     Input --> Restrict
-    Context[Security context: paths and access levels] --> Restrict
-    Restrict --> Restricted[Restricted input]
+    Context --> Restrict
+    Restrict --> Restricted
+
+    classDef pass fill:#DCFCE7,stroke:#15803D,color:#14532D
+    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
+    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
+    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
+    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
+    classDef reject fill:#FEE2E2,stroke:#B91C1C,color:#7F1D1D
+    class Input,Restricted state
+    class Context caller
+    class Restrict pass
 ```
 
 Restriction is the first pass that reads the security context. It rejects
@@ -258,10 +320,27 @@ node is reachable, because aggregates bypass row-level redaction.
 ### 5. Planning and latest-state reads
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
 flowchart LR
+    accTitle: Planning, with the example query
+    accDescr: The planner reads the restricted input and the data model and produces a relation graph. For the example, it reads gl_edge, joins gl_merge_request and gl_user, and uses FINAL on both node reads.
+    Input["<b>Restricted input</b>"]
+    Model[("<b>Data model</b>")]
+    Planner["<b>Planner</b><br/>relations, routes, joins,<br/>latest-state reads"]
+    Plan["<b>Relation graph</b><hr/><i>• read AUTHORED edges from gl_edge<br/>• join gl_merge_request for state and title<br/>• join gl_user for username<br/>• read the latest row versions</i>"]
     Input --> Planner
-    Model[(Data model)] --> Planner
-    Planner --> Plan[Relation graph and access paths]
+    Model --> Planner
+    Planner --> Plan
+
+    classDef pass fill:#DCFCE7,stroke:#15803D,color:#14532D
+    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
+    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
+    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
+    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
+    classDef reject fill:#FEE2E2,stroke:#B91C1C,color:#7F1D1D
+    class Input,Plan state
+    class Model data
+    class Planner pass
 ```
 
 The planner builds a relation graph, with one relation per relationship
@@ -287,34 +366,69 @@ pick, because tombstones carry those columns. Filters on mutable columns, and
 
 ### 6. Traversal-path bounds
 
-```mermaid
-flowchart LR
-    Anchor[Anchored project] -- namespace_anchor --> MR[Merge request]
-    MR -- same_namespace --> Diff[Merge request diff]
-    MR -. cross-namespace .-> WI[Work item]
+A traversal-path bound limits a read to one namespace when the query names
+that namespace. It is an extra `startsWith` filter on top of the authorization
+filter, and it lets ClickHouse skip most of the table.
+
+The example query names no project or group, so it gets no bound, and it reads
+every namespace that the caller can see. Here is the same query pinned to one
+project:
+
+```gql orbit-query
+MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project {id: 278964})
+RETURN u.username, mr.title
 ```
 
-After planning, each anchor yields a bound. An anchor is a node with a known
-ID or full path on an entity that declares a traversal-path lookup. A node
-with an equality filter on an anchor foreign key is an anchor too. The bound
-is the anchor's current traversal path, resolved by a scalar subquery in the
-same statement. ClickHouse evaluates that subquery before index analysis, so
-the bound prunes the primary index like a literal prefix.
+```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 64, "padding": 14}}}%%
+flowchart LR
+    accTitle: Traversal-path bounds for the example query pinned to one project
+    accDescr: The project has a known ID, so it is the anchor. Its path bounds the merge request through IN_PROJECT, and the AUTHORED edge read through the merge request. The user is global and gets no bound.
+    user["<b>u: User</b><hr/><i>global, so no bound</i>"]
+    mr["<b>mr: MergeRequest</b><hr/><i>bound: the project's path</i>"]
+    project["<b>p: Project {id: 278964}</b><hr/><i>• the anchor<br/>• its path is read in the same statement</i>"]
+    user -->|"AUTHORED<br/>edge read bounded like mr"| mr
+    mr -->|"IN_PROJECT<br/>the bound spreads to mr"| project
 
-Bounds propagate along variants that the ontology marks `namespace_anchor` or
-`same_namespace`, and only from parent to child for containment. A
-`prune_to_source` or `prune_to_target` variant bounds its edge read by one
-endpoint, and stops there. Cross-namespace variants stop propagation. A bound
-only narrows a read. The authorization predicate still applies.
+    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
+    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
+    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
+    class user,mr,project state
+```
+
+The project has a known ID, so it is the anchor. The engine reads the
+project's current path in a subquery of the same statement, so a moved project
+is bounded by its new path. `IN_PROJECT` keeps a merge request in its
+project's namespace, so the bound spreads to `mr`. `AUTHORED` edges are stored
+with their merge request, so the edge read gets the same bound. `User` is
+global and has no path, so `u` gets no bound.
+
+Some relationships, like `CLOSES`, can cross namespaces. A bound never spreads
+across them, and never from a child namespace up to its parent. A bound only
+narrows a read, and the authorization filter still applies.
 
 ### 7. Lowering and result shaping
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
 flowchart LR
-    Plan --> AST[SQL AST]
-    AST --> Page[Pagination window]
-    Page --> Shape[Response policy and result contract]
-    Shape --> Extras[Hydration plan and settings]
+    accTitle: Lowering and result shaping, with the example query
+    accDescr: Lowering builds the SQL AST, then pagination, the response policy, the result contract, hydration planning, and settings shape it. For the example, the AST joins gl_edge to gl_merge_request and gl_user, the page is LIMIT 31, and the result contract adds ID and type columns for u and mr.
+    Plan["<b>Relation graph</b>"]
+    AST["<b>SQL AST</b><hr/><i>• gl_edge joined to gl_merge_request on target_id<br/>• gl_edge joined to gl_user on source_id</i>"]
+    Page["<b>Pagination window</b><hr/><i>LIMIT 31: 30 rows, plus 1 to check for more</i>"]
+    Shape["<b>Response policy and result contract</b><hr/><i>adds ID and type columns for u and mr</i>"]
+    Extras["<b>Hydration plan and settings</b><hr/><i>username and title are already in the main query</i>"]
+    Plan --> AST --> Page --> Shape --> Extras
+
+    classDef pass fill:#DCFCE7,stroke:#15803D,color:#14532D
+    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
+    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
+    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
+    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
+    classDef reject fill:#FEE2E2,stroke:#B91C1C,color:#7F1D1D
+    class Plan,AST state
+    class Page,Shape,Extras pass
 ```
 
 Lowering turns the plan into a SQL AST with physical result bindings, and
@@ -330,11 +444,28 @@ type.
 ### 8. Security, verification, and code generation
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
 flowchart LR
-    AST --> Security[Inject traversal-path predicates]
-    Security --> Verify
+    accTitle: Security, verification, and code generation, with the example query
+    accDescr: Security injects traversal-path predicates, verification checks every namespaced read, and code generation renders the SQL. For the example, gl_edge and gl_merge_request get predicates at the Reporter floor, gl_user gets none, and every value is a bound parameter.
+    AST["<b>SQL AST</b>"]
+    Security["<b>Inject traversal-path predicates</b><hr/><i>• path filter on gl_edge and gl_merge_request<br/>• gl_user is global, so no filter</i>"]
+    Verify["<b>Verify</b><hr/><i>both filtered, so it passes</i>"]
+    Codegen["<b>Code generation</b><hr/><i>AUTHORED, 'merged', and the paths are sent as parameters</i>"]
+    Reject["<b>Reject</b>"]
+    AST --> Security --> Verify
     Verify -- every namespaced read covered --> Codegen
-    Verify -- any read uncovered --> Reject
+    Verify -. any read uncovered .-> Reject
+
+    classDef pass fill:#DCFCE7,stroke:#15803D,color:#14532D
+    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
+    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
+    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
+    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
+    classDef reject fill:#FEE2E2,stroke:#B91C1C,color:#7F1D1D
+    class AST state
+    class Security,Verify,Codegen pass
+    class Reject reject
 ```
 
 Security runs on the finished AST, after every pass that can add a read. It
