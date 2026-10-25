@@ -28,11 +28,11 @@ If you have no such tool, print the options as a numbered list, then stop and wa
 
 ## Answer with Orbit
 
-1. Note the start time in UTC with `date -u +%Y-%m-%dT%H:%M:%SZ`.
+1. Run `date -u +%Y-%m-%dT%H:%M:%SZ` as your first tool call, and keep the output as the start time.
 1. Run each query with `glab orbit query`.
+1. Run `date -u +%Y-%m-%dT%H:%M:%SZ` again after the last query, and keep it as the end time.
 1. Give the answer, and list each finding with the query result that shows it.
 1. Show the queries that you ran, so the user can run them again.
-1. Note the end time.
 
 ## Step 1: Check the setup
 
@@ -96,14 +96,15 @@ Then ask the user what to do next. Offer these options:
 
 Run the same prompt again, in this session, so that the user sees each call.
 
-1. Note the start time in UTC with `date -u +%Y-%m-%dT%H:%M:%SZ`.
+1. Run `date -u +%Y-%m-%dT%H:%M:%SZ` as your first tool call, and keep the output as the start time.
 1. Use only the tools that the user had before Orbit.
    These are `glab` commands, the REST API through `glab api`, and `git` and file reads in the local clone.
 1. Do not use `glab orbit`, the GitLab Orbit MCP endpoint, or any other Orbit tool.
 1. Stop after 15 tool calls or 3 minutes, whichever comes first, and keep what you have.
-1. Give the answer, and note the end time.
+1. Run `date -u +%Y-%m-%dT%H:%M:%SZ` again after the last call, and keep it as the end time.
+1. Give the answer.
 
-Then show a short summary of both runs:
+Then count both runs, and show the summary in the same reply:
 
 | | With Orbit | Without Orbit |
 |---|---|---|
@@ -127,19 +128,39 @@ Then ask the user what to do next. Offer these options:
 
 Read the counts from the transcript that your agent writes, not from memory.
 The token counts in it come from the model API, so the counts are the same every time you read them.
-For each run, count only the lines between its start and end times.
+For each run, count only the lines between its start and end times. Never guess the times.
 
-- **Claude Code**: the session is `~/.claude/projects/<project>/<session-id>.jsonl`.
-  `<project>` is the working directory, with each character other than a letter or digit replaced by `-`.
-  The newest `.jsonl` file there is the current session.
-  Count the `tool_use` blocks in the `assistant` lines, and add up `message.usage` once for each `message.id`.
-  One message can span several lines.
+- **Claude Code**: the session is `~/.claude/projects/*/$CLAUDE_CODE_SESSION_ID.jsonl`.
+  Run the script under this list once for each run, with its start and end times.
 - **Codex**: the session is `~/.codex/sessions/<year>/<month>/<day>/rollout-<time>-<id>.jsonl`.
   Count the `response_item` lines whose `payload.type` ends in `_call`.
   The tokens are in `payload.info.total_token_usage` of the `event_msg` lines with `payload.type` `token_count`.
   This total grows during the session, so subtract the last total before the start time.
 - **Other agents**: use the transcript if your agent keeps one with token counts.
   Otherwise, count your tool calls as you make them, and write `Not known` for tokens.
+
+Claude Code script. It adds up `message.usage` once for each `message.id`, because one message can span several lines:
+
+```shell
+python3 - <start> <end> ~/.claude/projects/*/"$CLAUDE_CODE_SESSION_ID".jsonl <<'EOF'
+import json, sys
+start, end, path = sys.argv[1][:19], sys.argv[2][:19], sys.argv[3]
+calls, api, usage = 0, 0, {}
+for line in open(path):
+    e = json.loads(line)
+    if e.get("type") != "assistant" or not start <= e.get("timestamp", "")[:19] <= end:
+        continue
+    m = e["message"]
+    usage[m["id"]] = m.get("usage") or {}
+    for c in m.get("content") or []:
+        if c.get("type") == "tool_use":
+            calls += 1
+            cmd = json.dumps(c.get("input"))
+            api += cmd.count("glab api") + cmd.count("glab orbit query")
+tokens = sum(sum(v for k, v in u.items() if k.endswith("_tokens") and isinstance(v, int)) for u in usage.values())
+print(f"tool calls {calls}, API requests {api}, tokens {tokens}")
+EOF
+```
 
 API requests are the `glab orbit query` and `glab api` calls, and any other call to the GitLab instance.
 
