@@ -751,11 +751,14 @@ check_docs_i18n_markdown:
   variables:
     GIT_DEPTH: "0"
   cache:
-    key:
-      files:
-        - bun.lock
-    paths:
-      - .bun-cache
+    - key:
+        files:
+          - bun.lock
+      paths:
+        - .bun-cache
+    - key: orbit-markdown
+      paths:
+        - packages/site/.cache/orbit-markdown
   before_script:
     - apt-get update -qq && apt-get install -y -qq git > /dev/null
     - bun install --frozen-lockfile --cache-dir .bun-cache

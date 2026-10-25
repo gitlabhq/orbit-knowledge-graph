@@ -78,6 +78,7 @@ image-digests/
 .cargo-cache/
 packages/site/content/
 packages/site/data/
+packages/site/.cache/
 packages/site/public/
 packages/site/src/routeTree.gen.ts
 .tanstack/

@@ -36,6 +36,7 @@ export default defineConfig(
       routes: { "": HOME },
       port: 5190,
       siteRoot,
+      markdown: { project: "gitlab-org/orbit/knowledge-graph", tokenEnv: "ORBIT_MARKDOWN_TOKEN" },
       meta: siteMeta,
     }),
     { plugins: [syncSources()] },
