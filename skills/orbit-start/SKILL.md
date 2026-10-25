@@ -178,17 +178,18 @@ API requests are the `glab orbit query` and `glab api` calls, and any other call
 
 ## Step 5: See how GitLab Orbit works
 
-Show all five parts below in one reply.
+Walk the user through the five parts below, one part for each reply.
 
-1. First, run one command to get the data:
+1. Before part 1, run one command to get the data for all parts:
 
    ```shell
    glab orbit graph-status --full-path <scope>; glab orbit ontology Project MergeRequest Pipeline Job Vulnerability File Definition User
    ```
 
-1. Write all five parts in your reply, in order.
-   Each part has a heading, its diagram in a `text` code block, its explanation, and its **Read more** link.
-1. Then ask the user what to do next. Offer these options:
+   Do not run other commands in this step, so that each later part shows at once.
+1. For each part, write it in your reply: a heading, its diagram in a `text` code block, its explanation, and its **Read more** link.
+1. End each reply with these options:
+   - **Next: <title of the next part>**: show the next part. Leave this out after the last part.
    - **Ask a question**: go to step 3.
    - **Done**: go to step 6.
 
