@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { orbitSite } from "@gitlab-org/orbit-site/vite";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
-import { engineeringMeta, siteRoot, sourcePaths, syncContent } from "./build/content";
+import { siteMeta, siteRoot, sourcePaths, syncContent } from "./build/content";
+import { HOME } from "./src/sections";
 
 function syncSources(): Plugin {
   return {
@@ -24,17 +25,18 @@ syncContent();
 export default defineConfig(
   mergeConfig(
     orbitSite({
-      name: "Orbit engineering",
-      title: "Engineering",
+      name: HOME.title,
+      title: "",
       banner: {
         kind: "external",
-        message: "How the Orbit team builds and runs GitLab Orbit.",
+        message: "Public site. Safe to share with customers and the community.",
         switchUrl: { dev: "http://localhost:5173/", prod: "https://gitlab-org.gitlab.io/orbit/portal/" },
       },
-      search: "Search the engineering docs",
+      search: "Search GitLab Orbit",
+      routes: { "": HOME },
       port: 5190,
       siteRoot,
-      meta: engineeringMeta,
+      meta: siteMeta,
     }),
     { plugins: [syncSources()] },
   ),

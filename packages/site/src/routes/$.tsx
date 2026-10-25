@@ -15,5 +15,5 @@ export const Route = createFileRoute("/$")({
 
 function ContentRoute() {
   const { page, body } = Route.useLoaderData();
-  return <PageView page={page} body={body} />;
+  return <PageView page={page} body={body} sidebar={page.path.startsWith("engineering")} />;
 }

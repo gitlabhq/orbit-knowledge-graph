@@ -13,7 +13,8 @@
     "@tanstack/react-router": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "yaml": "catalog:"
   },
   "devDependencies": {
     "@types/bun": "catalog:",

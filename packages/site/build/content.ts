@@ -1,17 +1,20 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
+import { parse as parseYaml } from "yaml";
+import { itemFields, postFields } from "../src/roadmap/schema";
 import { SECTIONS } from "../src/sections";
 
 export const siteRoot = join(import.meta.dirname, "..");
 const repoRoot = join(siteRoot, "../..");
 export const contentDir = join(siteRoot, "content");
+const dataDir = join(siteRoot, "data");
 const repoUrl = `https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/`;
 const revision = process.env.CI_COMMIT_SHA ?? "main";
 export const repoBlob = `${repoUrl}blob/${revision}/`;
 const repoRaw = `${repoUrl}raw/${revision}/`;
 
-const HOME = "docs/README.md";
+const ENGINEERING_HOME = "docs/README.md";
 const IMAGE = /\.(png|jpe?g|gif|svg|webp)$/i;
 const CODE = /(`{3,}[\s\S]*?`{3,}|~{3,}[\s\S]*?~{3,}|`[^`\n]*`)/;
 const INLINE_LINK = /\]\((?![a-z]+:|#|\/)([^)\s]+)((?:\s+"[^"]*")?)\)/g;
@@ -26,11 +29,11 @@ const routeOf = (section: string, name: string) => posix.join(section, isReadme(
 
 const contentName = (file: string, route: string) => (isReadme(file) ? posix.join(route, "index.md") : `${route}.md`);
 
-export const sourcePaths = [HOME, ...SECTIONS.map(({ dir }) => dir)].map((path) => join(repoRoot, path));
+export const sourcePaths = [ENGINEERING_HOME, ...SECTIONS.map(({ dir }) => dir)].map((path) => join(repoRoot, path));
 
 export function sourceFiles(): Map<string, string> {
   return new Map([
-    [HOME, ""],
+    [ENGINEERING_HOME, "engineering"],
     ...SECTIONS.flatMap(({ route, dir }) =>
       readdirSync(join(repoRoot, dir), { recursive: true, encoding: "utf8" })
         .filter((name) => name.endsWith(".md"))
@@ -73,8 +76,23 @@ function commitDates(files: string[]) {
   }
 }
 
+function syncData() {
+  rmSync(dataDir, { recursive: true, force: true });
+  for (const { route, dir } of SECTIONS)
+    for (const name of readdirSync(join(repoRoot, dir)).filter((file) => file.endsWith(".yaml"))) {
+      mkdirSync(join(dataDir, route), { recursive: true });
+      copyFileSync(join(repoRoot, dir, name), join(dataDir, route, name));
+    }
+}
+
+const sectionData = (route: string, name: string) => parseYaml(readFileSync(join(dataDir, route, name), "utf8"));
+
+let roadmapSchema = { themes: [] as string[], authors: [] as string[] };
+
 export function syncContent() {
   const routes = sourceFiles();
+  syncData();
+  roadmapSchema = { themes: sectionData("roadmap", "roadmap.yaml").themes.map((theme: { id: string }) => theme.id), authors: Object.keys(sectionData("content", "authors.yaml")) };
   rmSync(contentDir, { recursive: true, force: true });
   sourceOfRoute.clear();
   for (const [file, route] of routes) {
@@ -86,7 +104,7 @@ export function syncContent() {
   commitDates([...routes.keys()]);
 }
 
-export function engineeringMeta(route: string, frontmatter: Record<string, unknown>) {
+export function siteMeta(route: string, frontmatter: Record<string, unknown>, body: string) {
   const source = sourceOfRoute.get(route);
   if (!source) throw new Error(`no source file for the route /${route}`);
   return {
@@ -97,5 +115,13 @@ export function engineeringMeta(route: string, frontmatter: Record<string, unkno
       .map((author) => author.replace(/^@/, "")),
     lastChanged: changedOn.get(source),
     order: typeof frontmatter.order === "number" ? frontmatter.order : undefined,
+    words: body.split(/\s+/).filter(Boolean).length,
+    ...roadmapFields(route, frontmatter),
   };
+}
+
+function roadmapFields(route: string, frontmatter: Record<string, unknown>) {
+  if (route.startsWith("content/blog/")) return { post: postFields(frontmatter, roadmapSchema.authors) };
+  if (route.startsWith("roadmap/")) return { item: itemFields(frontmatter, roadmapSchema.themes) };
+  return {};
 }

@@ -68,6 +68,9 @@ workflow:
           - docs/architecture/**/*
           - docs/design-documents/decisions/**/*
           - docs/testing/**/*
+          - docs/roadmap/**/*
+          - docs/content/**/*
+          - docs/team/**/*
           - packages/**/*
           - package.json
           - bun.lock
