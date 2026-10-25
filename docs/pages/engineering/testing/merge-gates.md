@@ -6,7 +6,7 @@ authors:
   - michaelangeloio
 ---
 
-**TL;DR:** Every merge request runs static analysis, schema checks, freshness
+Every merge request runs static analysis, schema checks, freshness
 checks, and version checks next to the tests. Review automation and code
 owners add a second check for security, performance, and billing.
 

@@ -6,7 +6,7 @@ authors:
   - michaelusa
 ---
 
-**TL;DR:** Orbit tests behavior at the highest layer that can see it. New
+Orbit tests behavior at the highest layer that can see it. New
 correctness tests are data files that run real Orbit code, most of them
 against real infrastructure.
 Mocks replace only the systems that Orbit does not own. The GitLab side of

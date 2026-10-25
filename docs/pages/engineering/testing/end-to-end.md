@@ -6,7 +6,7 @@ authors:
   - michaelangeloio
 ---
 
-**TL;DR:** End-to-end tests deploy GitLab and every Orbit component. Then they
+End-to-end tests deploy GitLab and every Orbit component. Then they
 create data through the GitLab API and query until the expected graph appears.
 A pass proves the full chain, from a database row to a query response.
 

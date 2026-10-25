@@ -6,7 +6,7 @@ authors:
   - michaelangeloio
 ---
 
-**TL;DR:** Fuzz targets send random input to the query languages, the source
+Fuzz targets send random input to the query languages, the source
 parsers, and the message decoders. A short run happens on each merge request.
 A longer run happens each day and grows the corpus.
 

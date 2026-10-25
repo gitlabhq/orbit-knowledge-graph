@@ -7,7 +7,7 @@ authors:
   - michaelusa
 ---
 
-**TL;DR:** These tests run Orbit against a real graph store and a real message
+These tests run Orbit against a real graph store and a real message
 broker in containers. Query scenarios are the main proof of query
 correctness.
 

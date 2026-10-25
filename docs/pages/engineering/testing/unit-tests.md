@@ -6,7 +6,7 @@ authors:
   - michaelangeloio
 ---
 
-**TL;DR:** Unit tests cover pure logic, such as parsing and name mapping. They
+Unit tests cover pure logic, such as parsing and name mapping. They
 need no external services.
 
 ## Contracts

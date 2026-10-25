@@ -7,7 +7,7 @@ authors:
   - michaelusa
 ---
 
-**TL;DR:** These tests run the query compiler, the code-graph engine, and the
+These tests run the query compiler, the code-graph engine, and the
 command-line tool with no external services. They are the fastest layer that
 runs the real code path.
 

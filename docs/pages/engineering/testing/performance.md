@@ -6,7 +6,7 @@ authors:
   - michaelangeloio
 ---
 
-**TL;DR:** Performance tests load a synthetic graph and send concurrent
+Performance tests load a synthetic graph and send concurrent
 queries. Benchmarks measure code indexing on real repositories. Production
 rollouts are the load test at full scale.
 

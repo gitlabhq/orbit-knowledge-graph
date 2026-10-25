@@ -6,7 +6,7 @@ authors:
   - michaelangeloio
 ---
 
-**TL;DR:** Build checks verify the inputs that the code depends on but that
+Build checks verify the inputs that the code depends on but that
 the compiler cannot type-check. A failed check stops the build on a laptop and
 in CI.
 
