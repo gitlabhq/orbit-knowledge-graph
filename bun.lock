@@ -23,6 +23,7 @@
     "packages/site": {
       "name": "@orbit/site",
       "dependencies": {
+        "@gitlab-org/orbit-markdown": "catalog:",
         "@gitlab-org/orbit-site": "catalog:",
         "@tanstack/react-router": "catalog:",
         "react": "catalog:",
@@ -39,6 +40,7 @@
     },
   },
   "catalog": {
+    "@gitlab-org/orbit-markdown": "0.7.1",
     "@gitlab-org/orbit-site": "0.7.1",
     "@tanstack/react-router": "1.170.17",
     "@types/bun": "1.4.4",

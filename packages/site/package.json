@@ -9,6 +9,7 @@
     "test": "bun test build"
   },
   "dependencies": {
+    "@gitlab-org/orbit-markdown": "catalog:",
     "@gitlab-org/orbit-site": "catalog:",
     "@tanstack/react-router": "catalog:",
     "react": "catalog:",

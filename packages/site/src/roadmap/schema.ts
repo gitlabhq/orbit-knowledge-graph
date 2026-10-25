@@ -45,11 +45,15 @@ export function horizonOf(status: Exclude<Status, "shipped">, start: Quarter, no
   return quarterIndex(start) <= quarterIndex(now) + 1 ? "next" : "later";
 }
 
-export function trackingLabel(url: string): string {
+export type TrackingRef = { namespace: string; iid: string; label: string };
+
+export function trackingRef(url: string): TrackingRef | undefined {
   const { pathname } = new URL(url);
-  const group = /^\/groups\/(?:.+\/)?([^/]+)\/-\/(?:epics|work_items)\/(\d+)/.exec(pathname);
-  if (group) return `${group[1]}&${group[2]}`;
-  const project = /^\/(?:.+\/)?([^/]+)\/-\/(?:issues|work_items)\/(\d+)/.exec(pathname);
-  if (project) return `${project[1]}#${project[2]}`;
-  return "Tracking work item";
+  const group = /^\/groups\/(.+)\/-\/(?:epics|work_items)\/(\d+)/.exec(pathname);
+  if (group?.[1] && group[2]) return { namespace: group[1], iid: group[2], label: `${group[1].split("/").pop()}&${group[2]}` };
+  const project = /^\/(.+)\/-\/(?:issues|work_items)\/(\d+)/.exec(pathname);
+  if (project?.[1] && project[2]) return { namespace: project[1], iid: project[2], label: `${project[1].split("/").pop()}#${project[2]}` };
+  return undefined;
 }
+
+export const trackingLabel = (url: string) => trackingRef(url)?.label ?? "Tracking work item";

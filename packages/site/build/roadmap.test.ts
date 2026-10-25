@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { itemFields, trackingLabel } from "../src/roadmap/schema";
+import { itemFields, trackingLabel, trackingRef } from "../src/roadmap/schema";
 
 const item = { description: "D", theme: "agents", status: "planned", start: "FY27 Q4" };
 
@@ -10,6 +10,8 @@ describe("roadmap tracking", () => {
     expect(trackingLabel("https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1075")).toBe("knowledge-graph#1075");
     expect(trackingLabel("https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1421")).toBe("knowledge-graph#1421");
     expect(trackingLabel("https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/milestones/3")).toBe("Tracking work item");
+    expect(trackingRef("https://gitlab.com/groups/gitlab-org/orbit/-/work_items/9")).toEqual({ namespace: "gitlab-org/orbit", iid: "9", label: "orbit&9" });
+    expect(trackingRef("https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1075")).toEqual({ namespace: "gitlab-org/orbit/knowledge-graph", iid: "1075", label: "knowledge-graph#1075" });
   });
 
   test("accepts only gitlab.com tracking URLs", () => {

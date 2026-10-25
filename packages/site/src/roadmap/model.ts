@@ -1,5 +1,7 @@
 import { type Page, pages } from "@gitlab-org/orbit-site";
 import data from "@data/roadmap/roadmap.yaml";
+import trackers from "@data/roadmap/trackers.yaml";
+import type { Tracker } from "../../build/trackers";
 import { parseQuarter, type Quarter, quarterIndex, quarterOf } from "./calendar";
 import { type Horizon, horizonOf, type Status } from "./schema";
 
@@ -22,6 +24,7 @@ export type RoadmapItem = {
   end: Quarter;
   link?: string;
   tracking?: string;
+  tracker?: Tracker;
 };
 
 const roadmap = data as { updated: string; themes: RoadmapTheme[] };
@@ -47,6 +50,7 @@ export const items: RoadmapItem[] = pages
     end: parseQuarter(end),
     link,
     tracking,
+    tracker: tracking ? (trackers as Record<string, Tracker>)[tracking] : undefined,
   }))
   .sort(
     (a, b) =>

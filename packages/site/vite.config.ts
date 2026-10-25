@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { orbitSite } from "@gitlab-org/orbit-site/vite";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
-import { siteMeta, siteRoot, sourcePaths, syncContent } from "./build/content";
+import { siteMeta, siteRoot, sourcePaths, syncContent, syncTrackers } from "./build/content";
 import { HOME } from "./src/sections";
 
 function syncSources(): Plugin {
@@ -20,10 +20,11 @@ function syncSources(): Plugin {
 process.env.VITE_ORBIT_VERSION = JSON.parse(readFileSync(join(siteRoot, "../../package.json"), "utf8")).version;
 process.env.VITE_ORBIT_RELEASE = process.env.CI_COMMIT_TAG ?? "";
 
-syncContent();
 
-export default defineConfig(
-  mergeConfig(
+export default defineConfig(async () => {
+  syncContent();
+  await syncTrackers();
+  return mergeConfig(
     orbitSite({
       name: HOME.title,
       title: "",
@@ -40,5 +41,5 @@ export default defineConfig(
       meta: siteMeta,
     }),
     { plugins: [syncSources()] },
-  ),
-);
+  );
+});

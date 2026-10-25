@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
+import { parseFrontmatter } from "@gitlab-org/orbit-markdown/author";
 import { parse as parseYaml } from "yaml";
 import { itemFields, postFields } from "../src/roadmap/schema";
 import { SECTIONS } from "../src/sections";
+import { fetchTrackers, type Tracker } from "./trackers";
 
 export const siteRoot = join(import.meta.dirname, "..");
 const repoRoot = join(siteRoot, "../..");
@@ -76,6 +78,8 @@ function commitDates(files: string[]) {
   }
 }
 
+let trackers: Record<string, Tracker> = {};
+
 function syncData() {
   rmSync(dataDir, { recursive: true, force: true });
   for (const { route, dir } of SECTIONS)
@@ -83,6 +87,19 @@ function syncData() {
       mkdirSync(join(dataDir, route), { recursive: true });
       copyFileSync(join(repoRoot, dir, name), join(dataDir, route, name));
     }
+  mkdirSync(join(dataDir, "roadmap"), { recursive: true });
+  writeFileSync(join(dataDir, "roadmap", "trackers.yaml"), JSON.stringify(trackers));
+}
+
+const trackingUrls = () =>
+  [...sourceFiles()]
+    .filter(([, route]) => route.startsWith("roadmap/"))
+    .map(([file]) => parseFrontmatter(readFileSync(join(repoRoot, file), "utf8")).frontmatter.tracking)
+    .filter((url): url is string => typeof url === "string");
+
+export async function syncTrackers() {
+  trackers = await fetchTrackers(trackingUrls(), process.env.ORBIT_MARKDOWN_TOKEN);
+  syncData();
 }
 
 const sectionData = (route: string, name: string) => parseYaml(readFileSync(join(dataDir, route, name), "utf8"));
