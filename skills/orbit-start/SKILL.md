@@ -199,23 +199,15 @@ Walk the user through the five parts below, one part for each reply.
 Show this diagram:
 
 ```text
-GitLab
-  groups, projects, merge requests,
-  pipelines, jobs, work items,
-  vulnerabilities, and code on the
-  default branch
-       |
-       | index
-       v
-GitLab Orbit
-  indexer --> graph database
-  GitLab authorizes each query
-     ^            |
-     | query      | rows
-     |            v
-Your agent
-  glab orbit query, MCP endpoint,
-  REST API, or GitLab Duo
+GitLab                       GitLab Orbit                       Your agent
++------------------+  index  +---------------------------+ query +------------------+
+| groups, projects | ------> | a graph of nodes and      | <---- | glab orbit query |
+| merge requests   |         | edges, updated as the     | ----> | or the MCP tools |
+| pipelines, jobs  |         | data changes              | rows  |                  |
+| vulnerabilities  |         |                           |       |                  |
+| code             |         | returns only what you can |       |                  |
++------------------+         | see                       |       +------------------+
+                             +---------------------------+
 ```
 
 Then explain, in a short list:
@@ -232,12 +224,12 @@ Read more: <https://docs.gitlab.com/orbit/remote/how-it-works/>
 ### Part 2: What is in your graph
 
 Use the `graph-status` output. Draw the node counts as a bar chart.
-Show the eight largest node types, with the domain after each count. Scale the bars to the largest count. For example:
+Show the eight largest node types. Scale the bars to 24 characters for the largest count, and align the columns. For example:
 
 ```text
-Job         ################  600,000  ci
-Definition  #######           250,000  source_code
-Pipeline    #                  25,000  ci
+Job                   ########################  600,000
+Definition            ##########                250,000
+Pipeline              #                          25,000
 ```
 
 Then say how many projects in the scope are indexed, and name any domain with no data.
