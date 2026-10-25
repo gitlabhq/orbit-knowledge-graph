@@ -14,7 +14,7 @@ fi
 
 download=$(mktemp)
 trap 'rm -f "$download"' EXIT
-curl -sf --retry 4 --retry-all-errors "$job_url" -o "$download"
+curl -sf --retry 4 --retry-all-errors --max-filesize 67108864 "$job_url" -o "$download"
 if ! grep -q '^type Query ' "$download"; then
     echo "ERROR: job $job_id did not return a GraphQL schema with a Query type" >&2
     exit 1
