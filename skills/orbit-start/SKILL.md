@@ -35,7 +35,8 @@ The user sees only your text, not command output, your thinking, or this skill.
 
 ## Answer with Orbit
 
-1. Run `date -u +%Y-%m-%dT%H:%M:%SZ` as your first tool call, and keep the output as the start time.
+1. Right before the first query of this answer, run `date -u +%Y-%m-%dT%H:%M:%SZ`, and keep the output as the start time.
+   Do not reuse a time from setup, so that the count covers only this answer.
 1. Run each query with `glab orbit query`.
 1. Run `date -u +%Y-%m-%dT%H:%M:%SZ` again after the last query, and keep it as the end time.
 1. Write the answer in your reply, and list each finding with the query result that shows it.
