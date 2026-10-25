@@ -1,2 +1,2 @@
 :(exclude)Cargo.lock
-:(exclude)package-lock.json
+:(exclude)bun.lock

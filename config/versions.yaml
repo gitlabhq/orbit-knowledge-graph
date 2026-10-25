@@ -29,6 +29,11 @@ vendored:
     vendor_dir: config/vendored
     check_script: scripts/vendored/gitlab_system_note_actions/check.sh
 
+  gitlab_graphql_schema:
+    version: "17448481030"
+    vendor_dir: crates/orbit-cli/graphql/schema
+    vendor_script: scripts/vendored/gitlab_graphql_schema/vendor.sh
+
   # Iglu schema version pins. Edit a pin here, then run `mise vendor -- iglu`
   # to fetch the schema JSON from the upstream Iglu registry.
   iglu:
@@ -36,9 +41,9 @@ vendored:
     vendor_script: scripts/vendored/iglu/bump.sh
     check_script: scripts/vendored/iglu/check.sh
     pins:
-      orbit_query: 2-2-1
+      orbit_query: 2-2-3
       orbit_common: 1-0-4
-      orbit_cli: 1-0-0
+      orbit_cli: 1-0-1
       orbit_cli_command: 1-0-1
       orbit_cli_setup: 1-0-0
       orbit_code_indexing: 2-0-0

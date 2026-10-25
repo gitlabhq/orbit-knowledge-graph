@@ -11,6 +11,7 @@ use query_engine::compiler::ExecMetrics;
 use query_engine::pipeline::PipelineError;
 
 use crate::auth::{Claims, SourceType};
+use crate::user_agent::UserAgent;
 
 pub(crate) fn build_common(
     config: &AnalyticsConfig,
@@ -49,7 +50,7 @@ pub(crate) fn build_common(
 pub(crate) fn build_query(
     claims: &Claims,
     tool_name: &str,
-    coding_agent: Option<&str>,
+    user_agent: &UserAgent,
     metrics: &ExecMetrics,
     row_count: usize,
     redacted_count: usize,
@@ -64,8 +65,10 @@ pub(crate) fn build_query(
                 .parse::<orbit_query::OrbitQueryToolName>()
                 .map_err(validation("tool_name"))?,
         ),
-        coding_agent: coding_agent
-            .and_then(|a| a.parse::<orbit_query::OrbitQueryCodingAgent>().ok()),
+        coding_agent: parse_or_drop(user_agent.coding_agent.as_deref()),
+        client_name: parse_or_drop(user_agent.client_name.as_deref()),
+        client_version: parse_or_drop(user_agent.client_version.as_deref()),
+        distribution: parse_or_drop(user_agent.distribution.as_deref()),
         queried_namespace_ids: if queried.is_empty() {
             None
         } else {
@@ -80,6 +83,8 @@ pub(crate) fn build_query(
             .transpose()
             .map_err(validation("session_id"))?,
         is_gitlab_team_member: claims.is_gitlab_team_member,
+        user_type: parse_or_drop(claims.user_type.as_deref()),
+        token_type: parse_or_drop(claims.token_type.as_deref()),
         ..Default::default()
     };
     apply_metrics(&mut q, metrics, row_count, redacted_count, total_elapsed);
@@ -296,6 +301,10 @@ fn source_type(source: SourceType) -> orbit_query::OrbitQuerySourceType {
     }
 }
 
+fn parse_or_drop<T: std::str::FromStr>(value: Option<&str>) -> Option<T> {
+    value.and_then(|v| v.parse().ok())
+}
+
 fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
     claims
         .group_traversal_ids
@@ -341,6 +350,8 @@ mod tests {
             deployment_type: None,
             realm: None,
             is_gitlab_team_member: None,
+            user_type: None,
+            token_type: None,
             license_checksum: None,
         }
     }
@@ -355,7 +366,7 @@ mod tests {
         let query = build_query(
             claims,
             tool,
-            None,
+            &UserAgent::default(),
             &ExecMetrics::default(),
             0,
             0,
@@ -380,7 +391,7 @@ mod tests {
         let query = build_query(
             claims,
             "query_graph",
-            None,
+            &UserAgent::default(),
             &ExecMetrics::default(),
             0,
             0,
@@ -431,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn build_query_passes_through_coding_agent() {
+    fn build_query_passes_through_user_agent() {
         let claims = claims_with_paths(vec![]);
         let common = build_common(
             &orbit_server_config::AppConfig::embedded_defaults().analytics,
@@ -442,7 +453,9 @@ mod tests {
         let query = build_query(
             &claims,
             "query_graph",
-            Some("claude-code"),
+            &UserAgent::parse(Some(
+                "orbit/0.157.0 (linux, x86_64) Distribution/glab Coding-Agent/claude-code",
+            )),
             &ExecMetrics::default(),
             0,
             0,
@@ -456,6 +469,28 @@ mod tests {
             .unwrap();
         let data = event.contexts()[1].data.clone();
         assert_eq!(data["coding_agent"], "claude-code");
+        assert_eq!(data["client_name"], "orbit");
+        assert_eq!(data["client_version"], "0.157.0");
+        assert_eq!(data["distribution"], "glab");
+    }
+
+    #[test]
+    fn build_query_passes_through_caller_credentials() {
+        let mut claims = claims_with_paths(vec![]);
+        claims.user_type = Some("project_bot".into());
+        claims.token_type = Some("personal_access_token".into());
+        let data = query_data(&claims, "query_graph");
+        assert_eq!(data["user_type"], "project_bot");
+        assert_eq!(data["token_type"], "personal_access_token");
+    }
+
+    #[test]
+    fn build_query_drops_oversized_token_type_but_keeps_the_event() {
+        let mut claims = claims_with_paths(vec![]);
+        claims.token_type = Some("x".repeat(65));
+        let data = query_data(&claims, "query_graph");
+        assert!(data.get("token_type").is_none());
+        assert_eq!(data["tool_name"], "query_graph");
     }
 
     #[test]
@@ -471,7 +506,10 @@ mod tests {
         let query = build_query(
             &claims,
             "query_graph",
-            Some(&"x".repeat(65)),
+            &UserAgent {
+                coding_agent: Some("x".repeat(65)),
+                ..UserAgent::default()
+            },
             &ExecMetrics::default(),
             0,
             0,
@@ -567,11 +605,15 @@ mod tests {
 
         #[test]
         fn query_context_validates_against_iglu_schema() {
-            let claims = claims_with_paths(vec!["1/22/"]);
+            let mut claims = claims_with_paths(vec!["1/22/"]);
+            claims.user_type = Some("project_bot".into());
+            claims.token_type = Some("personal_access_token".into());
             let query = build_query(
                 &claims,
                 "query_graph",
-                Some("claude-code"),
+                &UserAgent::parse(Some(
+                    "orbit/0.157.0 (linux, x86_64) Distribution/glab Coding-Agent/claude-code",
+                )),
                 &ExecMetrics::default(),
                 0,
                 0,
@@ -587,7 +629,7 @@ mod tests {
             let query = build_query(
                 &claims,
                 "query_graph",
-                None,
+                &UserAgent::default(),
                 &ExecMetrics::default(),
                 0,
                 0,
@@ -608,7 +650,7 @@ mod tests {
             let query = build_query(
                 &claims,
                 "query_graph",
-                None,
+                &UserAgent::default(),
                 &ExecMetrics::default(),
                 0,
                 0,
@@ -665,8 +707,16 @@ mod tests {
             hydration: Some(HydrationPlan::Static(vec![])),
             ..Default::default()
         };
-        let query =
-            build_query(&claims, "query_graph", None, &metrics, 0, 0, Duration::ZERO).unwrap();
+        let query = build_query(
+            &claims,
+            "query_graph",
+            &UserAgent::default(),
+            &metrics,
+            0,
+            0,
+            Duration::ZERO,
+        )
+        .unwrap();
         let data = query.data();
 
         assert_eq!(data["source_type"], "mcp");

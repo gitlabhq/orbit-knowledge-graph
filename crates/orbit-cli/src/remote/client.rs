@@ -358,6 +358,10 @@ fn build_user_agent(get_env: impl Fn(&str) -> Option<String>) -> String {
         std::env::consts::OS,
         std::env::consts::ARCH,
     );
+    if let Some(distribution) = crate::telemetry::detect_distribution(&get_env) {
+        ua.push_str(" Distribution/");
+        ua.push_str(distribution);
+    }
     if let Some(agent) = crate::telemetry::detect_coding_agent(get_env) {
         ua.push_str(" Coding-Agent/");
         ua.push_str(&agent);
@@ -678,6 +682,18 @@ mod tests {
         assert!(
             ua.ends_with(" Coding-Agent/claude-code"),
             "expected Coding-Agent suffix, got: {ua}"
+        );
+    }
+
+    #[test]
+    fn user_agent_under_glab() {
+        let ua = build_user_agent(env_from(&[
+            ("GITLAB_ORBIT_DISTRIBUTION", "glab"),
+            ("CLAUDECODE", "1"),
+        ]));
+        assert!(
+            ua.ends_with(" Distribution/glab Coding-Agent/claude-code"),
+            "expected glab distribution before the Coding-Agent suffix, got: {ua}"
         );
     }
 }

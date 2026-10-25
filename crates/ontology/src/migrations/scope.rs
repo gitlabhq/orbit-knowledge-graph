@@ -161,7 +161,7 @@ pub fn derive_scope(
     Some(MigrationScope::Sdlc(sdlc_entities))
 }
 
-/// Names accepted in an entry's `entities:` list: etl-bearing nodes, derived
+/// Names accepted in an entry's `entities:` list: pipeline-bearing nodes, derived
 /// entities, and SDLC-routed relationship kinds (code edges are excluded).
 #[must_use]
 pub fn sdlc_entity_names(ontology: &Ontology) -> BTreeSet<String> {
@@ -212,12 +212,12 @@ enum NodeScope {
 struct NodeScopeYaml {
     node_type: String,
     #[serde(default)]
-    etl: Option<serde_json::Value>,
+    pipelines: Vec<serde_json::Value>,
 }
 
 fn parse_node_scope(content: &str) -> Option<NodeScope> {
     let parsed: NodeScopeYaml = orbit_utils::yaml::from_str(content).ok()?;
-    if parsed.etl.is_some() {
+    if !parsed.pipelines.is_empty() {
         Some(NodeScope::Sdlc(parsed.node_type))
     } else {
         Some(NodeScope::Code)
@@ -386,11 +386,11 @@ mod tests {
     }
 
     #[test]
-    fn derive_scope_etl_node_is_sdlc_entity() {
+    fn derive_scope_pipeline_node_is_sdlc_entity() {
         let ontology = Ontology::new();
         let embedded = BTreeMap::from([(
             "nodes/core/note.yaml".to_string(),
-            "node_type: Note\netl:\n  type: table\n".to_string(),
+            "node_type: Note\npipelines:\n  - name: Note\n".to_string(),
         )]);
         let scope = derive_scope(
             &ontology,
@@ -402,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn derive_scope_etl_less_node_is_code() {
+    fn derive_scope_pipeline_less_node_is_code() {
         let ontology = Ontology::new();
         let embedded = BTreeMap::from([(
             "nodes/source_code/file.yaml".to_string(),
@@ -423,7 +423,7 @@ mod tests {
         let embedded = BTreeMap::from([
             (
                 "nodes/core/note.yaml".to_string(),
-                "node_type: Note\netl:\n  type: table\n".to_string(),
+                "node_type: Note\npipelines:\n  - name: Note\n".to_string(),
             ),
             (
                 "nodes/source_code/file.yaml".to_string(),
@@ -444,7 +444,7 @@ mod tests {
         let ontology = Ontology::new().with_nodes(["Note"]);
         let embedded = BTreeMap::from([(
             "nodes/core/note.yaml".to_string(),
-            "node_type: Note\netl:\n  type: table\n".to_string(),
+            "node_type: Note\npipelines:\n  - name: Note\n".to_string(),
         )]);
         let scope = derive_scope(
             &ontology,
@@ -460,7 +460,7 @@ mod tests {
         let ontology = Ontology::new().with_nodes(["Note"]);
         let embedded = BTreeMap::from([(
             "nodes/core/note.yaml".to_string(),
-            "node_type: Note\netl:\n  type: table\n".to_string(),
+            "node_type: Note\npipelines:\n  - name: Note\n".to_string(),
         )]);
         let scope = derive_scope(
             &ontology,
@@ -471,7 +471,7 @@ mod tests {
         assert_eq!(scope, Some(MigrationScope::Sdlc(entities(&["Note"]))));
     }
 
-    // HAS_NOTE is FK-derived: no edge `etl:` block, but routed to the default
+    // HAS_NOTE is FK-derived: no edge `pipelines:` block, but routed to the default
     // SDLC edge table, so it must derive an sdlc entity — not code.
     #[test]
     fn derive_scope_edge_resolves_to_relationship_kind() {

@@ -28,6 +28,10 @@
             "items": { "type": "string" },
             "description": "SDLC entity names or relationship kinds narrowing a 'sdlc' scope. Only valid with scope 'sdlc'."
           },
+          "edge_rows": {
+            "enum": ["changed", "unchanged"],
+            "description": "With scope 'sdlc', 'unchanged' declares that every edge row stays byte-identical, so the migration clones the edge tables instead of rebuilding them. Derived by `mise schema:bump`; absent means 'changed'."
+          },
           "note": {
             "type": "string",
             "description": "Human-facing rationale for the bump."
@@ -35,7 +39,10 @@
         },
         "if": { "properties": { "scope": { "const": "sdlc" } }, "required": ["scope"] },
         "then": true,
-        "else": { "not": { "required": ["entities"] } }
+        "else": {
+          "not": { "required": ["entities"] },
+          "properties": { "edge_rows": { "const": "changed" } }
+        }
       }
     }
   }

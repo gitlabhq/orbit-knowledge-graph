@@ -218,7 +218,7 @@ The `corpus-smoke-test` job runs a large set of queries through the production q
 - The named queries in `config/named_queries`, each in JSON and GQL.
 - Code blocks marked `json orbit-query` or `gql orbit-query` in the docs and the Orbit skill.
 
-The test runs every marked query example in the root Markdown files, `docs/source`, `docs/design-documents`, `skills/orbit`, and `crates/integration-testkit`. It also fails on a query in an unmarked `json` or shell block. It fails on an unclosed `json`, `gql`, or shell block too.
+The test runs every marked query example in the root Markdown files, `docs/docs-gitlab-com`, `docs/design-documents`, `skills/orbit`, and `crates/integration-testkit`. It also fails on a query in an unmarked `json` or shell block. It fails on an unclosed `json`, `gql`, or shell block too.
 
 Other jobs check the docs prose. `check_docs_markdown` runs Vale, markdownlint, and a link check on MRs. `lint:prose` checks sentence length and wording in prompts, skills, agent guides, `docs/dev`, and `docs/design-documents`. `query-language-docs-check` regenerates the generated parts of the query-language reference and fails if they differ.
 
@@ -267,7 +267,7 @@ The `e2e` job runs on every main commit and is manual on MRs. It saves diagnosti
 - `e2e-ha` runs the suites on a ClickHouse cluster with replicas, and kills replicas during the run. It runs in the post-merge pipeline and on a daily schedule. It is manual on MRs.
 - `e2e-pin-bump` runs on a daily schedule. It moves the pins in `versions.yaml` to their latest versions and updates one MR. On that MR, `e2e` runs automatically and must pass before the MR can merge.
 
-For setup, debugging, and the list of key files, see [E2E testing harness](../dev/e2e-testing.md).
+For setup, debugging, and the list of key files, see [E2E testing harness](../pages/engineering/development/e2e-testing.md).
 
 ## Performance tests
 
@@ -339,4 +339,4 @@ Next to the tests, CI runs checks on each MR:
 
 ### Billing boundary
 
-Usage billing is in scope for SOX. The `billing-boundary-check` job fails if any crate other than `orbit-server` depends on `orbit-billing`. CODEOWNERS sends changes to the billing surface to the Orbit team for approval. The rules are in [SOX billing boundary](../dev/sox-billing-boundary.md).
+Usage billing is in scope for SOX. The `billing-boundary-check` job fails if any crate other than `orbit-server` depends on `orbit-billing`. CODEOWNERS sends changes to the billing surface to the Orbit team for approval. The rules are in [SOX billing boundary](../pages/engineering/development/sox-billing-boundary.md).

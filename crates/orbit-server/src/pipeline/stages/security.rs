@@ -67,6 +67,8 @@ mod tests {
             deployment_type: None,
             realm: None,
             is_gitlab_team_member: None,
+            user_type: None,
+            token_type: None,
             license_checksum: None,
         }
     }
