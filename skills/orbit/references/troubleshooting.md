@@ -28,7 +28,7 @@ Read this when a command fails with "command not found", an auth error, or a fea
    glab orbit status --full-path GROUP_NAMESPACE
    ```
 
-   0: ready. 2: no Orbit. 3: bad token. 4: Orbit off here, or role below Reporter. 5: rate limit.
+   0: ready. 1: error. 2: no Orbit. 3: bad token. 4: Orbit off, or below Reporter. 5: rate limit.
 
 4. Orbit Local: no server needed. `grep` and `context` index the checkout on first use:
 

@@ -712,7 +712,7 @@ enum Commands {
     /// Show the remote Orbit schema: node types, properties, and edges.
     #[command(alias = "ontology")]
     Schema {
-        /// Node names to expand with their properties.
+        /// Node names to expand with their properties. Quote '*' to expand all.
         #[arg(value_name = "NODE")]
         nodes: Vec<String>,
 
