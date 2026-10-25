@@ -5869,7 +5869,6 @@ dependencies = [
  "cynic",
  "cynic-codegen",
  "prettyplease",
- "serde_json",
  "syn 2.0.118",
 ]
 

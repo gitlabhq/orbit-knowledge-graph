@@ -10,9 +10,6 @@ workspace = true
 [dependencies]
 cynic = { workspace = true }
 
-[dev-dependencies]
-serde_json = { workspace = true }
-
 [build-dependencies]
 cynic-codegen = { workspace = true }
 prettyplease = { workspace = true }
