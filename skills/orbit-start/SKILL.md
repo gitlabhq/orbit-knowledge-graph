@@ -182,13 +182,17 @@ Walk the user through the five parts below, one part for each reply.
 Do not run new commands in this step, so that each part shows at once.
 Use this skill, the `graph-status` output from step 1, and the last query.
 
+Do not use your interactive question tool in this step.
+When the tool is available, agents tend to call it without writing the part first, so the user sees only the menu.
+Ask with a numbered list in your reply instead.
+
 For each part:
 
 1. Write the part in your reply: its explanation, its diagram in a `text` code block, and its **Read more** link.
-1. Then, in the same reply, ask the user what to do next. Offer these options:
-   - **Next: <title of the next part>**: show the next part. Leave this out after the last part.
-   - **Ask a question**: go to step 3.
-   - **Done**: go to step 6.
+1. End the reply with this numbered list, then stop and wait for the answer:
+   1. **Next: <title of the next part>**. Leave this out after the last part.
+   1. **Ask a question**: go to step 3.
+   1. **Done**: go to step 6.
 
 ### Part 1: From GitLab data to answers
 
