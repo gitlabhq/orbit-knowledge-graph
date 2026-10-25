@@ -1,0 +1,19 @@
+[package]
+name = "gitlab-graphql"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[lints]
+workspace = true
+
+[dependencies]
+cynic = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[build-dependencies]
+cynic-codegen = { workspace = true }
+prettyplease = { workspace = true }
+syn = { workspace = true }

@@ -5,20 +5,15 @@
 # Graph schema version; prefixes every versioned ClickHouse table (vN_).
 # Bump with `mise schema:bump`, which also appends a migration ledger entry.
 schema: 115
-
 # Accepted query-DSL shape. Bump when graph_query.schema.json or the
 # compiler's input/validate passes change what queries are accepted.
 query_dsl: 13.0.2
-
 # Response envelope of the raw (JSON) formatter.
 raw_output_format: 6.0.0
-
 # Response envelope of the TOON formatter (format=llm query results).
 toon_output_format: 3.0.0
-
 # Response envelope of the GQL table formatter.
 gql_output_format: 2.0.0
-
 # Vendored dependencies. Each entry declares its pins, artifact location,
 # and vendor/check scripts. Vendor scripts read pins and write computed
 # checksums back into this file via `yq -i`. Run `mise vendor <name>`.
@@ -28,7 +23,10 @@ vendored:
     version: ea52f8c3adc370db76545ecd82728710f2609800
     vendor_dir: config/vendored
     check_script: scripts/vendored/gitlab_system_note_actions/check.sh
-
+  gitlab_graphql_schema:
+    version: "17448481030"
+    vendor_dir: crates/gitlab-graphql/schema
+    vendor_script: scripts/vendored/gitlab_graphql_schema/vendor.sh
   # Iglu schema version pins. Edit a pin here, then run `mise vendor -- iglu`
   # to fetch the schema JSON from the upstream Iglu registry.
   iglu:

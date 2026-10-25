@@ -1,0 +1,30 @@
+{
+  "data": {
+    "orbit": {
+      "schema": {
+        "nodes": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "MzM"
+          },
+          "nodes": [
+            {
+              "name": "AgentSession",
+              "description": "An AI agent session in a project, recorded in the AI governance sessions table. Existence, source and flow type only, never its content",
+              "domain": {
+                "name": "agents"
+              }
+            },
+            {
+              "name": "Branch",
+              "description": "A Git branch in a repository",
+              "domain": {
+                "name": "source_code"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
