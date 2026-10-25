@@ -30,7 +30,7 @@ Scope (the `SCOPE` tuple in `prose_lint.py`): `config/prompts/**/*.yml`,
 `docs/pages/engineering/development/**/*.md` (agent docs and runbooks), `docs/pages/engineering/architecture/**/*.md`,
 `docs/design-documents/**/*.md`, and the MR and issue templates. `CLAUDE.md` is skipped
 because CI already enforces that it equals `AGENTS.md`. Public docs under
-`docs/source/` stay with Vale.
+`docs/docs-gitlab-com/` stay with Vale.
 
 Before scoring, fenced code, tables, headings, blockquotes (quoted people keep
 their own words), link targets, template placeholders, and column-aligned label

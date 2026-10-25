@@ -9,16 +9,16 @@ components:
   - name: Technical Documentation
     create_request: false
     paths:
-      - source: 'docs/source/**/*.md'
+      - source: 'docs/docs-gitlab-com/**/*.md'
         target: 'docs-locale/{{language}}/source/'
     ignored_paths:
       - 'docs/.*/**'
-      - 'docs/source/schema.md'
-      - 'docs/source/queries/query_language.md'
-      - 'docs/source/queries/mcp_tools.md'
-      - 'docs/source/queries/_index.md'
-      - 'docs/source/configure.md'
-      - 'docs/source/orbit_troubleshooting.md'
+      - 'docs/docs-gitlab-com/schema.md'
+      - 'docs/docs-gitlab-com/queries/query_language.md'
+      - 'docs/docs-gitlab-com/queries/mcp_tools.md'
+      - 'docs/docs-gitlab-com/queries/_index.md'
+      - 'docs/docs-gitlab-com/configure.md'
+      - 'docs/docs-gitlab-com/orbit_troubleshooting.md'
 
   # Redirects list generated 2026-07-13
   # This list contains all Redirects files. It is auto generated through the monthly maintenance tasks.
@@ -26,15 +26,15 @@ components:
   - name: Redirects
     create_request: false
     paths:
-      - source: 'docs/source/schema.md'
-        target: 'docs/source/schema.md'
-      - source: 'docs/source/queries/query_language.md'
-        target: 'docs/source/queries/query_language.md'
-      - source: 'docs/source/queries/mcp_tools.md'
-        target: 'docs/source/queries/mcp_tools.md'
-      - source: 'docs/source/queries/_index.md'
-        target: 'docs/source/queries/_index.md'
-      - source: 'docs/source/configure.md'
-        target: 'docs/source/configure.md'
-      - source: 'docs/source/orbit_troubleshooting.md'
-        target: 'docs/source/orbit_troubleshooting.md'
+      - source: 'docs/docs-gitlab-com/schema.md'
+        target: 'docs/docs-gitlab-com/schema.md'
+      - source: 'docs/docs-gitlab-com/queries/query_language.md'
+        target: 'docs/docs-gitlab-com/queries/query_language.md'
+      - source: 'docs/docs-gitlab-com/queries/mcp_tools.md'
+        target: 'docs/docs-gitlab-com/queries/mcp_tools.md'
+      - source: 'docs/docs-gitlab-com/queries/_index.md'
+        target: 'docs/docs-gitlab-com/queries/_index.md'
+      - source: 'docs/docs-gitlab-com/configure.md'
+        target: 'docs/docs-gitlab-com/configure.md'
+      - source: 'docs/docs-gitlab-com/orbit_troubleshooting.md'
+        target: 'docs/docs-gitlab-com/orbit_troubleshooting.md'
