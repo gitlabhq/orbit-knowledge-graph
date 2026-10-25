@@ -1,6 +1,6 @@
 ---
 name: orbit-start
-description: Walk a user through their first GitLab Orbit session. Check the setup, then answer a simple first question and a workflow from the prompt examples with Orbit. Offer to run a prompt again without Orbit and compare the cost. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
+description: Walk a user through their first GitLab Orbit session. Check the setup, then answer a simple first question and a workflow from the prompt examples with Orbit. Offer to run a prompt again without Orbit, and to show how Orbit works. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
 version: 0.1.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance. Works best in agents that can ask the user multiple-choice questions.
@@ -16,7 +16,7 @@ metadata:
 
 Guide the user through real questions about their own GitLab data, answered with GitLab Orbit.
 Start with a simple question, then try a full workflow from the prompt examples.
-After an answer, offer to run the same prompt again without Orbit, and compare what each run cost.
+After an answer, offer to run the same prompt again without Orbit, or to show how Orbit works with diagrams of the user's own graph.
 
 Keep the session short and read-only. Do not create issues, merge requests, comments, or commits.
 
@@ -57,8 +57,8 @@ Then ask the user what to do next. Offer these options:
 
 - **Try a full workflow**: go to step 3.
 - **Run it again without Orbit**: go to step 4.
-- **Ask another simple question**: go back to step 2.
-- **Done**: go to step 5.
+- **See how GitLab Orbit works**: go to step 5.
+- **Done**: go to step 6.
 
 ## Step 3: Try a workflow from the prompt examples
 
@@ -83,8 +83,9 @@ Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
 
 - **Run it again without Orbit**: go to step 4.
+- **See how GitLab Orbit works**: go to step 5.
 - **Try another workflow**: go back to step 3.
-- **Done**: go to step 5.
+- **Done**: go to step 6.
 
 ## Step 4: Run it again without Orbit
 
@@ -113,8 +114,9 @@ Keep it to the table. Do not say which run is better.
 
 Then ask the user what to do next. Offer these options:
 
+- **See how GitLab Orbit works**: go to step 5.
 - **Try another workflow**: go back to step 3.
-- **Done**: go to step 5.
+- **Done**: go to step 6.
 
 ### Count tool calls and tokens
 
@@ -136,7 +138,53 @@ For each run, count only the lines between its start and end times.
 
 API requests are the `glab orbit query` and `glab api` calls, and any other call to the GitLab instance.
 
-## Step 5: Offer next steps
+## Step 5: See how GitLab Orbit works
+
+Show the user how Orbit answered, with text diagrams in code blocks. Keep each diagram small.
+
+1. Show how Orbit works:
+
+   ```text
+   GitLab                       GitLab Orbit                       Your agent
+   +------------------+  index  +---------------------------+ query +------------------+
+   | groups, projects | ------> | a graph of nodes and      | <---- | glab orbit query |
+   | merge requests   |         | edges, updated as the     | ----> | or the MCP tools |
+   | pipelines, jobs  |         | data changes              | rows  |                  |
+   | vulnerabilities  |         |                           |       |                  |
+   | code             |         | returns only what you can |       |                  |
+   +------------------+         | see                       |       +------------------+
+                                +---------------------------+
+   ```
+
+   One query can follow many edges, such as from a merge request to its changed code, to the callers of that code.
+   Without Orbit, each of those hops is a separate REST API call.
+1. Show the user's graph. Run `glab orbit graph-status --full-path <scope>`, and draw the node counts as a bar chart.
+   For example:
+
+   ```text
+   Job           ########################  600,000
+   Definition    ##########                250,000
+   Pipeline      #                          25,000
+   ```
+
+   Show the eight largest node types. Scale the bars to the largest count.
+1. Show the part of the graph that the last query used.
+   Run `glab orbit ontology <Node>` for each node type in the query, and draw those nodes and the edges between them:
+
+   ```text
+   (User) --APPROVED--> (MergeRequest) --IN_PROJECT--> (Project)
+   ```
+
+   Then match each part of the query to the diagram, in one line each.
+1. Say that `glab orbit ontology` lists every node type and edge, so the user can see what else they can ask.
+
+Then ask the user what to do next. Offer these options:
+
+- **Try another workflow**: go back to step 3.
+- **Run it again without Orbit**: go to step 4.
+- **Done**: go to step 6.
+
+## Step 6: Offer next steps
 
 Ask the user what to do next. Offer these options:
 
