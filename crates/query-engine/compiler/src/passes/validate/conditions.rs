@@ -104,14 +104,6 @@ impl<M: query_data_model::OrbitQueryModel> Validator<'_, M> {
                     "filter on \"{property}\" for {entity}: virtual columns cannot be used under NOT"
                 )));
             }
-            if self
-                .property_id(entity, property)
-                .is_some_and(|property| self.model.get().property_is_hidden(property))
-            {
-                return Err(QueryError::Validation(format!(
-                    "filter on \"{property}\" for {entity}: this field cannot be used under NOT"
-                )));
-            }
         }
         Ok(())
     }

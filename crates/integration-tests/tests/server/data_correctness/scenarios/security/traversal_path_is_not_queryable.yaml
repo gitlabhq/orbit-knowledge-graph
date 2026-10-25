@@ -1,0 +1,83 @@
+cases:
+  - name: return_column_rejected
+    description: A query cannot return traversal_path
+    config:
+      security: { org_id: 1, paths: ["1/100/"] }
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name", "traversal_path"]}], "limit": 10}
+      gql: |
+        MATCH (g:Group {id: 100}) RETURN g.name, g.traversal_path LIMIT 10
+    expect:
+      compile_error: traversal_path
+
+  - name: order_by_rejected
+    description: A query cannot sort by traversal_path
+    config:
+      security: { org_id: 1, paths: ["1/100/"] }
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}], "order_by": "g.traversal_path", "limit": 10}
+      gql: |
+        MATCH (g:Group {id: 100}) RETURN g ORDER BY g.traversal_path LIMIT 10
+    expect:
+      compile_error: traversal_path
+
+  - name: node_filter_rejected
+    description: A node cannot filter on traversal_path, even inside the caller's scope
+    config:
+      security: { org_id: 1, paths: ["1/100/"] }
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"traversal_path": {"starts_with": "1/100/"}}}], "limit": 10}
+      gql: |
+        MATCH (p:Project) WHERE p.traversal_path STARTS WITH '1/100/' RETURN p LIMIT 10
+    expect:
+      compile_error: traversal_path
+
+  - name: node_property_map_rejected
+    description: A node property map cannot pin traversal_path
+    config:
+      security: { org_id: 1, paths: ["1/100/"] }
+    query:
+      gql: |
+        MATCH (p:Project {traversal_path: '1/100/1000/'}) RETURN p LIMIT 10
+    expect:
+      compile_error: traversal_path
+      compile_error_not_contains: [1/100/]
+
+  - name: negated_node_filter_rejected
+    description: NOT cannot wrap a traversal_path condition
+    config:
+      security: { org_id: 1, paths: ["1/100/"] }
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "not": {"traversal_path": {"starts_with": "2/"}}}], "limit": 10}
+      gql: |
+        MATCH (p:Project {id: 1000}) WHERE NOT p.traversal_path STARTS WITH '2/' RETURN p.id
+    expect:
+      compile_error: traversal_path
+      compile_error_not_contains: [1/100/, 2/]
+
+  - name: relationship_filter_rejected
+    description: A relationship cannot filter on traversal_path, even inside the caller's scope
+    config:
+      security: { org_id: 1, paths: ["1/100/"] }
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "g", "entity": "Group"}], "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g", "filters": {"traversal_path": "1/100/"}}], "limit": 10}
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF {traversal_path: '1/100/'}]->(g:Group) RETURN u, g LIMIT 10
+    expect:
+      compile_error: private edge column "traversal_path"
+
+  - name: negated_relationship_filter_rejected
+    description: NOT cannot wrap a relationship traversal_path condition
+    config:
+      security: { org_id: 1, paths: ["1/100/"] }
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[c:CONTAINS]->(p:Project) WHERE NOT c.traversal_path = '1/100/1000/' RETURN p.id
+    expect:
+      compile_error: private edge column "traversal_path"
+      compile_error_not_contains: [1/100/]

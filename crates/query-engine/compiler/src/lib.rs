@@ -342,66 +342,89 @@ mod tests {
     }
 
     #[test]
-    fn traversal_path_scope_rejection_is_observable() {
-        use std::sync::atomic::Ordering;
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
-            "limit": 1
-        }"#;
-        let ctx =
-            SecurityContext::new(1, vec!["1/100/".to_string()]).expect("valid scoped context");
-        let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile(query, Frontend::JsonDsl, &ONTOLOGY, &ctx).expect_err("must reject");
-        let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-
-        assert!(
-            matches!(err, crate::error::QueryError::Authorization(_)),
-            "expected Authorization, got: {err:?}"
-        );
-        assert!(
-            err.is_client_safe(),
-            "traversal_path scope rejection should be client safe: {err:?}"
-        );
-        assert_eq!(
-            err.rejection_reason(),
-            crate::error::RejectionReason::Authorization
-        );
-        assert!(
-            after > before,
-            "count_err must run on traversal_path authorization rejections (before={before}, after={after})"
-        );
-    }
-
-    #[test]
-    fn traversal_path_shape_rejection_is_validate_pass_error() {
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": {"starts_with": 1}}}],
-            "limit": 1
-        }"#;
-        let err =
-            compile(query, Frontend::JsonDsl, &ONTOLOGY, &security_ctx()).expect_err("must reject");
-        let msg = err.to_string();
-
-        assert!(
-            matches!(err, crate::error::QueryError::Validation(_)),
-            "expected Validation, got: {err:?}"
-        );
-        assert!(
-            err.is_client_safe(),
-            "traversal_path shape rejection should be client safe: {err:?}"
-        );
-        assert!(
-            msg.contains("schema violation"),
-            "error should come from ValidatePass schema validation, got: {msg}"
-        );
-        assert!(
-            !msg.contains("RestrictPass"),
-            "client-facing shape errors should come from validation, got: {msg}"
-        );
+    fn user_queries_cannot_reference_traversal_path() {
+        let ctx = SecurityContext::new(1, vec!["1/100/".to_string()]).expect("valid context");
+        let queries = [
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "filters": {"traversal_path": {"starts_with": "1/100/"}}}]}"#,
+            ),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "not": {"traversal_path": "1/100/200/"}}]}"#,
+            ),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "p", "entity": "Project"}], "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "filters": {"traversal_path": "1/100/"}}]}"#,
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (p:Project) WHERE p.traversal_path = '1/100/' RETURN p",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (p:Project) WHERE p.traversal_path STARTS WITH '1/100/' RETURN p",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (p:Project) WHERE p.traversal_path IN ['1/100/'] RETURN p",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (p:Project {traversal_path: '1/100/'}) RETURN p",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (p:Project {id: 1}) WHERE NOT p.traversal_path STARTS WITH '1/100/200/' RETURN p",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (u:User {id: 1})-[r:MEMBER_OF]->(p:Project) WHERE r.traversal_path = '1/100/' RETURN p",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (u:User {id: 1})-[:MEMBER_OF {traversal_path: '1/100/'}]->(p:Project) RETURN p",
+            ),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name", "traversal_path"]}]}"#,
+            ),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "traversal", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}], "order_by": "p.traversal_path"}"#,
+            ),
+            (
+                Frontend::JsonDsl,
+                r#"{"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}], "aggregations": [{"count": "p.traversal_path", "as": "n"}]}"#,
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (p:Project {id: 1}) RETURN p.name, p.traversal_path",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (p:Project {id: 1}) RETURN p{.name, .traversal_path}",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (p:Project {id: 1}) RETURN p ORDER BY p.traversal_path",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (p:Project {id: 1}) RETURN count(p.traversal_path) AS n",
+            ),
+            (
+                Frontend::Gql,
+                "MATCH (p:Project {id: 1}) WHERE p.full_path = p.traversal_path RETURN p",
+            ),
+        ];
+        for (frontend, query) in queries {
+            let err = compile(query, frontend, &ONTOLOGY, &ctx).expect_err(query);
+            assert!(
+                err.is_client_safe() && err.to_string().contains("traversal_path"),
+                "{query} should be rejected with a client-safe traversal_path error, got: {err:?}"
+            );
+        }
     }
 
     #[test]
