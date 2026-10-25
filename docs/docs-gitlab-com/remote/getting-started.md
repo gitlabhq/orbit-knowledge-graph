@@ -74,7 +74,7 @@ See [Use GitLab Orbit via MCP](access/mcp.md) for setup. Once configured, you ha
 
 ### Install the GitLab Orbit skill for AI agents
 
-The GitLab Orbit skill gives your AI agent query recipes, DSL guidance, and
+The GitLab Orbit skill gives your AI agent query recipes, query language guidance, and
 troubleshooting so it writes correct GitLab Orbit queries on the first attempt:
 
 ```shell
@@ -88,23 +88,20 @@ for project-scoped install, update instructions, and what the skill contains.
 
 Replace `your-group` with the top-level group path you enabled GitLab Orbit on. The `full_path` filter scopes the query so it passes GitLab Orbit's selectivity validation.
 
+For example, this query lists projects in a group:
+
+```gql orbit-query
+MATCH (p:Project)
+WHERE p.full_path STARTS WITH 'your-group/'
+RETURN p{.name, .full_path}
+LIMIT 10
+```
+
 Put the request body in `request.json`:
 
-```json orbit-query
+```json
 {
-  "query": {
-    "query_type": "traversal",
-    "nodes": [{
-      "id": "p",
-      "entity": "Project",
-      "columns": ["name", "full_path"],
-      "filters": {
-        "full_path": {"starts_with": "your-group/"}
-      }
-    }],
-    "limit": 10
-  },
-  "response_format": "raw"
+  "query": "MATCH (p:Project) WHERE p.full_path STARTS WITH 'your-group/' RETURN p{.name, .full_path} LIMIT 10"
 }
 ```
 

@@ -24,7 +24,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Ontology derived entity definitions | `config/ontology/derived/` |
 | Ontology extraction SQL | Generated from the pipeline (`query: generated`) for nodes and edges; a `.sql.j2` MiniJinja template next to the YAML only for complex nodes (`config/ontology/nodes/`) and derived entities (`config/ontology/derived/`) |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
-| Graph query JSON schema | `config/schemas/graph_query.schema.json` |
+| Query language grammar (GQL) | `crates/query-engine/compiler/src/passes/frontend/gql/query.pest`; add a frontend as a sibling module under `passes/frontend/` |
 | YAML document type configs | `crates/code-graph/src/v2/langs/generic/yaml/document_types/` (one file per document type, embedded via rust-embed, interpreted by `document_types.rs`) |
 | YAML document type JSON schema | `config/schemas/yaml_document_type.schema.json` (configs validated against it when the code-graph YAML pipeline first loads them) |
 | Named query definitions | `config/named_queries/` (parsed/embedded by `crates/named-queries`, compiled against the ontology in `orbit-server` tests, executed via gRPC `QUERY_TYPE_NAMED`, listed via gRPC `ListNamedQueries`) |

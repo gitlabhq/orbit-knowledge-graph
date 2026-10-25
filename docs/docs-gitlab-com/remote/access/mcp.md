@@ -53,16 +53,12 @@ Commands available through `invoke_command`:
 
 | Command | Description |
 |---------|-------------|
-| `query_graph` | Execute a graph query using the GitLab Orbit query DSL, or read-only GQL text when enabled for the user. |
+| `query_graph` | Execute a graph query written in the [GitLab Orbit query language](../queries/query-language.md). |
 | `get_graph_schema` | Fetch the current schema: all node types, their properties, and relationship types. |
-| `get_query_dsl` | Return the `query_graph` JSON DSL grammar and version. |
 | `get_response_format` | Return the `query_graph` response JSON Schema and version. |
 
-The default-off Rails `orbit_gql_queries` feature flag selects one mode per user.
-See the [GQL access requirements](api.md#query-endpoint).
-With the flag off, `list_commands` teaches JSON and `query_graph` accepts only JSON objects.
-With the flag on, discovery teaches only GQL and `query_graph` accepts only strings. The catalog hides `get_query_dsl`, and direct or invoked DSL requests reject. Use `CALL db.schema()` for graph discovery instead.
-Clients cannot select a language, and discovery results must not be shared across users or modes.
+`query_graph` also accepts `CALL db.schema()` and `CALL db.schema('Node')` for
+graph discovery. Discovery results must not be shared across users.
 
 ## Connect your MCP client
 
@@ -181,7 +177,7 @@ Antigravity.
 > needs the manual configuration shown.
 
 You can also [install the GitLab Orbit skill manually](../../ai_coding_agents.md)
-to give the agent query recipes, DSL guidance, and troubleshooting.
+to give the agent query recipes, query language guidance, and troubleshooting.
 
 ### Test it
 
@@ -199,7 +195,7 @@ During the beta, queries through MCP do not consume GitLab Credits.
 
 When GitLab Orbit is generally available, each `invoke_command` call that runs
 `query_graph` consumes GitLab Credits from your subscription. `list_commands` and the
-`get_graph_schema`, `get_query_dsl`, and `get_response_format` commands stay free.
+`get_graph_schema` and `get_response_format` commands stay free.
 Credit rates are published in
 [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
 before charging begins.
@@ -224,8 +220,8 @@ Onboarding:
 > "Use GitLab Orbit to map the key services in this group, their languages, and which
 > projects they depend on."
 
-The agent composes the JSON query DSL and invokes the `query_graph` command on your
-behalf. You can also pass raw JSON queries directly if you want precise control over
+The agent writes the query and invokes the `query_graph` command on your
+behalf. You can also pass query text directly if you want precise control over
 results.
 
 ## Example: manual invoke_command call for query_graph
@@ -233,23 +229,11 @@ results.
 Pass the query below as `invoke_command` with
 `{"command_name": "query_graph", "parameters": {"query": ...}}`:
 
-```json orbit-query
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {"id": "p", "entity": "Project", "columns": ["name", "full_path"]},
-    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
-  ],
-  "relationships": [
-    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-  ],
-  "group_by": ["p"],
-  "aggregations": [
-    { "count": "mr", "as": "open_mrs" }
-  ],
-  "aggregation_sort": "-open_mrs",
-  "limit": 10
-}
+```gql orbit-query
+MATCH (p:Project)<-[:IN_PROJECT]-(mr:MergeRequest {state: 'opened'})
+RETURN p{.name, .full_path}, count(mr) AS open_mrs
+ORDER BY open_mrs DESC
+LIMIT 10
 ```
 
 ## Troubleshooting
@@ -286,8 +270,8 @@ glab auth login
 ### Query errors after connecting
 
 For query-time errors (validation failures, empty results, rate limits), see the
-[GitLab Orbit skill documentation](../../ai_coding_agents.md), which includes DSL
-guidance, query recipes, and exit-code diagnostics. Install the skill for
+[GitLab Orbit skill documentation](../../ai_coding_agents.md), which includes query
+language guidance, query recipes, and exit-code diagnostics. Install the skill for
 inline guidance:
 
 ```shell

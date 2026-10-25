@@ -43,7 +43,7 @@ GitLab Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-lev
 | [Security](security.md) | Roles required to query, the authorization model, programmatic access, and service accounts |
 | [Schema reference](schema.md) | All 28 node types across 6 domains |
 | [Cookbook](cookbook.md) | Copy-paste queries for common use cases |
-| [Query language](queries/) | Full query DSL reference |
+| [Query language](queries/) | Full query language reference |
 
 ## Access methods
 

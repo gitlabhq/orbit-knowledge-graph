@@ -9,6 +9,8 @@ toc_hide: true
 
 Accepted
 
+> The `get_query_dsl` command and the JSON Query DSL were later removed. `query_graph` takes GQL text, and agents discover the graph with `CALL db.schema()`. See the [Orbit Query Engine](../architecture/querying/query-engine.md).
+
 ## Date
 
 2026-05-06
@@ -88,9 +90,9 @@ guarantee: concurrent changes can choose the same next version, and an explicit
 
 `ListSkills` returns each skill's name, version, description, and compatibility.
 `GetSkill` returns the versioned tree, or no files when `metadata_only` is true.
-Both requests carry the caller's `language`. GQL callers get `SKILL.gql.md` as
-`SKILL.md`, whose version carries `+gql` so ETags and caches differ by mode. A
-missing language selects JSON; an unknown one rejects with `INVALID_ARGUMENT`.
+Both requests carry the caller's `language`, which must be GQL. A missing
+language selects the removed JSON Query DSL, so it rejects with
+`INVALID_ARGUMENT`, as do JSON and unknown languages.
 Full-tree responses sort normalized relative paths and include each UTF-8 file's
 SHA-256 for integrity verification. Both responses include `server_version` as
 deployment provenance; it is not part of skill identity.

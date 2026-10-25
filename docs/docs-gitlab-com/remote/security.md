@@ -143,21 +143,20 @@ Verify the scope after you set up the account, and each time you change its memb
 
 To verify the scope:
 
-1. Add the following [JSON query](queries/query-language.md) in a file called `request.json`:
+1. Use this [query](queries/query-language.md), which lists the groups the account can read:
 
-   ```json orbit-query
+   ```gql orbit-query
+   MATCH (g:Group)
+   WHERE g.visibility_level IN ['private', 'internal', 'public']
+   RETURN g{.name, .full_path}
+   LIMIT 50
+   ```
+
+1. Put the query in a request body file called `request.json`:
+
+   ```json
    {
-     "query": {
-       "query_type": "traversal",
-       "nodes": [{
-         "id": "g",
-         "entity": "Group",
-         "filters": {"visibility_level": {"in": ["private", "internal", "public"]}},
-         "columns": ["name", "full_path"]
-       }],
-       "limit": 50
-     },
-     "response_format": "raw"
+     "query": "MATCH (g:Group) WHERE g.visibility_level IN ['private', 'internal', 'public'] RETURN g{.name, .full_path} LIMIT 50"
    }
    ```
 

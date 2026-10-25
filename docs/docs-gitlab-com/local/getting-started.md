@@ -169,7 +169,7 @@ details.
 | [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | `claude mcp add orbit-cli -- orbit mcp serve` |
 
 All three read the same local graph. GitLab Orbit Local is queried with DuckDB SQL;
-the structured JSON query DSL is [GitLab Orbit Remote](../remote/_index.md) only.
+the GitLab Orbit query language is [GitLab Orbit Remote](../remote/_index.md) only.
 
 ## 60-second quickstart
 
