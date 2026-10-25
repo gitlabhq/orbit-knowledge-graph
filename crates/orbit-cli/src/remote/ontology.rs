@@ -8,6 +8,8 @@ use super::client::OrbitClient;
 use super::error::{EXIT_UNAVAILABLE, RemoteError, build_graphql_error};
 use super::{pretty_value, write_stdout};
 
+const EXPAND_ALL: &str = "*";
+
 #[derive(Serialize, Default)]
 struct Ontology {
     nodes: Vec<NodeKind>,
@@ -81,6 +83,9 @@ async fn read_schema_page(
 
 impl Ontology {
     fn keep_properties_of(&mut self, names: &[String]) {
+        if names.iter().any(|name| name == EXPAND_ALL) {
+            return;
+        }
         self.nodes
             .iter_mut()
             .filter(|node| !names.contains(&node.name))

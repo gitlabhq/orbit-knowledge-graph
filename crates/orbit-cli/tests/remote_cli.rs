@@ -213,6 +213,28 @@ fn schema_asks_graphql_for_the_properties_of_the_named_nodes() {
 }
 
 #[test]
+fn ontology_star_keeps_the_properties_of_every_node() {
+    let (base_url, handle) = serve_once(ONTOLOGY_RESPONSE, "application/json");
+    let output = run_orbit(&base_url, &["ontology", "*"]);
+    let request = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(graphql_variables(&request)["withProperties"], true);
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    let nodes = stdout["nodes"].as_array().expect("nodes");
+    assert_eq!(nodes.len(), 2);
+    assert!(
+        nodes
+            .iter()
+            .all(|node| node["properties"]["nodes"].is_array())
+    );
+}
+
+#[test]
 fn ontology_reads_each_connection_until_its_last_page() {
     let (base_url, handle) = serve_in_order(&[
         r#"{"data":{"orbit":{"schema":{

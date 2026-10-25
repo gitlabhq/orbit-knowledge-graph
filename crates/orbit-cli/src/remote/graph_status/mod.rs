@@ -17,8 +17,6 @@ use super::status::select_status_output;
 use super::{ResponseFormat, pretty_value, write_stdout};
 use crate::tui;
 
-const DAP_SCOPES_RELEASE: &str = "the GitLab release that includes gitlab-org/gitlab!264673";
-
 struct ScopeStatus {
     orbit: OrbitStatus,
     field_errors: Vec<GraphQlError>,
@@ -121,10 +119,8 @@ async fn read_scope_status(
         _ if !errors.is_empty() => Err(build_graphql_error("graph status query failed", &errors)),
         Some(_) => Err(RemoteError::new(
             EXIT_FORBIDDEN,
-            format!(
-                "This token cannot read Orbit status on this GitLab version. \
-                 Duo Agent Platform tokens need {DAP_SCOPES_RELEASE}."
-            ),
+            "This token cannot read Orbit status on this GitLab version.\n\n\
+             Use a personal access token, or ask your GitLab admin to update GitLab.",
         )),
         None => Err(build_not_found_error("Group or project")),
     }
