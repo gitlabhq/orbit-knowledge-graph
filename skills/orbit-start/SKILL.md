@@ -18,6 +18,7 @@ Guide the user through real questions about their own GitLab data, answered with
 Start with a simple question, then try a full workflow from the prompt examples.
 After an answer, offer to run the same prompt again without Orbit, or to show how Orbit works with diagrams of the user's own graph.
 
+Your first reply after the setup check is the welcome screen in step 2.
 Keep the session short and read-only. Do not create issues, merge requests, comments, or commits.
 
 ## Ask questions the right way
@@ -26,12 +27,16 @@ When this skill asks the user something, use your interactive question tool if y
 `AskUserQuestion` in Claude Code. Offer two to four options, and put the recommended option first.
 If you have no such tool, print the options as a numbered list, then stop and wait for the answer.
 
+Before each question, write out what the user needs to see, as text in your reply: the welcome screen, the answer, or the summary.
+Never go from a command's output straight to the next question. The user does not see command output, only your text.
+
 ## Answer with Orbit
 
 1. Run `date -u +%Y-%m-%dT%H:%M:%SZ` as your first tool call, and keep the output as the start time.
 1. Run each query with `glab orbit query`.
 1. Run `date -u +%Y-%m-%dT%H:%M:%SZ` again after the last query, and keep it as the end time.
-1. Give the answer, and list each finding with the query result that shows it.
+1. Write the answer in your reply, and list each finding with the query result that shows it.
+   If a query returns no rows, say so, and say what that means for the scope.
 1. Show the queries that you ran, so the user can run them again.
 
 ## Step 1: Check the setup
@@ -44,51 +49,56 @@ If you have no such tool, print the options as a numbered list, then stop and wa
 1. Load the Orbit skill with `glab orbit skills get orbit`, and follow its query rules for the rest of the session.
 1. Run `glab orbit graph-status --full-path <scope>`.
    If no project in the scope is indexed yet, tell the user, and ask for another scope.
-1. Show the welcome screen in a `text` code block. Fill in each `<value>` from the commands above, and never invent one:
+## Step 2: Welcome the user
 
-   ```text
-                .        *         .
-         *          _.-----._            .
-             .    .'    .    '.     *        GitLab Orbit
-      ===========/====( o )====\===========  Software lifecycle context graph
-             *    '.    '    .'      .       for AI agents
-         .          '-.___.-'          *
-                *        .        .
+Before you ask the user anything, print this welcome screen as text in a `text` code block.
+Fill in each `<value>` from the commands in step 1, and never invent one:
 
-      Status    <status> · Orbit <version>
-      Scope     <scope>
-      Indexed   <indexed> of <total_known> projects
-      Graph     <total> nodes in <types> node types
-      Largest   <type> <count> · <type> <count> · <type> <count>
-   ```
+```text
+             .        *         .
+      *          _.-----._            .
+          .    .'    .    '.     *        GitLab Orbit
+   ===========/====( o )====\===========  Software lifecycle context graph
+          *    '.    '    .'      .       for AI agents
+      .          '-.___.-'          *
+             *        .        .
 
-   `<status>` and `<version>` come from `glab orbit status`.
-   The rest comes from `graph-status`: `<total>` is the sum of every count, and `<types>` counts the node types above zero.
-   `Largest` lists the three largest node types.
+   Status    <status> · Orbit <version>
+   Scope     <scope>
+   Indexed   <indexed> of <total_known> projects
+   Graph     <total> nodes in <types> node types
+   Largest   <type> <count> · <type> <count> · <type> <count>
+```
 
-## Step 2: Ask a simple first question
+`<status>` and `<version>` come from `glab orbit status`.
+The rest comes from `graph-status`: `<total>` is the sum of every count, and `<types>` counts the node types above zero.
+`Largest` lists the three largest node types.
+
+Then go to step 3.
+
+## Step 3: Ask a simple first question
 
 Start with a question that one query answers, about the scope from step 1.
-Offer these options, with the bold question as the label and the rest as the description:
+Offer these options, with the bold text as the label and the rest as the description:
 
-- **Which merge requests are open in this project, and who wrote them?**:
+- **Open merge requests and their authors**:
   the open merge requests, newest first, with their titles and authors. A quick check that Orbit sees your project.
-- **How many open vulnerabilities does this project have, by severity?**:
+- **Open vulnerabilities by severity**:
   a count for each severity, from critical to info. One query counts them all, with no paging through results.
-- **Who approved the most merge requests here in the last 30 days?**:
+- **Top approvers in the last 30 days**:
   the top approvers, with a count for each. Useful when you need a reviewer.
-- **Which functions and methods call a function that I name?**:
+- **Callers of a function you name**:
   each caller, with the file it is in. Shows that Orbit indexes your code, not only merge requests and pipelines.
 
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
 
-- **Try a full workflow**: go to step 3.
-- **Run it again without Orbit**: go to step 4.
-- **See how GitLab Orbit works**: go to step 5.
-- **Done**: go to step 6.
+- **Try a full workflow**: go to step 4.
+- **Run it again without Orbit**: go to step 5.
+- **See how GitLab Orbit works**: go to step 6.
+- **Done**: go to step 7.
 
-## Step 3: Try a workflow from the prompt examples
+## Step 4: Try a workflow from the prompt examples
 
 Now try a bigger question that takes several queries.
 Read the prompt examples at <https://docs.gitlab.com/orbit/prompt-examples/>.
@@ -110,12 +120,12 @@ Offer real values from the project as options when you can, such as recent merge
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
 
-- **Run it again without Orbit**: go to step 4.
-- **See how GitLab Orbit works**: go to step 5.
-- **Try another workflow**: go back to step 3.
-- **Done**: go to step 6.
+- **Run it again without Orbit**: go to step 5.
+- **See how GitLab Orbit works**: go to step 6.
+- **Try another workflow**: go back to step 4.
+- **Done**: go to step 7.
 
-## Step 4: Run it again without Orbit
+## Step 5: Run it again without Orbit
 
 Run the same prompt again, in this session, so that the user sees each call.
 
@@ -143,9 +153,9 @@ Keep it to the table. Do not say which run is better.
 
 Then ask the user what to do next. Offer these options:
 
-- **See how GitLab Orbit works**: go to step 5.
-- **Try another workflow**: go back to step 3.
-- **Done**: go to step 6.
+- **See how GitLab Orbit works**: go to step 6.
+- **Try another workflow**: go back to step 4.
+- **Done**: go to step 7.
 
 ### Count tool calls and tokens
 
@@ -187,7 +197,7 @@ EOF
 
 API requests are the `glab orbit query` and `glab api` calls, and any other call to the GitLab instance.
 
-## Step 5: See how GitLab Orbit works
+## Step 6: See how GitLab Orbit works
 
 Show the user how Orbit answered, with text diagrams in code blocks. Keep each diagram small.
 
@@ -229,14 +239,14 @@ Show the user how Orbit answered, with text diagrams in code blocks. Keep each d
 
 Then ask the user what to do next. Offer these options:
 
-- **Try another workflow**: go back to step 3.
-- **Run it again without Orbit**: go to step 4.
-- **Done**: go to step 6.
+- **Try another workflow**: go back to step 4.
+- **Run it again without Orbit**: go to step 5.
+- **Done**: go to step 7.
 
-## Step 6: Offer next steps
+## Step 7: Offer next steps
 
 Ask the user what to do next. Offer these options:
 
-- Try another workflow: go back to step 3.
+- Try another workflow: go back to step 4.
 - Set up Orbit for every session: run `glab orbit setup`.
 - See more prompts: <https://docs.gitlab.com/orbit/prompt-examples/>.
