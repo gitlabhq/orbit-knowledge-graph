@@ -5,7 +5,7 @@ remove_date: '2026-09-11'
 
 <!-- markdownlint-disable -->
 
-This document was moved to [another location](./compare-local-remote.md).
+This document was moved to [another location](compare-local-remote.md).
 
 <!-- This redirect file can be deleted after <2026-12-11>. -->
 <!-- Redirects that point to other docs in the same project expire in three months. -->

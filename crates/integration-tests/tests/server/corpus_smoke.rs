@@ -48,7 +48,8 @@ const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 const DOC_MARKDOWN_DIRS: &[&str] = &[
     "docs/source",
     "docs/design-documents",
-    "docs/architecture",
+    "docs/pages/engineering/architecture",
+    "docs/pages/engineering/adr",
     "skills/orbit",
     "crates/integration-testkit",
 ];

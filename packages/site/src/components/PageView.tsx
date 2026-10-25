@@ -1,5 +1,5 @@
-import { Avatar, type Page, type PageBody, PageContent, SiteLink, Toc, useHeadingLinks } from "@gitlab-org/orbit-site";
-import { useRef } from "react";
+import { Avatar, cn, type Page, type PageBody, PageContent, SiteLink, Toc, useHeadingLinks } from "@gitlab-org/orbit-site";
+import { type ReactNode, useRef } from "react";
 import { Sidebar } from "./Sidebar";
 
 function Authors({ authors }: { authors: string[] }) {
@@ -20,18 +20,19 @@ function Authors({ authors }: { authors: string[] }) {
   );
 }
 
-export function PageView({ page, body }: { page: Page; body: PageBody }) {
+export function PageView({ page, body, sidebar = false, children }: { page: Page; body: PageBody; sidebar?: boolean; children?: ReactNode }) {
   const article = useRef<HTMLElement>(null);
   useHeadingLinks(article, page.path);
   return (
-    <>
-      <Sidebar page={page} />
-      <div className="flex min-w-0 flex-1 gap-10 px-6 py-8 lg:px-10">
+    <div className="flex flex-col md:flex-row">
+      {sidebar && <Sidebar />}
+      <div className={cn("flex min-w-0 flex-1 gap-10", sidebar ? "px-6 py-8 lg:px-10" : "page-container py-10")}>
         <article ref={article} className="min-w-0 max-w-4xl flex-1">
           <header className="mb-8 border-b border-border pb-6">
-            <h1 className="text-4xl font-extrabold tracking-tight text-default">{page.meta.title}</h1>
-            {page.meta.description && <p className="mt-3 text-lg text-subtle">{page.meta.description}</p>}
-            {page.meta.authors.length > 0 && (
+            <h1 className="m-0 text-3xl font-semibold text-default">{page.meta.title}</h1>
+            {page.meta.description && <p className="mt-2 mb-0 text-base text-subtle">{page.meta.description}</p>}
+            {children}
+            {!page.meta.post && page.meta.authors.length > 0 && (
               <div className="mt-4">
                 <Authors authors={page.meta.authors} />
               </div>
@@ -49,6 +50,6 @@ export function PageView({ page, body }: { page: Page; body: PageBody }) {
           className="sticky top-[calc(var(--header-h)+1.5rem)] hidden max-h-[calc(100vh-var(--header-h)-3rem)] w-56 shrink-0 self-start overflow-y-auto xl:block"
         />
       </div>
-    </>
+    </div>
   );
 }

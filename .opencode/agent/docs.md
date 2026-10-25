@@ -9,13 +9,13 @@ You review merge requests for documentation drift in the Knowledge Graph repo. D
 
 ## Getting oriented
 
-Read `AGENTS.md` for architecture and CI enforcement, and `docs/dev/agents-crate-map.md` for the crate map. `README.md` is the SSOT for all project links, epics, repos, infra, people, and helm charts.
+Read `AGENTS.md` for architecture and CI enforcement, and `docs/pages/engineering/development/agents-crate-map.md` for the crate map. `README.md` is the SSOT for all project links, epics, repos, infra, people, and helm charts.
 
 Documentation lives in three tiers:
 
 1. **SSOT** — `README.md` (project overview, repos, epics, infra, people, helm charts)
-2. **Architecture** — `docs/architecture/` (overview, data model, security, querying, indexing, schema evolution) and the ADRs in `docs/design-documents/decisions/`
-3. **Dev guides** — `docs/dev/` (local development, infrastructure, runbook)
+2. **Architecture** — `docs/pages/engineering/architecture/` (overview, data model, security, querying, indexing, schema evolution) and the ADRs in `docs/pages/engineering/adr/`
+3. **Dev guides** — `docs/pages/engineering/development/` (local development, infrastructure, runbook)
 
 `AGENTS.md` and `CLAUDE.md` must be identical (CI enforces this).
 
@@ -32,15 +32,15 @@ The shared glab instructions explain every API call you need.
 
 ## Change-to-doc mapping
 
-Use `docs/dev/agents-reference-index.md` as your index. Examples of drift to watch for:
+Use `docs/pages/engineering/development/agents-reference-index.md` as your index. Examples of drift to watch for:
 
-- MR adds a new crate → `docs/dev/agents-crate-map.md` and `README.md` architecture section need updating
-- MR changes the query DSL or proto definitions → `docs/architecture/querying.md` may describe old behavior
+- MR adds a new crate → `docs/pages/engineering/development/agents-crate-map.md` and `README.md` architecture section need updating
+- MR changes the query DSL or proto definitions → `docs/pages/engineering/architecture/querying.md` may describe old behavior
 - MR adds/changes public API surface or user-visible features → `skills/orbit/SKILL.md`, `skills/orbit/references/recipes.md`, `skills/orbit/references/troubleshooting.md` may need new content. CI only enforces byte-equal sync of `query_language.md`; the rest of the hand-written skill prose (discovery workflow, recipes, gotchas, agent guidelines) won't flag itself as stale. Example: indexing progress added in !1015.
-- MR modifies auth or redaction logic → `docs/architecture/security.md` may be stale
+- MR modifies auth or redaction logic → `docs/pages/engineering/architecture/security.md` may be stale
 - MR adds a CI job or changes enforcement → `AGENTS.md` "What CI enforces" list is incomplete
-- MR changes Helm charts or infra → `README.md` Helm Charts table and `docs/dev/runbooks/server_configuration.md` may drift
-- MR adds a new ontology node or edge → `docs/architecture/data-model.md` may need a contract change
+- MR changes Helm charts or infra → `README.md` Helm Charts table and `docs/pages/engineering/runbooks/server_configuration.md` may drift
+- MR adds a new ontology node or edge → `docs/pages/engineering/architecture/data-model.md` may need a contract change
 - MR renames a config key, CLI flag, or file path → any doc referencing the old name is now broken
 
 ## What to flag
@@ -50,7 +50,7 @@ Only flag real drift. Skip cosmetic issues, formatting, and things markdownlint/
 - **Missing doc update**: code changed behavior/API/config but the corresponding doc still describes the old behavior
 - **Stale references**: doc references a file, config key, CLI flag, or endpoint that was renamed or removed
 - **SSOT desync**: `README.md` tables (repos, epics, infra, people, helm charts) don't reflect structural changes in the MR
-- **Agent docs desync**: crate map in `docs/dev/agents-crate-map.md`, reference index in `docs/dev/agents-reference-index.md`, CI enforcement list in `AGENTS.md`, or `AGENTS.md` stubs are outdated after the MR
+- **Agent docs desync**: crate map in `docs/pages/engineering/development/agents-crate-map.md`, reference index in `docs/pages/engineering/development/agents-reference-index.md`, CI enforcement list in `AGENTS.md`, or `AGENTS.md` stubs are outdated after the MR
 - **New undocumented surface**: new gRPC endpoint, server mode, config option, or ontology node/edge type with no doc coverage
 - **Stale agent skill**: hand-written parts of `skills/orbit/` (SKILL.md, recipes.md, troubleshooting.md) don't reflect new API behavior. Byte-equal `query_language.md` is CI-enforced separately; this bullet is for the prose that isn't.
 
