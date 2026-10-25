@@ -277,7 +277,7 @@ docs-in-code-mr-check:
       BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
       git cat-file -e "${BASE}^{commit}" 2>/dev/null || git fetch origin "$BASE" --depth=1 || git fetch --unshallow origin "$CI_COMMIT_SHA"
       CHANGED=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE" HEAD)
-      DOCS=$(echo "$CHANGED" | grep '^docs/' | grep -vxF -e docs/source/remote/queries/query-language.md -e docs/pages/engineering/development/agents-crate-map.md || true)
+      DOCS=$(echo "$CHANGED" | grep '^docs/' | grep -vxF -e docs/docs-gitlab-com/remote/queries/query-language.md -e docs/pages/engineering/development/agents-crate-map.md || true)
       CODE=$(echo "$CHANGED" | grep -v -e '^docs/' -e '\.md$' -e '^\.vale' -e '^\.markdownlint' -e '^lychee\.toml$' || true)
       if [ -n "$DOCS" ] && [ -n "$CODE" ]; then
         printf 'This MR changes code and files under docs/:\n%s\n\n' "$DOCS"
@@ -711,10 +711,10 @@ check_docs_markdown:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
   script:
     # Lint prose
-    - vale --minAlertLevel error docs/source
-    - markdownlint-cli2 '*.md' 'docs/source/**/*.md' 'docs/pages/**/*.md'
+    - vale --minAlertLevel error docs/docs-gitlab-com
+    - markdownlint-cli2 '*.md' 'docs/docs-gitlab-com/**/*.md' 'docs/pages/**/*.md'
     # Check links
-    - lychee --offline --include-fragments '*.md' 'docs/source/**/*.md' 'docs/pages/**/*.md'
+    - lychee --offline --include-fragments '*.md' 'docs/docs-gitlab-com/**/*.md' 'docs/pages/**/*.md'
 
 check_docs_i18n_markdown:
   stage: docs
@@ -729,11 +729,11 @@ check_docs_i18n_markdown:
         - docs-locale/${LOCALE_CODE}/**/*
   script:
     # Lint prose
-    - vale --config="docs-locale/${LOCALE_CODE}/.vale.ini" --minAlertLevel error docs-locale/${LOCALE_CODE}/source/
+    - vale --config="docs-locale/${LOCALE_CODE}/.vale.ini" --minAlertLevel error docs-locale/${LOCALE_CODE}/docs-gitlab-com/
     # Lint Markdown
-    - markdownlint-cli2 "docs-locale/${LOCALE_CODE}/source/**/*.md"
+    - markdownlint-cli2 "docs-locale/${LOCALE_CODE}/docs-gitlab-com/**/*.md"
     # Check links
-    - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/source/**/*.md
+    - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/docs-gitlab-com/**/*.md
 
 .engineering-site:
   stage: docs
@@ -764,7 +764,9 @@ check_docs_i18n_markdown:
 
 pages:
   extends: .engineering-site
+  resource_group: pages
   rules:
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
     - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
 
 pages:preview:
@@ -842,7 +844,7 @@ docs_index_pages:
     - .docs-gitlab-com
   script:
     # See https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/-/blob/main/scripts/check-index-filenames.sh
-    - make check-index-pages SEARCH_DIR="../docs/source"
+    - make check-index-pages SEARCH_DIR="../docs/docs-gitlab-com"
     #- make check-index-pages SEARCH_DIR="../doc-locale/source" # Enable when translation is added
 
 # Test Stage

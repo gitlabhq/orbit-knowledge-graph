@@ -385,8 +385,8 @@ For debugging: `--no-fail-fast --retries 0`.
 ### Step 8 — Update the user docs
 
 After the code MR merges, open a separate docs MR. Add the language to the
-[supported languages table](../../../source/compare-local-remote.md#supported-languages)
-and to the language list in [`docs/source/_index.md`](../../../source/_index.md).
+[supported languages table](../../../docs-gitlab-com/compare-local-remote.md#supported-languages)
+and to the language list in [`docs/docs-gitlab-com/_index.md`](../../../docs-gitlab-com/_index.md).
 
 ## Pre-flight checklist
 

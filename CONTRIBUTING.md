@@ -69,7 +69,7 @@ Run `mise lint:docs` before pushing any documentation changes.
 - Use the canonical terms in `CONTEXT.md`. Add a term only when a new domain
   concept could confuse a new contributor.
 - Follow the GitLab documentation principles in `.ai/principles/distilled/` when
-  writing pages under `docs/source/`. A green `mise lint:docs` run does not mean
+  writing pages under `docs/docs-gitlab-com/`. A green `mise lint:docs` run does not mean
   a page follows them.
 
 ## Issue conventions

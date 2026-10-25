@@ -9,7 +9,7 @@
 //! must never be hand-edited.
 //!
 //! The same table appears in two committed mirrors, both updated here:
-//! - `docs/source/remote/queries/query-language.md` (published reference)
+//! - `docs/docs-gitlab-com/remote/queries/query-language.md` (published reference)
 //! - `skills/orbit/references/query_language.md` (agent skill copy, kept in
 //!   sync by the `orbit-skill-docs-sync` hook)
 //!
@@ -33,7 +33,7 @@ use ontology::Ontology;
 
 /// Paths are relative to the workspace root.
 const DEFAULT_DOCS: &[&str] = &[
-    "docs/source/remote/queries/query-language.md",
+    "docs/docs-gitlab-com/remote/queries/query-language.md",
     "skills/orbit/references/query_language.md",
 ];
 
