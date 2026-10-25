@@ -10,7 +10,7 @@ components:
     create_request: false
     paths:
       - source: 'docs/docs-gitlab-com/**/*.md'
-        target: 'docs-locale/{{language}}/source/'
+        target: 'docs-locale/{{language}}/docs-gitlab-com/'
     ignored_paths:
       - 'docs/.*/**'
       - 'docs/docs-gitlab-com/schema.md'

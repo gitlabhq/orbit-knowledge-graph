@@ -729,11 +729,11 @@ check_docs_i18n_markdown:
         - docs-locale/${LOCALE_CODE}/**/*
   script:
     # Lint prose
-    - vale --config="docs-locale/${LOCALE_CODE}/.vale.ini" --minAlertLevel error docs-locale/${LOCALE_CODE}/source/
+    - vale --config="docs-locale/${LOCALE_CODE}/.vale.ini" --minAlertLevel error docs-locale/${LOCALE_CODE}/docs-gitlab-com/
     # Lint Markdown
-    - markdownlint-cli2 "docs-locale/${LOCALE_CODE}/source/**/*.md"
+    - markdownlint-cli2 "docs-locale/${LOCALE_CODE}/docs-gitlab-com/**/*.md"
     # Check links
-    - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/source/**/*.md
+    - lychee --offline --include-fragments docs-locale/${LOCALE_CODE}/docs-gitlab-com/**/*.md
 
 .engineering-site:
   stage: docs
