@@ -61,15 +61,15 @@ So when you ask with the question tool:
 ## Step 2: Ask a simple first question
 
 Start with a question that one query answers, about the scope from step 1.
-Offer these options with your question tool, with the bold text as the label and the rest as the description:
+Offer these options with your question tool. Use the bold text as the label, exactly as written, and the rest as the description:
 
-- **Open merge requests and their authors**:
+- **See the open merge requests and who wrote them**:
   the open merge requests, newest first, with their titles and authors. A quick check that Orbit sees your project.
-- **Open vulnerabilities by severity**:
+- **Count the open vulnerabilities by severity**:
   a count for each severity, from critical to info. One query counts them all, with no paging through results.
-- **Top approvers in the last 30 days**:
+- **Find who approved the most merge requests this month**:
   the top approvers, with a count for each. Useful when you need a reviewer.
-- **Callers of a function you name**:
+- **Find every caller of a function you name**:
   each caller, with the file it is in. Shows that Orbit indexes your code, not only merge requests and pipelines.
 
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
