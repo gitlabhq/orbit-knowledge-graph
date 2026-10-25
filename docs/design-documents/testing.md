@@ -218,7 +218,7 @@ The `corpus-smoke-test` job runs a large set of queries through the production q
 - The named queries in `config/named_queries`, each in JSON and GQL.
 - Code blocks marked `json orbit-query` or `gql orbit-query` in the docs and the Orbit skill.
 
-The test runs every marked query example in the root Markdown files, `docs/source`, `docs/design-documents`, `skills/orbit`, and `crates/integration-testkit`. It also fails on a query in an unmarked `json` or shell block. It fails on an unclosed `json`, `gql`, or shell block too.
+The test runs every marked query example in the root Markdown files, `docs/docs-gitlab-com`, `docs/design-documents`, `skills/orbit`, and `crates/integration-testkit`. It also fails on a query in an unmarked `json` or shell block. It fails on an unclosed `json`, `gql`, or shell block too.
 
 Other jobs check the docs prose. `check_docs_markdown` runs Vale, markdownlint, and a link check on MRs. `lint:prose` checks sentence length and wording in prompts, skills, agent guides, `docs/dev`, and `docs/design-documents`. `query-language-docs-check` regenerates the generated parts of the query-language reference and fails if they differ.
 

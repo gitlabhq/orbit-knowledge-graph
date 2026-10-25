@@ -5,7 +5,7 @@ principles, synced from
 [the same path](https://gitlab.com/gitlab-org/gitlab/-/tree/master/.ai/principles/distilled)
 in `gitlab-org/gitlab`.
 They are the standard for GitLab product documentation, and they govern the pages under
-`docs/source/`.
+`docs/docs-gitlab-com/`.
 Read them before writing or editing a page there.
 The repository's own `mise lint:docs` task checks almost none of these rules, so a clean
 lint run is not evidence that a page follows them.
