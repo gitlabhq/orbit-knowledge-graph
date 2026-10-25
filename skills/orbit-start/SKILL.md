@@ -15,7 +15,7 @@ metadata:
 # Get started with GitLab Orbit
 
 Guide the user through real questions about their own GitLab data, answered with GitLab Orbit.
-Start with a simple question, then try a full workflow from the prompt examples.
+Start with a simple question, then try a bigger one, such as a workflow from the prompt examples.
 After an answer, offer to run the same prompt again without Orbit, or to show how Orbit works with diagrams of the user's own graph.
 
 Your first reply after the setup check is the welcome screen in step 2.
@@ -94,14 +94,15 @@ Offer these options, with the bold text as the label and the rest as the descrip
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
 
-- **Try a full workflow**: go to step 4.
+- **Ask a bigger question**: go to step 4.
 - **Run it again without Orbit**: go to step 5.
 - **See how GitLab Orbit works**: go to step 6.
 - **Done**: go to step 7.
 
-## Step 4: Try a workflow from the prompt examples
+## Step 4: Ask a bigger question
 
-Now try a bigger question that takes several queries.
+Now try a bigger question that takes several queries, such as a workflow from the prompt examples.
+The user can also ask their own question.
 Read the prompt examples at <https://docs.gitlab.com/orbit/prompt-examples/>.
 Offer two to four examples that fit the scope, and use the prompt of the one that the user picks.
 If you cannot read the page, offer these:
@@ -121,9 +122,9 @@ Offer real values from the project as options when you can, such as recent merge
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
 
+- **Ask another question**: go back to step 4.
 - **Run it again without Orbit**: go to step 5.
 - **See how GitLab Orbit works**: go to step 6.
-- **Try another workflow**: go back to step 4.
 - **Done**: go to step 7.
 
 ## Step 5: Run it again without Orbit
@@ -154,8 +155,8 @@ Keep it to the table. Do not say which run is better.
 
 Then ask the user what to do next. Offer these options:
 
+- **Ask another question**: go to step 4.
 - **See how GitLab Orbit works**: go to step 6.
-- **Try another workflow**: go back to step 4.
 - **Done**: go to step 7.
 
 ### Count tool calls and tokens
@@ -200,54 +201,84 @@ API requests are the `glab orbit query` and `glab api` calls, and any other call
 
 ## Step 6: See how GitLab Orbit works
 
-Show the user how Orbit answered, with text diagrams in code blocks. Keep each diagram small.
+Walk the user through five short parts, one at a time. Each part uses text diagrams in `text` code blocks.
+Write each part in your reply, then ask the user what to do next. Offer these options:
 
-1. Show how Orbit works:
-
-   ```text
-   GitLab                       GitLab Orbit                       Your agent
-   +------------------+  index  +---------------------------+ query +------------------+
-   | groups, projects | ------> | a graph of nodes and      | <---- | glab orbit query |
-   | merge requests   |         | edges, updated as the     | ----> | or the MCP tools |
-   | pipelines, jobs  |         | data changes              | rows  |                  |
-   | vulnerabilities  |         |                           |       |                  |
-   | code             |         | returns only what you can |       |                  |
-   +------------------+         | see                       |       +------------------+
-                                +---------------------------+
-   ```
-
-   One query can follow many edges, such as from a merge request to its changed code, to the callers of that code.
-   Without Orbit, each of those hops is a separate REST API call.
-1. Show the user's graph. Run `glab orbit graph-status --full-path <scope>`, and draw the node counts as a bar chart.
-   For example:
-
-   ```text
-   Job           ########################  600,000
-   Definition    ##########                250,000
-   Pipeline      #                          25,000
-   ```
-
-   Show the eight largest node types. Scale the bars to the largest count.
-1. Show the part of the graph that the last query used.
-   Run `glab orbit ontology <Node>` for each node type in the query, and draw those nodes and the edges between them:
-
-   ```text
-   (User) --APPROVED--> (MergeRequest) --IN_PROJECT--> (Project)
-   ```
-
-   Then match each part of the query to the diagram, in one line each.
-1. Say that `glab orbit ontology` lists every node type and edge, so the user can see what else they can ask.
-
-Then ask the user what to do next. Offer these options:
-
-- **Try another workflow**: go back to step 4.
-- **Run it again without Orbit**: go to step 5.
+- **Next: <title of the next part>**: show the next part. Leave this out after the last part.
+- **Ask a question**: go to step 4.
 - **Done**: go to step 7.
+
+### Part 1: From GitLab data to answers
+
+Show this diagram:
+
+```text
+GitLab                        GitLab Orbit                          Your agent
++--------------------+        +-----------------------------+       +------------------+
+| groups, projects   | index  | indexer --> graph database  | query | glab orbit query |
+| merge requests     | -----> |                             | <---- | MCP endpoint     |
+| pipelines, jobs    |        | GitLab authorizes each      | ----> | REST API         |
+| work items         |        | query                       | rows  | GitLab Duo       |
+| vulnerabilities    |        |                             |       |                  |
+| code on the        |        |                             |       |                  |
+| default branch     |        |                             |       |                  |
++--------------------+        +-----------------------------+       +------------------+
+```
+
+Then explain, in a short list:
+
+- A new merge request, work item, or pipeline is in the graph within minutes.
+- Code comes from the default branch. Orbit indexes it again when the default branch changes.
+  For code you have not merged, the local graph indexes a clone on your machine with `glab orbit index`.
+- One query can follow many edges, for example from a merge request to the changed code, and on to its callers.
+  Without Orbit, each of those hops is at least one REST API call.
+
+### Part 2: What is in your graph
+
+Run `glab orbit graph-status --full-path <scope>`. Draw the node counts as a bar chart, grouped by domain.
+Show the eight largest node types, and scale the bars to the largest count. For example:
+
+```text
+ci            Job           ########################  600,000
+source_code   Definition    ##########                250,000
+ci            Pipeline      #                          25,000
+```
+
+Then say how many projects in the scope are indexed, and name any domain with no data.
+
+### Part 3: How the graph connects
+
+Run `glab orbit ontology Project MergeRequest Pipeline Job Vulnerability File Definition User`.
+Draw these nodes, and only the edges that the ontology lists between them.
+Keep one edge for each pair of nodes, the one most users would ask about, so the diagram stays readable. For example:
+
+```text
+(User) --AUTHORED--> (MergeRequest) --IN_PROJECT--> (Project)
+(Definition) --CALLS--> (Definition)
+```
+
+Then say that `glab orbit ontology` lists every node type and edge, so the user can see what else they can ask.
+
+### Part 4: How your last query walked the graph
+
+Draw the nodes and edges that the last query used. Under the diagram, match each part of the query to it, in one line each.
+Then count the hops, and say that each hop without Orbit is at least one REST API call.
+If the user has not asked a question yet, use the first question in step 3 as the example.
+
+### Part 5: Who can see what
+
+Explain, in a short list:
+
+- A query returns only the data that your role lets you see in GitLab, even when an agent sends the query.
+- To query groups, projects, merge requests, CI/CD, and work items, you need at least the Reporter role.
+- To query security data, you need the Security Manager, Developer, Maintainer, or Owner role.
+- A role for a top-level group applies to each subgroup and project in it.
+  A role for a project alone does not give access to that project.
 
 ## Step 7: Offer next steps
 
 Ask the user what to do next. Offer these options:
 
-- Try another workflow: go back to step 4.
+- Ask another question: go back to step 4.
 - Set up Orbit for every session: run `glab orbit setup`.
 - See more prompts: <https://docs.gitlab.com/orbit/prompt-examples/>.
