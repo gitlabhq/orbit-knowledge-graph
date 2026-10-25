@@ -1,3 +1,51 @@
-mission: ""
-people: []
-principles: []
+mission: Give every AI agent and every engineer on GitLab a fast, correct map of their code and their software delivery data.
+people:
+  - username: michaelangeloio
+    name: Michael Angelo Rivera
+    title: Orbit Engineering Lead
+    bio: Started GitLab Orbit to give agents the context that senior engineers carry in their heads. Leads engineering and owns the roadmap with Product.
+    avatar: https://gitlab.com/uploads/-/system/user/avatar/20271294/avatar.png
+  - username: gabrielengel_gl
+    name: Gabriel Engel
+    title: Senior Product Manager
+    bio: Works with customers to decide what Orbit builds next, and owns the roadmap with Engineering.
+    avatar: https://gitlab.com/uploads/-/system/user/avatar/13656597/avatar.png
+  - username: sikim5
+    name: Simon Kim
+    title: Staff Product Designer
+    bio: Designs how people find Orbit, set it up, and get their first answer.
+    avatar: https://gitlab.com/uploads/-/system/user/avatar/42212120/avatar.png
+  - username: dgruzd
+    name: Dmitry Gruzd
+    title: Staff Software Engineer
+    bio: Works on the Orbit architecture and connects the context graph to GitLab agents.
+    avatar: https://gitlab.com/uploads/-/system/user/avatar/5054237/avatar.png
+  - username: jgdoyon1
+    name: Jean-Gabriel Doyon
+    title: Senior Backend Engineer
+    bio: Builds the query engine and the graph storage that every Orbit answer runs on.
+    avatar: https://gitlab.com/uploads/-/system/user/avatar/20627644/avatar.png
+  - username: michaelusa
+    name: Michael Usachenko
+    title: Senior Machine Learning Engineer
+    bio: Works on the query compiler and code indexing, so that answers are fast and correct.
+    avatar: https://gitlab.com/uploads/-/system/user/avatar/27794888/avatar.png
+  - username: bohdanpk
+    name: Bohdan Parkhomchuk
+    title: Senior Backend Engineer
+    bio: Runs the infrastructure behind Orbit and brings Orbit to GitLab Self-Managed and GitLab Dedicated.
+    avatar: https://gitlab.com/uploads/-/system/user/avatar/21247235/avatar.png
+  - username: aalgutifan
+    name: Aaron Algutifan
+    title: Backend Engineer
+    bio: Builds the agent query language and the Orbit CLI, and keeps Orbit reliable.
+    avatar: https://gitlab.com/uploads/-/system/user/avatar/38952539/avatar.png
+principles:
+  - title: Everyone ships
+    text: Every person on the team writes code, including Product and Design.
+  - title: More than one hat
+    text: Each of us works toward the end goal, even when the work is outside our job title.
+  - title: Built for agents
+    text: We design every feature for AI agents first, then for people.
+  - title: Small and fast
+    text: We stay small, listen to customers, and change direction fast when we learn something new.
