@@ -103,7 +103,7 @@ Show the raw comparison in two tables. First, what each answer cost:
 | Tool calls and API requests | | |
 | Time | | |
 
-Then the results, one row for each thing that the question asks about, up to five rows.
+Then the results, one row for each thing that the question asks about.
 For example, for a merge request question:
 
 | Result | Without Orbit | With Orbit |
@@ -111,8 +111,13 @@ For example, for a merge request question:
 | Callers outside the merge request | 2, in this project only | 14, in 6 projects |
 | Projects that import the changed code | Not found | 6 |
 
-In each cell, give a count or a short fact that the user can check, or write `Not found` or `Guessed`.
+In each cell, give a count or a fact that the user can check, or write `Not found` or `Guessed`.
+A cell can name the items when there are only a few, or add a short sentence of context.
 Pick the rows that answer the question. Leave out details that do not change the answer.
+
+After the tables, list any important findings that do not fit in a row.
+For example, a caller in a critical service, or a failing job that blocks a release.
+Say which answer found each one, and show the query result or API response behind it.
 
 Do not show the full answers. Offer to show either one if the user asks.
 
