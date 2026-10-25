@@ -62,14 +62,17 @@ It starts with the data model, and follows one query through each phase, from te
 | Structure | [Pipelines](#pipelines) | Ordered lists of phases, built from reusable segments, one per frontend and backend | All |
 | Querying | [Frontends](query-languages.md) | Parse GQL or JSON into the shared input, in their own doc | `gql_parse`, `json_dsl_parse` |
 | Querying | [Validation](#phases) | Rejects bad queries early, then normalizes names and types | `validate`, `validate_relationships`, `normalize` |
-| Querying | [Restriction and scope](#phases) | Applies who is asking, and narrows the query to the namespaces it touches | `restrict` |
+| Querying | [Restriction](#phases) | Applies the caller's field access, and rejects queries that would skip redaction | `restrict` |
 | Querying | [Planning](#phases) | Picks how to read each node and relationship | `plan` |
 | Querying | [Current-state reads](#phases) | Makes sure every read sees the latest version of each row | `plan` |
-| Querying | [Lowering and code generation](#phases) | Turns the plan into a SQL syntax tree, then into SQL for one backend | `lower`, `response_policy`, `codegen` |
-| Querying | [Authorization](#phases) | Adds authorization filters and redaction columns, then proves they are all there | `enforce`, `security`, `check` |
-| Querying | [Hydration](#phases) | Plans a second, small query for the properties the main query didn't fetch | `hydrate_plan` |
+| Querying | [Scope bounds](#phases) | Narrows each read to the namespaces that the query's anchors live in | `tp_bounds` |
+| Querying | [Lowering](#phases) | Turns the plan into a SQL syntax tree | `lower` |
 | Querying | [Pagination](#phases) | Pages through results without keeping state between requests | `paginate` |
+| Querying | [Result shape](#phases) | Caps large values, and adds the columns that redaction needs | `response_policy`, `result_contract` |
+| Querying | [Hydration](#phases) | Plans a second, small query for the properties the main query didn't fetch | `hydrate_plan` |
 | Querying | [Settings](#phases) | Picks time and memory limits for each query type | `settings` |
+| Querying | [Authorization](#phases) | Adds authorization filters, then proves that every read has one | `security`, `security_check` |
+| Querying | [Code generation](#phases) | Renders the SQL tree as SQL for one backend | `codegen`, `duckdb_codegen` |
 
 ---
 
@@ -79,7 +82,7 @@ It starts with the data model, and follows one query through each phase, from te
 %%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 36, "rankSpacing": 40, "padding": 12}}}%%
 flowchart TB
     accTitle: How the graph query engine fits together
-    accDescr: Once per schema version, the ontology produces the query data model, including the ClickHouse tables that store the graph. For each request, the query text enters the frontend, and the security context feeds restriction and authorization. The query data model feeds validation, planning, and authorization. The pipeline generates parameterized SQL. Outside the engine, ClickHouse runs the SQL, Rails redacts the rows, and a hydration query fetches the remaining properties before the response goes back.
+    accDescr: Once per schema version, the ontology produces the query data model, including the ClickHouse tables that store the graph. For each request, the query text enters the frontend, and the security context feeds restriction and authorization. The query data model feeds validation, planning, scope bounds, and authorization. The pipeline generates parameterized SQL. Outside the engine, ClickHouse runs the SQL, Rails redacts the rows, and a hydration query fetches the remaining properties before the response goes back.
 
     subgraph schema_version["Once per schema version"]
         ontology["Ontology"]
@@ -95,13 +98,14 @@ flowchart TB
     subgraph pipeline["Engine pipeline"]
         frontend["Frontend<br/>parse into the shared input"]
         validation["Validation<br/>shape, limits, names, types"]
-        restriction["Restriction and scope<br/>admin-only fields, paths, anchors"]
+        restriction["Restriction<br/>admin-only fields, paths, aggregation reach"]
         planning["Planning<br/>access paths and current-state reads"]
+        scope["Scope bounds<br/>anchor paths on each read"]
         lowering["Lowering<br/>SQL syntax tree"]
-        authorization["Authorization<br/>enforce, security, check"]
-        finishing["Pagination, hydration plan,<br/>and settings"]
+        finishing["Pagination, result shape,<br/>hydration plan, and settings"]
+        authorization["Authorization<br/>security and security_check"]
         codegen["Code generation<br/>ClickHouse or DuckDB SQL"]
-        frontend --> validation --> restriction --> planning --> lowering --> authorization --> finishing --> codegen
+        frontend --> validation --> restriction --> planning --> scope --> lowering --> finishing --> authorization --> codegen
     end
 
     subgraph execution["Execution, outside the engine"]
@@ -118,6 +122,7 @@ flowchart TB
     context -- "roles" --> authorization
     model -. "names and types" .-> validation
     model -. "tables and routes" .-> planning
+    model -. "anchor paths" .-> scope
     model -. "role floors" .-> authorization
     codegen --> sql
 
@@ -128,7 +133,7 @@ flowchart TB
 
     class ontology,model,clickhouse data
     class query_text,context input
-    class frontend,validation,restriction,planning,lowering,authorization,finishing,codegen phase
+    class frontend,validation,restriction,planning,scope,lowering,finishing,authorization,codegen phase
     class sql,redaction,hydration,response outside
 
     style schema_version fill:#EFF6FF,stroke:#93C5FD
@@ -136,8 +141,8 @@ flowchart TB
     style pipeline fill:#F0FDF4,stroke:#86EFAC
     style execution fill:#F9FAFB,stroke:#D1D5DB
 
-    linkStyle 13,14 stroke:#B45309,stroke-width:2px
-    linkStyle 15,16,17 stroke:#2563EB,stroke-width:2px
+    linkStyle 14,15 stroke:#B45309,stroke-width:2px
+    linkStyle 16,17,18,19 stroke:#2563EB,stroke-width:2px
 ```
 
 ---
@@ -228,10 +233,12 @@ Each phase asks the model different questions:
 | Phase | Asks the data model |
 | --- | --- |
 | `validate`, `normalize` | Does this entity, property, or relationship exist? Is the property filterable or text-indexed? Which foreign key links these nodes? |
-| `restrict` | Which table and column hold an anchor's traversal path? |
+| `restrict` | Is this property admin-only? Does this entity have a traversal path? |
 | `plan` | Which table stores this entity, and which edge tables does this relationship route to? Is there a foreign key, a sort key, or a sorted copy? Is the property mutable or selective? |
+| `tp_bounds` | Which table and column hold an anchor's traversal path? Which foreign keys point at an anchor? Does this relationship variant stay in one namespace? |
 | `lower` | Is this column in the table's sort key? |
-| `security`, `check` | Which columns hold a traversal path, and what role floor does each table need? |
+| `result_contract` | Which column identifies each entity for redaction, and which authorization rules apply to it? |
+| `security`, `security_check` | Which columns hold a traversal path, and what role floor does each table need? |
 | `hydrate_plan` | Which table stores each entity, and which properties are virtual, hidden, or admin-only? |
 
 Schema management doesn't need the mapping or the policy.
@@ -328,9 +335,10 @@ A segment is a run of phases that several pipelines share:
 | --- | --- |
 | GQL front | `gql_parse` → `validate` → `validate_relationships` → `normalize` |
 | JSON front | `json_dsl_parse` → `validate` → `normalize` |
-| Remote core | `restrict` → `plan` → `lower` → `response_policy` → `enforce` → `security` |
-| Remote finish | `paginate` → `check` → `hydrate_plan` → `settings` → `codegen` |
-| Local tail | `plan` → `lower` → `enforce_local` → `paginate` → `duckdb_codegen` |
+| Remote plan | `restrict` → `plan` → `tp_bounds` → `lower` |
+| Result shape | `response_policy` → `result_contract` |
+| Remote finish | `settings` → `security` → `security_check` → `codegen` |
+| Local tail | `plan` → `lower` → `paginate` → `result_contract` → `duckdb_codegen` |
 
 This diagram shows how each pipeline combines segments.
 Boxes with the same color are the same segment:
@@ -341,28 +349,42 @@ left to right direction
 skinparam componentStyle rectangle
 
 component "GQL front" as gql_a #DCFCE7
-component "Remote core" as core_a #DBEAFE
+component "Remote plan" as plan_a #DBEAFE
+component "paginate" as page_a
+component "Result shape" as shape_a #FCE7F3
+component "hydrate_plan" as hydrate_a
 component "Remote finish" as finish_a #FEF3C7
-gql_a --> core_a
-core_a --> finish_a
+gql_a --> plan_a
+plan_a --> page_a
+page_a --> shape_a
+shape_a --> hydrate_a
+hydrate_a --> finish_a
 note top of gql_a : clickhouse_gql
 
 component "JSON front" as json_b #D1FAE5
-component "Remote core" as core_b #DBEAFE
+component "Remote plan" as plan_b #DBEAFE
+component "paginate" as page_b
+component "Result shape" as shape_b #FCE7F3
+component "hydrate_plan" as hydrate_b
 component "Remote finish" as finish_b #FEF3C7
-json_b --> core_b
-core_b --> finish_b
+json_b --> plan_b
+plan_b --> page_b
+page_b --> shape_b
+shape_b --> hydrate_b
+hydrate_b --> finish_b
 note top of json_b : clickhouse_json_dsl
 
 component "validate_conditions" as cond_c
-component "Remote core" as core_c #DBEAFE
-component "check, settings,\ncodegen" as finish_c
-cond_c --> core_c
-core_c --> finish_c
+component "Remote plan" as plan_c #DBEAFE
+component "Result shape" as shape_c #FCE7F3
+component "Remote finish" as finish_c #FEF3C7
+cond_c --> plan_c
+plan_c --> shape_c
+shape_c --> finish_c
 note top of cond_c : ch_hydration
 
 component "GQL front\nwith validate_local" as gql_d #DCFCE7
-component "Local tail" as local_d #FCE7F3
+component "Local tail" as local_d #EDE9FE
 gql_d --> local_d
 note top of gql_d : duckdb_gql
 
@@ -374,10 +396,12 @@ note top of gql_e : validate_normalize_gql
 Segment reuse has these effects:
 
 - **Both remote languages share everything after parsing.** `clickhouse_gql` and `clickhouse_json_dsl` differ only in their front segment.
-- **Hydration reuses the remote core.** It starts from an input the server builds, so it skips parsing, but it runs the same restrict, plan, and security phases.
-  Hydration queries can't bypass authorization.
+- **Hydration reuses the remote segments.** It starts from an input the server builds, so it skips parsing, pagination, and hydration planning.
+  It still runs the same restrict, plan, scope, and security phases, so hydration queries can't bypass authorization.
+- **Security runs last.** Every phase that changes the SQL tree runs before `security` and `security_check`.
+  The check sees the final tree, so no later phase can add an unfiltered read.
 - **Local queries reuse the front.** The DuckDB pipelines parse and normalize the same way.
-  Then they swap in a local tail with no security phases, because a local graph has a single user.
+  Then they swap in a local tail with no restriction, scope, or security phases, because a local graph has a single user.
 - **A front segment can run alone.** When a new schema version loads, the server runs every named query through `validate_normalize_gql` and `validate_normalize`, to prove each one still fits the new ontology.
 
 | Pipeline | Frontend | Backend | Used by |
@@ -478,14 +502,9 @@ The [query language reference](../source/remote/queries/query-language.md#valida
 </details>
 
 <details>
-<summary><b>Restriction and scope</b>: applies the caller's access, and narrows the query to the namespaces it touches</summary>
+<summary><b>Restriction</b>: applies the caller's field access, and rejects queries that would skip redaction</summary>
 
 Restriction is the first phase that reads the caller's security context: their organization, plus each traversal path they can read and their role on it.
-Restriction does three things:
-
-- It removes properties that the ontology marks as admin-only, like `User.email`, unless the caller is an admin.
-- It rejects any traversal path the caller asks for that isn't inside their authorized paths.
-- It derives the query's scope, so a project-scoped query reads only that project's rows.
 
 ```plantuml
 @startuml
@@ -494,7 +513,7 @@ skinparam componentStyle rectangle
 component "Shared input" as input
 component "Security context\n1/9970/ as Reporter\n1/22/ as Developer" as context
 component "restrict" as restrict
-component "Restricted input\nand scope" as output
+component "Restricted input" as output
 input --> restrict
 context --> restrict
 restrict --> output
@@ -504,61 +523,23 @@ note bottom of restrict
   so it is removed for non-admins.
   A requested path outside
   1/9970/ and 1/22/ is rejected.
-  Project {id: 278964} is an anchor,
-  so the query gets a scope.
+  count(u) over User alone is rejected,
+  because aggregation skips redaction.
+  Vulnerability without the higher role
+  on any path is rejected.
 end note
 @enduml
 ```
 
-**How scope works**
+Restriction does four things:
 
-A scope starts at an anchor: a node with a known ID or path, like a project, group, merge request, or file.
-The anchor's traversal path becomes a `startsWith` filter, which lets ClickHouse prune most of the primary index.
-
-```plantuml
-@startuml
-left to right direction
-skinparam componentStyle rectangle
-component "Group 9970" as group
-component "Project 278964\n(anchor)" as project #DBEAFE
-component "MergeRequest" as mr #DBEAFE
-component "WorkItem" as work_item
-group --> project : CONTAINS
-mr --> project : IN_PROJECT
-mr --> work_item : CLOSES
-
-note bottom of project
-  scope: the project's own path,
-  read in a subquery of the same statement
-end note
-note bottom of mr
-  IN_PROJECT stays in one namespace,
-  so the scope spreads here
-end note
-note bottom of work_item
-  CLOSES can cross namespaces,
-  so the scope stops
-end note
-note top of group
-  scope never spreads
-  from a child to its parent
-end note
-@enduml
-```
-
-The rules for scope:
-
-- The anchor's current path is read in a subquery inside the same statement.
-  There is no lookup before the query and no cache.
-  A transferred project scopes to its new path as soon as its rows are indexed.
-- ClickHouse evaluates that subquery before index analysis, so it prunes like a literal prefix.
-- The scope spreads along relationships that the ontology marks as staying in one namespace, like `IN_PROJECT` and `CONTAINS`.
-- It never spreads across relationships that can cross namespaces, like `CLOSES`, and never from a child namespace up to its parent.
-- A node with several anchors gets one `startsWith` per anchor, combined with `OR`.
-  Past eight anchors, the node keeps only the authorization filter.
-- A missing or deleted anchor falls back to the authorization filter alone, so the query still returns the rows that are indexed.
-- Scope only narrows a query.
-  It never widens what the caller can read.
+- It rejects a query on an entity that needs a higher role, like vulnerabilities, when the caller holds that role on no path.
+- It removes admin-only properties, like `User.email`, from the returned columns, unless the caller is an admin.
+  A filter, a sort, or an aggregation on an admin-only property fails instead.
+- It rejects any traversal path filter the caller asks for that isn't inside their authorized paths.
+- It rejects an aggregation that no namespaced node can reach.
+  Aggregations return counts, not rows, so Rails redaction can't check them.
+  At least one node in the pattern must carry a traversal path, like a group, project, or note.
 
 </details>
 
@@ -728,122 +709,85 @@ Some more details:
 </details>
 
 <details>
-<summary><b>Lowering and code generation</b>: turns the plan into SQL for one backend</summary>
+<summary><b>Scope bounds</b>: narrows each read to the namespaces that the query's anchors live in</summary>
 
-Lowering turns the plan into a SQL syntax tree.
-Code generation then renders that tree for one backend.
-Built-in functions are a closed vocabulary in the tree, so each backend spells them its own way.
+A project-scoped query should read only that project's rows.
+The `tp_bounds` phase runs after planning and finds those bounds.
+Lowering then adds them to each node and edge read.
+
+A bound starts at an anchor: a node with a known ID or path, like a project, group, merge request, or file.
+The anchor's traversal path becomes a `startsWith` filter, which lets ClickHouse prune most of the primary index.
 
 ```plantuml
 @startuml
 left to right direction
 skinparam componentStyle rectangle
-component "Plan\nread gl_merge_request\nwithin path ?" as plan
-component "SQL tree\nFilter(StartsWith(mr.traversal_path, p0))" as tree
-component "ClickHouse\nstartsWith(mr.traversal_path, {p0:String})" as clickhouse #DBEAFE
-component "DuckDB\nstarts_with(mr.traversal_path, ?)" as duckdb #FCE7F3
-plan --> tree
-tree --> clickhouse
-tree --> duckdb
+component "Group 9970" as group
+component "Project 278964\n(anchor)" as project #DBEAFE
+component "MergeRequest" as mr #DBEAFE
+component "User" as user
+component "WorkItem" as work_item
+group --> project : CONTAINS
+mr --> project : IN_PROJECT
+user --> mr : AUTHORED
+mr --> work_item : CLOSES
+
+note bottom of project
+  bound: the project's own path,
+  read in a subquery of the same statement
+end note
+note bottom of mr
+  IN_PROJECT stays in one namespace,
+  so the bound spreads here
+end note
+note bottom of user
+  AUTHORED edges are stored with the
+  merge request, so the edge read gets
+  its bound, and the bound stops there
+end note
+note bottom of work_item
+  CLOSES can cross namespaces,
+  so the bound stops
+end note
+note top of group
+  a bound never spreads
+  from a child to its parent
+end note
 @enduml
 ```
+
+The rules for bounds:
+
+- Only traversal and aggregation queries get bounds.
+- The anchor's current path is read in a subquery inside the same statement.
+  There is no lookup before the query and no cache.
+  A transferred project scopes to its new path as soon as its rows are indexed.
+- ClickHouse evaluates that subquery before index analysis, so it prunes like a literal prefix.
+- A bound spreads along relationships that the ontology marks as staying in one namespace, like `IN_PROJECT` and `CONTAINS`.
+- It never spreads across relationships that can cross namespaces, like `CLOSES`, and never from a child namespace up to its parent.
+- Some relationships store their edges with one endpoint, like `AUTHORED` with its target.
+  The edge read gets that endpoint's bound, but the bound doesn't spread to the other endpoint.
+- A node pinned only by its own ID or path gets no bound of its own, because the pin already narrows the read.
+  It still gets one when another read in the query shares that bound.
+- A node with several anchors gets one `startsWith` per anchor, combined with `OR`.
+  Past eight anchors, the node keeps only the authorization filter.
+- A missing or deleted anchor falls back to the authorization filter alone, so the query still returns the rows that are indexed.
+- A bound only narrows a query.
+  It never widens what the caller can read.
+
+</details>
+
+<details>
+<summary><b>Lowering</b>: turns the plan into a SQL syntax tree</summary>
+
+Lowering turns the plan into a SQL syntax tree, and adds the scope bounds to each read.
+Every later phase works on that tree.
 
 - Planning decides what to read.
   Lowering decides how to express it as SQL.
   Code generation decides the dialect.
 - Every query value stays a bound parameter, all the way to the database driver.
-- `response_policy` caps the size of large projected values, like long text, before the result leaves ClickHouse.
 - Date buckets keep their units until code generation picks the backend expression.
-- When a backend can't support an operation, it rejects the query.
-  DuckDB, for example, has no equivalent for ClickHouse's token search.
-
-</details>
-
-<details>
-<summary><b>Authorization</b>: adds authorization filters, then proves that every read has one</summary>
-
-Three phases protect every remote query.
-`enforce` adds what redaction needs, `security` adds the authorization filters, and `check` verifies that every read has a filter.
-
-```plantuml
-@startuml
-left to right direction
-skinparam componentStyle rectangle
-component "SQL tree\nreads gl_edge, gl_merge_request,\ngl_vulnerability, gl_user" as tree
-component "enforce" as enforce
-component "security" as security
-component "check" as check
-component "Safe SQL tree" as safe
-tree --> enforce
-enforce --> security
-security --> check
-check --> safe
-
-note bottom of enforce
-  adds an ID and type column
-  per node, so Rails can redact rows
-end note
-
-note bottom of security
-  gl_merge_request: startsWith on
-  1/9970/ and 1/22/ (Reporter floor)
-  gl_vulnerability: only paths where
-  the caller holds the higher role
-  gl_user: global, no path filter
-end note
-
-note bottom of check
-  every namespaced read has a filter?
-  yes: pass
-  no: reject the query
-end note
-@enduml
-```
-
-- Every namespaced node and edge read gets a `startsWith(traversal_path, ?)` filter at the role floor of its entity.
-  Most entities need Reporter, and security entities like vulnerabilities need a higher role.
-- When the caller holds no path at the right role, the read gets a filter that is always false.
-  Some queries are refused outright instead.
-  In both cases, the caller gets no rows for that entity.
-- Global tables, like `gl_user`, have no traversal path.
-  Their rows rely on Rails redaction, and joins through namespaced relationships keep their path filters.
-- `check` walks the final SQL tree.
-  If any namespaced read lacks a valid filter, the engine rejects the query instead of running it.
-- `enforce` adds the columns that redaction needs, so Rails can check rows that SQL can't decide on its own, like confidential items.
-
-The [Security](../design-documents/security.md) design document describes the full authorization model and the redaction layer.
-
-</details>
-
-<details>
-<summary><b>Hydration</b>: fetches the properties that the main query didn't return</summary>
-
-The main query returns identities, plus the properties it already joined.
-Hydration fetches the rest in one more small query.
-
-```plantuml
-@startuml
-left to right direction
-skinparam componentStyle rectangle
-component "Main query\n(User 1)-[:MEMBER_OF]->(Group 22)\nIDs only" as main
-component "Hydration plan\nUser: [1]\nGroup: [22]" as hydration_plan
-component "Hydration query\ngl_user WHERE id IN (1)\nUNION ALL\ngl_group WHERE id IN (22)" as hydration_query #DBEAFE
-component "Response\nnodes with properties" as response
-main --> hydration_plan
-hydration_plan --> hydration_query
-hydration_query --> response
-note bottom of hydration_query
-  compiled through ch_hydration,
-  so it carries the same
-  authorization filters
-end note
-@enduml
-```
-
-- Path finding and neighbors find node types only at run time, so they usually return IDs alone and rely on hydration.
-- Nodes that the main query already joined, for a sort or a group key, need no second query.
-- The hydration query compiles through `ch_hydration`, so it runs the same restrict and security phases as the main query.
-- The caller picks how many columns dynamic nodes return: the ontology defaults, or all columns.
 
 </details>
 
@@ -881,11 +825,129 @@ end note
 </details>
 
 <details>
+<summary><b>Result shape</b>: caps large values, and adds the columns that redaction needs</summary>
+
+Two phases shape what the query returns.
+`response_policy` caps large values, and `result_contract` records what each row means.
+
+- `response_policy` shortens large text projections, so a full page always fits in one response message.
+- `result_contract` adds ID and type columns for each returned node and edge.
+  Rails uses them to check rows that SQL can't decide on its own, like confidential items.
+- It also records each entity's authorization rules, and builds the result context that redaction and formatting read.
+- Local pipelines run `result_contract` too, so local and remote results have the same shape.
+
+</details>
+
+<details>
+<summary><b>Hydration</b>: fetches the properties that the main query didn't return</summary>
+
+The main query returns identities, plus the properties it already joined.
+Hydration fetches the rest in one more small query.
+
+```plantuml
+@startuml
+left to right direction
+skinparam componentStyle rectangle
+component "Main query\n(User 1)-[:MEMBER_OF]->(Group 22)\nIDs only" as main
+component "Hydration plan\nUser: [1]\nGroup: [22]" as hydration_plan
+component "Hydration query\ngl_user WHERE id IN (1)\nUNION ALL\ngl_group WHERE id IN (22)" as hydration_query #DBEAFE
+component "Response\nnodes with properties" as response
+main --> hydration_plan
+hydration_plan --> hydration_query
+hydration_query --> response
+note bottom of hydration_query
+  compiled through ch_hydration,
+  so it carries the same
+  authorization filters
+end note
+@enduml
+```
+
+- Path finding and neighbors find node types only at run time, so they usually return IDs alone and rely on hydration.
+- Nodes that the main query already joined, for a sort or a group key, need no second query.
+- The hydration query compiles through `ch_hydration`, so it runs the same restrict and security phases as the main query.
+- The caller picks how many columns dynamic nodes return: the ontology defaults, or all columns.
+
+</details>
+
+<details>
 <summary><b>Settings</b>: sets time and memory limits for each query type</summary>
 
 The `settings` phase picks ClickHouse settings for each query type: time limits, memory limits, and caching.
 Path finding has hard ceilings of 15 seconds and 15 GiB.
 Server configuration can tighten these limits, but never raise them past the ceilings.
+
+</details>
+
+<details>
+<summary><b>Authorization</b>: adds authorization filters, then proves that every read has one</summary>
+
+Two phases protect every remote query, and they run last.
+`security` adds the authorization filters, and `security_check` verifies that every read has one.
+
+```plantuml
+@startuml
+left to right direction
+skinparam componentStyle rectangle
+component "SQL tree\nreads gl_edge, gl_merge_request,\ngl_vulnerability, gl_user" as tree
+component "security" as security
+component "security_check" as check
+component "Safe SQL tree" as safe
+tree --> security
+security --> check
+check --> safe
+
+note bottom of security
+  gl_merge_request: startsWith on
+  1/9970/ and 1/22/ (Reporter floor)
+  gl_vulnerability: only paths where
+  the caller holds the higher role
+  gl_user: global, no path filter
+end note
+
+note bottom of check
+  every namespaced read has a filter?
+  yes: pass
+  no: reject the query
+end note
+@enduml
+```
+
+- Every namespaced node and edge read gets a `startsWith(traversal_path, ?)` filter at the role floor of its entity.
+  Most entities need Reporter, and security entities like vulnerabilities need a higher role.
+- When the caller holds no path at the right role, the read gets a filter that is always false.
+  When the caller holds that role on no path at all, restriction already refused the query.
+  In both cases, the caller gets no rows for that entity.
+- Global tables, like `gl_user`, have no traversal path.
+  Their rows rely on Rails redaction, and joins through namespaced relationships keep their path filters.
+- `security_check` walks the final SQL tree.
+  If any namespaced read lacks a valid filter, the engine rejects the query instead of running it.
+
+The [Security](../design-documents/security.md) design document describes the full authorization model and the redaction layer.
+
+</details>
+
+<details>
+<summary><b>Code generation</b>: renders the SQL tree as SQL for one backend</summary>
+
+Code generation renders the safe SQL tree for one backend.
+Built-in functions are a closed vocabulary in the tree, so each backend spells them its own way.
+
+```plantuml
+@startuml
+left to right direction
+skinparam componentStyle rectangle
+component "SQL tree\nFilter(StartsWith(mr.traversal_path, p0))" as tree
+component "ClickHouse\nstartsWith(mr.traversal_path, {p0:String})" as clickhouse #DBEAFE
+component "DuckDB\nstarts_with(mr.traversal_path, ?)" as duckdb #FCE7F3
+tree --> clickhouse
+tree --> duckdb
+@enduml
+```
+
+- Every query value is a bound parameter in the rendered SQL.
+- When a backend can't support an operation, it rejects the query.
+  DuckDB, for example, has no equivalent for ClickHouse's token search.
 
 </details>
 
@@ -901,7 +963,7 @@ Server configuration can tighten these limits, but never raise them past the cei
 - A **pipeline** is an ordered list of phases for one frontend and one backend.
 - The **query data model** is the engine's view of one schema version: the logical graph, its physical layout for one backend, and its authorization policy.
 - A **relation** is one read of a node or edge table in the plan.
-- A **scope** is a narrow traversal path prefix that the engine derives from the query, such as the path of one project.
+- A **scope bound** is a narrow traversal path prefix that the engine derives from the query's anchors, such as the path of one project.
 - A **segment** is a run of phases that several pipelines share.
 - A **tombstone** is the row version that marks a row as deleted.
 
