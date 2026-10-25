@@ -48,7 +48,9 @@ SDLC change rebuilds the affected table and clones unaffected tables from the ac
 affected table has writers outside the requested scope, the dispatcher widens the migration to a
 full rebuild. A code migration is the exception. It clones the shared `gl_edge` table intact rather
 than widening. The code stale sweep then tombstones its own rows as the re-index drains. So it
-re-indexes only code without re-pulling SDLC.
+re-indexes only code without re-pulling SDLC. An SDLC entry with `edge_rows: unchanged` also
+clones every edge table: its re-indexed pipelines write the same edge sort keys, and merges keep
+the newest row. Edge drift in the active tables carries over, because nothing rebuilds them.
 
 Selective migrations seed the new checkpoint table with completed checkpoints for unchanged
 pipelines. Required pipelines are left out so the normal sweep tasks run them again. The dispatcher

@@ -345,7 +345,7 @@ fn checkpoint_seed(
     scope: &MigrationScope,
 ) -> Option<CheckpointSeed> {
     match scope {
-        MigrationScope::Sdlc(_) => Some(CheckpointSeed {
+        MigrationScope::Sdlc { .. } => Some(CheckpointSeed {
             excluded_key_prefix: DISPATCH_CURSOR_PREFIX,
             pipelines: find_invalidated_pipelines(ontology, scope),
         }),
