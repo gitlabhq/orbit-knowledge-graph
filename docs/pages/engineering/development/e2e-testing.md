@@ -1,7 +1,7 @@
 # E2E Testing Harness
 
 The e2e harness deploys the full GitLab stack and every Orbit component on a shared GKE cluster. Then it runs Robot Framework suites against the stack.
-For the purpose and scope of e2e tests, see [Testing strategy](../../../design-documents/testing.md#end-to-end-tests).
+For the purpose and scope of e2e tests, see [Testing strategy](../testing/end-to-end.md).
 
 ## Architecture
 

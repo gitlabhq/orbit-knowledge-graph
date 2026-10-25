@@ -89,7 +89,7 @@ Many tasks need no deep Rust knowledge, for example documentation, ontology YAML
 | Guide | Use it to |
 |-------|-----------|
 | [Local development](docs/pages/engineering/development/local-development.md) | Run the full stack on a Caproni cluster. |
-| [Testing strategy](docs/design-documents/testing.md) | Learn which tests a change needs. |
+| [Testing strategy](docs/pages/engineering/testing/README.md) | Learn which tests a change needs. |
 | [Adding a language](docs/pages/engineering/development/adding-a-language.md) | Add a parser for a new language. |
 | [Architecture](docs/pages/engineering/architecture/) | Read the design of each area before you change it. |
 
