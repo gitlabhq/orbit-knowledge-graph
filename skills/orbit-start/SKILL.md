@@ -42,20 +42,43 @@ If you have no such tool, print the options as a numbered list, then stop and wa
 1. Find the scope. In a clone, read the project from `git remote get-url origin`.
    Otherwise, ask the user for the full path of a group or project that has GitLab Orbit turned on.
 1. Load the Orbit skill with `glab orbit skills get orbit`, and follow its query rules for the rest of the session.
+1. Run `glab orbit graph-status --full-path <scope>`.
+   If no project in the scope is indexed yet, tell the user, and ask for another scope.
+1. Show the welcome screen in a `text` code block. Fill in each `<value>` from the commands above, and never invent one:
+
+   ```text
+                .        *         .
+         *          _.-----._            .
+             .    .'    .    '.     *        GitLab Orbit
+      ===========/====( o )====\===========  Software lifecycle context graph
+             *    '.    '    .'      .       for AI agents
+         .          '-.___.-'          *
+                *        .        .
+
+      Status    <status> · Orbit <version>
+      Scope     <scope>
+      Indexed   <indexed> of <total_known> projects
+      Graph     <total> nodes in <types> node types
+      Largest   <type> <count> · <type> <count> · <type> <count>
+   ```
+
+   `<status>` and `<version>` come from `glab orbit status`.
+   The rest comes from `graph-status`: `<total>` is the sum of every count, and `<types>` counts the node types above zero.
+   `Largest` lists the three largest node types.
 
 ## Step 2: Ask a simple first question
 
 Start with a question that one query answers, about the scope from step 1.
-Offer these options, with the bold text as the label and the rest as the description:
+Offer these options, with the bold question as the label and the rest as the description:
 
-- **What is open in this project**: the open merge requests, newest first, with their titles and authors.
-  A quick check that Orbit sees your project.
-- **Which vulnerabilities this project has**: the open vulnerabilities, counted by severity from critical to info.
-  One query counts them all, with no paging through results.
-- **Who reviews this project**: the people who approved the most merge requests in the last 30 days, with a count for each.
-  Useful when you need a reviewer.
-- **What calls a function**: every function or method that calls one you name, with the file it is in.
-  Shows that Orbit indexes your code, not only merge requests and pipelines.
+- **Which merge requests are open in this project, and who wrote them?**:
+  the open merge requests, newest first, with their titles and authors. A quick check that Orbit sees your project.
+- **How many open vulnerabilities does this project have, by severity?**:
+  a count for each severity, from critical to info. One query counts them all, with no paging through results.
+- **Who approved the most merge requests here in the last 30 days?**:
+  the top approvers, with a count for each. Useful when you need a reviewer.
+- **Which functions and methods call a function that I name?**:
+  each caller, with the file it is in. Shows that Orbit indexes your code, not only merge requests and pipelines.
 
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
