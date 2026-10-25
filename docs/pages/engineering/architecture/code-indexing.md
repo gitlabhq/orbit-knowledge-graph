@@ -7,14 +7,11 @@ authors:
 
 ## What gets indexed
 
-Orbit indexes the default branch of every project in an enabled group, and
-nothing else. Code is different from SDLC data. The same file can look
-different on every branch and at every commit, and a large repository can have
-thousands of active branches. Indexing all of them would mean billions of
-definitions for a single project, while most questions about code are about
-what's on the default branch. The [Orbit CLI](orbit-cli.md) covers the other
-branches, on the user's own machine. Here is a simplified view of how a push
-reaches the code graph.
+Orbit indexes the default branch of every project in an enabled group. Each
+push to that branch rebuilds the project's code graph, so the graph follows
+what the team has merged. The other branches aren't indexed yet, and
+[Why we built it this way](#why-we-built-it-this-way) explains why. Here is a
+simplified view of how a push reaches the code graph.
 
 ![A push to the default branch reaches the code graph](../../../assets/architecture/code-indexing.svg)
 
@@ -41,12 +38,9 @@ flowchart LR
     Sweep[Periodic sweep] --> D
 ```
 
-Every push goes through the same GitLab service, whether it comes from `git
-push`, a web edit, or a merge. When a push lands on the default branch of a
-project in an enabled group, GitLab writes a code indexing task. The task
-names the project, the commit, and where the repository is stored. Siphon
-replicates those tasks to NATS, so the indexer never has to check the branch
-or the group itself.
+A push counts whether it comes from `git push`, a web edit, or a merge. The
+task already names the project, the commit, and where the repository is stored.
+The indexer never looks up the branch or the group itself.
 
 Pushes aren't the only trigger. When a group turns Orbit on, the dispatcher
 queues all of its existing projects, and a periodic sweep queues any project
@@ -80,21 +74,17 @@ flowchart LR
     Indexer -- archive --> GitLab --> Workhorse --> Gitaly[(Gitaly)]
 ```
 
-The worker asks the GitLab internal API for an archive of the repository at
-that commit. GitLab checks the request, which is signed with a secret that
-GitLab and Orbit share. It then hands the request to Workhorse, which streams
-the archive from Gitaly. Orbit asks for the archive without Git LFS content,
-and GitLab records every download as an audit event.
+The worker downloads the repository as one archive at the indexed commit.
+GitLab checks the request and hands it to Workhorse, which streams the archive
+from Gitaly. A few rules keep this cheap for Gitaly and for the worker:
 
-Gitaly serves the rest of GitLab too, so Orbit limits how hard it pulls. Each
-Gitaly storage gets a few download slots shared by every indexer. A worker
-that can't get one in time puts the request back for later.
-
-There's no long-lived clone. Each run unpacks the archive into its own folder
-and deletes it when the run ends. While unpacking, the worker records every
-file in the repository. It skips the ones that aren't worth parsing, like
-binaries, minified files, and very large files. Skipped files still appear in
-the graph, they just aren't parsed.
+- The archive leaves out Git LFS content.
+- Each Gitaly storage has a few download slots shared by every worker. A worker
+  that can't get one puts the request back for later.
+- Nothing stays on disk between runs. Each run unpacks into its own folder and
+  deletes it at the end.
+- Binaries, minified files, and very large files aren't parsed. They still
+  appear in the graph as files.
 
 ### 4. Build and write
 
@@ -160,12 +150,16 @@ them and marks their code deleted.
 
 ## Why we built it this way
 
-We first listened to every push event that Siphon replicates. But fewer than
-one push in a hundred belongs to a project with Orbit turned on. The indexer
-spent its time asking GitLab about pushes only to throw them away. Only GitLab
-knows which groups are enabled and which branch is the default, so we moved
-the filtering there. GitLab writes a task for the pushes that matter, and the
-indexer gets a stream with nothing to throw away.
+We index only the default branch for now. Indexing other branches would work
+the same way, but the limit is the database. Every branch is close to a full
+copy of the project's graph, so storage and query cost grow with each branch we
+keep.
+
+Code indexing starts from a task that GitLab writes, not from every push. We
+first listened to every push event that Siphon replicates. But fewer than one
+push in a hundred belongs to a project with Orbit turned on. Only GitLab knows
+which groups are enabled and which branch is the default, so the filtering
+moved there.
 
 Downloading a fresh archive on every run is simpler than keeping clones. The
 workers keep nothing on disk between runs, so any worker can pick up any
