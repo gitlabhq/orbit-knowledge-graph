@@ -71,6 +71,11 @@ pub fn policy(config: &ExpandedLogsConfig) -> ExpandedLogsPolicy {
     let internal: HashSet<u64> = config.root_namespace_ids.iter().copied().collect();
     ExpandedLogsPolicy::default()
         .with_safe_fields(safe::ALL)
+        .with_decision_fields([
+            safe::EXPANDED_LOGS_REQUESTED,
+            safe::GL_ROOT_NAMESPACE_ID,
+            safe::TRAVERSAL_PATH,
+        ])
         .with_global_override(config.global_override)
         .with_predicate(move |facts| is_requested(facts) || is_internal_tenant(facts, &internal))
 }
