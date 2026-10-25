@@ -58,7 +58,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Local development guide | `docs/dev/local-development.md` |
 | Local development (`mise run dev`, `caproni run`) | `scripts/dev/orbit-native-dev.sh`, `scripts/dev/caproni-edit-mode.sh`, `caproni-project.yaml`, `docs/dev/local-development.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
-| Architecture Decision Records | `docs/design-documents/decisions/` |
+| Architecture Decision Records | `docs/adr/` |
 | **All project links** (repos, epics, infra, people, Helm charts) | `README.md` (single source of truth) |
 | Orbit issue, epic, and MR planning taxonomy | `/orbit-planning` skill |
 | Iglu schemas (committed; codegen'd at build) | `config/schemas/iglu/<name>/<version>.json` (update via `mise vendor -- iglu`) |

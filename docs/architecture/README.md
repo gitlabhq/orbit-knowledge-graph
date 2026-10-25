@@ -20,7 +20,7 @@ other GitLab features can build on.
 - **Minimal impact on GitLab.** Orbit reads a replication stream and runs
   every analytical query on its own store. This was a primary reason to
   build Orbit on the Data Insights Platform instead of adding a graph
-  database. [ADR 000](../design-documents/decisions/000_clickhouse_graph_storage.md)
+  database. [ADR 000](../adr/000_clickhouse_graph_storage.md)
   records the evaluation.
 - **A data platform.** The replication pipeline and the analytical store are
   shared GitLab infrastructure. Other features can build on them, and the
@@ -124,7 +124,7 @@ and health. Each role scales and fails on its own.
 
 ## Decisions
 
-The [ADRs](../design-documents/decisions/) record each decision and the
+The [ADRs](../adr/) record each decision and the
 reasons for it. A new ADR replaces an old one when a decision changes. The
 pages in this folder state the current contracts. New pages follow the
 [page template](template.md).

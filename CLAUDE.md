@@ -36,10 +36,10 @@ git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"
 
 List these directories and read the relevant owner before you act:
 
-- `docs/architecture/` for the architecture overview and the contract of each area, and `docs/design-documents/decisions/` for the ADRs.
+- `docs/architecture/` for the architecture overview and the contract of each area, and `docs/adr/` for the ADRs.
 - `docs/dev/` for runbooks, the crate map, and the reference index.
 - Before working in a crate, check for and read `crates/<crate>/AGENTS.md`.
-- `docs/design-documents/decisions/020_billing_sox_scope.md` documents the SOX scope for billing emission. Read it before touching `crates/orbit-billing/`, `billing_adapter.rs`, or the hook points enumerated in `.gitlab/CODEOWNERS`.
+- `docs/adr/020_billing_sox_scope.md` documents the SOX scope for billing emission. Read it before touching `crates/orbit-billing/`, `billing_adapter.rs`, or the hook points enumerated in `.gitlab/CODEOWNERS`.
 - **SOX billing surface:** files controlling billing emission, delivery, payloads, or quota checks are in scope, including files outside `crates/orbit-billing/`. If you add or move such a file, add it to `.gitlab/CODEOWNERS` under the SOX-scoped rules.
 
 Do not change any file under `docs/` in an MR that changes code. Change it only when a CI or build check fails without it.

@@ -160,6 +160,6 @@ What gets harder:
 - Orchestration, seeding, rollback:
   `crates/indexer/src/schema/migration.rs`, `version.rs`
 - Promotion gate: `crates/indexer/src/orchestrator/scheduled/migration_completion.rs`
-- Related: [ADR 014](014_entity_level_indexing.md),
-  [ADR 015](015_pluggable_entity_pipelines.md)
+- Related: [ADR 014](../adr/014_entity_level_indexing.md),
+  [ADR 015](../adr/015_pluggable_entity_pipelines.md)
 - Blue-green deployment epic: [Non-blocking migrations and blue/green deployment](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/7)

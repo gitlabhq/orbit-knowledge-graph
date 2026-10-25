@@ -14,7 +14,7 @@ Read `AGENTS.md` for architecture and CI enforcement, and `docs/dev/agents-crate
 Documentation lives in three tiers:
 
 1. **SSOT** — `README.md` (project overview, repos, epics, infra, people, helm charts)
-2. **Architecture** — `docs/architecture/` (overview, data model, security, querying, indexing, schema evolution) and the ADRs in `docs/design-documents/decisions/`
+2. **Architecture** — `docs/architecture/` (overview, data model, security, querying, indexing, schema evolution) and the ADRs in `docs/adr/`
 3. **Dev guides** — `docs/dev/` (local development, infrastructure, runbook)
 
 `AGENTS.md` and `CLAUDE.md` must be identical (CI enforces this).

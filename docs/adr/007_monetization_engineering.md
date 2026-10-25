@@ -804,7 +804,7 @@ The controls that apply to GKG billing code fall into three categories:
 
 1. **Isolate billing code.** Billing event emission lives in a dedicated crate, `crates/orbit-billing/`, with a single `Claims` to `BillingInputs` conversion seam at `crates/orbit-server/src/billing_adapter.rs`. The authoring rules for this boundary are in `docs/dev/sox-billing-boundary.md`. This keeps CODEOWNERS scoping practical and the SOX audit surface small.
 2. **Set up CODEOWNERS.** `.gitlab/CODEOWNERS` requires approval from designated billing code owners on the billing crate and the adapter seam. Satisfies PC.2 (change approval) and LA.4 (privileged access).
-3. **Finalize SOX scope.** The detailed control scoping is tracked in [orbit/knowledge-graph#507](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/507) and [ADR 020](020_billing_sox_scope.md).
+3. **Finalize SOX scope.** The detailed control scoping is tracked in [orbit/knowledge-graph#507](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/507) and [ADR 020](../adr/020_billing_sox_scope.md).
 
 ---
 

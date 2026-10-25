@@ -170,7 +170,7 @@ than `fetch_concurrency × pods`.
 `fetch_concurrency × indexer pods` is the upper bound on active archive proxy
 connections, independent of repository count. Per indexer pod, archive fetches
 are bounded by
-[`engine.handlers.code-indexing-task.pipeline.fetch_concurrency`](../../../crates/orbit-server-config/src/engine.rs),
+[`engine.handlers.code-indexing-task.pipeline.fetch_concurrency`](../../crates/orbit-server-config/src/engine.rs),
 which defaults to 10; backfill and incremental indexing share that ceiling. As
 of 2026-09 on GitLab.com, the code-indexer pool has four pods, giving about 40
 concurrent archive-fetch slots. The indexer's `max_concurrent_workers`, set to

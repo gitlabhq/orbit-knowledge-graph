@@ -87,7 +87,7 @@ instructions:
       - "crates/orbit-server/**/*.rs"
       - "!crates/orbit-server/src/billing_adapter.rs"
     instructions: |
-      The SOX billing scope (ADR 020 — docs/design-documents/decisions/020_billing_sox_scope.md)
+      The SOX billing scope (ADR 020 — docs/adr/020_billing_sox_scope.md)
       requires that claims mapped into billing input structs flow through
       a single conversion point: crates/orbit-server/src/billing_adapter.rs. Any
       new billing touch point added anywhere else in orbit-server expands the

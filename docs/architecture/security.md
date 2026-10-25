@@ -109,5 +109,5 @@ orbit --> gitlab : redaction check per item
 
 ## Decisions
 
-- [ADR 001: gRPC communication](../design-documents/decisions/001_grpc_communication.md)
-- [ADR 008: Workhorse query acceleration](../design-documents/decisions/008_workhorse_query_acceleration.md)
+- [ADR 001: gRPC communication](../adr/001_grpc_communication.md)
+- [ADR 008: Workhorse query acceleration](../adr/008_workhorse_query_acceleration.md)

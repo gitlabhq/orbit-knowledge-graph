@@ -28,16 +28,16 @@ The endpoint must optionally attach graph data, and Orbit bills per graph
 query. GKG emits one billing event for each finished `ExecuteQuery` stream.
 Rails and Workhorse emit none. The event has no field that groups several
 queries. `correlation_id` is on it, but Fulfillment said it is used for logging
-and tracing only ([ADR 007](007_monetization_engineering.md)). A `context`
+and tracing only ([ADR 007](../adr/007_monetization_engineering.md)). A `context`
 request that ran several graph queries would therefore bill as several queries,
 and the caller could not predict how many.
 
 Two accepted ADRs shape where a graph query runs:
 
-- [ADR 008](008_workhorse_query_acceleration.md): Workhorse owns the gRPC
+- [ADR 008](../adr/008_workhorse_query_acceleration.md): Workhorse owns the gRPC
   stream to GKG, so a graph query never holds a Puma worker for its whole
   duration.
-- [ADR 011](011_agent_command_surface.md): moving query execution out of
+- [ADR 011](../adr/011_agent_command_surface.md): moving query execution out of
   Workhorse loses streaming, because Rails buffers large results.
 
 Rails can now run the stream itself, behind the `orbit_query_in_rails` feature
@@ -357,6 +357,6 @@ duplicate tokens. Array-only `tokens` is unambiguous.
 - [#1262: Orbit context endpoint](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1262)
 - [#1381: Rails query execution](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1381)
 - [`gitlab-org/gitlab!254189`](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/254189) (closed prototype)
-- [ADR 007: Monetization engineering](007_monetization_engineering.md)
-- [ADR 008: Workhorse query acceleration](008_workhorse_query_acceleration.md)
-- [ADR 011: Agent command surface](011_agent_command_surface.md)
+- [ADR 007: Monetization engineering](../adr/007_monetization_engineering.md)
+- [ADR 008: Workhorse query acceleration](../adr/008_workhorse_query_acceleration.md)
+- [ADR 011: Agent command surface](../adr/011_agent_command_surface.md)

@@ -301,9 +301,9 @@ unaffected.
 
 ## References
 
-- ADR 014 (Entity-level SDLC indexing): [014_entity_level_indexing.md](014_entity_level_indexing.md)
+- ADR 014 (Entity-level SDLC indexing): [014_entity_level_indexing.md](../adr/014_entity_level_indexing.md)
 - ADR 013 (Materialize edges from system notes); multi-hop resolution shape:
-  [013_system_note_edges.md](013_system_note_edges.md)
+  [013_system_note_edges.md](../adr/013_system_note_edges.md)
 - Shared pipeline + the transform seam: `crates/indexer/src/modules/sdlc/pipeline.rs`
   (`Pipeline::run`, `Producer`, `Loader`, `Extractor`) and
   `crates/indexer/src/modules/sdlc/transform.rs` (`BlockTransform`,

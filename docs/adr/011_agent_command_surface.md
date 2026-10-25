@@ -254,7 +254,7 @@ A pure hypermedia-style API, where every response embeds links to next actions. 
 - [Rails MR !234925: MCP/REST surface and command interceptor](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/234925)
 - [ai-assist MR !5446: agent prompt and command discovery](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/5446)
 - [lazy-mcp project](https://gitlab.com/gitlab-org/ai/lazy-mcp)
-- [ADR 003: API design](003_api_design.md)
-- [ADR 004: Unified response schema](004_unified_response_schema.md)
-- [ADR 010: Graph status endpoint](010_graph_status_endpoint.md)
+- [ADR 003: API design](../adr/003_api_design.md)
+- [ADR 004: Unified response schema](../adr/004_unified_response_schema.md)
+- [ADR 010: Graph status endpoint](../adr/010_graph_status_endpoint.md)
 - [Duo / Orbit prompt routing architecture](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/duo_orbit_prompt_routing.md): when Duo agents are routed through Rails to the MCP surface defined here

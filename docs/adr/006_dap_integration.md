@@ -21,7 +21,7 @@ LLMs query structured graph data instead of assembling answers from dozens of
 REST calls. `query_graph` executes a query written in the condensed graph DSL.
 `get_graph_schema` returns the ontology with progressive disclosure.
 `list_commands` and `invoke_command` form the named-command surface
-([ADR 011](011_agent_command_surface.md)). Giving agents these tools cuts
+([ADR 011](../adr/011_agent_command_surface.md)). Giving agents these tools cuts
 tool-call volume and produces better answers because the agent receives
 relational data in one shot.
 
@@ -32,7 +32,7 @@ direct connection to GKG. This document defines how Orbit tools reach DAP
 agents.
 
 Billing and usage tracking are covered separately in
-[ADR 007](007_monetization_engineering.md).
+[ADR 007](../adr/007_monetization_engineering.md).
 
 ### Consumption channels
 
@@ -116,7 +116,7 @@ Workhorse is a deliberate part of this path, not incidental proxying. It
 hosts the MCP client, resolves the internal endpoint path for the built-in
 servers, and forwards session identifiers. It mints the channel identity header.
 It accelerates query execution by streaming results from GKG directly
-([ADR 008](008_workhorse_query_acceleration.md)).
+([ADR 008](../adr/008_workhorse_query_acceleration.md)).
 
 ### First-class MCP server
 
@@ -211,12 +211,12 @@ Scope-based detection is enough for metrics but is not tamper proof, since a
 user could extract an `ai_workflows` token and replay it. For attribution
 strong enough to support zero-rating, Workhorse stamps Orbit calls that
 originate from DWS with a short-lived signed channel header that Rails
-verifies. [ADR 007](007_monetization_engineering.md) covers that mechanism.
+verifies. [ADR 007](../adr/007_monetization_engineering.md) covers that mechanism.
 
 ### GKG service changes
 
 GKG needs no new endpoints for this integration.
-[ADR 003](003_api_design.md) established Rails as the REST proxy, and that
+[ADR 003](../adr/003_api_design.md) established Rails as the REST proxy, and that
 holds. GKG serves gRPC only. Capabilities added for agents (schema and
 DSL discovery, named-query execution) are gRPC methods. The JWT claims carry
 the source type described above; traversal IDs and redaction behave the same
@@ -331,13 +331,13 @@ prompt fetch would break pinning while adding a query to every workflow.
 
 ## References
 
-- [ADR 003: Orbit API design](003_api_design.md), Rails as the REST proxy
-- [ADR 007: Orbit monetization engineering](007_monetization_engineering.md),
+- [ADR 003: Orbit API design](../adr/003_api_design.md), Rails as the REST proxy
+- [ADR 007: Orbit monetization engineering](../adr/007_monetization_engineering.md),
   billing, quotas, and channel attribution
-- [ADR 008: Workhorse query acceleration](008_workhorse_query_acceleration.md)
-- [ADR 011: Agent command surface](011_agent_command_surface.md),
+- [ADR 008: Workhorse query acceleration](../adr/008_workhorse_query_acceleration.md)
+- [ADR 011: Agent command surface](../adr/011_agent_command_surface.md),
   `list_commands` and `invoke_command`
-- [ADR 012: GOON format](012_goon_format.md)
+- [ADR 012: GOON format](../adr/012_goon_format.md)
 - [Duo / Orbit prompt routing architecture](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/duo_orbit_prompt_routing.md),
   the consumer-side map of the Rails routing seams
 - [Security](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md), the redaction and authorization model

@@ -466,7 +466,7 @@ What gets harder:
 
 - [Code indexing design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/code_indexing.md)
 - [SDLC indexing design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md)
-- [ADR 005: PostgreSQL task table for code indexing triggers](005_code_indexing_task_table.md)
+- [ADR 005: PostgreSQL task table for code indexing triggers](../adr/005_code_indexing_task_table.md)
 - [Security and authorization design](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md)
 - [MR !987: Per-entity role scoping for aggregation targets](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/987)
 - [Rails MR !231381: Add `GET /api/v4/orbit/graph_status` endpoint](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/231381)

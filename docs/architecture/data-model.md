@@ -92,6 +92,6 @@ def --> def : calls
 
 ## Decisions
 
-- [ADR 000: ClickHouse as graph storage](../design-documents/decisions/000_clickhouse_graph_storage.md)
-- [ADR 014: Entity-level indexing](../design-documents/decisions/014_entity_level_indexing.md)
-- [ADR 015: Pluggable entity pipelines](../design-documents/decisions/015_pluggable_entity_pipelines.md)
+- [ADR 000: ClickHouse as graph storage](../adr/000_clickhouse_graph_storage.md)
+- [ADR 014: Entity-level indexing](../adr/014_entity_level_indexing.md)
+- [ADR 015: Pluggable entity pipelines](../adr/015_pluggable_entity_pipelines.md)

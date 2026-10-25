@@ -36,7 +36,7 @@ export const SECTIONS = [
   { route: "team", dir: "docs/team", label: "Team" },
   { route: "engineering/runbooks", dir: "docs/runbooks", label: "Runbooks" },
   { route: "engineering/architecture", dir: "docs/architecture", label: "Architecture" },
-  { route: "engineering/adr", dir: "docs/design-documents/decisions", label: "ADRs" },
+  { route: "engineering/adr", dir: "docs/adr", label: "ADRs" },
   { route: "engineering/testing", dir: "docs/testing", label: "Testing" },
 ];
 

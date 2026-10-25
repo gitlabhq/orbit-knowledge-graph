@@ -2,7 +2,7 @@
 //!
 //! A passing run in CI is control evidence that the billing crate's dependency
 //! surface has not silently expanded. See ADR 020:
-//! docs/design-documents/decisions/020_billing_sox_scope.md
+//! docs/adr/020_billing_sox_scope.md
 
 use std::path::PathBuf;
 
@@ -37,7 +37,7 @@ fn only_permitted_crates_depend_on_orbit_billing() {
         "SOX boundary violation: {violations:?} depend on `orbit-billing` \
          but are not in the permitted list {PERMITTED_DEPENDENTS:?}.\n\
          Add to PERMITTED_DEPENDENTS only after SOX review — \
-         see docs/design-documents/decisions/020_billing_sox_scope.md"
+         see docs/adr/020_billing_sox_scope.md"
     );
 }
 

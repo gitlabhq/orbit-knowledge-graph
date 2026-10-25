@@ -342,7 +342,7 @@ Longer term, it may make sense to expose the GKG query endpoint directly to clie
 
 - [`gitlab-org/gitlab!229394`](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/229394) - Implementation MR
 - [`gitlab-org/orbit/knowledge-graph#349`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/349) - Move GKG queries to Workhorse
-- [ADR 001: gRPC communication protocol](001_grpc_communication.md) - The bidirectional streaming redaction exchange this ADR builds on
+- [ADR 001: gRPC communication protocol](../adr/001_grpc_communication.md) - The bidirectional streaming redaction exchange this ADR builds on
 - `workhorse/internal/orbit/sendquery.go` - The `SendQuery` injecter implementation
 - `workhorse/internal/orbit/client.go` - gRPC connection management
 - `workhorse/internal/orbit/redaction.go` - Rails redaction callback

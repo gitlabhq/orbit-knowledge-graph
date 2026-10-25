@@ -61,7 +61,7 @@ ontology.nodes["User"].domain       -> "core"
 ontology.nodes["User"].style        -> { color: "#10B981", size: 32 }
 ```
 
-This already exists via `GET /api/v4/orbit/schema` / `GetGraphSchema` gRPC (see [ADR 003](003_api_design.md)).
+This already exists via `GET /api/v4/orbit/schema` / `GetGraphSchema` gRPC (see [ADR 003](../adr/003_api_design.md)).
 
 **Layer 2: Query response (per-request)**
 
@@ -362,6 +362,6 @@ GOON format versioning (`config/GOON_OUTPUT_FORMAT_VERSION`) is added alongside 
 - Issue: #243 (Establish GKG Response Format)
 - MR: !479
 - Snippets: [5965027](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/snippets/5965027) (Michael U.), [5965036](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/snippets/5965036) (Angelo), [5965394](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/snippets/5965394) (Combined research)
-- [ADR 003](003_api_design.md)
+- [ADR 003](../adr/003_api_design.md)
 - MR !411 note on proto sync decisions
 - JSON Schema: `config/schemas/query_response.json`

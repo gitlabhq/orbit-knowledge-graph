@@ -296,9 +296,9 @@ Cross-language parity (Rust encoder vs the Python prototype in `gkg-evals-harnes
 - Benchmark harness: [`gkg-evals-harness!1`](https://gitlab.com/gitlab-org/orbit/gkg-evals-harness/-/merge_requests/1)
 - Benchmark result note: [MR note 3331102607](https://gitlab.com/gitlab-org/orbit/gkg-evals-harness/-/merge_requests/1#note_3331102607)
 - Eval archive: `gitlab-org/orbit/orbit-evals-results-archive`
-- ADR 003 (API Design): [`003_api_design.md`](003_api_design.md)
-- ADR 004 (Unified Query Response Schema): [`004_unified_response_schema.md`](004_unified_response_schema.md)
-- ADR 008 (Workhorse Query Acceleration): [`008_workhorse_query_acceleration.md`](008_workhorse_query_acceleration.md)
+- ADR 003 (API Design): [`003_api_design.md`](../adr/003_api_design.md)
+- ADR 004 (Unified Query Response Schema): [`004_unified_response_schema.md`](../adr/004_unified_response_schema.md)
+- ADR 008 (Workhorse Query Acceleration): [`008_workhorse_query_acceleration.md`](../adr/008_workhorse_query_acceleration.md)
 - Fatemi, Halcrow, Perozzi. "Talk like a Graph: Encoding Graphs for Large Language Models." ICLR 2024.
 - [TOON specification](https://github.com/toon-format/spec/blob/main/SPEC.md)
 - [Orbit API Design (snippet)](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205)

@@ -25,7 +25,7 @@ Use gRPC with bidirectional streaming for the RPC that requires redaction (`Exec
 
 ### Service definition
 
-From `orbit.proto` (package `orbit.v1`; the server also answers the legacy gkg.v1 paths through a facade during the rename). The original 5-RPC design included `ExecuteTool` and `GetOntology`; these were consolidated into `ExecuteQuery` (with `ResponseFormat`) and `GetGraphSchema` respectively. See [ADR 003](003_api_design.md) for the rationale.
+From `orbit.proto` (package `orbit.v1`; the server also answers the legacy gkg.v1 paths through a facade during the rename). The original 5-RPC design included `ExecuteTool` and `GetOntology`; these were consolidated into `ExecuteQuery` (with `ResponseFormat`) and `GetGraphSchema` respectively. See [ADR 003](../adr/003_api_design.md) for the rationale.
 
 ```protobuf
 service KnowledgeGraphService {
@@ -269,9 +269,9 @@ If Rails is down or slow, GKG cannot complete any query that requires Layer 3 ch
 
 ## References
 
-- [Proto definition: `orbit.proto`](../../../crates/orbit-server/proto/orbit.proto)
+- [Proto definition: `orbit.proto`](../../crates/orbit-server/proto/orbit.proto)
 - [Security design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md)
 - [MR !273: gRPC service implementation](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/273)
 - [Gitaly client in Rails](https://gitlab.com/gitlab-org/gitlab/-/tree/master/lib/gitlab/gitaly_client)
 - [Gitaly proto definitions](https://gitlab.com/gitlab-org/gitaly/-/tree/master/proto)
-- [ADR 003: API Design, Unified REST + GraphQL](003_api_design.md)
+- [ADR 003: API Design, Unified REST + GraphQL](../adr/003_api_design.md)

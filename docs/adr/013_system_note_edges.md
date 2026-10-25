@@ -479,7 +479,7 @@ for the full investigation.
 - Prior research and POC plan: [dgruzd/droid-workspace/task/2685](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685/), E2E validation report: [task/2685-e2e](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685-e2e/), entity-refactor compatibility analysis: [task/2685-entity-refactor](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685-entity-refactor/)
 - Rails source of truth: `app/models/system_note_metadata.rb` (`ICON_TYPES`, `TYPES_WITH_CROSS_REFERENCES`), `app/services/system_notes/*.rb` (body templates), `app/models/{issue,merge_request,commit,project}.rb` (`reference_pattern`)
 - Siphon repo: `gitlab-org/analytics-section/siphon`
-- ADR precedent: [009 (Code Indexer Service)](009_code_indexer_service.md) for implementation-plan shape; [012 (GOON Format)](012_goon_format.md) for benchmark-driven decision rationale and the vendored-constant + CI drift-check pattern
+- ADR precedent: [009 (Code Indexer Service)](../adr/009_code_indexer_service.md) for implementation-plan shape; [012 (GOON Format)](../adr/012_goon_format.md) for benchmark-driven decision rationale and the vendored-constant + CI drift-check pattern
 - Custom-handler precedent in code: `crates/indexer/src/modules/code/`, `crates/indexer/src/modules/namespace_deletion/`
 - Schema version file: `config/SCHEMA_VERSION` (50 → 51 with the initial system-notes work; 70 → 71 with the MENTIONS direction fix)
 - Routes-join precedent: `config/ontology/nodes/core/project.yaml:115-121`, `config/ontology/nodes/core/group.yaml:101-107`

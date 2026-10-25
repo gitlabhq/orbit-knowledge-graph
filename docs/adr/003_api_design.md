@@ -454,7 +454,7 @@ Unchanged: pure passthrough from `grpc_client.list_tools`.
 
 ### New proto definition
 
-The proto definition below reflects the end state after [MR !411](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411). Pseudo code: see the authoritative definition in [`orbit.proto`](../../../crates/orbit-server/proto/orbit.proto).
+The proto definition below reflects the end state after [MR !411](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411). Pseudo code: see the authoritative definition in [`orbit.proto`](../../crates/orbit-server/proto/orbit.proto).
 
 > Historical sketch: the shipped proto carries no PaginationInfo message; pagination metadata lives in the formatted JSON/GOON body.
 
@@ -753,10 +753,10 @@ end
 
 ## References
 
-- [Proto definition: `orbit.proto`](../../../crates/orbit-server/proto/orbit.proto)
-- [ADR 001: gRPC Communication Protocol](001_grpc_communication.md)
-- [ADR 002: Rust Core Runtime](002_rust_core_runtime.md)
-- [ADR 011: Agent command surface](011_agent_command_surface.md)
+- [Proto definition: `orbit.proto`](../../crates/orbit-server/proto/orbit.proto)
+- [ADR 001: gRPC Communication Protocol](../adr/001_grpc_communication.md)
+- [ADR 002: Rust Core Runtime](../adr/002_rust_core_runtime.md)
+- [ADR 011: Agent command surface](../adr/011_agent_command_surface.md)
 - [Duo / Orbit prompt routing architecture](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/duo_orbit_prompt_routing.md): the Rails-side routing that decides when MCP agents reach this API
 - [MR !411: Proto rewrite for REST API alignment](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411)
 - [GOON Format Specification](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205): Graph Object Output Notation for `format=llm` query results
