@@ -764,7 +764,9 @@ check_docs_i18n_markdown:
 
 pages:
   extends: .engineering-site
+  resource_group: pages
   rules:
+    - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
     - if: $CI_PROJECT_ID == $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
 
 pages:preview:
