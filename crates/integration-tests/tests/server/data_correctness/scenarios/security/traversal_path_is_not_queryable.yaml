@@ -23,6 +23,19 @@ cases:
     expect:
       compile_error: traversal_path
 
+  - name: group_by_rejected
+    description: An aggregation cannot group by traversal_path
+    config:
+      security: { org_id: 1, paths: ["1/100/"] }
+    query:
+      json: |
+        {"query_type": "aggregation", "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}, {"id": "u", "entity": "User"}], "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}], "group_by": ["g.traversal_path"], "aggregations": [{"count": "u", "as": "members"}], "limit": 10}
+      gql: |
+        MATCH (g:Group {id: 100})<-[:MEMBER_OF]-(u:User) RETURN g.traversal_path AS path, count(u) AS members LIMIT 10
+    expect:
+      compile_error: traversal_path
+      compile_error_not_contains: [1/100/]
+
   - name: node_filter_rejected
     description: A node cannot filter on traversal_path, even inside the caller's scope
     config:
