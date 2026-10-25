@@ -239,7 +239,7 @@ If either FK column is `Nullable` in the source, the ETL can emit null-target ed
 Filter or document it (reviewers will ask). Prefer NOT-NULL join columns.
 
 Hot query shapes can be pre-joined by declaring a chain under `settings.denormalized_joins`
-in `schema.yaml` (see the [storage model](../architecture/query-engine.md#storage-model) in the graph query engine page).
+in `schema.yaml` (see the [query data model](../architecture/query-engine.md#1-the-query-data-model) in the graph query engine page).
 This emits a `gl_denorm_<name>` table composed from the chain's own DDL plus one feeding
 materialized view per table. The table stores every column of every table in the chain and
 each declaration is a schema bump, so weigh write amplification before adding one.
