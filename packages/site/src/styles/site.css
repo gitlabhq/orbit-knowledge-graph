@@ -1,1 +1,82 @@
 @import "@gitlab-org/orbit-site/styles.css";
+
+:root {
+  --tone-platform: var(--gl-color-data-blue-500);
+  --tone-agents: var(--gl-color-data-magenta-500);
+  --tone-code: var(--gl-color-data-aqua-500);
+  --tone-data: var(--gl-color-data-orange-500);
+  --tone-trust: var(--gl-color-data-green-500);
+}
+
+.gl-dark {
+  --tone-platform: var(--gl-color-data-blue-300);
+  --tone-agents: var(--gl-color-data-magenta-300);
+  --tone-code: var(--gl-color-data-aqua-300);
+  --tone-data: var(--gl-color-data-orange-300);
+  --tone-trust: var(--gl-color-data-green-300);
+}
+
+@layer components {
+  .eyebrow {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--gl-color-orange-600);
+  }
+
+  .gl-dark .eyebrow {
+    color: var(--gl-color-orange-300);
+  }
+
+  .page-container {
+    width: 100%;
+    max-width: 76rem;
+    margin-inline: auto;
+    padding-inline: 1.25rem;
+  }
+
+  @media (min-width: 640px) {
+    .page-container {
+      padding-inline: 2rem;
+    }
+  }
+
+  .prose-measure {
+    max-width: 45rem;
+  }
+
+  .tone-platform { --tone: var(--tone-platform); }
+  .tone-agents { --tone: var(--tone-agents); }
+  .tone-code { --tone: var(--tone-code); }
+  .tone-data { --tone: var(--tone-data); }
+  .tone-trust { --tone: var(--tone-trust); }
+
+  .tone-dot {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    background: var(--tone);
+  }
+
+  .tone-icon {
+    color: var(--tone);
+    background: color-mix(in srgb, var(--tone) 14%, transparent);
+  }
+
+  .tone-bar {
+    background: color-mix(in srgb, var(--tone) 16%, var(--gl-background-color-default));
+    border: 1px solid color-mix(in srgb, var(--tone) 55%, transparent);
+    box-shadow: inset 3px 0 0 var(--tone);
+  }
+
+  .tone-bar[data-status="exploring"] {
+    background: transparent;
+    border-style: dashed;
+  }
+
+  .tone-bar[data-status="shipped"] {
+    background: color-mix(in srgb, var(--tone) 8%, var(--gl-background-color-subtle));
+    border-color: var(--border-hairline-strong);
+  }
+}

@@ -1,6 +1,7 @@
 import "./styles/site.css";
 import { renderSite, routerOptions } from "@gitlab-org/orbit-site";
 import { createRouter } from "@tanstack/react-router";
+import type { ItemFields, PostFields } from "./roadmap/schema";
 import { routeTree } from "./routeTree.gen";
 
 export const router = createRouter({ routeTree, ...routerOptions });
@@ -17,6 +18,9 @@ declare module "@gitlab-org/orbit-site" {
     authors: string[];
     lastChanged?: string;
     order?: number;
+    words: number;
+    item?: ItemFields;
+    post?: PostFields;
   }
 }
 

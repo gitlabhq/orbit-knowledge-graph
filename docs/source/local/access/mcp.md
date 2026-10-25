@@ -35,12 +35,12 @@ The GitLab Orbit Local MCP server is stateless. This means the server has the fo
 ## Prerequisites
 
 - Install either of the following tools:
-  - The [GitLab Orbit CLI](./cli.md) (`orbit`)
-  - The [GitLab CLI](./glab.md) (`glab orbit`)
+  - The [GitLab Orbit CLI](cli.md) (`orbit`)
+  - The [GitLab CLI](glab.md) (`glab orbit`)
 
 ## Connect a client to the GitLab Orbit Local MCP server
 
-[`orbit setup --mcp`](./cli.md#set-up-your-ai-agent) writes this
+[`orbit setup --mcp`](cli.md#set-up-your-ai-agent) writes this
 configuration for Claude Code, Codex, and OpenCode. The sections below show
 the manual equivalent.
 
@@ -166,7 +166,7 @@ To confirm the MCP server is connected, run:
 claude mcp list
 ```
 
-After you connect, [set up your AI assistant](./cli.md).
+After you connect, [set up your AI assistant](cli.md).
 
 > [!note]
 > For project-scoped commands, Claude Code asks for approval before
@@ -206,7 +206,7 @@ To confirm the server is registered, run:
 codex mcp list
 ```
 
-After you connect, [set up your AI assistant](./cli.md).
+After you connect, [set up your AI assistant](cli.md).
 
 ### Connect Cursor
 
@@ -309,7 +309,7 @@ To confirm the server is connected, run:
 opencode mcp list
 ```
 
-After you connect, [set up your AI assistant](./cli.md).
+After you connect, [set up your AI assistant](cli.md).
 
 ### Connect other MCP clients
 

@@ -5,18 +5,18 @@ description: Security review agent
 ---
 # Security agent
 
-You do security reviews on merge requests in the Knowledge Graph repo, a Rust service that ingests GitLab SDLC data. Authorization is delegated to Rails via gRPC. Read `docs/architecture/security.md` before you start.
+You do security reviews on merge requests in the Knowledge Graph repo, a Rust service that ingests GitLab SDLC data. Authorization is delegated to Rails via gRPC. Read `docs/pages/engineering/architecture/security.md` before you start.
 
 ## Getting oriented
 
-Read `AGENTS.md` for architecture and CI enforcement, and `docs/dev/agents-crate-map.md` for the crate map. `README.md` is the single source of truth for all related links (epics, repos, infra, design docs). Fetch from those links when you need context on something outside this repo.
+Read `AGENTS.md` for architecture and CI enforcement, and `docs/pages/engineering/development/agents-crate-map.md` for the crate map. `README.md` is the single source of truth for all related links (epics, repos, infra, design docs). Fetch from those links when you need context on something outside this repo.
 
 ## How to work through the MR
 
 Don't load everything at once. API responses can be large and will get truncated.
 
 1. Fetch the list of changed files via glab (filenames only, not full diffs)
-2. Read `AGENTS.md` and `docs/architecture/security.md`
+2. Read `AGENTS.md` and `docs/pages/engineering/architecture/security.md`
 3. Fetch existing discussions — prefer the latest comments; earlier threads may be resolved
 4. Spin up sub-agents in parallel to analyze different files or crates against the checklist below
 5. **Important**: You should try running any code in the MR to test the data flow and taint analysis. You can do this by mocking the data sources and sinks and leveraging mise tests.

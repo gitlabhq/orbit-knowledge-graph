@@ -63,11 +63,7 @@ workflow:
       changes:
         compare_to: refs/heads/main
         paths: &engineering-site-changes
-          - docs/README.md
-          - docs/runbooks/**/*
-          - docs/architecture/**/*
-          - docs/design-documents/decisions/**/*
-          - docs/testing/**/*
+          - docs/pages/**/*
           - packages/**/*
           - package.json
           - bun.lock
@@ -281,7 +277,7 @@ docs-in-code-mr-check:
       BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
       git cat-file -e "${BASE}^{commit}" 2>/dev/null || git fetch origin "$BASE" --depth=1 || git fetch --unshallow origin "$CI_COMMIT_SHA"
       CHANGED=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE" HEAD)
-      DOCS=$(echo "$CHANGED" | grep '^docs/' | grep -vxF -e docs/source/remote/queries/query-language.md -e docs/dev/agents-crate-map.md || true)
+      DOCS=$(echo "$CHANGED" | grep '^docs/' | grep -vxF -e docs/source/remote/queries/query-language.md -e docs/pages/engineering/development/agents-crate-map.md || true)
       CODE=$(echo "$CHANGED" | grep -v -e '^docs/' -e '\.md$' -e '^\.vale' -e '^\.markdownlint' -e '^lychee\.toml$' || true)
       if [ -n "$DOCS" ] && [ -n "$CODE" ]; then
         printf 'This MR changes code and files under docs/:\n%s\n\n' "$DOCS"
@@ -716,11 +712,9 @@ check_docs_markdown:
   script:
     # Lint prose
     - vale --minAlertLevel error docs/source
-    # Lint Markdown. docs/source is user-facing; root and docs/dev are contributor
-    # docs that previously reached CI unlinted (design-documents deferred: #981).
-    - markdownlint-cli2 '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md' 'docs/architecture/**/*.md'
+    - markdownlint-cli2 '*.md' 'docs/source/**/*.md' 'docs/pages/**/*.md'
     # Check links
-    - lychee --offline --include-fragments '*.md' 'docs/dev/**/*.md' 'docs/source/**/*.md' 'docs/architecture/**/*.md'
+    - lychee --offline --include-fragments '*.md' 'docs/source/**/*.md' 'docs/pages/**/*.md'
 
 check_docs_i18n_markdown:
   stage: docs
@@ -748,11 +742,14 @@ check_docs_i18n_markdown:
   variables:
     GIT_DEPTH: "0"
   cache:
-    key:
-      files:
-        - bun.lock
-    paths:
-      - .bun-cache
+    - key:
+        files:
+          - bun.lock
+      paths:
+        - .bun-cache
+    - key: orbit-markdown
+      paths:
+        - packages/site/.cache/orbit-markdown
   before_script:
     - apt-get update -qq && apt-get install -y -qq git > /dev/null
     - bun install --frozen-lockfile --cache-dir .bun-cache
