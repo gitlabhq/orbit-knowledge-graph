@@ -45,7 +45,7 @@ pub(crate) fn pretty_json(body: &[u8]) -> Vec<u8> {
     }
 }
 
-pub(crate) fn pretty_value(value: &serde_json::Value) -> Vec<u8> {
+pub(crate) fn pretty_value(value: &impl serde::Serialize) -> Vec<u8> {
     serde_json::to_vec_pretty(value).unwrap_or_default()
 }
 

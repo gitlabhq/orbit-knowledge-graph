@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
-use serde::Deserialize;
+use cynic::{GraphQlResponse, Operation};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
 
@@ -15,9 +17,9 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const SKILL_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 const STATUS_PATH: &str = "/api/v4/orbit/status";
-const SCHEMA_PATH: &str = "/api/v4/orbit/schema";
 const QUERY_PATH: &str = "/api/v4/orbit/query";
 const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
+const GRAPHQL_PATH: &str = "/api/graphql";
 const SKILLS_PATH: &str = "/api/v4/orbit/skills";
 const GREP_PATH: &str = "/api/v4/orbit/grep";
 const CONTEXT_PATH: &str = "/api/v4/orbit/context";
@@ -147,13 +149,6 @@ impl OrbitClient {
         self.get_bytes(STATUS_PATH, &[]).await
     }
 
-    pub(crate) async fn get_schema(
-        &self,
-        params: &[(&str, String)],
-    ) -> Result<Vec<u8>, RemoteError> {
-        self.get_bytes(SCHEMA_PATH, params).await
-    }
-
     pub(crate) async fn get_graph_status(
         &self,
         params: &[(&str, String)],
@@ -181,6 +176,29 @@ impl OrbitClient {
         self.post_json(QUERY_PATH, body).await
     }
 
+    pub(crate) async fn graphql<Q, V>(
+        &self,
+        operation: &Operation<Q, V>,
+    ) -> Result<GraphQlResponse<Q>, RemoteError>
+    where
+        Q: DeserializeOwned,
+        V: Serialize,
+    {
+        let request = serde_json::to_vec(operation).map_err(|error| {
+            RemoteError::new(
+                EXIT_GENERIC,
+                format!("could not encode GraphQL query: {error}"),
+            )
+        })?;
+        let body = self.post_json(GRAPHQL_PATH, request).await?;
+        serde_json::from_slice(&body).map_err(|error| {
+            RemoteError::new(
+                EXIT_GENERIC,
+                format!("unexpected GraphQL response: {error}"),
+            )
+        })
+    }
+
     async fn post_json(&self, path: &str, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
         let response = self
             .send(
@@ -193,7 +211,7 @@ impl OrbitClient {
         read_body(response).await
     }
 
-    async fn get_bytes(
+    pub(crate) async fn get_bytes(
         &self,
         path: &str,
         params: &[(&str, String)],

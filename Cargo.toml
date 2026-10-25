@@ -225,6 +225,7 @@ rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs
 aws-lc-rs = { version = "1.18.1", default-features = false }
 health-check = { path = "crates/health-check" }
 gitlab-client = { path = "crates/gitlab-client" }
+orbit-cli-graphql = { path = "crates/orbit-cli/graphql" }
 
 [profile.dev]
 debug = "line-tables-only"

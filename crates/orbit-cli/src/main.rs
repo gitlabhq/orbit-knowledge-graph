@@ -479,7 +479,7 @@ struct GraphStatusArgs {
 
     #[arg(
         long,
-        help = "Server response format. Default: a summary in a terminal, raw JSON otherwise.",
+        help = "Output format. Default: a summary in a terminal, raw JSON otherwise.",
         value_parser = clap::builder::PossibleValuesParser::new(["llm", "raw"])
             .map(|value| match value.as_str() {
                 "raw" => remote::ResponseFormat::Raw,
@@ -712,7 +712,7 @@ enum Commands {
     /// Show the remote Orbit schema: node types, properties, and edges.
     #[command(alias = "ontology")]
     Schema {
-        /// Node names to expand with full properties and edge lists.
+        /// Node names to expand with their properties.
         #[arg(value_name = "NODE")]
         nodes: Vec<String>,
 

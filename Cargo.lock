@@ -5850,6 +5850,7 @@ dependencies = [
  "clap",
  "cliclack",
  "code-graph-incremental",
+ "cynic",
  "dirs",
  "duckdb-client",
  "dunce",
@@ -5866,6 +5867,7 @@ dependencies = [
  "ontology",
  "orbit-analytics",
  "orbit-arrow",
+ "orbit-cli-graphql",
  "orbit-log-fields",
  "orbit-prompts",
  "orbit-search",
@@ -5885,6 +5887,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml_edit 0.25.11+spec-1.1.0",
+ "toon-format",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -5898,6 +5901,7 @@ dependencies = [
  "cynic-codegen",
  "cynic-querygen",
  "prettyplease",
+ "serde",
  "syn 2.0.118",
 ]
 
