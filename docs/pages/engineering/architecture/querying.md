@@ -74,7 +74,7 @@ every identifier against the ontology and plans the reads. It then injects a
 `startsWith(traversal_path, ?)` predicate at each entity's role floor, and
 fails closed if any namespaced read lacks one. The output is one statement
 with bound parameters, plus a plan for the hydration query. The
-[graph query engine](query-engine.md) page covers each pass.
+[Orbit Query Engine](query-engine.md) page covers each pass.
 
 ### 3. Execution
 
@@ -286,4 +286,4 @@ The same result can render as raw JSON, as [TOON](https://github.com/toon-format
 | Document | Covers |
 | --- | --- |
 | [Query languages](query-languages.md) | The JSON Query DSL and GQL: why each exists, how each lowers to the shared input, and how Rails picks one |
-| [Graph query engine](query-engine.md) | Data model and storage, compiler phases, planning, current-state reads, and guarantees |
+| [Orbit Query Engine](query-engine.md) | Data model and storage, compiler phases, planning, current-state reads, and guarantees |

@@ -1,6 +1,6 @@
 ---
-title: Graph query engine
-description: How the engine turns a graph query into parameterized SQL.
+title: Orbit Query Engine
+description: How the Orbit Query Engine turns a graph query into parameterized SQL.
 authors:
   - michaelusa
 ---
@@ -10,8 +10,8 @@ authors:
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 24, "rankSpacing": 64, "padding": 14}}}%%
 flowchart LR
-    accTitle: Query languages and backends of the graph query engine
-    accDescr: A user query arrives in GQL or the JSON Query DSL, with SQL and GLQL planned. The graph query compiler turns it into SQL for ClickHouse or DuckDB, with PostgreSQL planned.
+    accTitle: Query languages and backends of the Orbit Query Engine
+    accDescr: A user query arrives in GQL or the JSON Query DSL, with SQL and GLQL planned. The Orbit Query Engine turns it into SQL for ClickHouse or DuckDB, with PostgreSQL planned.
 
     user(["User query"])
 
@@ -22,7 +22,7 @@ flowchart LR
         glql["GLQL"]
     end
 
-    compiler[["Graph query compiler"]]
+    compiler[["Orbit Query Engine"]]
 
     subgraph backends["Backends"]
         clickhouse[("ClickHouse")]
@@ -42,23 +42,23 @@ flowchart LR
     compiler --> duckdb
     compiler -.-> postgres
 
-    classDef language fill:#FEF3C7,stroke:#B45309,color:#78350F
-    classDef engine fill:#DCFCE7,stroke:#15803D,color:#14532D
-    classDef backend fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
-    classDef future fill:#F9FAFB,stroke:#9CA3AF,color:#6B7280,stroke-dasharray:5 4
+    classDef language fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
+    classDef engine fill:#22C55E26,stroke:#22C55E,stroke-width:1.5px
+    classDef backend fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
+    classDef future fill:#9CA3AF26,stroke:#9CA3AF,stroke-width:1.5px,stroke-dasharray:5 4
 
     class user,gql,json language
     class compiler engine
     class clickhouse,duckdb backend
     class sql,glql,postgres future
 
-    style languages fill:#FFFBEB,stroke:#FCD34D
-    style backends fill:#EFF6FF,stroke:#93C5FD
+    style languages fill:#F59E0B12,stroke:#F59E0B
+    style backends fill:#3B82F612,stroke:#3B82F6
 ```
 
 Dashed boxes are planned and not yet supported.
 
-The graph query engine is a multi-pass compiler. It turns a JSON Query DSL or
+The Orbit Query Engine is a multi-pass compiler. It turns a JSON Query DSL or
 GQL query into one parameterized SQL statement over the ontology's node and
 edge tables. Every statement it emits is bounded, carries a traversal-path
 predicate on every namespaced read, and resolves each row to its latest
@@ -88,7 +88,7 @@ of the SQL that it produces.
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 40, "rankSpacing": 70, "padding": 16}}}%%
 flowchart LR
-    accTitle: How the graph query engine compiles a query
+    accTitle: How the Orbit Query Engine compiles a query
     accDescr: A JSON or GQL query passes through four stages. The frontend parses and lowers it into the intermediate representation. Check validates, normalizes, and restricts it. Plan picks access paths, latest-state reads, and traversal-path bounds. Emit lowers, secures, verifies, and renders it as parameterized SQL with a hydration plan. The data model feeds check, plan, and emit, and the security context feeds check and emit.
 
     model[("<b>Data model</b><br/>graph, tables, policy")]
@@ -107,12 +107,12 @@ flowchart LR
     context -- "paths and roles" --> check
     context -- "eligible paths" --> emit
 
-    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
-    classDef input fill:#FEF3C7,stroke:#B45309,color:#78350F
-    classDef checking fill:#DCFCE7,stroke:#15803D,color:#14532D
-    classDef planner fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
-    classDef emitter fill:#FCE7F3,stroke:#BE185D,color:#831843
-    classDef output fill:#F3F4F6,stroke:#6B7280,color:#111827,stroke-dasharray:4 3
+    classDef data fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
+    classDef input fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
+    classDef checking fill:#22C55E26,stroke:#22C55E,stroke-width:1.5px
+    classDef planner fill:#8B5CF626,stroke:#8B5CF6,stroke-width:1.5px
+    classDef emitter fill:#EC489926,stroke:#EC4899,stroke-width:1.5px
+    classDef output fill:#9CA3AF26,stroke:#9CA3AF,stroke-width:1.5px,stroke-dasharray:4 3
 
     class model data
     class front,context input
@@ -121,8 +121,8 @@ flowchart LR
     class emit emitter
     class sql output
 
-    linkStyle 4,5,6 stroke:#2563EB,stroke-width:2px
-    linkStyle 7,8 stroke:#B45309,stroke-width:2px
+    linkStyle 4,5,6 stroke:#3B82F6,stroke-width:2px
+    linkStyle 7,8 stroke:#F59E0B,stroke-width:2px
 ```
 
 The engine compiles in passes, and each pass has one job. A pass declares the
@@ -227,12 +227,12 @@ flowchart LR
     GQL --> GF --> IR
     GF -.->|"CALL db.schema"| Schema
 
-    classDef pass fill:#DCFCE7,stroke:#15803D,color:#14532D
-    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
-    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
-    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
-    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
-    classDef reject fill:#FEE2E2,stroke:#B91C1C,color:#7F1D1D
+    classDef pass fill:#22C55E26,stroke:#22C55E,stroke-width:1.5px
+    classDef state fill:#8B5CF626,stroke:#8B5CF6,stroke-width:1.5px
+    classDef caller fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
+    classDef data fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
+    classDef external fill:#9CA3AF26,stroke:#9CA3AF,stroke-width:1.5px
+    classDef reject fill:#EF444426,stroke:#EF4444,stroke-width:1.5px
     class JSON,GQL caller
     class JF,GF pass
     class IR state
@@ -268,12 +268,12 @@ flowchart LR
     Normalize["<b>Normalize</b><br/>tables, coerced values, expanded columns<hr/><i>• User → gl_user<br/>• MergeRequest → gl_merge_request<br/>• 'merged' cast to the type of state</i>"]
     Input --> Validate --> Normalize
 
-    classDef pass fill:#DCFCE7,stroke:#15803D,color:#14532D
-    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
-    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
-    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
-    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
-    classDef reject fill:#FEE2E2,stroke:#B91C1C,color:#7F1D1D
+    classDef pass fill:#22C55E26,stroke:#22C55E,stroke-width:1.5px
+    classDef state fill:#8B5CF626,stroke:#8B5CF6,stroke-width:1.5px
+    classDef caller fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
+    classDef data fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
+    classDef external fill:#9CA3AF26,stroke:#9CA3AF,stroke-width:1.5px
+    classDef reject fill:#EF444426,stroke:#EF4444,stroke-width:1.5px
     class Input state
     class Validate,Normalize pass
 ```
@@ -299,12 +299,12 @@ flowchart LR
     Context --> Restrict
     Restrict --> Restricted
 
-    classDef pass fill:#DCFCE7,stroke:#15803D,color:#14532D
-    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
-    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
-    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
-    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
-    classDef reject fill:#FEE2E2,stroke:#B91C1C,color:#7F1D1D
+    classDef pass fill:#22C55E26,stroke:#22C55E,stroke-width:1.5px
+    classDef state fill:#8B5CF626,stroke:#8B5CF6,stroke-width:1.5px
+    classDef caller fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
+    classDef data fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
+    classDef external fill:#9CA3AF26,stroke:#9CA3AF,stroke-width:1.5px
+    classDef reject fill:#EF444426,stroke:#EF4444,stroke-width:1.5px
     class Input,Restricted state
     class Context caller
     class Restrict pass
@@ -332,12 +332,12 @@ flowchart LR
     Model --> Planner
     Planner --> Plan
 
-    classDef pass fill:#DCFCE7,stroke:#15803D,color:#14532D
-    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
-    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
-    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
-    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
-    classDef reject fill:#FEE2E2,stroke:#B91C1C,color:#7F1D1D
+    classDef pass fill:#22C55E26,stroke:#22C55E,stroke-width:1.5px
+    classDef state fill:#8B5CF626,stroke:#8B5CF6,stroke-width:1.5px
+    classDef caller fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
+    classDef data fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
+    classDef external fill:#9CA3AF26,stroke:#9CA3AF,stroke-width:1.5px
+    classDef reject fill:#EF444426,stroke:#EF4444,stroke-width:1.5px
     class Input,Plan state
     class Model data
     class Planner pass
@@ -390,9 +390,9 @@ flowchart LR
     user -->|"AUTHORED<br/>edge read bounded like mr"| mr
     mr -->|"IN_PROJECT<br/>the bound spreads to mr"| project
 
-    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
-    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
-    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
+    classDef state fill:#8B5CF626,stroke:#8B5CF6,stroke-width:1.5px
+    classDef caller fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
+    classDef external fill:#9CA3AF26,stroke:#9CA3AF,stroke-width:1.5px
     class user,mr,project state
 ```
 
@@ -421,12 +421,12 @@ flowchart LR
     Extras["<b>Hydration plan and settings</b><hr/><i>username and title are already in the main query</i>"]
     Plan --> AST --> Page --> Shape --> Extras
 
-    classDef pass fill:#DCFCE7,stroke:#15803D,color:#14532D
-    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
-    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
-    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
-    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
-    classDef reject fill:#FEE2E2,stroke:#B91C1C,color:#7F1D1D
+    classDef pass fill:#22C55E26,stroke:#22C55E,stroke-width:1.5px
+    classDef state fill:#8B5CF626,stroke:#8B5CF6,stroke-width:1.5px
+    classDef caller fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
+    classDef data fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
+    classDef external fill:#9CA3AF26,stroke:#9CA3AF,stroke-width:1.5px
+    classDef reject fill:#EF444426,stroke:#EF4444,stroke-width:1.5px
     class Plan,AST state
     class Page,Shape,Extras pass
 ```
@@ -457,12 +457,12 @@ flowchart LR
     Verify -- every namespaced read covered --> Codegen
     Verify -. any read uncovered .-> Reject
 
-    classDef pass fill:#DCFCE7,stroke:#15803D,color:#14532D
-    classDef state fill:#EDE9FE,stroke:#6D28D9,color:#4C1D95
-    classDef caller fill:#FEF3C7,stroke:#B45309,color:#78350F
-    classDef data fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A
-    classDef external fill:#F3F4F6,stroke:#6B7280,color:#111827
-    classDef reject fill:#FEE2E2,stroke:#B91C1C,color:#7F1D1D
+    classDef pass fill:#22C55E26,stroke:#22C55E,stroke-width:1.5px
+    classDef state fill:#8B5CF626,stroke:#8B5CF6,stroke-width:1.5px
+    classDef caller fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
+    classDef data fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
+    classDef external fill:#9CA3AF26,stroke:#9CA3AF,stroke-width:1.5px
+    classDef reject fill:#EF444426,stroke:#EF4444,stroke-width:1.5px
     class AST state
     class Security,Verify,Codegen pass
     class Reject reject

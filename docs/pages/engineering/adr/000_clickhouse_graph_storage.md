@@ -106,7 +106,7 @@ maintenance perspective to be too high. We keep an eye on
 - Graph nodes live in typed `gl_*` ClickHouse tables; relationships live in
   ontology-configured edge tables with adjacency-optimized ordering and
   projections. See the [data model](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/data_model.md) and
-  [Graph Query Engine](../architecture/query-engine.md) design documents for the
+  [Graph Query Engine](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/querying/graph_engine.md) design documents for the
   as-built implementation.
 - The query layer compiles an intermediate JSON query language into
   parameterized ClickHouse SQL instead of executing Cypher natively.

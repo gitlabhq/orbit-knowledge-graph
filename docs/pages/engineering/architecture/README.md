@@ -95,7 +95,7 @@ the store is ClickHouse.
 - [Querying](querying.md): turns a graph question into one bounded,
   authorized query.
   - [Query languages](query-languages.md): the JSON Query DSL and GQL.
-  - [Graph query engine](query-engine.md): the data model, the pipelines,
+  - [Orbit Query Engine](query-engine.md): the data model, the pipelines,
     and each step from query to SQL.
 - [Security](security.md): makes sure each caller sees only what GitLab
   lets them see.
