@@ -68,27 +68,17 @@ The user sees only your text, not command output, your thinking, or this skill.
 
 Start with a question that one query answers, about the scope from step 1.
 Make each option name something real in the scope, so the first answer is about something the user knows.
+None of the options needs input from the user, so do not ask for any.
 
-1. Find the values with up to two quick queries:
-   - The project to use. For a project scope, it is that project.
-     For a group scope, use the project with the most open merge requests:
+1. Find the project to use. For a project scope, it is that project.
+   For a group scope, use the project with the most open merge requests:
 
-     ```plaintext
-     MATCH (g:Group {full_path: '<group>'})-[:CONTAINS*1..3]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)
-     WHERE mr.state = 'opened'
-     RETURN p.full_path, count(mr) AS open_mrs ORDER BY open_mrs DESC LIMIT 5
-     ```
+   ```plaintext
+   MATCH (g:Group {full_path: '<group>'})-[:CONTAINS*1..3]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)
+   WHERE mr.state = 'opened'
+   RETURN p.full_path, count(mr) AS open_mrs ORDER BY open_mrs DESC LIMIT 5
+   ```
 
-   - A function that many definitions call, in that project:
-
-     ```plaintext
-     MATCH (c:Definition)-[:CALLS]->(d:Definition)
-     WHERE d.project_id = <project ID> AND d.definition_type IN ['Function', 'Method']
-       AND NOT d.file_path CONTAINS 'test'
-     RETURN d.name, d.file_path, count(c) AS callers ORDER BY callers DESC LIMIT 8
-     ```
-
-     Pick one that a developer would recognize. Skip macros and generated code, such as `*.pb.go` files.
 1. Offer these options with your question tool. Fill in the real values, as in the examples:
    - **See the open merge requests in <project>**, for example "See the open merge requests in my-project":
      the newest first, with their titles and authors. A quick check that Orbit sees your project.
@@ -96,8 +86,18 @@ Make each option name something real in the scope, so the first answer is about 
      a count for each severity, from critical to info. One query counts them all, with no paging through results.
    - **Find who approved the most merge requests in <scope>**:
      the top approvers in the last 30 days, with a count for each. Useful when you need a reviewer.
-   - **Find every caller of <function>**, for example "Find every caller of compile":
-     each caller, with the file it is in. Shows that Orbit indexes your code, not only merge requests and pipelines.
+   - **Find the most-called functions in <project>**:
+     the functions that the most other definitions call, with their files.
+     Shows that Orbit indexes your code, not only merge requests and pipelines. Use this query:
+
+     ```plaintext
+     MATCH (c:Definition)-[:CALLS]->(d:Definition)
+     WHERE d.project_id = <project ID> AND d.definition_type IN ['Function', 'Method']
+       AND NOT d.file_path CONTAINS 'test'
+     RETURN d.name, d.file_path, count(c) AS callers ORDER BY callers DESC LIMIT 10
+     ```
+
+     In the answer, leave out macros and generated code, such as `*.pb.go` files.
 
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
