@@ -6,7 +6,7 @@
 //!
 //! This file, the orbit-billing crate, and the extended hook points form
 //! the SOX billing surface defined in ADR 020:
-//! `docs/adr/020_billing_sox_scope.md`.
+//! `docs/pages/engineering/adr/020_billing_sox_scope.md`.
 
 use orbit_billing::{BillingInputs, QuotaCheckInputs};
 

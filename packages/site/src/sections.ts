@@ -30,14 +30,17 @@ export const TABS: Tab[] = [
 
 export const USER_DOCS = { label: "User docs", href: "https://docs.gitlab.com/orbit/" };
 
+export const PAGES_DIR = "docs/pages";
+
 export const SECTIONS = [
-  { route: "roadmap", dir: "docs/roadmap", label: "Roadmap" },
-  { route: "content", dir: "docs/content", label: "Content" },
-  { route: "team", dir: "docs/team", label: "Team" },
-  { route: "engineering/runbooks", dir: "docs/runbooks", label: "Runbooks" },
-  { route: "engineering/architecture", dir: "docs/architecture", label: "Architecture" },
-  { route: "engineering/adr", dir: "docs/adr", label: "ADRs" },
-  { route: "engineering/testing", dir: "docs/testing", label: "Testing" },
+  { route: "roadmap", label: "Roadmap" },
+  { route: "content", label: "Content" },
+  { route: "team", label: "Team" },
+  { route: "engineering/runbooks", label: "Runbooks" },
+  { route: "engineering/architecture", label: "Architecture" },
+  { route: "engineering/adr", label: "ADRs" },
+  { route: "engineering/testing", label: "Testing" },
+  { route: "engineering/development", label: "Development" },
 ];
 
 export const ENGINEERING = SECTIONS.filter(({ route }) => route.startsWith("engineering/"));

@@ -203,7 +203,7 @@ it is justified when it needs:
 
 If the transform is a per-row projection of one extracted batch, express it as an ontology plan +
 `datafusion`, not Rust. SystemNote is the reference case for the Rust path (ADR 013). See
-`docs/adr/015_pluggable_entity_pipelines.md`.
+`docs/pages/engineering/adr/015_pluggable_entity_pipelines.md`.
 
 ### Adding a handler
 

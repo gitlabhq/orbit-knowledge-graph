@@ -27,7 +27,7 @@ folder so it can be removed as a unit (see *Removing the gates* below). Task #29
 Scope (the `SCOPE` tuple in `prose_lint.py`): `config/prompts/**/*.yml`,
 `config/setup/setup.yaml`, `skills/**/*.md` (minus the generated
 `query_language.md`), `AGENTS.md`, `CONTEXT.md`, `crates/*/AGENTS.md`,
-`docs/dev/**/*.md` (agent docs and runbooks), `docs/architecture/**/*.md`,
+`docs/pages/engineering/development/**/*.md` (agent docs and runbooks), `docs/pages/engineering/architecture/**/*.md`,
 `docs/design-documents/**/*.md`, and the MR and issue templates. `CLAUDE.md` is skipped
 because CI already enforces that it equals `AGENTS.md`. Public docs under
 `docs/source/` stay with Vale.

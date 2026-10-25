@@ -267,7 +267,7 @@ The `e2e` job runs on every main commit and is manual on MRs. It saves diagnosti
 - `e2e-ha` runs the suites on a ClickHouse cluster with replicas, and kills replicas during the run. It runs in the post-merge pipeline and on a daily schedule. It is manual on MRs.
 - `e2e-pin-bump` runs on a daily schedule. It moves the pins in `versions.yaml` to their latest versions and updates one MR. On that MR, `e2e` runs automatically and must pass before the MR can merge.
 
-For setup, debugging, and the list of key files, see [E2E testing harness](../dev/e2e-testing.md).
+For setup, debugging, and the list of key files, see [E2E testing harness](../pages/engineering/development/e2e-testing.md).
 
 ## Performance tests
 
@@ -339,4 +339,4 @@ Next to the tests, CI runs checks on each MR:
 
 ### Billing boundary
 
-Usage billing is in scope for SOX. The `billing-boundary-check` job fails if any crate other than `orbit-server` depends on `orbit-billing`. CODEOWNERS sends changes to the billing surface to the Orbit team for approval. The rules are in [SOX billing boundary](../dev/sox-billing-boundary.md).
+Usage billing is in scope for SOX. The `billing-boundary-check` job fails if any crate other than `orbit-server` depends on `orbit-billing`. CODEOWNERS sends changes to the billing surface to the Orbit team for approval. The rules are in [SOX billing boundary](../pages/engineering/development/sox-billing-boundary.md).

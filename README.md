@@ -88,10 +88,10 @@ Many tasks need no deep Rust knowledge, for example documentation, ontology YAML
 
 | Guide | Use it to |
 |-------|-----------|
-| [Local development](docs/dev/local-development.md) | Run the full stack on a Caproni cluster. |
+| [Local development](docs/pages/engineering/development/local-development.md) | Run the full stack on a Caproni cluster. |
 | [Testing strategy](docs/design-documents/testing.md) | Learn which tests a change needs. |
-| [Adding a language](docs/dev/adding-a-language.md) | Add a parser for a new language. |
-| [Architecture](docs/architecture/) | Read the design of each area before you change it. |
+| [Adding a language](docs/pages/engineering/development/adding-a-language.md) | Add a parser for a new language. |
+| [Architecture](docs/pages/engineering/architecture/) | Read the design of each area before you change it. |
 
 GitLab Orbit also uses these public repositories:
 [GitLab Rails](https://gitlab.com/gitlab-org/gitlab),

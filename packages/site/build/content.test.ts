@@ -8,13 +8,13 @@ describeContent(contentDir, { routes: { "": HOME }, meta: siteMeta });
 
 describe("site links", () => {
   const routes = sourceFiles();
-  const adr = "docs/adr/021_entity_context_expansion.md";
+  const adr = "docs/pages/engineering/adr/021_entity_context_expansion.md";
   const repoRaw = repoBlob.replace("/-/blob/", "/-/raw/");
 
   test("maps every section README to the section route", () => {
-    expect(routes.get("docs/README.md")).toBe("engineering");
-    expect(routes.get("docs/adr/README.md")).toBe("engineering/adr");
-    expect(routes.get("docs/runbooks/README.md")).toBe("engineering/runbooks");
+    expect(routes.get("docs/pages/engineering/README.md")).toBe("engineering");
+    expect(routes.get("docs/pages/engineering/adr/README.md")).toBe("engineering/adr");
+    expect(routes.get("docs/pages/engineering/runbooks/README.md")).toBe("engineering/runbooks");
   });
 
   test("turns links to published pages and folders into site routes", () => {
@@ -25,8 +25,8 @@ describe("site links", () => {
   });
 
   test("sends links to other repository files to the repository", () => {
-    expect(siteLinks("[Local development](../dev/local-development.md) ![Logo](../assets/orbit-logo.png)", adr, routes)).toBe(
-      `[Local development](${repoBlob}docs/dev/local-development.md) ![Logo](${repoRaw}docs/assets/orbit-logo.png)`,
+    expect(siteLinks("[Fuzzing](../../../../crates/fuzz/README.md) ![Logo](../../../assets/orbit-logo.png)", adr, routes)).toBe(
+      `[Fuzzing](${repoBlob}crates/fuzz/README.md) ![Logo](${repoRaw}docs/assets/orbit-logo.png)`,
     );
   });
 
