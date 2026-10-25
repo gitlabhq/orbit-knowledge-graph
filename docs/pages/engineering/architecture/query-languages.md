@@ -240,7 +240,6 @@ The other fields depend on the type:
 | `limit` and ordering | The size and order of the result |
 | `options` | Presentation settings that do not change what the query matches |
 
-
 The DSL has a version: the `query_dsl` pin in `config/versions.yaml`.
 Its major version is part of the schema `$id`.
 `get_query_dsl` returns the current schema.
@@ -271,7 +270,6 @@ RETURN projections
 [LIMIT rows]
 [DEBUG]
 ```
-
 
 The pattern must form one connected tree.
 Several `MATCH` clauses join into one pattern, and their `WHERE` predicates combine with `AND`.

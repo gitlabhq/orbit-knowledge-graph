@@ -21,12 +21,115 @@ of the SQL that it produces.
 > These SQL fragments show only the core of each query.
 > The full SQL also has authorization filters, page limits, and query settings.
 
-| Query type | Example (GQL) | Meaning | SQL output fragment |
-| --- | --- | --- | --- |
-| **Traversal** | `MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'}) RETURN u.username, mr.title` | Merged merge requests and the users who wrote them | `FROM gl_edge AS e JOIN gl_merge_request AS mr ON mr.id = e.target_id WHERE e.relationship_kind = ? AND mr.state = ?` |
-| **Aggregation** | `MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964}) RETURN mr.state, count(mr) AS mrs` | How many merge requests one project has in each state | `SELECT mr.state, COUNT(mr.id) AS mrs ... GROUP BY mr.state` |
-| **Path finding** | `MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {id: 278964}) RETURN path` | The shortest path from a group to a project | `WITH forward AS (...), backward AS (...) SELECT ... FROM forward JOIN backward ON ...` |
-| **Neighbors** | `MATCH (mr:MergeRequest {id: 42})--(n) RETURN n` | Everything directly connected to one merge request, in either direction | `SELECT ... FROM gl_edge WHERE source_id = ? UNION ALL SELECT ... FROM gl_edge WHERE target_id = ?` |
+<table>
+
+<thead>
+
+<tr><th>Query type</th><th>Example (GQL)</th><th>Meaning</th><th>SQL output fragment</th></tr>
+
+</thead>
+
+<tbody>
+
+<tr>
+
+<td><b>Traversal</b></td>
+
+<td>
+
+```cypher
+MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'}) RETURN u.username, mr.title
+```
+
+</td>
+
+<td>Merged merge requests and the users who wrote them</td>
+
+<td>
+
+```sql
+FROM gl_edge AS e JOIN gl_merge_request AS mr ON mr.id = e.target_id WHERE e.relationship_kind = ? AND mr.state = ?
+```
+
+</td>
+
+</tr>
+
+<tr>
+
+<td><b>Aggregation</b></td>
+
+<td>
+
+```cypher
+MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964}) RETURN mr.state, count(mr) AS mrs
+```
+
+</td>
+
+<td>How many merge requests one project has in each state</td>
+
+<td>
+
+```sql
+SELECT mr.state, COUNT(mr.id) AS mrs ... GROUP BY mr.state
+```
+
+</td>
+
+</tr>
+
+<tr>
+
+<td><b>Path finding</b></td>
+
+<td>
+
+```cypher
+MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {id: 278964}) RETURN path
+```
+
+</td>
+
+<td>The shortest path from a group to a project</td>
+
+<td>
+
+```sql
+WITH forward AS (...), backward AS (...) SELECT ... FROM forward JOIN backward ON ...
+```
+
+</td>
+
+</tr>
+
+<tr>
+
+<td><b>Neighbors</b></td>
+
+<td>
+
+```cypher
+MATCH (mr:MergeRequest {id: 42})--(n) RETURN n
+```
+
+</td>
+
+<td>Everything directly connected to one merge request, in either direction</td>
+
+<td>
+
+```sql
+SELECT ... FROM gl_edge WHERE source_id = ? UNION ALL SELECT ... FROM gl_edge WHERE target_id = ?
+```
+
+</td>
+
+</tr>
+
+</tbody>
+
+</table>
 
 ## How it works
 
