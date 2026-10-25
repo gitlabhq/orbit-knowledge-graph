@@ -311,22 +311,22 @@ fn local(
                         .filter(|(_, matched)| matched.len() == most)
                         .map(|(file, _)| file.to_string())
                         .collect();
-                    hits = any
-                        .into_iter()
-                        .filter(|hit| keep.contains(&hit.file))
-                        .collect();
-                    let shown = hits.iter().filter(|hit| !hit.context).count();
-                    if options.before == 0 && options.after == 0 {
-                        hits = most_words(hits, &words);
-                    }
-                    let cut = match shown.saturating_sub(hits.len()) {
+                    let (kept, files) = most_words(
+                        any.into_iter()
+                            .filter(|hit| keep.contains(&hit.file))
+                            .collect(),
+                        &words,
+                    );
+                    hits = kept;
+                    let more = match files.saturating_sub(FALLBACK_FILES) {
                         0 => String::new(),
-                        cut => format!(
-                            ", up to {FALLBACK_LINES} lines each with the most of them ({cut} more lines)"
+                        more => format!(
+                            "; {more} more files have them too, so add a word or a path to narrow it"
                         ),
                     };
                     notes.push(format!(
-                        "{NOTE}0 lines contain {:?}; showing files with {most} of its {} words{cut}",
+                        "{NOTE}0 lines contain {:?}; showing the files with {most} of its {} words, \
+                         up to {FALLBACK_LINES} lines each with the most of them{more}",
                         alternatives.join("|"),
                         words.len()
                     ));
@@ -406,30 +406,44 @@ fn local(
 
 const NOTE: &str = "» ";
 
-const FALLBACK_LINES: usize = 8;
+const FALLBACK_LINES: usize = 4;
+const FALLBACK_FILES: usize = 5;
 
-fn most_words(hits: Vec<scan::Hit>, words: &[term::Term]) -> Vec<scan::Hit> {
+/// The files whose lines carry the most query words, best first, each cut to its
+/// `FALLBACK_LINES` best lines, and how many files matched before the cut.
+fn most_words(hits: Vec<scan::Hit>, words: &[term::Term]) -> (Vec<scan::Hit>, usize) {
     let mut by_file: std::collections::BTreeMap<String, Vec<(usize, scan::Hit)>> =
         Default::default();
-    for hit in hits {
+    for hit in hits.into_iter().filter(|hit| !hit.context) {
         let count = words.iter().filter(|word| word.mentions(&hit.text)).count();
         by_file
             .entry(hit.file.clone())
             .or_default()
             .push((count, hit));
     }
-    let mut kept = Vec::new();
-    for (_, mut lines) in by_file {
-        lines.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.line.cmp(&b.1.line)));
-        let mut lines: Vec<scan::Hit> = lines
-            .into_iter()
-            .take(FALLBACK_LINES)
-            .map(|(_, hit)| hit)
-            .collect();
-        lines.sort_by_key(|hit| hit.line);
-        kept.extend(lines);
-    }
-    kept
+    let files = by_file.len();
+    let mut ranked: Vec<(usize, usize, Vec<scan::Hit>)> = by_file
+        .into_values()
+        .map(|mut lines| {
+            lines.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.line.cmp(&b.1.line)));
+            let best = lines.first().map_or(0, |(count, _)| *count);
+            let at_best = lines.iter().filter(|(count, _)| *count == best).count();
+            let mut lines: Vec<scan::Hit> = lines
+                .into_iter()
+                .take(FALLBACK_LINES)
+                .map(|(_, hit)| hit)
+                .collect();
+            lines.sort_by_key(|hit| hit.line);
+            (best, at_best, lines)
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+    let kept = ranked
+        .into_iter()
+        .take(FALLBACK_FILES)
+        .flat_map(|(_, _, lines)| lines)
+        .collect();
+    (kept, files)
 }
 
 static OR_WORD: std::sync::LazyLock<regex::Regex> =

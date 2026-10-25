@@ -594,6 +594,157 @@ fn context_appends_the_local_code_a_merge_request_changes() {
 }
 
 #[test]
+fn grep_without_a_line_holding_every_word_shows_the_best_few_files() {
+    let files: Vec<(String, String)> = (1..=7)
+        .map(|n| {
+            (
+                format!("src/f{n}.py"),
+                format!("alpha = {n}\n\nbeta = {n}\n"),
+            )
+        })
+        .collect();
+    let files: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(path, body)| (path.as_str(), body.as_str()))
+        .collect();
+    let repo = committed_repo("https://localhost/my-group/my-project", &files);
+    let data = tempfile::tempdir().expect("tempdir");
+    let orbit = |args: &[&str]| {
+        orbit_command(repo.path(), data.path(), "http://localhost:1", args)
+            .output()
+            .expect("run orbit binary")
+    };
+    let indexed = orbit(&["index", "."]);
+    assert!(
+        indexed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&indexed.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&orbit(&["grep", "alpha beta"]).stdout).into_owned();
+    assert!(stdout.contains("in 5 files"), "{stdout}");
+    assert!(
+        stdout.contains("0 lines contain \"alpha beta\"; showing the files with 2 of its 2 words"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("; 2 more files have them too"), "{stdout}");
+}
+
+#[test]
+fn context_prints_each_anchored_line_once() {
+    let clone = committed_repo(
+        "https://localhost/my-group/my-project",
+        &[(
+            "src/app.py",
+            "import os\n\n\ndef total(items):\n    count = len(items)\n    return count\n",
+        )],
+    );
+    let data = tempfile::tempdir().expect("tempdir");
+    let indexed = orbit_command(
+        clone.path(),
+        data.path(),
+        "http://localhost:1",
+        &["index", "."],
+    )
+    .output()
+    .expect("run orbit binary");
+    assert!(
+        indexed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&indexed.stderr)
+    );
+    let (base_url, handle) = serve_routes(vec![(
+        "orbit/context",
+        "- mr:my-group/my-project!4 found=true\n  changed_files[1]:\n    M src/app.py @ 2-6\n  discussions[1]:\n    @a [unresolved] src/app.py:5:\n      why count?\n",
+    )]);
+    let base_url = base_url.replace("127.0.0.1", "localhost");
+    let output = orbit_command(
+        clone.path(),
+        data.path(),
+        &base_url,
+        &["context", "my-group/my-project!4"],
+    )
+    .output()
+    .expect("run orbit binary");
+    handle.join().expect("join mock");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.matches("5|    count = len(items)").count(),
+        1,
+        "{stdout}"
+    );
+    assert_eq!(stdout.matches("6|    return count").count(), 1, "{stdout}");
+}
+
+#[test]
+fn context_reads_a_definition_named_after_its_path() {
+    let clone = committed_repo(
+        "https://localhost/my-group/my-project",
+        &[
+            (
+                "src/app.py",
+                "def total(items):\n    return len(items)\n\n\nclass Cart:\n    def total(self):\n        return 0\n",
+            ),
+            ("src/other.py", "def total():\n    return 1\n"),
+        ],
+    );
+    let data = tempfile::tempdir().expect("tempdir");
+    let orbit = |args: &[&str]| {
+        orbit_command(clone.path(), data.path(), "http://localhost:1", args)
+            .output()
+            .expect("run orbit binary")
+    };
+    let indexed = orbit(&["index", "."]);
+    assert!(
+        indexed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&indexed.stderr)
+    );
+    let output = orbit(&["context", "src/app.py:Cart.total"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("6|    def total(self):"), "{stdout}");
+    assert!(!stdout.contains("src/other.py"), "{stdout}");
+    assert!(!stdout.contains("return len(items)"), "{stdout}");
+}
+
+#[test]
+fn context_stops_a_whole_file_and_says_how_to_read_the_rest() {
+    let body: String = (1..=250).map(|n| format!("X_{n} = {n}\n")).collect();
+    let clone = committed_repo(
+        "https://localhost/my-group/my-project",
+        &[("src/big.py", body.as_str())],
+    );
+    let data = tempfile::tempdir().expect("tempdir");
+    let orbit = |args: &[&str]| {
+        orbit_command(clone.path(), data.path(), "http://localhost:1", args)
+            .output()
+            .expect("run orbit binary")
+    };
+    let indexed = orbit(&["index", "."]);
+    assert!(
+        indexed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&indexed.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&orbit(&["context", "src/big.py"]).stdout).into_owned();
+    assert!(stdout.contains("200|X_200 = 200\n"), "{stdout}");
+    assert!(!stdout.contains("201|"), "{stdout}");
+    assert!(
+        stdout.contains(
+            "» src/big.py has 250 lines; `orbit context src/big.py:201-250` reads the rest"
+        ),
+        "{stdout}"
+    );
+    let rest =
+        String::from_utf8_lossy(&orbit(&["context", "src/big.py:201-250"]).stdout).into_owned();
+    assert!(rest.contains("250|X_250 = 250"), "{rest}");
+}
+
+#[test]
 fn grep_refreshes_an_edited_file_inline_or_detached() {
     let repo = committed_repo(
         "https://localhost/my-group/my-project",

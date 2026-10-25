@@ -253,13 +253,19 @@ pub(crate) fn render(client: &GraphReader, git: &GitInfo, anchors: &Anchors) -> 
     let mut used = 0;
     let mut skipped = Vec::new();
     let mut shown = BTreeSet::new();
+    let mut printed: BTreeMap<String, BTreeSet<i64>> = BTreeMap::new();
     for region in regions(client, git, anchors)? {
-        let lines = region.lines();
+        let seen = printed.entry(region.path.clone()).or_default();
+        let lines: BTreeSet<i64> = region.lines().difference(seen).copied().collect();
+        if lines.is_empty() {
+            continue;
+        }
         let label = spans_label(&region.spans);
         if used + lines.len() > BUDGET_LINES {
             skipped.push(format!("{}:{label}", region.path));
             continue;
         }
+        seen.extend(&lines);
         let content = std::fs::read_to_string(git.repo_path.join(&region.path)).unwrap_or_default();
         let source: Vec<&str> = content.lines().collect();
         match &region.definition {

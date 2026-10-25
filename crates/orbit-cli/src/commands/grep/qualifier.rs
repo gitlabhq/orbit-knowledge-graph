@@ -72,13 +72,16 @@ fn kind_for(name: &str) -> Option<String> {
     })
 }
 
+/// Splits a query on whitespace outside double quotes. An unpaired quote is part of the
+/// pattern, as in `'runtime"' file:x`, so it does not swallow the qualifiers after it.
 fn tokens(query: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut quoted = false;
+    let paired = query.matches('"').count().is_multiple_of(2);
     for c in query.chars() {
         match c {
-            '"' => quoted = !quoted,
+            '"' if paired => quoted = !quoted,
             c if c.is_whitespace() && !quoted => {
                 if !current.is_empty() {
                     tokens.push(std::mem::take(&mut current));
@@ -227,6 +230,21 @@ mod tests {
             .into_iter()
             .map(|section| (section.kinds, section.query.unwrap()))
             .collect()
+    }
+
+    #[test]
+    fn an_unpaired_quote_stays_in_the_pattern() {
+        let parsed = parse(r#"apimachinery/pkg/runtime" file:describe_test.go"#).unwrap();
+        assert_eq!(
+            parsed.sections[0].query.as_deref(),
+            Some(r#"apimachinery/pkg/runtime""#)
+        );
+        assert_eq!(
+            parsed.globs,
+            strings(&["*describe_test.go*", "**/*describe_test.go*/**"])
+        );
+        let quoted = parse(r#""rate limit" file:a.rs"#).unwrap();
+        assert_eq!(quoted.sections[0].query.as_deref(), Some("rate limit"));
     }
 
     #[test]

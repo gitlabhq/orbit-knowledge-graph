@@ -20,6 +20,8 @@ pub(crate) const SCOPES: &[(&str, &str)] = &[
 const BRANCHES: &str = "branches";
 const DEFAULT_SCOPES: &[&str] = &["work_items", "merge_requests", "notes"];
 const MAX_SEARCHES: usize = 5;
+/// GitLab rejects a search with no term this long as an abusive tiny search.
+const MIN_SEARCH_CHARS: usize = 2;
 
 pub(crate) fn scope_for(kind: &str) -> Option<&'static str> {
     let lower = kind.to_ascii_lowercase();
@@ -230,7 +232,7 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
     };
     let keywords: Vec<String> = keywords
         .iter()
-        .filter(|k| k.trim().len() >= 2)
+        .filter(|k| k.trim().chars().count() >= MIN_SEARCH_CHARS)
         .take(MAX_SEARCHES)
         .cloned()
         .collect();
@@ -246,7 +248,7 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         .iter()
         .flat_map(|keyword| keyword.split_whitespace())
     {
-        if word.len() >= 2 && !words.iter().any(|seen| seen == word) {
+        if word.chars().count() >= MIN_SEARCH_CHARS && !words.iter().any(|seen| seen == word) {
             words.push(word.to_string());
         }
     }

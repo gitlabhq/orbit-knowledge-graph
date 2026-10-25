@@ -547,9 +547,22 @@ fn render_local(
     for dir in &targets.dirs {
         render_dir(&mut out, &client, &git, dir)?;
     }
-    for (path, start, end) in &targets.ranges {
-        let (start, end) = snap_to_definitions(&client, &git, path, *start, *end)?;
+    for (path, start, requested) in &targets.ranges {
+        let (start, snapped) = snap_to_definitions(&client, &git, path, *start, *requested)?;
+        let whole = targets.whole.contains(path);
+        let end = match whole {
+            true => snapped.min(start + WHOLE_FILE_LINES - 1),
+            false => snapped,
+        };
         render_range(&mut out, &git, path, start, end)?;
+        if whole && end < *requested {
+            let launcher = crate::commands::setup::spec::launcher();
+            writeln!(
+                out,
+                "» {path} has {requested} lines; `{launcher} context {path}:{}-{requested}` reads the rest",
+                end + 1
+            )?;
+        }
         let (lines, calling) = callers(&client, &git, path, start, end)?;
         out.push_str(&lines);
         out.push_str(&tests_for(&client, &git, path, calling)?);
@@ -615,8 +628,13 @@ fn edited_note(git: &workspace::GitInfo, edited: std::collections::BTreeSet<Stri
     }
 }
 
+/// A file read without a range stops here, saying how to read the rest, so a long file
+/// does not crowd out the other targets of the same call.
+const WHOLE_FILE_LINES: usize = 200;
+
 #[derive(Default)]
 struct Targets {
+    whole: BTreeSet<String>,
     files: Vec<String>,
     file_ids: Vec<i64>,
     ids: Vec<i64>,
@@ -645,6 +663,7 @@ fn resolve_targets(
 ) -> Result<Targets> {
     let mut resolved = Targets::default();
     let Targets {
+        whole,
         files,
         file_ids,
         ids,
@@ -684,7 +703,10 @@ fn resolve_targets(
                 Ok(path) => match std::fs::read_to_string(git.repo_path.join(&path))
                     .map(|content| content.lines().count())
                 {
-                    Ok(lines) if lines > 0 => ranges.push((path, 1, lines)),
+                    Ok(lines) if lines > 0 => {
+                        whole.insert(path.clone());
+                        ranges.push((path, 1, lines));
+                    }
                     _ => {
                         if !files.contains(&path) {
                             files.push(path);
@@ -704,7 +726,14 @@ fn resolve_targets(
                     matches.sort_by_key(|node| node.id);
                     let mut found: Vec<i64> = matches.into_iter().map(|node| node.id).collect();
                     if found.is_empty() {
-                        found = named(client, git, target)?;
+                        found = named(client, git, target, None)?;
+                    }
+                    if found.is_empty()
+                        && let Some((path, symbol)) = target.rsplit_once(':')
+                        && !symbol.is_empty()
+                        && let Ok(path) = repo_relative(&git.repo_path, path)
+                    {
+                        found = named(client, git, symbol, Some(&path))?;
                     }
                     if found.is_empty() {
                         missing.push(error);
@@ -737,25 +766,35 @@ fn missing_note(missing: &[anyhow::Error]) -> String {
 const NAMED_MAX: usize = 5;
 
 /// Definitions whose FQN ends with `target`, so a bare name or `Class.method` finds
-/// `pkg.Class.method` and `Class::method` alike.
+/// `pkg.Class.method` and `Class::method` alike. With `file`, only definitions in that file,
+/// so `path:Name` reads `Name` where the path says it is.
 fn named(
     client: &duckdb_client::DuckDbClient,
     git: &workspace::GitInfo,
     target: &str,
+    file: Option<&str>,
 ) -> Result<Vec<i64>> {
     let normalize = "regexp_replace(?3, '::|#|/', '.', 'g')";
+    let in_file = match file {
+        Some(_) => "AND file_path = ?4",
+        None => "",
+    };
+    let mut params = vec![
+        git.project_id.into(),
+        git.commit_sha.clone().into(),
+        target.to_string().into(),
+    ];
+    if let Some(file) = file {
+        params.push(file.to_string().into());
+    }
     let batches = client.query_arrow_json(
         &format!(
-            "SELECT id, fqn FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2
+            "SELECT id, fqn FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2 {in_file}
              AND (regexp_replace(fqn, '::|#|/', '.', 'g') = {normalize}
                   OR ends_with(regexp_replace(fqn, '::|#|/', '.', 'g'), '.' || {normalize}))
              ORDER BY id"
         ),
-        &[
-            git.project_id.into(),
-            git.commit_sha.clone().into(),
-            target.to_string().into(),
-        ],
+        &params,
     )?;
     let (ids, fqns) = (
         duckdb_client::i64_column(&batches, "id"),

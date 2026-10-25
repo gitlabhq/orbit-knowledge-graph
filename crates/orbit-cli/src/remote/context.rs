@@ -49,7 +49,51 @@ static GRAPH_KEY: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^(query_type|nodes|edges|pagination)\b").expect("valid pattern")
 });
 
+/// Drops HTML comments outside code fences, as rendered Markdown does, so PR templates and
+/// bot markers in descriptions and notes cost nothing. A line left empty by a removed comment
+/// goes, and so does a blank line after another blank line.
+fn strip_html_comments(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let (mut in_comment, mut fenced, mut blank) = (false, false, false);
+    for line in text.lines() {
+        if !in_comment && line.trim_start().starts_with("```") {
+            fenced = !fenced;
+        }
+        let (mut kept, mut touched, mut rest) = (String::new(), in_comment, line);
+        match fenced {
+            true => kept.push_str(line),
+            false => loop {
+                match in_comment {
+                    true => match rest.find("-->") {
+                        Some(at) => (rest, in_comment) = (&rest[at + 3..], false),
+                        None => break,
+                    },
+                    false => match rest.find("<!--") {
+                        Some(at) => {
+                            kept.push_str(&rest[..at]);
+                            (rest, in_comment, touched) = (&rest[at + 4..], true, true);
+                        }
+                        None => {
+                            kept.push_str(rest);
+                            break;
+                        }
+                    },
+                }
+            },
+        }
+        let empty = kept.trim().is_empty();
+        if empty && (touched || blank) {
+            continue;
+        }
+        blank = empty;
+        out.push_str(kept.trim_end());
+        out.push('\n');
+    }
+    out
+}
+
 pub(crate) fn tidy(text: &str, drop_failed_jobs: bool) -> String {
+    let text = strip_html_comments(text);
     let mut out = String::with_capacity(text.len());
     let (mut in_graph, mut in_failed_jobs) = (false, false);
     for line in text.lines() {
@@ -136,6 +180,16 @@ pub(crate) fn compact(text: &str) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tidy_drops_html_comments_outside_code_fences() {
+        let text = "  description:\n    Fixes a crash.\n    <!--\n    Thanks for your contribution!\n    -->\n    \n    \n    \
+                    <!-- gh-issue-number: gh-1 -->\n    * Issue: gh-1 <!-- bot --> done\n    ```html\n    <!-- kept -->\n    ```\n";
+        assert_eq!(
+            tidy(text, false),
+            "  description:\n    Fixes a crash.\n\n    * Issue: gh-1  done\n    ```html\n    <!-- kept -->\n    ```\n"
+        );
+    }
 
     #[test]
     fn tidy_drops_the_graph_timestamps_and_repeated_failed_jobs() {
