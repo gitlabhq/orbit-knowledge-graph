@@ -94,8 +94,8 @@ struct SkillCatalog {
 }
 
 impl SkillCatalog {
+    /// Only the orbit skill teaches a query language, so only it has per-frontend files.
     fn load_embedded(frontend: Frontend) -> Result<Self, String> {
-        // Only the orbit skill teaches a query language, so only it has per-frontend files.
         let orbit = load_skill::<SkillAssets>(SKILL_NAME, |path| {
             served_in(path, frontend).then(|| {
                 if path == MANIFEST && frontend == Frontend::Gql {
