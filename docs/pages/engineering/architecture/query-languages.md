@@ -7,12 +7,13 @@ authors:
 
 ## What the query languages are
 
-Orbit has two query languages. The JSON Query DSL is a JSON object that
-follows a published schema, and it is the default. GQL is read-only text based
-on openCypher 9. Both describe the same queries and return the same results.
+Orbit Remote accepts two query languages with the same expressive power over
+the graph. The JSON Query DSL is a schema-defined JSON object, and it is the
+default. GQL is a read-only subset of openCypher 9 with a small set of Orbit
+extensions. Both frontends lower into the same compiler input, so validation,
+authorization, planning, and results are shared.
 
-Here is the same question in both languages: merged merge requests and the
-users who wrote them.
+The same query in each language:
 
 ```json orbit-query
 {
@@ -39,113 +40,124 @@ LIMIT 10
 
 ```mermaid
 flowchart LR
-    JSON[JSON query] --> JF[JSON frontend]
-    GQL[GQL text] --> GF[GQL frontend]
-    JF --> Input[Shared input]
+    JSON[JSON object] --> JF[JSON frontend]
+    GQL[GQL statement] --> GF[GQL frontend]
+    JF --> Input[Compiler input]
     GF --> Input
-    Input --> Engine[Graph query engine]
+    Input --> Passes[Shared compiler passes]
 ```
 
-Each language has its own frontend. A frontend parses the query and turns it
-into one shared input. From there on, the engine treats every query the same
-way. The steps below follow a query through its frontend.
+The language is a property of the user, not of the payload. Rails selects it,
+and the matching frontend parses and lowers the query. Every pass after
+lowering is language-neutral.
 
-### 1. Rails picks the language
+### 1. Language selection
 
 ```mermaid
 flowchart LR
-    Flag[Per-user flag] --> Rails
-    Rails -- language --> Webserver
-    Webserver --> Frontend
+    Flag[Per-user feature flag] --> Rails
+    Rails -- query language on the request --> Webserver
+    Webserver --> Frontend[Matching frontend]
 ```
 
-A default-off feature flag in Rails picks the language for each user. With the
-flag off, every surface accepts only JSON. With the flag on, the query
-endpoint, named queries, and discovery all use GQL, and JSON queries fail.
-Rails sets the language on each request. Callers can't choose it, and the
-server never guesses it from the query.
+A default-off, per-user Rails feature flag selects the frontend. Rails sets
+the language on the gRPC request, for ad hoc and named queries alike. With the
+flag off, every surface accepts only JSON. With it on, the query endpoint,
+named queries, and discovery switch to GQL, and JSON payloads are rejected.
+The server does no content sniffing and has no fallback. Discovery responses
+describe only the active language.
 
-### 2. The frontend parses the query
+### 2. Parsing and lowering
 
 ```mermaid
 flowchart LR
-    Object[JSON object] --> Schema[JSON schema check] --> Input[Shared input]
-    Text[GQL text] --> Grammar --> Tree[Syntax tree] --> Lower --> Input
+    Object[JSON object] --> Schema[JSON schema validation] --> Input[Compiler input]
+    Text[GQL text] --> Grammar[openCypher 9 grammar] --> Tree[Typed syntax tree] --> Lower --> Input
 ```
 
-A JSON query is checked against its JSON schema, then read into the shared
-input. A GQL query goes through a grammar adapted from the official openCypher
-9 grammar. The frontend builds a typed syntax tree, then lowers it into the
-shared input. Lowering checks the whole statement: the pattern must be one
-connected tree, each variable must be unique, and the query type must be
-clear.
+The JSON frontend validates the payload against the base JSON schema and an
+ontology-derived schema, then deserializes it into the compiler input. The GQL
+frontend parses with a grammar adapted from the openCypher 9 M23 EBNF and
+builds a typed syntax tree. Lexical rules apply at that point: identifiers,
+string escapes, numeric ranges, and duplicate map keys. Lowering then applies
+the statement-wide rules. The pattern must be one connected tree, variables
+must be unique, and the query type is inferred from the pattern and
+projections.
 
-A frontend never drops part of a query and runs the rest. Anything it can't
-support fails with an error that names the problem.
+An unsupported construct fails with a positioned, client-safe error. A
+frontend never drops part of a statement and runs the rest.
 
 ### 3. Shared validation
 
 ```mermaid
 flowchart LR
-    Input[Shared input] --> Validator
-    Ontology --> Validator
-    Validator --> Checked[Checked input]
+    Input[Compiler input] --> Validator
+    Model[(Data model)] --> Validator
+    Validator --> Checked[Validated input]
 ```
 
-Both languages end in the same validator. It checks the query's limits, then
-checks every entity, relationship, and property against the ontology. A JSON
-query is checked twice, by its schema and by this validator, so every JSON
-test also tests the shared validator.
+Both inputs pass through one native validator. It checks shape, limits,
+ontology membership, and type compatibility. The limits are Rust constants,
+and a build script asserts that the JSON schema declares the same bounds. JSON
+is validated twice by design, so every JSON test also exercises the shared
+validator. GQL pipelines also check each typed relationship against the
+ontology's edge endpoints, and reject a reversed arrow with the valid
+direction.
 
 ### 4. Schema discovery
 
 ```mermaid
 flowchart LR
-    Caller -- discovery call --> Webserver
+    Caller -- get_graph_schema or CALL db.schema --> Webserver
     Ontology --> Webserver
-    Webserver -- compact schema --> Caller
+    Webserver -- logical schema --> Caller
 ```
 
-Callers read the graph schema before they write a query. In JSON mode, they
-call `get_graph_schema`. In GQL mode, they run `CALL db.schema()`. Both
-answers come from the ontology, sized for an LLM context window, and never
-show the ClickHouse tables underneath. A schema call runs no SQL.
+Discovery returns the logical schema from the ontology, never the physical
+tables. JSON callers use `get_graph_schema`, which lists domains and edges in
+TOON and expands node types on request. GQL callers use `CALL db.schema()`, or
+`CALL db.schema('MergeRequest')` for one type. The GQL frontend answers schema
+calls from ontology metadata, with no SQL and no billing event.
 
 ### 5. Named queries
 
 ```mermaid
 flowchart LR
-    Name[Name and parameters] --> Server
-    Server -- active language --> Frontend
-    Frontend --> Engine
+    Request[Name and parameters] --> Webserver
+    Webserver -- spelling for the active language --> Frontend
+    Frontend --> Passes[Compiler passes]
 ```
 
-Some clients, like the Orbit dashboard, call queries by name instead of
-writing them. Each named query is stored in both languages. The server picks
-the spelling for the caller's active language and compiles it with that
-language's frontend. Named queries follow the same rules as any other query.
+Named queries are server-defined queries that clients such as the Orbit
+dashboard call by name. Each one carries a JSON spelling and a GQL spelling
+with one shared parameter schema. The server renders the spelling for the
+caller's active language and compiles it through that frontend. Compiler tests
+require both spellings to produce identical SQL and parameters. Each schema
+version also checks every named query against its ontology when it loads.
 
 ## When things go wrong
 
-- **The query is in the wrong language.** It's rejected. There is no fallback
-  to the other language.
-- **GQL uses syntax that Orbit doesn't support,** like `OPTIONAL MATCH` or
-  `OR`. The error names the unsupported part.
-- **A name doesn't match the ontology.** The error lists the valid names.
-- **The query goes over a limit.** The error names the limit.
-- **A named query no longer fits a new schema version.** The server leaves it
-  out of that version and logs a warning.
+- **The payload doesn't match the active language.** The request is rejected.
+  The other frontend is never tried.
+- **An unsupported GQL construct,** such as `OPTIONAL MATCH`, `OR`, `WITH`, or
+  any write. The error names the construct and its position.
+- **An unknown identifier.** The error lists the valid candidates from the
+  data model.
+- **A bound is exceeded.** The error names the limit.
+- **A named query no longer fits a new schema version.** That snapshot leaves
+  it out, and the server logs a warning.
 
 ## Why we built it this way
 
-JSON came first because LLMs fill in a JSON schema more reliably than they
-write free-form text. The schema also documents every field and limit in one
-file that tools can read. GQL came next because agents already know Cypher,
-and a short pattern costs fewer tokens than the same query in JSON.
+The JSON Query DSL came first. LLMs generate output that conforms to a JSON
+schema more reliably than free-form text. The schema also documents every
+field and bound in one machine-readable file. GQL followed because agents
+already know Cypher, and a pattern costs fewer tokens than the equivalent
+JSON.
 
-Both languages lower into one shared input, so each capability exists once. A
-new language is one new frontend. Retiring the JSON Query DSL means deleting
-its frontend and its schema, and nothing after the frontend changes.
+Both languages lower into one input, so each capability, check, and security
+rule exists once. A language is one frontend module. Retiring the JSON Query
+DSL removes that module and its schema, and nothing downstream changes.
 
 ## Decisions
 

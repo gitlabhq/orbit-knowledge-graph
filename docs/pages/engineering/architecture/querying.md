@@ -7,151 +7,158 @@ authors:
 
 ## What querying does
 
-Querying answers questions about the graph: who wrote what, what connects to
-what, how many of something there are, and how two things are related. Agents
-and people ask these questions through MCP, the GitLab Orbit CLI, the REST
-API, and GitLab Duo. Orbit answers each question with one ClickHouse query
-that reads only what the caller is allowed to see.
+Orbit Remote serves read-only graph queries over the SDLC and code graphs.
+Each query compiles to one parameterized ClickHouse statement. The statement
+is scoped to the caller's authorized traversal paths and bounded in shape,
+execution time, and memory. MCP, the GitLab Orbit CLI, the REST API, and
+GitLab Duo all reach it through GitLab Rails.
 
-There are four types of query:
+| Query type | Shape | Example |
+| --- | --- | --- |
+| Traversal | A pattern of up to five node selectors joined by relationship selectors | Merge requests that a user authored |
+| Aggregation | A traversal with group keys and metrics | Merged merge requests per author, per month |
+| Path finding | The shortest path between two anchored nodes, up to three hops | The containment path from a group to a project |
+| Neighbors | One hop from a single node, in either direction | Every entity linked to a work item |
 
-| Type | Answers questions like |
-| --- | --- |
-| Traversal | Which merge requests did this user author? |
-| Aggregation | Which authors merged the most work this month? |
-| Path finding | What is the shortest path between these two projects? |
-| Neighbors | What is connected to this work item? |
-
-Callers write queries in the JSON Query DSL or in GQL. The
-[query languages](query-languages.md) page covers both.
+Queries are written in the JSON Query DSL or in GQL. The
+[query languages](query-languages.md) page covers both frontends.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    Caller --> GitLab
-    GitLab --> Engine[Query engine]
-    Engine --> CH[(ClickHouse)]
-    Engine -- redaction --> GitLab
-    Engine --> Response
+    Caller --> Rails[Rails: authn and traversal paths]
+    Rails --> Workhorse
+    Workhorse -- gRPC stream --> Webserver[Orbit webserver]
+    Webserver -- parameterized SQL --> CH[(ClickHouse)]
+    Webserver -- redaction checks --> Rails
+    Webserver --> Response
 ```
 
-Every query goes through GitLab first, so GitLab stays the only source of
-truth for who can see what. Orbit then compiles the query into SQL, runs it on
-ClickHouse, and asks GitLab about the rows that SQL alone can't decide. The
-steps below follow one query along that path.
+Authorization is split between Orbit and GitLab. Orbit enforces namespace and
+role scope inside the SQL. GitLab stays authoritative for identity and for
+per-resource rules that the graph does not model. The request path below
+follows that split.
 
-### 1. GitLab checks the caller
+### 1. Authentication and scope resolution
 
 ```mermaid
 flowchart LR
     Caller -- token --> Rails
-    Rails -- paths and roles --> Workhorse
-    Workhorse -- gRPC stream --> Webserver[Orbit webserver]
+    Rails -- JWT with traversal paths and roles --> Workhorse
+    Workhorse -- bidirectional gRPC --> Webserver[Orbit webserver]
 ```
 
-Rails authenticates the caller and works out which namespaces they can read,
-and with which role. It hands the query, those namespaces, and a signed token
-to Workhorse. Workhorse opens a gRPC stream to the Orbit webserver, so a long
-query never ties up a Rails worker.
-[ADR 008](../adr/008_workhorse_query_acceleration.md) explains that choice.
+Rails authenticates the caller and resolves the traversal paths that the
+caller can read, each tagged with an access level. It signs them into a JWT
+and hands the request to Workhorse, which opens a bidirectional gRPC stream to
+the Orbit webserver. Long-running queries never hold a Puma worker;
+[ADR 008](../adr/008_workhorse_query_acceleration.md) records that decision.
 
-A per-user feature flag in Rails decides which query language the caller uses.
-The server never guesses the language from the query itself.
+The query language is a per-user setting, selected by a Rails feature flag and
+carried on the request. The webserver never infers it from the payload.
 
-### 2. The engine compiles the query
+### 2. Compilation
 
 ```mermaid
 flowchart LR
     Query --> Frontend
-    Frontend --> Engine[Graph query engine]
-    Model[(Data model)] --> Engine
-    Engine --> SQL[Parameterized SQL]
+    Frontend --> Passes[Compiler passes]
+    Model[(Data model for the active schema version)] --> Passes
+    Passes --> SQL[SQL and hydration plan]
 ```
 
-The engine turns the query into one parameterized SQL statement. It checks
-every name against the ontology, plans how to read each node and relationship,
-and adds authorization filters for the caller's namespaces. A final check
-rejects the query if any read is missing its filter. The
-[graph query engine](query-engine.md) page walks through each step.
+The webserver builds a security context from the JWT and compiles the query
+against the data model of the active schema version. Compilation resolves
+every identifier against the ontology and plans the reads. It then injects a
+`startsWith(traversal_path, ?)` predicate at each entity's role floor, and
+fails closed if any namespaced read lacks one. The output is one statement
+with bound parameters, plus a plan for the hydration query. The
+[graph query engine](query-engine.md) page covers each pass.
 
-### 3. ClickHouse runs it
+### 3. Execution
 
 ```mermaid
 flowchart LR
-    SQL --> CH[(ClickHouse)]
-    CH --> Rows
+    SQL --> CH[(ClickHouse, read-only user)]
+    CH --> Rows[Latest row versions]
 ```
 
-The webserver connects to ClickHouse as a user that can only read. Each query
-type has its own time and memory limits, so one expensive query can't starve
-the others. The SQL reads the current version of each row, never a stale or
-deleted one.
+The statement runs as a read-only ClickHouse user, with execution-time and
+memory limits chosen per query type. Every read resolves the latest version of
+each row, so superseded and deleted versions never match a predicate.
 
-### 4. GitLab redacts what SQL can't decide
+### 4. Redaction
 
 ```mermaid
 flowchart LR
-    Rows -- resource IDs --> Rails
+    Rows -- resource IDs --> Workhorse
+    Workhorse --> Rails[Rails: per-resource abilities]
     Rails -- allow or deny --> Webserver
-    Webserver --> Kept[Allowed rows]
 ```
 
-Some rules live only in GitLab, like who can see a confidential work item. For
-those, the webserver sends the IDs of the returned resources back through the
-stream. Rails checks each one with its normal permission rules, and the
-webserver drops every row that Rails denies.
+Some access rules exist only in Rails, such as confidential work items. For
+entities that need them, the webserver streams the returned resource IDs back
+to Workhorse, which calls the Rails redaction endpoint. Rails evaluates each
+resource against its normal ability checks, and the webserver removes every
+denied row before formatting. Aggregates can't be redacted row by row, so the
+compiler rejects aggregation shapes that would depend on redaction.
 
-### 5. Hydration and the response
+### 5. Hydration and formatting
 
 ```mermaid
 flowchart LR
-    Rows --> Hydration
-    Hydration --> Format
-    Format --> Response
+    Rows --> Hydration[Hydration statement]
+    Hydration --> Formatter
+    Formatter --> Envelope[Unified response envelope]
 ```
 
-The main query returns IDs, plus the properties it already joined. A second,
-small query fetches the rest for a fixed set of IDs, with the same
-authorization filters. Then the webserver formats the result. Every query type
-returns the same shape: nodes, edges, optional aggregation rows, and
-pagination information. Callers pick raw JSON, compact text for LLMs, or a
-GQL-style table.
+The base statement returns identities and the properties it joined inline. A
+second statement fetches the remaining properties for that bounded ID set. It
+compiles through the same restriction and security passes as the base
+statement. The formatter then emits one envelope for every query type:
+deduplicated nodes, instance-level edges, optional aggregation columns and
+rows, and pagination metadata. It renders the envelope as JSON, as TOON for
+LLM callers, or as a cypher-shell table
+([ADR 004](../adr/004_unified_response_schema.md),
+[ADR 019](../adr/019_gql_response_format.md)).
 
-Pages keep no state. The server asks for one row past the page to report
-whether more rows exist, and each next page is a new query.
+Pagination is stateless. Each statement fetches one row past the window to
+compute `has_more`, and `SKIP` lowers to an `OFFSET` over a stable sort.
 
 ## When things go wrong
 
-- **The caller can't see a namespace.** Its rows never match, because every
-  read filters on the caller's namespaces.
-- **The caller lacks the role for an entity.** The query is rejected, or that
-  entity returns no rows.
-- **The query is too big.** Validation rejects it before any SQL runs, and the
-  error names the limit.
-- **The query is too slow.** ClickHouse stops it at its time limit, and the
-  caller gets an error.
-- **GitLab can't answer a redaction check.** The query fails instead of
-  returning rows that nobody checked.
-- **The caller disconnects.** The webserver stops the query.
-- **A new schema version is rolling out.** Queries keep using the active graph
-  until the new graph is complete.
+- **Unauthorized namespace.** The traversal-path predicate excludes its rows
+  inside ClickHouse. They never reach the webserver.
+- **Role floor not met.** If the caller meets an entity's role floor on no
+  path, restriction rejects the query. Otherwise, reads of that entity compile
+  to a constant-false predicate for the ineligible paths.
+- **Shape or size limit exceeded.** Validation rejects the query before any
+  SQL is generated, with a client-safe error that names the bound.
+- **Time or memory limit exceeded.** ClickHouse aborts the statement, and the
+  caller gets an error, never a partial result.
+- **Redaction exchange fails.** The query fails. Rows that Rails didn't check
+  are never returned.
+- **Client disconnects.** Closing the stream cancels the pipeline.
+- **Schema migration in progress.** The webserver serves the active snapshot
+  until every table of the new version is complete.
 
 ## Why we built it this way
 
-We could have run a graph database next to GitLab. We didn't, because
-ClickHouse already holds the replicated data, handles analytical queries well,
-and is shared GitLab infrastructure.
-[ADR 000](../adr/000_clickhouse_graph_storage.md) records the evaluation. The
-engine adds graph semantics on top.
+ClickHouse already holds the replicated GitLab data as shared Data Insights
+Platform infrastructure, and its OLAP execution suits aggregation-heavy
+questions. A dedicated graph database would add another store to operate and
+replicate into. Orbit treats graph semantics as a compilation problem instead.
+[ADR 000](../adr/000_clickhouse_graph_storage.md) records the evaluation.
 
-Authorization lives in two places. SQL filters on the caller's namespaces,
-which is fast and covers almost every row. GitLab redaction covers the rules
-that only GitLab knows. Some queries pay for an extra round trip, but no query
-depends on filtering after the fact alone.
+Authorization uses two layers. Traversal-path predicates in SQL apply
+namespace and role scope at index speed. Rails redaction covers the remaining
+per-resource rules. Results that need redaction pay for one extra round trip,
+and in return no query relies on post-filtering for tenant isolation.
 
-Callers never write SQL. A query language with a fixed shape lets the engine
-validate, bound, and secure every query, and LLMs can write it safely.
+Callers never send SQL. A constrained query language gives the compiler a
+closed input shape, so validation, bounding, and predicate injection are
+total. The same constraint makes the language reliable for LLMs to generate.
 
 ## Decisions
 
@@ -264,7 +271,7 @@ Each part can change on its own.
   The JSON mode uses `get_graph_schema`, and GQL uses `CALL db.schema()`.
 
 Each user has one active language, which a per-user flag in Rails selects.
-[Query languages](query-languages.md#1-rails-picks-the-language) describes the rules.
+[Query languages](query-languages.md#1-language-selection) describes the rules.
 
 ### Responses
 
