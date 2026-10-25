@@ -96,18 +96,25 @@ With Orbit:
 Each answer reports the answer, the number of tool calls and API requests, and the time.
 It also lists what it could not find, and what it had to guess.
 
-Show the raw comparison:
+Show the raw comparison in two tables. First, what each answer cost:
 
 | | Without Orbit | With Orbit |
 |---|---|---|
 | Tool calls and API requests | | |
 | Time | | |
-| What the answer covers | | |
-| Could not find | | |
-| Had to guess | | |
 
-In **What the answer covers**, give counts that the user can check, such as projects, files, callers,
-or merge requests. Then show both answers in full, one after the other.
+Then the results, one row for each thing that the question asks about, up to five rows.
+For example, for a merge request question:
+
+| Result | Without Orbit | With Orbit |
+|---|---|---|
+| Callers outside the merge request | 2, in this project only | 14, in 6 projects |
+| Projects that import the changed code | Not found | 6 |
+
+In each cell, give a count or a short fact that the user can check, or write `Not found` or `Guessed`.
+Pick the rows that answer the question. Leave out details that do not change the answer.
+
+Do not show the full answers. Offer to show either one if the user asks.
 
 Do not add a verdict, a score, or a summary of which answer is better. Let the user compare.
 
