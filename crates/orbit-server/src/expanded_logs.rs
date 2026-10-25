@@ -239,6 +239,21 @@ mod tests {
     }
 
     #[test]
+    fn customer_path_in_a_span_below_the_log_level_is_not_expanded() {
+        let filter = tracing_subscriber::EnvFilter::new("info");
+        let logs = capture_with_filter(&config(false, vec![9970]), filter, || {
+            let outer = orbit_log_fields::info_span!("work", safe(GL_ROOT_NAMESPACE_ID) = 9970_u64);
+            outer.in_scope(|| {
+                let inner =
+                    orbit_log_fields::debug_span!("project", safe(TRAVERSAL_PATH) = "1/42/123/");
+                inner.in_scope(log_parsed_file);
+            });
+        });
+
+        assert!(!logs.contains(FILE_PATH), "{logs}");
+    }
+
+    #[test]
     fn requested_lines_are_expanded() {
         let logs = capture(&config(false, vec![]), || {
             let span = orbit_log_fields::info_span!(
