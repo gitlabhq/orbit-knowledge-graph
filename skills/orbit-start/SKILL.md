@@ -66,20 +66,16 @@ Then ask the user what to do next. Offer these options:
 
 Ask which question to compare: one that you already answered, or a new one from step 2.
 
-Answer the question twice, once without Orbit and once with Orbit, so that both answers are measured the same way.
-If you can start subagents and stream a file to the user, run both answers in parallel:
+Answer the question twice, once without Orbit and once with Orbit.
 
-1. Create two empty logs: `${TMPDIR:-/tmp}/orbit-start/without.log` and `${TMPDIR:-/tmp}/orbit-start/with.log`.
-1. Start streaming both logs to the user, for example with the Monitor tool and `tail -q -n +1 -F` in Claude Code.
-1. Tell the user that two answers are starting, and that each call shows up as it runs.
-1. Start both subagents in one turn. Give each one the question, the scope, the inputs, its log, and its rules from below.
-1. Stop the stream when both subagents finish.
+1. Run `date +%s` to note the start time.
+1. If you can start a background subagent, for example with the Agent tool in Claude Code, start the answer without Orbit there.
+   Give it the question, the scope, the inputs, and the rules from below.
+1. Answer with Orbit yourself, in this session, so that the user sees each query as it runs.
+   Count your tool calls, and run `date +%s` again when you finish.
+1. If the answer without Orbit is still running, tell the user, and wait for it.
 
-Otherwise, answer without Orbit first, then with Orbit, so that the user sees each call as you make it.
-
-Before each tool call, a subagent appends one line to its log with the call number and the command.
-For example: `[without Orbit] 4: glab api projects/123/merge_requests/45/changes`.
-When it finishes, it appends one line with the number of calls and the time, such as `[with Orbit] done: 3 calls, 25s`.
+If you cannot start a background subagent, answer with Orbit first, then without Orbit.
 
 Without Orbit:
 
@@ -90,7 +86,7 @@ Without Orbit:
 
 With Orbit:
 
-- Load the Orbit skill with `glab orbit skills get orbit`, and follow its query rules.
+- Follow the query rules from the Orbit skill that you loaded in step 1.
 - Run each query with `glab orbit query`.
 
 Each answer reports the answer, the number of tool calls and API requests, and the time.
