@@ -43,6 +43,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `orbit-search` | Store-agnostic grep helpers: OR-alternative parsing and the kind filter (`grep`), and the shared corpus policy (source extensions, test/vendor exclusions) in `corpus` |
 | `duckdb-client` | DuckDB client with read-write retry backoff, read-only concurrent access, ontology-driven graph converter, shared SQL-literal/Arrow-column helpers |
 | `gitlab-client` | GitLab REST/JWT client for Rails API calls |
+| `orbit-cli/graphql` | Typed GitLab GraphQL queries, checked at compile time against the vendored GitLab schema |
 | `integration-testkit` | Shared ClickHouse service helpers, `MockRedactionService`, `ResponseView` assertion framework, YAML query scenario runner (`query_scenario` module: `QueryScenario` format, preset system, assertion enforcement), indexer scenario runner (`scenario`), plan-shape runner (`plan_shape`), `GKG_TEST_ONTOLOGY_OVERLAY` loader, CLI test harness (`cli` module) |
 | `integration-tests` | Test binaries: `local` (compiler, plan shape), `server_containers`, `indexer_containers`, `cli`, and `billing_boundary`. See [Testing](../design-documents/testing.md) |
 | `integration-tests-codegraph` | YAML suites for `code-graph` (`fixtures/`) and `code-graph-incremental` (`fixtures_incremental/`); `build.rs` generates one test per suite |
