@@ -757,7 +757,7 @@ end
 - [ADR 001: gRPC Communication Protocol](001_grpc_communication.md)
 - [ADR 002: Rust Core Runtime](002_rust_core_runtime.md)
 - [ADR 011: Agent command surface](011_agent_command_surface.md)
-- [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md): the Rails-side routing that decides when MCP agents reach this API
+- [Duo / Orbit prompt routing architecture](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/duo_orbit_prompt_routing.md): the Rails-side routing that decides when MCP agents reach this API
 - [MR !411: Proto rewrite for REST API alignment](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411)
 - [GOON Format Specification](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205): Graph Object Output Notation for `format=llm` query results
 - [TOON Specification](https://github.com/toon-format/spec/blob/main/SPEC.md): Token-Oriented Object Notation for schema `format=llm`

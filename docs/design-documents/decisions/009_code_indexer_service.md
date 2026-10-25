@@ -149,7 +149,7 @@ The `code` module could be extracted to its own crate. This is orthogonal to the
 
 ## References
 
-- [Code indexing design document](../indexing/code_indexing.md)
-- [SDLC indexing design document](../indexing/sdlc_indexing.md)
+- [Code indexing design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/code_indexing.md)
+- [SDLC indexing design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md)
 - [Indexer crate: handler registry](../../../crates/indexer/src/engine/handler.rs)
 - [Server CLI: mode enum](../../../crates/orbit-server/src/cli/mod.rs)

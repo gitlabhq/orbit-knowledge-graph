@@ -166,7 +166,7 @@ The PREP (Production Readiness) review (MR !64) will evaluate Rust-specific oper
 - [Orbit Helm charts](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts) - production Helm chart (v1.0.0)
 - [ADR 001: gRPC communication protocol](001_grpc_communication.md)
 - [ADR 003: API Design, Unified REST + GraphQL](003_api_design.md)
-- [Design documents](../README.md) - architecture overview
+- [Design documents](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/README.md) - architecture overview
 - [PREP readiness review MR !64](https://gitlab.com/gitlab-org/architecture/readiness/-/merge_requests/64)
 - [labkit-rs](https://gitlab.com/gitlab-org/rust/labkit-rs) - Rust implementation of LabKit observability library
 - [GLAZ authorization service](https://gitlab.com/gitlab-org/architecture/auth-architecture/design-doc/-/merge_requests/74) - another Rust service at GitLab
