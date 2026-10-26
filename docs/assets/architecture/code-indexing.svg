@@ -1,46 +1,47 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-150 -260 1460 620" width="720" height="306" font-family="'GitLab Sans', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif">
 <title>Orbit code indexing: from a push to the code graph</title>
 <defs>
+<linearGradient id="logo" gradientUnits="userSpaceOnUse" x1="0" y1="-66" x2="0" y2="66"><stop offset="0.0" stop-color="#8FD6C6"/><stop offset="0.5" stop-color="#8E9DD3"/><stop offset="1.0" stop-color="#6B4DB6"/></linearGradient>
 <symbol viewBox="0 0 16 16" id="i-branch" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M11.5 4.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm2.5-1a2.501 2.501 0 0 1-1.872 2.42A3.502 3.502 0 0 1 8.75 8.5h-1.5a2 2 0 0 0-1.965 1.626 2.501 2.501 0 1 1-1.535-.011v-4.23a2.501 2.501 0 1 1 1.5 0v1.742a3.484 3.484 0 0 1 2-.627h1.5a2 2 0 0 0 1.823-1.177A2.5 2.5 0 1 1 14 3.5zm-8.5 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm0-9a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></symbol>
 <symbol viewBox="0 0 16 16" id="i-commit" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 10.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM8 12c1.953 0 3.579-1.4 3.93-3.25h3.32a.75.75 0 0 0 0-1.5h-3.32a4.001 4.001 0 0 0-7.86 0H.75a.75.75 0 0 0 0 1.5h3.32A4.001 4.001 0 0 0 8 12z"/></symbol>
-<symbol viewBox="0 0 16 16" id="i-orbit" xmlns="http://www.w3.org/2000/svg"><path d="M4.938.61a8 8 0 0 1 5.113-.342.75.75 0 0 1-.385 1.449 6.502 6.502 0 0 0-6.297 10.845 6.5 6.5 0 0 0 10.939-6.133.75.75 0 1 1 1.455-.363A8 8 0 1 1 4.938.61zm2.634 2.409a5 5 0 1 1 .858 9.963 5 5 0 0 1-.858-9.963zm1.486 1.645a3.501 3.501 0 0 0-3.736 1.082 3.5 3.5 0 1 0 3.736-1.082zM14 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></symbol>
 <symbol viewBox="0 0 16 16" id="i-project" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M9.5 14.5l-6-2.5V4l6-2.5v13zm-6.885-1.244A1 1 0 0 1 2 12.333V3.667a1 1 0 0 1 .615-.923L8.923.115A1.5 1.5 0 0 1 11 1.5V2h1.25c.966 0 1.75.783 1.75 1.75v8.5A1.75 1.75 0 0 1 12.25 14H11v.5a1.5 1.5 0 0 1-2.077 1.385l-6.308-2.629zM11 12.5h1.25a.25.25 0 0 0 .25-.25v-8.5a.25.25 0 0 0-.25-.25H11v9z"/></symbol>
 <symbol viewBox="0 0 16 16" id="i-work-item-task" xmlns="http://www.w3.org/2000/svg"><path d="M14.25 9a.75.75 0 0 1 .75.75V12a3 3 0 0 1-3 3H4a3 3 0 0 1-3-3V9.75a.75.75 0 0 1 1.5 0V12A1.5 1.5 0 0 0 4 13.5h8a1.5 1.5 0 0 0 1.5-1.5V9.75a.75.75 0 0 1 .75-.75zm-1.474-6.682a.75.75 0 0 1 1.056 1.056l-.052.057-6.096 6.096a.751.751 0 0 1-.955.088l-.115-.096-2.403-2.484-.05-.057A.75.75 0 0 1 5.232 5.94l.056.052 1.873 1.935L12.72 2.37l.056-.052z"/></symbol>
 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8f8e96" fill-opacity="0.8"/></marker>
-<mask id="knockout" maskUnits="userSpaceOnUse" x="-150" y="-260" width="1460" height="620"><rect x="-150" y="-260" width="1460" height="620" fill="white"/><rect x="837.24" y="54.75" width="65.52000000000001" height="34.5" rx="6" fill="black"/><rect x="792.44" y="86.5" width="155.12" height="27.0" rx="6" fill="black"/><rect x="772.84" y="-120.25" width="194.32000000000002" height="34.5" rx="6" fill="black"/><rect x="807.56" y="-88.5" width="124.88000000000001" height="27.0" rx="6" fill="black"/><rect x="805.04" y="229.75" width="129.92000000000002" height="34.5" rx="6" fill="black"/><rect x="807.56" y="261.5" width="124.88000000000001" height="27.0" rx="6" fill="black"/><rect x="-37.24" y="57.75" width="74.48" height="40.5" rx="6" fill="black"/><rect x="-76.16000000000001" y="97.75" width="152.32000000000002" height="28.5" rx="6" fill="black"/><rect x="-102.76" y="123.75" width="205.52" height="28.5" rx="6" fill="black"/><rect x="252.76" y="57.75" width="74.48" height="40.5" rx="6" fill="black"/><rect x="208.51999999999998" y="97.75" width="162.96" height="28.5" rx="6" fill="black"/><rect x="235.12" y="123.75" width="109.76" height="28.5" rx="6" fill="black"/><rect x="497.4" y="65.75" width="165.20000000000002" height="40.5" rx="6" fill="black"/><rect x="519.8" y="105.75" width="120.4" height="28.5" rx="6" fill="black"/><rect x="514.48" y="131.75" width="131.04000000000002" height="28.5" rx="6" fill="black"/><rect x="1077.4" y="71.75" width="165.20000000000002" height="40.5" rx="6" fill="black"/><rect x="1099.8" y="111.75" width="120.4" height="28.5" rx="6" fill="black"/><rect x="1099.8" y="137.75" width="120.4" height="28.5" rx="6" fill="black"/></mask>
+<mask id="knockout" maskUnits="userSpaceOnUse" x="-150" y="-260" width="1460" height="620"><rect x="-150" y="-260" width="1460" height="620" fill="white"/><rect x="837.24" y="54.75" width="65.52000000000001" height="34.5" rx="6" fill="black"/><rect x="792.44" y="86.5" width="155.12" height="27.0" rx="6" fill="black"/><rect x="772.84" y="-120.25" width="194.32000000000002" height="34.5" rx="6" fill="black"/><rect x="807.56" y="-88.5" width="124.88000000000001" height="27.0" rx="6" fill="black"/><rect x="805.04" y="229.75" width="129.92000000000002" height="34.5" rx="6" fill="black"/><rect x="807.56" y="261.5" width="124.88000000000001" height="27.0" rx="6" fill="black"/><rect x="-37.24" y="57.75" width="74.48" height="40.5" rx="6" fill="black"/><rect x="-76.16000000000001" y="97.75" width="152.32000000000002" height="28.5" rx="6" fill="black"/><rect x="-102.76" y="123.75" width="205.52" height="28.5" rx="6" fill="black"/><rect x="252.76" y="57.75" width="74.48" height="40.5" rx="6" fill="black"/><rect x="208.51999999999998" y="97.75" width="162.96" height="28.5" rx="6" fill="black"/><rect x="235.12" y="123.75" width="109.76" height="28.5" rx="6" fill="black"/><rect x="497.4" y="65.75" width="165.20000000000002" height="40.5" rx="6" fill="black"/><rect x="519.8" y="105.75" width="120.4" height="28.5" rx="6" fill="black"/><rect x="514.48" y="131.75" width="131.04000000000002" height="28.5" rx="6" fill="black"/><rect x="1077.4" y="75.75" width="165.20000000000002" height="40.5" rx="6" fill="black"/><rect x="1099.8" y="115.75" width="120.4" height="28.5" rx="6" fill="black"/><rect x="1099.8" y="141.75" width="120.4" height="28.5" rx="6" fill="black"/></mask>
 </defs>
-<g mask="url(#knockout)"><path d="M58,0 L228,0" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M348,0 L514,0" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M646,0 L818,0" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M922,0 L1090,0" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M637,-34 L825,-148" fill="none" stroke="#8f8e96" stroke-opacity="0.3" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrow)"/><path d="M637,34 L825,148" fill="none" stroke="#8f8e96" stroke-opacity="0.3" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrow)"/></g>
-<circle cx="870" cy="0" r="44" fill="#14B8A6"/>
-<use href="#i-branch" x="852.0" y="-18.0" width="36" height="36" style="fill:#1f1e24"/>
-<circle cx="870" cy="-175" r="44" fill="#c4c3ca"/>
-<use href="#i-branch" x="852.0" y="-193.0" width="36" height="36" style="fill:#1f1e24"/>
-<circle cx="870" cy="175" r="44" fill="#c4c3ca"/>
-<use href="#i-branch" x="852.0" y="157.0" width="36" height="36" style="fill:#1f1e24"/>
-<circle cx="0" cy="0" r="48" fill="#FC6D26"/>
-<use href="#i-commit" x="-20.0" y="-20.0" width="40" height="40" style="fill:#1f1e24"/>
-<circle cx="290" cy="0" r="48" fill="#E24329"/>
-<use href="#i-work-item-task" x="270.0" y="-20.0" width="40" height="40" style="fill:#ffffff"/>
-<circle cx="580" cy="0" r="56" fill="#8B5CF6"/>
-<use href="#i-project" x="557.0" y="-23.0" width="46" height="46" style="fill:#ffffff"/>
-<circle cx="1160" cy="0" r="62" fill="#3B82F6"/>
-<use href="#i-orbit" x="1134.5" y="-25.5" width="51" height="51" style="fill:#ffffff"/>
-<text x="870" y="72" font-size="23" font-weight="600" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">main</text>
+<g mask="url(#knockout)"><path d="M58,0 L228,0" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M348,0 L514,0" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M646,0 L818,0" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M922,0 L1080,0" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M637,-34 L825,-148" fill="none" stroke="#8f8e96" stroke-opacity="0.3" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrow)"/><path d="M637,34 L825,148" fill="none" stroke="#8f8e96" stroke-opacity="0.3" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrow)"/></g>
+<circle cx="870" cy="0" r="44" fill="#14B8A6" fill-opacity="0.16" stroke="#14B8A6" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-branch" x="852.0" y="-18.0" width="36" height="36" style="fill:#14B8A6"/>
+<circle cx="870" cy="-175" r="44" fill="#c4c3ca" fill-opacity="0.16" stroke="#c4c3ca" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-branch" x="852.0" y="-193.0" width="36" height="36" style="fill:#c4c3ca"/>
+<circle cx="870" cy="175" r="44" fill="#c4c3ca" fill-opacity="0.16" stroke="#c4c3ca" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-branch" x="852.0" y="157.0" width="36" height="36" style="fill:#c4c3ca"/>
+<circle cx="0" cy="0" r="48" fill="#FC6D26" fill-opacity="0.16" stroke="#FC6D26" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-commit" x="-20.0" y="-20.0" width="40" height="40" style="fill:#FC6D26"/>
+<circle cx="290" cy="0" r="48" fill="#E24329" fill-opacity="0.16" stroke="#E24329" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-work-item-task" x="270.0" y="-20.0" width="40" height="40" style="fill:#E24329"/>
+<circle cx="580" cy="0" r="56" fill="#8B5CF6" fill-opacity="0.16" stroke="#8B5CF6" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-project" x="557.0" y="-23.0" width="46" height="46" style="fill:#8B5CF6"/>
+<circle cx="1160" cy="0" r="35.2" fill="none" stroke="url(#logo)" stroke-width="12.5"/>
+<path d="M1217.7,-16.5 A60.0,60.0 0 1 1 1175.5,-58.0" fill="none" stroke="url(#logo)" stroke-width="12.0" stroke-linecap="round"/>
+<circle cx="1210.2" cy="-50.2" r="16.5" fill="url(#logo)"/>
+<text x="870" y="72" font-size="23" font-weight="600" fill="#14B8A6" text-anchor="middle" dominant-baseline="central">main</text>
 <text x="870" y="100" font-size="18" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Default branch</text>
 <text x="870" y="-103" font-size="23" font-weight="600" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">feature/search</text>
 <text x="870" y="-75" font-size="18" font-weight="450" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">Not indexed</text>
 <text x="870" y="247" font-size="23" font-weight="600" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">fix/login</text>
 <text x="870" y="275" font-size="18" font-weight="450" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">Not indexed</text>
-<text x="0" y="78" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Push</text>
+<text x="0" y="78" font-size="27" font-weight="650" fill="#FC6D26" text-anchor="middle" dominant-baseline="central">Push</text>
 <text x="0" y="112" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Code lands on</text>
 <text x="0" y="138" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">the default branch</text>
-<text x="290" y="78" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Task</text>
+<text x="290" y="78" font-size="27" font-weight="650" fill="#E24329" text-anchor="middle" dominant-baseline="central">Task</text>
 <text x="290" y="112" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">GitLab records</text>
 <text x="290" y="138" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">the event</text>
-<text x="580" y="86" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Repository</text>
+<text x="580" y="86" font-size="27" font-weight="650" fill="#8B5CF6" text-anchor="middle" dominant-baseline="central">Repository</text>
 <text x="580" y="120" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Downloaded</text>
 <text x="580" y="146" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">from Gitaly</text>
-<text x="1160" y="92" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Code graph</text>
-<text x="1160" y="126" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Written to</text>
-<text x="1160" y="152" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">ClickHouse</text>
+<text x="1160" y="96" font-size="27" font-weight="650" fill="#6B4DB6" text-anchor="middle" dominant-baseline="central">Code graph</text>
+<text x="1160" y="130" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Written to</text>
+<text x="1160" y="156" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">ClickHouse</text>
 <text x="870" y="330" font-size="19" font-weight="450" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">Other branches stay local with the Orbit CLI</text>
 </svg>

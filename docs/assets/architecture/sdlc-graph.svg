@@ -13,39 +13,39 @@
 <mask id="knockout" maskUnits="userSpaceOnUse" x="-780" y="-420" width="1560" height="890"><rect x="-780" y="-420" width="1560" height="890" fill="white"/><rect x="-37.24" y="73.75" width="74.48" height="40.5" rx="6" fill="black"/><rect x="-124.04" y="113.75" width="248.08" height="28.5" rx="6" fill="black"/><rect x="-28.28" y="139.75" width="56.56" height="28.5" rx="6" fill="black"/><rect x="-82.60000000000001" y="-242.25" width="165.20000000000002" height="40.5" rx="6" fill="black"/><rect x="-155.96" y="-202.25" width="311.92" height="28.5" rx="6" fill="black"/><rect x="325.15999999999997" y="-129.25" width="225.68" height="40.5" rx="6" fill="black"/><rect x="271.4" y="-89.25" width="333.20000000000005" height="28.5" rx="6" fill="black"/><rect x="470.96" y="124.75" width="150.08" height="40.5" rx="6" fill="black"/><rect x="421.96" y="164.75" width="248.08" height="28.5" rx="6" fill="black"/><rect x="363.43999999999994" y="190.75" width="365.12000000000006" height="28.5" rx="6" fill="black"/><rect x="175.51999999999998" y="327.75" width="134.96" height="40.5" rx="6" fill="black"/><rect x="55.119999999999976" y="367.75" width="375.76000000000005" height="28.5" rx="6" fill="black"/><rect x="-363.4" y="327.75" width="240.8" height="40.5" rx="6" fill="black"/><rect x="-452.16" y="367.75" width="418.32000000000005" height="28.5" rx="6" fill="black"/><rect x="-425.56000000000006" y="393.75" width="365.12000000000006" height="28.5" rx="6" fill="black"/><rect x="-689.08" y="124.75" width="286.16" height="40.5" rx="6" fill="black"/><rect x="-606.2" y="164.75" width="120.4" height="28.5" rx="6" fill="black"/><rect x="-513.04" y="-129.25" width="150.08" height="40.5" rx="6" fill="black"/><rect x="-482.24" y="-89.25" width="88.48" height="28.5" rx="6" fill="black"/></mask>
 </defs>
 <g mask="url(#knockout)"><path d="M0,-70 L0,-248" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5"/><path d="M64,-27 L390,-167" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5"/><path d="M69,9 L494,61" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5"/><path d="M47,52 L208,231" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5"/><path d="M-47,52 L-208,231" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5"/><path d="M-69,9 L-494,61" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5"/><path d="M-64,-27 L-390,-167" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5"/><path d="M-387,-199 Q0,-290 387,-199" fill="none" stroke="#8f8e96" stroke-opacity="0.45" stroke-width="2" stroke-dasharray="7 7"/><path d="M588,36 Q763,-93 488,-173" fill="none" stroke="#8f8e96" stroke-opacity="0.45" stroke-width="2" stroke-dasharray="7 7"/><path d="M563,116 Q611,261 295,269" fill="none" stroke="#8f8e96" stroke-opacity="0.45" stroke-width="2" stroke-dasharray="7 7"/><path d="M502,95 Q235,261 -191,269" fill="none" stroke="#8f8e96" stroke-opacity="0.45" stroke-width="2" stroke-dasharray="7 7"/><path d="M414,-233 Q339,-377 51,-312" fill="none" stroke="#8f8e96" stroke-opacity="0.45" stroke-width="2" stroke-dasharray="7 7"/><path d="M399,-153 Q151,64 -197,246" fill="none" stroke="#8f8e96" stroke-opacity="0.45" stroke-width="2" stroke-dasharray="7 7"/><path d="M199,297 Q0,418 -199,297" fill="none" stroke="#8f8e96" stroke-opacity="0.45" stroke-width="2" stroke-dasharray="7 7"/></g>
-<circle cx="0" cy="0" r="64" fill="#3B82F6"/>
-<use href="#i-project" x="-26.0" y="-26.0" width="52" height="52" style="fill:#ffffff"/>
-<circle cx="0" cy="-300" r="48" fill="#EC4899"/>
-<use href="#i-work-items" x="-20.0" y="-320.0" width="40" height="40" style="fill:#ffffff"/>
-<circle cx="438" cy="-187" r="48" fill="#F59E0B"/>
-<use href="#i-merge-request" x="418.0" y="-207.0" width="40" height="40" style="fill:#1f1e24"/>
-<circle cx="546" cy="67" r="48" fill="#6366F1"/>
-<use href="#i-pipeline" x="526.0" y="47.0" width="40" height="40" style="fill:#ffffff"/>
-<circle cx="243" cy="270" r="48" fill="#FB923C"/>
-<use href="#i-package" x="223.0" y="250.0" width="40" height="40" style="fill:#1f1e24"/>
-<circle cx="-243" cy="270" r="48" fill="#DC2626"/>
-<use href="#i-shield" x="-263.0" y="250.0" width="40" height="40" style="fill:#ffffff"/>
-<circle cx="-546" cy="67" r="48" fill="#22D3EE"/>
-<use href="#i-container-image" x="-566.0" y="47.0" width="40" height="40" style="fill:#1f1e24"/>
-<circle cx="-438" cy="-187" r="48" fill="#A78BFA"/>
-<use href="#i-tanuki-ai" x="-458.0" y="-207.0" width="40" height="40" style="fill:#1f1e24"/>
-<text x="0" y="94" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Core</text>
+<circle cx="0" cy="0" r="64" fill="#3B82F6" fill-opacity="0.16" stroke="#3B82F6" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-project" x="-26.0" y="-26.0" width="52" height="52" style="fill:#3B82F6"/>
+<circle cx="0" cy="-300" r="48" fill="#EC4899" fill-opacity="0.16" stroke="#EC4899" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-work-items" x="-20.0" y="-320.0" width="40" height="40" style="fill:#EC4899"/>
+<circle cx="438" cy="-187" r="48" fill="#F59E0B" fill-opacity="0.16" stroke="#F59E0B" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-merge-request" x="418.0" y="-207.0" width="40" height="40" style="fill:#F59E0B"/>
+<circle cx="546" cy="67" r="48" fill="#6366F1" fill-opacity="0.16" stroke="#6366F1" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-pipeline" x="526.0" y="47.0" width="40" height="40" style="fill:#6366F1"/>
+<circle cx="243" cy="270" r="48" fill="#FB923C" fill-opacity="0.16" stroke="#FB923C" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-package" x="223.0" y="250.0" width="40" height="40" style="fill:#FB923C"/>
+<circle cx="-243" cy="270" r="48" fill="#DC2626" fill-opacity="0.16" stroke="#DC2626" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-shield" x="-263.0" y="250.0" width="40" height="40" style="fill:#DC2626"/>
+<circle cx="-546" cy="67" r="48" fill="#22D3EE" fill-opacity="0.16" stroke="#22D3EE" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-container-image" x="-566.0" y="47.0" width="40" height="40" style="fill:#22D3EE"/>
+<circle cx="-438" cy="-187" r="48" fill="#A78BFA" fill-opacity="0.16" stroke="#A78BFA" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-tanuki-ai" x="-458.0" y="-207.0" width="40" height="40" style="fill:#A78BFA"/>
+<text x="0" y="94" font-size="27" font-weight="650" fill="#3B82F6" text-anchor="middle" dominant-baseline="central">Core</text>
 <text x="0" y="128" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Project · Group · User</text>
 <text x="0" y="154" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Note</text>
-<text x="0" y="-222" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Work items</text>
+<text x="0" y="-222" font-size="27" font-weight="650" fill="#EC4899" text-anchor="middle" dominant-baseline="central">Work items</text>
 <text x="0" y="-188" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">WorkItem · Milestone · Label</text>
-<text x="438" y="-109" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Merge requests</text>
+<text x="438" y="-109" font-size="27" font-weight="650" fill="#F59E0B" text-anchor="middle" dominant-baseline="central">Merge requests</text>
 <text x="438" y="-75" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">MergeRequest · Diff · DiffFile</text>
-<text x="546" y="145" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Pipelines</text>
+<text x="546" y="145" font-size="27" font-weight="650" fill="#6366F1" text-anchor="middle" dominant-baseline="central">Pipelines</text>
 <text x="546" y="179" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Pipeline · Stage · Job</text>
 <text x="546" y="205" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Runner · Deployment · Environment</text>
-<text x="243" y="348" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Packages</text>
+<text x="243" y="348" font-size="27" font-weight="650" fill="#FB923C" text-anchor="middle" dominant-baseline="central">Packages</text>
 <text x="243" y="382" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Package · PackageFile · Dependency</text>
-<text x="-243" y="348" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Vulnerabilities</text>
+<text x="-243" y="348" font-size="27" font-weight="650" fill="#DC2626" text-anchor="middle" dominant-baseline="central">Vulnerabilities</text>
 <text x="-243" y="382" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Vulnerability · Finding · SecurityScan</text>
 <text x="-243" y="408" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Occurrence · Identifier · Scanner</text>
-<text x="-546" y="145" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Container registry</text>
+<text x="-546" y="145" font-size="27" font-weight="650" fill="#22D3EE" text-anchor="middle" dominant-baseline="central">Container registry</text>
 <text x="-546" y="179" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Repository</text>
-<text x="-438" y="-109" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">AI agents</text>
+<text x="-438" y="-109" font-size="27" font-weight="650" fill="#A78BFA" text-anchor="middle" dominant-baseline="central">AI agents</text>
 <text x="-438" y="-75" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Session</text>
 </svg>
