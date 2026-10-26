@@ -33,11 +33,9 @@ On Dedicated, only the Dedicated EOC runs commands. Use `gkg-webserver` and no `
 | You see | Do this | Done when |
 | --- | --- | --- |
 | Started with a deploy | [Roll back](../maintenance.md#rollback). | The query in step 1 works. |
-| `query` fails, `status` works, logs show `LazyLock instance has previously been poisoned` | [Roll back](../maintenance.md#rollback). | The query in step 1 works. |
 | All query types slow, or errors with `TIMEOUT_EXCEEDED` | The graph ClickHouse is overloaded. High indexer writes: [stop one indexer pool](../README.md#emergency-actions). Else page Orbit tier-2. | p95 is below 5 seconds. |
-| Errors with `status="timeout"` | The permission check in GitLab Rails is slow. Page the on-call of the GitLab API. | No `timeout` errors. |
-| One query type slow | One caller sends heavy queries. Find it in the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5), filter `json.mode: webserver`. Page Orbit tier-2. | p95 is below 5 seconds. |
-| The first queries after a quiet time are slow, then fast | No action. The graph ClickHouse starts after idle time. | p95 is below 5 seconds. |
+| Errors with `status="timeout"` | The query passed the stream timeout. Page Orbit tier-2. | No `timeout` errors. |
+| One query type slow | One caller sends heavy queries. Find it in the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5), filter `json.resource.labels.container_name: orbit-webserver`. Page Orbit tier-2. | p95 is below 5 seconds. |
 | Webserver pods show `OOMKilled` | Follow [OrbitContainerOOMKilled](OrbitContainerOOMKilled.md). | RESTARTS does not increase. |
 | `TrafficAbsent`, but the query in step 1 works | Users are not affected. Post in `#f_orbit_dev`. | Orbit tier-2 has the issue. |
 

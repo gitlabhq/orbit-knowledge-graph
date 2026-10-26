@@ -43,5 +43,3 @@ On Dedicated, only the Dedicated EOC runs commands. Use no `--context`.
 
 Page Orbit tier-2 in incident.io ([escalation](../README.md#escalation)). Siphon producer problem: ask in `#g_analytics_platform_insights`.
 Dedicated: the EOC runs `/inc escalate` and selects Orbit.
-
-Past incident: [production#21959](https://gitlab.com/gitlab-com/gl-infra/production/-/work_items/21959), the JetStream storage limit did not match the disk.

@@ -2,7 +2,7 @@
 
 Use this page when the code data of one project is stale or its task fails. For how code
 indexing works, see [code indexing architecture](../architecture/indexing/code-indexing.md).
-To stop code indexing, use [emergency actions](README.md#emergency-actions). Do not use `kubectl scale`.
+To stop code indexing, use [emergency actions](README.md#emergency-actions).
 
 ## Names you need
 
@@ -59,8 +59,7 @@ On Dedicated, the Dedicated EOC runs the commands without `--context`. Deploymen
 1. Read the indexer logs in [Kibana](https://log.gprd.gitlab.net/app/r/s/DhOL5). Filter
    `json.mode: indexer` and `json.span.gl_project_id: <project_id>`.
 
-Do not delete a lock. A held lock puts the request back in the queue. The lease of a crashed
-worker expires within a few minutes. If a lock stays for more than 15 minutes, page Orbit tier-2.
+Do not delete a lock. If a lock stays for more than 15 minutes, page Orbit tier-2.
 
 No code tasks for any project? The dispatcher ConfigMap must have
 `events_stream_name: prd_siphon_event_stream` (staging: `stg_siphon_event_stream`):
@@ -77,9 +76,6 @@ If a task waits or runs, wait for it. If the task fails, see
 Check: `indexed_at` in the checkpoint query shows a new time.
 
 ## A task fails again and again
-
-A timeout goes to the dead letters after a second attempt. A fatal parse error goes there
-at once. Other errors go there after the last attempt, a few minutes later.
 
 ### Read the dead letters
 

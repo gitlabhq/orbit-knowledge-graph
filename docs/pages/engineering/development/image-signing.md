@@ -6,7 +6,7 @@ job of this project built the digest on the named ref. It does not prove a revie
 
 ## Verify an image
 
-Use cosign 3 or later. Replace `<version>` with the release, for example `0.159.0`:
+Use cosign 3 or later. Replace `<version>` with the release:
 
 ```shell
 cosign verify \
@@ -20,8 +20,8 @@ Check: the command exits 0 and prints the certificate identity. The double slash
 
 ## Tag identity and branch identity
 
-Only a `refs/tags/v<version>` identity means a release. A `refs/heads/<branch>` identity proves
-nothing about review, because any Developer can get one through a fork merge request.
+Only a `refs/tags/v<version>` identity means a release. A `refs/heads/<branch>` identity does not
+mean a release.
 
 A policy pattern must match the full identity, with anchors at both ends:
 `^https://gitlab\.com/gitlab-org/orbit/knowledge-graph//\.gitlab-ci\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$`.

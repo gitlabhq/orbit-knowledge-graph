@@ -20,7 +20,7 @@ On Dedicated, only the Dedicated EOC runs commands. Use `gkg-dispatcher` and no 
    sum by (task, outcome) (increase(gkg_scheduler_task_runs_total{env="orbit-prd"}[30m]))
    ```
 
-1. Read the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5) with the filter `json.mode: dispatch-indexing`. Healthy: no `task failed` or `cadence lock check failed` lines.
+1. Read the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5) with the filter `json.resource.labels.container_name: orbit-dispatcher`. Healthy: no `task failed` or `cadence lock check failed` lines.
 1. Look for a recent deploy. Healthy: the newest ReplicaSet is older than the alert.
 
    ```shell
@@ -34,7 +34,7 @@ On Dedicated, only the Dedicated EOC runs commands. Use `gkg-dispatcher` and no 
 | A deploy a few minutes ago, the pod is `1/1` | No action. The pod restarts on each deploy, so a short gap is expected. | Task runs show `success` again. |
 | Started with a deploy and does not recover | [Roll back](../maintenance.md#rollback). | Task runs show `success`. |
 | Pod is `1/1`, but no task runs or `cadence lock check failed` | Restart the dispatcher with the commands below. | READY is `1/1` and task runs show `success`. |
-| Pod is not ready after a deploy, logs show a schema migration | Wait 15 minutes. Still not ready: page Orbit tier-2. | READY is `1/1`. |
+| Pod is not ready after a deploy, logs show a schema migration | Wait for the migration to end. Still not ready: page Orbit tier-2. | READY is `1/1`. |
 | `task failed` names the datalake or Siphon | Check the [Siphon dashboard](https://dashboards.gitlab.net/d/orbit-orbit-siphon). Siphon problem: ask in `#g_analytics_platform_insights`. | Task runs show `success`. |
 | `task failed` names NATS, a stream or a KV bucket | Follow [NATS alerts](nats-slo.md). Do not delete streams or KV buckets. | Task runs show `success`. |
 | Pod restarts with `OOMKilled` | Follow [OrbitContainerOOMKilled](OrbitContainerOOMKilled.md). | RESTARTS does not increase. |

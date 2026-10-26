@@ -33,7 +33,7 @@ On Dedicated, only the Dedicated EOC runs commands. Use `gkg-*` names and no `--
 
 | You see | Do this | Done when |
 | --- | --- | --- |
-| Restarts do not increase after 10 minutes | No action. NATS sends the job of a killed pod again after a few minutes, so a repeated kill shows in that time. | The alert resolves. |
+| Restarts do not increase after 10 minutes | No action. | The alert resolves. |
 | Started with a deploy | Roll back ([rollback](../maintenance.md#rollback)). | RESTARTS does not increase. |
 | The same container is killed again and again | Give it more memory: `resources` of `webserver`, `dispatcher` or `indexer.pools.<pool>` ([capacity](../maintenance.md#capacity)). | RESTARTS does not increase for 1 hour. |
 | An indexer is killed on the same repository each time | Give the pool more memory ([capacity](../maintenance.md#capacity)). Page Orbit tier-2 with the project ID from the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5). | RESTARTS does not increase. |

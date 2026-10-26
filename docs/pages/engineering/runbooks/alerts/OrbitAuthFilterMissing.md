@@ -14,7 +14,7 @@ Treat it as a security alert. Page Orbit tier-2 now, then do the checks.
    sum by (job) (rate(gkg_query_engine_compiler_rejected_total{failure_reason="security"}[5m]))
    ```
 
-1. Read the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5) with the filter `json.mode: webserver` at the alert time. Find the compiler rejection and write down the caller.
+1. Read the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5) with the filter `json.resource.labels.container_name: orbit-webserver` at the alert time. Find the compiler rejection and write down the caller.
 1. Look for a recent deploy of GitLab or Orbit. Healthy: the newest Orbit ReplicaSet is older than the alert.
 
    ```shell
@@ -27,7 +27,6 @@ Treat it as a security alert. Page Orbit tier-2 now, then do the checks.
 
 | You see | Do this | Done when |
 | --- | --- | --- |
-| Any rejection | Page Orbit tier-2 in incident.io. | Orbit tier-2 has the caller from the logs. |
 | The requests do not come from a known GitLab Rails caller | [Engage SIRT](https://handbook.gitlab.com/handbook/security/security-operations/sirt/engaging-security-on-call/). Give them the caller from the logs. | SIRT owns the incident. |
 | One caller with a bad or old JWT, after a key rotation | Finish the rotation on the old side ([secret rotation](../secret_rotation.md)). | The rejection rate is `0`. |
 | Started with a GitLab or Orbit deploy | Roll back that side ([rollback](../maintenance.md#rollback)). | The rejection rate is `0`. |

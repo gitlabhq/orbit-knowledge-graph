@@ -35,7 +35,7 @@ values on the shell command line.
 Symptoms: authentication or TLS errors right after a rotation.
 
 1. Set `version` back on the side you changed last, and merge. Exception: after ClickHouse
-   step 5, add a new password instead.
+   step 6, add a new password instead.
 2. Check: the [health check](README.md#first-5-minutes) passes.
 
 ## JWT shared key
@@ -51,9 +51,8 @@ window and change both sides close together.
 
 2. Orbit: set `version` of `gkg-gitlab-jwt` to the new Vault version. Check: the webserver and
    indexer pods restart.
-3. Rails reads the key once per process. In `k8s-workloads/gitlab-com`, add the ExternalSecret
-   `gitlab-knowledge-graph-jwt-v2` with the new version. Point
-   `knowledgeGraph.jwtSecret.secret` to it.
+3. In `k8s-workloads/gitlab-com`, add the ExternalSecret `gitlab-knowledge-graph-jwt-v2` with
+   the new version. Point `global.appConfig.knowledgeGraph.jwtSecret.secret` to it.
 4. Ask the release managers in `#releases` to hold auto-deploy while you merge. An auto-deploy
    can roll the change back.
 5. Check: the health check passes. Then remove the old ExternalSecret.
@@ -106,8 +105,8 @@ deletes the other passwords.
 ## Certificates
 
 cert-manager renews the leaf certificates by itself. The private CA `orbit-<env>-root-ca`
-renews by itself only near its end of life, with a new key. That breaks all connections, so
-rotate it by hand before then. Check its dates:
+renews by itself at its RENEWAL time, with a new key. That breaks all connections, so rotate
+it by hand before then. Check its dates:
 
 ```shell
 kubectl --context "$CTX" -n cert-manager get certificate orbit-<env>-root-ca \
@@ -117,7 +116,7 @@ kubectl --context "$CTX" -n cert-manager get certificate orbit-<env>-root-ca \
 > [!warning]
 > Do not run `cmctl renew` on the root CA and do not delete its Secret. Both make a new CA key.
 
-No alert watches certificate expiry yet. After TLS errors, check the leaf certificates:
+After TLS errors, check the leaf certificates:
 `kubectl --context "$CTX" -n gkg get certificate` (READY must be `True`).
 
 <details>
@@ -145,9 +144,9 @@ has a short window: the server and the clients must change together.
 5. Webserver: set `issuerRef.name` of `gkg-server-tls` to `orbit-<env>-ca-v2`. cert-manager
    issues the new certificate at once. Check: the health check passes.
 6. NATS, in one window: set `issuerRef.name` to `orbit-<env>-ca-v2` on `nats-server-tls`,
-   `nats-box-client-tls`, `nats-client-gkg` and `siphon-client-tls`. Merge.
-   - ArgoCD syncs `gkg` by itself, but not `nats` or `siphon`. Sync `nats` at once, then
-     `siphon`.
+   `nats-box-client-tls`, `nats-client-gkg`, `siphon-client-tls` (production) and
+   `nats-surveyor-client-tls` (staging). Merge.
+   - Sync `nats` at once, then `siphon`, if ArgoCD does not sync them by itself.
    - Orbit pods crash with `UnknownIssuer` until NATS has the new certificate. Indexing stops
      for those minutes.
    - Restart Orbit and Siphon. Reloader does not restart Siphon for this Secret:

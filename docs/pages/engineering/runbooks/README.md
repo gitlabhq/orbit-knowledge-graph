@@ -49,9 +49,8 @@ gcloud container clusters get-credentials orbit-prd --region us-east1 --project 
 <details open>
 <summary>GitLab.com</summary>
 
-Do not use `kubectl scale` on an indexer. KEDA changes the count back, or keeps a wrong count
-while the pool is paused. Do not set `keda.enabled: false` or use the `paused` annotation:
-neither stops the pool.
+Do not use `kubectl scale`, `keda.enabled: false` or the `paused` annotation on an indexer.
+They do not stop the pool.
 
 **Stop code indexing:**
 
@@ -134,11 +133,7 @@ and run an [emergency maintenance](https://gitlab.com/gitlab-com/gl-infra/gitlab
 > Do not use Dedicated rollback level 2 or 3 in an incident. They set `orbit.infra_enabled`
 > to `false`, which deletes the Orbit graph. Orbit then needs a full rebuild.
 
-Dedicated notes ([Orbit on Dedicated](https://gitlab.com/gitlab-com/gl-infra/gitlab-dedicated/team/-/blob/main/runbooks/orbit.md)):
-
-- Orbit needs the Data Insights Platform (Siphon and NATS).
-- On a large tenant, the first Siphon snapshot takes hours.
-- Do not enable indexing for the customer.
+More: [Orbit on Dedicated](https://gitlab.com/gitlab-com/gl-infra/gitlab-dedicated/team/-/blob/main/runbooks/orbit.md).
 
 </details>
 
@@ -158,8 +153,7 @@ Dedicated notes ([Orbit on Dedicated](https://gitlab.com/gitlab-com/gl-infra/git
 
 ## Escalation
 
-- Orbit: in the incident channel, run `/inc escalate` and select Orbit.
-- No answer in 15 minutes: run `/inc escalate` and select the IMOC. Also contact the Context
+- No answer from Orbit in 15 minutes: run `/inc escalate` and select the IMOC. Also contact the Context
   Systems engineering manager in Slack `#f_orbit`.
 - Siphon or the datalake ClickHouse: Slack `#g_analytics_platform_insights`
   ([Siphon runbook](https://runbooks.gitlab.com/siphon/)).
@@ -181,8 +175,7 @@ Dedicated notes ([Orbit on Dedicated](https://gitlab.com/gitlab-com/gl-infra/git
 
 The graph ClickHouse holds Red data: code symbols and SDLC metadata of private projects
 ([#1398](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1398)). Use Service
-Reader for investigation. Console actions are in the Audit tab. Database queries are in
-`system.query_log`.
+Reader only.
 
 </details>
 

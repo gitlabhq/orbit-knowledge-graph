@@ -17,7 +17,7 @@ On Dedicated, only the Dedicated EOC runs commands. Use `gkg-indexer-sdlc` and n
    ```
 
 1. Open the [indexer dashboard](https://dashboards.gitlab.net/d/orbit-orbit-gkg-indexer). Healthy: SDLC handler errors are near 0 and traffic is above 0.
-1. Read the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5) with the filter `json.mode: indexer`. Note the error and the namespace.
+1. Read the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5) with the filter `json.resource.labels.container_name: orbit-indexer`. Note the error and the namespace.
 1. Look for a recent deploy. Healthy: the newest ReplicaSet is older than the alert.
 
    ```shell
@@ -29,7 +29,7 @@ On Dedicated, only the Dedicated EOC runs commands. Use `gkg-indexer-sdlc` and n
 | You see | Do this | Done when |
 | --- | --- | --- |
 | Started with a deploy | [Roll back](../maintenance.md#rollback). | Handler errors are near 0. |
-| PAUSED is `True` | Someone stopped the pool. The `paused` annotation also shows `True` but keeps the pods: remove it with `autoscaling.keda.sh/paused-`. Ask in the incident channel. When the overload is gone, [resume](../README.md#emergency-actions). | Pods are `Running` and traffic is above 0. |
+| PAUSED is `True` | Someone stopped the pool. Ask in the incident channel. When the overload is gone, [resume](../README.md#emergency-actions). | Pods are `Running` and traffic is above 0. |
 | Pods restart with `OOMKilled` | Follow [OrbitContainerOOMKilled](OrbitContainerOOMKilled.md). | RESTARTS does not increase. |
 | Errors on the ClickHouse write | The graph ClickHouse is slow or down. Page Orbit tier-2. | Handler errors are near 0. |
 | Traffic stopped, pods are healthy | Nothing sends work. Follow [dispatcher alerts](gkg-dispatcher.md) and check the [Siphon dashboard](https://dashboards.gitlab.net/d/orbit-orbit-siphon). | Traffic is above 0. |

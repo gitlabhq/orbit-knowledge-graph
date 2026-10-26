@@ -1,7 +1,6 @@
 # NATS
 
-Orbit uses NATS JetStream for indexing work, dead letters and indexing locks. NATS runs in
-namespace `nats`. Use the `nats-box` deployment for all commands. Its default context has the
+NATS runs in namespace `nats`. Use the `nats-box` deployment for all commands. Its default context has the
 mTLS client certificates.
 
 ## Run commands
@@ -21,18 +20,14 @@ kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n nats exec deploy/nats-b
 ## Find the current names
 
 The stream and bucket names change with each release and schema version. `<release>` is the
-image tag with dashes, for example `0-159-0` for `0.159.0`. `<schema>` is the schema version.
+image tag with dashes, for example `1-2-3` for `1.2.3`. `<schema>` is the schema version.
 
 | Command | Shows |
 | --- | --- |
 | `nats stream ls` | `GKG_INDEXER_V<release>` and `GKG_DEAD_LETTERS_V<release>` |
 | `nats kv ls` | `indexing_locks_v<schema>` |
 
-Use the streams whose release is the running image tag. Old streams and buckets stay in
-production and do not affect indexing: ignore them. The dispatcher removes the streams of an
-old release about one hour after that release stops. Streams and buckets without a release
-or schema suffix, and the `_V79`, `_V80`, `_v72` and `_v94` ones, never go away by
-themselves.
+Use the streams whose release is the running image tag. Ignore all other streams and buckets.
 
 ## Check stream and consumer health
 

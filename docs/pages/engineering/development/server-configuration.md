@@ -9,7 +9,8 @@
 2. One overlay file: `--config <path>`, or else `config/config.yaml` when it exists.
 3. Secret files under `/etc/secrets/`, for example `/etc/secrets/billing/quota/api_token`.
 
-The server reads no environment variables. To add a setting, add the field to
+The server reads only two environment variables: `RUST_LOG`, when `metrics.log_level` is
+unset, and `GKG_VERSION`. To add a setting, add the field to
 `crates/orbit-server-config/` and its value to `config/default.yaml`. For the local overlay
 files, see [local development](local-development.md).
 
@@ -41,7 +42,7 @@ Select the mode with `--mode`. The default is `webserver`.
 | `nats.subscription_buffer_size` | Buffer between the fetch loop and the handlers |
 | `nats.fetch_expires_secs` | Server-side timeout of one batch fetch |
 | `nats.auto_create_streams` | Create the streams at startup |
-| `nats.stream_replicas` | Replicas per stream. Use 3 in production. |
+| `nats.stream_replicas` | Replicas per stream. |
 | `nats.stream_max_age_secs`, `nats.stream_max_bytes`, `nats.stream_max_messages` | Stream limits |
 | `nats.consumer_inactive_threshold_secs` | Idle time before NATS deletes a versioned durable consumer |
 | `nats.release_gc_idle_threshold_secs` | Idle time before a dispatcher deletes the streams of another release |
@@ -101,7 +102,7 @@ become slower and make more parts, because quorum inserts run one at a time per 
 A handler takes its group slot first, then a global slot. So one handler type cannot use all
 workers. When these keys are unset, the server derives them from the container resources:
 
-- `max_concurrent_workers`: the CPU limit, capped by the memory limit at 1.5 GiB per worker.
+- `max_concurrent_workers`: the CPU limit, capped by the memory limit.
 - `concurrency_groups`: one group gets the full limit. `sdlc` and `code` together share it 75% and 25%.
 
 Each derived value writes one log line at startup.
@@ -109,7 +110,7 @@ Each derived value writes one log line at startup.
 ## Topics
 
 Each indexer module declares the default policy of its topics in code, next to the handler. Only
-`code-indexing-task` retries and sends failed messages to the dead letter stream by default. An
+`code-indexing-task` sends failed messages to the dead letter stream by default. An
 `engine.topics.<topic>` entry changes only the fields that it sets.
 
 | Key | Effect |
@@ -213,8 +214,7 @@ example `[orbit_request]=debug`, also turns on the lines of dependencies in that
 | `tls.internal.enabled` | TLS on the probe server and the health-check API |
 | `tls.internal.cert_path`, `tls.internal.key_path` | Internal certificate. Unset uses `tls.cert_path` and `tls.key_path`. |
 
-The server reads certificates at startup. Restart the pods after a rotation. A separate internal
-certificate lets the gRPC certificate rotate on a different schedule.
+The server reads certificates at startup. Restart the pods after a rotation.
 
 ### Turn on internal TLS
 

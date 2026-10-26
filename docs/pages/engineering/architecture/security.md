@@ -122,10 +122,8 @@ build on Windows and macOS.
 - CI fails when a second cryptographic backend enters the server build or binary.
 - A unit test pins the module generation. CI fails when a dependency bump crosses a
   generation, because that change is a compliance event.
-- FedRAMP SC-8 needs TLS between pods. Turn on `tls.internal` with the
+- To turn on TLS between pods, follow the
   [internal TLS checklist](../development/server-configuration.md#turn-on-internal-tls).
-- Kubernetes probes over HTTPS do not verify the certificate. The webserver verifies the
-  health-check certificate against the OS trust store.
 
 ## When things go wrong
 

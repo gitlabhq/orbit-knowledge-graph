@@ -1,8 +1,6 @@
 # Disaster recovery
 
-Orbit holds no primary data. Siphon copies GitLab data into the datalake, and Orbit builds
-the graph from the datalake and the repositories. Recover Siphon first, then rebuild the
-graph.
+Recover Siphon first, then rebuild the graph.
 
 ## 1. Recover Siphon and the datalake
 
@@ -22,7 +20,7 @@ week of incomplete data. Continue when the Siphon team confirms that the snapsho
 
 If the NATS cluster was lost, ArgoCD recreates it. Orbit pods restart and create the Orbit
 streams again. Siphon does not: the Siphon team restarts Siphon.
-A Velero backup of NATS runs every 6 hours, but Siphon streams are in it too. Do not restore
+A Velero backup of NATS exists, but Siphon streams are in it too. Do not restore
 it yourself: ask the Siphon team. Check: all NATS pods are `Running`, and the stream list
 shows `GKG_INDEXER_V<release>`.
 
@@ -41,7 +39,7 @@ kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n nats exec deploy/nats-b
 On Dedicated, the Dedicated EOC runs the rebuild.
 
 A rebuild does not bring back `gkg.namespace_storage_snapshot`. To keep its history, a
-ClickHouse Cloud admin restores the daily backup (kept for 24 hours) to a new service
+ClickHouse Cloud admin restores the latest backup to a new service
 ([procedure](https://gitlab.com/gitlab-com/runbooks/-/blob/master/docs/clickhouse/backup-restore.md)).
 Copy only this table back
 ([ClickHouse docs](https://clickhouse.com/docs/products/cloud/guides/backups/review-and-restore-backups)),

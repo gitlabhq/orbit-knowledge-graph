@@ -39,7 +39,7 @@ Orbit SDLC data is behind the datalake, or the freshness samples stopped. Users 
 | Migration age above 4 hours | The migration is stuck. Page Orbit tier-2. | Migration age is `0`. |
 | Freshness task has no `success` runs | Follow [dispatcher alerts](gkg-dispatcher.md). | `success` is above 0. |
 | All entities are old, no migration | Indexing stopped. Follow [SDLC indexer](gkg-indexer-sdlc.md) and [NATS](nats-slo.md) alerts. | "Oldest data" is below 15 minutes. |
-| One entity is old in many namespaces | One handler fails. Find its error in the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5), filter `json.mode: indexer`. Page Orbit tier-2. | That entity is below 15 minutes. |
+| One entity is old in many namespaces | One handler fails. Find its error in the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5), filter `json.resource.labels.container_name: orbit-indexer`. Page Orbit tier-2. | That entity is below 15 minutes. |
 | A few namespaces in the SQL result | Get the path with the query below. Check `GITLAB_HOST=gitlab.com glab orbit graph-status --full-path <path>`. If it is enabled, [reindex it](../manual_rebuild.md#reindex-one-namespace-project-or-entity). | The namespace is not in the SQL result. |
 | Started with a deploy | [Roll back](../maintenance.md#rollback). | "Oldest data" is below 15 minutes. |
 

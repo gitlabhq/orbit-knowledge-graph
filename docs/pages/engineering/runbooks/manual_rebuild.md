@@ -22,9 +22,11 @@ on 2026-10-26.
 
 ## Names that you need
 
-- `<release>`: the current indexing stream name ends with it.
+- `<release>`: the running image tag, with dashes for dots (`1.2.3` is `1-2-3`). The stream
+  list also shows old releases: use only the running one.
 
   ```shell
+  kubectl --context "$CTX" -n gkg get deploy orbit-dispatcher -o jsonpath='{.spec.template.spec.containers[0].image}'
   kubectl --context "$CTX" -n nats exec deploy/nats-box -- nats stream ls -n | grep GKG_INDEXER_V
   ```
 
@@ -34,11 +36,9 @@ on 2026-10-26.
   SELECT version, status FROM gkg.gkg_schema_version FINAL ORDER BY version DESC
   ```
 
-Keep `gkg.namespace_storage_snapshot`. A reindex cannot rebuild its history.
-
 ## Full rebuild
 
-Steps 4 and 5: queries fail. After step 5: results are incomplete until indexing completes,
+Steps 5 and 6: queries fail. After step 6: results are incomplete until indexing completes,
 about 4 hours on GitLab.com and 7 minutes in staging.
 
 1. Tell users in the incident channel and in `#f_orbit_dev`.
@@ -107,8 +107,6 @@ about 4 hours on GitLab.com and 7 minutes in staging.
    DROP TABLE gkg.gkg_schema_version;
    ```
 
-   If you keep `gkg_schema_version`, the dispatcher creates no tables and crash-loops.
-
 6. Start the dispatcher. If you scaled it down, scale it to 1. Otherwise set
    `dispatcher.enabled: true` and merge.
 
@@ -129,15 +127,14 @@ about 4 hours on GitLab.com and 7 minutes in staging.
    projects as indexed.
 
 To move to another ClickHouse service, change the host and the passwords in the ArgoCD values
-and Vault before step 6. The datalake does not change.
+and Vault before step 6.
 
 ## Reindex one namespace, project or entity
 
 Mark the checkpoint rows as deleted. Orbit then indexes that data again from the start.
 
-SDLC data of one top-level namespace. The sweep key starts the reindex within a minute. It
-also starts the hourly sweep of all namespaces early. This load is normal.
-Without it, the reindex waits for the hourly sweep.
+SDLC data of one top-level namespace. The sweep key starts the reindex within a minute,
+together with a sweep of all namespaces.
 
 ```sql
 INSERT INTO gkg.v<N>_checkpoint (key, watermark, cursor_values, _deleted)

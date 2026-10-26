@@ -7,13 +7,12 @@
 
 > [!warning]
 > Do not edit live Deployments: ArgoCD removes the change. Do not delete the
-> `orbit-webserver` Service or uninstall the release: the PSC attachment uses its load
-> balancer, and GitLab then cannot reach Orbit. A rollback two or more schema versions back
+> `orbit-webserver` Service or uninstall the release: GitLab then cannot reach Orbit. A rollback two or more schema versions back
 > starts a full reindex. Check first: [does a release reindex?](#does-a-release-reindex)
 
 1. Revert the last deploy MR in
    [argocd-apps](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests) and merge it.
-2. ArgoCD syncs staging, then production. Watch the `service-gkg` app in
+2. ArgoCD syncs staging and production at the same time. Watch the `service-gkg` app in
    [ArgoCD](https://argocd.gitlab.net).
 3. Done when all Deployments show the old tag:
 
@@ -45,11 +44,11 @@ Instrumentor rollback.
 <summary>GitLab.com</summary>
 
 1. The `release-deploy-mr` job opens a deploy MR in
-   [argocd-apps](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests). The
-   MR says if the release has a schema migration.
+   [argocd-apps](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests). Check
+   if it [reindexes](#does-a-release-reindex).
 
    > [!warning]
-   > Merge a release with a schema migration during working hours, and watch the reindex.
+   > Merge a release that reindexes during working hours, and watch the reindex.
 
 2. An Orbit team member merges the MR. Close older deploy MRs that it replaces.
 3. Done when all Deployments show the new tag (command in [rollback](#rollback)).
@@ -68,8 +67,8 @@ window. A faster fix needs an emergency maintenance: ask the Dedicated EOC.
 
 ## Does a release reindex?
 
-Only a release that changes the schema version reindexes. The deploy MR says so. To compare
-two tags, run this in the Orbit repository. Git tags start with `v`, for example `v0.159.0`.
+The deploy MR shows a schema version change. To see if it reindexes, run this in the Orbit
+repository. Git tags start with `v`.
 
 ```shell
 git fetch origin --tags
@@ -88,7 +87,6 @@ nothing. A version with no entry counts as `*`.
 During a reindex:
 
 - The old version serves queries, but it gets no new data until the new version is active.
-- A full reindex of GitLab.com takes about 4 hours.
 - Some indexer restarts at the start are normal.
 - Watch the **Schema migration** row of the
   [indexer dashboard](https://dashboards.gitlab.net/d/orbit-orbit-gkg-indexer) and the graph
@@ -99,8 +97,7 @@ During a reindex:
 Before planned work, such as a reindex or a rotation, create a
 [silence for Orbit](https://alerts.gitlab.net/#/silences/new?filter=%7Btype%3D%22orbit%22%2C%20env%3D%22orbit-prd%22%7D).
 Set the duration to the planned window. Put your name in **Creator** and the change issue
-link in **Comment**. The silence matches `orbit-prd` alerts only. When the work is done, open
-the silence and select **Expire**.
+link in **Comment**. When the work is done, open the silence and select **Expire**.
 
 Dedicated: the Dedicated EOC creates the silence in the tenant Grafana, Alerting > Silences
 ([Dedicated silences](https://gitlab.com/gitlab-com/gl-infra/gitlab-dedicated/team/-/blob/main/runbooks/alert-silences.md)).
@@ -117,8 +114,7 @@ change `services/gkg/env/orbit-prd/values.yaml` in argocd-apps:
 | `indexer.enabled: false` | All indexing stops. |
 
 These values remove the pods and their KEDA objects, so a KEDA pause is lost. Set the value
-back to `true` to resume. Queued jobs can expire during a long pause. The dispatcher sends
-the work again at its next sweep, so the graph catches up.
+back to `true` to resume.
 
 ## Capacity
 
@@ -128,16 +124,14 @@ The current numbers are in argocd-apps `services/gkg/values.yaml` and
 | To get more | Change | Where |
 | --- | --- | --- |
 | Indexer pods | `indexer.pools.<pool>.keda.maxReplicaCount` | `env/<env>/values.yaml` |
-| SDLC throughput past the shared limit | Raise `indexer.pools.sdlc.engine.topics.namespace-handler.max_ack_pending`, or lower `nats.subscriptionBufferSize` | `values.yaml` |
+| SDLC throughput past the shared limit | Raise `indexer.pools.sdlc.engine.topics.namespace-handler.max_ack_pending`, or lower `indexer.pools.sdlc.nats.subscriptionBufferSize` | `values.yaml` |
 | Jobs per indexer pod | `indexer.pools.<pool>.engine.max_concurrent_workers` | `values.yaml` |
 | Nodes for Orbit pods | `gkg_pool_max_nodes` (per zone) | config-mgmt `environments/orbit-<env>/variables.tf` |
 | Room for large repositories | `tmpSizeLimit` and the ephemeral-storage limit of the code pool | `values.yaml` |
 | Container memory (OOM kills) | `resources` of `webserver`, `dispatcher` or `indexer.pools.<pool>` | `values.yaml` |
 | Graph ClickHouse | Maximum replica memory | config-mgmt `environments/orbit-prd/clickhouse-cloud.tf` |
 
-All SDLC pods share one NATS consumer that holds at most `max_ack_pending` jobs. Each pod
-holds its workers plus its buffer. Above `max_ack_pending / (workers + buffer)` pods, more
-SDLC pods do not help. A higher limit can overload the graph ClickHouse during a reindex.
+A higher `max_ack_pending` can overload the graph ClickHouse during a reindex.
 
 More webserver pods do not make queries faster. The graph ClickHouse limits query speed.
 All settings: [server configuration](../development/server-configuration.md).
