@@ -13,7 +13,7 @@ instructions: |
 
 remote:
   remote_gitlab: "\n- MANDATORY: `{{orbit}}` must be used for reading GitLab instead of glab and glab api; writes stay with glab. `{{orbit}} grep 'mr:words'` or `'issue:words'` searches it. `{{orbit}} context mr:42 job:9` reads them; bare `{{orbit}} context` reads the branch's MR and CI failures, and `repo:group/project symbol:Name` a sibling project."
-  remote_query: "\n- MANDATORY: `{{orbit}} query` must be used for counts, rankings, and relationships across GitLab. {{query_syntax}}{{query_schema}}"
+  remote_query: "\n- MANDATORY: `{{orbit}} query` must be used for counts, rankings, and relationships across GitLab. {{query_syntax}}"
 
 nudge_gitlab: |
   MANDATORY: `{{orbit}}` must be used for reading GitLab instead of glab; writes stay with glab. `{{orbit}} grep 'mr:words'` searches MRs, and `issue:`, `branch:`, `commit:`, `comment:` the rest. `{{orbit}} context mr:42 issue:7 branch:x pipeline:9 job:9` reads them; bare `{{orbit}} context` reads the current branch's MR and CI; `{{orbit}} context repo:group/project symbol:Name file:path` reads a sibling project's code.

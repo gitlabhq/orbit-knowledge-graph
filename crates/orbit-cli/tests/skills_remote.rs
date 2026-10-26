@@ -895,9 +895,6 @@ fn error_reply(status: u16) -> Reply {
     }
 }
 
-const SCHEMA_OVERVIEW: &str = r#"{"domains":[{"name":"core","node_names":["User"]}]}"#;
-const SCHEMA_EXPANDED: &str = r#"{"domains":[{"name":"core","node_names":["User"]}],"nodes":[{"name":"User","properties":[{"name":"username","enum_values":[]}]}],"edges":[]}"#;
-
 fn setup_instructions(base_url: Option<&str>) -> (Output, String) {
     let project = tempfile::tempdir().unwrap();
     let cache = tempfile::tempdir().unwrap();
@@ -1003,51 +1000,16 @@ fn setup_instructions_stay_local_when_orbit_status_is_refused() {
 }
 
 #[test]
-fn setup_instructions_skip_the_schema_when_the_schema_request_fails() {
-    let cases = [
-        vec![error_reply(401)],
-        vec![error_reply(403)],
-        vec![error_reply(500)],
-        vec![ok_reply("not json")],
-        vec![ok_reply(r#"{"domains":[]}"#)],
-        vec![ok_reply(SCHEMA_OVERVIEW), error_reply(403)],
-        vec![ok_reply(SCHEMA_OVERVIEW), ok_reply("not json")],
-        vec![ok_reply(SCHEMA_OVERVIEW), ok_reply(SCHEMA_OVERVIEW)],
-    ];
-    for schema_replies in cases {
-        let expected = 2 + schema_replies.len();
-        let mut replies = vec![ok_reply("{}"), ok_reply("[]")];
-        replies.extend(schema_replies);
-        let (url, server) = mock_server(replies);
-        let (output, instructions) = setup_instructions(Some(&url));
-        let requests = server.join().unwrap();
-        assert_remote_without_schema(&output, &instructions);
-        assert_eq!(requests.len(), expected);
-    }
-}
-
-#[test]
-fn setup_instructions_include_the_schema_when_the_instance_serves_it() {
-    let (url, server) = mock_server(vec![
-        ok_reply("{}"),
-        ok_reply("[]"),
-        ok_reply(SCHEMA_OVERVIEW),
-        ok_reply(SCHEMA_EXPANDED),
-    ]);
+fn setup_instructions_leave_the_schema_to_failing_queries() {
+    let (url, server) = mock_server(vec![ok_reply("{}"), ok_reply("[]")]);
     let (output, instructions) = setup_instructions(Some(&url));
     let requests = server.join().unwrap();
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert!(
-        instructions.contains("  - User: username"),
-        "{instructions}"
-    );
+    assert_remote_without_schema(&output, &instructions);
     assert_eq!(
         request_paths(&requests),
         [
             "/api/v4/orbit/status",
             "/api/v4/orbit/agent/commands?command_names=query_graph",
-            "/api/v4/orbit/schema",
-            "/api/v4/orbit/schema?expand=User",
         ]
     );
 }

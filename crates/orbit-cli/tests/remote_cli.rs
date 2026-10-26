@@ -477,6 +477,17 @@ fn grep_for_a_hosted_kind_searches_the_origin_group() {
 fn serve_routes(
     routes: Vec<(&'static str, &'static str)>,
 ) -> (String, thread::JoinHandle<Vec<CapturedRequest>>) {
+    serve_routes_with_status(
+        routes
+            .into_iter()
+            .map(|(pattern, body)| (pattern, 200, body))
+            .collect(),
+    )
+}
+
+fn serve_routes_with_status(
+    routes: Vec<(&'static str, u16, &'static str)>,
+) -> (String, thread::JoinHandle<Vec<CapturedRequest>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
     let base_url = format!("http://{}", listener.local_addr().expect("mock addr"));
     let handle = thread::spawn(move || {
@@ -503,12 +514,14 @@ fn serve_routes(
                 let mut body = vec![0u8; content_length];
                 reader.read_exact(&mut body).expect("read request body");
                 let text = String::from_utf8_lossy(&body);
-                let response_body = routes
+                let (status, response_body) = routes
                     .iter()
-                    .find(|(pattern, _)| request_line.contains(pattern) || text.contains(pattern))
-                    .map_or("[]", |(_, body)| body);
+                    .find(|(pattern, _, _)| {
+                        request_line.contains(pattern) || text.contains(pattern)
+                    })
+                    .map_or((200, "[]"), |(_, status, body)| (*status, *body));
                 let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+                    "HTTP/1.1 {status} Mock\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
                     response_body.len()
                 );
                 stream.write_all(response.as_bytes()).expect("write response");
@@ -523,6 +536,48 @@ fn serve_routes(
             .collect()
     });
     (base_url, handle)
+}
+
+#[test]
+fn a_query_with_an_unknown_relationship_prints_the_schema() {
+    let (base_url, handle) = serve_routes_with_status(vec![
+        (
+            "POST /api/v4/orbit/query",
+            400,
+            r#"{"code":"compile_error","message":"allowlist rejected: unknown relationship type \"WROTE\""}"#,
+        ),
+        (
+            "schema?expand=",
+            200,
+            r#"{"domains":[{"name":"core","node_names":["User"]},{"name":"code_review","node_names":["MergeRequest"]}],"nodes":[{"name":"User","properties":[{"name":"username","enum_values":[]}]},{"name":"MergeRequest","properties":[{"name":"state","enum_values":["opened","merged"]}]}],"edges":[{"name":"AUTHORED","variants":[{"source_type":"User","target_type":"MergeRequest"}]}]}"#,
+        ),
+        (
+            "GET /api/v4/orbit/schema",
+            200,
+            r#"{"domains":[{"name":"core","node_names":["User"]},{"name":"code_review","node_names":["MergeRequest"]}]}"#,
+        ),
+    ]);
+    let output = run_orbit(
+        &base_url,
+        &[
+            "query",
+            "MATCH (u:User)-[:WROTE]->(m:MergeRequest) RETURN m",
+        ],
+    );
+    let requests = handle.join().expect("join mock");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("unknown relationship type"), "{stderr}");
+    assert!(stderr.contains("  - User: username"), "{stderr}");
+    assert!(
+        stderr.contains("(User)-[:AUTHORED]->(MergeRequest)"),
+        "{stderr}"
+    );
+    assert_eq!(
+        requests[2].request_line,
+        "GET /api/v4/orbit/schema?expand=User%2CMergeRequest HTTP/1.1"
+    );
 }
 
 #[test]

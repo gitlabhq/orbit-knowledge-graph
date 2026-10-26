@@ -54,21 +54,13 @@ fn substitute_launcher(text: &str, launcher: &str) -> String {
     text.replace("{{orbit}}", launcher)
 }
 
-fn render_instructions(
-    launcher: &str,
-    remote: bool,
-    query_syntax: &str,
-    query_schema: &str,
-) -> String {
+fn render_instructions(launcher: &str, remote: bool, query_syntax: &str) -> String {
     let mut text = TEXTS.instructions.trim_end().to_string();
     for (name, value) in &TEXTS.remote {
         let value = if remote { value.as_str() } else { "" };
         text = text.replace(&format!("{{{{{name}}}}}"), value);
     }
-    let text = text
-        .replace("{{query_syntax}}", query_syntax)
-        .replace("{{query_schema}}", query_schema);
-    substitute_launcher(&text, launcher)
+    substitute_launcher(&text.replace("{{query_syntax}}", query_syntax), launcher)
 }
 
 static REACHES_GITLAB: LazyLock<bool> =
@@ -83,11 +75,7 @@ static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| {
     let syntax = served
         .as_deref()
         .unwrap_or(crate::descriptions::gql_syntax());
-    let schema = remote
-        .then(|| crate::remote::client::query_schema_summary(Path::new(".")))
-        .flatten()
-        .unwrap_or_default();
-    render_instructions(launcher(), remote, syntax, &schema)
+    render_instructions(launcher(), remote, syntax)
 });
 
 pub(crate) fn reaches_gitlab() -> bool {
@@ -323,7 +311,7 @@ mod tests {
         ] {
             for remote in [true, false] {
                 let rendered =
-                    render_instructions(launcher, remote, crate::descriptions::gql_syntax(), "");
+                    render_instructions(launcher, remote, crate::descriptions::gql_syntax());
                 assert!(rendered.contains(expected), "{launcher}: {rendered}");
                 assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
                 for phrase in [
@@ -348,16 +336,7 @@ mod tests {
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
-        let local = render_instructions(
-            DIRECT_LAUNCHER,
-            false,
-            crate::descriptions::gql_syntax(),
-            "",
-        );
-        assert_eq!(
-            render_instructions(DIRECT_LAUNCHER, true, "syntax", "\n- Schema for core"),
-            render_instructions(DIRECT_LAUNCHER, true, "syntax", "") + "\n- Schema for core"
-        );
+        let local = render_instructions(DIRECT_LAUNCHER, false, crate::descriptions::gql_syntax());
         assert_eq!(
             local.lines().filter(|line| line.starts_with("- ")).count(),
             2,
