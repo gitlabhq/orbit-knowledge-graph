@@ -34,7 +34,7 @@ Every namespaced row carries its path, and the [security](security.md) model dep
 
 Rows are versioned in Orbit Remote: a delete writes a new version marked as deleted, and queries read the latest version and skip deleted rows. The SDLC graph lives apart from the raw replicated data, so a new schema version can rebuild it from that data. Orbit Remote and the Orbit CLI build their storage from the same ontology, and the code graph uses the same types in both.
 
-Changing the stored shape of the graph means a new schema version. The [schema evolution](schema-evolution.md) page covers how a version reaches production.
+Changing the stored shape of the graph means a new schema version. The [schema evolution](indexing/schema-evolution.md) page covers how a version reaches production.
 
 ## Why we built it this way
 
