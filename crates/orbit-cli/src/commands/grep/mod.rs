@@ -106,6 +106,9 @@ pub(crate) async fn run(
     }
 }
 
+/// How long a plain grep waits for the implicit `origin` GitLab search once local code has matched.
+const IMPLICIT_GITLAB_BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
+
 async fn search(
     query: Option<String>,
     repo: Option<PathBuf>,
@@ -154,28 +157,8 @@ async fn search(
         }
     }
     let remote_only = route.local.is_empty();
+    let deadline = tokio::time::Instant::now() + IMPLICIT_GITLAB_BUDGET;
     let (mut found, mut printed) = (false, false);
-    for (explicit, task) in pending {
-        match task
-            .await
-            .unwrap_or_else(|error| Outcome::Failed(error.to_string()))
-        {
-            Outcome::Found(text) => {
-                let mut out = std::io::stdout().lock();
-                if printed {
-                    writeln!(out)?;
-                }
-                write!(out, "{text}")?;
-                out.flush()?;
-                (found, printed) = (true, true);
-            }
-            Outcome::Skipped(reason) if explicit || remote_only => {
-                eprintln!("orbit: GitLab search skipped: {reason}");
-            }
-            Outcome::Failed(reason) => eprintln!("orbit: GitLab search failed: {reason}"),
-            Outcome::Empty | Outcome::Skipped(_) => {}
-        }
-    }
     for target in route.local {
         if printed {
             println!();
@@ -189,6 +172,40 @@ async fn search(
             options.clone(),
         )?;
         printed = true;
+    }
+    let found_locally = found;
+    for (explicit, task) in pending {
+        // The `origin` group search runs beside the local one; once code matched, it gets a short budget.
+        let outcome = match explicit || remote_only || !found_locally {
+            true => task.await,
+            false => match tokio::time::timeout_at(deadline, task).await {
+                Ok(outcome) => outcome,
+                Err(_) => Ok(Outcome::Skipped(format!(
+                    "GitLab took over {}s; `{} grep 'mr:words'` searches it alone",
+                    IMPLICIT_GITLAB_BUDGET.as_secs(),
+                    crate::commands::setup::spec::launcher()
+                ))),
+            },
+        };
+        match outcome.unwrap_or_else(|error| Outcome::Failed(error.to_string())) {
+            Outcome::Found(text) => {
+                let mut out = std::io::stdout().lock();
+                if printed {
+                    writeln!(out)?;
+                }
+                write!(out, "{text}")?;
+                out.flush()?;
+                (found, printed) = (true, true);
+            }
+            Outcome::Skipped(reason) if explicit || remote_only => {
+                eprintln!("orbit: GitLab search skipped: {reason}");
+            }
+            Outcome::Skipped(reason) if found_locally && reason.starts_with("GitLab took over") => {
+                eprintln!("orbit: GitLab search skipped: {reason}");
+            }
+            Outcome::Failed(reason) => eprintln!("orbit: GitLab search failed: {reason}"),
+            Outcome::Empty | Outcome::Skipped(_) => {}
+        }
     }
     match found {
         true => Ok(()),

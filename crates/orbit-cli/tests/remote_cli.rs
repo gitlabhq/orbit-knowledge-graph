@@ -848,3 +848,32 @@ fn a_refresh_that_cannot_write_leaves_the_file_marked_as_edited() {
     let grep = String::from_utf8_lossy(&orbit(&["grep", "renamed"]).stdout).into_owned();
     assert!(grep.contains("edited since index"), "{grep}");
 }
+
+#[test]
+fn a_slow_gitlab_does_not_hold_back_local_grep_results() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let base_url = format!("http://localhost:{}", listener.local_addr().unwrap().port());
+    thread::spawn(move || {
+        let held: Vec<_> = listener.incoming().take(4).filter_map(Result::ok).collect();
+        thread::sleep(Duration::from_secs(20));
+        drop(held);
+    });
+    let repo = committed_repo(
+        "https://localhost/my-group/my-project",
+        &[("util.py", "def alpha_marker():\n    return 1\n")],
+    );
+    let data = tempfile::tempdir().unwrap();
+    let started = std::time::Instant::now();
+    let output = orbit_command(
+        repo.path(),
+        data.path(),
+        &base_url,
+        &["grep", "alpha_marker"],
+    )
+    .output()
+    .expect("run orbit binary");
+    let elapsed = started.elapsed();
+
+    assert!(String::from_utf8_lossy(&output.stdout).contains("alpha_marker"));
+    assert!(elapsed < Duration::from_secs(8), "grep took {elapsed:?}");
+}
