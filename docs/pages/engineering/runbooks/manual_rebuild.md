@@ -1,34 +1,32 @@
 # Rebuild and reindex
 
-Back to the [runbook](README.md). Tested on a throwaway cluster, not yet run in production.
-Do staging first.
+Back to the [runbook](README.md).
 
-| | Staging (commands below) | Production |
-| --- | --- | --- |
-| kubectl context | `gke_gl-orbit-stg_us-east1_orbit-stg` | `gke_gl-orbit-prd_us-east1_orbit-prd` |
-| Graph ClickHouse service | `gitlab-com-staging-us-east1` | `orbit-production-us-east1` |
+> [!warning]
+> Tested on a throwaway cluster, not yet run in production. Do staging first.
 
-Before you run SQL, check the service name in the ClickHouse console header.
+Set the cluster once. All commands below use it:
+
+```shell
+export CTX=gke_gl-orbit-stg_us-east1_orbit-stg   # production: gke_gl-orbit-prd_us-east1_orbit-prd
+```
+
+The graph ClickHouse service is `gitlab-com-staging-us-east1` in staging and
+`orbit-production-us-east1` in production. Before you run SQL, check the service name in the
+ClickHouse console header. You need a user that can drop and create tables in database `gkg`:
+ask an Orbit team member with Service Admin.
 
 ## When to rebuild
 
-- The graph has wrong data that indexing does not fix, for example after a database incident.
-- Disaster recovery (start with [disaster recovery](disaster-recovery/README.md)), or a move to
-  another ClickHouse service.
-
-The graph is derived data. GitLab PostgreSQL and the repositories are the source of truth.
-Orbit does not restore from ClickHouse Cloud backups.
-
-You need a ClickHouse user that can drop and create tables in database `gkg`. Ask an Orbit
-team member with Service Admin on the graph service.
+- The graph has wrong data that indexing does not fix.
+- [Disaster recovery](disaster-recovery/README.md), or a move to another ClickHouse service.
 
 ## Names that you need
 
-- `<release>`: the image tag with dashes, for example `0-159-0`.
+- `<release>`: the current indexing stream name ends with it.
 
   ```shell
-  kubectl --context gke_gl-orbit-stg_us-east1_orbit-stg -n gkg get deploy orbit-dispatcher \
-    -o jsonpath='{.spec.template.spec.containers[0].image}'
+  kubectl --context "$CTX" -n nats exec deploy/nats-box -- nats stream ls | grep GKG_INDEXER_V
   ```
 
 - `<N>`: the active schema version.
@@ -41,44 +39,49 @@ Keep `gkg.namespace_storage_snapshot`. A reindex cannot rebuild its history.
 
 ## Full rebuild
 
-Queries fail from step 4 to step 5. After step 5, queries return empty or incomplete results
-until the indexers fill the tables. On GitLab.com this takes about 4 hours.
+Steps 4 and 5: queries fail. After step 5: results are incomplete until indexing completes,
+about 4 hours on GitLab.com.
 
 1. Tell users in the incident channel and in `#f_orbit_dev`.
-2. Pause both indexer pools:
+2. Pause both indexer pools. Check: both indexers show `0/0`.
 
    ```shell
-   kubectl --context gke_gl-orbit-stg_us-east1_orbit-stg -n gkg annotate scaledobject orbit-indexer-sdlc autoscaling.keda.sh/paused-replicas="0" --overwrite
-   kubectl --context gke_gl-orbit-stg_us-east1_orbit-stg -n gkg annotate scaledobject orbit-indexer-code autoscaling.keda.sh/paused-replicas="0" --overwrite
+   kubectl --context "$CTX" -n gkg annotate scaledobject orbit-indexer-sdlc autoscaling.keda.sh/paused-replicas="0" --overwrite
+   kubectl --context "$CTX" -n gkg annotate scaledobject orbit-indexer-code autoscaling.keda.sh/paused-replicas="0" --overwrite
+   kubectl --context "$CTX" -n gkg get deploy
    ```
 
-   Check: `kubectl --context gke_gl-orbit-stg_us-east1_orbit-stg -n gkg get deploy` shows `0/0`
-   for both indexers.
+3. Stop the dispatcher: set `dispatcher.enabled: false` in
+   `services/gkg/env/orbit-<env>/values.yaml` in argocd-apps, and merge. Check: no
+   `orbit-dispatcher` pod in `kubectl --context "$CTX" -n gkg get pods`.
 
-3. Stop the dispatcher: set `dispatcher.enabled: false` in the ArgoCD values and merge.
-   Check: `kubectl --context gke_gl-orbit-stg_us-east1_orbit-stg -n gkg get pods` shows no
-   `orbit-dispatcher` pod.
+4. Delete the old indexing jobs. Old jobs block new jobs for the same namespace.
 
-   Then delete the old indexing jobs of the current release. Old jobs block new jobs for the
-   same namespace. Purge only `GKG_INDEXER_V<release>`: the same NATS holds Siphon streams.
+   > [!warning]
+   > Purge only the `GKG_INDEXER_V<release>` stream. Siphon streams are on the same NATS.
 
    ```shell
-   kubectl --context gke_gl-orbit-stg_us-east1_orbit-stg -n nats exec deploy/nats-box -- nats stream purge GKG_INDEXER_V<release> -f
-   kubectl --context gke_gl-orbit-stg_us-east1_orbit-stg -n nats exec deploy/nats-box -- nats stream info GKG_INDEXER_V<release>
+   kubectl --context "$CTX" -n nats exec deploy/nats-box -- nats stream purge GKG_INDEXER_V<release> -f
+   kubectl --context "$CTX" -n nats exec deploy/nats-box -- nats stream info GKG_INDEXER_V<release>
    ```
 
    Check: `stream info` shows 0 messages.
 
-   > [!warning]
-   > The next step deletes the graph. Get approval from the incident lead first.
+5. Drop the graph.
 
-4. Drop the graph. This query prints the `DROP` statements in the correct order (views,
-   dictionaries, tables). Run them, then drop the version table:
+   > [!warning]
+   > This deletes the graph. Get approval from the incident lead first.
+
+   This query prints the `DROP` statements in the correct order. Run them, then drop the
+   version table:
 
    ```sql
    SELECT concat(multiIf(engine IN ('View', 'MaterializedView'), 'DROP VIEW',
                          engine = 'Dictionary', 'DROP DICTIONARY', 'DROP TABLE'),
-                 ' gkg.', name, ';')
+                 ' gkg.', name,
+                 if(engine IN ('View', 'MaterializedView', 'Dictionary'), '',
+                    ' SETTINGS max_table_size_to_drop = 0'),
+                 ';')
    FROM system.tables
    WHERE database = 'gkg' AND match(name, '^v[0-9]+_')
    ORDER BY multiIf(engine IN ('View', 'MaterializedView'), 1, engine = 'Dictionary', 2, 3), name;
@@ -86,31 +89,29 @@ until the indexers fill the tables. On GitLab.com this takes about 4 hours.
    DROP TABLE gkg.gkg_schema_version;
    ```
 
-   If you keep `gkg_schema_version`, the dispatcher creates no tables and crash-loops. For a
-   table larger than 50 GB, add `SETTINGS max_table_size_to_drop = 0` to its `DROP TABLE`.
+   If you keep `gkg_schema_version`, the dispatcher creates no tables and crash-loops.
 
-5. Start the dispatcher: set `dispatcher.enabled: true` and merge. Check: its logs show
+6. Start the dispatcher: set `dispatcher.enabled: true` and merge. Check: its logs show
    `fresh install`.
-6. Resume both pools:
+7. Resume both pools:
 
    ```shell
-   kubectl --context gke_gl-orbit-stg_us-east1_orbit-stg -n gkg annotate scaledobject orbit-indexer-sdlc autoscaling.keda.sh/paused-replicas-
-   kubectl --context gke_gl-orbit-stg_us-east1_orbit-stg -n gkg annotate scaledobject orbit-indexer-code autoscaling.keda.sh/paused-replicas-
+   kubectl --context "$CTX" -n gkg annotate scaledobject orbit-indexer-sdlc autoscaling.keda.sh/paused-replicas-
+   kubectl --context "$CTX" -n gkg annotate scaledobject orbit-indexer-code autoscaling.keda.sh/paused-replicas-
    ```
 
-7. Done when the indexer dashboard shows indexing of all namespaces and
-   `glab orbit graph-status --full-path <group>` reports the projects as indexed.
+8. Done when `GITLAB_HOST=gitlab.com glab orbit graph-status --full-path <group>` reports the
+   projects as indexed.
 
-To move to another ClickHouse service, change the host and the passwords in the ArgoCD
-values and Vault before step 5. The datalake does not change.
+To move to another ClickHouse service, change the host and the passwords in the ArgoCD values
+and Vault before step 6. The datalake does not change.
 
 ## Reindex one namespace, project or entity
 
 Mark the checkpoint rows as deleted. Orbit then indexes that data again from the start.
-Replace `<N>` with the schema version.
 
-SDLC data of one top-level namespace. The last line starts the full sweep now; without it,
-the namespace reindexes at the next hourly sweep:
+SDLC data of one top-level namespace. The sweep key starts the reindex within a minute.
+Without it, the reindex waits for the hourly sweep.
 
 ```sql
 INSERT INTO gkg.v<N>_checkpoint (key, watermark, cursor_values, _deleted)
@@ -128,8 +129,8 @@ Other selections for the same query:
 | One entity type in a namespace | `key = 'ns.<id>.<Entity>' OR startsWith(key, 'ns.<id>.<Entity>.p')` |
 | One global entity, for example User | `key = 'global.<Entity>'` |
 
-Code of one project (all branches; the backfill sends the default branch again within a
-few minutes):
+Code of one project, all branches. The backfill sends the default branch again within a few
+minutes.
 
 ```sql
 INSERT INTO gkg.v<N>_code_indexing_checkpoint
@@ -144,14 +145,14 @@ GROUP BY traversal_path, project_id, branch HAVING argMax(_deleted, _version) = 
 For all projects in a namespace, use
 `WHERE startsWith(traversal_path, '<org_id>/<root_namespace_id>/')`.
 
-Do not disable and enable Orbit on a namespace to reindex it. That does not reindex, and
-it schedules the namespace data for deletion.
+Check: `GITLAB_HOST=gitlab.com glab orbit graph-status --full-path <group>` shows the
+projects as indexed again.
+
+> [!warning]
+> Do not disable and enable Orbit on a namespace to reindex it. That does not reindex, and it
+> schedules the namespace data for deletion.
 
 ## Dedicated
 
-The Dedicated EOC runs these steps. Names are `gkg-*`, and only the code indexer has a KEDA
-ScaledObject.
-
-> [!warning]
-> Setting `orbit.infra_enabled` to `false` deletes the whole Orbit graph. It is not an
-> incident action.
+The Dedicated EOC runs these steps. Names are `gkg-*`. Only the code indexer has a KEDA
+ScaledObject: stop the SDLC indexer as in [emergency actions](README.md#emergency-actions).

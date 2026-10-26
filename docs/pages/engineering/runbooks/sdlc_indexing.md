@@ -1,201 +1,63 @@
-# SDLC Indexing Runbook
+# SDLC indexing
 
-> [!warning]
-> NATS stream, subject and consumer names now carry the release (for example
-> `GKG_INDEXER_V0-159-0`), and graph tables carry the schema version (for example
-> `gkg.v115_checkpoint`). Some commands on this page still use the old names. See
-> [rebuild and reindex](manual_rebuild.md#names-that-you-need) for the current names.
+Use this page when the SDLC data of one namespace is stale. For how SDLC indexing works, see
+[SDLC indexing architecture](../architecture/indexing/sdlc-indexing.md).
 
-Operations guide for the SDLC indexing pipeline: dispatching, entity extraction, checkpoint management, and recovery.
+## Names you need
 
-## Architecture overview
+Get `<release>` and `<N>` from [names that you need](manual_rebuild.md#names-that-you-need).
+To open a nats-box shell and list the current streams, see [NATS](nats.md). The work stream
+is `GKG_INDEXER_V<release>`. The checkpoint table is `gkg.v<N>_checkpoint`.
 
-Siphon CDC replicates GitLab PostgreSQL tables into ClickHouse datalake tables.
-The SDLC indexing pipeline transforms datalake rows into graph node and edge tables.
+On Dedicated, the Dedicated EOC runs the commands without `--context`. Deployments are `gkg-*`.
 
-```plaintext
-GitLab PostgreSQL
-  -> Siphon CDC (logical replication)
-    -> NATS JetStream
-      -> ClickHouse datalake tables
-        -> [Dispatcher] publishes indexing requests to NATS
-          -> [Indexer] extracts, transforms, writes graph tables
-```
+## A namespace's data is stale
 
-### NATS stream: `GKG_INDEXER`
+Use the top-level namespace ID. Run the SQL in the read-only ClickHouse console.
 
-| Setting | Value |
-|---------|-------|
-| Retention | WorkQueue (deleted on ack) |
-| Max messages per subject | 1 |
-| Discard policy | New (reject duplicates while in-flight) |
-
-### Subjects
-
-| Subject | Purpose |
-|---------|---------|
-| `sdlc.global.indexing.requested` | Trigger global entity indexing (User) |
-| `sdlc.namespace.indexing.requested.<org>.<ns>` | Trigger namespace entity indexing |
-
-### NATS consumers
-
-Consumer names are derived from the configured `consumer_name` (default in production: `gkg-indexer`) and the subscription subject, with dots replaced by hyphens and wildcards spelled out.
-
-| Consumer | Stream | Role |
-|----------|--------|------|
-| `gkg-indexer-sdlc-global-indexing-requested` | `GKG_INDEXER` | Global entity handlers |
-| `gkg-indexer-sdlc-namespace-indexing-requested-wildcard-wildcard` | `GKG_INDEXER` | Namespaced entity handlers |
-| `gkg-indexer-sdlc-namespace-deletion-requested-wildcard` | `GKG_INDEXER` | Namespace deletion handler |
-
-With ephemeral consumers (`consumer_name: None`, the local dev default), NATS assigns random names that don't survive restarts.
-
-### Handlers
-
-Each ontology entity type gets its own `EntityHandler` instance. Handlers for global entities subscribe to the global subject; handlers for namespaced entities subscribe to the namespace subject.
-
-| Scope | Subject | max_attempts on GitLab.com | DLQ |
-|-------|---------|---------------------|-----|
-| Global (e.g. User) | `sdlc.global.indexing.requested` | 1 | No (re-dispatched next cycle) |
-| Namespaced (e.g. Project, MergeRequest) | `sdlc.namespace.indexing.requested.*.*` | 1 | No (re-dispatched next cycle) |
-
-All SDLC handlers rely on the dispatcher to re-create requests on the next cycle rather than retrying via NATS. This is the eventual consistency model.
-
-## Dispatcher
-
-The dispatcher runs as `gkg-server --mode DispatchIndexing` and publishes indexing requests on a schedule.
-
-### Scheduled tasks
-
-| Task | What it does |
-|------|-------------|
-| GlobalDispatcher | Publishes a single `GlobalIndexingRequest` with watermark = now |
-| NamespaceDispatcher | Queries `siphon_knowledge_graph_enabled_namespaces`, publishes one request per enabled namespace |
-
-Both run on every scheduler cycle. The NATS `max_messages_per_subject: 1` constraint ensures at-most-one in-flight request per subject. Duplicate publishes are silently rejected.
-
-## Checkpoint system
-
-The indexer tracks progress in a `checkpoint` table in the graph database.
-
-### Schema
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `key` | String | Position identifier (e.g., `global.User`, `ns.42.Project`) |
-| `watermark` | DateTime64 | Upper bound of the extraction window |
-| `cursor_values` | String (JSON) | Keyset pagination cursor for resuming mid-batch |
-| `_version` | DateTime64 | ReplacingMergeTree version |
-| `_deleted` | Bool | Soft delete flag |
-
-### Checkpoint states
-
-| State | Meaning |
-|-------|---------|
-| No row | First run. Extracts from epoch. |
-| `cursor_values` is null/empty | Previous run completed. Next run starts a fresh window. |
-| `cursor_values` has values | Interrupted mid-pagination. Resumes from the cursor. |
-
-### Inspect checkpoints
-
-```sql
-SELECT key, watermark, cursor_values
-FROM `<gkg-database>`.checkpoint
-ORDER BY key;
-```
-
-### Inspect checkpoints for a specific namespace
-
-```sql
-SELECT key, watermark, cursor_values
-FROM `<gkg-database>`.checkpoint
-WHERE key LIKE 'ns.42.%'
-ORDER BY key;
-```
-
-## Force reindex
-
-To reindex a namespace, or to rebuild the whole graph, see
-[rebuild and reindex](manual_rebuild.md). Do not truncate graph tables and do not reset
-NATS: the NATS cluster also holds the Siphon streams.
-
-## Retry mechanism
-
-SDLC handlers can retry a transient failure (ClickHouse timeout, network blip) through NATS redelivery. The code default is `max_attempts: 5` with a 60 second `retry_interval_secs`. GitLab.com production sets 1 attempt, so there the dispatcher sends the work again instead:
-
-1. Handler fails and nacks the message with the retry delay
-2. NATS redelivers the message and the handler retries from its checkpoint
-3. After the last attempt the handler term-acks the message, which removes it from the stream
-4. The next namespace change or the hourly sweep publishes a new request for the same subject
-
-The namespace dispatcher does not re-publish a failed namespace on its next cycle; its watermark advances after each publish. NATS redelivery is the only retry inside one dispatch window.
-
-### Extraction-level retries
-
-Within a single handler invocation, the datalake batch extraction query retries up to 3 times with exponential backoff (100ms, 200ms, 400ms) before failing the handler.
-
-## Troubleshooting
-
-### Namespace not being indexed
-
-1. Verify the namespace is enabled:
+1. Is Orbit on for the namespace? Run this on the datalake service `gitlab-com-production-us-east1`.
+   No row: Orbit is off, and Orbit does not index it.
 
    ```sql
-   SELECT *
-   FROM gitlab_clickhouse_main_production.siphon_knowledge_graph_enabled_namespaces
-   WHERE root_namespace_id = <namespace_id>
-     AND _siphon_deleted = false;
+   SELECT root_namespace_id, created_at
+   FROM gitlab_clickhouse_main_production.siphon_knowledge_graph_enabled_namespaces FINAL
+   WHERE root_namespace_id = <root_namespace_id> AND _siphon_deleted = false
    ```
 
-2. Check if a message is in-flight (blocking new dispatches):
+1. Is a request queued? A subject means that a request waits or runs. `No subjects found`
+   means none. A failed request is not retried at once. The dispatcher sends the namespace
+   again at its next data change or at the hourly sweep.
 
    ```shell
-   nats stream info GKG_INDEXER --subjects
+   kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n nats exec deploy/nats-box -- nats stream subjects GKG_INDEXER_V<release> 'v<release>.sdlc.namespace.indexing.requested.*.<root_namespace_id>' --names
    ```
 
-3. Check the checkpoint for errors or stale cursors:
+1. Is the watermark old? Run this on the graph service `orbit-production-us-east1`. An
+   `oldest` value older than 4 hours is stale, see [SDLC freshness](alerts/sdlc-freshness.md).
 
    ```sql
-   SELECT key, watermark, cursor_values
-   FROM `<gkg-database>`.checkpoint
-   WHERE key LIKE 'ns.<namespace_id>.%';
+   SELECT min(watermark) AS oldest, max(watermark) AS newest
+   FROM gkg.v<N>_checkpoint FINAL
+   WHERE startsWith(key, 'ns.<root_namespace_id>.')
    ```
 
-### Indexer stuck on a batch
+If the datalake data is old too, the problem is in Siphon. See [escalation](README.md#escalation).
 
-If the indexer is consuming CPU but not making progress:
+## The indexer is stuck on a long query
 
-1. Check ClickHouse for long-running queries:
-
-   ```sql
-   SELECT query_id, elapsed, query
-   FROM system.processes
-   WHERE elapsed > 60
-   ORDER BY elapsed DESC;
-   ```
-
-2. Kill the stuck query if needed:
-
-   ```sql
-   KILL QUERY WHERE query_id = '<query_id>';
-   ```
-
-3. The handler will fail and the dispatcher will re-create the request.
-
-### Checkpoint has a corrupted cursor
-
-If `cursor_values` contains invalid JSON:
+The SDLC indexer reads as `gkg_siphon_reader` on the datalake service. Find its long queries:
 
 ```sql
-ALTER TABLE `<gkg-database>`.checkpoint
-DELETE WHERE key = '<position_key>';
+SELECT hostName() AS replica, query_id, round(elapsed) AS seconds, left(query, 100) AS query
+FROM clusterAllReplicas('default', system.processes)
+WHERE user = 'gkg_siphon_reader' AND elapsed > 300
+ORDER BY elapsed DESC
 ```
 
-The handler will restart extraction from epoch for that entity type.
+The on-call console is read-only. A person with Service Admin on that service runs
+`KILL QUERY ON CLUSTER default WHERE query_id = '<query_id>' SYNC`. For the datalake, ask
+Analytics Platform Insights. Check: the query is not in the list. The dispatcher sends the namespace again.
 
-## Graph table maintenance
+## Reindex a namespace or an entity
 
-A deletion is a tombstone: the row is re-inserted with `_deleted = true` and a bumped `_version`, and reads hide it at once via FINAL. No deletion path issues a mutation. To physically reclaim tombstoned rows from a table on disk:
-
-```sql
-OPTIMIZE TABLE `<gkg-database>`.gl_project FINAL CLEANUP;
-```
+See [reindex one namespace, project or entity](manual_rebuild.md#reindex-one-namespace-project-or-entity).

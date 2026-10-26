@@ -1,88 +1,38 @@
 # OrbitAuthFilterMissing
 
-A query reached the compiler without a valid security context; the compiler rejected it, but this path means authorization filtering would have been bypassed. Fires after `1m`.
+Covers `OrbitAuthFilterMissing`.
 
-## Overview
+A query reached the query compiler without a valid security context. The compiler rejected the query, so no data leaked, but a check before the compiler failed. The caller gets an error.
 
-The query compiler injects `traversal_path` predicates from the caller's JWT
-into every query. This alert fires when a query reaches compilation without a
-valid security context (`failure_reason="security"` on the compiler rejection
-counter). The compiler is the last line of defense. It rejected the query, so
-no data leaked. But nothing upstream should let such a request through.
-Any non-zero count is anomalous and needs investigation.
+Treat it as a security alert. Page Orbit tier-2 now, then do the checks.
 
-## Services
+## Check
 
-- [Orbit service overview](../README.md)
-- Owner team: `context_systems`
+1. In [Grafana Explore](https://dashboards.gitlab.net/explore), data source `mimir-analytics-eventsdot`, find the source of the rejections. Healthy: `0`.
 
-## Metrics
+   ```promql
+   sum by (job) (rate(gkg_query_engine_compiler_rejected_total{failure_reason="security"}[5m]))
+   ```
 
-The firing expression, on `gkg_query_engine_compiler_rejected_total` (emitted by the service, see the
-[metrics catalog](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/crates/gkg-observability/orbit-dashboards/gkg-metrics.json)):
+1. Read the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5) with the filter `json.mode: webserver` at the alert time. Find the compiler rejection and write down the caller.
+1. Look for a recent deploy of GitLab or Orbit. Healthy: the newest Orbit ReplicaSet is older than the alert.
 
-```promql
-sum by (env, environment, stage) (rate(gkg_query_engine_compiler_rejected_total{failure_reason="security"}[5m])) > 0
-```
+   ```shell
+   kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n gkg get rs --sort-by=.metadata.creationTimestamp | grep orbit-webserver | tail -1
+   ```
 
-## Alert Behavior
+1. Look for a recent JWT key rotation ([secret rotation](../secret_rotation.md)).
 
-- Silence via [Alertmanager](https://alerts.gitlab.net/#/alerts?filter=%7Btype%3D%22orbit%22%7D) filtered on the alertname.
-- Expected to never fire; any occurrence is anomalous.
+## Act
 
-## Severities
-
-- No paging during burn-in. No data leaked when it fires: the compiler rejected the queries. Escalate as if it paged.
-
-## Verification
-
-Confirm the rejections are real and find where they come from:
-
-```promql
-sum by (job) (rate(gkg_query_engine_compiler_rejected_total{failure_reason="security"}[5m]))
-```
-
-Then pull the matching webserver logs (`mode: webserver`) around the alert
-window and look for the compiler rejection with its request context. A single
-internal caller with a malformed JWT looks very different from broad traffic.
-
-## Recent changes
-
-- [argocd-apps MRs](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests?scope=all&state=merged) touching `services/gkg` (a merge is a deploy).
-- [Production issues labeled Service::Orbit](https://gitlab.com/gitlab-com/gl-infra/production/-/issues/?sort=created_date&state=all&label_name%5B%5D=Service%3A%3AOrbit).
-
-## Troubleshooting
-
-| Symptom | Cause | Action |
+| You see | Do this | Done when |
 | --- | --- | --- |
-| Rejections from one internal caller with a malformed or stale JWT | JWT key rotation landed on one side only | Finish the rotation on the stale side ([JWT shared key](../secret_rotation.md#jwt-shared-key)) |
-| Rejections started right after a GitLab or GKG deploy | JWT claims or verification changed | Roll back the offending side ([Rollback](../maintenance.md#rollback)) |
-| Requests do not come from Rails at all | Direct gRPC calls without a JWT | Treat as a security incident; capture the caller identity from the logs |
+| Any rejection | Page Orbit tier-2 in incident.io. | Orbit tier-2 has the caller from the logs. |
+| The requests do not come from a known GitLab Rails caller | [Engage SIRT](https://handbook.gitlab.com/handbook/security/security-operations/sirt/engaging-security-on-call/). Give them the caller from the logs. | SIRT owns the incident. |
+| One caller with a bad or old JWT, after a key rotation | Finish the rotation on the old side ([secret rotation](../secret_rotation.md)). | The rejection rate is `0`. |
+| Started with a GitLab or Orbit deploy | Roll back that side ([rollback](../maintenance.md#rollback)). | The rejection rate is `0`. |
 
-## Possible Resolutions
+## Escalate
 
-- If a recent GitLab or GKG deploy changed the JWT contents (claims, signing
-  key rotation, `root_namespace_id`), roll the offending side back. A key
-  rotation that only landed on one side is the most common cause: Rails and
-  GKG cannot hold two key versions at once.
-- If requests bypass Rails entirely (direct gRPC calls without a JWT), treat
-  it as a security incident, not a bug.
-
-## Dependencies
-
-- GitLab Rails (JWT minting, internal Orbit API) builds the security context this alert watches for.
-
-## Escalation
-
-Escalate to the `context_systems` team (`#f_orbit_dev`) immediately. This
-alert does not page. If the requests do not come from a known internal caller,
-follow the security incident process.
-
-## Definitions
-
-- [Alert rule](https://gitlab.com/gitlab-com/runbooks/-/blob/master/mimir-rules/analytics-eventsdot/orbit/orbit-cause-alerts.yml) (hand-maintained; keep the expr above in sync when tuning it).
-
-## Related Links
-
-- [Related alerts](../monitoring.md#alerts)
-- [Orbit runbook](../README.md)
+Page Orbit tier-2 in incident.io now ([escalation](../README.md#escalation)). Unknown caller: engage SIRT.
+Dedicated: this alert goes through incident.io. The EOC runs `/inc escalate` and selects Orbit.

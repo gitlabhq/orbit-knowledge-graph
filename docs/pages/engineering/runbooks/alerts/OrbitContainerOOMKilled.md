@@ -1,114 +1,43 @@
 # OrbitContainerOOMKilled
 
-An Orbit container was OOM killed; its memory limit is too small for the
-workload. Fires after `1m`.
+Covers `OrbitContainerOOMKilled`.
 
-## Overview
+An Orbit container used more memory than its limit, and the kernel stopped it. The pod loses its running queries or indexing job, and repeated kills cause failed queries or old data.
 
-The kernel OOM killer terminated an Orbit container because it exceeded its
-memory limit. One OOM kill loses the work of that pod: running queries on the
-webserver, or a running indexing job on an indexer. Repeated kills reduce
-throughput. The indexers are the usual suspects:
-indexing a very large repository can spike memory well above the
-steady-state usage the limits were tuned for.
+## Check
 
-## Services
+On Dedicated, only the Dedicated EOC runs commands. Use `gkg-*` names and no `--context`.
 
-- [Orbit service overview](../README.md)
-- Owner team: `context_systems`
+1. Find the pod from the `container` label of the alert. Healthy: RESTARTS does not increase for 10 minutes.
 
-## Metrics
+   ```shell
+   kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n gkg get pods
+   ```
 
-The firing expression counts OOM kill events from cAdvisor
-(`container_oom_events_total`, exposed by the kubelet on every cluster):
+1. Confirm the kill. Healthy: `Last State` is not `OOMKilled`.
 
-```promql
-sum by (env, environment, stage, container) (
-  increase(container_oom_events_total{container=~"orbit-.*"}[10m])
-) > 0
-```
+   ```shell
+   kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n gkg describe pod <pod> | grep -A3 'Last State'
+   ```
 
-## Alert Behavior
+1. Open the [Orbit overview dashboard](https://dashboards.gitlab.net/d/orbit-main/orbit3a-overview?orgId=1&var-environment=orbit-prd), `kube_container_rss_limit` panel. Healthy: memory is well below the limit.
+1. Look for a recent deploy. Healthy: the newest ReplicaSet is older than the first kill.
 
-- Silence via [Alertmanager](https://alerts.gitlab.net/#/alerts?filter=%7Btype%3D%22orbit%22%7D) filtered on the alertname.
-- A single OOM kill fires the alert and it auto-resolves roughly 10 minutes
-  after the event. Sustained kills keep it firing continuously.
-- The `container` label identifies which workload was killed
-  (`orbit-indexer`, `orbit-webserver`, `orbit-dispatcher`, ...; `gkg-*` before the
-  container rename).
+   ```shell
+   kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n gkg get rs --sort-by=.metadata.creationTimestamp | tail -5
+   ```
 
-## Severities
+## Act
 
-- No paging. A one-off kill is disruptive but self-healing; sustained
-  kills degrade indexing throughput or query availability and will surface
-  through the SLO alerts.
-
-## Verification
-
-Find the affected pods and the kill rate:
-
-```promql
-sum by (environment, pod) (increase(container_oom_events_total{container=~"orbit-.*"}[1h])) > 0
-```
-
-Cross-check with kube-state-metrics which pods most recently terminated
-with an OOM:
-
-```promql
-kube_pod_container_status_last_terminated_reason{container=~"orbit-.*", reason="OOMKilled"} > 0
-```
-
-Compare memory usage against the limit to see how close to the ceiling the
-workload runs:
-
-```promql
-container_memory_rss:labeled{type="orbit", container!="", container!="POD"}
-/ on (environment, cluster, pod, container) group_left ()
-kube_pod_container_resource_limits:labeled{type="orbit", resource="memory"}
-```
-
-Cross-check the `kube_container_rss_limit` saturation panel on the
-[orbit service dashboard](https://dashboards.gitlab.net/d/orbit-main/orbit3a-overview?orgId=1&var-environment=orbit-prd).
-
-## Recent changes
-
-- [argocd-apps MRs](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests?scope=all&state=merged) touching `services/gkg` (a merge is a deploy).
-- [Production issues labeled Service::Orbit](https://gitlab.com/gitlab-com/gl-infra/production/-/issues/?sort=created_date&state=all&label_name%5B%5D=Service%3A%3AOrbit).
-
-## Troubleshooting
-
-| Symptom | Cause | Action |
+| You see | Do this | Done when |
 | --- | --- | --- |
-| One indexer pod killed once, then stable | A single very large repository spiked memory | Usually self-healing; check the indexer picked the job back up |
-| The same container killed repeatedly | Memory limit below actual demand | Raise the limit in the Helm values via argocd-apps ([Capacity](../maintenance.md#capacity)) |
-| Kills started right after a deploy | New version uses more memory | Roll back the image tag ([Rollback](../maintenance.md#rollback)), then investigate the regression |
-| Webserver containers killed under load | Query workload exceeding the limit | Raise the limit or find the offending query pattern in the logs |
+| Restarts do not increase after 10 minutes | No action. | The alert resolves. |
+| Started with a deploy | Roll back ([rollback](../maintenance.md#rollback)). | RESTARTS does not increase. |
+| The same container is killed again and again | Give it more memory: `resources` of `webserver`, `dispatcher` or `indexer.pools.<pool>` ([capacity](../maintenance.md#capacity)). | RESTARTS does not increase for 1 hour. |
+| An indexer is killed on the same repository each time | Give the pool more memory ([capacity](../maintenance.md#capacity)). Page Orbit tier-2 with the project ID from the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5). | RESTARTS does not increase. |
+| Dedicated | Ask the Dedicated EOC to give the container more memory. | RESTARTS does not increase. |
 
-## Possible Resolutions
+## Escalate
 
-- Raise the container memory limit for the affected deployment in the
-  [argocd-apps](https://gitlab.com/gitlab-com/gl-infra/argocd/apps) values for
-  `services/gkg`.
-- If the kills start with a fresh deploy, roll back the image tag. Report the
-  memory growth as a regression in the
-  [knowledge-graph](https://gitlab.com/gitlab-org/orbit/knowledge-graph) repo.
-- If a single pathological repository keeps OOMing an indexer, exclude or
-  defer it and file an issue against the indexer.
-
-## Dependencies
-
-- cAdvisor metrics via the kubelet (metric source)
-- No GKG application dependency: the signal is entirely Kubernetes-side.
-
-## Escalation
-
-Ask in `#f_orbit_dev` (`context_systems`).
-
-## Definitions
-
-- [Alert rule](https://gitlab.com/gitlab-com/runbooks/-/blob/master/mimir-rules/analytics-eventsdot/orbit/orbit-cause-alerts.yml) (hand-maintained; keep the expr above in sync when tuning it).
-
-## Related Links
-
-- [Related alerts](../monitoring.md#alerts)
-- [Orbit runbook](../README.md)
+Kills continue after a memory increase: page Orbit tier-2 in incident.io ([escalation](../README.md#escalation)).
+Dedicated: the EOC runs `/inc escalate` and selects Orbit.

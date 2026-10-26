@@ -4,10 +4,9 @@
 
 use anyhow::Context;
 
-/// AWS-LC FIPS module generation the build is declared against. The CMVP
-/// status of that generation is documented in
-/// `docs/pages/engineering/runbooks/fips_and_tls.md`; moving to another generation is a
-/// compliance event, not a routine dependency bump.
+/// AWS-LC FIPS module generation the build is declared against. See the FIPS
+/// section of `docs/pages/engineering/architecture/security.md`; moving to another
+/// generation is a compliance event, not a routine dependency bump.
 pub const DECLARED_MODULE_GENERATION: u32 = 4;
 
 const BUILD_DEFECT_HINT: &str = "This is a defect in how this binary was built, not a configuration \
