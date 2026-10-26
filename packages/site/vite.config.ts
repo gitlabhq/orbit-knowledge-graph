@@ -41,6 +41,7 @@ export default defineConfig(async () => {
       siteRoot,
       markdown: { project: "gitlab-org/orbit/knowledge-graph", tokenEnv: "ORBIT_MARKDOWN_TOKEN" },
       meta: siteMeta,
+      avatars: (route) => !route.startsWith("content/blog/"),
     }),
     { plugins: [syncSources()] },
   );
