@@ -94,6 +94,16 @@ impl AppConfig {
         Self::decode(document)
     }
 
+    /// The embedded defaults and the overlay in strict mode, where an unknown
+    /// key anywhere is an error. Secret files are not read, so the result
+    /// depends on the overlay alone.
+    pub fn check(overlay: Option<&Path>) -> Result<Self, ConfigError> {
+        Self::decode_with(
+            with_overlay_file(overlay)?,
+            Loader::new().with_strict_mode(),
+        )
+    }
+
     fn decode(document: serde_json::Value) -> Result<Self, ConfigError> {
         Self::decode_with(document, Loader::new())
     }
@@ -428,6 +438,17 @@ graph:
             error.contains("- features.code_graph_incremental.enabeld: unknown field"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn a_check_rejects_an_unknown_key_that_startup_ignores() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let overlay = write_overlay(dir.path(), "unknown.yaml", "nats:\n  urll: nats://x\n");
+
+        AppConfig::load_from(Some(&overlay), dir.path()).unwrap();
+        let error = AppConfig::check(Some(&overlay)).unwrap_err().to_string();
+
+        assert!(error.contains("urll"), "{error}");
     }
 
     #[test]
