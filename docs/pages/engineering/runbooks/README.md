@@ -82,8 +82,11 @@ kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n gkg annotate scaledobje
 ```
 
 **Turn off Code Intelligence only.** In Slack `#production`, run
-`/chatops gitlab run feature set orbit_code_intelligence false`. To restore, run
-`/chatops gitlab run feature set orbit_code_intelligence 100 --actors`.
+`/chatops gitlab run feature set orbit_code_intelligence false`. The Code navigation button
+and panel go away from the file view after a page reload. The Orbit API, MCP and indexing
+continue. No data is deleted. To restore, run
+`/chatops gitlab run feature set orbit_code_intelligence true`. If the production check
+fails, ask `@sre-oncall` to confirm, then add `--ignore-production-check`.
 
 **Turn Orbit off for all users.** In k8s-workloads `gitlab-com`, set
 `global.appConfig.knowledgeGraph.enabled: false` in `releases/gitlab/values/gprd.yaml.gotmpl`.

@@ -100,8 +100,9 @@ During a reindex:
 
 Before planned work, such as a reindex or a rotation, create a
 [silence for Orbit](https://alerts.gitlab.net/#/silences/new?filter=%7Btype%3D%22orbit%22%2C%20env%3D%22orbit-prd%22%7D).
-Set the duration to the planned window. Put your name as the owner and link the change issue
-in the comment. Remove the silence when the work is done.
+Set the duration to the planned window. Put your name in **Creator** and the change issue
+link in **Comment**. The silence matches `orbit-prd` alerts only. When the work is done, open
+the silence and select **Expire**.
 
 Dedicated: the Dedicated EOC creates the silence in the tenant Grafana, Alerting > Silences
 ([Dedicated silences](https://gitlab.com/gitlab-com/gl-infra/gitlab-dedicated/team/-/blob/main/runbooks/alert-silences.md)).
