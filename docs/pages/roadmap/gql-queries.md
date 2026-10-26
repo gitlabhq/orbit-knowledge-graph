@@ -1,10 +1,11 @@
 ---
-title: GQL graph queries
+title: OpenCypher-like graph query language (GQL)
 description: Query the graph with GQL, a read-only query language that is similar to OpenCypher.
 theme: agents
 status: in-progress
 start: FY27 Q3
 end: FY27 Q3
+rank: 2
 tracking: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1311
 ---
 

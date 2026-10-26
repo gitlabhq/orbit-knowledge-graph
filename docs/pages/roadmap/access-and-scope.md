@@ -1,5 +1,5 @@
 ---
-title: Choose what Orbit indexes and who can query it
+title: Govern Orbit indexing and queries
 description: Control what goes into the graph and who can query it.
 theme: trust
 status: exploring

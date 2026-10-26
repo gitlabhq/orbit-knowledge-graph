@@ -1,10 +1,11 @@
 ---
-title: General availability on GitLab.com, GitLab Self-Managed, and GitLab Dedicated
+title: GitLab Orbit generally available
 description: Orbit moves from beta to general availability on every GitLab deployment type.
 theme: platform
 status: in-progress
 start: FY27 Q3
 end: FY27 Q3
+rank: 1
 link: https://docs.gitlab.com/orbit/
 tracking: https://gitlab.com/groups/gitlab-org/-/work_items/19744
 ---

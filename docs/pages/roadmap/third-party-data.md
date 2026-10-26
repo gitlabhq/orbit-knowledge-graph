@@ -3,9 +3,9 @@ title: Third-party data sources
 description: Connect data from more than 20 other tools to the graph, such as planning, documentation, and chat.
 theme: data
 status: planned
-start: FY27 Q4
+start: FY28 Q1
 end: FY28 Q1
-rank: 2
+rank: 1
 tracking: https://gitlab.com/groups/gitlab-org/orbit/-/work_items/8
 ---
 

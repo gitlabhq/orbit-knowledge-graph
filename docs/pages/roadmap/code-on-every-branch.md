@@ -1,5 +1,5 @@
 ---
-title: "Code search, branches + commits, all languages"
+title: Code search for branches, commits + all languages
 description: Index code in all languages on active branches and recent commits, and search file content in queries.
 theme: code
 status: planned

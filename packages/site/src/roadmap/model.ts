@@ -56,9 +56,9 @@ export const items: RoadmapItem[] = pages
   }))
   .sort(
     (a, b) =>
+      (a.rank ?? Infinity) - (b.rank ?? Infinity) ||
       quarterIndex(a.start) - quarterIndex(b.start) ||
       STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
-      (a.rank ?? Infinity) - (b.rank ?? Infinity) ||
       themes.indexOf(a.theme) - themes.indexOf(b.theme) ||
       a.title.localeCompare(b.title),
   );

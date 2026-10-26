@@ -1,10 +1,11 @@
 ---
-title: "Agent experience: one-step setup and the Orbit CLI"
+title: One-step setup for Orbit CLI
 description: Turn on Orbit in one step, and connect any agent to the graph with one CLI.
 theme: agents
 status: in-progress
 start: FY27 Q3
 end: FY27 Q3
+rank: 3
 link: https://docs.gitlab.com/cli/orbit/
 tracking: https://gitlab.com/groups/gitlab-org/orbit/-/work_items/18
 ---

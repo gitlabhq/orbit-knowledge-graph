@@ -14,7 +14,7 @@ themes:
     icon: code
   - id: data
     title: Your data, connected
-    description: Bring code and planning data from outside GitLab into the same graph.
+    description: Bring data from other tools into the same graph.
     icon: connected
   - id: trust
     title: Trust and scale
