@@ -55,7 +55,7 @@ tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
-zstd = "0.13.3"
+zstd = "0.14.3"
 
 [dev-dependencies]
 orbit-analytics = { path = "../orbit-analytics", features = ["testkit"] }
