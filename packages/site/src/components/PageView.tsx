@@ -32,7 +32,7 @@ export function PageView({ page, body, sidebar = false, children }: { page: Page
             <h1 className="m-0 text-3xl font-semibold text-default">{page.meta.title}</h1>
             {page.meta.description && <p className="mt-2 mb-0 text-base text-subtle">{page.meta.description}</p>}
             {children}
-            {!page.meta.post && page.meta.authors.length > 0 && (
+            {page.meta.authors.length > 0 && (
               <div className="mt-4">
                 <Authors authors={page.meta.authors} />
               </div>
