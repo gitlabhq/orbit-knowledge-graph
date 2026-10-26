@@ -48,12 +48,9 @@ workflow:
     - if: $CI_COMMIT_TAG
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       # Every path outside docs/, plus the docs/ files that code checks read.
-      # changes: has no negation, so the second glob excludes docs/ by prefix.
+      # Keep that list in sync with docs-in-code-mr-check.
       changes:
-        - "*"
-        - "{[!d],d[!o],do[!c],doc[!s],docs?}*/**/*"
-        - docs/docs-gitlab-com/remote/queries/query-language.md
-        - docs/pages/engineering/development/agents-crate-map.md
+        regexp: '\A(?!docs/)|\Adocs/(docs-gitlab-com/remote/queries/query-language|pages/engineering/development/agents-crate-map)\.md\z'
       auto_cancel:
         on_new_commit: interruptible
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
@@ -232,7 +229,7 @@ stages:
     - if: $DOCS_ONLY == "true"
       when: never
 
-# Jobs that check docs. A docs-only MR pipeline runs only these.
+# Jobs that also run on docs-only MRs.
 .docs-mr-rules:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
@@ -264,6 +261,7 @@ stages:
     ALPINE_IMAGE: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
   image: ${ALPINE_IMAGE}
   rules:
+    - !reference [.skip-on-docs-only, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $GITLAB_USER_LOGIN =~ /(-|_)bot(_|$)|^service_account_/
       interruptible: true
       variables:
@@ -295,16 +293,22 @@ docs-in-code-mr-check:
   tags:
     - saas-linux-medium-amd64
   extends:
-    - .mr-only-rules
+    - .docs-mr-rules
   needs: []
   script:
     - apk add --no-cache git
     - |
-      case ",${CI_MERGE_REQUEST_LABELS:-}," in *,docs-in-code-mr,*) echo "docs-in-code-mr label set; skipping." && exit 0;; esac
       BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_SHA:-$CI_MERGE_REQUEST_DIFF_BASE_SHA}"
       git cat-file -e "${BASE}^{commit}" 2>/dev/null || git fetch origin "$BASE" --depth=1 || git fetch --unshallow origin "$CI_COMMIT_SHA"
       CHANGED=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE" HEAD)
+      # Keep the docs/ files that code checks read in sync with the workflow regexp.
       DOCS=$(echo "$CHANGED" | grep '^docs/' | grep -vxF -e docs/docs-gitlab-com/remote/queries/query-language.md -e docs/pages/engineering/development/agents-crate-map.md || true)
+      # GitLab reads a Gitaly error as "no changed paths", which makes a code MR docs-only.
+      if [ "${DOCS_ONLY:-}" = "true" ] && [ "$DOCS" != "$CHANGED" ]; then
+        echo "This pipeline skipped the code jobs, but the MR changes code. Run a new pipeline."
+        exit 1
+      fi
+      case ",${CI_MERGE_REQUEST_LABELS:-}," in *,docs-in-code-mr,*) echo "docs-in-code-mr label set; skipping." && exit 0;; esac
       CODE=$(echo "$CHANGED" | grep -v -e '^docs/' -e '\.md$' -e '^\.vale' -e '^\.markdownlint' -e '^lychee\.toml$' || true)
       if [ -n "$DOCS" ] && [ -n "$CODE" ]; then
         printf 'This MR changes code and files under docs/:\n%s\n\n' "$DOCS"
