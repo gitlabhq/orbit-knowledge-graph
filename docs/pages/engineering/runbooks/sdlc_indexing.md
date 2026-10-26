@@ -1,5 +1,11 @@
 # SDLC Indexing Runbook
 
+> [!warning]
+> NATS stream, subject and consumer names now carry the release (for example
+> `GKG_INDEXER_V0-159-0`), and graph tables carry the schema version (for example
+> `gkg.v115_checkpoint`). Some commands on this page still use the old names. See
+> [rebuild and reindex](manual_rebuild.md#names-that-you-need) for the current names.
+
 Operations guide for the SDLC indexing pipeline: dispatching, entity extraction, checkpoint management, and recovery.
 
 ## Architecture overview
@@ -47,7 +53,7 @@ With ephemeral consumers (`consumer_name: None`, the local dev default), NATS as
 
 Each ontology entity type gets its own `EntityHandler` instance. Handlers for global entities subscribe to the global subject; handlers for namespaced entities subscribe to the namespace subject.
 
-| Scope | Subject | Default max_attempts | DLQ |
+| Scope | Subject | max_attempts on GitLab.com | DLQ |
 |-------|---------|---------------------|-----|
 | Global (e.g. User) | `sdlc.global.indexing.requested` | 1 | No (re-dispatched next cycle) |
 | Namespaced (e.g. Project, MergeRequest) | `sdlc.namespace.indexing.requested.*.*` | 1 | No (re-dispatched next cycle) |
@@ -108,115 +114,13 @@ ORDER BY key;
 
 ## Force reindex
 
-### Reindex a single namespace
-
-1. Delete the namespace's checkpoints so the indexer starts from epoch:
-
-   ```sql
-   ALTER TABLE `<gkg-database>`.checkpoint
-   DELETE WHERE key LIKE 'ns.<namespace_id>.%';
-   ```
-
-2. Trigger the dispatcher (it will publish a new request on the next cycle):
-
-   ```shell
-   # Option A: wait for the next scheduled dispatch cycle
-   # Option B: trigger manually (see "Trigger dispatcher manually" above)
-   # Option C: publish directly to NATS
-   nats pub sdlc.namespace.indexing.requested.<org_id>.<namespace_id> \
-     '{"organization":<org_id>,"namespace":<namespace_id>,"watermark":"2026-03-24T00:00:00Z"}'
-   ```
-
-### Reindex a single entity type within a namespace
-
-```sql
-ALTER TABLE `<gkg-database>`.checkpoint
-DELETE WHERE key = 'ns.<namespace_id>.<EntityType>';
-```
-
-For example, to reindex only Projects in namespace 42:
-
-```sql
-ALTER TABLE `<gkg-database>`.checkpoint
-DELETE WHERE key = 'ns.42.Project';
-```
-
-### Reindex global entities (User)
-
-```sql
-ALTER TABLE `<gkg-database>`.checkpoint
-DELETE WHERE key LIKE 'global.%';
-```
-
-### Full reindex (all namespaces, all entities)
-
-1. Truncate graph tables:
-
-   ```sql
-   SELECT 'TRUNCATE TABLE `<gkg-database>`.' || name || ';'
-   FROM system.tables
-   WHERE database = '<gkg-database>';
-   ```
-
-   Run the generated statements.
-
-2. Clear all checkpoints:
-
-   ```sql
-   TRUNCATE TABLE `<gkg-database>`.checkpoint;
-   ```
-
-3. Trigger the dispatcher to re-publish all requests.
-
-### Replay from a specific point in time
-
-Manually set a checkpoint watermark to re-extract rows after that timestamp:
-
-```sql
-INSERT INTO `<gkg-database>`.checkpoint (key, watermark, cursor_values, _version, _deleted)
-VALUES ('ns.42.Project', '2026-01-01T00:00:00', '', now64(), false);
-```
-
-The handler will extract rows where `_siphon_watermark` falls between the old watermark and the new one.
-
-## Remove stuck messages from NATS
-
-### Check pending messages
-
-```shell
-nats stream info GKG_INDEXER
-nats consumer ls GKG_INDEXER
-nats consumer info GKG_INDEXER <consumer_name>
-```
-
-### Purge a specific subject
-
-Remove a stuck message for a single namespace:
-
-```shell
-nats stream purge GKG_INDEXER --subject='sdlc.namespace.indexing.requested.<org>.<ns>'
-```
-
-### Purge all SDLC subjects
-
-```shell
-nats stream purge GKG_INDEXER --subject='sdlc.global.indexing.requested'
-nats stream purge GKG_INDEXER --subject='sdlc.namespace.indexing.requested.*.*'
-```
-
-### Full NATS reset
-
-Destroys all in-flight messages. The dispatcher will re-create them on the next cycle.
-
-```shell
-kubectl -n gkg delete pod gkg-nats-0
-kubectl -n gkg delete pvc gkg-nats-js-gkg-nats-0
-kubectl -n gkg wait --for=condition=ready pod/gkg-nats-0 --timeout=120s
-```
+To reindex a namespace, or to rebuild the whole graph, see
+[rebuild and reindex](manual_rebuild.md). Do not truncate graph tables and do not reset
+NATS: the NATS cluster also holds the Siphon streams.
 
 ## Retry mechanism
 
-SDLC handlers retry a transient failure (ClickHouse timeout, network blip) through NATS redelivery. The module policy is `max_attempts: 5` with a 60 second `retry_interval_secs`:
+SDLC handlers can retry a transient failure (ClickHouse timeout, network blip) through NATS redelivery. The code default is `max_attempts: 5` with a 60 second `retry_interval_secs`. GitLab.com production sets 1 attempt, so there the dispatcher sends the work again instead:
 
 1. Handler fails and nacks the message with the retry delay
 2. NATS redelivers the message and the handler retries from its checkpoint

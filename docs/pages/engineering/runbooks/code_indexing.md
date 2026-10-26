@@ -1,5 +1,11 @@
 # Code Indexing Runbook
 
+> [!warning]
+> NATS stream, subject and consumer names now carry the release (for example
+> `GKG_INDEXER_V0-159-0`), and graph tables carry the schema version (for example
+> `gkg.v115_checkpoint`). Some commands on this page still use the old names. See
+> [rebuild and reindex](manual_rebuild.md#names-that-you-need) for the current names.
+
 Operations guide for the code indexing pipeline: dispatch sources, task processing, dead letter queue, and recovery.
 
 ## Architecture overview
@@ -232,40 +238,8 @@ DELETE WHERE project_id = <id> AND branch = '<branch>';
 
 ## Force reindex
 
-### Reindex a single project branch
-
-1. Clear the checkpoint:
-
-   ```sql
-   ALTER TABLE `<gkg-database>`.code_indexing_checkpoint
-   DELETE WHERE project_id = <id> AND branch = '<branch>';
-   ```
-
-2. Publish a new indexing request:
-
-   ```shell
-   # Encode branch name: echo -n 'main' | base64
-   nats pub 'code.task.indexing.requested.<project_id>.<base64_branch>' \
-     '{"task_id":0,"project_id":<id>,"branch":"<branch>","commit_sha":null,"traversal_path":"<path>"}'
-   ```
-
-### Reindex default branch for a project
-
-```sql
-ALTER TABLE `<gkg-database>`.code_indexing_checkpoint
-DELETE WHERE project_id = <id>;
-```
-
-Then publish a backfill request (no branch):
-
-```shell
-nats pub 'code.task.indexing.requested.<project_id>._' \
-  '{"task_id":0,"project_id":<id>,"branch":null,"commit_sha":null,"traversal_path":"<path>"}'
-```
-
-### Reindex an entire namespace
-
-Trigger a namespace backfill by re-enabling the namespace in GitLab (toggle the Orbit feature flag off and on). You can also simulate the Siphon event that the `NamespaceCodeBackfillDispatcher` consumes.
+To reindex a project or a namespace, see [rebuild and reindex](manual_rebuild.md).
+Turning the Orbit feature off and on does not reindex.
 
 ## Retry mechanism
 

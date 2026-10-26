@@ -1,0 +1,158 @@
+# Secret rotation
+
+Back to the [runbook](README.md). These are planned changes, not incident actions. Do
+staging first.
+
+## Before you start (GitLab.com)
+
+> [!warning]
+> Check that each Orbit ExternalSecret in
+> `services/gkg/env/orbit-<env>/values-vault-secrets.yaml` has `refreshPolicy: OnChange`.
+> Without it, a new `version` does not update the Secret. If it is missing, add it first.
+
+| Secret | Vault path (`<env>` is `prd` or `stg`) | ExternalSecret |
+| --- | --- | --- |
+| JWT shared key | `k8s/shared/knowledge-graph/<env>/jwt` | `gkg-gitlab-jwt` |
+| ClickHouse passwords | `k8s/orbit-<env>/gkg/clickhouse-cloud` | `gkg-graph`, `gkg-graph-readonly`, `gkg-datalake` |
+| CA that Rails trusts | `k8s/shared/knowledge-graph/<env>/tls` | Rails side, `gitlab-knowledge-graph-tls-certificate-v1` |
+
+Reloader restarts the Orbit pods when their Secret changes. Do not put secret values on the
+command line: read them from a file or from standard input.
+
+## If a rotation breaks connections
+
+Symptoms: Orbit queries fail with authentication or TLS errors right after a rotation.
+
+1. Set the ExternalSecret `version` back to the previous Vault version on the side you
+   changed last, and merge. After ClickHouse step 5 you cannot go back: add a new password
+   instead.
+2. Check: `glab orbit status` is `healthy` and a test query works (see
+   [troubleshooting](troubleshooting.md#order-of-checks)).
+
+## JWT shared key
+
+Rails and Orbit each hold one key, so there is a short downtime. Do it in a low-traffic
+window and change both sides close together.
+
+1. A Vault administrator writes a new key (base64 of exactly 32 bytes):
+
+   ```shell
+   vault kv put -mount=k8s shared/knowledge-graph/<env>/jwt key="$(openssl rand -base64 32)"
+   ```
+
+2. Orbit: set `version` of `gkg-gitlab-jwt` to the new Vault version. Make sure the Secret
+   changes and the webserver and indexer pods restart.
+3. Rails: Rails reads the key once per process. In `k8s-workloads/gitlab-com`, add a new
+   ExternalSecret `gitlab-knowledge-graph-jwt-v2` with the new version and point
+   `knowledgeGraph.jwtSecret.secret` to it. Make sure no auto-deploy runs before you merge.
+4. Check: `glab orbit status` and a test query work. Remove the old ExternalSecret.
+
+## ClickHouse passwords
+
+The three passwords are properties of one Vault secret. Use `vault kv patch`. `vault kv put`
+deletes the other passwords.
+
+1. Add the new password to the SQL user. The old password continues to work:
+
+   ```sql
+   ALTER USER <user> ADD IDENTIFIED WITH sha256_password BY '<new password>'
+   ```
+
+2. Write it to Vault:
+
+   ```shell
+   vault kv patch -mount=k8s orbit-<env>/gkg/clickhouse-cloud <user>_password=@<file with the new password>
+   ```
+
+3. Set `version` in the matching ExternalSecret to the version that `vault kv patch` shows.
+   The number can go up by more than 1.
+4. Make sure the Orbit pods started after the Secret changed. If they did not, restart them:
+
+   ```shell
+   kubectl --context gke_gl-orbit-<env>_us-east1_orbit-<env> -n gkg rollout restart deploy/orbit-webserver deploy/orbit-dispatcher deploy/orbit-indexer-sdlc deploy/orbit-indexer-code deploy/orbit-health-check
+   ```
+
+   > [!warning]
+   > Do not run step 5 before the pods restart. Orbit then loses access to ClickHouse.
+
+5. Remove the old password. This keeps only the last password that you added:
+
+   ```sql
+   ALTER USER <user> RESET AUTHENTICATION METHODS TO NEW
+   ```
+
+6. Check: no ClickHouse authentication errors in the Orbit logs, and a test query works.
+
+`gkg_siphon_reader` is on the datalake service. Coordinate with the Siphon team.
+
+## Certificates
+
+cert-manager renews the leaf certificates by itself. The private CA `orbit-<env>-root-ca`
+renews by itself only near its end of life, with a new key, and that breaks all
+connections. Rotate it by hand before then. Check its dates:
+
+```shell
+kubectl --context gke_gl-orbit-<env>_us-east1_orbit-<env> -n cert-manager get certificate orbit-<env>-root-ca \
+  -o 'custom-columns=NOT_AFTER:.status.notAfter,RENEWAL:.status.renewalTime'
+```
+
+Do not run `cmctl renew` on the root CA and do not delete its Secret. Both make a new CA key.
+
+<details>
+<summary>CA rotation</summary>
+
+Rails can trust two certificate authorities at once, so the gRPC side has no downtime. NATS
+has a short window, because the server and the clients must change together.
+
+1. In argocd-apps `services/cert-manager/env/orbit-<env>/values.yaml`, add a Certificate
+   `orbit-<env>-root-ca-v2` (common name `orbit-<env>-root-ca-v2`) and a ClusterIssuer
+   `orbit-<env>-ca-v2`. Keep the old ones.
+2. Get the public certificate of the new CA. This Secret also holds the CA private key, so
+   copy only `ca.crt`:
+
+   ```shell
+   kubectl --context gke_gl-orbit-<env>_us-east1_orbit-<env> -n cert-manager get secret orbit-<env>-root-ca-v2 \
+     -o jsonpath='{.data.ca\.crt}' | base64 -d > orbit-<env>-ca-v2.crt
+   ```
+
+3. Rails trust: put both CA certificates in one file. A Vault administrator writes it as a
+   new version of `k8s/shared/knowledge-graph/<env>/tls`, property `certificate`. In
+   `k8s-workloads/gitlab-com`, add the ExternalSecret
+   `gitlab-knowledge-graph-tls-certificate-v2` with that version, and replace v1 in
+   `global.certificates.customCAs`. Rails pods restart.
+4. Webserver: set `issuerRef.name` of `gkg-server-tls` to `orbit-<env>-ca-v2`. cert-manager
+   issues the new certificate at once and the webserver restarts. Check: a test query works.
+5. NATS, in one window: set `issuerRef.name` to `orbit-<env>-ca-v2` on `nats-server-tls`,
+   `nats-box-client-tls`, `nats-client-gkg` and `siphon-client-tls`, and merge.
+   - ArgoCD syncs `gkg` by itself but not `nats` or `siphon`. Sync `nats` at once, then
+     `siphon`.
+   - Orbit pods crash with `UnknownIssuer` until NATS has the new certificate. Indexing
+     stops for those minutes.
+   - Restart Orbit and Siphon. Reloader does not restart Siphon for this Secret:
+
+     ```shell
+     kubectl --context gke_gl-orbit-<env>_us-east1_orbit-<env> -n gkg rollout restart deploy
+     kubectl --context gke_gl-orbit-<env>_us-east1_orbit-<env> -n siphon rollout restart deploy
+     ```
+
+   - Check: all NATS pods are ready, all Orbit pods are `Running`.
+6. Make sure no Certificate uses the old issuer:
+
+   ```shell
+   kubectl --context gke_gl-orbit-<env>_us-east1_orbit-<env> get certificates -A \
+     -o 'custom-columns=NS:.metadata.namespace,NAME:.metadata.name,ISSUER:.spec.issuerRef.name'
+   ```
+
+7. Remove the old ClusterIssuer, then the old CA Certificate. Removing the CA Certificate
+   also deletes the CA key, so do it last.
+
+</details>
+
+## Dedicated
+
+- Onboarding creates the JWT key and the ClickHouse passwords in AWS Secrets Manager. There
+  is no tested rotation. Talk to the Orbit and Dedicated teams first.
+- The Orbit chart sets each ClickHouse password to the Secret value at every install and
+  upgrade, and removes all other passwords of the user. Do not upgrade Orbit while a user
+  has two passwords.
+- Orbit uses no TLS inside the tenant cluster, so there are no certificates to rotate.
