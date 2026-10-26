@@ -68,7 +68,7 @@ The [security](security.md) page walks through those checks.
 | [Code indexing](indexing/code-indexing.md) | How repositories become the code graph |
 | [Schema evolution](indexing/schema-evolution.md) | How the graph moves to a new schema with no downtime |
 | [Resiliency](indexing/resiliency.md) | How indexing recovers from crashes, retries, and outages |
-| [Querying](querying.md) | How a graph question becomes one safe query |
+| [Querying](querying/README.md) | How a graph question becomes one safe query |
 | [Security](security.md) | How each caller sees only what GitLab lets them see |
 | [Orbit CLI](orbit-cli.md) | How Orbit indexes and queries code on your own machine |
 | [Testing](../testing/README.md) | How we prove a change is correct before it ships |

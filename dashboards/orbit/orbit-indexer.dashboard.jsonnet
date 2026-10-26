@@ -8,8 +8,8 @@
 //               code first then SDLC.
 //   3. Latency — percentiles per stage, plus a top-N entity table.
 //   4. Reliability — error ratios and stage/kind breakdowns.
-//   5. Freshness and saturation — SDLC pairs behind by lag and by plan,
-//               watermark lag per entity, ETL permits.
+//   5. Freshness and saturation — oldest SDLC data per plan, namespaces
+//               behind by plan, watermark lag per entity, ETL permits.
 //   6. Fleet — replica counts per indexer pool kind.
 //   7. Resources — CPU, memory, FS I/O, pressure, OOM, restarts, reduced to
 //               avg and max per pool kind. Per-pod detail is a collapsed row.
@@ -44,8 +44,6 @@ local sdlcPipelineDur = o.metric('gkg_indexer_sdlc_pipeline_duration_seconds');
 local LAG = 'gkg_indexer_sdlc_watermark_lag_seconds{%s}' % [SEL];
 local SDLC_RUNS = 'gkg_indexer_sdlc_pipeline_duration_seconds_count{%s}' % [SEL];
 local FRESH_LAG = '(%s and on (pod, entity) (increase(%s[6m]) > 0))' % [LAG, SDLC_RUNS];
-// Every entity runs at least once per hourly namespace sweep; 65m without a run is a stall.
-local STALLED_ENTITIES = '(count by (entity) (%s) unless count by (entity) (increase(%s[65m]) > 0))' % [LAG, SDLC_RUNS];
 
 // 1. At a glance ----------------------------------------------------------
 // Freshness is the symptom users see, so it leads; throughput and success
@@ -69,8 +67,12 @@ local freshShare(le, range) = '%s / (%s > 0)' % [freshBucket(le, range), freshCo
 local freshRuns(range) = 'on () group_left () (max(changes(%s_count{%s}[%s])) > 0)' % [FRESH, DSP_SEL, range];
 local behind(le, range, by='') =
   'clamp_min(%s - %s, 0) / %s' % [freshCount(range, by), freshBucket(le, range, by), freshRuns(range)];
-local band(lo, hi, range) =
-  'clamp_min(%s - %s, 0) / %s' % [freshBucket(hi, range), freshBucket(lo, range), freshRuns(range)];
+// The dispatcher stamps each plan with the time its data last matched the datalake, so the age
+// keeps growing when indexing or the freshness task stops.
+local OLDEST_SYNC = o.metric('gkg_indexer_sdlc_freshness_oldest_sync_timestamp_seconds').prom_name;
+local oldestAge(by='') = 'time() - min%s(%s{%s})' % [by, OLDEST_SYNC, DSP_SEL];
+// Emitted by the dispatcher freshness task, not the indexer.
+local DISPATCHER_SDLC = [FRESH, OLDEST_SYNC];
 
 local CODE = o.metric('gkg_indexer_code_events_processed_total').prom_name;
 local CODE_DONE = 'outcome=~"indexed|empty_repository|error"';
@@ -103,10 +105,10 @@ local glance = [
     'percentunit', o.stepsDown(0.95, 0.99), 2,
   ),
   tile(
-    'Behind 1 h',
-    'Namespace and SDLC plan pairs more than 1 hour behind the datalake at the end of the selected time range. One namespace stuck on every plan counts once per plan. See the lag chart below for the split.',
-    behind('3600.0', '15m'),
-    'short', NEUTRAL, 0,
+    'Oldest data',
+    'Age of the oldest indexed SDLC data at the end of the selected time range: how far the least synced enabled namespace and plan trails the datalake. See the per-plan chart below.',
+    oldestAge(),
+    's', NEUTRAL,
   ),
   tile(
     'Projects/min',
@@ -327,19 +329,12 @@ local reliability = [
 // 5. Freshness and saturation --------------------------------------------
 local freshness = [
   o.row('Freshness and saturation'),
-  bars(
-    'SDLC pairs behind, by lag',
-    'Namespace and SDLC plan pairs more than 15 minutes behind the datalake, by how far behind, averaged per freshness run. A namespace that never finished its first sync counts from the time it was enabled.',
-    [
-      o.target(band('900.0', '3600.0', '$__interval'), '15 min – 1 h', DS, 'A'),
-      o.target(band('3600.0', '14400.0', '$__interval'), '1 – 4 h', DS, 'B'),
-      o.target(band('14400.0', '57600.0', '$__interval'), '4 – 16 h', DS, 'C'),
-      o.target(behind('57600.0', '$__interval'), '> 16 h', DS, 'D'),
-    ],
-    'short',
-    [['15 min – 1 h', '#EAB839'], ['1 – 4 h', '#d95926'], ['4 – 16 h', '#e66767'], ['> 16 h', '#9085e9']],
-    'list',
-  ) + { interval: '15m', fieldConfig+: { defaults+: { decimals: 0 } } },
+  o.timeseries(
+    'SDLC: oldest data per plan',
+    'Age of the oldest indexed data for each SDLC plan, in its least synced enabled namespace. An idle namespace counts as in sync until its hourly sweep is overdue. A namespace that never finished its first sync counts from the time it was enabled.',
+    [o.target(oldestAge(' by (entity)'), '{{entity}}', DS)],
+    's', 12, 9,
+  ),
   {
     kind: 'panel',
     type: 'bargauge',
@@ -372,12 +367,6 @@ local freshness = [
     'Active worker permits by kind. Watch the global pool flatlining at the configured ceiling, that is the bottleneck signal.',
     [o.target('sum by (permit_kind) (gkg_etl_permits_active{%s})' % [SEL], '{{permit_kind}}', DS)],
     'short', 12, 8,
-  ),
-  o.gaugeStat(
-    'SDLC: stalled entities',
-    'SDLC entities that completed no run on any replica in the last 65 minutes. Every entity runs during the hourly namespace sweep, so anything above 0 means an entity has stalled.',
-    'count(%s)' % [STALLED_ENTITIES],
-    DS, 'short', 6,
   ),
 ];
 
@@ -669,8 +658,8 @@ local dataDeletionPanels = [
 local reference =
   o.sectionCollapsed('ETL engine (reference)', o.metricsInDomain('indexer.etl'), DS, SEL)
   + o.sectionCollapsed('Code pipeline (reference)', o.metricsInDomain('indexer.code'), DS, SEL)
-  + o.sectionCollapsed('SDLC pipeline (reference)', [m for m in o.metricsInDomain('indexer.sdlc') if m.prom_name != FRESH], DS, SEL)
-  + o.panelsFor(o.metric(FRESH), DS, DSP_SEL)
+  + o.sectionCollapsed('SDLC pipeline (reference)', [m for m in o.metricsInDomain('indexer.sdlc') if !std.member(DISPATCHER_SDLC, m.prom_name)], DS, SEL)
+  + std.flattenArrays([o.panelsFor(o.metric(name), DS, DSP_SEL) for name in DISPATCHER_SDLC])
   + [o.rowCollapsed('Data deletion')] + dataDeletionPanels
   + o.sectionCollapsed('Scheduler (reference)', o.metricsInDomain('indexer.scheduler'), DS, DSP_SEL);
 

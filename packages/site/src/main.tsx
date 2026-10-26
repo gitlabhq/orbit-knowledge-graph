@@ -15,7 +15,6 @@ declare module "@tanstack/react-router" {
 declare module "@gitlab-org/orbit-site" {
   interface PageMeta {
     sourceUrl: string;
-    authors: string[];
     lastChanged?: string;
     order?: number;
     words: number;
