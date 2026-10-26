@@ -28,11 +28,11 @@ export const SECTIONS = [
   { route: "roadmap", label: "Roadmap" },
   { route: "content", label: "Content" },
   { route: "team", label: "Team" },
-  { route: "engineering/runbooks", label: "Runbooks" },
-  { route: "engineering/architecture", label: "Architecture" },
-  { route: "engineering/adr", label: "ADRs" },
-  { route: "engineering/testing", label: "Testing" },
-  { route: "engineering/development", label: "Development" },
+  { route: "engineering/runbooks", label: "Runbooks", description: "How to operate Orbit, recover from failures, and restore it after a disaster." },
+  { route: "engineering/architecture", label: "Architecture", description: "What Orbit is, why we built it, and the design contracts of each component." },
+  { route: "engineering/adr", label: "ADRs", description: "Each design decision, the reasons for it, and its consequences." },
+  { route: "engineering/testing", label: "Testing", description: "How Orbit proves that a change is correct before it ships." },
+  { route: "engineering/development", label: "Development", description: "How to run Orbit locally, add a language or data source, and contribute." },
 ];
 
 export const ENGINEERING = SECTIONS.filter(({ route }) => route.startsWith("engineering/"));

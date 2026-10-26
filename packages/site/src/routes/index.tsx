@@ -1,4 +1,4 @@
-import { cn, findPage, Icon, pageHead, pageLink, site, SiteLink } from "@gitlab-org/orbit-site";
+import { cn, Icon, pageHead, pageLink, site, SiteLink } from "@gitlab-org/orbit-site";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Board } from "../roadmap/Board";
 import { videos } from "../content/demos";
@@ -91,12 +91,12 @@ function Themes() {
 
 function Engineering() {
   return (
-    <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-4">
-      {ENGINEERING.map(({ route, label }) => (
+    <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-5">
+      {ENGINEERING.map(({ route, label, description }) => (
         <li key={route}>
           <Link {...pageLink(route)} className="card group flex h-full flex-col gap-2 p-5 no-underline">
             <span className="text-base font-semibold text-default">{label}</span>
-            <span className="text-sm text-subtle">{findPage(route)?.meta.description}</span>
+            <span className="text-sm text-subtle">{description}</span>
           </Link>
         </li>
       ))}
@@ -109,16 +109,16 @@ function HomePage() {
     <>
       <Hero />
       <div className="page-container flex flex-col gap-12 py-10">
-        <section>
-          <SectionHeading title="Now, next, and later" description="The top items in each horizon." action={{ label: "Full roadmap", to: "/roadmap" }} />
-          <Board items={items} limit={3} compact headingLevel={3} />
-        </section>
         {themes.length > 0 && (
           <section>
             <SectionHeading title="Themes" description="Roadmap items, grouped by area." />
             <Themes />
           </section>
         )}
+        <section>
+          <SectionHeading title="Now, next, and later" description="The top items in each horizon." action={{ label: "Full roadmap", to: "/roadmap" }} />
+          <Board items={items} limit={3} compact headingLevel={3} />
+        </section>
         <section>
           <SectionHeading title="Engineering" description="How the Orbit team builds, tests, and runs Orbit." action={{ label: "Engineering docs", to: "/engineering" }} />
           <Engineering />
