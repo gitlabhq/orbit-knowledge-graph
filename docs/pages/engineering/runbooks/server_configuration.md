@@ -7,12 +7,12 @@ Reference for all configurable knobs in the GKG server. All five modes (Webserve
 Config is loaded in layers, each overriding the previous:
 
 1. **Embedded defaults**: `config/default.yaml`, compiled into the binary. It declares every
-   section and scalar the server reads. The Rust config structs carry no fallback values. So a
-   key removed from this file fails startup with a "missing field" error. Optional keys are
+   section and scalar the server reads. The schema marks each one required. So a key removed
+   from this file fails startup with a "value is required" error. Optional keys are
    `Option` fields (passwords, TLS paths, values derived from container resources) and are
    commented out in the file. These are **deployment defaults**. A production pod runs on them for
    every key the Helm ConfigMap does not set. So the file holds no local-development tuning. Its
-   maps stay empty unless an entry is a genuine universal default. The reason: config-rs
+   maps stay empty unless an entry is a genuine universal default. The reason: the loader
    deep-merges maps. Any entry here that a partial ConfigMap does not set would leak into production.
 2. **Overlay file**: the path given with `--config <path>`, otherwise `config/config.yaml` when it exists.
    An explicit `--config` path must exist; the default overlay is optional and Git ignores it.
@@ -22,8 +22,16 @@ Config is loaded in layers, each overriding the previous:
 
 There is no environment-variable layer. Every override is a YAML overlay or a secret file.
 
-Adding a setting means adding a field to the struct in `crates/orbit-server-config/` and its
-value to `config/default.yaml`; nothing else. Tests that need a config start from
+Adding a setting means adding:
+
+- a field to `crates/orbit-server-config/proto/orbit/config/v1/config.proto`, marked
+  `(buf.validate.field).required = true` unless it is optional, then running `mise proto:config`
+- a field to the Rust struct in `crates/orbit-server-config/`, and its arm in `convert.rs`
+- its value in `config/default.yaml`
+
+The loader merges the layers into one document. It rejects enum names and closed-section keys the
+schema does not declare, then decodes and validates the document. Validation reports
+every violation at once. Tests that need a config start from
 `AppConfig::embedded_defaults()` and override the fields they care about. The `orbit` CLI uses its
 own clap configuration instead of `AppConfig`.
 
