@@ -46,3 +46,7 @@ Do not change any file under `docs/` in an MR that changes code. Change it only 
 Do not create a GitLab issue or epic until the author approves the draft.
 Read `CONTRIBUTING.md` for engineering, documentation, issue, and MR
 conventions. Read `CONTEXT.md` for domain terms.
+
+## Writing or changing a skill
+
+Before you create or edit a skill, follow the [`authoring-skills`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/authoring-skills/SKILL.md) guide; shipped skills live in `skills/`, repo-only skills in `.agents/skills/`.
