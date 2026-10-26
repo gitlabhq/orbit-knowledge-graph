@@ -1,6 +1,6 @@
 ---
 stage: Analytics
-group: Knowledge Graph
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Install GitLab Orbit on Kubernetes, connect GitLab to it, and index your first group.
 title: Set up GitLab Orbit
@@ -215,7 +215,7 @@ Adjust the values for your environment:
 - If the ClickHouse certificate comes from your own CA, add the CA certificate to `trust.extraCAs`.
 - If a load balancer or a service mesh handles TLS, remove the `tls` block.
 - If NATS requires a password, set `nats.username`, add `nats-password` to the Secret and `natsPassword` to `secrets`, and turn on `nats.tls` so the password does not cross the network in clear text.
-- Snowplow analytics is on by default. To turn it off, set `analytics.enabled: false`.
+- Snowplow analytics is off by default. To turn it on, set `analytics.enabled: true`.
 
 For TLS, private certificate authorities, NATS TLS, and plaintext connections, see [Networking for GitLab Orbit](networking.md).
 For every value and its default, see the [GitLab Orbit Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts).
@@ -248,15 +248,15 @@ An hourly sweep picks up any data that indexing missed.
 ## Verify the installation
 
 Query the graph for the projects in the group that you turned on.
-The API accepts GQL queries only when the `orbit_gql_queries` feature flag is on.
-With the flag on, the API parses every query as GQL, so JSON query objects fail.
+If your GitLab version has the `orbit_gql_queries` feature flag, the API accepts GQL queries only from users that have the flag on.
+For these users, the API parses every query as GQL, so JSON query objects fail.
 
 To verify the installation:
 
-1. In the [Rails console](https://docs.gitlab.com/administration/operations/rails_console/), turn on the feature flag:
+1. If your GitLab version has the `orbit_gql_queries` feature flag, turn it on for your user in the [Rails console](https://docs.gitlab.com/administration/operations/rails_console/):
 
    ```ruby
-   Feature.enable(:orbit_gql_queries)
+   Feature.enable(:orbit_gql_queries, User.find_by_username('<your_username>'))
    ```
 
 1. Save the query as `query.gql`:
@@ -278,6 +278,12 @@ To verify the installation:
    ```
 
    Replace `<your_access_token>` with your personal access token.
+
+1. Optional. To send JSON queries again as this user, turn off the feature flag:
+
+   ```ruby
+   Feature.disable(:orbit_gql_queries, User.find_by_username('<your_username>'))
+   ```
 
 The query returns rows after the first index finishes.
 Pod status and the `/-/readiness` endpoint pass before that point, so they do not confirm indexing.

@@ -1,6 +1,6 @@
 ---
 stage: Analytics
-group: Knowledge Graph
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Set up ClickHouse for GitLab Orbit on GitLab Self-Managed.
 title: ClickHouse for GitLab Orbit
@@ -19,7 +19,7 @@ Siphon connects over the native protocol on port 9000.
 
 ## Supported versions
 
-GitLab Orbit requires ClickHouse 26.4 or later.
+GitLab Orbit requires ClickHouse 26.4 or later, in a release that GitLab supports.
 For the releases that GitLab supports, see [Supported ClickHouse versions](https://docs.gitlab.com/integration/clickhouse/#supported-clickhouse-versions).
 
 ## Databases
@@ -95,7 +95,7 @@ These values suit a 32 GiB instance:
 ## System log retention
 
 The ClickHouse system log tables have no time limit by default and can fill the disk.
-To delete old rows, add a TTL for every log to `/etc/clickhouse-server/config.d/system_log_ttl.xml`, then restart ClickHouse:
+To delete old rows, add a TTL for these logs to `/etc/clickhouse-server/config.d/system_log_ttl.xml`, then restart ClickHouse:
 
 ```xml
 <clickhouse>

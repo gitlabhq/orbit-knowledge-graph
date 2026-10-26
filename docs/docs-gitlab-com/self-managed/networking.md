@@ -1,6 +1,6 @@
 ---
 stage: Analytics
-group: Knowledge Graph
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Configure TLS between GitLab and GitLab Orbit, trust a private certificate authority, and encrypt NATS traffic.
 title: Networking for GitLab Orbit
@@ -30,8 +30,12 @@ A load balancer that terminates TLS itself must support gRPC.
 If GitLab runs in the same cluster, use the endpoint `tls://orbit-webserver.gitlab-orbit.svc.cluster.local:50054`.
 The certificate must be valid for the host name that GitLab connects to.
 
+If GitLab runs outside the cluster, expose the service with a method your cluster supports, and keep the address on a private network.
+
 On AWS, use a Network Load Balancer with a TCP listener.
 A Classic Load Balancer does not support HTTP/2.
+Without the [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/), a `LoadBalancer` Service gets a Classic Load Balancer.
+Install the controller, and set the load balancer type and scheme in the Service annotations.
 If GitLab connects to one fixed load balancer address, also turn on cross-zone load balancing:
 
 ```yaml
@@ -39,6 +43,9 @@ webserver:
   service:
     type: LoadBalancer
     annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internal
       service.beta.kubernetes.io/aws-load-balancer-attributes: load_balancing.cross_zone.enabled=true
 ```
 

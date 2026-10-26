@@ -1,6 +1,6 @@
 ---
 stage: Analytics
-group: Knowledge Graph
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Find and fix common problems with GitLab Orbit on GitLab Self-Managed.
 title: Troubleshooting GitLab Orbit on GitLab Self-Managed
@@ -46,6 +46,8 @@ For example, the archive was never published, the NATS volume was reset, or the 
 
 To resolve this issue, point `clickhouse.graph.database` at a new database, upgrade GitLab Orbit, and wait for the first index to finish.
 On a replicated cluster, create the database first.
+If you created the users manually, run `graph.sql` again with `${GRAPH_DB}` set to the new database.
+After the first index finishes, you can drop the old database to free disk.
 
 ## Recover from data loss
 
