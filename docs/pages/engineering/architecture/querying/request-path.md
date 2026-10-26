@@ -14,7 +14,7 @@ GitLab Orbit CLI, the REST API, and GitLab Duo, and every query goes through
 GitLab first. GitLab decides who can see what. Orbit compiles the query, runs
 it on ClickHouse, and asks GitLab about the rows that SQL alone can't decide.
 
-![A query goes from the caller through GitLab and Orbit to ClickHouse, with a redaction check back to GitLab](../../../../assets/architecture/query-request-path.svg)
+![A query goes from the caller through GitLab and Workhorse to the query service and the graph, with redaction checks back to GitLab](../../../../assets/architecture/query-request-path.svg)
 
 ## How it works
 

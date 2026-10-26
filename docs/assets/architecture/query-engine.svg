@@ -9,38 +9,38 @@
 <mask id="knockout" maskUnits="userSpaceOnUse" x="-150" y="-350" width="1280" height="670"><rect x="-150" y="-350" width="1280" height="670" fill="white"/><rect x="-44.800000000000004" y="57.75" width="89.60000000000001" height="40.5" rx="6" fill="black"/><rect x="-81.48" y="97.75" width="162.96" height="28.5" rx="6" fill="black"/><rect x="-92.12" y="123.75" width="184.24" height="28.5" rx="6" fill="black"/><rect x="272.84" y="-152.0" width="54.32000000000001" height="36.0" rx="6" fill="black"/><rect x="267.8" y="-119.5" width="64.4" height="27.0" rx="6" fill="black"/><rect x="272.84" y="48.0" width="54.32000000000001" height="36.0" rx="6" fill="black"/><rect x="257.72" y="80.5" width="84.56" height="27.0" rx="6" fill="black"/><rect x="266.12" y="248.0" width="67.76" height="36.0" rx="6" fill="black"/><rect x="257.72" y="280.5" width="84.56" height="27.0" rx="6" fill="black"/><rect x="905.8" y="-152.0" width="148.4" height="36.0" rx="6" fill="black"/><rect x="912.52" y="-119.5" width="134.96" height="27.0" rx="6" fill="black"/><rect x="932.68" y="48.0" width="94.64000000000001" height="36.0" rx="6" fill="black"/><rect x="927.64" y="80.5" width="104.72000000000001" height="27.0" rx="6" fill="black"/><rect x="905.8" y="248.0" width="148.4" height="36.0" rx="6" fill="black"/><rect x="937.72" y="280.5" width="84.56" height="27.0" rx="6" fill="black"/><rect x="491.88" y="101.0" width="296.24" height="42.0" rx="6" fill="black"/><rect x="426.36" y="142.5" width="427.28000000000003" height="27.0" rx="6" fill="black"/></mask>
 </defs>
 <g mask="url(#knockout)"><path d="M48,-32 L257,-171" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M345,-174 L556,-50" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M58,0 L248,0" fill="none" stroke="#8f8e96" stroke-opacity="0.3" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrow)"/><path d="M352,0 L542,0" fill="none" stroke="#8f8e96" stroke-opacity="0.3" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrow)"/><path d="M48,32 L257,171" fill="none" stroke="#8f8e96" stroke-opacity="0.3" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrow)"/><path d="M345,174 L556,50" fill="none" stroke="#8f8e96" stroke-opacity="0.3" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrow)"/><path d="M724,-50 L935,-174" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M738,0 L928,0" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M724,50 L935,174" fill="none" stroke="#8f8e96" stroke-opacity="0.3" stroke-width="2.5" stroke-dasharray="7 7" marker-end="url(#arrow)"/></g>
-<circle cx="0" cy="0" r="48" fill="#FC6D26"/>
-<use href="#i-search" x="-20.0" y="-20.0" width="40" height="40" style="fill:#1f1e24"/>
-<circle cx="300" cy="-200" r="40" fill="#FC6D26"/>
-<use href="#i-code" x="283.5" y="-216.5" width="33" height="33" style="fill:#1f1e24"/>
-<circle cx="300" cy="0" r="40" fill="#c4c3ca"/>
-<use href="#i-code" x="283.5" y="-16.5" width="33" height="33" style="fill:#1f1e24"/>
-<circle cx="300" cy="200" r="40" fill="#c4c3ca"/>
-<use href="#i-code" x="283.5" y="183.5" width="33" height="33" style="fill:#1f1e24"/>
-<circle cx="980" cy="-200" r="40" fill="#3B82F6"/>
-<use href="#i-table" x="963.5" y="-216.5" width="33" height="33" style="fill:#ffffff"/>
-<circle cx="980" cy="0" r="40" fill="#14B8A6"/>
-<use href="#i-table" x="963.5" y="-16.5" width="33" height="33" style="fill:#1f1e24"/>
-<circle cx="980" cy="200" r="40" fill="#c4c3ca"/>
-<use href="#i-table" x="963.5" y="183.5" width="33" height="33" style="fill:#1f1e24"/>
-<circle cx="640" cy="0" r="86" fill="#8B5CF6"/>
-<use href="#i-orbit" x="605.0" y="-35.0" width="70" height="70" style="fill:#ffffff"/>
-<text x="0" y="78" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Query</text>
+<circle cx="0" cy="0" r="48" fill="#10B981" fill-opacity="0.16" stroke="#10B981" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-search" x="-20.0" y="-20.0" width="40" height="40" style="fill:#10B981"/>
+<circle cx="300" cy="-200" r="40" fill="#FC6D26" fill-opacity="0.16" stroke="#FC6D26" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-code" x="283.5" y="-216.5" width="33" height="33" style="fill:#FC6D26"/>
+<circle cx="300" cy="0" r="40" fill="#a8a7af" fill-opacity="0.16" stroke="#a8a7af" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-code" x="283.5" y="-16.5" width="33" height="33" style="fill:#a8a7af"/>
+<circle cx="300" cy="200" r="40" fill="#a8a7af" fill-opacity="0.16" stroke="#a8a7af" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-code" x="283.5" y="183.5" width="33" height="33" style="fill:#a8a7af"/>
+<circle cx="980" cy="-200" r="40" fill="#14B8A6" fill-opacity="0.16" stroke="#14B8A6" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-table" x="963.5" y="-216.5" width="33" height="33" style="fill:#14B8A6"/>
+<circle cx="980" cy="0" r="40" fill="#14B8A6" fill-opacity="0.16" stroke="#14B8A6" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-table" x="963.5" y="-16.5" width="33" height="33" style="fill:#14B8A6"/>
+<circle cx="980" cy="200" r="40" fill="#a8a7af" fill-opacity="0.16" stroke="#a8a7af" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-table" x="963.5" y="183.5" width="33" height="33" style="fill:#a8a7af"/>
+<circle cx="640" cy="0" r="86" fill="#3B82F6" fill-opacity="0.16" stroke="#3B82F6" stroke-opacity="0.9" stroke-width="3"/>
+<use href="#i-orbit" x="605.0" y="-35.0" width="70" height="70" style="fill:#3B82F6"/>
+<text x="0" y="78" font-size="27" font-weight="650" fill="#10B981" text-anchor="middle" dominant-baseline="central">Query</text>
 <text x="0" y="112" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">From an agent,</text>
 <text x="0" y="138" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">the CLI, or REST</text>
-<text x="300" y="-134" font-size="24" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">GQL</text>
+<text x="300" y="-134" font-size="24" font-weight="650" fill="#FC6D26" text-anchor="middle" dominant-baseline="central">GQL</text>
 <text x="300" y="-106" font-size="18" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Today</text>
 <text x="300" y="66" font-size="24" font-weight="650" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">SQL</text>
 <text x="300" y="94" font-size="18" font-weight="450" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">Planned</text>
 <text x="300" y="266" font-size="24" font-weight="650" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">GLQL</text>
 <text x="300" y="294" font-size="18" font-weight="450" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">Planned</text>
-<text x="980" y="-134" font-size="24" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">ClickHouse</text>
+<text x="980" y="-134" font-size="24" font-weight="650" fill="#14B8A6" text-anchor="middle" dominant-baseline="central">ClickHouse</text>
 <text x="980" y="-106" font-size="18" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Orbit Remote</text>
-<text x="980" y="66" font-size="24" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">DuckDB</text>
+<text x="980" y="66" font-size="24" font-weight="650" fill="#14B8A6" text-anchor="middle" dominant-baseline="central">DuckDB</text>
 <text x="980" y="94" font-size="18" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Orbit CLI</text>
 <text x="980" y="266" font-size="24" font-weight="650" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">PostgreSQL</text>
 <text x="980" y="294" font-size="18" font-weight="450" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">Planned</text>
-<text x="640" y="122" font-size="28" font-weight="700" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Orbit Query Engine</text>
+<text x="640" y="122" font-size="28" font-weight="700" fill="#3B82F6" text-anchor="middle" dominant-baseline="central">Orbit Query Engine</text>
 <text x="640" y="156" font-size="18" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">frontend · check · plan · secure · render</text>
 <text x="300" y="-318" font-size="21" font-weight="650" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">Languages</text>
 <text x="980" y="-318" font-size="21" font-weight="650" fill="#a8a7af" text-anchor="middle" dominant-baseline="central">Backends</text>
