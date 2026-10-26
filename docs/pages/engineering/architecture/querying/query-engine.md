@@ -1,7 +1,7 @@
 ---
 title: Orbit Query Engine
 description: How the Orbit Query Engine turns a graph query into parameterized SQL.
-order: 5.5
+order: 2
 authors:
   - michaelusa
 ---
@@ -428,5 +428,5 @@ the query instead of approximating it.
 
 ## Decisions
 
-- [ADR 000: ClickHouse as graph storage](../adr/000_clickhouse_graph_storage.md)
-- [ADR 016: Column statistics for join ordering](../adr/016_column_statistics_for_join_ordering.md)
+- [ADR 000: ClickHouse as graph storage](../../adr/000_clickhouse_graph_storage.md)
+- [ADR 016: Column statistics for join ordering](../../adr/016_column_statistics_for_join_ordering.md)

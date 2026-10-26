@@ -1,7 +1,7 @@
 ---
-title: Querying
-description: How Orbit turns a graph question into one bounded, authorized query.
-order: 5
+title: Query request path
+description: How a graph query travels from the caller to ClickHouse and back.
+order: 1
 authors:
   - michaelusa
 ---
@@ -55,7 +55,7 @@ Rails authenticates the caller and resolves the traversal paths that the
 caller can read, each tagged with an access level. It signs them into a JWT
 and hands the request to Workhorse, which opens a bidirectional gRPC stream to
 the Orbit webserver. Long-running queries never hold a Puma worker;
-[ADR 008](../adr/008_workhorse_query_acceleration.md) records that decision.
+[ADR 008](../../adr/008_workhorse_query_acceleration.md) records that decision.
 
 ### 2. Compilation
 
@@ -119,8 +119,8 @@ statement. The formatter then emits one envelope for every query type:
 deduplicated nodes, instance-level edges, optional aggregation columns and
 rows, and pagination metadata. It renders the envelope as JSON, as TOON for
 LLM callers, or as a cypher-shell table
-([ADR 004](../adr/004_unified_response_schema.md),
-[ADR 019](../adr/019_gql_response_format.md)).
+([ADR 004](../../adr/004_unified_response_schema.md),
+[ADR 019](../../adr/019_gql_response_format.md)).
 
 Pagination is stateless. Each statement fetches one row past the window to
 compute `has_more`, and `SKIP` lowers to an `OFFSET` over a stable sort.
@@ -148,7 +148,7 @@ ClickHouse already holds the replicated GitLab data as shared Data Insights
 Platform infrastructure, and its OLAP execution suits aggregation-heavy
 questions. A dedicated graph database would add another store to operate and
 replicate into. Orbit treats graph semantics as a compilation problem instead.
-[ADR 000](../adr/000_clickhouse_graph_storage.md) records the evaluation.
+[ADR 000](../../adr/000_clickhouse_graph_storage.md) records the evaluation.
 
 Authorization uses two layers. Traversal-path predicates in SQL apply
 namespace and role scope at index speed. Rails redaction covers the remaining
@@ -161,12 +161,12 @@ total. The same constraint makes the language reliable for LLMs to generate.
 
 ## Decisions
 
-- [ADR 000: ClickHouse as graph storage](../adr/000_clickhouse_graph_storage.md)
-- [ADR 004: Unified response schema](../adr/004_unified_response_schema.md)
-- [ADR 008: Workhorse query acceleration](../adr/008_workhorse_query_acceleration.md)
-- [ADR 011: Agent command surface](../adr/011_agent_command_surface.md)
-- [ADR 019: GQL response format](../adr/019_gql_response_format.md)
-- [ADR 021: Entity context expansion](../adr/021_entity_context_expansion.md)
+- [ADR 000: ClickHouse as graph storage](../../adr/000_clickhouse_graph_storage.md)
+- [ADR 004: Unified response schema](../../adr/004_unified_response_schema.md)
+- [ADR 008: Workhorse query acceleration](../../adr/008_workhorse_query_acceleration.md)
+- [ADR 011: Agent command surface](../../adr/011_agent_command_surface.md)
+- [ADR 019: GQL response format](../../adr/019_gql_response_format.md)
+- [ADR 021: Entity context expansion](../../adr/021_entity_context_expansion.md)
 
 ## Appendix
 
@@ -217,8 +217,8 @@ total. The same constraint makes the language reliable for LLMs to generate.
 | Hydration | Fetches the properties of discovered nodes, under the same authorization rules. |
 | Output | Formats the result as raw JSON, as compact text for LLMs, or as a GQL table. |
 
-The [Security](security.md) design document covers the authorization layers.
-[ADR 008](../adr/008_workhorse_query_acceleration.md) explains why the gRPC stream runs in Workhorse.
+The [Security](../security.md) design document covers the authorization layers.
+[ADR 008](../../adr/008_workhorse_query_acceleration.md) explains why the gRPC stream runs in Workhorse.
 
 ### Capabilities
 
@@ -230,7 +230,7 @@ Queries can also:
 - Page through results with `SKIP` and `LIMIT`.
 - Return the compiled SQL to authorized users for debugging.
 
-The [query language reference](../../../docs-gitlab-com/remote/queries/query-language.md) lists every field, operator, and limit.
+The [query language reference](../../../../docs-gitlab-com/remote/queries/query-language.md) lists every field, operator, and limit.
 
 ### Flexible by design
 
@@ -255,9 +255,9 @@ Each part can change on its own.
 - **gRPC.** `ExecuteQuery` is the only path from a query to SQL.
   Rails and Workhorse are its callers.
 - **REST and MCP.** Rails serves `/api/v4/orbit/*` and the Orbit MCP tools.
-  The [API reference](../../../docs-gitlab-com/remote/access/api.md) lists the endpoints.
+  The [API reference](../../../../docs-gitlab-com/remote/access/api.md) lists the endpoints.
 - **Agent commands.** Agents discover graph capabilities through a short command catalog instead of long tool descriptions.
-  See [ADR 011](../adr/011_agent_command_surface.md).
+  See [ADR 011](../../adr/011_agent_command_surface.md).
 - **Named queries.** `config/named_queries/` holds server-defined queries.
   Clients pass a name and parameters, and the server compiles the query.
   The Orbit dashboard and entity context expansion use them.
@@ -268,9 +268,9 @@ Each part can change on its own.
 
 Every query type returns the same envelope: nodes, edges, optional aggregation columns and rows, and pagination metadata.
 Nodes appear once, and edges connect node instances.
-[ADR 004](../adr/004_unified_response_schema.md) defines the contract, and its version is the `raw_output_format` pin in `config/versions.yaml`.
+[ADR 004](../../adr/004_unified_response_schema.md) defines the contract, and its version is the `raw_output_format` pin in `config/versions.yaml`.
 
-The same result can render as raw JSON, as [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text for LLMs, or as a cypher-shell style table for GQL callers ([ADR 019](../adr/019_gql_response_format.md)).
+The same result can render as raw JSON, as [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text for LLMs, or as a cypher-shell style table for GQL callers ([ADR 019](../../adr/019_gql_response_format.md)).
 
 ### Pages
 
