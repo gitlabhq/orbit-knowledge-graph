@@ -72,6 +72,7 @@ fn lower_predicate(value: &Predicate, negated: bool) -> Expr {
             Expr::binary(Op::Le, column(value), Expr::int(*end)),
         ),
         Predicate::Live { alias } => sql::deleted_false(alias),
+        Predicate::Tombstone { alias } => sql::deleted_true(alias),
         Predicate::EntityKind {
             column: value,
             entity,

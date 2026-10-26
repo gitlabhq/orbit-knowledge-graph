@@ -237,6 +237,13 @@ pub fn deleted_false(alias: &str) -> Expr {
     )
 }
 
+pub fn deleted_true(alias: &str) -> Expr {
+    Expr::eq(
+        Expr::col(alias, DELETED_COLUMN),
+        Expr::param(SqlType::Bool, true),
+    )
+}
+
 pub fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
     if crate::passes::normalize::is_wildcard(types) {
         return None;

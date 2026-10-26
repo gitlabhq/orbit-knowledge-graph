@@ -16,7 +16,7 @@ cases:
             - (Filter mr.source_branch = 'feature-x', mr._deleted = false (_))
           reject: ["(Deduplicate Final (Scan Table(gl_merge_request) AS mr))"]
 
-  - name: High-selectivity filters on an unchanging column apply before the pick behind the version guard
+  - name: High-selectivity filters on an unchanging column apply before the pick behind the tombstone guard
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"name":"build"},"columns":["id","name"]}],"limit":10}
@@ -29,6 +29,7 @@ cases:
         planned:
           expect:
             - (Deduplicate LimitBy j.traversal_path, j.id (Filter j.name = 'build' (Scan Table(gl_job) AS j)))
+            - (Bind j_later (Filter (j_later.traversal_path, j_later.id) IN ?.(traversal_path, id), j_later._deleted = true (Scan Table(gl_job) AS j_later)))
             - (Filter NOT (j.traversal_path, j.id, j._version) IN ?.(traversal_path, id, _version), j._deleted = false (_))
           reject:
             - (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
@@ -64,7 +65,7 @@ cases:
             - (Deduplicate LimitBy j.traversal_path, j.id (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
           reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
 
-  - name: High-selectivity ranges on an unchanging column apply before the pick behind the version guard
+  - name: High-selectivity ranges on an unchanging column apply before the pick behind the tombstone guard
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"created_at":{"gte":"2026-10-10"}},"columns":["id","created_at"]}],"limit":10}
@@ -129,7 +130,7 @@ cases:
             - (Deduplicate LimitBy u.id (Filter u.id >= 1, u.id <= 10000, u.id IN ?.id (Scan Table(gl_user) AS u)))
           reject: ["(Deduplicate Final (Scan Table(gl_user) AS u))"]
 
-  - name: Text indexes on an unchanging column apply before the pick behind the version guard
+  - name: Text indexes on an unchanging column apply before the pick behind the tombstone guard
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"f","entity":"MergeRequestDiffFile","filters":{"project_id":1000,"new_path":{"contains":"app/services"}},"columns":["new_path"]}],"limit":10}

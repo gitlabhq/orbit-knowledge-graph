@@ -610,6 +610,7 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             format!("{} <= {end}", planned_column(column)),
         ],
         Predicate::Live { alias } => vec![format!("{alias}._deleted = false")],
+        Predicate::Tombstone { alias } => vec![format!("{alias}._deleted = true")],
         Predicate::EntityKind { column, entity } => vec![format!(
             "{} = {}",
             planned_column(column),

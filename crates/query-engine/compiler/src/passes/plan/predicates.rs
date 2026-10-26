@@ -51,6 +51,9 @@ pub enum Predicate {
     Live {
         alias: String,
     },
+    Tombstone {
+        alias: String,
+    },
     EntityKind {
         column: Column,
         entity: String,

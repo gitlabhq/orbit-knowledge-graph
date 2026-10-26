@@ -362,15 +362,20 @@ impl RelationGraph {
         );
         let later = self.filter(
             later,
-            vec![Predicate::Membership {
-                columns: key
-                    .iter()
-                    .map(|column| Column::new(&later_alias, column))
-                    .collect(),
-                relation: picked_keys,
-                keys: key.to_vec(),
-                negated: false,
-            }],
+            vec![
+                Predicate::Membership {
+                    columns: key
+                        .iter()
+                        .map(|column| Column::new(&later_alias, column))
+                        .collect(),
+                    relation: picked_keys,
+                    keys: key.to_vec(),
+                    negated: false,
+                },
+                Predicate::Tombstone {
+                    alias: later_alias.clone(),
+                },
+            ],
         );
         let later = self.bind(later, &later_alias);
         let mut on: Vec<Predicate> = key

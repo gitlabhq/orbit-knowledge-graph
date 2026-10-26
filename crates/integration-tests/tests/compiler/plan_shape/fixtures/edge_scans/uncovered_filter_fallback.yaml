@@ -1,4 +1,4 @@
-name: Uncovered filters keep the node scan behind the version guard alongside covered edge tags
+name: Uncovered filters keep the node scan behind the tombstone guard alongside covered edge tags
 
 query:
   json: |
