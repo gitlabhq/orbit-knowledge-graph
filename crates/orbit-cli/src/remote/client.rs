@@ -431,6 +431,19 @@ pub(crate) fn query_graph_description(dir: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
+pub(crate) fn query_schema_summary(dir: &Path) -> Option<String> {
+    let client = OrbitClient::from_env_in(dir).ok()?;
+    let overview_client = client.clone();
+    let overview = block_on_short(async move { overview_client.get_schema(&[]).await })?;
+    let names = super::compact_schema::node_names(&serde_json::from_slice(&overview).ok()?);
+    if names.is_empty() {
+        return None;
+    }
+    let expand = names.join(",");
+    let body = block_on_short(async move { client.get_schema(&[("expand", expand)]).await })?;
+    super::compact_schema::render(&serde_json::from_slice(&body).ok()?)
+}
+
 fn block_on_short<T, F>(future: F) -> Option<T>
 where
     T: Send + 'static,
