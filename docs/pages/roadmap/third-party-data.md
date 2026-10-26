@@ -1,6 +1,6 @@
 ---
-title: Data from your other tools
-description: Connect planning, documentation, and chat data from other tools to the graph.
+title: Third-party data sources
+description: Connect data from more than 20 other tools to the graph, such as planning, documentation, and chat.
 theme: data
 status: planned
 start: FY27 Q4

@@ -1,5 +1,5 @@
 ---
-title: The right context at the start
+title: Context optimization
 description: Give agents the context for a task when the task starts.
 theme: agents
 status: exploring
