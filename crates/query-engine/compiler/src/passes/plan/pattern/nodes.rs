@@ -59,6 +59,7 @@ impl NodePlan {
             node_ids: node.node_ids.clone(),
             id_range: node.id_range.clone(),
             has_traversal_path: model.entity_has_traversal_path(entity),
+            high_fan_out: model.entity_high_fan_out(entity),
             redaction_id_column: model
                 .redaction_id_column_named(entity)
                 .unwrap_or(DEFAULT_PRIMARY_KEY)

@@ -30,6 +30,7 @@ pub struct NodePlan {
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
     pub has_traversal_path: bool,
+    pub high_fan_out: bool,
     pub redaction_id_column: String,
     pub columns: Option<ColumnSelection>,
     pub emit_select: bool,
@@ -86,7 +87,7 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             ReadOwner::Node(node.alias.clone()),
             sort_key(self.model, table)?,
             self.node_conditions(node),
-            node.has_traversal_path,
+            node.has_traversal_path && !node.high_fan_out,
         ))
     }
 

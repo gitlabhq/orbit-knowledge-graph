@@ -181,7 +181,7 @@ struct ReadKey {
     owner: ReadOwner,
     key: Vec<String>,
     predicates: Vec<Predicate>,
-    scoped: bool,
+    final_for_mutable: bool,
 }
 
 pub struct RelationGraph {
@@ -276,7 +276,7 @@ impl RelationGraph {
         owner: ReadOwner,
         key: &[String],
         predicates: Vec<Predicate>,
-        scoped: bool,
+        final_for_mutable: bool,
     ) -> RelationId {
         let read = ReadKey {
             table: table.to_string(),
@@ -284,12 +284,12 @@ impl RelationGraph {
             owner: owner.clone(),
             key: key.to_vec(),
             predicates: predicates.clone(),
-            scoped,
+            final_for_mutable,
         };
         if let Some((_, id)) = self.reads.iter().find(|(planned, _)| *planned == read) {
             return *id;
         }
-        let id = self.plan_current_rows(table, alias, owner, key, predicates, scoped);
+        let id = self.plan_current_rows(table, alias, owner, key, predicates, final_for_mutable);
         self.reads.push((read, id));
         id
     }
@@ -301,19 +301,18 @@ impl RelationGraph {
         owner: ReadOwner,
         key: &[String],
         predicates: Vec<Predicate>,
-        scoped: bool,
+        final_for_mutable: bool,
     ) -> RelationId {
         let bounds_scan = |predicate: &Predicate| {
             predicate.is_selective()
                 && (!predicate.is_text_match() || predicate.filters_sort_key(key, true))
         };
-        let unpinned_mutable = scoped
-            && !predicates.iter().any(Predicate::narrows_keys)
+        let mutable_selective = final_for_mutable
             && predicates.iter().any(|predicate| {
                 predicate.is_selective() && !predicate.filters_sort_key(key, true)
             });
         let bounded = self.selective_latest && predicates.iter().any(bounds_scan);
-        if !bounded || unpinned_mutable {
+        if !bounded || mutable_selective {
             self.exact_final_reads |= bounded;
             let (keyed, rest): (Vec<_>, Vec<_>) = predicates
                 .into_iter()

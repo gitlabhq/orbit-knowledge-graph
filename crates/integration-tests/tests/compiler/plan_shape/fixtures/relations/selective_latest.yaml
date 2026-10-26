@@ -49,7 +49,7 @@ cases:
           expect: ["(Filter j.status = 'failed', j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))"]
           reject: ["(Deduplicate LimitBy ... (_))"]
 
-  - name: A selective range on a changing column reads once with FINAL and checks after the merge
+  - name: A selective range on a high fan out child keeps find then check
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"finished_at":{"gte":"2026-10-10"}},"columns":["id","finished_at"]}],"limit":10}
@@ -61,14 +61,11 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter j.finished_at >= '2026-10-10', j._deleted = false (Deduplicate Final (Scan Table(gl_job) AS j)))
-          reject:
-            - (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
-            - (Deduplicate LimitBy ... (_))
-          ctes:
-            absent: true
+            - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.finished_at >= '2026-10-10', ... (Scan Table(gl_job) AS j)))
+            - (Deduplicate LimitBy j.traversal_path, j.id (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
+          reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
 
-  - name: A changing-column filter on a read pinned by a foreign key keeps find then check
+  - name: A changing-column filter on a high fan out child pinned by its parent keeps find then check
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"pipeline_id":7,"finished_at":{"gte":"2026-10-10"}},"columns":["id","finished_at"]}],"limit":10}
@@ -83,6 +80,26 @@ cases:
             - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.finished_at >= '2026-10-10', j.pipeline_id = 7, ... (Scan Table(gl_job) AS j)))
             - (Deduplicate LimitBy j.traversal_path, j.id (Filter j.pipeline_id = 7, (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
           reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
+
+  - name: A changing-column filter on a pinned read of an ordinary table reads once with FINAL
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[2000,2001],"filters":{"source_branch":"feature-x"},"columns":["id","title"]}],"limit":10}
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id IN [2000, 2001] AND mr.source_branch = 'feature-x' RETURN mr.id, mr.title LIMIT 10
+    logical:
+      expect: ["(Filter mr.source_branch = 'feature-x', mr.id IN [2000, 2001] (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter mr.source_branch = 'feature-x', mr._deleted = false (_))
+            - (Deduplicate Final (Scan Table(gl_merge_request) AS mr))
+          reject:
+            - (Filter (mr.traversal_path, mr.id) IN ?.(traversal_path, id) (_))
+            - (Deduplicate LimitBy ... (_))
+          ctes:
+            absent: true
 
   - name: High-selectivity ranges on an unchanging column apply before the latest-row pick
     query:

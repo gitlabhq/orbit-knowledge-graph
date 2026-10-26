@@ -5,6 +5,7 @@ domain: ci
 description: A CI/CD job that executes scripts within a pipeline stage
 label: name
 destination_table: gl_job
+high_fan_out: true
 default_columns: [id, name, status, ref]
 enrichment_props: [status, tag, allow_failure, when, retried, failure_reason, type, timeout_source, scheduling_type]
 

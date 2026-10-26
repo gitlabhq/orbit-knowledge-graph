@@ -1337,22 +1337,22 @@ mod tests {
     }
 
     #[test]
-    fn exact_skip_index_settings_follow_unpinned_mutable_reads() {
-        let unpinned = compile_sql(
-            r#"{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"source_branch":"feature-x"}}],"limit":10}"#,
+    fn exact_skip_index_settings_follow_final_mutable_reads() {
+        let pinned = compile_sql(
+            r#"{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1,2],"filters":{"source_branch":"feature-x"}}],"limit":10}"#,
         );
-        assert!(unpinned.contains("AS mr FINAL"), "{unpinned}");
+        assert!(pinned.contains("AS mr FINAL"), "{pinned}");
         for setting in [
             "use_skip_indexes_if_final = 1",
             "use_skip_indexes_if_final_exact_mode = 1",
         ] {
-            assert!(unpinned.contains(setting), "{unpinned}");
+            assert!(pinned.contains(setting), "{pinned}");
         }
-        let pinned = compile_sql(
-            r#"{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1,2],"filters":{"source_branch":"feature-x"}}],"limit":10}"#,
+        let fan_out = compile_sql(
+            r#"{"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"finished_at":{"gte":"2026-10-10"}}}],"limit":10}"#,
         );
-        assert!(!pinned.contains(" FINAL"), "{pinned}");
-        assert!(!pinned.contains("use_skip_indexes_if_final"), "{pinned}");
+        assert!(!fan_out.contains(" FINAL"), "{fan_out}");
+        assert!(!fan_out.contains("use_skip_indexes_if_final"), "{fan_out}");
     }
 
     #[test]
