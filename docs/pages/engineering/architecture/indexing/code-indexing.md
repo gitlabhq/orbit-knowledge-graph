@@ -4,6 +4,8 @@ description: How Orbit gets repository code into the graph.
 order: 2
 authors:
   - jgdoyon1
+  - michaelusa
+  - michaelangeloio
 ---
 
 ## What gets indexed

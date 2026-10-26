@@ -4,6 +4,7 @@ description: How a change to the graph schema reaches production without downtim
 order: 3
 authors:
   - jgdoyon1
+  - dgruzd
 ---
 
 ## What a schema change is
