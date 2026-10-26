@@ -1,0 +1,1 @@
+{"query":{"query_type":"neighbors","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[482908721]}],"neighbors":{"direction":"both","rel_types":["AUTHORED","IN_PROJECT","HAS_DIFF"]},"limit":25}}

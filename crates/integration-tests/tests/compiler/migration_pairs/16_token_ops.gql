@@ -1,0 +1,4 @@
+MATCH (w:WorkItem {project_id: 278964})
+WHERE token_match(w.title, 'flaky') AND all_tokens(w.description, 'database migration') AND any_tokens(w.description, 'spec test')
+RETURN w.iid, w.title
+LIMIT 10

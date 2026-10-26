@@ -1,0 +1,4 @@
+MATCH (pl:Pipeline {project_id: 278964})
+RETURN pl.status, sum(pl.duration) AS total, min(pl.duration) AS lo, max(pl.duration) AS hi
+ORDER BY total DESC
+LIMIT 10

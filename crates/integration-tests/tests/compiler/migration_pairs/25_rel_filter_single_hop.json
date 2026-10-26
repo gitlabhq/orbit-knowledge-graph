@@ -1,0 +1,1 @@
+{"query":{"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","node_ids":[1],"columns":["name"]},{"id":"b","entity":"Definition","columns":["name"]}],"relationships":[{"type":"CALLS","from":"a","to":"b","filters":{"project_id":9}}],"limit":10}}

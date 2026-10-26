@@ -1,0 +1,4 @@
+MATCH (a:Definition {id: 1})-[r:CALLS]->(b:Definition)
+WHERE r.project_id = 9
+RETURN a.name, b.name
+LIMIT 10

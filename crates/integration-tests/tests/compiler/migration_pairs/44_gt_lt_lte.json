@@ -1,0 +1,1 @@
+{"query":{"query_type":"traversal","nodes":[{"id":"pl","entity":"Pipeline","columns":["id","duration"],"filters":{"project_id":278964,"duration":{"gt":60,"lte":600},"created_at":{"lt":"2026-10-01"}}}],"limit":10}}

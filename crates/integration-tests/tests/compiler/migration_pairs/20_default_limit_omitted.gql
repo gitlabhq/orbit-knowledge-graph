@@ -1,0 +1,2 @@
+MATCH (u:User {id: 1})
+RETURN u.username

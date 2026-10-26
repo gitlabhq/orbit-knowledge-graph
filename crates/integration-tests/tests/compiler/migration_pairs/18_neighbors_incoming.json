@@ -1,0 +1,1 @@
+{"query":{"query_type":"neighbors","nodes":[{"id":"p","entity":"Project","node_ids":[278964]}],"neighbors":{"direction":"incoming","rel_types":["IN_PROJECT"]},"limit":10}}

@@ -1,0 +1,4 @@
+MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {project_id: 278964, state: 'merged'})
+RETURN u{.id, .username}, count(mr) AS mr_count
+ORDER BY mr_count DESC
+LIMIT 20

@@ -1,0 +1,1 @@
+{"query":{"query_type":"aggregation","nodes":[{"id":"pl","entity":"Pipeline","filters":{"project_id":278964,"status":"success"}}],"group_by":[{"key":"pl.created_at","truncate":"month","as":"month"}],"aggregations":[{"count":"pl","as":"runs"},{"avg":"pl.duration","as":"avg_dur"}],"aggregation_sort":"-month","limit":12}}

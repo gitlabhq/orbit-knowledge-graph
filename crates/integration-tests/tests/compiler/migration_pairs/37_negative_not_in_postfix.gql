@@ -1,0 +1,4 @@
+MATCH (mr:MergeRequest {project_id: 278964})
+WHERE mr.state NOT IN ['merged']
+RETURN mr.iid
+LIMIT 10

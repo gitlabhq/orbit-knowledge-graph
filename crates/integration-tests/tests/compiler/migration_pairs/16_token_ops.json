@@ -1,0 +1,1 @@
+{"query":{"query_type":"traversal","nodes":[{"id":"w","entity":"WorkItem","columns":["iid","title"],"filters":{"project_id":278964,"title":{"token_match":"flaky"},"description":[{"all_tokens":"database migration"},{"any_tokens":"spec test"}]}}],"limit":10}}

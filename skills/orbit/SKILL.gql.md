@@ -30,6 +30,8 @@ If they decline, note the discrepancy in one line and continue with the correcte
 
 Queries use read-only openCypher 9-based syntax (`MATCH ... RETURN`).
 
+If you find a legacy JSON query (an object with `query_type`, `nodes`, or `relationships`), run `glab orbit skills get orbit-gql-migration` and convert it to GQL. The JSON language is deprecated.
+
 ## Discovery
 
 `glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available skills. Run `glab orbit skills get orbit` to print the composed skill (`SKILL.md` by default), or append a path such as `references/local/sql.md` to print a file.

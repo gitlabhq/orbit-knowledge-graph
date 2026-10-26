@@ -1,0 +1,1 @@
+{"query":{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["iid"],"filters":{"project_id":278964,"state":{"eq":"merged"},"merged_at":{"is_not_null":true}}}],"limit":10}}

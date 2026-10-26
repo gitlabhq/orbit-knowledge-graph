@@ -1,0 +1,3 @@
+MATCH (g:Group {id: 9970})-[:CONTAINS*1..4]->(p:Project)
+RETURN p.id
+LIMIT 10

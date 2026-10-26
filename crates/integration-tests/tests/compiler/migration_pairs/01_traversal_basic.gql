@@ -1,0 +1,4 @@
+MATCH (mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project {id: 278964})
+RETURN mr.iid, mr.title, mr.state
+ORDER BY mr.created_at DESC
+LIMIT 5

@@ -1,0 +1,1 @@
+{"query":{"query_type":"aggregation","nodes":[{"id":"pl","entity":"Pipeline","filters":{"project_id":278964}}],"group_by":["pl.status"],"aggregations":[{"sum":"pl.duration","as":"total"},{"min":"pl.duration","as":"lo"},{"max":"pl.duration","as":"hi"}],"aggregation_sort":"-total","limit":10}}

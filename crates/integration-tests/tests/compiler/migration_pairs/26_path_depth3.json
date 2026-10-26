@@ -1,0 +1,1 @@
+{"query":{"query_type":"path_finding","nodes":[{"id":"a","entity":"Group","node_ids":[9970]},{"id":"b","entity":"Project","node_ids":[278964]}],"path":{"type":"shortest","from":"a","to":"b","max_depth":3,"rel_types":["CONTAINS"]},"limit":5}}

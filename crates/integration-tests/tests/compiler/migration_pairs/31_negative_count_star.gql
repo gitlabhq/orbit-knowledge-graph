@@ -1,0 +1,3 @@
+MATCH (mr:MergeRequest {project_id: 278964})
+RETURN mr.state, count(*) AS n
+LIMIT 10

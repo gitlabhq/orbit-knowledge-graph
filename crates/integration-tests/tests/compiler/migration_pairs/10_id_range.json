@@ -1,0 +1,1 @@
+{"query":{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","id_range":{"start":100,"end":200},"columns":["iid"]}],"limit":10}}
