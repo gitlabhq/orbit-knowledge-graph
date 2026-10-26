@@ -7,6 +7,7 @@ mod build_validations;
 pub mod cli;
 pub mod clickhouse_setup;
 pub mod cluster_health;
+pub mod config_check;
 pub mod content;
 pub mod expanded_logs;
 pub mod fips;
