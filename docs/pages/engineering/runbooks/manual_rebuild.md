@@ -3,7 +3,9 @@
 Back to the [runbook](README.md).
 
 > [!warning]
-> Tested on a throwaway cluster, not yet run in production. Do staging first.
+> Rehearsed in staging on 2026-10-26
+> ([evidence](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1428)), not yet
+> run in production. Do staging first.
 
 Set the cluster once. All commands below use it:
 
@@ -40,20 +42,39 @@ Keep `gkg.namespace_storage_snapshot`. A reindex cannot rebuild its history.
 ## Full rebuild
 
 Steps 4 and 5: queries fail. After step 5: results are incomplete until indexing completes,
-about 4 hours on GitLab.com.
+about 4 hours on GitLab.com and 7 minutes in staging.
 
 1. Tell users in the incident channel and in `#f_orbit_dev`.
-2. Pause both indexer pools. Check: both indexers show `0/0`.
+2. Pause both indexer pools:
 
    ```shell
    kubectl --context "$CTX" -n gkg annotate scaledobject orbit-indexer-sdlc autoscaling.keda.sh/paused-replicas="0" --overwrite
    kubectl --context "$CTX" -n gkg annotate scaledobject orbit-indexer-code autoscaling.keda.sh/paused-replicas="0" --overwrite
-   kubectl --context "$CTX" -n gkg get deploy
    ```
 
-3. Stop the dispatcher: set `dispatcher.enabled: false` in
-   `services/gkg/env/orbit-<env>/values.yaml` in argocd-apps, and merge. Check: no
-   `orbit-dispatcher` pod in `kubectl --context "$CTX" -n gkg get pods`.
+   Use this command to check the replicas in each step. Here: both indexers show `0/0`.
+
+   ```shell
+   kubectl --context "$CTX" -n gkg get deploy orbit-dispatcher orbit-indexer-sdlc orbit-indexer-code
+   ```
+
+3. Stop the dispatcher. First check if ArgoCD puts changes back by itself:
+
+   ```shell
+   GITLAB_HOST=gitlab.com glab api "projects/gitlab-com%2Fgl-infra%2Fargocd%2Fapps/repository/files/applications%2Fservices.yaml/raw?ref=main" | grep selfHeal
+   ```
+
+   - `selfHeal: false`: scale it down directly. A merge to the gkg app in argocd-apps starts
+     it again, so merge no gkg change until step 6.
+
+     ```shell
+     kubectl --context "$CTX" -n gkg scale deploy orbit-dispatcher --replicas=0
+     ```
+
+   - `selfHeal: true`: set `dispatcher.enabled: false` in
+     `services/gkg/env/orbit-<env>/values.yaml` in argocd-apps, and merge.
+
+   Check: `orbit-dispatcher` shows `0/0`.
 
 4. Delete the old indexing jobs. Old jobs block new jobs for the same namespace.
 
@@ -91,9 +112,16 @@ about 4 hours on GitLab.com.
 
    If you keep `gkg_schema_version`, the dispatcher creates no tables and crash-loops.
 
-6. Start the dispatcher: set `dispatcher.enabled: true` and merge. Check: its logs show
-   `fresh install`.
-7. Resume both pools:
+6. Start the dispatcher. If you scaled it down, scale it to 1. Otherwise set
+   `dispatcher.enabled: true` and merge.
+
+   ```shell
+   kubectl --context "$CTX" -n gkg scale deploy orbit-dispatcher --replicas=1
+   kubectl --context "$CTX" -n gkg logs deploy/orbit-dispatcher | grep "fresh install"
+   ```
+
+   Check: `orbit-dispatcher` shows `1/1` and the log shows `fresh install`.
+7. Resume both pools. Check: both indexers show their minimum replicas again.
 
    ```shell
    kubectl --context "$CTX" -n gkg annotate scaledobject orbit-indexer-sdlc autoscaling.keda.sh/paused-replicas-
