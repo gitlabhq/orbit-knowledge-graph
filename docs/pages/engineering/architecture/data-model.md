@@ -47,10 +47,10 @@ shows how every query compiles against that model.
 [The guide for adding data](../development/adding-data-to-the-knowledge-graph.md)
 lists every step to add a new entity.
 
-The ontology describes Orbit's model, not the GitLab database. Callers query
-nodes and edges, not tables. Nodes follow the concepts that GitLab users
-already know. For example, issues, epics, and tasks are all one work item
-type. A property tells them apart.
+The ontology describes Orbit's model, not the GitLab database. Queries to
+Orbit's graph use nodes and edges, not tables. Nodes follow the concepts that
+GitLab users already know. For example, issues, epics, and tasks are all one
+work item type. A property tells them apart.
 
 ## How rows are stored
 
@@ -58,12 +58,13 @@ Every row that belongs to a namespace carries its traversal path. Only global
 entities, like users and runners, have none. The [security](security.md) model
 depends on that path.
 
-Every row has a version. A delete writes a new version that is marked as
-deleted. Queries read the latest version of each row and skip deleted rows.
+In Orbit's graph, every row has a version. A delete writes a new version that
+is marked as deleted. Queries read the latest version of each row and skip
+deleted rows.
 
-The SDLC graph is stored apart from the replicated GitLab data. A new schema
-version rebuilds the SDLC graph from that data. Any change to the ontology
-needs a new schema version. [Schema evolution](indexing/schema-evolution.md)
+The SDLC graph is stored apart from the replicated GitLab data. A schema
+change gets a new version. That version re-indexes the tables the change
+touches and copies the rest. [Schema evolution](indexing/schema-evolution.md)
 covers how a version reaches production.
 
 ## Why we built it this way

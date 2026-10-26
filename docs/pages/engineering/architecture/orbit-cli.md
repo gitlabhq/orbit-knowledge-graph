@@ -13,7 +13,8 @@ authors:
 The Orbit CLI is the way into Orbit from a terminal or an AI agent. Most
 people run it through the GitLab CLI as `glab orbit`. It answers from two
 graphs. The local graph holds the code of the checkouts on your machine.
-Orbit's graph covers all of your projects. Here is a simplified view.
+Orbit's graph covers the projects in the groups where Orbit is on. Here is a
+simplified view.
 
 ![The Orbit CLI sends local questions to the local graph and the rest through GitLab to Orbit's graph](../../../assets/architecture/orbit-cli.svg)
 
@@ -44,19 +45,20 @@ instance.
 
 The `glab orbit index .` command walks the working tree of the checkout in the
 current folder. So uncommitted and untracked files are part of the graph. It
-skips what `.gitignore` excludes, plus binary, minified, and very large files.
-Tree-sitter grammars parse 17 languages into the code types that the
-[data model](data-model.md) page describes.
+skips what `.gitignore` excludes. It lists binary, minified, and very large
+files, but it doesn't parse them. Tree-sitter grammars parse each
+[supported language](https://docs.gitlab.com/orbit/compare-local-remote/#supported-languages)
+into the code types that the [data model](data-model.md) page describes.
 
-Each checkout and commit gets its own file on your machine. A query reads
-every indexed checkout at once, so it can span several repositories. A repeat
-run on the same commit parses only the files that changed. The
-`glab orbit grep` and `glab orbit context` commands index the current commit
-when it isn't indexed yet.
+Each checkout and commit gets its own file on your machine. The
+`glab orbit sql` command reads every indexed checkout at once, so one query
+can span several repositories. A repeat run on the same commit parses only the
+files that changed. The `glab orbit grep` and `glab orbit context` commands
+index the current commit when it isn't indexed yet.
 
 ### 4. Ask the local graph
 
-Four commands read the local graph:
+The main commands that read the local graph are:
 
 - `glab orbit grep` works like grep. It shows each match inside its enclosing
   definition, with that definition's callers and callees.
@@ -69,17 +71,18 @@ Four commands read the local graph:
 ### 5. Ask Orbit's graph
 
 Orbit's graph answers what the local context can't. It holds merge requests,
-pipelines, vulnerabilities, and the code of every indexed project. Four
-commands ask Orbit's graph through the GitLab API:
+pipelines, vulnerabilities, and the code of every indexed project. The main
+commands that ask Orbit's graph through the GitLab API are:
 
 - `glab orbit query` sends a question to Orbit's graph.
 - `glab orbit ontology` shows the node and edge types.
 - `glab orbit dsl` shows the query language.
-- `glab orbit graph-status` shows the indexing progress of a project.
+- `glab orbit graph-status` shows the indexing progress of a project or a
+  group.
 
 GitLab checks who you are and which groups you can see, as
 [security](security.md) explains. The GitLab CLI passes your sign-in to the
-Orbit CLI in its environment. It never writes the token to disk.
+Orbit CLI in its environment. The Orbit CLI never stores the token.
 
 ## Why use the Orbit CLI
 
@@ -91,3 +94,5 @@ Several agents can index and query in separate worktrees at the same time.
 ## Decisions
 
 - [ADR 007: Monetization engineering](../adr/007_monetization_engineering.md)
+- [ADR 010: Graph status](../adr/010_graph_status_endpoint.md)
+- [ADR 011: Agent command surface](../adr/011_agent_command_surface.md)
