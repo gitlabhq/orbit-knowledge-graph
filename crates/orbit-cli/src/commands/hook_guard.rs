@@ -96,13 +96,18 @@ fn respond(kind: Kind, call: &Value, gitlab: bool) -> Option<Value> {
     if !matches!(kind, Kind::Search) {
         return None;
     }
-    if gitlab && calls_glab(call) {
+    if gitlab && reads_gitlab_with_glab(call) {
         return Some(nudge(spec::gitlab_nudge_text()));
     }
     should_nudge(call).then(|| nudge(spec::search_nudge_text()))
 }
 
-fn calls_glab(call: &Value) -> bool {
+const GLAB_READ_GROUPS: &[&str] = &["mr", "issue", "ci", "pipeline", "job", "incident", "epic"];
+const GLAB_READ_VERBS: &[&str] = &["view", "list", "ls", "diff", "trace", "status", "search"];
+const GLAB_API_FIELD_FLAGS: &[&str] = &["-f", "-F", "--field", "--raw-field", "--input"];
+
+/// Orbit only reads GitLab, so only glab reads get the nudge; writes such as `glab mr create` stay with glab.
+fn reads_gitlab_with_glab(call: &Value) -> bool {
     let tool_input = call.get("tool_input").unwrap_or(call);
     let command = tool_input
         .get("command")
@@ -115,8 +120,31 @@ fn calls_glab(call: &Value) -> bool {
                 || w.parse::<f64>().is_ok()
                 || COMMAND_WRAPPERS.contains(&program(w))
         });
-        words.next().map(program) == Some("glab") && words.next() != Some("orbit")
+        words.next().map(program) == Some("glab") && glab_reads(&words.collect::<Vec<_>>())
     })
+}
+
+fn glab_reads(args: &[&str]) -> bool {
+    match args {
+        ["api", rest @ ..] => {
+            let fields = rest.iter().any(|arg| {
+                GLAB_API_FIELD_FLAGS.contains(arg)
+                    || GLAB_API_FIELD_FLAGS
+                        .iter()
+                        .any(|flag| flag.starts_with("--") && arg.starts_with(&format!("{flag}=")))
+            });
+            let method = rest
+                .iter()
+                .position(|arg| matches!(*arg, "-X" | "--method"))
+                .and_then(|index| rest.get(index + 1).copied())
+                .or_else(|| rest.iter().find_map(|arg| arg.strip_prefix("--method=")));
+            !fields
+                && method.is_none_or(|method| method.eq_ignore_ascii_case("GET"))
+                && !rest.iter().any(|arg| arg.contains("mutation"))
+        }
+        [group, verb, ..] => GLAB_READ_GROUPS.contains(group) && GLAB_READ_VERBS.contains(verb),
+        _ => false,
+    }
 }
 
 /// Checks the graph's default location without creating or migrating the data directory.
@@ -340,6 +368,36 @@ mod tests {
         assert!(respond(Kind::Search, &tool, false).is_some());
         let file = json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_name": "Grep", "tool_input": {"pattern": "rand", "path": "Cargo.toml"}});
         assert!(respond(Kind::Search, &file, false).is_none());
+    }
+
+    #[test]
+    fn only_glab_reads_get_the_gitlab_nudge() {
+        let nudged = |command: &str| {
+            let call =
+                json!({"cwd": env!("CARGO_MANIFEST_DIR"), "tool_input": {"command": command}});
+            respond(Kind::Search, &call, true).is_some()
+        };
+        for command in [
+            "glab mr view 42",
+            "glab issue list --label bug",
+            "glab ci trace 9",
+            "glab api projects/1/merge_requests",
+            "glab api -X GET projects/1",
+        ] {
+            assert!(nudged(command), "{command}");
+        }
+        for command in [
+            "glab mr create --fill",
+            "glab mr note 42 -m hi",
+            "glab api -X POST projects/1/issues",
+            "glab api --method=PUT projects/1",
+            "glab api projects/1/notes -f body=x",
+            "glab api graphql -f query='mutation { x }'",
+            "glab auth login",
+            "glab orbit grep x",
+        ] {
+            assert!(!nudged(command), "{command}");
+        }
     }
 
     #[test]
