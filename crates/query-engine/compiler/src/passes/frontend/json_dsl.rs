@@ -45,22 +45,17 @@ fn derive_json_schema(model: &impl OrbitQueryModel) -> Result<serde_json::Value>
                 .iter()
                 .map(|name| (*name).to_string())
                 .collect();
-            let mut hidden = Vec::new();
             for id in &entity.properties {
                 let property = model.graph().property(*id);
-                if filterable_only
-                    && !model.property_is_filterable(&entity.name, &property.name)
-                    && property.name != ontology::TRAVERSAL_PATH_COLUMN
+                if model.property_is_hidden(*id)
+                    || filterable_only
+                        && !model.property_is_filterable(&entity.name, &property.name)
                 {
                     continue;
                 }
-                if model.property_is_hidden(*id) {
-                    hidden.push(property.name.clone());
-                } else {
-                    listed.push(property.name.clone());
-                }
+                listed.push(property.name.clone());
             }
-            serde_json::json!({"anyOf": [{"enum": listed}, {"enum": hidden}]})
+            serde_json::json!({"enum": listed})
         };
         serde_json::json!({
             "if": { "properties": { "entity": { "const": entity.name } } },
@@ -88,7 +83,7 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn accepts_declared_columns_and_only_filterable_fields() {
+    fn accepts_only_visible_columns_and_filterable_fields() {
         let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
         let model = query_data_model::ClickHouseDataModel::derive(ontology.clone()).unwrap();
         for entity in model.graph().entities() {
@@ -105,17 +100,15 @@ mod tests {
                     .iter()
                     .find(|field| field.name == property);
                 let reserved = ontology::constants::NODE_RESERVED_COLUMNS.contains(&property);
+                let visible = declared.filter(|field| !field.hidden);
                 for (selector, expected) in [
                     (
                         serde_json::json!({"columns": [property]}),
-                        reserved || declared.is_some(),
+                        reserved || visible.is_some(),
                     ),
                     (
                         serde_json::json!({"filters": {property: "value"}}),
-                        reserved
-                            || declared.is_some_and(|field| {
-                                field.filterable || field.name == ontology::TRAVERSAL_PATH_COLUMN
-                            }),
+                        reserved || visible.is_some_and(|field| field.filterable),
                     ),
                 ] {
                     let mut node =

@@ -95,7 +95,7 @@ impl QueryParser {
     }
 
     fn LegacyShortestPath(input: Node) -> Result<()> {
-        Err(input.error("use ANY SHORTEST (a)-[*1..3]->(b) for shortest paths"))
+        Err(input.error("use ANY SHORTEST (a)-[:CONTAINS*1..3]->(b) for shortest paths"))
     }
 
     fn PathSearch(input: Node) -> Result<()> {
@@ -274,15 +274,16 @@ impl QueryParser {
     #[alias(predicate)]
     fn ComparisonExpression(input: Node) -> Result<BooleanExpression<Predicate>> {
         let span = input.as_span();
+        let from_temporal_literal = has_temporal_literal(&input);
         let comparison = match_nodes!(input.into_children();
             [PropertyExpression(property), operator(op)] => Comparison {
-                span, property, op, value: None, rhs_property: None,
+                span, property, op, value: None, from_temporal_literal, rhs_property: None,
             },
             [PropertyExpression(property), operator(op), value(value)] => Comparison {
-                span, property, op, value: Some(value), rhs_property: None,
+                span, property, op, value: Some(value), from_temporal_literal, rhs_property: None,
             },
             [PropertyExpression(lhs), operator(op), PropertyExpression(rhs)] => Comparison {
-                span, property: lhs, op, value: None, rhs_property: Some(rhs),
+                span, property: lhs, op, value: None, from_temporal_literal, rhs_property: Some(rhs),
             },
             [PropertyExpression(_), operator(_), FunctionCall(_)] => unreachable!("FunctionCall always errors"),
         );
@@ -325,9 +326,10 @@ impl QueryParser {
     #[alias(predicate)]
     fn TokenPredicate(input: Node) -> Result<BooleanExpression<Predicate>> {
         let span = input.as_span();
+        let from_temporal_literal = has_temporal_literal(&input);
         let comparison = match_nodes!(input.into_children();
             [TokenFunction(op), PropertyExpression(property), value(value)] => Comparison {
-                span, property, op, value: Some(value), rhs_property: None,
+                span, property, op, value: Some(value), from_temporal_literal, rhs_property: None,
             },
         );
         Ok(leaf(comparison))
@@ -585,8 +587,9 @@ impl QueryParser {
     }
 
     fn MapEntry(input: Node) -> Result<MapEntry> {
+        let from_temporal_literal = has_temporal_literal(&input);
         Ok(match_nodes!(input.into_children();
-            [SchemaName(key), value(value)] => MapEntry { key, value },
+            [SchemaName(key), value(value)] => MapEntry { key, value, from_temporal_literal },
         ))
     }
 
@@ -643,6 +646,14 @@ fn directed(input: Node, direction: Direction) -> Result<Relationship> {
         },
         [RelationshipDetail(detail)] => Relationship { direction, ..detail },
     ))
+}
+
+fn has_temporal_literal(node: &Node) -> bool {
+    node.as_pair()
+        .clone()
+        .into_inner()
+        .flatten()
+        .any(|pair| pair.as_rule() == Rule::TemporalLiteral)
 }
 
 fn leaf(comparison: Comparison<'_>) -> BooleanExpression<Predicate<'_>> {
@@ -761,15 +772,18 @@ fn number(node: &Node) -> Result<Value> {
     } else {
         None
     };
+    let out_of_range = || node.error("integer is out of range for a signed 64-bit integer");
     if let Some(radix) = radix {
-        let magnitude = u64::from_str_radix(&unsigned[2..], radix)
-            .map_err(|_| node.error("integer is out of range"))?;
-        if raw.starts_with('-') {
-            let signed = i64::try_from(-i128::from(magnitude))
-                .map_err(|_| node.error("integer is out of range"))?;
-            return Ok(Value::from(signed));
-        }
-        return Ok(Value::from(magnitude));
+        let magnitude =
+            i128::from(u64::from_str_radix(&unsigned[2..], radix).map_err(|_| out_of_range())?);
+        let signed = if raw.starts_with('-') {
+            -magnitude
+        } else {
+            magnitude
+        };
+        return i64::try_from(signed)
+            .map(Value::from)
+            .map_err(|_| out_of_range());
     }
     let raw = raw.trim_start_matches('+');
     if raw.contains(['.', 'e', 'E']) {
@@ -779,11 +793,9 @@ fn number(node: &Node) -> Result<Value> {
             .and_then(Number::from_f64)
             .ok_or_else(|| node.error("number must be finite and in range"))?;
         Ok(Value::Number(number))
-    } else if let Ok(signed) = raw.parse::<i64>() {
-        Ok(Value::from(signed))
     } else {
-        raw.parse::<u64>()
+        raw.parse::<i64>()
             .map(Value::from)
-            .map_err(|_| node.error("integer is out of range"))
+            .map_err(|_| out_of_range())
     }
 }
