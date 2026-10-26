@@ -35,18 +35,15 @@ A query can follow a merge request to its project and then into the code.
 
 ## The ontology
 
-```mermaid
-flowchart TB
-    Ontology[Ontology] --> Storage[Storage schema]
-    Ontology --> Indexing[Indexing plans]
-    Ontology --> Validation[Query validation]
-    Ontology --> Redaction[Redaction rules]
-```
+![The ontology drives indexing and builds the query data model](../../../assets/architecture/ontology.svg)
 
 The ontology declares every node type, edge type, and property. It also
-declares where each value comes from and who can read it. Orbit derives the
-storage schema, the indexing plans, query validation, and redaction from that
-one declaration.
+declares where each value comes from and who can read it. For indexing, Orbit
+derives the storage schema and the indexing plans from it. For querying, Orbit
+builds the query data model from three kinds of facts: the logical graph, the
+backend facts, and the authorization facts.
+[Query engine](querying/query-engine.md#1-load-the-data-model-for-the-active-schema-version)
+shows how every query compiles against that model.
 [The guide for adding data](../development/adding-data-to-the-knowledge-graph.md)
 lists every step to add a new entity.
 
