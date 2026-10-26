@@ -22,7 +22,8 @@ pub fn resolve(input: &Input, node: &Node, plan: &QueryPlan) -> Result<QueryConf
         visit_queries(query, &mut |query| {
             derived.enable_materialized_cte |= query.ctes.iter().any(|cte| cte.materialized);
             visit_relations(&query.from, &mut |relation| {
-                derived.final_scan |= matches!(relation, TableRef::Scan { final_: true, .. });
+                derived.optimize_move_to_prewhere_if_final |=
+                    matches!(relation, TableRef::Scan { final_: true, .. });
             });
             if !query.ctes.is_empty() {
                 derived.use_index_for_in_with_subqueries_max_values =
@@ -32,6 +33,9 @@ pub fn resolve(input: &Input, node: &Node, plan: &QueryPlan) -> Result<QueryConf
         })?;
     }
 
+    config.compiler_derived.use_skip_indexes_if_final_exact = plan
+        .execution()
+        .is_some_and(|execution| execution.graph.has_exact_final_reads());
     if plan.relations().len() >= 3 {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
     }

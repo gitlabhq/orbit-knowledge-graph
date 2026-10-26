@@ -1243,7 +1243,7 @@ mod tests {
             ..Default::default()
         };
         let mut config = QueryConfig::default();
-        config.compiler_derived.final_scan = true;
+        config.compiler_derived.optimize_move_to_prewhere_if_final = true;
         config
             .compiler_derived
             .use_index_for_in_with_subqueries_max_values = Some(100_000);

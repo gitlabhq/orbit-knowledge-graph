@@ -101,7 +101,8 @@ pub struct CompilerDerivedSettings {
     /// enables dynamic-programming join reordering for queries with 3+
     /// JOINs. Experimental in ClickHouse 26.x.
     pub join_order_algorithm: Option<String>,
-    pub final_scan: bool,
+    pub optimize_move_to_prewhere_if_final: bool,
+    pub use_skip_indexes_if_final_exact: bool,
     pub use_index_for_in_with_subqueries_max_values: Option<u64>,
     pub null_in_is_unknown: bool,
 }
@@ -119,14 +120,12 @@ impl CompilerDerivedSettings {
                 format!("'{algo}'"),
             ));
         }
-        if self.final_scan {
-            for setting in [
-                "optimize_move_to_prewhere_if_final",
-                "use_skip_indexes_if_final",
-                "use_skip_indexes_if_final_exact_mode",
-            ] {
-                out.push((setting.into(), "1".into()));
-            }
+        if self.optimize_move_to_prewhere_if_final {
+            out.push(("optimize_move_to_prewhere_if_final".into(), "1".into()));
+        }
+        if self.use_skip_indexes_if_final_exact {
+            out.push(("use_skip_indexes_if_final".into(), "1".into()));
+            out.push(("use_skip_indexes_if_final_exact_mode".into(), "1".into()));
         }
         if let Some(max) = self.use_index_for_in_with_subqueries_max_values {
             out.push((
@@ -373,7 +372,8 @@ mod tests {
         );
 
         let derived = CompilerDerivedSettings {
-            final_scan: true,
+            optimize_move_to_prewhere_if_final: true,
+            use_skip_indexes_if_final_exact: true,
             use_index_for_in_with_subqueries_max_values: Some(100_000),
             ..Default::default()
         };

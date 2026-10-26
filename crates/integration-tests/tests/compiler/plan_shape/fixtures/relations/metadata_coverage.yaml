@@ -12,7 +12,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Join ON p.id = mr.project_id (_) (Bind p (Filter p.full_path = 'gitlab-org/orbit', p._deleted = false (Deduplicate Final (Scan Table(gl_project) AS p)))))
+            - (Join ON p.id = mr.project_id (_) (Bind p (Filter p.full_path = 'gitlab-org/orbit', p._deleted = false (Deduplicate LimitBy ... (_)))))
 
   - name: Filtered aggregation endpoints use exact reusable keys
     query:

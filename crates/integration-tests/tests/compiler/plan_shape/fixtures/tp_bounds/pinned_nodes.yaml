@@ -39,7 +39,7 @@ cases:
     physical:
       clickhouse:
         emitted:
-          expect: ["(Filter StartsWith(j.traversal_path, scalar(gl_pipeline AS _scope WHERE _scope.id = 7)) OR (scalar(gl_pipeline AS _scope WHERE _scope.id = 7) = '0/'), ... (Bind j (Project * (Deduplicate Final (Scan Table(gl_job) AS j)))))"]
+          expect: ["(Filter StartsWith(j.traversal_path, scalar(gl_pipeline AS _scope WHERE _scope.id = 7)) OR (scalar(gl_pipeline AS _scope WHERE _scope.id = 7) = '0/'), ... (Scan Table(gl_job) AS j))"]
 
   - name: A node pinned through a foreign key keeps the anchor's path lookup on its own read
     query:

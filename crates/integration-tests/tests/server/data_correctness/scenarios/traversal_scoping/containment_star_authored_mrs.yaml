@@ -56,7 +56,7 @@ query:
     MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)<-[:AUTHORED]-(u:User) WHERE g.full_path = 'g700' RETURN u{.id, .username}, count(mr) AS c, count(p.id) AS project_rows, count(p.created_at) AS dated_projects LIMIT 10
 
 expect:
-  sql_contains: ["gl_group AS _scope FINAL WHERE", "_scope.full_path = 'g700'", "AS g FINAL", "relationship_kind = 'CONTAINS'"]
+  sql_contains: ["gl_group AS _scope FINAL WHERE", "_scope.full_path = 'g700'", "LIMIT 1 BY g.traversal_path, g.id", "relationship_kind = 'CONTAINS'"]
   skip_requirements: ["filter:full_path"]
   groups:
     u:

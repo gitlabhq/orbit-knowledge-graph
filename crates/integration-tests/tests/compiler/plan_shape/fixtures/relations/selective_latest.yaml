@@ -68,6 +68,22 @@ cases:
           ctes:
             absent: true
 
+  - name: A changing-column filter on a read pinned by a foreign key keeps find then check
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"pipeline_id":7,"finished_at":{"gte":"2026-10-10"}},"columns":["id","finished_at"]}],"limit":10}
+      gql: |
+        MATCH (j:Job {pipeline_id: 7}) WHERE j.finished_at >= '2026-10-10' RETURN j.id, j.finished_at LIMIT 10
+    logical:
+      expect: ["(Filter j.finished_at >= '2026-10-10', j.pipeline_id = 7 (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.finished_at >= '2026-10-10', j.pipeline_id = 7, ... (Scan Table(gl_job) AS j)))
+            - (Deduplicate LimitBy j.traversal_path, j.id (Filter j.pipeline_id = 7, (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
+          reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
+
   - name: High-selectivity ranges on an unchanging column apply before the latest-row pick
     query:
       json: |
@@ -116,7 +132,7 @@ cases:
             - (Filter mr.project_id = 1000, contains(mr.title, 'migration'), ... (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
           reject: ["(Filter (mr.traversal_path, mr.id) IN ?.(traversal_path, id) (_))"]
 
-  - name: A text match beside a key range bounds the FINAL read by the key and checks after the merge
+  - name: A text match beside a key range still finds then checks
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"u","entity":"User","id_range":{"start":1,"end":10000},"filters":{"username":{"starts_with":"ALI"}},"columns":["username"]}],"limit":10}
@@ -128,12 +144,9 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter starts_with(u.username, 'ALI'), u._deleted = false (Bind u (Filter u.id >= 1, u.id <= 10000 (Deduplicate Final (Scan Table(gl_user) AS u)))))
-          reject:
-            - (Filter u.id IN ?.id (_))
-            - (Deduplicate LimitBy ... (_))
-          ctes:
-            absent: true
+            - (Project u.id AS id (Filter u.id >= 1, u.id <= 10000, starts_with(u.username, 'ALI'), ... (Scan Table(gl_user) AS u)))
+            - (Deduplicate LimitBy u.id (Filter u.id >= 1, u.id <= 10000, u.id IN ?.id (Scan Table(gl_user) AS u)))
+          reject: ["(Deduplicate Final (Scan Table(gl_user) AS u))"]
 
   - name: Text indexes on an unchanging column apply before the latest-row pick
     query:

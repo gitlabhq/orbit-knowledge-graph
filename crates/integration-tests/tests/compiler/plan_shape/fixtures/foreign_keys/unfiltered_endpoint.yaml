@@ -77,6 +77,6 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter mr.state = 'merged', mr.project_id IN ?.id, mr._deleted = false (Deduplicate Final (Scan Table(gl_merge_request) AS mr)))
+            - (Filter mr.project_id IN ?.id, ... (Scan Table(gl_merge_request) AS mr))
           reject:
-            - (Deduplicate LimitBy ... (Scan Table(gl_merge_request) AS mr))
+            - (Deduplicate Final (Scan Table(gl_merge_request) AS mr))

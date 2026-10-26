@@ -1320,22 +1320,39 @@ mod tests {
     }
 
     #[test]
-    fn final_settings_follow_final_scans() {
+    fn final_prewhere_setting_follows_final_scans() {
         let sql = compile_sql(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":"active"}}],"limit":10}"#,
         );
         assert!(sql.contains(" FINAL"), "{sql}");
-        for setting in [
-            "optimize_move_to_prewhere_if_final = 1",
-            "use_skip_indexes_if_final = 1",
-            "use_skip_indexes_if_final_exact_mode = 1",
-        ] {
-            assert!(sql.contains(setting), "{sql}");
-        }
+        assert!(
+            sql.contains("optimize_move_to_prewhere_if_final = 1"),
+            "{sql}"
+        );
         assert!(
             !sql.contains("use_index_for_in_with_subqueries_max_values"),
             "no IN (subquery) in this query, got:\n{sql}"
         );
+        assert!(!sql.contains("use_skip_indexes_if_final"), "{sql}");
+    }
+
+    #[test]
+    fn exact_skip_index_settings_follow_unpinned_mutable_reads() {
+        let unpinned = compile_sql(
+            r#"{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"source_branch":"feature-x"}}],"limit":10}"#,
+        );
+        assert!(unpinned.contains("AS mr FINAL"), "{unpinned}");
+        for setting in [
+            "use_skip_indexes_if_final = 1",
+            "use_skip_indexes_if_final_exact_mode = 1",
+        ] {
+            assert!(unpinned.contains(setting), "{unpinned}");
+        }
+        let pinned = compile_sql(
+            r#"{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","node_ids":[1,2],"filters":{"source_branch":"feature-x"}}],"limit":10}"#,
+        );
+        assert!(!pinned.contains(" FINAL"), "{pinned}");
+        assert!(!pinned.contains("use_skip_indexes_if_final"), "{pinned}");
     }
 
     #[test]

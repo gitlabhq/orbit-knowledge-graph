@@ -36,6 +36,7 @@ pub enum Predicate {
         text_indexed: bool,
         unique: bool,
         immutable: bool,
+        anchor: bool,
         null_as_epoch: NullAsEpoch,
     },
     Ids {
@@ -85,6 +86,23 @@ impl Predicate {
             Self::Ids { .. } | Self::Membership { .. } => true,
             Self::IdRange { start, end, .. } => {
                 end.saturating_sub(*start) <= crate::passes::validate::MAX_ID_RANGE_SPAN
+            }
+            _ => false,
+        }
+    }
+
+    /// A text match on a changing column finds rows through the text index but does not bound a keyed re-read, so that scan keeps FINAL.
+    pub fn is_text_match(&self) -> bool {
+        matches!(self, Self::Property { filter, .. } if filter.op.is_some_and(FilterOp::is_text))
+    }
+
+    pub fn narrows_keys(&self) -> bool {
+        match self {
+            Self::Ids { .. } | Self::IdRange { .. } | Self::Membership { .. } => true,
+            Self::Property { anchor, filter, .. } => {
+                *anchor
+                    && filter.rhs_column.is_none()
+                    && matches!(filter.op, None | Some(FilterOp::Eq | FilterOp::In))
             }
             _ => false,
         }
