@@ -467,3 +467,5 @@ a follow-up issue.
 - Worked examples:
   [C MR !1133](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1133) (canonical reference),
   [C++ MR !1140](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1140) (family-pipeline example)
+
+<!-- docs-only pipeline probe -->
