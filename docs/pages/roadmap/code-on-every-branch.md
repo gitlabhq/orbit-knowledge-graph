@@ -1,5 +1,5 @@
 ---
-title: Code on every branch, with code search
+title: Code indexing on every branch and commit with content
 description: Index code on active branches and recent commits, and search file content inside graph queries.
 theme: code
 status: in-progress
