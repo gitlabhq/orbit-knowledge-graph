@@ -50,11 +50,11 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $users (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
+            - (CTE $users (Project u.id AS id (Filter u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
           expect:
             - (Filter _orbit_edge_0.source_id IN $users.id, ... (_))
           occurrences:
-            - pattern: (CTE ? (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
+            - pattern: (CTE ? (Project u.id AS id (Filter u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
               count: 1
 
   - name: Repeated low-cardinality row filters stay inline

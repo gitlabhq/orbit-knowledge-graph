@@ -420,7 +420,7 @@ fn filter_operators() {
     let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    assert!(rendered.contains("LIMIT 1 BY"));
+    assert!(rendered.contains("AS u FINAL"));
     assert!(rendered.contains("_deleted"));
     assert!(rendered.contains(">="));
     assert!(rendered.contains("IN"));

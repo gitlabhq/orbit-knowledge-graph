@@ -89,6 +89,7 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Project j.traversal_path AS traversal_path, j.id AS id (Filter j.pipeline_id = 1000, ... (Scan Table(gl_job) AS j)))
-            - (Deduplicate LimitBy j.traversal_path, j.id (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
-          reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
+            - (Filter j.pipeline_id = 1000, ..., j.pipeline_id IN ?.id (Deduplicate Final (Scan Table(gl_job) AS j)))
+          reject:
+            - (Project j.traversal_path AS traversal_path, j.id AS id (_))
+            - (Deduplicate LimitBy ... (Scan Table(gl_job) AS j))

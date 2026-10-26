@@ -12,11 +12,11 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Bind u (Filter u.username = 'alice', ... (Deduplicate LimitBy u.id (_))))
+            - (Bind u (Filter u.username = 'alice', ... (Deduplicate Final (Scan Table(gl_user) AS u))))
           occurrences:
-            - { pattern: "(Deduplicate LimitBy u.id (_))", count: 2 }
+            - { pattern: "(Deduplicate Final (Scan Table(gl_user) AS u))", count: 2 }
           reject:
-            - (CTE ? (Filter u.username = 'alice', ... (Deduplicate LimitBy u.id (_))))
+            - (CTE ? (Filter u.username = 'alice', ... (Deduplicate Final (Scan Table(gl_user) AS u))))
 
   - name: A non-unique selective lookup is materialized once and reused
     query:
@@ -31,8 +31,8 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $users (Filter u.name = 'Alice', ... (Deduplicate LimitBy u.id (_))))
+            - (CTE $users (Filter u.name = 'Alice', ... (Deduplicate Final (Scan Table(gl_user) AS u))))
           occurrences:
-            - { pattern: "(Deduplicate LimitBy u.id (_))", count: 1 }
+            - { pattern: "(Deduplicate Final (Scan Table(gl_user) AS u))", count: 1 }
           reject:
-            - (Bind u (Filter u.name = 'Alice', ... (Deduplicate LimitBy u.id (_))))
+            - (Bind u (Filter u.name = 'Alice', ... (Deduplicate Final (Scan Table(gl_user) AS u))))

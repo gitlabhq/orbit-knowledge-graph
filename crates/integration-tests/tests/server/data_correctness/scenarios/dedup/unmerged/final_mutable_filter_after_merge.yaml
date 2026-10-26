@@ -1,0 +1,58 @@
+description: A selective filter on a changing column reads once with FINAL and checks the latest version, so an older matching version never returns
+
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      ci_build: [9910]
+  extra_seed:
+    gl_job:
+      - { id: 9910, name: build, status: running, project_id: 1000, created_at: "2024-01-10 00:00:00", finished_at: "2024-01-15 00:00:00", traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 9910, name: build, status: success, project_id: 1000, created_at: "2024-01-10 00:00:00", finished_at: "2024-01-15 00:00:00", traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00" }
+
+cases:
+  - name: stale_status_excluded
+    description: Only the older version is running, so the running filter returns nothing
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.status = 'running' AND j.finished_at >= '2024-01-01' AND j.finished_at < '2024-02-01' RETURN j.id, j.status, j.finished_at
+    expect:
+      sql_contains: ["AS j FINAL", "use_skip_indexes_if_final_exact_mode = 1"]
+      sql_not_contains: ["tuple(j.traversal_path, j.id) IN"]
+      skip_requirements: ["node_ids", "filter:status", "filter:finished_at"]
+      node_count: 0
+
+  - name: latest_status_once
+    description: The latest version is success, so the success filter returns the job once
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.status = 'success' AND j.finished_at >= '2024-01-01' AND j.finished_at < '2024-02-01' RETURN j.id, j.status, j.finished_at
+    expect:
+      sql_contains: ["AS j FINAL"]
+      node_count: 1
+      nodes:
+        Job:
+          ids: [9910]
+          filters:
+            status: success
+            finished_at: { gte: "2024-01-01T00:00:00Z", lt: "2024-02-01T00:00:00Z" }
+
+  - name: latest_status_count
+    description: A count over the same filter agrees with the search
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.status = 'success' AND j.finished_at >= '2024-01-01' AND j.finished_at < '2024-02-01' RETURN count(j) AS n
+    expect:
+      skip_requirements: ["filter:status", "filter:finished_at"]
+      row_count: 1
+      row_values: [{ n: 1 }]
+
+  - name: stale_status_count
+    description: A count over the stale status counts nothing
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.status = 'running' AND j.finished_at >= '2024-01-01' AND j.finished_at < '2024-02-01' RETURN count(j) AS n
+    expect:
+      skip_requirements: ["filter:status", "filter:finished_at"]
+      row_count: 1
+      row_values: [{ n: 0 }]
