@@ -17,7 +17,7 @@ use orbit_server::analytics::{
     SnowplowAnalyticsTracker,
 };
 use orbit_server::auth::JwtValidator;
-use orbit_server::cli::{Args, Mode};
+use orbit_server::cli::{Args, Command, Mode};
 use orbit_server::cluster_health::ClusterHealthChecker;
 use orbit_server::content;
 use orbit_server::grpc::GrpcServer;
@@ -32,6 +32,9 @@ async fn main() -> anyhow::Result<()> {
     let aws_lc_version = orbit_server::fips::install_crypto_provider()?;
 
     let args = Args::parse();
+    if let Some(Command::CheckConfig) = args.command {
+        return orbit_server::config_check::run(args.config.as_deref());
+    }
     let config = AppConfig::load(args.config.as_deref())?;
 
     // Force-parse schema/format versions at boot so malformed version files
