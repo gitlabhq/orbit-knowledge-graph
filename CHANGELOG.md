@@ -1,3 +1,15 @@
+## [0.159.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.159.0...v0.159.1) (2026-10-26)
+
+### Fixes
+
+* **deps:** move zstd users to 0.14 and document the remaining advisories ([7256202](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7256202e1b881f09b2e37cd2d402af25b7b7d3d3)) by Michael Usachenko
+
+### Other
+
+* **agents:** add skill authoring guidance ([cbe3ab3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cbe3ab30b6ff3590b7464de34534a1b4f473103c)) by Dmitry Gruzd
+* **argo:** add human translation MR template ([4996d1f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4996d1f88aa8e55c69f6a9bed36b61a20bfc36ff)) by Jack Cole
+* **xtask:** point simulator config headers at cargo synth ([1a147e6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1a147e65c16db8574f636b5ff0133dbf013b637a)) by Dmitry Gruzd
+
 ## [0.159.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.158.0...v0.159.0) (2026-10-26)
 
 ### Features
