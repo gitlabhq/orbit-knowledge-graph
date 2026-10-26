@@ -101,14 +101,13 @@ A worker takes the request and indexes each type of entity in the namespace,
 like merge requests or pipelines. The ontology tells it which lake rows to
 read and how to map them, so adding an entity is a declaration, not new code.
 
-For each type, the worker reads the rows that changed since the last run, one
-page at a time. It turns each page into nodes and edges, writes them to the
-graph, and saves a checkpoint. If the run stops, the next one picks up from
-that checkpoint. When the last page is written, the checkpoint moves forward,
-and the next run starts from there.
-
-A run only reads up to the moment its request was sent. Rows that arrive while
-it runs are left for the next one, so nothing falls between two runs.
+Each type keeps a checkpoint per namespace. Its watermark marks how far the
+lake has been read, and its cursor marks the last page the current run wrote.
+A run reads the rows that landed between the watermark and the moment its
+request was sent, one page at a time. It turns each page into nodes and edges
+and moves the cursor, so a stopped run resumes from its last page. When the
+last page is written, the watermark moves up and the cursor is cleared. Rows
+that arrive mid-run wait for the next one, so nothing falls between two runs.
 
 ### 5. Deletes and moves
 
@@ -139,8 +138,8 @@ marked deleted.
   so it replaces itself.
 - **ClickHouse is overloaded or down.** The worker waits and retries, without
   counting it as a failure.
-- **A request keeps failing.** It's retried a few times, then dropped. The data
-  stays in the lake for the next request.
+- **A request keeps failing.** It's retried a few times, then dropped. The
+  data stays in the lake for the next request.
 - **The graph needs a rebuild.** Replay everything from the lake and get the
   same graph.
 

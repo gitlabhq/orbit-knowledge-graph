@@ -20,33 +20,33 @@ simplified view of how a push reaches the code graph.
 
 ```mermaid
 flowchart LR
-    GitLab --> Siphon --> Dispatcher --> Indexer --> Graph[(Graph)]
+    Siphon --> NATS --> Dispatcher --> Indexer --> Graph[(Graph)]
     Gitaly[(Gitaly)] --> Indexer
 ```
 
-A push to the default branch starts the chain. GitLab records it as a small
-task, Siphon replicates the task, and the dispatcher turns it into a request
-for the indexer. The indexer then downloads the repository from Gitaly, builds
-the code graph, and writes it to ClickHouse. What the code graph contains is
-on the [code graph](code-graph.md) page.
+A push to the default branch starts the chain. GitLab records it as a task,
+and Siphon publishes it to NATS, where the dispatcher reads it directly
+instead of waiting for the data lake. The indexer then downloads the
+repository from Gitaly, builds the code graph, and writes it to ClickHouse.
+What the code graph contains is on the [code graph](code-graph.md) page.
 
 ### 1. Triggers
 
 ```mermaid
 flowchart LR
-    Push --> GitLab -- task --> Siphon --> D[Dispatcher]
-    Enabled[Group turned on] --> D
-    Sweep[Periodic sweep] --> D
+    GitLab -- task --> Siphon --> NATS --> D[Dispatcher]
+    Lake[(Data lake)] -- projects --> D
 ```
 
 A push counts whether it comes from `git push`, a web edit, or a merge. The
-task already names the project, the commit, and where the repository is stored.
-The indexer never looks up the branch or the group itself.
+task already names the project, the commit, and where the repository is
+stored. The indexer never looks up the branch or the group itself.
 
 Pushes aren't the only trigger. When a group turns Orbit on, the dispatcher
-queues all of its existing projects, and a periodic sweep queues any project
-that still isn't indexed. The sweep also covers outages: GitLab only keeps the
-tasks for about a day, so the sweep is what catches up after a long one.
+sees it on NATS. It reads the group's projects from the data lake and queues
+the ones not indexed yet. A periodic sweep does the same for every enabled
+group. It also catches up after an outage, since GitLab only keeps tasks for
+about a day.
 
 The dispatcher puts every request on a NATS work queue that keeps one request
 per project. While a project is waiting or being indexed, newer pushes for it
@@ -61,12 +61,14 @@ flowchart LR
     C -- no --> L[Take the lock] --> I[Index]
 ```
 
-A worker first checks the project's checkpoint. If this task, or a newer one,
-is already indexed, there's nothing to do. Otherwise it takes a lock on the
-project, so two workers never index the same repository at once. The lock is a
-lease in NATS KV that the worker keeps renewing while it runs. If the worker
-dies, the lease expires and another worker can take over. If another worker
-holds the lock, the request goes back on the queue for later.
+A worker first checks the project's checkpoint, which records the last task
+indexed and how many attempts it took. GitLab numbers tasks in order, so if
+this task or a newer one is already indexed, there's nothing to do. Otherwise
+it takes a lock on the project, so two workers never index the same repository
+at once. The lock is a lease in NATS KV that the worker keeps renewing while
+it runs. If the worker dies, the lease expires and another worker can take
+over. If another worker holds the lock, the request goes back on the queue for
+later.
 
 ### 3. Fetch
 
@@ -80,8 +82,8 @@ GitLab checks the request and hands it to Workhorse, which streams the archive
 from Gitaly. A few rules keep this cheap for Gitaly and for the worker:
 
 - The archive leaves out Git LFS content.
-- Each Gitaly storage has a few download slots shared by every worker. A worker
-  that can't get one puts the request back for later.
+- Each Gitaly storage has a few download slots shared by every worker. A
+  worker that can't get one puts the request back for later.
 - Nothing stays on disk between runs. Each run unpacks into its own folder and
   deletes it at the end.
 - Binaries, minified files, and very large files aren't parsed. They still
@@ -134,8 +136,8 @@ them and marks their code deleted.
 ## When things go wrong
 
 - **A write fails.** The insert is retried a couple of times. If it still
-  fails, the run ends without a checkpoint and NATS delivers the request again.
-  Reindexing is idempotent.
+  fails, the run ends without a checkpoint and NATS delivers the request
+  again. Reindexing is idempotent.
 - **A run is too slow.** A run that goes over its time budget gets one more
   try. If it times out again, it goes to the dead letter queue instead of
   burning a worker slot over and over. A parser error that can't succeed on
@@ -153,8 +155,8 @@ them and marks their code deleted.
 
 We index only the default branch for now. Indexing other branches would work
 the same way, but the limit is the database. Every branch is close to a full
-copy of the project's graph, so storage and query cost grow with each branch we
-keep.
+copy of the project's graph, so storage and query cost grow with each branch
+we keep.
 
 Code indexing starts from a task that GitLab writes, not from every push. We
 first listened to every push event that Siphon replicates. But fewer than one
