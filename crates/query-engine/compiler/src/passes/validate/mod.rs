@@ -496,11 +496,19 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
     fn check_field(&self, entity: &str, property: &str) -> Result<()> {
         validate_identifier(property)?;
         let model = self.model.get();
-        let addressable = ontology::constants::NODE_RESERVED_COLUMNS.contains(&property)
-            || self
-                .property(entity, property)
-                .is_some_and(|property| !model.property_is_hidden(property.id));
-        if addressable {
+        if ontology::constants::NODE_RESERVED_COLUMNS.contains(&property) {
+            return Ok(());
+        }
+        if let Some(field) = self.property(entity, property)
+            && !model.property_is_hidden(field.id)
+        {
+            if model.property_realization(field.id).is_none()
+                && model.entity_table(entity).is_some()
+            {
+                return Err(QueryError::AllowlistRejected(format!(
+                    "field \"{property}\" on {entity} is not available in this data model"
+                )));
+            }
             return Ok(());
         }
         let properties: Vec<_> = model
