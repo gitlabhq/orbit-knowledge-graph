@@ -239,14 +239,10 @@ If either FK column is `Nullable` in the source, the ETL can emit null-target ed
 Filter or document it (reviewers will ask). Prefer NOT-NULL join columns.
 
 Hot query shapes can be pre-joined by declaring a chain under `settings.denormalized_joins`
-in `schema.yaml` (see the [query data model](../architecture/query-engine.md#1-load-the-data-model-for-the-active-schema-version) in the Orbit Query Engine page).
+in `schema.yaml` (see the [Denormalized joins](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/querying/graph_engine.md#denormalized-joins) section of the pre-rewrite graph engine doc).
 This emits a `gl_denorm_<name>` table composed from the chain's own DDL plus one feeding
 materialized view per table. The table stores every column of every table in the chain and
 each declaration is a schema bump, so weigh write amplification before adding one.
-
-Trial a join as an ontology overlay under `config/seeds/overlays/<name>/` before you declare
-it in `schema.yaml`. Then run `mise test:integration:overlay <name>`. The suite checks that the
-table holds exactly the rows of the live source join, and runs the query scenarios against it.
 
 ### 5.3 Register in `config/ontology/schema.yaml` (the step that's easy to miss)
 
@@ -287,7 +283,7 @@ This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql
 ### 5.5 Test fixtures + SDLC scenario
 
 - **`config/seeds/siphon.sql`**: add a `CREATE TABLE … siphon_<table>` for each new source table, using the simplified fixture form (mirror the existing `siphon_packages_build_infos` block: no CODECs, `PROJECTION pg_pkey_ordered`). The scenario harness seeds rows into these.
-- **SDLC scenario YAML**: entity-ETL coverage lives in `crates/integration-tests/tests/indexer/scenarios/sdlc/<domain>/`, executed by the `scenario_indexing` test. Add a `.yaml` scenario, not a Rust function (see [Testing](../../../design-documents/testing.md#testing-principles)). Mirror `processes_packages.yaml` (node + IN_PROJECT) and `processes_package_built_by_pipeline.yaml` (edge from a join row):
+- **SDLC scenario YAML**: entity-ETL coverage lives in `crates/integration-tests/tests/indexer/scenarios/sdlc/<domain>/`, executed by the `scenario_indexing` test. Add a `.yaml` scenario, not a Rust function (see [Testing](../testing/README.md#principles)). Mirror `processes_packages.yaml` (node + IN_PROJECT) and `processes_package_built_by_pipeline.yaml` (edge from a join row):
 
   ```yaml
   description: ...

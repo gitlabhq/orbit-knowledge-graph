@@ -1,6 +1,7 @@
 ---
 title: Querying
 description: How Orbit turns a graph question into one bounded, authorized query.
+order: 5
 authors:
   - michaelusa
 ---

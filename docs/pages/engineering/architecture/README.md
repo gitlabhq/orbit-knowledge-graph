@@ -1,132 +1,99 @@
 ---
 title: Orbit architecture
-description: What Orbit is, why it exists, and the contracts that hold across every part of it.
+description: What Orbit is, why we built it, and the rules that every part of it follows.
 authors:
   - michaelangeloio
+  - dgruzd
+  - jgdoyon1
+  - bohdanpk
+  - michaelusa
+  - aalgutifan
 ---
 
-**TL;DR:** Orbit turns GitLab code and lifecycle data into one property
-graph that agents and people can query. It reads GitLab data through
-replication and runs every analytical query on its own store, so the GitLab
-database never serves that load. It is long-term data infrastructure that
-other GitLab features can build on.
+![Orbit at a glance](../../../assets/architecture/overview.svg)
 
-## Why Orbit
+Orbit turns GitLab data about your software into one graph that agents and people can query.
+Groups, projects, merge requests, pipelines, vulnerabilities, and code become nodes, and the links between them become edges.
 
-- **Connected answers.** Agents and people ask questions that cross many
-  objects. An example is the failed pipelines of the merge requests
-  that close the issues in an epic. The GitLab APIs need many calls for one such
-  question, and the GitLab database is not built for analytical queries.
-- **Minimal impact on GitLab.** Orbit reads a replication stream and runs
-  every analytical query on its own store. This was a primary reason to
-  build Orbit on the Data Insights Platform instead of adding a graph
-  database. [ADR 000](../adr/000_clickhouse_graph_storage.md)
-  records the evaluation.
-- **A data platform.** The replication pipeline and the analytical store are
-  shared GitLab infrastructure. Other features can build on them, and the
-  graph grows as GitLab adds data.
+## Why we built Orbit
 
-## Goals
+Say you want to know which merge requests closed the issues in an epic, and which of their pipelines failed.
+The GitLab API needs dozens of calls for that, and Orbit answers it with one graph query.
 
-- Answer traversal, neighbor, path, and aggregation questions with one
-  bounded query.
-- Never show a caller data that GitLab would not show them.
-- Keep the load on the GitLab instance as small as possible.
-- Run the same architecture on GitLab.com, GitLab Dedicated, and
-  GitLab Self-Managed. Small installs stay cheap, and large ones scale out.
-- Upgrade and patch Orbit separately from GitLab. Customers never run
-  scripts to repair data.
+We also wanted that load to stay off GitLab.
+Orbit reads a replicated copy of GitLab data and runs every graph query on its own store, so the GitLab database never serves them.
+That small footprint was a main reason we built on the ClickHouse, Siphon, and NATS stack instead of buying a graph database.
+[ADR 000](../adr/000_clickhouse_graph_storage.md) has the full evaluation.
 
-## Non-goals
+That stack is shared GitLab data infrastructure, so we see Orbit as a long-term data platform that other features can build on.
 
-- Orbit is not a transactional store, and it is not real time. A result
-  shows the graph at the time of the last indexing.
-- Orbit does not write to GitLab.
-- Orbit does not decide permissions. GitLab does.
-- Orbit Remote does not run database queries that callers write. Callers
-  use the Orbit query languages.
+## How data gets in
 
-## System context
-
-```plantuml
-@startuml
-left to right direction
-skinparam componentStyle rectangle
-actor "Agents and people" as user
-rectangle "GitLab" {
-  component "GitLab application" as gitlab
-  database "GitLab database" as pg
-}
-rectangle "Data Insights Platform" {
-  component "Replication" as cdc
-  queue "Message broker" as broker
-  database "Analytical store" as store
-}
-rectangle "Orbit" {
-  component "Indexing" as indexer
-  component "Query service" as query
-}
-user --> gitlab : requests
-gitlab --> query : authorized queries
-query --> gitlab : redaction checks
-pg --> cdc : replication stream
-cdc --> broker
-broker --> store : raw data
-broker --> indexer : indexing work
-indexer --> gitlab : repository content
-indexer --> store : graph
-query --> store : read-only queries
-@enduml
+```mermaid
+flowchart LR
+    DB[(GitLab database)] -- changes --> Siphon --> NATS --> Lake[(Data lake)]
+    Dispatcher -- jobs through NATS --> SDLC[SDLC indexer]
+    Dispatcher -- jobs through NATS --> Code[Code indexer]
+    Lake --> SDLC --> Graph[(Graph)]
+    Repos[Repositories] -- through GitLab --> Code --> Graph
 ```
 
-Today the replication service is Siphon, the broker is NATS JetStream, and
-the store is ClickHouse.
+Siphon copies changes to selected GitLab tables into a ClickHouse data lake.
+The dispatcher schedules work and sends jobs to both indexers.
+The SDLC indexer reads the lake one namespace at a time, plus one pass for instance-wide entities, and turns rows into nodes and edges.
+The code indexer fetches repositories through GitLab, parses the source, and writes the code graph into the same store.
 
-## Parts
+## How a question gets answered
 
-- [Data model](data-model.md): the property graph and the ontology that
-  defines it.
-- [SDLC indexing](sdlc-indexing.md): builds the lifecycle graph from
-  replicated GitLab data.
-- [Code indexing](code-indexing.md): builds the code graph from
-  repositories.
-- [Schema evolution](schema-evolution.md): moves the graph to a new schema
-  with no downtime.
-- [Querying](querying.md): turns a graph question into one bounded,
-  authorized query.
-  - [Orbit Query Engine](query-engine.md): the data model, the pipelines,
-    and each step from query to SQL.
-- [Security](security.md): makes sure each caller sees only what GitLab
-  lets them see.
-- [Orbit CLI](orbit-cli.md): indexes and queries a repository on the user's
-  machine.
-- [Testing](../testing/README.md): proves that a change is correct before it ships.
+```mermaid
+flowchart LR
+    Caller[Agent or person] --> GitLab
+    GitLab -- signed identity and scope --> Query[Query service]
+    Query -- bounded queries --> Graph[(Graph)]
+    Query -- check each item --> GitLab
+    GitLab -- allowed items --> Caller
+```
 
-Orbit Remote runs as separate roles for query serving, indexing, dispatch,
-and health. Each role scales and fails on its own.
+Every request goes through GitLab first, and GitLab works out who the caller is and which groups they can see.
+Orbit compiles the question into a bounded query inside that scope.
+GitLab then checks each result again before anything goes back.
+The [security](security.md) page walks through those checks.
 
-## System contracts
+## The parts
 
-- Every request reaches Orbit Remote through GitLab. GitLab is the only
-  source of truth for identity and permissions.
-- Orbit gets GitLab data only through replication and GitLab APIs. It never
-  connects to the GitLab database or to repository storage.
-- The query service only reads. Only the indexing and dispatch roles write
-  to the graph.
-- One ontology defines the graph. Storage, indexing, query validation, and
-  authorization all come from it.
-- Every query is bounded and scoped to the caller. A query that breaks a
-  rule fails instead of returning data outside that scope.
-- Indexing is idempotent and can resume after a failure. Orbit can rebuild
-  the lifecycle graph from the raw replicated data and the code graph from
-  the repositories.
-- A schema change builds the new graph next to the active one. Queries move
-  to the new graph when its lifecycle data is complete. Code indexing does
-  not block the switch.
+| Page | What it covers |
+| --- | --- |
+| [Data model](data-model.md) | The graph and the ontology that defines it |
+| [SDLC indexing](sdlc-indexing.md) | How replicated GitLab data becomes the SDLC graph |
+| [Code indexing](code-indexing.md) | How repositories become the code graph |
+| [Schema evolution](schema-evolution.md) | How the graph moves to a new schema with no downtime |
+| [Querying](querying.md) | How a graph question becomes one safe query |
+| [Security](security.md) | How each caller sees only what GitLab lets them see |
+| [Orbit CLI](orbit-cli.md) | How Orbit indexes and queries code on your own machine |
+| [Testing](../testing/README.md) | How we prove a change is correct before it ships |
+
+## Rules every part follows
+
+- **GitLab is the front door.** Every request comes through GitLab, and GitLab decides who can see what. Orbit enforces that decision in each query.
+- **Orbit only reads from GitLab.** It uses replication and the GitLab APIs, and never connects to the GitLab database or repository storage.
+- **One ontology defines the graph.** Storage, indexing, query validation, and authorization all come from that one declaration.
+- **Every query is bounded and scoped.** A query that breaks a rule fails instead of returning data outside the caller's scope.
+- **Only the indexers and the dispatcher write.** The query service only reads the graph.
+- **Indexing can always start over.** A crashed run resumes where it stopped, and Orbit can rebuild the whole graph from the data lake and the repositories.
+- **Schema changes don't take Orbit down.** A new graph builds next to the live one, and queries switch over once its SDLC data is complete.
+
+## What Orbit isn't
+
+Orbit isn't a transactional store or a real-time one, so a result shows the graph as of the last indexing run.
+It never writes to GitLab.
+Callers send a JSON graph query, a named query, or a GQL query, not raw database queries.
+
+## Where it runs
+
+The same architecture runs on GitLab.com, GitLab Dedicated, and GitLab Self-Managed.
+Orbit Remote runs as separate roles for queries, indexing, dispatch, and health checks, plus a one-time ClickHouse setup job.
+Orbit ships and upgrades separately from GitLab.
 
 ## Decisions
 
-The [ADRs](../adr/) record each decision and the
-reasons for it. A new ADR replaces an old one when a decision changes. The
-pages in this folder state the current contracts. New pages follow the
-[page template](template.md).
+The [ADRs](../adr/) record our main decisions and why we made them, and these pages describe how Orbit works today.

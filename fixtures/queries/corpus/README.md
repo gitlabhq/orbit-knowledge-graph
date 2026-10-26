@@ -48,7 +48,7 @@ The test also fails on Orbit query JSON in an unmarked `json` or shell code bloc
 and on a code block with no closing fence. It does not check result correctness.
 
 Run it locally with Docker: `mise test:integration:corpus`. See
-[Query corpus and executable docs](../../../docs/design-documents/testing.md#query-corpus-and-executable-docs).
+[Query corpus and executable docs](../../../docs/pages/engineering/testing/infrastructure.md#query-corpus-and-executable-docs).
 
 ## `raw_sql_ab.yaml`
 

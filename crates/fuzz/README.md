@@ -77,4 +77,4 @@ Seeds are in `seeds.yaml`, each with `labels` that start with its query class or
 - `fuzz-deep` fuzzes daily and writes the corpus back.
 - Fuzzer output goes to `tests/<target>/fuzz.log`, not the public job log. Crashes upload to the crash bucket.
 
-See [Fuzzing](../../docs/design-documents/testing.md#fuzzing).
+See [Fuzzing](../../docs/pages/engineering/testing/fuzzing.md).
