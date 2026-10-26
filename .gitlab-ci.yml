@@ -47,8 +47,20 @@ workflow:
     # Canonical project — original behavior
     - if: $CI_COMMIT_TAG
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      # Every path outside docs/, plus the docs/ files that code checks read.
+      # changes: has no negation, so the second glob excludes docs/ by prefix.
+      changes:
+        - "*"
+        - "{[!d],d[!o],do[!c],doc[!s],docs?}*/**/*"
+        - docs/docs-gitlab-com/remote/queries/query-language.md
+        - docs/pages/engineering/development/agents-crate-map.md
       auto_cancel:
         on_new_commit: interruptible
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      auto_cancel:
+        on_new_commit: interruptible
+      variables:
+        DOCS_ONLY: "true"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     # Security-template jobs can't reference .skip-on-solo-schedule, so solo
@@ -215,17 +227,32 @@ stages:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY != ""
       when: never
 
-.mr-only-rules:
+.skip-on-docs-only:
+  rules:
+    - if: $DOCS_ONLY == "true"
+      when: never
+
+# Jobs that check docs. A docs-only MR pipeline runs only these.
+.docs-mr-rules:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       interruptible: true
 
-.mr-and-main-rules:
+.docs-mr-and-main-rules:
   rules:
     - !reference [.skip-on-solo-schedule, rules]
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-      interruptible: true
+    - !reference [.docs-mr-rules, rules]
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+.mr-only-rules:
+  rules:
+    - !reference [.skip-on-docs-only, rules]
+    - !reference [.docs-mr-rules, rules]
+
+.mr-and-main-rules:
+  rules:
+    - !reference [.skip-on-docs-only, rules]
+    - !reference [.docs-mr-and-main-rules, rules]
 
 # Jobs that pull alpine through the group dependency proxy. The proxy answers
 # 404 when the job user lacks at least Guest on the top-level group, as with
@@ -292,7 +319,7 @@ mr-title-check:
   tags:
     - saas-linux-medium-amd64
   extends:
-    - .mr-only-rules
+    - .docs-mr-rules
   before_script:
     - bun install --frozen-lockfile --ignore-scripts
   script:
@@ -568,7 +595,7 @@ newline-check:
   stage: lint
   extends:
     - .job-template
-    - .mr-only-rules
+    - .docs-mr-rules
     - .no-cargo-home-cache
   script:
     - mise run lint:newlines
@@ -677,6 +704,7 @@ semgrep-sast:
   stage: security
   needs: []
   rules:
+    - !reference [.skip-on-docs-only, rules]
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       exists:
@@ -707,7 +735,7 @@ check_docs_markdown:
   stage: docs
   needs: []
   extends:
-    - .mr-only-rules
+    - .docs-mr-rules
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
   script:
     # Lint prose
@@ -794,7 +822,7 @@ pages:preview:
   stage: docs
   needs: []
   extends:
-    - .mr-only-rules
+    - .docs-mr-rules
   variables:
     DOCS_BRANCH: "main"
   before_script:
@@ -855,6 +883,7 @@ unit-test:
     - .test-template
   # Same rules as .mr-and-main-rules, plus the cache upload on main only.
   rules:
+    - !reference [.skip-on-docs-only, rules]
     - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       interruptible: true
@@ -998,7 +1027,7 @@ corpus-smoke-test:
   stage: test
   extends:
     - .test-template
-    - .mr-and-main-rules
+    - .docs-mr-and-main-rules
   tags:
     - ${RUNNER_LARGE}
   services:
