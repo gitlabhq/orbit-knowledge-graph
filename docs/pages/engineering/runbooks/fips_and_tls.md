@@ -1,6 +1,6 @@
 # FIPS and TLS
 
-This page records the cryptographic posture of the Orbit server for compliance reviews. The contract is in [Security](../architecture/security.md#service-trust).
+This page records the cryptographic posture of the Orbit server for compliance reviews. The contract is in [Security](../architecture/security.md#between-the-services).
 
 ## Cryptographic module
 
