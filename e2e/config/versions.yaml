@@ -38,29 +38,29 @@ gitlab:
 gitlab_lanes:
   "19-4":
     chart: "10.4.3"
-    ref: "b0325a9acd7e36f0f88731686fd9cc8d8d4dc85d"
+    ref: "70d41d56b48cbda6779a847067463d1071476a60"
     images:
       webservice:
-        digest: "sha256:e48fec75ffe438c337b349563ddea9d911b584921f74cf3ac25ebf145bda6202"
+        digest: "sha256:030d642e31c2616450486dcb3bab5a96a457520f9e4a0c1b8854ef5e6f184f6d"
       workhorse:
-        digest: "sha256:4a4556c1372563517e9b9a2505ac5fc6fa8b9a9723d19f9e0b64868b0992de5b"
+        digest: "sha256:ef96f23645daa962fc6c7bdb44c86505246ea8ba21c3bd529e43958c3864cc7a"
       sidekiq:
-        digest: "sha256:9c21ee1c8b9b2a20eaf979abfe75c18d1aa1f23d9a5d7322ee824dc3777bc0c0"
+        digest: "sha256:3978f398a84976aeaf0cd522fdaa822e2329719b7f8c0c0e53097857e54cb77f"
       toolbox:
-        digest: "sha256:2f0bc573ae18ad26eb842899e38c904b8d549d31eedff61f9f0b08e2c36c1030"
+        digest: "sha256:41c5b73cf58e55d36d7b48db069da5d64cb7e0046d7d9714ca81a01b46e05e2e"
     repository: registry.gitlab.com/gitlab-org/build/cng-mirror
   "19-5":
     chart: "10.5.1"
-    ref: "e4383f16d7a065d0e8c6e4eb2bc969dc6c17c7bc"
+    ref: "3d41496922730cc2efa13bdb4c4883ad3bbf7a6d"
     images:
       webservice:
-        digest: "sha256:2ab6b77769f777ec2dc94004ea493d1d3c2e6fe116d54d2679f7ce3bbc70c9ac"
+        digest: "sha256:d749cdac889818a0c11d24262a0e84fe86f26c418b6d423b2cf17fc20d902156"
       workhorse:
-        digest: "sha256:adf0f41e1bb4bf487d580ceaef429ee09dddf32a313f7d8e0a2f2c846edc5663"
+        digest: "sha256:45819f8247bfcfd8bce205a32b56ef042bffeef2ae92133c808e2d0148f937a3"
       sidekiq:
-        digest: "sha256:3ee087c7251f1225c31cf0ed3fe0323013679c5da504b9c0a94f042b8fed9968"
+        digest: "sha256:0d37539bef0d4f18bdaf6cead482bf46c02e959a1a9114d28846328cd4238a3c"
       toolbox:
-        digest: "sha256:950fc05a3d47ce7da463d82044b7f7ea5050c8383be6b04dedd0bdc34abc514e"
+        digest: "sha256:d57ec0a5f9816deef30861e7c5c8f460d68205f5c537644c91c7c0a148e89c2f"
     repository: registry.gitlab.com/gitlab-org/build/cng-mirror
 gkg:
   chart: "4.1.0"
