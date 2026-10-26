@@ -127,10 +127,6 @@ export function siteMeta(route: string, frontmatter: Record<string, unknown>, bo
   if (!source) throw new Error(`no source file for the route /${route}`);
   return {
     sourceUrl: `${repoBlob}${source}`,
-    authors: [frontmatter.authors]
-      .flat()
-      .filter((author): author is string => typeof author === "string")
-      .map((author) => author.replace(/^@/, "")),
     lastChanged: changedOn.get(source),
     order: typeof frontmatter.order === "number" ? frontmatter.order : undefined,
     words: body.split(/\s+/).filter(Boolean).length,
