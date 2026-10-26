@@ -1,7 +1,6 @@
 # Secret rotation
 
-Back to the [runbook](README.md). These are planned changes, not incident actions. Do
-staging first.
+These are planned changes, not incident actions. Do staging first.
 
 ```shell
 export CTX=gke_gl-orbit-stg_us-east1_orbit-stg   # production: gke_gl-orbit-prd_us-east1_orbit-prd

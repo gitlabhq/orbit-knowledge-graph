@@ -1,7 +1,5 @@
 # Rebuild and reindex
 
-Back to the [runbook](README.md).
-
 > [!warning]
 > Rehearsed in staging on 2026-10-26
 > ([evidence](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1428)), not yet

@@ -1,6 +1,6 @@
 # Monitoring
 
-Back to the [runbook](README.md). Dashboard links and alert routing are on the card.
+Dashboard links and alert routing are on the [card](README.md).
 
 ## Panels to know
 

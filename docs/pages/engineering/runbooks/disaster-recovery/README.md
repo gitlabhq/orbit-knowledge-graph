@@ -1,7 +1,5 @@
 # Disaster recovery
 
-Back to the [runbook](../README.md).
-
 Orbit holds no primary data. Siphon copies GitLab data into the datalake, and Orbit builds
 the graph from the datalake and the repositories. Recover Siphon first, then rebuild the
 graph.

@@ -1,7 +1,5 @@
 # NATS
 
-Back to the [runbook](README.md).
-
 Orbit uses NATS JetStream for indexing work, dead letters and indexing locks. NATS runs in
 namespace `nats`. Use the `nats-box` deployment for all commands. Its default context has the
 mTLS client certificates.

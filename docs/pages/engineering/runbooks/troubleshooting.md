@@ -1,7 +1,7 @@
 # Troubleshooting
 
-Back to the [runbook](README.md). No cause after 15 minutes: page Orbit tier-2. Commands use
-production. For staging, use `--context gke_gl-orbit-stg_us-east1_orbit-stg`.
+No cause after 15 minutes: page Orbit tier-2. Commands use production. For staging, use
+`--context gke_gl-orbit-stg_us-east1_orbit-stg`.
 
 ## Order of checks
 

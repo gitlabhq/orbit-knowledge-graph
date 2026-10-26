@@ -1,7 +1,5 @@
 # Maintenance
 
-Back to the [runbook](README.md).
-
 ## Rollback
 
 <details open>
