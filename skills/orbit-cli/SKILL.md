@@ -6,8 +6,9 @@ description: >
   structure. Examples: who calls or extends this, where it is defined, what
   a file defines, how definitions are distributed. One call replaces many
   file reads and text greps, including matches in config, templates, and docs.
-  Works on the working tree and unpushed branches. Not a fit: reading one known
-  file, or hosted GitLab data (use the `orbit` skill).
+  Works on the working tree and unpushed branches, and also searches and reads
+  the project's GitLab. Not a fit: reading one known file, or counts and
+  relationships across GitLab (use the `orbit` skill).
 version: 0.30.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.

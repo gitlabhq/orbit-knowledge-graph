@@ -173,6 +173,7 @@ pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<Indexe
 
 /// The repo-relative `files` whose working-tree contents differ from the indexed commit:
 /// modified, added, renamed, or untracked. The graph describes the commit, so its definitions
+/// and line spans do not fit these files. Empty when git cannot answer.
 pub fn edited_since_index(repo: &Path, files: &[&str]) -> std::collections::BTreeSet<String> {
     let mut edited = std::collections::BTreeSet::new();
     if files.is_empty() {

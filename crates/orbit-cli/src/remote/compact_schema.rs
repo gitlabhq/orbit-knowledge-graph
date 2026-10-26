@@ -28,17 +28,21 @@ pub(crate) fn render(schema: &Value) -> Option<String> {
         DOMAINS.join(", ")
     )];
     for name in &names {
-        let node = schema["nodes"]
+        let Some(node) = schema["nodes"]
             .as_array()?
             .iter()
-            .find(|node| node["name"] == name.as_str())?;
+            .find(|node| node["name"] == name.as_str())
+        else {
+            continue;
+        };
         let properties: Vec<String> = node["properties"]
-            .as_array()?
-            .iter()
+            .as_array()
+            .into_iter()
+            .flatten()
             .filter_map(property)
             .collect();
         if properties.is_empty() {
-            return None;
+            continue;
         }
         lines.push(format!("  - {name}: {}", properties.join(", ")));
     }
@@ -174,10 +178,12 @@ mod tests {
     }
 
     #[test]
-    fn render_needs_expanded_nodes() {
+    fn render_skips_a_node_without_properties() {
         let mut schema = schema();
         schema["nodes"][0]["properties"] = json!([]);
-        assert!(render(&schema).is_none());
+        let rendered = render(&schema).unwrap();
+        assert!(!rendered.contains("  - User:"));
+        assert!(rendered.contains("  - MergeRequest: iid, state (opened|merged)"));
         assert!(render(&json!({"domains": []})).is_none());
     }
 }
