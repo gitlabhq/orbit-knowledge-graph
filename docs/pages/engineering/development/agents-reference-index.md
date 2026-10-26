@@ -34,7 +34,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |
 | Query language reference (text-indexed properties table is generated) | `docs/docs-gitlab-com/remote/queries/query-language.md` (regenerate the ontology-derived table with `mise docs:query-language`; CI gate `query-language-docs-check`) |
-| Testing strategy (test layers, CI jobs, where to add a test) | `docs/design-documents/testing.md` |
+| Testing strategy (test layers, CI jobs, where to add a test) | `docs/pages/engineering/testing/` |
 | Query test fixtures | `fixtures/queries/` |
 | YAML query scenarios (data correctness) | `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/*.yaml` (run with `mise test:integration:data`; filter with `SCENARIO_FILTER=<name>`) |
 | Query scenario presets | `crates/integration-tests/tests/server/data_correctness/presets/` (`seed.yaml`, `security.yaml`, `redaction.yaml`) |

@@ -33,7 +33,7 @@ For the full local setup (Caproni cluster with GitLab, ClickHouse, NATS, and Sip
 
 `mise test:fast` runs the unit tests with no Docker. `mise test:integration` runs the container tests. On macOS, start Docker for them with `colima start gkg --memory 12`.
 
-For all test layers, the CI jobs, and where to add a test, see [Testing](docs/design-documents/testing.md).
+For all test layers, the CI jobs, and where to add a test, see [Testing](docs/pages/engineering/testing/README.md).
 
 ## Linting
 

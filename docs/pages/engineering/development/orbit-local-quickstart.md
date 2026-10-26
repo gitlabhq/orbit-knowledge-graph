@@ -100,7 +100,7 @@ mise run lint:docs                    # markdownlint + Vale + lychee
 ```
 
 For every test layer and where to add a test, see
-[Testing](../../../design-documents/testing.md).
+[Testing](../testing/README.md).
 
 ## What needs the full stack
 
