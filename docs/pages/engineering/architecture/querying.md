@@ -20,8 +20,9 @@ GitLab Duo all reach it through GitLab Rails.
 | Path finding | The shortest path between two anchored nodes, up to three hops | The containment path from a group to a project |
 | Neighbors | One hop from a single node, in either direction | Every entity linked to a work item |
 
-Queries are written in the JSON Query DSL or in GQL. The
-[query languages](query-languages.md) page covers both frontends.
+Queries are written in GQL today. The [Orbit Query Engine](query-engine.md)
+doesn't depend on the input language or the backend. A new language or backend
+plugs in as one frontend or one code generator.
 
 ## How it works
 
@@ -54,9 +55,6 @@ caller can read, each tagged with an access level. It signs them into a JWT
 and hands the request to Workhorse, which opens a bidirectional gRPC stream to
 the Orbit webserver. Long-running queries never hold a Puma worker;
 [ADR 008](../adr/008_workhorse_query_acceleration.md) records that decision.
-
-The query language is a per-user setting, selected by a Rails feature flag and
-carried on the request. The webserver never infers it from the payload.
 
 ### 2. Compilation
 
@@ -194,8 +192,6 @@ total. The same constraint makes the language reliable for LLMs to generate.
 
 ### Terms
 
-- The **JSON Query DSL** is the JSON query language.
-  It is the default.
 - **GQL** is Orbit's read-only text query language.
   It uses openCypher 9 syntax with Orbit restrictions and extensions.
   It is not a Neo4j-compatible driver.
@@ -212,7 +208,7 @@ total. The same constraint makes the language reliable for LLMs to generate.
 
 | Stage | What it does |
 | --- | --- |
-| Routing | Selects the frontend for the request language. Answers schema calls without SQL. |
+| Routing | Parses the query. Answers schema calls without SQL. |
 | Security | Builds the security context from the JWT: the organization and the caller's traversal paths with their roles. |
 | Compilation | Turns the query into parameterized SQL and a hydration plan. |
 | Execution | Runs the SQL on ClickHouse. |
@@ -241,12 +237,9 @@ The engine separates what a query means from where the data lives and how the ca
 Each part can change on its own.
 
 - **Query languages.** A frontend parses one language into the shared input.
-  Adding a language adds one frontend.
-  Retiring the JSON Query DSL removes one frontend, and the other phases do not change.
-  See [Query languages](query-languages.md).
+  GQL is the only language today, and SQL or GLQL would each add one frontend.
 - **Storage backends.** The compiler reads a query data model, not table names.
-  ClickHouse serves Orbit Remote.
-  DuckDB compiles the same queries against the local graph schema, and the code-graph test suites use it.
+  ClickHouse and DuckDB are the backends today, and PostgreSQL would add one code generator.
 - **The graph.** A new entity, property, or relationship is an ontology change.
   Tables, validation, schema discovery, and redaction follow from it.
 - **Storage layout.** The ontology routes each relationship to an edge table and can declare pre-joined tables.
@@ -264,14 +257,11 @@ Each part can change on its own.
   The [API reference](../../../docs-gitlab-com/remote/access/api.md) lists the endpoints.
 - **Agent commands.** Agents discover graph capabilities through a short command catalog instead of long tool descriptions.
   See [ADR 011](../adr/011_agent_command_surface.md).
-- **Named queries.** `config/named_queries/` holds server-defined queries in both languages.
-  Clients pass a name and parameters, and the server compiles the spelling for the active language.
+- **Named queries.** `config/named_queries/` holds server-defined queries.
+  Clients pass a name and parameters, and the server compiles the query.
   The Orbit dashboard and entity context expansion use them.
 - **Schema discovery.** Callers read the ontology, not the ClickHouse schema.
-  The JSON mode uses `get_graph_schema`, and GQL uses `CALL db.schema()`.
-
-Each user has one active language, which a per-user flag in Rails selects.
-[Query languages](query-languages.md#1-language-selection) describes the rules.
+  Agents call `get_graph_schema`, and GQL callers run `CALL db.schema()`.
 
 ### Responses
 
@@ -285,5 +275,4 @@ The same result can render as raw JSON, as [TOON](https://github.com/toon-format
 
 | Document | Covers |
 | --- | --- |
-| [Query languages](query-languages.md) | The JSON Query DSL and GQL: why each exists, how each lowers to the shared input, and how Rails picks one |
 | [Orbit Query Engine](query-engine.md) | Data model and storage, compiler phases, planning, current-state reads, and guarantees |

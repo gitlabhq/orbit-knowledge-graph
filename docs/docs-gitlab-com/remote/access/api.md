@@ -116,7 +116,7 @@ glab orbit query 'MATCH (u:User {id: 1}) RETURN u'
 
 To send a JSON request envelope, pass `--file <path>`, or `--file -` to read it from stdin.
 
-The query text language, based on openCypher 9 syntax, is documented in the [GitLab Orbit query languages](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/pages/engineering/architecture/query-languages.md) architecture page.
+The query text language, based on openCypher 9 syntax, is documented in the [GitLab Orbit query frontend](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/querying/orbit_query_frontend.md) design document.
 
 ### Example request
 

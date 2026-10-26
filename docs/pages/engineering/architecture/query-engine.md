@@ -53,12 +53,13 @@ flowchart LR
     style backends fill:#3B82F612,stroke:#3B82F6
 ```
 
-The Orbit Query Engine is a multi-pass compiler. It turns a JSON Query DSL or
-GQL query into one parameterized SQL statement over the ontology's node and
-edge tables. Every statement it emits is bounded, carries a traversal-path
-predicate on every namespaced read, and resolves each row to its latest
-version. ClickHouse is the production backend. The same passes target DuckDB
-for the local graph schema and the code-graph test suites.
+The Orbit Query Engine is a query compiler that doesn't depend on its input
+language or its backend. Each language has a frontend that produces one
+intermediate representation, and each backend has a code generator that
+renders it. Today it compiles GQL for ClickHouse and DuckDB, and a language
+like SQL or GLQL, or a backend like PostgreSQL, would each add one module.
+Every statement it emits is bounded, filters every namespaced read on
+traversal paths, and reads only the latest version of each row.
 
 The engine compiles four query types. Each row shows a GQL query and the core
 of the SQL that it produces.
@@ -84,10 +85,10 @@ of the SQL that it produces.
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 40, "rankSpacing": 70, "padding": 16}}}%%
 flowchart LR
     accTitle: How the Orbit Query Engine compiles a query
-    accDescr: A JSON or GQL query passes through four stages. The frontend parses and lowers it into the intermediate representation. Check validates, normalizes, and restricts it. Plan picks access paths, latest-state reads, and traversal-path bounds. Emit lowers, secures, verifies, and renders it as parameterized SQL with a hydration plan. The data model feeds check, plan, and emit, and the security context feeds check and emit.
+    accDescr: A user query passes through four stages. The frontend parses and lowers it into the intermediate representation. Check validates, normalizes, and restricts it. Plan picks access paths, latest-state reads, and traversal-path bounds. Emit lowers, secures, verifies, and renders it as parameterized SQL with a hydration plan. The data model feeds check, plan, and emit, and the security context feeds check and emit.
 
     model[("<b>Data model</b><br/>graph, tables, policy")]
-    front["<b>Frontend</b><br/>JSON or GQL query<br/>parse and lower<br/>intermediate representation"]
+    front["<b>Frontend</b><br/>User Query<br/>parse and lower<br/>intermediate representation"]
     context["<b>Security context</b><br/>caller paths and roles"]
     check["<b>Check</b><br/>validate and normalize<br/>restrict"]
     plan["<b>Plan</b><br/>access paths<br/>latest-state reads<br/>traversal-path bounds"]
@@ -193,15 +194,15 @@ changes it.
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
 flowchart LR
     accTitle: Frontends and the intermediate representation, with the example query
-    accDescr: The JSON and GQL frontends both produce the intermediate representation. The example GQL statement becomes a traversal with two node selectors, one AUTHORED relationship, and the default limit.
-    JSON["<b>JSON object</b>"]
-    JF["<b>JSON frontend</b><br/>schema check, deserialize"]
+    accDescr: The GQL frontend turns the example statement into the intermediate representation. A future language would add its own frontend that produces the same representation.
     GQL["<b>GQL statement</b><hr/><i>MATCH (u:User)-[:AUTHORED]-><br/>(mr:MergeRequest {state: 'merged'})<br/>RETURN u.username, mr.title</i>"]
     GF["<b>GQL frontend</b><br/>parse, typed tree, lower"]
+    Future["<b>Future language</b><hr/><i>SQL, GLQL, ...</i>"]
+    FF["<b>Its frontend</b>"]
     IR["<b>Intermediate representation</b><hr/><i>• a traversal<br/>• u is a User<br/>• mr is a MergeRequest where state = 'merged'<br/>• u AUTHORED mr<br/>• limit 30, the default</i>"]
     Schema["<b>Ontology metadata</b>"]
-    JSON --> JF --> IR
     GQL --> GF --> IR
+    Future -.-> FF -.-> IR
     GF -.->|"CALL db.schema"| Schema
 
     classDef pass fill:#22C55E26,stroke:#22C55E,stroke-width:1.5px
@@ -210,21 +211,21 @@ flowchart LR
     classDef data fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
     classDef external fill:#9CA3AF26,stroke:#9CA3AF,stroke-width:1.5px
     classDef reject fill:#EF444426,stroke:#EF4444,stroke-width:1.5px
-    class JSON,GQL caller
-    class JF,GF pass
+    classDef future fill:#9CA3AF26,stroke:#9CA3AF,stroke-dasharray:5 4
+    class GQL caller
+    class GF pass
     class IR state
     class Schema external
+    class Future,FF future
 ```
 
 Every pass after the frontend works on one intermediate representation (IR):
 node selectors, relationship selectors, filters, aggregations, ordering, and
-limits. The JSON frontend checks the payload against its JSON schemas, then
-deserializes it. The GQL frontend parses the statement against an openCypher 9
-grammar, then lowers it and checks for one connected pattern and unique
-variables. Both produce the same IR, so no later pass knows which language the
-query came from. A `CALL db.schema()` statement stops here and returns
-ontology metadata, and [Query languages](query-languages.md) covers both
-frontends.
+limits. The GQL frontend parses the statement against an openCypher 9 grammar,
+then lowers it and checks for one connected pattern and unique variables. Any
+other language needs only its own frontend that produces the same IR, and no
+later pass changes. A `CALL db.schema()` statement stops here and returns
+ontology metadata.
 
 ### 3. Validate and normalize the query
 

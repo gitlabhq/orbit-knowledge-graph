@@ -14,7 +14,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Image hardening (non-root user, Dockerfile scan, release gate, Vulnerability Report) | `Dockerfile`, `dockerfile-scan`, `release-image-scan`, `container_scanning` in `.gitlab-ci.yml`; runbook in `docs/pages/engineering/runbooks/image_signing.md` |
 | Query language reference | `docs/docs-gitlab-com/remote/queries/query-language.md` |
 | Query architecture overview | `docs/pages/engineering/architecture/querying.md` |
-| Query frontends (JSON Query DSL and GQL) | `crates/query-engine/compiler/src/passes/frontend/`; design in `docs/pages/engineering/architecture/query-languages.md` |
+| Query frontends | `crates/query-engine/compiler/src/passes/frontend/`; design in `docs/pages/engineering/architecture/query-engine.md` |
 | Orbit Query Engine (data model, pipelines, phases) | `crates/query-engine/compiler/src/config.rs`, `crates/query-data-model/`; design in `docs/pages/engineering/architecture/query-engine.md` |
 | SDLC indexing pipeline | `docs/pages/engineering/architecture/sdlc-indexing.md`, `docs/pages/engineering/runbooks/sdlc_indexing.md` |
 | Code indexing pipeline | `docs/pages/engineering/architecture/code-indexing.md`, `docs/pages/engineering/runbooks/code_indexing.md` |
