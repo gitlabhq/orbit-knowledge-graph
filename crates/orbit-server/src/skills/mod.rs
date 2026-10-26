@@ -110,8 +110,8 @@ impl SkillCatalog {
                 }
             })
         })?;
-        let migration = load_skill::<MigrationAssets>(MIGRATION_SKILL_NAME, Some)?;
-        let start = load_skill::<StartAssets>(START_SKILL_NAME, Some)?;
+        let migration = load_skill::<MigrationAssets>(MIGRATION_SKILL_NAME, |path| Some(path))?;
+        let start = load_skill::<StartAssets>(START_SKILL_NAME, |path| Some(path))?;
         let skills = [orbit, migration, start]
             .into_iter()
             .map(|skill| (skill.metadata.name.clone(), skill))
@@ -144,13 +144,8 @@ fn load_skill<A: Embed>(
 ) -> Result<EmbeddedSkill, String> {
     let mut files = Vec::new();
     for path in A::iter() {
-        if !is_served(&path) {
+        let Some(source) = source_for(&path) else {
             continue;
-        }
-        let source = if path == MANIFEST {
-            manifest_source
-        } else {
-            &path
         };
         let asset = A::get(source)
             .ok_or_else(|| format!("embedded skill file {source:?} is unreadable"))?;
@@ -247,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn gql_callers_get_the_manifest_source() {
+    fn gql_callers_get_the_gql_manifest() {
         let json = list_skills(Frontend::JsonDsl).remove(0);
         let tree = get_skill("orbit", Frontend::Gql, false).unwrap();
         assert_eq!(
@@ -376,7 +371,10 @@ mod tests {
     fn unknown_skill_error_carries_sorted_known_names() {
         let error = get_skill("unknown", Frontend::JsonDsl, false).unwrap_err();
         assert_eq!(error.name, "unknown");
-        assert_eq!(error.known_names, [SKILL_NAME, MIGRATION_SKILL_NAME, START_SKILL_NAME]);
+        assert_eq!(
+            error.known_names,
+            [SKILL_NAME, MIGRATION_SKILL_NAME, START_SKILL_NAME]
+        );
     }
 
     #[test]
