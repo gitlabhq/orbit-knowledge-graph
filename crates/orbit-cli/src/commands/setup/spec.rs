@@ -37,7 +37,7 @@ pub(crate) const GLAB_LAUNCHER: &str = "glab orbit";
 
 pub(crate) fn launcher() -> &'static str {
     static LAUNCHER: LazyLock<&'static str> = LazyLock::new(|| {
-        if std::env::var("GITLAB_ORBIT_DISTRIBUTION").as_deref() == Ok("glab") {
+        if crate::telemetry::detect_distribution(|key| std::env::var(key).ok()).is_some() {
             GLAB_LAUNCHER
         } else {
             DIRECT_LAUNCHER

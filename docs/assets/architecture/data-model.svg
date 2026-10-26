@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-820 -400 1640 840" width="820" height="420" font-family="'GitLab Sans', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif">
+<title>Orbit data model: the SDLC graph and the code graph</title>
+<defs><symbol viewBox="0 0 16 16" id="i-branch"><path fill-rule="evenodd" clip-rule="evenodd" d="M11.5 4.5a1 1 0 100-2 1 1 0 000 2zm2.5-1a2.501 2.501 0 01-1.872 2.42A3.502 3.502 0 018.75 8.5h-1.5a2 2 0 00-1.965 1.626 2.501 2.501 0 11-1.535-.011v-4.23a2.501 2.501 0 111.5 0v1.742a3.484 3.484 0 012-.627h1.5a2 2 0 001.823-1.177A2.5 2.5 0 1114 3.5zm-8.5 9a1 1 0 11-2 0 1 1 0 012 0zm0-9a1 1 0 11-2 0 1 1 0 012 0z"/></symbol><symbol viewBox="0 0 16 16" id="i-code"><path fill-rule="evenodd" clip-rule="evenodd" d="M9.424 2.023a.75.75 0 01.556.904L7.48 13.42a.75.75 0 01-1.46-.348L8.52 2.58a.75.75 0 01.904-.556zM11.16 4.22a.75.75 0 011.06 0l3.25 3.25L16 8l-.53.53-3.25 3.25a.75.75 0 11-1.06-1.06L13.88 8l-2.72-2.72a.75.75 0 010-1.06zM4.84 5.28a.75.75 0 10-1.06-1.06L.53 7.47 0 8l.53.53 3.25 3.25a.75.75 0 001.06-1.06L2.12 8l2.72-2.72z"/></symbol><symbol viewBox="0 0 16 16" id="i-document"><path fill-rule="evenodd" clip-rule="evenodd" d="M12.5 6v8.5h-9v-13H8v2.75C8 5.216 8.784 6 9.75 6h2.75zm-.121-1.5L9.5 1.621V4.25c0 .138.112.25.25.25h2.629zM2 1a1 1 0 011-1h6.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V15a1 1 0 01-1 1H3a1 1 0 01-1-1V1z"/></symbol><symbol viewBox="0 0 16 16" id="i-group"><path fill-rule="evenodd" clip-rule="evenodd" d="M6 4a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm1.5 0a3 3 0 11-6 0 3 3 0 016 0zm4 5.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm0 1.5a3 3 0 100-6 3 3 0 000 6zm-7 2.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm0 1.5a3 3 0 100-6 3 3 0 000 6z"/></symbol><symbol viewBox="0 0 16 16" id="i-merge-request"><path fill-rule="evenodd" clip-rule="evenodd" d="M10.34 1.22a.75.75 0 00-1.06 0L7.53 2.97 7 3.5l.53.53 1.75 1.75a.75.75 0 101.06-1.06l-.47-.47h.63c.69 0 1.25.56 1.25 1.25v4.614a2.501 2.501 0 101.5 0V5.5a2.75 2.75 0 00-2.75-2.75h-.63l.47-.47a.75.75 0 000-1.06zM13.5 12.5a1 1 0 11-2 0 1 1 0 012 0zm-9 0a1 1 0 11-2 0 1 1 0 012 0zm1.5 0a2.5 2.5 0 11-3.25-2.386V5.886a2.501 2.501 0 111.5 0v4.228A2.501 2.501 0 016 12.5zm-1.5-9a1 1 0 11-2 0 1 1 0 012 0z"/></symbol><symbol viewBox="0 0 16 16" id="i-pipeline"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.272 3.864a4.5 4.5 0 10-.1 8.314.75.75 0 10-.557-1.393 3 3 0 11.066-5.543.75.75 0 10.59-1.378zM11.5 11a3 3 0 100-6 3 3 0 000 6zm0 1.5a4.5 4.5 0 100-9 4.5 4.5 0 000 9zM6 8a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/></symbol><symbol viewBox="0 0 16 16" id="i-project"><path fill-rule="evenodd" clip-rule="evenodd" d="M9.5 14.5l-6-2.5V4l6-2.5v13zm-6.885-1.244A1 1 0 012 12.333V3.667a1 1 0 01.615-.923L8.923.115A1.5 1.5 0 0111 1.5V2h1.25c.966 0 1.75.783 1.75 1.75v8.5A1.75 1.75 0 0112.25 14H11v.5a1.5 1.5 0 01-2.077 1.385l-6.308-2.629zM11 12.5h1.25a.25.25 0 00.25-.25v-8.5a.25.25 0 00-.25-.25H11v9z"/></symbol><symbol viewBox="0 0 16 16" id="i-work-items"><path d="M12 0a2 2 0 012 2v8a2 2 0 01-2 2h-1v2a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h1V2a2 2 0 012-2h5zM4 5.5a.5.5 0 00-.5.5v8a.5.5 0 00.5.5h5a.5.5 0 00.5-.5v-2H7a2 2 0 01-2-2V5.5H4zm3-4a.5.5 0 00-.5.5v8a.5.5 0 00.5.5h5a.5.5 0 00.5-.5V2a.5.5 0 00-.5-.5H7zM10.75 3a.75.75 0 010 1.5h-2.5a.75.75 0 010-1.5h2.5z"/></symbol><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8f8e96"/></marker></defs>
+<rect x="-800" y="-380" width="920" height="800" rx="28" fill="#8f8e96" fill-opacity="0.07"/>
+<rect x="140" y="-380" width="640" height="800" rx="28" fill="#8f8e96" fill-opacity="0.07"/>
+<text x="-340" y="-340" font-size="28" font-weight="700" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">SDLC graph</text>
+<text x="470" y="-340" font-size="28" font-weight="700" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Code graph</text>
+<path d="M-506,-184 L55,-22" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M-504,55 L52,7" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M-560,116 L-560,238" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M-512,89 L-213,268" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M422,-172 L197,-40" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M470,-144 L470,-22" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M470,96 L470,208" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<circle cx="-560" cy="-200" r="48" fill="#8B5CF6"/>
+<use href="#i-group" x="-579.7" y="-219.7" width="39.4" height="39.4" style="fill:#ffffff"/>
+<text x="-560" y="-122" font-size="26" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Group</text>
+<circle cx="130" cy="0" r="64" fill="#3B82F6"/>
+<use href="#i-project" x="103.8" y="-26.2" width="52.5" height="52.5" style="fill:#ffffff"/>
+<text x="130" y="94" font-size="26" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Project</text>
+<circle cx="-560" cy="60" r="48" fill="#F59E0B"/>
+<use href="#i-merge-request" x="-579.7" y="40.3" width="39.4" height="39.4" style="fill:#1f1e24"/>
+<text x="-560" y="138" font-size="26" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Merge request</text>
+<circle cx="-560" cy="300" r="48" fill="#EC4899"/>
+<use href="#i-work-items" x="-579.7" y="280.3" width="39.4" height="39.4" style="fill:#ffffff"/>
+<text x="-560" y="378" font-size="26" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Work item</text>
+<circle cx="-160" cy="300" r="48" fill="#6366F1"/>
+<use href="#i-pipeline" x="-179.7" y="280.3" width="39.4" height="39.4" style="fill:#ffffff"/>
+<text x="-160" y="378" font-size="26" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Pipeline</text>
+<circle cx="470" cy="-200" r="48" fill="#14B8A6"/>
+<use href="#i-branch" x="450.3" y="-219.7" width="39.4" height="39.4" style="fill:#1f1e24"/>
+<text x="470" y="-122" font-size="26" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Branch</text>
+<circle cx="470" cy="40" r="48" fill="#22D3EE"/>
+<use href="#i-document" x="450.3" y="20.3" width="39.4" height="39.4" style="fill:#1f1e24"/>
+<text x="470" y="118" font-size="26" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">File</text>
+<circle cx="470" cy="270" r="48" fill="#2DD4BF"/>
+<use href="#i-code" x="450.3" y="250.3" width="39.4" height="39.4" style="fill:#1f1e24"/>
+<text x="470" y="348" font-size="26" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Definition</text>
+<text x="-275.57016766230663" y="-140.46210953832426" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">contains</text>
+<text x="-251.87798296921494" y="55.289800290673845" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">in project</text>
+<text x="-510.0" y="177.0" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">closes</text>
+<text x="-380.06533446167356" y="207.61127220794393" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">head pipeline</text>
+<text x="309.4106783926872" y="-80.01170350670114" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">in project</text>
+<text x="520.0" y="-83.0" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">contains</text>
+<text x="520.0" y="152.0" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">defines</text>
+</svg>

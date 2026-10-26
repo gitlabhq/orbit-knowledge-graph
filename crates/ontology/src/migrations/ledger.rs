@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+use super::EdgeRows;
 use super::scope::{LedgerScope, MigrationScope, sdlc_entity_names};
 use crate::Ontology;
 
@@ -83,6 +84,13 @@ impl MigrationLedger {
                 ));
             }
 
+            if !entry.edge_rows.is_changed() && entry.scope != LedgerScope::Sdlc {
+                return Err(format!(
+                    "version {}: `edge_rows: unchanged` is only valid with `scope: sdlc`",
+                    entry.version
+                ));
+            }
+
             if entry.scope == LedgerScope::None
                 && entry.note.as_ref().is_none_or(|n| n.trim().is_empty())
             {
@@ -125,6 +133,8 @@ pub struct MigrationEntry {
     pub scope: LedgerScope,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub entities: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "EdgeRows::is_changed")]
+    pub edge_rows: EdgeRows,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -157,12 +167,14 @@ mod tests {
                     version: 5,
                     scope: LedgerScope::All,
                     entities: BTreeSet::new(),
+                    edge_rows: EdgeRows::Changed,
                     note: None,
                 },
                 MigrationEntry {
                     version: 5,
                     scope: LedgerScope::All,
                     entities: BTreeSet::new(),
+                    edge_rows: EdgeRows::Changed,
                     note: None,
                 },
             ],
@@ -180,12 +192,14 @@ mod tests {
                     version: 82,
                     scope: LedgerScope::Code,
                     entities: BTreeSet::new(),
+                    edge_rows: EdgeRows::Changed,
                     note: None,
                 },
                 MigrationEntry {
                     version: 81,
                     scope: LedgerScope::All,
                     entities: BTreeSet::new(),
+                    edge_rows: EdgeRows::Changed,
                     note: None,
                 },
             ],
@@ -201,6 +215,7 @@ mod tests {
                 version: 5,
                 scope: LedgerScope::All,
                 entities: BTreeSet::new(),
+                edge_rows: EdgeRows::Changed,
                 note: None,
             }],
         };
@@ -216,6 +231,7 @@ mod tests {
                 version: 1,
                 scope: LedgerScope::Code,
                 entities: entities(&["Note"]),
+                edge_rows: EdgeRows::Changed,
                 note: None,
             }],
         };
@@ -225,12 +241,32 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_edge_rows_require_sdlc_scope() {
+        let ledger = MigrationLedger {
+            migrations: vec![MigrationEntry {
+                version: 1,
+                scope: LedgerScope::All,
+                entities: BTreeSet::new(),
+                edge_rows: EdgeRows::Unchanged,
+                note: None,
+            }],
+        };
+        let ontology = Ontology::new();
+        let err = ledger.validate(&ontology, 1).unwrap_err();
+        assert!(
+            err.contains("`edge_rows: unchanged` is only valid with `scope: sdlc`"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn none_scope_requires_note() {
         let ledger = MigrationLedger {
             migrations: vec![MigrationEntry {
                 version: 1,
                 scope: LedgerScope::None,
                 entities: BTreeSet::new(),
+                edge_rows: EdgeRows::Changed,
                 note: None,
             }],
         };
@@ -246,6 +282,7 @@ mod tests {
                 version: 1,
                 scope: LedgerScope::None,
                 entities: BTreeSet::new(),
+                edge_rows: EdgeRows::Changed,
                 note: Some("   ".to_string()),
             }],
         };
@@ -261,6 +298,7 @@ mod tests {
                 version: 1,
                 scope: LedgerScope::None,
                 entities: BTreeSet::new(),
+                edge_rows: EdgeRows::Changed,
                 note: Some("output-neutral extract-SQL refactor".to_string()),
             }],
         };
@@ -281,6 +319,7 @@ mod tests {
                 version: 1,
                 scope: LedgerScope::Sdlc,
                 entities: entities(&["Ghost"]),
+                edge_rows: EdgeRows::Changed,
                 note: None,
             }],
         };

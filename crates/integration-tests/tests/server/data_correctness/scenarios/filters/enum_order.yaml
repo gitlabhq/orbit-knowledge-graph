@@ -1,0 +1,155 @@
+cases:
+  - name: greater_than_rejected
+    description: An enum has no order, so > is rejected for its integer key and its label
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": {"gt": 1}}}]}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state > 'opened' RETURN mr
+    expect:
+      compile_error: enum values have no order
+
+  - name: greater_or_equal_rejected
+    description: An enum has no order, so >= is rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": {"gte": "merged"}}}]}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state >= 3 RETURN mr
+    expect:
+      compile_error: enum values have no order
+
+  - name: less_than_rejected
+    description: An enum has no order, so < is rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": {"lt": "opened"}}}]}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state < 'opened' RETURN mr
+    expect:
+      compile_error: enum values have no order
+
+  - name: less_or_equal_rejected
+    description: An enum has no order, so <= is rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": {"lte": 3}}}]}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state <= 'merged' RETURN mr
+    expect:
+      compile_error: enum values have no order
+
+  - name: negated_ordering_rejected
+    description: NOT does not make an enum ordering comparison valid
+    query:
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000}) WHERE NOT mr.state > 'opened' RETURN mr
+    expect:
+      compile_error: enum values have no order
+
+  - name: string_backed_enum_ordering_rejected
+    description: A string-backed enum has no order either
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1], "filters": {"state": {"gt": "active"}}}]}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.state > 'active' RETURN u
+    expect:
+      compile_error: enum values have no order
+
+  - name: min_rejected
+    description: MIN does not apply to an enum
+    query:
+      json: |
+        {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000]}, {"id": "mr", "entity": "MergeRequest"}], "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}], "group_by": ["p"], "aggregations": [{"min": "mr.state", "as": "s"}]}
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN p, min(mr.state) AS s
+    expect:
+      compile_error: because enum values have no order
+
+  - name: max_rejected
+    description: MAX does not apply to an enum
+    query:
+      json: |
+        {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000]}, {"id": "mr", "entity": "MergeRequest"}], "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}], "group_by": ["p"], "aggregations": [{"max": "mr.state", "as": "s"}]}
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN p, max(mr.state) AS s
+    expect:
+      compile_error: because enum values have no order
+
+  - name: ordering_between_enum_fields_rejected
+    description: Two enum fields with the same values still cannot be ordered against each other
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) WHERE g.visibility_level < p.visibility_level RETURN p
+    expect:
+      compile_error: not <, >, <=, or >=
+
+  - name: comparison_across_enum_domains_rejected
+    description: Two enum fields with different values cannot be compared
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) WHERE u.user_type = p.visibility_level RETURN p
+    expect:
+      compile_error: enums with different values
+
+  - name: inequality_across_enum_domains_rejected
+    description: Two enum fields with different values cannot be compared with <> either
+    query:
+      gql: |
+        MATCH (u:User {id: 1})-[:MEMBER_OF]->(p:Project) WHERE u.user_type <> p.visibility_level RETURN p
+    expect:
+      compile_error: enums with different values
+
+  - name: membership_returns_matching_rows
+    description: IN on an enum returns the rows whose label is in the list, for labels and integer keys
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2005}, "filters": {"state": {"in": ["merged", 4]}}}], "order_by": "mr.id"}
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.state IN ['merged', 4] RETURN mr ORDER BY mr.id
+    expect:
+      node_count: 3
+      nodes:
+        MergeRequest:
+          order: [2002, 2004, 2005]
+          absent: [2000, 2001, 2003]
+          filters:
+            state: { in: [merged, locked] }
+
+  - name: inequality_returns_other_rows
+    description: <> on an enum returns every row with a different label
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2005}, "filters": {"state": {"ne": "opened"}}}], "order_by": "mr.id"}
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.state <> 'opened' RETURN mr ORDER BY mr.id
+    expect:
+      node_count: 4
+      nodes:
+        MergeRequest:
+          order: [2002, 2003, 2004, 2005]
+          absent: [2000, 2001]
+          filters:
+            state: { in: [merged, closed] }
+
+  - name: order_by_enum_sorts_labels
+    description: ORDER BY an enum still works for display and sorts by label
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "id_range": {"start": 2001, "end": 2003}}], "order_by": "mr.state"}
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id >= 2001 AND mr.id <= 2003 RETURN mr ORDER BY mr.state
+    expect:
+      node_count: 3
+      nodes:
+        MergeRequest:
+          order: [2003, 2002, 2001]
+
+  - name: same_domain_comparison_compiles
+    description: Two enum fields with the same values can be compared with = and <>
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) WHERE g.visibility_level = p.visibility_level AND g.visibility_level <> 'private' RETURN p
+    expect:
+      compile_only: true

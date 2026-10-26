@@ -1,71 +1,4 @@
 cases:
-  - name: double_negated_traversal_path_rejected
-    description: A double NOT cannot hide a traversal_path condition
-    config:
-      security:
-        org_id: 1
-        paths: [1/100/]
-    query:
-      gql: |
-        MATCH (p:Project {id: 1000}) WHERE NOT NOT p.traversal_path STARTS WITH '2/' RETURN p.id
-    expect:
-      compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
-      compile_error_not_contains: [1/100/, 2/]
-
-  - name: negated_relationship_traversal_path_rejected
-    description: NOT cannot wrap a relationship traversal_path condition
-    config:
-      security:
-        org_id: 1
-        paths: [1/100/]
-    query:
-      gql: |
-        MATCH (g:Group {id: 100})-[c:CONTAINS]->(p:Project) WHERE NOT c.traversal_path = '1/100/1000/' RETURN p.id
-    expect:
-      compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
-      compile_error_not_contains: [1/100/, 2/]
-
-  - name: negated_traversal_path_grouped_rejected
-    description: A NOT group cannot contain a traversal_path condition
-    config:
-      security:
-        org_id: 1
-        paths: [1/100/]
-    query:
-      gql: |
-        MATCH (p:Project {id: 1000}) WHERE NOT (p.traversal_path STARTS WITH '1/100/' AND p.name = 'x') RETURN p.id
-    expect:
-      compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
-      compile_error_not_contains: [1/100/, 2/]
-
-  - name: negated_traversal_path_in_scope_rejected
-    description: "NOT cannot wrap a traversal_path condition even when the literal is inside the caller's scope"
-    config:
-      security:
-        org_id: 1
-        paths: [1/100/]
-    query:
-      gql: |
-        MATCH (p:Project {id: 1000}) WHERE NOT p.traversal_path STARTS WITH '1/100/1000/' RETURN p.id
-    expect:
-      compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
-      compile_error_not_contains: [1/100/]
-
-  - name: negated_traversal_path_rejected
-    description: NOT cannot wrap a traversal_path condition
-    config:
-      security:
-        org_id: 1
-        paths: [1/100/]
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"not":{"traversal_path":{"starts_with":"2/"}}}],"limit":30}
-      gql: |
-        MATCH (p:Project {id: 1000}) WHERE NOT p.traversal_path STARTS WITH '2/' RETURN p.id
-    expect:
-      compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
-      compile_error_not_contains: [1/100/, 2/]
-
   - name: negation_admin_bypass_cross_node
     description: A NOT group cannot compare against an administrator-only field on another node
     query:
@@ -308,9 +241,9 @@ cases:
         paths: [1/100/]
     query:
       json: |
-        {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100,101,102],"not":{"visibility_level":"private"}}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["*"]}}
+        {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100,101,102],"not":{"visibility_level":"private"}}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}
       gql: |
-        MATCH p = ANY SHORTEST (u:User {id: 1})-[*1..2]->(g:Group)
+        MATCH p = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(g:Group)
         WHERE g.id IN [100, 101, 102] AND NOT g.visibility_level = 'private'
         RETURN p
     expect:
@@ -319,27 +252,6 @@ cases:
       nodes:
         Group:
           filters: { visibility_level: public }
-
-  - name: not_traversal_path_eq_rejected
-    description: |
-      A JSON not entry on traversal_path is rejected even when its operator has an exact complement, and the error does not echo the path.
-    config:
-      security:
-        org_id: 1
-        paths: [1/100/]
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"not":{"traversal_path":"1/100/1000/"}}],"limit":30}
-    expect:
-      compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths
-      compile_error_not_contains: [1/100/]
-
-  - name: not_traversal_path_is_null_rejected
-    description: A JSON not entry with is_null on traversal_path is rejected before it becomes is_not_null
-    query:
-      json: |
-        {"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[1000],"not":{"traversal_path":{"is_null":true}}}],"limit":30}
-    expect: { compile_error: traversal_path cannot be used under NOT; Orbit scopes every query to your authorized paths }
 
   - name: scoped_negation
     description: Grouped negation cannot expose projects outside the authorized namespace and organization

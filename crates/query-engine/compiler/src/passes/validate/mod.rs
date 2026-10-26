@@ -21,11 +21,9 @@ use crate::query_limits::{
     MAX_DEPTH_CAP, MAX_FILTER_ENTRIES_PER_PROPERTY, MAX_FILTER_STRING_LEN, MAX_HOPS_CAP,
     MAX_IDENTIFIER_LEN, MAX_IN_VALUES, MAX_LIMIT, MAX_PREDICATE_DEPTH, MAX_SKIP,
 };
-use crate::types::SecurityContext;
 #[cfg(test)]
 use ontology::Ontology;
 use ontology::{DataType, TRAVERSAL_PATH_COLUMN};
-use orbit_utils::traversal_path::TraversalPath;
 #[cfg(test)]
 use query_data_model::ClickHouseDataModel;
 use query_data_model::PropertyId;
@@ -111,22 +109,40 @@ pub(crate) fn collect_schema_errors(
 /// Returns `None` if compatible, or `Some(reason)` describing the mismatch.
 fn check_value_type(value: &serde_json::Value, expected: DataType) -> Option<String> {
     match expected {
-        DataType::String | DataType::Date | DataType::DateTime | DataType::Uuid => {
+        DataType::String | DataType::Uuid => {
             if !value.is_string() {
                 return Some(format!("is {}, not a string", json_type_name(value)));
             }
         }
+        DataType::Date | DataType::DateTime => match value.as_str() {
+            Some(text) if is_date_literal(text) => {}
+            Some(_) => {
+                return Some(
+                    "is not a valid date; use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS[.ffffff][Z]"
+                        .to_string(),
+                );
+            }
+            None => return Some(format!("is {}, not a string", json_type_name(value))),
+        },
         // Int-based enums are coerced to string labels by normalization before lowering.
-        DataType::Enum => {
-            if !value.is_string() && !value.is_i64() && !value.is_u64() {
+        DataType::Enum => match value {
+            serde_json::Value::String(_) => {}
+            serde_json::Value::Number(n) if n.is_i64() => {}
+            serde_json::Value::Number(n) if n.is_u64() => {
+                return Some(OUT_OF_INT64_RANGE.to_string());
+            }
+            _ => {
                 return Some(format!(
                     "is {}, not a string or integer",
                     json_type_name(value)
                 ));
             }
-        }
+        },
         DataType::Int => match value {
-            serde_json::Value::Number(n) if n.is_i64() || n.is_u64() => {}
+            serde_json::Value::Number(n) if n.is_i64() => {}
+            serde_json::Value::Number(n) if n.is_u64() => {
+                return Some(OUT_OF_INT64_RANGE.to_string());
+            }
             serde_json::Value::Number(_) => {
                 return Some("is a float, not an integer".to_string());
             }
@@ -147,6 +163,8 @@ fn check_value_type(value: &serde_json::Value, expected: DataType) -> Option<Str
     }
     None
 }
+
+const OUT_OF_INT64_RANGE: &str = "is out of range for a signed 64-bit integer";
 
 fn json_type_name(value: &serde_json::Value) -> &'static str {
     match value {
@@ -218,28 +236,39 @@ fn wide_id_range_hint(wide: bool) -> String {
     }
 }
 
-fn at_or_before_epoch(value: &str) -> bool {
-    value.get(..10).is_some_and(|date| {
-        let dated = date.bytes().enumerate().all(|(i, byte)| {
+fn calendar_prefix(value: &str) -> Option<&str> {
+    value.get(..10).filter(|date| {
+        date.bytes().enumerate().all(|(i, byte)| {
             if i == 4 || i == 7 {
                 byte == b'-'
             } else {
                 byte.is_ascii_digit()
             }
-        });
-        dated && date <= "1970-01-01"
+        })
     })
+}
+
+fn at_or_before_epoch(value: &str) -> bool {
+    calendar_prefix(value).is_some_and(|date| date <= "1970-01-01")
+}
+
+/// Matches what the ClickHouse HTTP parameter parser accepts once the client strips a trailing `Z`.
+fn is_date_literal(value: &str) -> bool {
+    let value = value.strip_suffix('Z').unwrap_or(value);
+    calendar_prefix(value).is_some()
+        && if value.len() == 10 {
+            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
+        } else {
+            ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S%.f"]
+                .iter()
+                .any(|format| chrono::NaiveDateTime::parse_from_str(value, format).is_ok())
+        }
 }
 
 fn is_aggregate_scalar(data_type: DataType) -> bool {
     matches!(
         data_type,
-        DataType::Int
-            | DataType::Float
-            | DataType::Bool
-            | DataType::Date
-            | DataType::DateTime
-            | DataType::Enum
+        DataType::Int | DataType::Float | DataType::Bool | DataType::Date | DataType::DateTime
     )
 }
 
@@ -326,7 +355,6 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 continue;
             };
             if row_nodes.contains(alias)
-                || property == TRAVERSAL_PATH_COLUMN
                 || model.entity_authorized_by_namespace(entity)
                 || !model.property_is_free_text(entity, property)
             {
@@ -460,25 +488,33 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
 
     fn check_field(&self, entity: &str, property: &str) -> Result<()> {
         validate_identifier(property)?;
-        if ontology::constants::NODE_RESERVED_COLUMNS.contains(&property) {
+        let model = self.model.get();
+        let addressable = ontology::constants::NODE_RESERVED_COLUMNS.contains(&property)
+            || self
+                .property(entity, property)
+                .is_some_and(|property| !model.property_is_hidden(property.id));
+        if addressable {
             return Ok(());
         }
-        self.property(entity, property).map(|_| ()).ok_or_else(|| {
-            let entity_record = self.model.get().entity(entity);
-            let properties: Vec<_> = entity_record
-                .into_iter()
-                .flat_map(|entity| &entity.properties)
-                .filter(|property| !self.model.get().property_is_hidden(**property))
-                .map(|property| self.model.get().graph().property(*property).name.as_str())
-                .collect();
-            QueryError::AllowlistRejected(format!(
-                "field \"{property}\" does not exist on node type \"{entity}\"{}",
-                ontology::errors::format_candidate_list("fields", &properties)
-            ))
-        })
+        let properties: Vec<_> = model
+            .entity(entity)
+            .into_iter()
+            .flat_map(|entity| &entity.properties)
+            .filter(|property| !model.property_is_hidden(**property))
+            .map(|property| model.graph().property(*property).name.as_str())
+            .collect();
+        Err(QueryError::AllowlistRejected(format!(
+            "field \"{property}\" does not exist on node type \"{entity}\"{}",
+            ontology::errors::format_candidate_list("fields", &properties)
+        )))
     }
 
     fn check_relationship_types(&self, types: &[String]) -> Result<()> {
+        if types.len() > 1 && types.iter().any(|kind| kind == "*") {
+            return Err(QueryError::Validation(
+                "the \"*\" relationship type cannot be combined with named types; list only the types to follow".into(),
+            ));
+        }
         for kind in types {
             if kind != "*" && !self.model.get().relationship_exists(kind) {
                 return Err(QueryError::AllowlistRejected(format!(
@@ -722,9 +758,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         let Some(entity) = node.entity.as_deref() else {
             return Ok(());
         };
-        let is_traversal_path_filter =
-            prop == TRAVERSAL_PATH_COLUMN && self.model.get().entity_has_traversal_path(entity);
-        if !is_traversal_path_filter && !self.model.get().property_is_filterable(entity, prop) {
+        if !self.model.get().property_is_filterable(entity, prop) {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: field is not filterable"
             )));
@@ -769,14 +803,13 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             return Ok(());
         };
         for filter in filters {
-            if is_traversal_path_filter {
-                Self::check_traversal_path_filter(
-                    &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
-                    filter,
-                )?;
-            }
             if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
-                self.check_property_comparison(input, (&node.id, prop), (rhs_node, rhs_prop))?;
+                self.check_property_comparison(
+                    input,
+                    (&node.id, prop),
+                    filter.op.unwrap_or(FilterOp::Eq),
+                    (rhs_node, rhs_prop),
+                )?;
                 continue;
             }
             self.check_one_filter(entity, prop, filter, data_type)?;
@@ -792,7 +825,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         filters: &[InputFilter],
     ) -> Result<()> {
         let model = self.model.get();
-        if prop.starts_with('_') {
+        if prop.starts_with('_') || prop == TRAVERSAL_PATH_COLUMN {
             return Err(QueryError::Validation(format!(
                 "relationship[{index}] filter on private edge column \"{prop}\""
             )));
@@ -844,59 +877,12 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                     "property comparisons involving relationships are unsupported".into(),
                 ));
             }
-            if prop == TRAVERSAL_PATH_COLUMN {
-                Self::check_traversal_path_filter(
-                    &format!("relationship[{index}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
-                    filter,
-                )?;
-            }
             self.check_one_filter(&format!("relationship[{index}]"), prop, filter, data_type)?;
         }
         Ok(())
     }
 
     const MIN_LIKE_PATTERN_LEN: usize = 3;
-
-    fn check_traversal_path_filter(label: &str, filter: &InputFilter) -> Result<()> {
-        match filter.op.unwrap_or(FilterOp::Eq) {
-            FilterOp::Eq | FilterOp::StartsWith => {
-                let Some(path) = filter.value_str() else {
-                    return Err(QueryError::Validation(format!(
-                        "{label}: value must be a traversal_path string"
-                    )));
-                };
-                Self::check_traversal_path_value(label, path)
-            }
-            FilterOp::In => {
-                let Some(paths) = filter.value.as_ref().and_then(|v| v.as_array()) else {
-                    return Err(QueryError::Validation(format!(
-                        "{label}: \"in\" requires an array of traversal_path strings"
-                    )));
-                };
-                for path in paths {
-                    let Some(path) = path.as_str() else {
-                        return Err(QueryError::Validation(format!(
-                            "{label}: \"in\" values must be traversal_path strings"
-                        )));
-                    };
-                    Self::check_traversal_path_value(label, path)?;
-                }
-                Ok(())
-            }
-            _ => Err(QueryError::Validation(format!(
-                "{label}: only eq, in, and starts_with are supported"
-            ))),
-        }
-    }
-
-    fn check_traversal_path_value(label: &str, path: &str) -> Result<()> {
-        SecurityContext::validate_traversal_path(&TraversalPath::new_unchecked(path)).map_err(
-            |err| match err {
-                QueryError::Security(msg) => QueryError::Validation(format!("{label}: {msg}")),
-                other => other,
-            },
-        )
-    }
 
     fn check_one_filter(
         &self,
@@ -909,6 +895,19 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
 
         if matches!(op, FilterOp::IsNull | FilterOp::IsNotNull) {
             return Ok(());
+        }
+
+        if filter.from_temporal_literal && !matches!(data_type, DataType::Date | DataType::DateTime)
+        {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: datetime() and date() compare only with date fields, but this field is {data_type}"
+            )));
+        }
+
+        if data_type == DataType::Enum && op.is_ordering() {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: enum values have no order; use = or IN instead of <, >, <=, or >="
+            )));
         }
 
         let is_like_op = op.is_like();
@@ -969,8 +968,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             }
         }
 
-        // traversal_path is exempt: short paths like "1/" are valid hierarchical scopes.
-        if (is_like_op || is_token_op) && prop != TRAVERSAL_PATH_COLUMN {
+        if is_like_op || is_token_op {
             let len = value.as_str().map_or(0, |s| s.chars().count());
             if len < Self::MIN_LIKE_PATTERN_LEN {
                 return Err(QueryError::Validation(format!(
@@ -1199,6 +1197,13 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                         )));
                     }
 
+                    if data_type == DataType::Enum {
+                        return Err(QueryError::Validation(format!(
+                            "aggregation \"{alias}\": \"{}\" does not apply to enum {entity}.{prop}, because enum values have no order; group by it instead",
+                            function.to_string().to_uppercase(),
+                        )));
+                    }
+
                     if !is_aggregate_scalar(data_type) {
                         return Err(QueryError::Validation(format!(
                             "aggregation \"{alias}\": aggregates are restricted to scalars, got {entity}.{prop} ({data_type})"
@@ -1359,15 +1364,14 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             )));
         }
 
-        // rel_types is always required for pathfinding. Without it, each
-        // seed fans out through every edge type from high-degree nodes,
-        // producing unbounded fan-out that no runtime limit can cheaply cap.
-        // Even pinned endpoints can hit hub nodes (e.g. a project with
-        // millions of IN_PROJECT edges).
-        if path.rel_types.is_empty() {
+        let named_by_type_condition = input.predicates.iter().any(|root| {
+            root.relationship_type()
+                .is_some_and(|(_, negated)| !negated)
+        });
+        if crate::passes::normalize::is_wildcard(&path.rel_types) && !named_by_type_condition {
             return Err(QueryError::Validation(
-                "path_finding requires rel_types to bound fan-out; \
-                 without it the frontier expands over every edge type"
+                "shortest paths require named relationship types, such as \
+                 -[:CONTAINS*1..3]-> or [\"CONTAINS\"]; a wildcard expands over every edge type"
                     .into(),
             ));
         }
@@ -2190,17 +2194,6 @@ mod tests {
     }
 
     #[test]
-    fn accepts_large_u64_on_int_column() {
-        // u64 values beyond i64::MAX are still valid integers
-        assert_ok(
-            r#"{
-                "query_type": "traversal",
-                "nodes": [{"id": "n", "entity": "Note", "filters": {"noteable_id": 9223372036854775808}}]
-            }"#,
-        );
-    }
-
-    #[test]
     fn accepts_bool_filter_on_bool_column() {
         assert_ok(
             r#"{
@@ -2699,7 +2692,7 @@ mod tests {
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
             }"#,
-            "requires rel_types",
+            "require named relationship types",
         );
         assert_rejects(
             r#"{
@@ -2710,7 +2703,7 @@ mod tests {
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
             }"#,
-            "requires rel_types",
+            "require named relationship types",
         );
 
         assert_ok(
@@ -3070,118 +3063,6 @@ mod tests {
         assert!(
             err.to_string().contains("not filterable"),
             "expected group_by filterable rejection, got: {err}"
-        );
-    }
-
-    #[test]
-    fn accepts_filter_on_traversal_path_even_when_field_is_unfilterable() {
-        let ont = ontology_with_unfilterable_field();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-
-        assert!(
-            validator.check_references(&input).is_ok(),
-            "traversal_path scope is guarded by RestrictPass, not the ontology filterable flag"
-        );
-    }
-
-    #[test]
-    fn rejects_traversal_path_filter_on_global_entity() {
-        let ont = test_ontology();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User", "node_ids": [1],
-                     "filters": {"traversal_path": {"starts_with": "1/"}}}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-
-        let err = validator.check_references(&input).unwrap_err();
-        assert!(
-            err.to_string().contains("not filterable"),
-            "expected global entity traversal_path rejection, got: {err}"
-        );
-    }
-
-    #[test]
-    fn rejects_unsupported_traversal_path_filter_operator() {
-        let ont = ontology_with_unfilterable_field();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"contains": "100"}}}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-
-        let err = validator.check_references(&input).unwrap_err();
-        assert!(
-            err.to_string().contains("only eq, in, and starts_with"),
-            "expected traversal_path operator rejection, got: {err}"
-        );
-    }
-
-    #[test]
-    fn rejects_invalid_traversal_path_filter_format() {
-        let ont = ontology_with_unfilterable_field();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [{"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"starts_with": "1/100"}}}],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-
-        let err = validator.check_references(&input).unwrap_err();
-        assert!(
-            err.to_string().contains("invalid traversal_path format"),
-            "expected traversal_path format rejection, got: {err}"
-        );
-    }
-
-    #[test]
-    fn rejects_unsupported_relationship_traversal_path_filter_operator() {
-        let ont = test_ontology();
-        let validator = validator(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "a", "entity": "Project", "node_ids": [1]},
-                {"id": "b", "entity": "Project"}
-            ],
-            "relationships": [{
-                "type": "CONTAINS",
-                "from": "a",
-                "to": "b",
-                "filters": {"traversal_path": {"ends_with": "100/"}}
-            }],
-            "limit": 10
-        }"#,
-        )
-        .unwrap();
-
-        let err = validator.check_references(&input).unwrap_err();
-        assert!(
-            err.to_string().contains("only eq, in, and starts_with"),
-            "expected relationship traversal_path operator rejection, got: {err}"
         );
     }
 

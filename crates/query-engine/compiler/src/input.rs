@@ -1,8 +1,6 @@
 //! Security validation (identifiers, SQL injection) is handled by JSON Schema in lib.rs.
 
-use ontology::constants::{
-    DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TRAVERSAL_PATH_COLUMN,
-};
+use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use orbit_utils::traversal_path::TraversalPath;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
@@ -305,6 +303,7 @@ pub struct InputFilter {
     /// When set, compare against another node's column instead of a literal.
     /// Format: `(node_alias, property_name)`. Mutually exclusive with `value`.
     pub rhs_column: Option<(String, String)>,
+    pub from_temporal_literal: bool,
 }
 
 impl InputFilter {

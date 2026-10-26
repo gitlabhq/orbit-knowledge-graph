@@ -1438,11 +1438,6 @@ fn orbit_query_preserves_ontology_validation_and_security() {
     for (json, orbit_query) in cases {
         compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap_err();
     }
-    let json = r#"{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","filters":{"traversal_path":{"starts_with":"1/"}}}]}"#;
-    let orbit_query = "MATCH (p:Project) WHERE p.traversal_path STARTS WITH '1/' RETURN p";
-    let context = compiler::SecurityContext::new(1, vec!["1/24/".into()]).unwrap();
-    let error = compile_pair(json, orbit_query, &embedded_ontology(), &context).unwrap_err();
-    assert!(matches!(error, QueryError::Authorization(_)));
 }
 
 #[test]
@@ -1510,14 +1505,6 @@ fn orbit_query_caps_reject_during_lowering() {
             "{error:?}"
         );
     }
-}
-
-#[test]
-fn orbit_query_rejects_traversal_path_column_comparisons() {
-    let context = compiler::SecurityContext::new(1, vec!["1/".into()]).unwrap();
-    let query = "MATCH (p:Project {id: 5}) WHERE p.traversal_path = p.full_path RETURN p";
-    let error = compile(query, Frontend::Gql, &embedded_ontology(), &context).unwrap_err();
-    assert!(matches!(error, QueryError::Validation(_)), "{error:?}");
 }
 
 #[test]

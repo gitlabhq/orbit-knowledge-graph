@@ -268,14 +268,14 @@ mod tests {
     }
 
     #[test]
-    fn hides_traversal_path_only_in_the_remote_model() {
+    fn hides_traversal_path_in_remote_and_local_models() {
         let ontology = Arc::new(ontology::Ontology::load_embedded().unwrap());
         let remote = ClickHouseDataModel::derive(Arc::clone(&ontology)).unwrap();
         let local = DuckDbDataModel::derive(ontology).unwrap();
         let property = remote.property("Definition", "traversal_path").unwrap().id;
 
         assert!(remote.property_is_hidden(property));
-        assert!(!local.property_is_hidden(property));
+        assert!(local.property_is_hidden(property));
     }
 
     #[test]

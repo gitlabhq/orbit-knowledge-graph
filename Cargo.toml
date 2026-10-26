@@ -37,6 +37,7 @@ members = [
   "crates/health-check",
   "crates/gitaly-protos",
   "crates/gitlab-client",
+  "crates/orbit-cli/graphql",
   "crates/xtask",
   "crates/integration-testkit",
   "crates/integration-tests-codegraph",
@@ -53,10 +54,10 @@ members = [
 [workspace.dependencies]
 orbit-observability = { path = "crates/orbit-observability" }
 orbit-log-fields = { path = "crates/orbit-log-fields" }
-labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "b437fcee2067ac71f00523ebb0e9cf604fa06391" }
-labkit-fields = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "b437fcee2067ac71f00523ebb0e9cf604fa06391" }
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0" }
+labkit-fields = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0" }
 # No bundled ring provider: every binary installs its rustls provider before building a Tracker.
-labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "b437fcee2067ac71f00523ebb0e9cf604fa06391", default-features = false }
+labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0", default-features = false }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
@@ -75,6 +76,9 @@ async-trait = "0.1.89"
 bytes = "1.12.1"
 flate2 = "1.1.9"
 chrono = { version = "0.4.43", features = ["serde"] }
+cynic = { version = "3.14.0", features = ["rkyv"] }
+cynic-codegen = { version = "3.14.0", features = ["rkyv"] }
+cynic-querygen = { version = "3.14.0", default-features = false }
 croner = "3.0.1"
 futures = "0.3.31"
 mimalloc = { version = "0.1.48", default-features = false }

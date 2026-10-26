@@ -68,6 +68,7 @@ pub(super) struct MapLiteral<'i> {
 pub(super) struct MapEntry<'i> {
     pub key: Name<'i>,
     pub value: Value,
+    pub from_temporal_literal: bool,
 }
 
 pub(super) struct Relationship<'i> {
@@ -100,6 +101,7 @@ pub(super) struct Comparison<'i> {
     pub property: Property<'i>,
     pub op: FilterOp,
     pub value: Option<Value>,
+    pub from_temporal_literal: bool,
     pub rhs_property: Option<Property<'i>>,
 }
 

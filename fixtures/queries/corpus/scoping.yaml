@@ -303,7 +303,7 @@ ns_subgroup_id_scopes_to_subtree:
   suite: scoping
   query: |
     MATCH (g:Group {id: {{SUBGROUP_ID}}})
-    RETURN g{.id, .full_path, .traversal_path}
+    RETURN g{.id, .full_path}
     LIMIT 50
 
 ns_project_namespace_id_GAP:

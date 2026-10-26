@@ -149,6 +149,10 @@ impl OntologyArchive {
         &self.bytes
     }
 
+    pub fn sources(&self) -> &BTreeMap<String, String> {
+        &self.sources
+    }
+
     pub fn matches_sources(&self, sources: &BTreeMap<String, String>) -> bool {
         &self.sources == sources
     }

@@ -21,8 +21,10 @@ impl TrustedLocalCatalog {
 }
 
 impl GitLabPolicy for TrustedLocalCatalog {
-    fn is_hidden(&self, _property: PropertyId) -> bool {
-        false
+    fn is_hidden(&self, property: PropertyId) -> bool {
+        self.properties
+            .get(property.index())
+            .is_some_and(|policy| policy.hidden)
     }
     fn variant_scope(&self, _variant: RelationshipVariantId) -> Option<ontology::EdgeVariantScope> {
         None

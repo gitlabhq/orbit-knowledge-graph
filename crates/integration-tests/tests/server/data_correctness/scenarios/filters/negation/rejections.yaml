@@ -92,9 +92,9 @@ cases:
     description: Shortest paths reject NOT over a list membership
     query:
       json: |
-        {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100,102],"not":{"visibility_level":{"in":["internal"]}}}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["*"]}}
+        {"query_type":"path_finding","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"g","entity":"Group","node_ids":[100,102],"not":{"visibility_level":{"in":["internal"]}}}],"path":{"type":"shortest","from":"u","to":"g","max_depth":2,"rel_types":["MEMBER_OF","CONTAINS"]}}
       gql: |
-        MATCH p = ANY SHORTEST (u:User {id: 1})-[*1..2]->(g:Group)
+        MATCH p = ANY SHORTEST (u:User {id: 1})-[:MEMBER_OF|CONTAINS*1..2]->(g:Group)
         WHERE g.id IN [100, 102] AND NOT g.visibility_level IN ['internal']
         RETURN p
     expect: { compile_error: "shortest paths support NOT only on =, <>, IS NULL, and IS NOT NULL conditions" }

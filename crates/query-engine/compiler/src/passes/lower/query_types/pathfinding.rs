@@ -65,7 +65,6 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
 
     let frontier_opts = FrontierOpts {
         rel_type_filter: &pf.edge.rel_type_filter,
-        first_hop_filter: &pf.forward_first_hop_filter,
         anchor_entity: Some(start_entity),
         edge_tables: &pf.edge.tables,
         scope_cte: path_scope_cte.as_ref().map(|c| c.name.as_str()),
@@ -90,7 +89,6 @@ fn emit_pathfinding(plan: &Plan<PathFinding>, input: &Input) -> Result<Node> {
                 pf.backward_depth,
                 FDir::Backward,
                 &FrontierOpts {
-                    first_hop_filter: &pf.backward_first_hop_filter,
                     anchor_entity: Some(end_entity),
                     anchor_denorm_tags: end_denorm,
                     ..frontier_opts.clone()
@@ -425,7 +423,6 @@ enum FDir {
 #[derive(Clone)]
 struct FrontierOpts<'a> {
     rel_type_filter: &'a Option<Vec<String>>,
-    first_hop_filter: &'a Option<Vec<String>>,
     anchor_entity: Option<&'a str>,
     edge_tables: &'a [String],
     scope_cte: Option<&'a str>,
@@ -468,14 +465,7 @@ fn build_frontier_arm(
     let last = format!("e{depth}");
 
     let mut from = final_edge_table_scan(opts.edge_tables, "e1");
-    // Use specific first-hop filter if provided, otherwise fall back to
-    // the general rel_type_filter so e1 isn't left unfiltered.
-    let effective_first = if opts.first_hop_filter.is_some() {
-        opts.first_hop_filter
-    } else {
-        opts.rel_type_filter
-    };
-    let mut first_type_cond = type_cond_for("e1", effective_first);
+    let mut first_type_cond = type_cond_for("e1", opts.rel_type_filter);
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");

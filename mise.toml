@@ -41,8 +41,7 @@ watchexec = "2.8.0"
 clickhouse = "26.6.8.7-stable"
 duckdb = "1.5.1"
 uv = "0.9.28"
-node = "26"
-markdownlint-cli2 = "0.22.1"
+bun = "1.4.4"
 lychee = "0.23"
 vale = "3.14.1"
 lefthook = "2.1.3"
@@ -461,7 +460,7 @@ description = "Fail if the committed dashboards are out of date"
 
 [tasks."docs:query-language"]
 run = "cargo xtask query-docs"
-description = "Regenerate the ontology-derived tables in docs/source/remote/queries/query-language.md"
+description = "Regenerate the ontology-derived tables in docs/docs-gitlab-com/remote/queries/query-language.md"
 
 [tasks."docs:query-language:check"]
 run = "cargo xtask query-docs --check"
@@ -490,8 +489,16 @@ description = "Regenerate config/graph_persistent.sql (durable unversioned Click
 run = "cargo xtask ddl --target local 2>/dev/null > config/graph_local.sql.tmp && mv config/graph_local.sql.tmp config/graph_local.sql"
 description = "Regenerate config/graph_local.sql (DuckDB) from ontology"
 
+[tasks."site:dev"]
+run = "bun run --filter @orbit/site dev"
+description = "Serve the engineering site with live reload"
+
+[tasks."site:build"]
+run = "bun run build && bun run typecheck && bun run test"
+description = "Build, typecheck, and test the JavaScript workspace packages"
+
 [tasks."lint:markdown"]
-run = "markdownlint-cli2 '*.md' 'docs/**/*.md' 'docs-locale/**/*.md'"
+run = "bun x markdownlint-cli2 '*.md' 'docs/**/*.md' 'docs-locale/**/*.md'"
 description = "Run markdownlint on all markdown files"
 
 [tasks."lint:vale"]
@@ -499,7 +506,7 @@ run = "vale --minAlertLevel error *.md docs docs-locale"
 description = "Run Vale prose linting on markdown files"
 
 [tasks."lint:links"]
-run = "lychee --offline --include-fragments --exclude-path output --exclude-path .claude --exclude-path .opencode --exclude-path .ai/principles/distilled '**/*.md'"
+run = "lychee --offline --include-fragments --exclude-path output --exclude-path .claude --exclude-path .opencode --exclude-path .ai/principles/distilled --exclude-path packages/site/content --exclude-path node_modules '**/*.md'"
 description = "Check for broken links in markdown files"
 
 [tasks."lint:prose"]
@@ -536,5 +543,5 @@ run = "DRY_RUN=true bash ./scripts/ci/sync-doc-principles.sh"
 description = "Rehearse the documentation-principles sync: fetch upstream and show the diff"
 
 [tasks."skill:sync:orbit"]
-run = "cp docs/source/remote/queries/query-language.md skills/orbit/references/query_language.md"
+run = "cp docs/docs-gitlab-com/remote/queries/query-language.md skills/orbit/references/query_language.md"
 description = "Sync upstream docs into the Orbit agent skill (skills/orbit/references/)"

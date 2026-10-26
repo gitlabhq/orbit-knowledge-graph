@@ -84,17 +84,21 @@ async fn caller_without_enabled_namespaces_is_a_caller_error() {
 }
 
 #[tokio::test]
-async fn unparsable_datetime_filter_is_a_caller_error() {
+async fn unparsable_datetime_filter_is_rejected_before_execution() {
     let mut server = Server::start().await;
 
     for value in ["garbage", "2026-09-30T00:00:00+00:00"] {
         let filters = json!({"created_at": {"gte": value}});
         let error = server.run(project_query(filters)).await.unwrap_err();
 
-        assert_eq!(error.code, "execution_error");
-        assert!(error.message.contains("filter values"), "{}", error.message);
+        assert_eq!(error.code, "compile_error");
+        assert!(
+            error.message.contains("is not a valid date"),
+            "{}",
+            error.message
+        );
         server
-            .assert_recorded("execution_error", "caller_error")
+            .assert_recorded("compile_error", "caller_error")
             .await;
     }
 }

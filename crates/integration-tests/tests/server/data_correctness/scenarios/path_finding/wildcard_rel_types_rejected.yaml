@@ -1,0 +1,81 @@
+cases:
+  - name: untyped_path_rejected
+    description: A shortest path must name its relationship types; a wildcard is rejected
+    query:
+      json: |
+        {"query_type": "path_finding", "nodes": [{"id": "start", "entity": "User", "node_ids": [1]}, {"id": "end", "entity": "Project", "node_ids": [1004]}], "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["*"]}}
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[*1..3]->(`end`:Project {id: 1004}) RETURN p
+    expect:
+      compile_error: shortest paths require named relationship types
+
+  - name: legacy_shortest_path_hint_names_a_type
+    description: The legacy shortestPath() syntax points to the typed ANY SHORTEST form
+    query:
+      gql: |
+        MATCH p = shortestPath((start:User {id: 1})-[*1..3]->(`end`:Project {id: 1004})) RETURN p
+    expect:
+      compile_error: -[:CONTAINS*1..3]->
+
+  - name: negated_type_condition_rejected
+    description: A negated type(r) condition leaves the path open to every other type and is rejected
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE NOT type(r) = 'CONTAINS' RETURN p
+    expect:
+      compile_error: shortest paths require named relationship types
+
+  - name: not_equal_type_condition_rejected
+    description: A type(r) <> condition leaves the path open to every other type and is rejected
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 100}) WHERE type(r) <> 'CONTAINS' RETURN p
+    expect:
+      compile_error: shortest paths require named relationship types
+
+  - name: wildcard_mixed_with_names_rejected
+    description: A wildcard cannot be listed together with named relationship types
+    query:
+      json: |
+        {"query_type": "path_finding", "nodes": [{"id": "start", "entity": "User", "node_ids": [1]}, {"id": "end", "entity": "Project", "node_ids": [1004]}], "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["*", "MEMBER_OF"]}}
+    expect:
+      compile_error: cannot be combined with named types
+
+  - name: relationship_wildcard_mixed_with_names_rejected
+    description: A traversal relationship cannot list a wildcard together with named types
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "g", "entity": "Group"}], "relationships": [{"type": ["MEMBER_OF", "*"], "from": "u", "to": "g"}]}
+    expect:
+      compile_error: cannot be combined with named types
+
+  - name: neighbors_wildcard_mixed_with_names_rejected
+    description: A neighbors query cannot list a wildcard together with named types
+    query:
+      json: |
+        {"query_type": "neighbors", "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}], "neighbors": {"direction": "outgoing", "rel_types": ["*", "MEMBER_OF"]}}
+    expect:
+      compile_error: cannot be combined with named types
+
+  - name: named_types_find_the_path
+    description: Naming the relationship types finds the same User -> Group -> Project path
+    query:
+      json: |
+        {"query_type": "path_finding", "nodes": [{"id": "start", "entity": "User", "node_ids": [1]}, {"id": "end", "entity": "Project", "node_ids": [1004]}], "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}}
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[:MEMBER_OF|CONTAINS*1..3]->(`end`:Project {id: 1004}) RETURN p
+    expect:
+      referential_integrity: true
+      path_count: 1
+      path_edges:
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 102 }, { from: Group, from_id: 102, type: CONTAINS, to: Project, to_id: 1004 }]
+
+  - name: type_condition_in_list_finds_the_path
+    description: A positive type(r) IN condition names the types of an untyped shortest path
+    query:
+      gql: |
+        MATCH p = ANY SHORTEST (start:User {id: 1})-[r*1]->(`end`:Group {id: 102}) WHERE type(r) IN ['MEMBER_OF', 'CONTAINS'] RETURN p
+    expect:
+      path_count: 1
+      path_edges:
+        - [{ from: User, from_id: 1, type: MEMBER_OF, to: Group, to_id: 102 }]
