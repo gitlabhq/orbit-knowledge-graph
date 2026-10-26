@@ -161,6 +161,7 @@ On Dedicated, one ClickHouse service per tenant holds the datalake and the graph
 | [Troubleshooting](troubleshooting.md) | Symptoms, checks and actions |
 | [Monitoring](monitoring.md) | Dashboards, SLOs, alerts and their playbooks |
 | [Maintenance](maintenance.md) | Rollback, upgrade, reindex after a release, pause, capacity |
+| [Disaster recovery](disaster-recovery/README.md) | Recover Siphon, then rebuild Orbit |
 | [Rebuild and reindex](manual_rebuild.md) | Rebuild the graph, reindex a namespace or project |
 | [Secret rotation](secret_rotation.md) | JWT key, ClickHouse passwords, certificates |
 | [SDLC indexing](sdlc_indexing.md), [code indexing](code_indexing.md) | Pipeline details |

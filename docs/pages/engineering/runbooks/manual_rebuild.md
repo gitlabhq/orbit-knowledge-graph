@@ -13,7 +13,8 @@ Before you run SQL, check the service name in the ClickHouse console header.
 ## When to rebuild
 
 - The graph has wrong data that indexing does not fix, for example after a database incident.
-- Disaster recovery, or a move to another ClickHouse service.
+- Disaster recovery (start with [disaster recovery](disaster-recovery/README.md)), or a move to
+  another ClickHouse service.
 
 The graph is derived data. GitLab PostgreSQL and the repositories are the source of truth.
 Orbit does not restore from ClickHouse Cloud backups.
