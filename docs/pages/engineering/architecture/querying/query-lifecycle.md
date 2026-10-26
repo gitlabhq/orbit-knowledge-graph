@@ -15,7 +15,7 @@ GitLab first. GitLab decides who can see what. Orbit compiles the query and
 runs it on a relational store. Then it asks GitLab about the rows that SQL
 alone can't decide, and fills in properties from other sources.
 
-![Callers reach the Orbit query service through GitLab, and the query service reads the relational store, Gitaly, and planned sources](../../../../assets/architecture/query-lifecycle-overview.svg)
+![Callers reach the Orbit query service through GitLab, which reads its sources and returns JSON, TOON, or a GQL table](../../../../assets/architecture/query-lifecycle-overview.svg)
 
 ## How it works
 
@@ -105,8 +105,9 @@ those properties, and GitLab reads them from Gitaly with its own permission
 checks. A filter on a virtual property runs after Orbit fetches it.
 
 Every query type returns the same shape: nodes, edges, optional aggregation
-rows, and paging details. Callers get raw JSON, compact text for LLMs, or a
-GQL-style table. Pages keep no state, and each next page is a new query.
+rows, and paging details. Callers get raw JSON, compact TOON text for LLMs, or
+a GQL-style table. CSV and Parquet exports are a plan. Pages keep no state,
+and each next page is a new query.
 
 ## When things go wrong
 
