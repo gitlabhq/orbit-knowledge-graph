@@ -8,66 +8,19 @@ authors:
 
 ## What the engine does
 
-```mermaid
-%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 24, "rankSpacing": 64, "padding": 14, "subGraphTitleMargin": {"top": 8, "bottom": 18}}}}%%
-flowchart LR
-    accTitle: Query languages and backends of the Orbit Query Engine
-    accDescr: A user query arrives in GQL, with SQL and GLQL planned. The Orbit Query Engine turns it into SQL for ClickHouse or DuckDB, with PostgreSQL planned.
+The Orbit Query Engine compiles a graph query into one parameterized SQL
+statement. We built it so that neither end is fixed. A frontend turns a query
+language into one intermediate representation, and a code generator turns that
+representation into SQL for one backend. Today GQL is the only language, and
+ClickHouse and DuckDB are the backends.
 
-    user(["User Query"])
-
-    subgraph languages["Query languages"]
-        gql["GQL"]
-        sql["SQL"]
-        glql["GLQL"]
-    end
-
-    compiler[["Orbit Query Engine"]]
-
-    subgraph backends["Backends"]
-        clickhouse[("ClickHouse")]
-        duckdb[("DuckDB")]
-        postgres[("PostgreSQL")]
-    end
-
-    user --> gql
-    user -.-> sql
-    user -.-> glql
-    gql --> compiler
-    sql -.-> compiler
-    glql -.-> compiler
-    compiler --> clickhouse
-    compiler --> duckdb
-    compiler -.-> postgres
-
-    classDef language fill:#F59E0B26,stroke:#F59E0B,stroke-width:1.5px
-    classDef engine fill:#22C55E26,stroke:#22C55E,stroke-width:1.5px
-    classDef backend fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
-    classDef future fill:#9CA3AF26,stroke:#9CA3AF,stroke-width:1.5px,stroke-dasharray:5 4
-
-    class user,gql language
-    class compiler engine
-    class clickhouse,duckdb backend
-    class sql,glql,postgres future
-
-    style languages fill:#F59E0B12,stroke:#F59E0B
-    style backends fill:#3B82F612,stroke:#3B82F6
-```
-
-The Orbit Query Engine is a query compiler that doesn't depend on its input
-language or its backend. Each language has a frontend that produces one
-intermediate representation, and each backend has a code generator that
-renders it. Today it compiles GQL for ClickHouse and DuckDB, and a language
-like SQL or GLQL, or a backend like PostgreSQL, would each add one module.
-Every statement it emits is bounded, filters every namespaced read on
-traversal paths, and reads only the latest version of each row.
+![The Orbit Query Engine turns GQL, and later SQL or GLQL, into SQL for ClickHouse, DuckDB, and later PostgreSQL](../../../../assets/architecture/query-engine.svg)
 
 The engine compiles four query types. Each row shows a GQL query and the core
 of the SQL that it produces.
 
-> [!note]
-> These SQL fragments show only the core of each query.
-> The full SQL also has authorization filters, page limits, and query settings.
+> [!note] > These SQL fragments show only the core of each query. > The full
+SQL also has authorization filters, page limits, and query settings.
 
 <!-- markdownlint-disable MD044 -->
 
@@ -182,12 +135,12 @@ flowchart LR
     P --> S["SQL"]
 ```
 
-When the server loads a schema version, it builds one data model from that
-version's ontology. The graph catalog holds entities, properties,
-relationships, and their variants. The layout maps each of them to ClickHouse
-tables, columns, sort keys, and edge routes. The policy holds role floors,
-redaction rules, and admin-only fields. Every pass reads the model and never
-changes it.
+When Orbit loads a schema version, it builds one data model from that
+version's ontology. The model holds the graph, the ClickHouse tables that
+store it, and the rules for who may read what. Every step reads the model and
+never changes it. Each request compiles against the schema version that was
+active when it started, so a schema switch never changes a query halfway
+through.
 
 ### 2. Turn a user query into an intermediate representation
 
@@ -220,13 +173,13 @@ flowchart LR
     class Future,FF future
 ```
 
-Every pass after the frontend works on one intermediate representation (IR):
-node selectors, relationship selectors, filters, aggregations, ordering, and
-limits. The GQL frontend parses the statement against an openCypher 9 grammar,
-then lowers it and checks for one connected pattern and unique variables. Any
-other language needs only its own frontend that produces the same IR, and no
-later pass changes. A `CALL db.schema()` statement stops here and returns
-ontology metadata.
+Every step after the frontend works on one intermediate representation: the
+nodes, relationships, filters, aggregations, ordering, and limits of the
+query. The GQL frontend parses the statement against an openCypher 9 grammar,
+checks that the pattern is connected, and lowers it. Our example becomes a
+traversal with two nodes, one relationship, a filter on the merge request
+state, and the default page size. Another language would need only its own
+frontend, and no later step would change.
 
 ### 3. Validate and normalize the query
 
@@ -250,12 +203,11 @@ flowchart LR
     class Validate,Normalize pass
 ```
 
-Validation checks the IR's shape and limits, resolves every name against the
-data model, and checks that filter values fit their property types. A query
-that fails a check is rejected with an error that names the problem.
-Normalization then resolves entities to tables, coerces filter values, and
-expands wildcard columns. It also sorts predicates into a fixed order, so the
-same query always produces the same SQL.
+Validation checks the query's shape and limits, and checks every name against
+the data model. A query that fails a check is rejected with an error that
+names the problem. Normalization then maps each entity to its table, converts
+filter values to their property types, and puts the filters in a fixed order.
+The same query always produces the same SQL.
 
 ### 4. Apply the caller's access rules
 
@@ -283,13 +235,11 @@ flowchart LR
     class Restrict pass
 ```
 
-Restriction is the first pass that reads the caller's security context: their
-traversal paths, and their role on each one. It rejects a query on an entity
-whose required role the caller holds on no path. It removes admin-only
-columns, and rejects filters, sorts, and aggregates on admin-only fields. It
-checks any traversal-path filter in the query against the caller's paths. It
-also rejects aggregations that no namespaced node can reach, because
-aggregates skip row-by-row redaction.
+This is the first step that knows who is asking. It rejects a query on an
+entity whose role the caller holds on no namespace. It removes admin-only
+fields for callers who aren't admins. It also rejects an aggregation that no
+namespaced node can reach, because counts can't be redacted row by row. Our
+example asks for nothing restricted, so it passes unchanged.
 
 ### 5. Plan the reads and pick the latest row versions
 
@@ -317,20 +267,19 @@ flowchart LR
     class Planner pass
 ```
 
-The planner turns the IR into a relation graph, with one read per
-relationship, joined through shared nodes. It reads edge tables first, and
-joins a node table only when the query needs that node's data. A relationship
-stored in several edge tables becomes a `UNION ALL`, and a selective chain
-passes each hop's results to the next hop. Tables keep old row versions until
-ClickHouse merges them, so every read must pick the latest one. The planner
-uses `FINAL` by default, and a cheaper two-step read for exact IDs and
-selective filters.
+The planner decides how to read each node and relationship. It reads the edge
+table first, and joins a node table only when the query needs that node's
+data. For our example, it reads the authored edges, joins merge requests for
+the state and title, and joins users for the username. Tables keep old
+versions of a row until ClickHouse merges them away, so every read keeps only
+the latest version.
 
 ### 6. Narrow reads to the namespaces the query names
 
-A traversal-path bound limits a read to one namespace when the query names it,
-so ClickHouse can skip most of the table. The example names no project or
-group, so it gets no bound, and here is the same query pinned to one project:
+When a query names a project or group, the engine filters each read on that
+namespace path, so ClickHouse can skip most of the table. Our example names
+neither, so it reads every namespace the caller can see. Here is the same
+query pinned to one project:
 
 ```gql orbit-query
 MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project {id: 278964})
@@ -354,11 +303,10 @@ flowchart LR
     class user,mr,project state
 ```
 
-The project is the anchor, and the engine reads its current path inside the
-same statement. The bound spreads to `mr` through `IN_PROJECT`, and the
-`AUTHORED` edge read gets it too, but the global `User` gets none. A bound
-never crosses relationships like `CLOSES` that can leave the namespace, and
-the authorization filter always still applies.
+The engine reads the project's current path inside the same statement. The
+path spreads to the merge requests in that project, and to the authored edges
+stored with them. Users are global, so they get no path filter. A path never
+spreads across a relationship that can leave the namespace.
 
 ### 7. Build the SQL tree and shape the result
 
@@ -384,12 +332,12 @@ flowchart LR
     class Page,Shape,Extras pass
 ```
 
-Lowering turns the relation graph into a SQL syntax tree, and attaches the
-bounds to each read. Pagination asks for one row past the page, so the server
-can tell whether more rows exist. The response policy caps long text values,
-so a page fits in one response message. The result contract adds the ID and
-type columns that Rails needs for redaction. This step also plans the
-hydration statement, and sets time and memory limits for the query type.
+The plan becomes a SQL syntax tree. The engine asks for one row past the page,
+so it can tell whether more rows exist. It caps long text values, so a page
+fits in one response, and adds the ID and type columns that GitLab needs for
+redaction. Then it plans a second, small query for any properties that the
+main query didn't fetch. It also sets time and memory limits for the query
+type.
 
 ### 8. Add authorization filters, verify them, and render SQL
 
@@ -418,13 +366,48 @@ flowchart LR
     class Reject reject
 ```
 
-Security runs last, after every pass that can add a read to the tree. It adds
-a `startsWith(traversal_path, ?)` filter to every namespaced read, using only
-the paths where the caller meets the entity's role floor. Verification then
-walks the finished tree, and rejects the query if any namespaced read lacks a
-filter. Code generation renders the tree as SQL for one backend, with every
-value as a bound parameter. A backend that can't express an operation rejects
-the query instead of approximating it.
+Security runs last, on the finished tree. It adds a namespace filter to every
+namespaced read, using only the namespaces where the caller holds the role
+that the entity needs. Verification then checks every read, and rejects the
+query if any read lacks its filter. Last, the engine renders the tree as SQL
+for one backend, with every value as a bound parameter.
+
+## When things go wrong
+
+- **A name doesn't match the ontology.** Validation rejects the query before
+  planning, with an error that names the problem.
+- **The caller lacks the role for an entity on every namespace.** The engine
+  rejects the query.
+- **A read has no authorization filter.** Verification rejects the statement,
+  and it never reaches ClickHouse.
+- **The project or group that a query names isn't indexed yet.** The read
+  falls back to the caller's authorization filter, so indexed rows still come
+  back.
+- **A backend can't express an operation.** The engine rejects the query
+  instead of approximating it.
+- **A step is missing input that an earlier step should have produced.** The
+  engine returns an internal error, never partial SQL.
+
+## Why we built it this way
+
+We put every rule for turning a query into SQL in one compiler, so there's one
+place to review and test them. Each step declares what it reads and writes,
+which lets us reuse steps. Hydration and local queries run the same steps as
+remote queries. Security always runs last, so verification sees the finished
+statement. We read a project's path inside the same statement instead of
+looking it up first. So there's no cache that can go stale when a project
+moves.
+
+## Trade-offs and what's next
+
+- **New languages are a plan.** SQL and GLQL have no frontend yet. The
+  representation is ready for them, but each needs its own grammar and checks.
+- **New backends are a plan.** PostgreSQL has no code generator yet. It would
+  also need its own data model layout and its own way to read the latest row
+  version.
+- **Join order uses fixed rules.** The planner orders joins from hints in the
+  ontology. [ADR 016](../../adr/016_column_statistics_for_join_ordering.md)
+  proposes column statistics to make that choice from data.
 
 ## Decisions
 
