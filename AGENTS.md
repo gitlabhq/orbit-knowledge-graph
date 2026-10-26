@@ -46,3 +46,16 @@ Do not change any file under `docs/` in an MR that changes code. Change it only 
 Do not create a GitLab issue or epic until the author approves the draft.
 Read `CONTRIBUTING.md` for engineering, documentation, issue, and MR
 conventions. Read `CONTEXT.md` for domain terms.
+
+## Writing or changing a skill
+
+Before you create or edit a skill, load the `authoring-skills` skill from `gitlab-org/ai/skills` and follow it. Read the raw [`SKILL.md`](https://gitlab.com/gitlab-org/ai/skills/-/raw/main/skills/authoring-skills/SKILL.md) and the `references/*.md` files it links. The repository is public, so no token is needed.
+
+Local rules on top of it:
+
+- Shipped skills live in `skills/<name>/`. Agent-only skills for working in this repo live in `.agents/skills/<name>/`.
+- `name` is kebab-case and equals the directory name.
+- `description` says when to trigger.
+- Frontmatter has `name` and `description`. Shipped skills under `skills/` also have `version` and `license`.
+- Keep `SKILL.md` short. Move detail into `references/*.md` linked from `SKILL.md`.
+- No credentials, internal hostnames, or personal paths.
