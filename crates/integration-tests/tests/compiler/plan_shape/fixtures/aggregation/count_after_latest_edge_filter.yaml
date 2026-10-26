@@ -1,0 +1,30 @@
+name: Single-edge aggregation filters after the latest-row pick and counts the surviving rows
+
+query:
+  json: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "a", "entity": "Definition", "node_ids": [1]},
+        {"id": "b", "entity": "Definition"}
+      ],
+      "relationships": [{"type": "CALLS", "from": "a", "to": "b"}],
+      "aggregations": [{"count": "b", "as": "n"}]
+    }
+  gql: |
+    MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition) RETURN count(b) AS n
+
+logical:
+  expect:
+    - (Aggregate COUNT(b) AS n (_))
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Aggregate COUNT() AS n (Project (Deduplicate LimitBy ... (Filter ... (Scan Table(gl_code_edge) AS _orbit_edge_0)))))
+      reject:
+        - (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0))
+    emitted:
+      expect:
+        - (Aggregate COUNT() AS n (Filter _orbit_edge_0.relationship_kind = 'CALLS', _orbit_edge_0.source_kind = 'Definition', _orbit_edge_0.target_kind = 'Definition', _orbit_edge_0._deleted = false, _orbit_edge_0.source_id = 1 (Bind _orbit_edge_0 (Deduplicate LimitBy 1 BY ... (_)))))

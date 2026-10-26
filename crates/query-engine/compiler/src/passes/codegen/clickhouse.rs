@@ -303,7 +303,6 @@ impl Context {
                 function,
                 argument,
                 distinct,
-                condition,
             } => {
                 if let Err(error) =
                     super::validate_aggregate(*function, argument.as_deref(), *distinct)
@@ -319,22 +318,18 @@ impl Context {
                     crate::input::AggFunction::Max => "max",
                     crate::input::AggFunction::Collect => "groupArray",
                 };
-                let name = if *distinct || condition.is_some() {
-                    format!(
-                        "{base}{}{}",
-                        if *distinct { "Distinct" } else { "" },
-                        if condition.is_some() { "If" } else { "" }
-                    )
+                let name = if *distinct {
+                    format!("{base}Distinct")
                 } else if base == "groupArray" {
                     base.into()
                 } else {
                     base.to_uppercase()
                 };
-                let mut args: Vec<_> = argument.iter().map(|value| self.emit_expr(value)).collect();
-                if let Some(condition) = condition {
-                    args.push(self.emit_expr(condition));
-                }
-                format!("{name}({})", args.join(", "))
+                let argument = argument
+                    .as_ref()
+                    .map(|value| self.emit_expr(value))
+                    .unwrap_or_default();
+                format!("{name}({argument})")
             }
             Expr::Lambda { param, body } => {
                 let body = self.emit_expr(body);

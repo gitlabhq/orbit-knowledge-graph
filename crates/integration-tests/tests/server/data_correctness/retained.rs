@@ -80,9 +80,9 @@ pub(super) async fn path_finding_code_filtered_endpoints_stay_on_same_traversal_
 #[tokio::test]
 async fn semantic_aggregate_and_nested_cte_codegen_execute() {
     let ctx = TestContext::new(&[]).await;
-    ctx.execute("CREATE TABLE measurements(value Nullable(Int64), keep Bool) ENGINE=Memory")
+    ctx.execute("CREATE TABLE measurements(value Nullable(Int64)) ENGINE=Memory")
         .await;
-    ctx.execute("INSERT INTO measurements VALUES (2,true),(2,true),(NULL,true),(9,false)")
+    ctx.execute("INSERT INTO measurements VALUES (2),(2),(NULL)")
         .await;
     for (argument, distinct, expected) in
         [(false, false, "3"), (true, false, "2"), (true, true, "1")]
@@ -104,7 +104,6 @@ async fn semantic_aggregate_and_nested_cte_codegen_execute() {
                             function: AggFunction::Count,
                             argument: argument.then(|| Box::new(Expr::col("s", "value"))),
                             distinct,
-                            condition: Some(Box::new(Expr::col("s", "keep"))),
                         },
                         "n",
                     )],

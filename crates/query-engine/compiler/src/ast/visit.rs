@@ -83,12 +83,8 @@ pub fn visit_expressions<'a>(
                 visit_expressions(argument, callback)?;
             }
         }
-        Expr::Aggregate {
-            argument,
-            condition,
-            ..
-        } => {
-            for child in argument.iter().chain(condition.iter()) {
+        Expr::Aggregate { argument, .. } => {
+            for child in argument.iter() {
                 visit_expressions(child, callback)?;
             }
         }
@@ -194,12 +190,8 @@ fn visit_expr_queries(
             }
             Ok(())
         }
-        Expr::Aggregate {
-            argument,
-            condition,
-            ..
-        } => {
-            for child in argument.iter_mut().chain(condition.iter_mut()) {
+        Expr::Aggregate { argument, .. } => {
+            for child in argument.iter_mut() {
                 visit_expr_queries(child, callback)?;
             }
             Ok(())

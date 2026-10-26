@@ -1,5 +1,5 @@
-//! Aggregation: plan the pattern like a traversal, then derive groups, measures, and the deferred
-//! latest-row condition from the relation graph.
+//! Aggregation: plan the pattern like a traversal, then derive groups and measures from the
+//! relation graph.
 
 use std::collections::HashMap;
 
@@ -11,9 +11,9 @@ use crate::error::Result;
 use crate::input::{
     AggExpr, AggFunction, Input, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
 };
-use crate::passes::plan::graph::{ExecutionPlan, RelationNode};
+use crate::passes::plan::graph::ExecutionPlan;
 use crate::passes::plan::pattern::Pattern;
-use crate::passes::plan::predicates::{Column, OutputValue, Predicate};
+use crate::passes::plan::predicates::{Column, OutputValue};
 use crate::passes::plan::{NodePlan, Plan, property_value};
 
 #[derive(Clone, PartialEq)]
@@ -37,7 +37,6 @@ pub struct AggregationPlan {
     pub groups: Vec<Group>,
     pub group_outputs: Vec<(Group, String)>,
     pub measures: Vec<Measure>,
-    pub condition: Vec<Predicate>,
     pub order: Option<InputAggSort>,
 }
 
@@ -61,7 +60,6 @@ fn aggregation_plan(
         groups: vec![],
         group_outputs: vec![],
         measures: vec![],
-        condition: latest_row_condition(execution),
         order: aggregation.sort.clone(),
     };
     for (group, alias) in aggregation
@@ -157,21 +155,5 @@ fn aggregation_plan(
 fn add_group(groups: &mut Vec<Group>, group: Group) {
     if !groups.contains(&group) {
         groups.push(group);
-    }
-}
-
-/// The condition a single edge relation defers past its latest-row pick, so the measures apply it instead of the scan.
-fn latest_row_condition(execution: &ExecutionPlan) -> Vec<Predicate> {
-    let mut source = execution.root;
-    loop {
-        match execution.graph.get(source) {
-            RelationNode::Latest { condition, .. } => break condition.clone(),
-            RelationNode::Join { left, .. } => source = left.id,
-            RelationNode::Owned { input, .. }
-            | RelationNode::Filter { input, .. }
-            | RelationNode::Project { input, .. }
-            | RelationNode::Bind { input, .. } => source = input.id,
-            RelationNode::Read { .. } | RelationNode::UnionAll { .. } => break vec![],
-        }
     }
 }

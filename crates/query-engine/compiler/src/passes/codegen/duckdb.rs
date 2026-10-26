@@ -265,7 +265,6 @@ impl Context {
                 function,
                 argument,
                 distinct,
-                condition,
             } => {
                 if let Err(error) =
                     super::validate_aggregate(*function, argument.as_deref(), *distinct)
@@ -285,21 +284,14 @@ impl Context {
                     .as_ref()
                     .map(|value| self.emit_expr(value))
                     .unwrap_or_else(|| "*".into());
-                let mut expression = format!(
+                let expression = format!(
                     "{name}({}{argument})",
                     if *distinct { "DISTINCT " } else { "" }
                 );
-                let condition = condition.as_ref().map(|value| self.emit_expr(value));
                 if *function == crate::input::AggFunction::Collect {
-                    let nonnull = format!("{argument} IS NOT NULL");
-                    let condition = condition.map_or_else(
-                        || nonnull.clone(),
-                        |condition| format!("({condition}) AND {nonnull}"),
+                    return format!(
+                        "coalesce({expression} FILTER (WHERE {argument} IS NOT NULL), [])"
                     );
-                    return format!("coalesce({expression} FILTER (WHERE {condition}), [])");
-                }
-                if let Some(condition) = condition {
-                    expression.push_str(&format!(" FILTER (WHERE {condition})"));
                 }
                 expression
             }

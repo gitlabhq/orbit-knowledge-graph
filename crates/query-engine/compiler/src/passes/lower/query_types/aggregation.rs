@@ -2,7 +2,7 @@ use super::Emitted;
 use crate::ast::*;
 use crate::error::Result;
 use crate::input::{Input, OrderDirection};
-use crate::passes::lower::predicates::{output_value, predicate};
+use crate::passes::lower::predicates::output_value;
 use crate::passes::lower::{EmitOutput, graph};
 use crate::passes::plan::predicates::OutputValue;
 use crate::passes::plan::query_types::aggregation::{AggregationPlan, Group};
@@ -16,9 +16,6 @@ pub(crate) fn emit(
 ) -> Result<Emitted> {
     let result = &plan.operation.result;
     let mut read = super::super::redaction_columns(plan, &plan.operation.execution);
-    for condition in &result.condition {
-        super::super::columns::referenced(&predicate(condition), &mut read);
-    }
     read.extend(
         result
             .groups
@@ -55,7 +52,6 @@ fn group(value: &Group) -> Expr {
 }
 
 fn aggregation(plan: &AggregationPlan, output: EmitOutput, limit: u32) -> Query {
-    let condition = Expr::conjoin(plan.condition.iter().map(predicate).collect());
     let select = plan
         .group_outputs
         .iter()
@@ -69,7 +65,6 @@ fn aggregation(plan: &AggregationPlan, output: EmitOutput, limit: u32) -> Query 
                         .as_ref()
                         .map(|value| Box::new(output_value(value))),
                     distinct: false,
-                    condition: condition.clone().map(Box::new),
                 },
                 &measure.name,
             )

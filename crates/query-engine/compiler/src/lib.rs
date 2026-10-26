@@ -511,8 +511,8 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("countIf("),
-            "single-hop edge count should use countIf on the LIMIT BY path, \
+            sql.contains("COUNT()") && !sql.contains("If("),
+            "the post-pick WHERE already filters the edge rows, so the count stays bare, \
              got:\n{sql}"
         );
         assert!(

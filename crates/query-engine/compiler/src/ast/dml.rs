@@ -33,7 +33,6 @@ pub enum Expr {
         function: crate::input::AggFunction,
         argument: Option<Box<Expr>>,
         distinct: bool,
-        condition: Option<Box<Expr>>,
     },
     TimeBucket {
         unit: crate::input::TruncateUnit,
@@ -436,7 +435,6 @@ impl Expr {
             function,
             argument: argument.map(Box::new),
             distinct: false,
-            condition: None,
         }
     }
 

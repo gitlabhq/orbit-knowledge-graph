@@ -230,19 +230,6 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                     |unit| format!("bucket({}, {column})", unit.name()),
                 )
             };
-            let condition = if result.condition.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    " FILTER [{}]",
-                    result
-                        .condition
-                        .iter()
-                        .flat_map(planned_predicate)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            };
             let items = result
                 .groups
                 .iter()
@@ -260,7 +247,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                         .map(planned_value)
                         .unwrap_or_default();
                     format!(
-                        "{}({argument}){condition} AS {}",
+                        "{}({argument}) AS {}",
                         measure.function.to_string().to_uppercase(),
                         measure.name
                     )
@@ -769,21 +756,16 @@ fn expression(value: &Expr) -> String {
             function,
             argument,
             distinct,
-            condition,
         } => {
             let argument = argument
                 .as_ref()
                 .map(|value| expression(value))
                 .unwrap_or_default();
-            let mut value = format!(
+            format!(
                 "{}({}{argument})",
                 function.to_string().to_uppercase(),
                 if *distinct { "DISTINCT " } else { "" }
-            );
-            if let Some(condition) = condition {
-                value.push_str(&format!(" FILTER [{}]", expression(condition)));
-            }
-            value
+            )
         }
         Expr::Column { table, column } => format!("{table}.{column}"),
         Expr::Identifier(name) => name.clone(),

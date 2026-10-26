@@ -52,7 +52,7 @@ impl<T> Plan<T> {
 pub enum QueryPlan {
     Traversal(Plan<Traversal>),
     Aggregation(Plan<Aggregation>),
-    Neighbors(Plan<Neighbors>),
+    Neighbors(Box<Plan<Neighbors>>),
     PathFinding(Plan<PathFinding>),
     Hydration(Plan<Hydration>),
 }
@@ -136,7 +136,9 @@ where
         QueryType::Aggregation => {
             QueryPlan::Aggregation(query_types::aggregation::plan(input, model)?)
         }
-        QueryType::Neighbors => QueryPlan::Neighbors(query_types::neighbors::plan(input, model)?),
+        QueryType::Neighbors => {
+            QueryPlan::Neighbors(Box::new(query_types::neighbors::plan(input, model)?))
+        }
         QueryType::PathFinding => {
             QueryPlan::PathFinding(query_types::pathfinding::plan(input, model)?)
         }

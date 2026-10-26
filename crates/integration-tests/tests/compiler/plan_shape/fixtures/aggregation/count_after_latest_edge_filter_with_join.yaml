@@ -1,4 +1,4 @@
-name: Conditional edge aggregation survives a grouped node join
+name: Edge aggregation over a grouped node join counts the filtered latest edge rows
 
 query:
   json: |
@@ -14,6 +14,6 @@ physical:
     planned:
       expect:
         - (Join ON b.id = _orbit_edge_0.target_id (_) (Bind b (Filter b._deleted = false (Deduplicate LimitBy ... (Filter b.id IN ?.id (_))))))
-        - (Aggregate COUNT() FILTER ? AS n, ... (_))
+        - (Aggregate ..., COUNT() AS n (_))
     emitted:
-      expect: ["(Aggregate COUNT() FILTER [(_orbit_edge_0.relationship_kind = 'CALLS') AND (_orbit_edge_0.source_kind = 'Definition') AND (_orbit_edge_0.target_kind = 'Definition') AND (_orbit_edge_0._deleted = false) AND (_orbit_edge_0.source_id = 1)] AS n, ... (_))", "(Deduplicate LimitBy 1 BY ... (_))"]
+      expect: ["(Aggregate ..., COUNT() AS n (Join ON b.id = _orbit_edge_0.target_id (Scan Table(_orbit_relation_3) AS _orbit_edge_0) (_)))", "(Deduplicate LimitBy 1 BY ... (_))"]

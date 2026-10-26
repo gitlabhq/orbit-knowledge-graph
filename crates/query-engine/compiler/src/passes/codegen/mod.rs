@@ -117,35 +117,31 @@ mod tests {
             AggFunction::Collect,
         ] {
             for distinct in [false, true] {
-                for filtered in [false, true] {
-                    let ast = Node::Query(Box::new(Query {
-                        select: vec![SelectExpr::new(
-                            Expr::Aggregate {
-                                function,
-                                argument: None,
-                                distinct,
-                                condition: filtered.then(|| Box::new(Expr::col("n", "keep"))),
-                            },
-                            "result",
-                        )],
-                        from: TableRef::scan("nodes", "n"),
-                        ..Default::default()
-                    }));
-                    let remote = codegen(&ast, ResultContext::new(), QueryConfig::default());
-                    let local = duckdb::codegen(&ast, ResultContext::new());
-                    let simple = clickhouse::emit_simple_query(&ast);
-                    if function == AggFunction::Count && !distinct {
-                        assert!(remote.is_ok());
-                        assert!(local.is_ok());
-                        assert!(simple.is_ok());
-                    } else {
-                        for error in [remote.unwrap_err(), local.unwrap_err(), simple.unwrap_err()]
-                        {
-                            assert!(
-                                matches!(error, crate::error::QueryError::Codegen(ref message) if message.contains("requires an argument")),
-                                "{error}"
-                            );
-                        }
+                let ast = Node::Query(Box::new(Query {
+                    select: vec![SelectExpr::new(
+                        Expr::Aggregate {
+                            function,
+                            argument: None,
+                            distinct,
+                        },
+                        "result",
+                    )],
+                    from: TableRef::scan("nodes", "n"),
+                    ..Default::default()
+                }));
+                let remote = codegen(&ast, ResultContext::new(), QueryConfig::default());
+                let local = duckdb::codegen(&ast, ResultContext::new());
+                let simple = clickhouse::emit_simple_query(&ast);
+                if function == AggFunction::Count && !distinct {
+                    assert!(remote.is_ok());
+                    assert!(local.is_ok());
+                    assert!(simple.is_ok());
+                } else {
+                    for error in [remote.unwrap_err(), local.unwrap_err(), simple.unwrap_err()] {
+                        assert!(
+                            matches!(error, crate::error::QueryError::Codegen(ref message) if message.contains("requires an argument")),
+                            "{error}"
+                        );
                     }
                 }
             }
@@ -182,80 +178,61 @@ mod tests {
     }
 
     #[test]
-    fn semantic_aggregates_render_arguments_distinctness_and_conditions() {
+    fn semantic_aggregates_render_arguments_and_distinctness() {
         use crate::input::AggFunction;
 
-        for (function, plain, conditional, local) in [
-            (AggFunction::Count, "COUNT", "countIf", "COUNT"),
-            (AggFunction::Sum, "SUM", "sumIf", "SUM"),
-            (AggFunction::Avg, "AVG", "avgIf", "AVG"),
-            (AggFunction::Min, "MIN", "minIf", "MIN"),
-            (AggFunction::Max, "MAX", "maxIf", "MAX"),
+        for (function, plain, distinct_name, local) in [
+            (AggFunction::Count, "COUNT", "countDistinct", "COUNT"),
+            (AggFunction::Sum, "SUM", "sumDistinct", "SUM"),
+            (AggFunction::Avg, "AVG", "avgDistinct", "AVG"),
+            (AggFunction::Min, "MIN", "minDistinct", "MIN"),
+            (AggFunction::Max, "MAX", "maxDistinct", "MAX"),
             (
                 AggFunction::Collect,
                 "groupArray",
-                "groupArrayIf",
+                "groupArrayDistinct",
                 "array_agg",
             ),
         ] {
-            for filtered in [false, true] {
-                for distinct in [false, true] {
-                    let ast = Node::Query(Box::new(Query {
-                        select: vec![SelectExpr::new(
-                            Expr::Aggregate {
-                                function,
-                                argument: Some(Box::new(Expr::col("n", "value"))),
-                                distinct,
-                                condition: filtered.then(|| Box::new(Expr::col("n", "keep"))),
-                            },
-                            "result",
-                        )],
-                        from: TableRef::scan("nodes", "n"),
-                        ..Default::default()
-                    }));
-                    let remote =
-                        codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
-                    let local_query = duckdb::codegen(&ast, ResultContext::new()).unwrap();
-                    let name = if distinct {
-                        format!(
-                            "{}Distinct{}",
-                            conditional.strip_suffix("If").unwrap(),
-                            if filtered { "If" } else { "" }
-                        )
-                    } else if filtered {
-                        conditional.into()
-                    } else {
-                        plain.into()
-                    };
+            for distinct in [false, true] {
+                let ast = Node::Query(Box::new(Query {
+                    select: vec![SelectExpr::new(
+                        Expr::Aggregate {
+                            function,
+                            argument: Some(Box::new(Expr::col("n", "value"))),
+                            distinct,
+                        },
+                        "result",
+                    )],
+                    from: TableRef::scan("nodes", "n"),
+                    ..Default::default()
+                }));
+                let remote = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+                let local_query = duckdb::codegen(&ast, ResultContext::new()).unwrap();
+                let name = if distinct { distinct_name } else { plain };
+                assert!(
+                    remote
+                        .sql
+                        .starts_with(&format!("SELECT {name}(n.value) AS result")),
+                    "{}",
+                    remote.sql
+                );
+                if function == AggFunction::Collect {
                     assert!(
-                        remote.sql.starts_with(&format!(
-                            "SELECT {name}(n.value{}) AS result",
-                            if filtered { ", n.keep" } else { "" }
-                        )),
+                        local_query.sql.contains("coalesce(array_agg("),
                         "{}",
-                        remote.sql
+                        local_query.sql
                     );
-                    let aggregate = format!(
-                        "SELECT {local}({}n.value){} AS result FROM nodes AS n",
-                        if distinct { "DISTINCT " } else { "" },
-                        if filtered {
-                            " FILTER (WHERE n.keep)"
-                        } else {
-                            ""
-                        }
+                    assert!(local_query.sql.contains("n.value IS NOT NULL"));
+                    assert_eq!(local_query.sql.contains("DISTINCT"), distinct);
+                } else {
+                    assert_eq!(
+                        local_query.sql,
+                        format!(
+                            "SELECT {local}({}n.value) AS result FROM nodes AS n",
+                            if distinct { "DISTINCT " } else { "" }
+                        )
                     );
-                    if function == AggFunction::Collect {
-                        assert!(
-                            local_query.sql.contains("coalesce(array_agg("),
-                            "{}",
-                            local_query.sql
-                        );
-                        assert!(local_query.sql.contains("n.value IS NOT NULL"));
-                        assert_eq!(local_query.sql.contains("n.keep"), filtered);
-                        assert_eq!(local_query.sql.contains("DISTINCT"), distinct);
-                    } else {
-                        assert_eq!(local_query.sql, aggregate);
-                    }
                 }
             }
         }

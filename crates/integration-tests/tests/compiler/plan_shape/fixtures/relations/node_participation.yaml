@@ -48,4 +48,4 @@ cases:
         planned:
           expect:
             - (Join ON mr.id = _orbit_edge_0.target_id (_) (Bind mr (_)))
-            - (Aggregate COUNT(mr.merged_at) FILTER ? AS n (_))
+            - (Aggregate COUNT(mr.merged_at) AS n (_))

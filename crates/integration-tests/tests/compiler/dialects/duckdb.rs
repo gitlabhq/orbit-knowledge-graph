@@ -292,19 +292,17 @@ fn semantic_aggregate_codegen_preserves_null_and_empty_input_results() {
     let directory = tempfile::tempdir().unwrap();
     let database =
         duckdb_client::DuckDbClient::open(&directory.path().join("aggregate.duckdb")).unwrap();
-    database.initialize_schema("CREATE TABLE measurements(value BIGINT, keep BOOLEAN); INSERT INTO measurements VALUES (2, true), (2, true), (NULL, true), (9, false);").unwrap();
-    for (function, argument, distinct, filtered, expected) in [
-        (AggFunction::Count, false, false, false, "4"),
-        (AggFunction::Count, true, false, false, "3"),
-        (AggFunction::Count, false, false, true, "3"),
-        (AggFunction::Count, true, false, true, "2"),
-        (AggFunction::Count, true, true, true, "1"),
-        (AggFunction::Sum, true, false, true, "4"),
-        (AggFunction::Avg, true, false, true, "2.0"),
-        (AggFunction::Min, true, false, true, "2"),
-        (AggFunction::Max, true, false, true, "2"),
-        (AggFunction::Collect, true, false, true, "[2, 2]"),
-        (AggFunction::Collect, true, true, true, "[2]"),
+    database.initialize_schema("CREATE TABLE measurements(value BIGINT); INSERT INTO measurements VALUES (2), (2), (NULL);").unwrap();
+    for (function, argument, distinct, expected) in [
+        (AggFunction::Count, false, false, "3"),
+        (AggFunction::Count, true, false, "2"),
+        (AggFunction::Count, true, true, "1"),
+        (AggFunction::Sum, true, false, "4"),
+        (AggFunction::Avg, true, false, "2.0"),
+        (AggFunction::Min, true, false, "2"),
+        (AggFunction::Max, true, false, "2"),
+        (AggFunction::Collect, true, false, "[2, 2]"),
+        (AggFunction::Collect, true, true, "[2]"),
     ] {
         for empty in [false, true] {
             let ast = Node::Query(Box::new(Query {
@@ -313,7 +311,6 @@ fn semantic_aggregate_codegen_preserves_null_and_empty_input_results() {
                         function,
                         argument: argument.then(|| Box::new(Expr::col("m", "value"))),
                         distinct,
-                        condition: filtered.then(|| Box::new(Expr::col("m", "keep"))),
                     },
                     "result",
                 )],

@@ -819,7 +819,7 @@ fn scoped_aggregation_injects_tight_prefix() {
 }
 
 #[test]
-fn scoped_count_condition_excludes_the_scope_lookup() {
+fn scoped_count_post_pick_filter_excludes_the_scope_lookup() {
     let orbit_query =
         "MATCH (u:User)-[:MEMBER_OF]->(g:Group {id: 100}) RETURN g, count(u) AS n LIMIT 5";
     let json = r#"{
@@ -834,14 +834,17 @@ fn scoped_count_condition_excludes_the_scope_lookup() {
         "limit": 5
     }"#;
     let sql = render_scoped(json, orbit_query);
-    let count_arg = sql
-        .split("countIf(")
-        .nth(1)
+    let post_pick = sql
+        .rsplit_once(" GROUP BY")
+        .and_then(|(head, _)| head.rsplit_once(" WHERE "))
         .unwrap()
-        .split(" AS n")
-        .next()
-        .unwrap();
-    assert!(!count_arg.contains("_scope"), "{sql}");
+        .1;
+    assert!(
+        post_pick.contains("_orbit_edge_0._deleted = false"),
+        "{sql}"
+    );
+    assert!(!post_pick.contains("_scope"), "{sql}");
+    assert!(sql.starts_with("SELECT COUNT() AS n"), "{sql}");
     assert!(sql.contains("FROM gl_group AS _scope WHERE"), "{sql}");
 }
 
