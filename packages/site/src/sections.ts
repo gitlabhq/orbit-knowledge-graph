@@ -5,15 +5,7 @@ export type Tab = { route: string; label: string; menu?: { route: string; label:
 export const TABS: Tab[] = [
   { route: "", label: "Home" },
   { route: "roadmap", label: "Roadmap" },
-  {
-    route: "content",
-    label: "Content",
-    menu: [
-      { route: "content", label: "Overview", description: "Posts, demos, and talks about Orbit" },
-      { route: "content/blog", label: "Blog", description: "Engineering notes and product updates" },
-      { route: "content/demos", label: "Demos", description: "Videos and talks about Orbit" },
-    ],
-  },
+  { route: "content", label: "Content" },
   {
     route: "engineering",
     label: "Engineering",

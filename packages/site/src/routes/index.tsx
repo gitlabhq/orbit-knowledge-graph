@@ -1,8 +1,6 @@
 import { cn, findPage, Icon, pageHead, pageLink, site, SiteLink } from "@gitlab-org/orbit-site";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { PostCard } from "../content/PostCard";
 import { Board } from "../roadmap/Board";
-import { posts } from "../content/blog";
 import { videos } from "../content/demos";
 import { Video } from "../ui/Video";
 import { ENGINEERING, USER_DOCS } from "../sections";
@@ -127,7 +125,7 @@ function HomePage() {
         </section>
         {videos.length > 0 && (
           <section>
-            <SectionHeading title="Demos" description="Videos and talks that show how Orbit works." action={{ label: "All demos", to: "/content/demos" }} />
+            <SectionHeading title="Demos" description="Videos and talks that show how Orbit works." action={{ label: "All content", to: "/content" }} />
             <ul className="m-0 grid list-none gap-4 p-0 md:grid-cols-3">
               {videos.slice(0, 3).map((video) => (
                 <li key={video.id}>
@@ -135,22 +133,6 @@ function HomePage() {
                 </li>
               ))}
             </ul>
-          </section>
-        )}
-        {posts.length > 0 && (
-          <section>
-            <SectionHeading title="From the blog" description="Engineering notes and product updates." action={{ label: "All content", to: "/content" }} />
-            {posts.length === 1 ? (
-              <PostCard post={posts[0]} featured />
-            ) : (
-              <ul className="m-0 grid list-none gap-4 p-0 md:grid-cols-3">
-                {posts.slice(0, 3).map((post) => (
-                  <li key={post.slug}>
-                    <PostCard post={post} />
-                  </li>
-                ))}
-              </ul>
-            )}
           </section>
         )}
       </div>

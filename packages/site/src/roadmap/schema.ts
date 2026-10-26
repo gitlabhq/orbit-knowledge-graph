@@ -5,11 +5,8 @@ export type Status = (typeof STATUSES)[number];
 export type Horizon = "now" | "next" | "later";
 
 export type ItemFields = { theme: string; status: Status; start: string; end: string; link?: string; tracking?: string };
-export type PostFields = { date: string; authors: string[]; tags: string[] };
 
 type Frontmatter = Record<string, unknown>;
-
-const list = (value: unknown) => [value ?? []].flat().map(String);
 
 export function itemFields(data: Frontmatter, themes: string[]): ItemFields {
   if (typeof data.description !== "string") throw new Error("a roadmap item needs a description");
@@ -27,16 +24,6 @@ export function itemFields(data: Frontmatter, themes: string[]): ItemFields {
     ...(data.link === undefined ? {} : { link: String(data.link) }),
     ...(data.tracking === undefined ? {} : { tracking: String(data.tracking) }),
   };
-}
-
-export function postFields(data: Frontmatter, authors: string[]): PostFields {
-  const date = String(data.date ?? "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`date must look like 2026-10-01, got ${JSON.stringify(data.date)}`);
-  const names = list(data.authors);
-  if (names.length === 0) throw new Error("authors must list at least one author");
-  const unknown = names.filter((name) => !authors.includes(name));
-  if (unknown.length > 0) throw new Error(`unknown authors ${unknown.join(", ")}; add them to data/authors.yaml`);
-  return { date, authors: names, tags: list(data.tags) };
 }
 
 export function horizonOf(status: Exclude<Status, "shipped">, start: Quarter, now: Quarter): Horizon {

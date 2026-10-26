@@ -87,7 +87,7 @@ function TeamPage() {
         <section className="card flex flex-col items-start justify-between gap-6 p-8 md:flex-row md:items-center">
           <div>
             <h2 className="m-0 text-xl font-semibold text-default">Build with us</h2>
-            <p className="mt-1 mb-0 max-w-xl text-subtle">The Orbit source code is public. You can read the code, open an issue, or follow the blog.</p>
+            <p className="mt-1 mb-0 max-w-xl text-subtle">The Orbit source code is public. You can read the code or open an issue.</p>
           </div>
           <div className="flex flex-wrap gap-3">
             <SiteLink
