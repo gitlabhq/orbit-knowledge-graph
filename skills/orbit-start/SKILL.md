@@ -53,7 +53,8 @@ The user sees only your text, not command output, your thinking, or this skill.
    If it fails, follow the entry for its exit code in <https://docs.gitlab.com/orbit/remote/troubleshooting/>,
    and run `glab orbit status` again. If it still fails, tell the user what failed and stop.
 1. Ask the user for the scope with your question tool. Offer these options:
-   - **This project**: the project from `git remote get-url origin`, when you are in a clone. Recommended.
+   - **This project**: the `path_with_namespace` from `glab repo view -F json`, when you are in a clone. Recommended.
+     Do not read the remote URL with `git remote`: it can contain a token.
    - **Its top-level group**: the first part of that project path, to query across every project in it.
    - **Another project or group**: the user types its full path.
 
@@ -220,7 +221,7 @@ Then count both runs, and show the summary in the same reply:
 |---|---|---|
 | Tool calls | | |
 | API requests | | |
-| Tokens | | |
+| Tokens, without cache reads | | |
 | Tokens per call | | |
 | Time | | |
 | What it searched | | |
@@ -234,6 +235,7 @@ Then count both runs, and show the summary in the same reply:
   Count the baseline between the baseline start and end times.
   Use [Count tool calls and tokens](#count-tool-calls-and-tokens).
 - If the script finds Orbit calls in the baseline window, write `mixed` in the **Without Orbit** column header.
+- Under the table, say that the run without Orbit ran second, in the same session, and that the token rows leave out cache reads.
 Keep it to the table. Do not say which run is better.
 
 Then ask the user what to do next. Offer these options:
@@ -248,15 +250,19 @@ Read the counts from your agent's session transcript, not from memory. Never gue
 
 - **Claude Code**: `~/.claude/projects/*/$CLAUDE_CODE_SESSION_ID.jsonl`. Run the script below once for each run.
 - **Codex**: `~/.codex/sessions/<year>/<month>/<day>/rollout-*.jsonl`. Count the `_call` items, and take tokens from the `token_count` events.
+  The token total grows during the session, so subtract the last total before the start time.
 - **Other agents**: count your tool calls as you make them, and write `Not known` for tokens.
 
 Claude Code script. It adds up `message.usage` once for each `message.id`, because one message can span several lines.
-It counts each `glab` command as one request, or uses the last `requests=N` that the command printed:
+It counts each `glab` command as one request, or uses the last `requests=N` that the command printed.
+Tokens leave out cache reads, which repeat the whole context on every call.
+If `CLAUDE_CODE_SESSION_ID` is not set, use the newest `.jsonl` file in the project's directory.
 
 ```shell
-python3 - <start> <end> ~/.claude/projects/*/"$CLAUDE_CODE_SESSION_ID".jsonl <<'EOF'
+python3 - <start> <end> ~/.claude/projects/*/"${CLAUDE_CODE_SESSION_ID:-<session-id>}".jsonl <<'EOF'
 import json, re, sys
 start, end, path = sys.argv[1][:19], sys.argv[2][:19], sys.argv[3]
+ORBIT = re.compile(r"\bglab\s+orbit\b|\bglab\s+api\s+\S*orbit/|(^|[\s;&|(])orbit\s")
 lines = [json.loads(line) for line in open(path)]
 calls, orbit, usage, counted, reported = 0, 0, {}, {}, {}
 for e in lines:
@@ -267,9 +273,9 @@ for e in lines:
     for c in m.get("content") or []:
         if c.get("type") == "tool_use":
             calls += 1
-            cmd = json.dumps(c.get("input"))
+            cmd = str((c.get("input") or {}).get("command") or "")
             counted[c["id"]] = len(re.findall(r"\bglab\s", cmd))
-            orbit += cmd.count("glab orbit")
+            orbit += int(bool(ORBIT.search(cmd)) or "orbit" in c.get("name", "").lower())
 for e in lines:
     content = (e.get("message") or {}).get("content") if e.get("type") == "user" else None
     for c in content if isinstance(content, list) else []:
@@ -278,9 +284,11 @@ for e in lines:
             if found:
                 reported[c["tool_use_id"]] = int(found[-1])
 api = sum(reported.get(k, v) for k, v in counted.items())
-tokens = sum(sum(v for k, v in u.items() if k.endswith("_tokens") and isinstance(v, int)) for u in usage.values())
+tokens = sum(v for u in usage.values() for k, v in u.items()
+             if k.endswith("_tokens") and k != "cache_read_input_tokens" and isinstance(v, int))
 source = f"{len(reported)} of {calls} calls printed requests=N" if reported else "counted from the commands"
-print(f"tool calls {calls}, API requests {api} ({source}), Orbit calls {orbit}, tokens {tokens}, tokens per call {tokens // max(calls, 1)}")
+print(f"tool calls {calls}, API requests {api} ({source}), Orbit calls {orbit}, "
+      f"tokens without cache reads {tokens}, per call {tokens // max(calls, 1)}")
 EOF
 ```
 
@@ -399,5 +407,6 @@ Read more: <https://docs.gitlab.com/orbit/remote/security/>
 Ask the user what to do next. Offer these options:
 
 1. **Ask another question**: go back to step 3.
-1. **Set up Orbit for every session**: run `glab orbit setup`.
+1. **Set up Orbit for every session**: run `glab orbit setup --dry-run`, and show the user what it would change.
+   `glab orbit setup` needs a terminal, so ask the user to run it, for example with `! glab orbit setup` in Claude Code.
 1. **Done**: end the session.
