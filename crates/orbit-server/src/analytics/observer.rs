@@ -324,6 +324,14 @@ mod tests {
                 "memory_limit",
             ),
             (
+                PipelineError::Execution(
+                    "Code: 36. DB::Exception: Query tree is too big. Maximum: 500000.".into(),
+                ),
+                "execution_error",
+                "caller_error",
+                "too_complex",
+            ),
+            (
                 PipelineError::Execution("x".into()),
                 "execution_error",
                 "server_error",

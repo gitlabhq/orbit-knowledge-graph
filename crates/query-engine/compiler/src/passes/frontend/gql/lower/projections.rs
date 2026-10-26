@@ -446,6 +446,15 @@ impl Lowering {
             }
             QueryType::Traversal => {
                 let PropertyRef { node, property } = match sort.key {
+                    SortKey::Property(key) if self.edges.contains_key(&key.node.value) => {
+                        let relationship = key.node.value;
+                        return Err(invalid(
+                            key.span,
+                            &format!(
+                                "ORDER BY cannot sort by a relationship property; sort by a node property or by type({relationship})"
+                            ),
+                        ));
+                    }
                     SortKey::Property(key) => key.into(),
                     SortKey::RelationshipType(name) => {
                         let relationship = self.relationship_index(name.span, &name)?;

@@ -245,6 +245,12 @@ fn classify_execution_error(msg: &str) -> String {
              for ID fields, strings for text fields, DateTime format for \
              date columns)."
         }
+        Some(ClickHouseLimit::TooComplex) => {
+            "Query is too complex to plan. Each variable-length relationship \
+             multiplies the size of the next one. Try: narrow hop ranges \
+             (for example *1..2), give variable-length relationships a \
+             type, or split the query."
+        }
         _ => "Query execution failed.",
     }
     .to_string()
@@ -433,6 +439,17 @@ mod tests {
         let msg = "Code: 53. DB::Exception: Cannot convert String to DateTime64";
         assert!(
             classify_execution_error(msg).contains("type mismatch"),
+            "got: {}",
+            classify_execution_error(msg)
+        );
+    }
+
+    #[test]
+    fn classify_too_complex() {
+        let msg =
+            "Code: 36. DB::Exception: Query tree is too big. Maximum: 500000. (BAD_ARGUMENTS)";
+        assert!(
+            classify_execution_error(msg).contains("too complex"),
             "got: {}",
             classify_execution_error(msg)
         );
