@@ -47,6 +47,67 @@ cases:
     expect:
       compile_error: is not a valid date
 
+  - name: empty_value_rejected
+    description: An empty string is not a date
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "filters": {"created_at": {"gte": ""}}}]}
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at >= '' RETURN n
+    expect:
+      compile_error: is not a valid date
+
+  - name: day_past_month_end_rejected
+    description: A day past the end of its month is rejected
+    query:
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at >= '2024-06-31' RETURN n
+    expect:
+      compile_error: is not a valid date
+
+  - name: lowercase_separators_rejected
+    description: The T separator and Z suffix must be uppercase
+    query:
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at >= '2024-01-15t10:30:00z' RETURN n
+    expect:
+      compile_error: is not a valid date
+
+  - name: surrounding_text_rejected
+    description: Leading spaces and trailing text around a date are rejected
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "filters": {"created_at": {"gte": " 2024-01-15"}}}]}
+      gql: |
+        MATCH (n:Note {id: 3000}) WHERE n.created_at >= '2024-01-15 garbage' RETURN n
+    expect:
+      compile_error: is not a valid date
+
+  - name: invalid_date_field_value_rejected
+    description: A date field takes the same date formats as a timestamp field
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [4000], "filters": {"due_date": "2024-06-10T10:00:00+02:00"}}]}
+      gql: |
+        MATCH (w:WorkItem {id: 4000}) WHERE w.due_date IN [date('2024-06-10'), date('2024-06-31')] RETURN w
+    expect:
+      compile_error: is not a valid date
+
+  - name: date_field_bound_executes
+    description: A valid date bound on a date field runs and excludes rows with no date
+    query:
+      json: |
+        {"query_type": "traversal", "nodes": [{"id": "w", "entity": "WorkItem", "id_range": {"start": 4000, "end": 4010}, "filters": {"due_date": {"gte": "2024-01-01"}}}]}
+      gql: |
+        MATCH (w:WorkItem) WHERE w.id >= 4000 AND w.id <= 4010 AND w.due_date >= date('2024-01-01') RETURN w
+    expect:
+      node_count: 0
+      nodes:
+        WorkItem:
+          ids: []
+          filters:
+            due_date: { gte: "2024-01-01" }
+
   - name: temporal_literal_on_text_rejected
     description: datetime() and date() compare only with date fields
     query:

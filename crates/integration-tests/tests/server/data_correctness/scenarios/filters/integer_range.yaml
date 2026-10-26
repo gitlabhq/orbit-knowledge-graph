@@ -25,6 +25,14 @@ cases:
     expect:
       compile_error: out of range for a signed 64-bit integer
 
+  - name: octal_above_maximum_rejected
+    description: An octal literal above the signed 64-bit maximum is rejected
+    query:
+      gql: |
+        MATCH (n:Note) WHERE n.noteable_id = 0o1777777777777777777777 RETURN n
+    expect:
+      compile_error: out of range for a signed 64-bit integer
+
   - name: list_element_above_maximum_rejected
     description: Every IN element must fit in a signed 64-bit integer
     query:
@@ -48,6 +56,8 @@ cases:
     query:
       json: |
         {"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "filters": {"state": 18446744073709551615}}]}
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000}) WHERE mr.state = 18446744073709551615 RETURN mr
     expect:
       compile_error: out of range for a signed 64-bit integer
 

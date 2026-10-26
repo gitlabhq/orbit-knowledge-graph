@@ -9,6 +9,14 @@ cases:
     expect:
       compile_error: shortest paths require named relationship types
 
+  - name: legacy_shortest_path_hint_names_a_type
+    description: The legacy shortestPath() syntax points to the typed ANY SHORTEST form
+    query:
+      gql: |
+        MATCH p = shortestPath((start:User {id: 1})-[*1..3]->(`end`:Project {id: 1004})) RETURN p
+    expect:
+      compile_error: -[:CONTAINS*1..3]->
+
   - name: negated_type_condition_rejected
     description: A negated type(r) condition leaves the path open to every other type and is rejected
     query:
