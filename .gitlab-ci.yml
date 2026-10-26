@@ -1,17 +1,24 @@
-# throwaway benchmark pipeline (trident-4915); replaces the project CI on this branch only
 workflow:
   rules:
     - if: $CI_COMMIT_BRANCH =~ /^trident-4915-/
 
-bench-baseline:
+bench-variants:
   image: ubuntu:24.04
   tags: [saas-linux-small-amd64]
   timeout: 2h
   variables:
-    RUNS: "2"
     GIT_DEPTH: "1"
   script:
     - apt-get update -qq && apt-get install -y -qq git curl bc ca-certificates >/dev/null
-    - curl -fsSL https://gitlab.com/api/v4/projects/77960826/packages/generic/orbit-cli/0.159.0/orbit-cli-linux-musl-x86_64.tar.gz | tar xz -C /tmp
-    - export ORBIT_BIN=$(find /tmp -maxdepth 2 -name orbit -type f | head -1); $ORBIT_BIN version
+    - B=https://gitlab.com/api/v4/projects/77960826/packages/generic/orbit-cli/0.159.0
+    - mkdir -p /opt/musl /opt/gnu
+    - curl -fsSL $B/orbit-cli-linux-musl-x86_64.tar.gz | tar xz -C /opt/musl
+    - curl -fsSL $B/orbit-cli-linux-x86_64.tar.gz | tar xz -C /opt/gnu
+    - |
+      export VARIANTS="musl-default|/opt/musl/orbit|X=1
+      gnu-default|/opt/gnu/orbit|X=1
+      musl-rayon1|/opt/musl/orbit|RAYON_NUM_THREADS=1
+      musl-rayon4|/opt/musl/orbit|RAYON_NUM_THREADS=4
+      gnu-default-2|/opt/gnu/orbit|X=1
+      musl-default-2|/opt/musl/orbit|X=1"
     - bash $CI_PROJECT_DIR/ci-bench/bench.sh
