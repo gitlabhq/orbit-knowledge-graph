@@ -15,11 +15,9 @@ GitLab first. GitLab decides who can see what. Orbit compiles the query and
 runs it on a relational store. Then it asks GitLab about the rows that SQL
 alone can't decide, and fills in properties from other sources.
 
-![Callers reach the query service through GitLab and Workhorse, and the query service reads the relational store and other sources](../../../../assets/architecture/query-lifecycle.svg)
+![Callers reach the Orbit query service through GitLab, and the query service reads the relational store, Gitaly, and planned sources](../../../../assets/architecture/query-lifecycle-overview.svg)
 
 ## How it works
-
-![Callers reach the Orbit query service through GitLab, and the query service reads the relational store, Gitaly, and planned sources](../../../../assets/architecture/query-lifecycle-overview.svg)
 
 The caller sends a query to GitLab, which checks who is asking and hands the
 query to Orbit with the caller's namespaces. Orbit compiles the query into SQL
