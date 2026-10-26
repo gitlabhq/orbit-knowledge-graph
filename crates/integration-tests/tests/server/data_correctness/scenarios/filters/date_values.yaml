@@ -254,3 +254,30 @@ cases:
           ids: []
           filters:
             due_date: { in: ["2024-01-15", "2024-01-16"] }
+
+  - name: date_field_compares_with_timestamp_field
+    description: >
+      A date field compares with a timestamp field as midnight of that date. A due date on the
+      day of creation is earlier than the creation time, and a missing due date matches nothing.
+    config:
+      redaction: { allow: { work_item: [99031, 99032, 99033] } }
+      extra_seed:
+        gl_work_item:
+          - { id: 99031, iid: 91, title: Due after creation, state: opened, work_item_type: issue, confidential: false, due_date: "2024-05-01", created_at: "2024-04-01 08:00:00", namespace_id: 100, project_id: 1000, traversal_path: "1/100/1000/" }
+          - { id: 99032, iid: 92, title: Due before creation, state: opened, work_item_type: issue, confidential: false, due_date: "2024-03-01", created_at: "2024-04-01 08:00:00", namespace_id: 100, project_id: 1000, traversal_path: "1/100/1000/" }
+          - { id: 99033, iid: 93, title: Due on creation day, state: opened, work_item_type: issue, confidential: false, due_date: "2024-04-01", created_at: "2024-04-01 08:00:00", namespace_id: 100, project_id: 1000, traversal_path: "1/100/1000/" }
+    query:
+      gql: |
+        MATCH (wi:WorkItem)
+        WHERE wi.id IN [4000, 99031, 99032, 99033] AND wi.due_date >= wi.created_at
+        RETURN wi.title, wi.due_date LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        WorkItem:
+          ids: [99031]
+          absent: [4000, 99032, 99033]
+          filters:
+            due_date: { is_not_null: true }
+          rows:
+            - { id: 99031, due_date: "2024-05-01" }
