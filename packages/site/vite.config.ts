@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { orbitSite } from "@gitlab-org/orbit-site/vite";
 import { defineConfig, mergeConfig, type Plugin } from "vite";
-import { siteMeta, siteRoot, sourcePaths, syncContent, syncGitLab } from "./build/content";
+import { siteMeta, siteRoot, sourcePaths, syncContent, syncTrackers } from "./build/content";
 import { HOME } from "./src/sections";
 
 function syncSources(): Plugin {
@@ -25,7 +25,7 @@ process.env.VITE_ORBIT_RELEASE = process.env.CI_COMMIT_TAG ?? (onDefaultBranch ?
 
 export default defineConfig(async () => {
   syncContent();
-  await syncGitLab();
+  await syncTrackers();
   return mergeConfig(
     orbitSite({
       name: HOME.title,
@@ -41,6 +41,7 @@ export default defineConfig(async () => {
       siteRoot,
       markdown: { project: "gitlab-org/orbit/knowledge-graph", tokenEnv: "ORBIT_MARKDOWN_TOKEN" },
       meta: siteMeta,
+      avatars: (route) => !route.startsWith("content/blog/"),
     }),
     { plugins: [syncSources()] },
   );

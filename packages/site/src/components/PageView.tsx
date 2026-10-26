@@ -1,25 +1,6 @@
-import { Avatar, cn, type Page, type PageBody, PageContent, SiteLink, Toc, useHeadingLinks } from "@gitlab-org/orbit-site";
+import { cn, type Page, type PageBody, PageAuthors, PageContent, SiteLink, Toc, useHeadingLinks } from "@gitlab-org/orbit-site";
 import { type ReactNode, useRef } from "react";
-import type { PageAuthor } from "../../build/avatars";
 import { Sidebar } from "./Sidebar";
-
-function Authors({ authors }: { authors: PageAuthor[] }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs font-semibold uppercase tracking-wide text-subtle">{authors.length > 1 ? "Authors" : "Author"}</span>
-      {authors.map(({ username, avatar }) => (
-        <SiteLink
-          key={username}
-          href={`https://gitlab.com/${username}`}
-          className="flex items-center gap-2 rounded-full border border-border-strong py-0.5 pr-3 pl-0.5 text-xs text-default no-underline hover:bg-hover"
-        >
-          <Avatar name={username} src={avatar} size={22} />
-          @{username}
-        </SiteLink>
-      ))}
-    </div>
-  );
-}
 
 export function PageView({ page, body, sidebar = false, children }: { page: Page; body: PageBody; sidebar?: boolean; children?: ReactNode }) {
   const article = useRef<HTMLElement>(null);
@@ -35,7 +16,7 @@ export function PageView({ page, body, sidebar = false, children }: { page: Page
             {children}
             {!page.meta.post && page.meta.authors.length > 0 && (
               <div className="mt-4">
-                <Authors authors={page.meta.authors} />
+                <PageAuthors authors={page.meta.authors} />
               </div>
             )}
           </header>

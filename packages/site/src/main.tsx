@@ -1,7 +1,6 @@
 import "./styles/site.css";
 import { renderSite, routerOptions } from "@gitlab-org/orbit-site";
 import { createRouter } from "@tanstack/react-router";
-import type { PageAuthor } from "../build/avatars";
 import type { ItemFields, PostFields } from "./roadmap/schema";
 import { routeTree } from "./routeTree.gen";
 
@@ -16,7 +15,6 @@ declare module "@tanstack/react-router" {
 declare module "@gitlab-org/orbit-site" {
   interface PageMeta {
     sourceUrl: string;
-    authors: PageAuthor[];
     lastChanged?: string;
     order?: number;
     words: number;

@@ -5,7 +5,6 @@ import { parseFrontmatter } from "@gitlab-org/orbit-markdown/author";
 import { parse as parseYaml } from "yaml";
 import { itemFields, postFields } from "../src/roadmap/schema";
 import { PAGES_DIR, SECTIONS } from "../src/sections";
-import { fetchAvatars, type PageAuthor } from "./avatars";
 import { fetchTrackers, type Tracker } from "./trackers";
 
 export const siteRoot = join(import.meta.dirname, "..");
@@ -81,7 +80,6 @@ function commitDates(files: string[]) {
 }
 
 let trackers: Record<string, Tracker> = {};
-let authors: Record<string, PageAuthor> = {};
 
 function syncData() {
   rmSync(dataDir, { recursive: true, force: true });
@@ -94,28 +92,14 @@ function syncData() {
   writeFileSync(join(dataDir, "roadmap", "trackers.yaml"), JSON.stringify(trackers));
 }
 
-const frontmatterOf = (file: string) => parseFrontmatter(readFileSync(join(repoRoot, file), "utf8")).frontmatter;
-
-const authorNames = (frontmatter: Record<string, unknown>) =>
-  [frontmatter.authors]
-    .flat()
-    .filter((author): author is string => typeof author === "string")
-    .map((author) => author.replace(/^@/, ""));
-
 const trackingUrls = () =>
   [...sourceFiles()]
     .filter(([, route]) => route.startsWith("roadmap/"))
-    .map(([file]) => frontmatterOf(file).tracking)
+    .map(([file]) => parseFrontmatter(readFileSync(join(repoRoot, file), "utf8")).frontmatter.tracking)
     .filter((url): url is string => typeof url === "string");
 
-const pageAuthors = () =>
-  [...sourceFiles()]
-    .filter(([, route]) => !route.startsWith("content/blog/"))
-    .flatMap(([file]) => authorNames(frontmatterOf(file)));
-
-export async function syncGitLab() {
-  const token = process.env.ORBIT_MARKDOWN_TOKEN;
-  [trackers, authors] = await Promise.all([fetchTrackers(trackingUrls(), token), fetchAvatars(pageAuthors(), token)]);
+export async function syncTrackers() {
+  trackers = await fetchTrackers(trackingUrls(), process.env.ORBIT_MARKDOWN_TOKEN);
   syncData();
 }
 
@@ -143,7 +127,6 @@ export function siteMeta(route: string, frontmatter: Record<string, unknown>, bo
   if (!source) throw new Error(`no source file for the route /${route}`);
   return {
     sourceUrl: `${repoBlob}${source}`,
-    authors: authorNames(frontmatter).map((username) => authors[username] ?? { username }),
     lastChanged: changedOn.get(source),
     order: typeof frontmatter.order === "number" ? frontmatter.order : undefined,
     words: body.split(/\s+/).filter(Boolean).length,
