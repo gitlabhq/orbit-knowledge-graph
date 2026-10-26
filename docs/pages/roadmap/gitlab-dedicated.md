@@ -11,4 +11,4 @@ tracking: https://gitlab.com/groups/gitlab-org/-/work_items/22740
 
 GitLab runs Orbit for you, next to your instance.
 Orbit is in beta today.
-We plan general availability with GitLab 19.5, in FY27 Q4.
+We plan general availability in FY27 Q4.
