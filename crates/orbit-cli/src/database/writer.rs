@@ -87,7 +87,7 @@ impl GraphWriter {
         }
         let list = files
             .iter()
-            .map(|file| format!("'{}'", file.replace('\'', "''")))
+            .map(|file| duckdb_client::sql_lit(file))
             .collect::<Vec<_>>()
             .join(", ");
         let ids = tables
