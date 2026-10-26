@@ -247,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn gql_callers_get_the_gql_manifest() {
+    fn gql_callers_get_the_manifest_source() {
         let json = list_skills(Frontend::JsonDsl).remove(0);
         let tree = get_skill("orbit", Frontend::Gql, false).unwrap();
         assert_eq!(

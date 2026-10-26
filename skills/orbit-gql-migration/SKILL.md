@@ -26,15 +26,19 @@ copy it into long-lived tooling. Public API background:
 glab orbit query "CALL db.schema('Project')"
 ```
 
-If it fails, the instance is too old for GQL. Stop and ask the administrator to
-upgrade GitLab and Orbit. Do not rewrite queries you cannot run.
+- A GQL syntax or compile error means the instance is too old for GQL. Stop and
+  ask the administrator to upgrade GitLab and Orbit. Do not rewrite queries
+  you cannot run.
+- An auth error means the login is missing or expired. Fix it with
+  `glab auth login`, then rerun.
+- A network error or HTTP 429 is not a version problem. Wait and retry.
 
 ## Traps
 
 - `neighbors` defaults to `direction: outgoing`. Map the direction you find,
   and write `->` when it is omitted. `-[...]-` adds the incoming neighbors and
   returns plausible extra rows.
-- A node alias that is a GQL reserved word fails with "expected a variable" at
+- A node alias that is a GQL reserved word (case-insensitive, so `End` fails too) fails with "expected a variable" at
   the alias. Rename it. Likely ones: `end`, `desc`, `order`, `in`, `on`, `is`,
   `as`, `by`, `all`, `any`, `case`, `of`, `set`, `with`, `limit`, `match`.
   `start` is fine.
