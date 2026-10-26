@@ -1,10 +1,5 @@
 # Rebuild and reindex
 
-> [!warning]
-> Rehearsed in staging on 2026-10-26
-> ([evidence](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1428)), not yet
-> run in production. Do staging first.
-
 Set the cluster once. All commands below use it:
 
 ```shell
@@ -17,6 +12,10 @@ ClickHouse console header. You need a user that can drop and create tables in da
 ask an Orbit team member with Service Admin.
 
 ## When to rebuild
+
+A full rebuild in production is for extraordinary cases only. It was
+[rehearsed in staging](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1428)
+on 2026-10-26.
 
 - The graph has wrong data that indexing does not fix.
 - [Disaster recovery](disaster-recovery/README.md), or a move to another ClickHouse service.
