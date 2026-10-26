@@ -54,8 +54,7 @@ For dead-lettered code indexing messages, see [code indexing](code_indexing.md).
 
 > [!warning]
 > Do not delete or purge streams or KV buckets, except as a step of
-> [rebuild and reindex](manual_rebuild.md) or [code indexing](code_indexing.md). The Siphon
-> streams are on the same NATS server.
+> [rebuild and reindex](manual_rebuild.md). The Siphon streams are on the same NATS server.
 
 ## Dedicated
 

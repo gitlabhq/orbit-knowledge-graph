@@ -88,18 +88,6 @@ kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n nats exec deploy/nats-b
 Older releases keep their own `GKG_DEAD_LETTERS_V<release>` stream. Do not send dead letters
 again. After the cause is fixed, [reindex the project](#fix).
 
-### Remove the task from the queue
-
-> [!warning]
-> Do this only when each attempt harms the indexer, for example an OOM kill per attempt.
-> The next push or the backfill can queue the task again. Then page Orbit tier-2.
-
-```shell
-kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n nats exec deploy/nats-box -- nats stream purge GKG_INDEXER_V<release> --subject='v<release>.code.task.indexing.requested.<project_id>.*' -f
-```
-
-Check: the queued task check in [check](#check) prints `No subjects found`.
-
 ## Gitaly or ClickHouse overload
 
 See [Gitaly overload](troubleshooting.md#gitaly-overload).
