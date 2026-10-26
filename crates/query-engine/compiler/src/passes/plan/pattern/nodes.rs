@@ -10,6 +10,7 @@ use super::{NodePlan, Pattern};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::filters::{FilterOwner, ordered_filters};
+use crate::passes::plan::graph::ReadScope;
 use crate::passes::plan::predicates::{
     Column, OutputValue, Predicate, Projection, live, property_filter,
 };
@@ -90,6 +91,14 @@ impl NodePlan {
 
     pub(crate) fn is_pinned(&self) -> bool {
         !self.node_ids.is_empty() || self.id_range.is_some()
+    }
+
+    pub(crate) fn read_scope(&self) -> ReadScope {
+        match (self.has_traversal_path, self.high_fan_out) {
+            (false, _) => ReadScope::Unscoped,
+            (true, false) => ReadScope::Scoped,
+            (true, true) => ReadScope::HighFanOut,
+        }
     }
 
     pub(crate) fn id_predicates(&self, column: Column) -> Vec<Predicate> {

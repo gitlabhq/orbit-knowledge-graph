@@ -174,6 +174,13 @@ impl RelationNode {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum ReadScope {
+    Unscoped,
+    Scoped,
+    HighFanOut,
+}
+
 #[derive(PartialEq)]
 struct ReadKey {
     table: String,
@@ -181,7 +188,7 @@ struct ReadKey {
     owner: ReadOwner,
     key: Vec<String>,
     predicates: Vec<Predicate>,
-    final_for_mutable: bool,
+    scope: ReadScope,
 }
 
 pub struct RelationGraph {
@@ -276,7 +283,7 @@ impl RelationGraph {
         owner: ReadOwner,
         key: &[String],
         predicates: Vec<Predicate>,
-        final_for_mutable: bool,
+        scope: ReadScope,
     ) -> RelationId {
         let read = ReadKey {
             table: table.to_string(),
@@ -284,12 +291,12 @@ impl RelationGraph {
             owner: owner.clone(),
             key: key.to_vec(),
             predicates: predicates.clone(),
-            final_for_mutable,
+            scope,
         };
         if let Some((_, id)) = self.reads.iter().find(|(planned, _)| *planned == read) {
             return *id;
         }
-        let id = self.plan_current_rows(table, alias, owner, key, predicates, final_for_mutable);
+        let id = self.plan_current_rows(table, alias, owner, key, predicates, scope);
         self.reads.push((read, id));
         id
     }
@@ -301,13 +308,18 @@ impl RelationGraph {
         owner: ReadOwner,
         key: &[String],
         predicates: Vec<Predicate>,
-        final_for_mutable: bool,
+        scope: ReadScope,
     ) -> RelationId {
         let bounds_scan = |predicate: &Predicate| {
             predicate.is_selective()
                 && (!predicate.is_text_match() || predicate.filters_sort_key(key, true))
         };
-        let mutable_selective = final_for_mutable
+        let final_allowed = match scope {
+            ReadScope::Unscoped => false,
+            ReadScope::Scoped => true,
+            ReadScope::HighFanOut => !predicates.iter().any(Predicate::narrows_keys),
+        };
+        let mutable_selective = final_allowed
             && predicates.iter().any(|predicate| {
                 predicate.is_selective() && !predicate.filters_sort_key(key, true)
             });

@@ -9,7 +9,7 @@ use super::super::{EdgeRelation, Pattern};
 use super::{IdSet, RelationBuilder};
 use crate::constants::*;
 use crate::error::{QueryError, Result};
-use crate::passes::plan::graph::{ReadOwner, RelationGraph, RelationId};
+use crate::passes::plan::graph::{ReadOwner, ReadScope, RelationGraph, RelationId};
 use crate::passes::plan::predicates::*;
 use crate::passes::plan::sort_key;
 
@@ -223,7 +223,7 @@ pub(super) fn current_edge_rows<M: OrbitQueryModel + ?Sized>(
             owner,
             sort_key(model, table)?,
             predicates,
-            true,
+            ReadScope::Scoped,
         ));
     }
     edge_union(
@@ -238,7 +238,7 @@ pub(super) fn current_edge_rows<M: OrbitQueryModel + ?Sized>(
                 owner.clone(),
                 sort_key(model, table)?,
                 predicates.clone(),
-                true,
+                ReadScope::Scoped,
             ))
         },
     )

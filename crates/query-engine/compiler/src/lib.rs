@@ -1349,7 +1349,7 @@ mod tests {
             assert!(pinned.contains(setting), "{pinned}");
         }
         let fan_out = compile_sql(
-            r#"{"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"finished_at":{"gte":"2026-10-10"}}}],"limit":10}"#,
+            r#"{"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"pipeline_id":7,"finished_at":{"gte":"2026-10-10"}}}],"limit":10}"#,
         );
         assert!(!fan_out.contains(" FINAL"), "{fan_out}");
         assert!(!fan_out.contains("use_skip_indexes_if_final"), "{fan_out}");

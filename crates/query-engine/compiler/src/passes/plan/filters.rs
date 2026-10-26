@@ -22,6 +22,7 @@ pub struct BoundFilter {
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
     pub namespace_anchor: bool,
+    pub anchor: bool,
     pub in_sort_key: bool,
     pub text_indexed: bool,
     pub unique: bool,
@@ -53,6 +54,7 @@ impl BoundFilter {
             text_indexed: self.text_indexed,
             unique: self.unique,
             immutable: self.immutable,
+            anchor: self.anchor,
             null_as_epoch: self.null_as_epoch,
         }
     }
@@ -132,6 +134,30 @@ pub fn bind_filter(
     let column = property_id
         .and_then(|property| model.property_column(property))
         .unwrap_or(property);
+    let namespace_anchor = model.anchor_foreign_keys().contains_key(column);
+    let lookup_key = match owner {
+        FilterOwner::Entity(entity) => [
+            ontology::TraversalPathKind::Id,
+            ontology::TraversalPathKind::FullPath,
+        ]
+        .into_iter()
+        .any(|kind| {
+            model
+                .query_backend()
+                .traversal_path_lookup(*entity, kind)
+                .is_some_and(|lookup| Some(lookup.property) == property_id)
+        }),
+        FilterOwner::Tables(_) => false,
+    };
+    let foreign_key = property_id.is_some_and(|property| {
+        model.graph().variants().any(|variant| {
+            model
+                .query_backend()
+                .variant_route(variant.id)
+                .and_then(|route| route.foreign_key)
+                .is_some_and(|foreign_key| foreign_key.property == property)
+        })
+    });
     BoundFilter {
         filter,
         property: property_id,
@@ -140,7 +166,8 @@ pub fn bind_filter(
             .map(|property| model.property_selectivity(property))
             .or_else(|| data_type.map(ontology::FieldSelectivity::from_data_type))
             .unwrap_or_default(),
-        namespace_anchor: model.anchor_foreign_keys().contains_key(column),
+        namespace_anchor,
+        anchor: namespace_anchor || lookup_key || foreign_key,
         in_sort_key,
         text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),
         unique: property_id.is_some_and(|property| model.property_unique(property)),
