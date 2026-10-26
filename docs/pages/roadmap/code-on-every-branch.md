@@ -1,9 +1,9 @@
 ---
-title: Code indexing on every branch and commit with content
+title: "Orbit next (Code search, branches + commits, all languages)"
 description: Index code in all languages on active branches and recent commits, and search file content in queries.
 theme: code
-status: in-progress
-start: FY27 Q3
+status: planned
+start: FY27 Q4
 end: FY28 Q1
 tracking: https://gitlab.com/groups/gitlab-org/orbit/-/work_items/16
 ---

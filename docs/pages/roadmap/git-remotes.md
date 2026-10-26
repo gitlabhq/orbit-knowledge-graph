@@ -1,6 +1,6 @@
 ---
-title: Code outside GitLab.com
-description: Add code from other GitLab instances, GitHub, Bitbucket, and other Git remotes to the same graph.
+title: Code indexing for repositories outside GitLab
+description: Index repositories from GitHub, Bitbucket, other GitLab instances, and other Git hosts into the same graph.
 theme: data
 status: planned
 start: FY28 Q1
