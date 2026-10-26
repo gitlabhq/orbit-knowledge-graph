@@ -1,1 +1,0 @@
-{"query":{"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[9970]},{"id":"p","entity":"Project","columns":["id","full_path"]}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","hops":[1,2]}],"limit":50}}

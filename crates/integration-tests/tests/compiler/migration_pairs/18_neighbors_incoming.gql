@@ -1,3 +1,0 @@
-MATCH (p:Project {id: 278964})<-[:IN_PROJECT]-(n)
-RETURN p, n
-LIMIT 10

@@ -1,3 +1,0 @@
-MATCH (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project)
-RETURN p.id, p.full_path
-LIMIT 50

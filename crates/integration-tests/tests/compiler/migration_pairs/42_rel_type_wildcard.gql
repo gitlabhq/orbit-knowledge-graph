@@ -1,3 +1,0 @@
-MATCH (mr:MergeRequest {id: 482908721})-->(p:Project)
-RETURN mr.iid, p.id
-LIMIT 10

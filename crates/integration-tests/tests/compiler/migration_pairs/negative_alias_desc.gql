@@ -1,3 +1,0 @@
-MATCH (u:User {id: 1})-[:AUTHORED]->(desc:MergeRequest)
-RETURN desc.iid
-LIMIT 5

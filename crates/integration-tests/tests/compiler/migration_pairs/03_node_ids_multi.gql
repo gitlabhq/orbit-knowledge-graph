@@ -1,4 +1,0 @@
-MATCH (u:User)
-WHERE u.id IN [1, 2, 3]
-RETURN u.id, u.username
-LIMIT 10

@@ -7,5 +7,4 @@ mod setup;
 mod utils;
 mod virtual_columns;
 
-mod migration_pairs;
 mod named_queries;

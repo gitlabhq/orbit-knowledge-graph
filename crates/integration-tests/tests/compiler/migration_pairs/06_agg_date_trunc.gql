@@ -1,4 +1,0 @@
-MATCH (pl:Pipeline {project_id: 278964, status: 'success'})
-RETURN date_trunc('month', pl.created_at) AS month, count(pl) AS runs, avg(pl.duration) AS avg_dur
-ORDER BY month DESC
-LIMIT 12

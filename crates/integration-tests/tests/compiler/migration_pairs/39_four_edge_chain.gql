@@ -1,3 +1,0 @@
-MATCH (a:Definition {id: 1})-[:CALLS]->(b:Definition)-[:CALLS]->(c:Definition)-[:CALLS]->(d:Definition)-[:CALLS]->(e:Definition)
-RETURN e.name
-LIMIT 10

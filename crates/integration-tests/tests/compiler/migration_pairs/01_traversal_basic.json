@@ -1,1 +1,0 @@
-{"query":{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["iid","title","state"],"filters":{"state":"merged"}},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"order_by":"-mr.created_at","limit":5}}

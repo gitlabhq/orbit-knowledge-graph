@@ -1,1 +1,0 @@
-{"query":{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username"],"filters":{"username":"sytses"}},{"id":"mr","entity":"MergeRequest","columns":["iid"]},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"},{"type":"IN_PROJECT","from":"mr","to":"p"}],"limit":5}}

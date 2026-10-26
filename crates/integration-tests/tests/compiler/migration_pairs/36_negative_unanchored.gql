@@ -1,3 +1,0 @@
-MATCH (mr:MergeRequest)
-RETURN mr.iid
-LIMIT 10

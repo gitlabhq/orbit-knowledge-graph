@@ -1,1 +1,0 @@
-{"query":{"query_type":"traversal","nodes":[{"id":"p","entity":"Project","node_ids":[278964]},{"id":"mr","entity":"MergeRequest","columns":["iid"]}],"relationships":[{"type":"IN_PROJECT","from":"p","to":"mr","direction":"incoming"}],"limit":5}}

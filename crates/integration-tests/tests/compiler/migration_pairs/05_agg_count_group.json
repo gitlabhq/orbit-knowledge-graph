@@ -1,1 +1,0 @@
-{"query":{"query_type":"aggregation","nodes":[{"id":"mr","entity":"MergeRequest"},{"id":"p","entity":"Project","node_ids":[278964]}],"relationships":[{"type":"IN_PROJECT","from":"mr","to":"p"}],"group_by":["mr.state"],"aggregations":[{"count":"mr","as":"mrs"}],"aggregation_sort":"-mrs","limit":10}}

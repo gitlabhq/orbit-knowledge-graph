@@ -1,4 +1,0 @@
-MATCH (mr:MergeRequest {project_id: 278964})
-RETURN mr.iid
-ORDER BY mr.created_at
-LIMIT 5

@@ -1,3 +1,0 @@
-MATCH path = ANY SHORTEST (start:Group {id: 9970})-[:CONTAINS*1..2]->(end:Project {id: 278964})
-RETURN path
-LIMIT 5

@@ -1,4 +1,0 @@
-MATCH (mr:MergeRequest {project_id: 278964})
-WHERE mr.state = 'merged' AND mr.merged_at IS NOT NULL
-RETURN mr.iid
-LIMIT 10

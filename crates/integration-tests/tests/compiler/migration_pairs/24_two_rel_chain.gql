@@ -1,3 +1,0 @@
-MATCH (u:User {username: 'sytses'})-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964})
-RETURN u.username, mr.iid
-LIMIT 5

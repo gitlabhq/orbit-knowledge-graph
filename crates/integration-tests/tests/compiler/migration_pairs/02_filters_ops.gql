@@ -1,4 +1,0 @@
-MATCH (mr:MergeRequest {project_id: 278964})
-WHERE mr.state IN ['opened', 'merged'] AND mr.title CONTAINS 'flaky' AND mr.created_at >= '2026-01-01' AND mr.merged_at IS NOT NULL
-RETURN mr.iid, mr.title, mr.state
-LIMIT 10

@@ -1,1 +1,0 @@
-{"query":{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2,3],"columns":["id","username"]}],"limit":10}}

@@ -1,4 +1,0 @@
-MATCH (pl:Pipeline {project_id: 278964})
-WHERE pl.duration > 60 AND pl.duration <= 600 AND pl.created_at < '2026-10-01'
-RETURN pl.id, pl.duration
-LIMIT 10

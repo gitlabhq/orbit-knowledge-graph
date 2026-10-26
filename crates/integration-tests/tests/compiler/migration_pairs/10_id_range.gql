@@ -1,4 +1,0 @@
-MATCH (mr:MergeRequest)
-WHERE mr.id >= 100 AND mr.id <= 200
-RETURN mr.iid
-LIMIT 10

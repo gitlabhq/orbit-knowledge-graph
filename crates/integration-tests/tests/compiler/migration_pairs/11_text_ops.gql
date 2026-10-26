@@ -1,4 +1,0 @@
-MATCH (mr:MergeRequest {project_id: 278964})
-WHERE mr.title STARTS WITH 'Fix' AND mr.title ENDS WITH 'spec' AND mr.merged_at IS NULL
-RETURN mr.iid, mr.title
-LIMIT 10

@@ -1,11 +1,12 @@
 ---
 name: orbit-gql-migration
-description: Converts legacy Orbit JSON queries to Orbit GQL (read-only Cypher) and checks each result against your graph. Legacy queries are objects with query_type, nodes, relationships, or aggregations. Use when you find them in repos, runbooks, scripts, docs, or agent skills. Also use for a `glab orbit query --file` call with a JSON body, or a once-working query that fails with HTTP 400 compile_error. Skip for writing new queries (use the orbit skill).
+description: Converts and migrates legacy Orbit JSON DSL queries to Orbit GQL, then checks each converted query read-only against the graph. Legacy queries are objects with query_type, nodes, relationships, or aggregations. Use when a repo, runbook, script, doc, or agent skill contains them. Also use when a `glab orbit query --file` envelope or API body has an object `query`. Also use when a legacy JSON query fails with HTTP 400 compile_error. Do not use for writing new GQL queries (use the orbit skill).
 version: 0.1.0
 license: MIT
-compatibility: Requires glab with the orbit commands and a GitLab instance with Orbit enabled in GQL mode.
+compatibility: Requires glab with the orbit commands and a GitLab instance with Orbit enabled.
 metadata:
   audience: developers
+  keywords: orbit, gql, migration, json, dsl, deprecated, glab
   workflow: ai
   source-project: gitlab-org/orbit/knowledge-graph
   source-path: skills/orbit-gql-migration
@@ -13,39 +14,44 @@ metadata:
 
 # Migrate legacy Orbit JSON queries to GQL
 
-The Orbit JSON query language is deprecated and being removed. GitLab.com
-already rejects it. This skill converts legacy JSON queries to GQL. It does not
-teach the JSON language and never suggests it still works. It needs only the
-`orbit` skill (`glab orbit skills get orbit`) for GQL syntax. The tables below
-let you recognize each legacy construct without a JSON reference. Public API
-background: <https://docs.gitlab.com/api/orbit/>.
+The Orbit JSON query language is deprecated and removed. Convert each legacy
+query to GQL (`glab orbit skills get orbit` has the syntax), run it, and keep
+the GQL. This skill is a temporary migration aid and will be removed. Do not
+copy it into long-lived tooling. Public API background:
+<https://docs.gitlab.com/api/orbit/>.
 
-This is a temporary migration aid. It will be removed once the JSON language
-is gone from supported releases. Do not copy it into long-lived tooling.
-Convert your queries once and keep the GQL.
-
-## Step 0: confirm your instance speaks GQL
+## Step 0: confirm the instance accepts GQL
 
 ```shell
 glab orbit query "CALL db.schema('Project')"
 ```
 
-- Success: the instance is in GQL mode. Continue.
-- An error, or the `orbit` skill's own text still shows JSON queries: your
-  instance is not on GQL yet. Self-managed instances can run an older release,
-  or have GQL query mode switched off. Converted queries would be rejected.
-  Stop and tell the user to ask their administrator to enable GQL query mode or
-  upgrade Orbit. Do not rewrite queries you cannot run.
+If it fails, the instance is too old for GQL. Stop and ask the administrator to
+upgrade GitLab and Orbit. Do not rewrite queries you cannot run.
+
+## Traps
+
+- `neighbors` defaults to `direction: outgoing`. Map the direction you find,
+  and write `->` when it is omitted. `-[...]-` adds the incoming neighbors and
+  returns plausible extra rows.
+- A node alias that is a GQL reserved word fails with "expected a variable" at
+  the alias. Rename it. Likely ones: `end`, `desc`, `order`, `in`, `on`, `is`,
+  `as`, `by`, `all`, `any`, `case`, `of`, `set`, `with`, `limit`, `match`.
+  `start` is fine.
+- The query lives in an envelope. Replace the object under `query` with a
+  string of GQL and keep the other envelope fields. Never replace the whole
+  file with bare GQL, because `--file` rejects it.
+- Some constructs have no GQL form. See "Rejected constructs".
 
 ## Workflow
 
-1. Find legacy queries: `rg -l '"query_type"\s*:'`, code fences tagged
-   `json orbit-query`, `--file` payloads or heredocs with `nodes` /
-   `relationships`, and skills or prompts that embed them.
-2. Convert one query at a time with the mapping table.
-3. Run it (read-only) and check it with "Validate a conversion" below.
-4. Report queries with no equivalent (see "Rejected constructs"); leave them
-   for manual rework instead of guessing.
+1. Find legacy queries: `rg -l '"query_type"\s*:'`, `--file` payloads,
+   heredocs, API or MCP call bodies with `nodes` or `relationships`, and skills
+   or prompts that embed them. Skip output files you wrote yourself.
+2. Convert one query at a time with the mapping.
+3. Validate it (below).
+4. Report queries with no equivalent. Leave them for manual rework instead of
+   guessing.
 
 ## Validate a conversion
 
@@ -54,30 +60,31 @@ Every step is read-only.
 1. **Run it.** Use raw output so the shape is easy to inspect:
 
    ```shell
-   glab orbit query --response-format raw "<gql>" > out.json
-   jq -c '{query_type, row_count, pagination: .result.pagination}' out.json
+   glab orbit query --response-format raw "<gql>" > /tmp/out.json
+   jq -c '{query_type, row_count, pagination: .result.pagination}' /tmp/out.json
    ```
 
-   Exit 0 means it parsed and ran. HTTP 400 `compile_error` names the line and
-   column; fix it and rerun.
-2. **Compare with what the old query returned.** If you saved old output, compare
-   row count, the property names, and the IDs of the first rows. If you did not,
-   use an independent source for the same question, such as the REST API:
+   Exit 0 means it parsed and ran. HTTP 400 `compile_error` usually names the
+   line and column. Fix it and rerun.
+2. **Compare with what the old query returned.** If you saved old output,
+   compare row count, property names, and the IDs of the first rows. If you
+   did not, use an independent source for the same question, such as the REST
+   API. Five newest merged MRs of a project:
 
    ```shell
-   # the five newest merged MRs of a project, by internal ID
-   jq -c '[.result.nodes[] | select(.type=="MergeRequest") | .iid]' out.json
+   glab orbit query --response-format raw "MATCH (mr:MergeRequest {project_id: <id>, state: 'merged'}) RETURN mr.iid ORDER BY mr.created_at DESC LIMIT 5" \
+     | jq -c '[.result.nodes[] | select(.type=="MergeRequest") | .iid]'
    glab api 'projects/<id>/merge_requests?state=merged&order_by=created_at&sort=desc&per_page=5' | jq -c '[.[].iid]'
    ```
 
    For counts, compare each group with the REST `X-Total` header
    (`glab api -i 'projects/<id>/merge_requests?state=opened&per_page=1'`).
    Small differences can come from indexing lag; large ones mean the
-   conversion is wrong. The REST API omits `X-Total` above 10,000 rows.
-   On very large projects the counts can also drift by a few percent. Use
-   this check on small and medium projects.
-3. **Check completeness.** `pagination.has_more` true means more rows exist than
-   `LIMIT` returned. That is expected for a capped list; compare only the
+   conversion is wrong. The REST API omits `X-Total` above 10,000 rows. On very
+   large projects the counts can also drift by a few percent. Use this check on
+   small and medium projects.
+3. **Check completeness.** `pagination.has_more` true means more rows exist
+   than `LIMIT` returned. That is expected for a capped list. Compare only the
    rows you asked for.
 4. **Run a control.** Change one filter value to a nonsense value and confirm
    the row count drops to 0. A query that returns the same rows either way is
@@ -89,6 +96,10 @@ Every step is read-only.
 
 | Legacy JSON construct | GQL |
 | --- | --- |
+| `{"query": {...}, ...}` envelope | `{"query": "<GQL text>", ...}`; keep other fields such as `response_format` |
+| node without `columns` | `RETURN n` (default columns) |
+| `options` (`dynamic_columns`, `include_debug_sql`) | drop it; it never changes semantics. Report `dynamic_columns` use |
+| `id_property` | no known equivalent; report for manual rework |
 | `query_type` | inferred from the pattern; drop it |
 | `nodes[].id` / `entity` | `(id:Entity)`; rename ids that are GQL reserved words, e.g. `end` |
 | `node_ids: [1]` | `{id: 1}` |
@@ -118,12 +129,12 @@ Every step is read-only.
 | `group_by: ["u"]` (node) | `RETURN u{.id, .username}` |
 | `group_by [{key, truncate, as}]` | `date_trunc('month', n.p) AS as` |
 | `aggregation_sort: "-x"` | `ORDER BY x DESC` |
-| `path_finding` | `MATCH path = ANY SHORTEST (a:L {id: 1})-[:T*1..N]->(b:L {id: 2}) RETURN path` |
-| `neighbors` | `MATCH (c:L {id: 1})-[:A\|B]-(n) RETURN c, n` |
+| `path_finding` `{from, to, max_depth, rel_types}` | `MATCH path = ANY SHORTEST (a:L {id: 1})-[:T\|U*1..max_depth]->(b:L {id: 2}) RETURN path`; GQL requires named types, so `rel_types` is mandatory |
+| `neighbors` `{direction, rel_types}` | outgoing (default) `(c:L {id: 1})-[:A\|B]->(n)`, incoming `<-[:A\|B]-`, both `-[:A\|B]-`, then `RETURN c, n`; omitted `rel_types` is `(c)-->(n)` |
 
-## Worked example
+## Worked examples
 
-Legacy:
+Aggregation. Legacy:
 
 ```json
 {"query": {"query_type": "aggregation",
@@ -144,6 +155,22 @@ ORDER BY mrs DESC
 LIMIT 10
 ```
 
+Neighbors with no `direction`, so outgoing. Legacy:
+
+```json
+{"query": {"query_type": "neighbors",
+  "nodes": [{"id": "mr", "entity": "MergeRequest", "node_ids": [482908721]}],
+  "neighbors": {"rel_types": ["AUTHORED", "IN_PROJECT"]}, "limit": 25}}
+```
+
+GQL:
+
+```gql
+MATCH (mr:MergeRequest {id: 482908721})-[:AUTHORED|IN_PROJECT]->(n)
+RETURN mr, n
+LIMIT 25
+```
+
 ## Rejected constructs and workarounds
 
 | Construct | What to do |
@@ -156,7 +183,6 @@ LIMIT 10
 | `direction: both` on a traversal relationship | no equivalent. Run one query per direction, or a neighbors-style query |
 | relationship `filters` on a variable-length hop | no equivalent (GQL rejects it). Any rewrite, such as a chain of filtered single-hop edges, changes the plan and result shape, so check its results by hand |
 | postfix `n.p NOT IN [...]` | `NOT n.p IN [...]` |
-| node alias that is a GQL reserved word (`end`, `desc`, ...) | rename the alias |
 
 ## Pitfalls
 

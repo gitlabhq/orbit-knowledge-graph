@@ -1,3 +1,0 @@
-MATCH (p:Project {id: 278964})<-[:IN_PROJECT]-(mr:MergeRequest)
-RETURN mr.iid
-LIMIT 5

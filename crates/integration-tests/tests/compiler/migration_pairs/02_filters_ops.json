@@ -1,1 +1,0 @@
-{"query":{"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","columns":["iid","title","state"],"filters":{"project_id":278964,"state":{"in":["opened","merged"]},"title":{"contains":"flaky"},"created_at":{"gte":"2026-01-01"},"merged_at":{"is_null":false}}}],"limit":10}}

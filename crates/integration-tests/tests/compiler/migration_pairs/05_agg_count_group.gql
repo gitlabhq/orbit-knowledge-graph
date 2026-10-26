@@ -1,4 +1,0 @@
-MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 278964})
-RETURN mr.state, count(mr) AS mrs
-ORDER BY mrs DESC
-LIMIT 10

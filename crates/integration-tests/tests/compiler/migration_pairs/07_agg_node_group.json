@@ -1,1 +1,0 @@
-{"query":{"query_type":"aggregation","nodes":[{"id":"u","entity":"User","columns":["id","username"]},{"id":"mr","entity":"MergeRequest","filters":{"project_id":278964,"state":"merged"}}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"group_by":["u"],"aggregations":[{"count":"mr","as":"mr_count"}],"aggregation_sort":"-mr_count","limit":20}}

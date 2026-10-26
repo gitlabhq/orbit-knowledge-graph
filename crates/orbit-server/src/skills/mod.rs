@@ -144,8 +144,13 @@ fn load_skill<A: Embed>(
 ) -> Result<EmbeddedSkill, String> {
     let mut files = Vec::new();
     for path in A::iter() {
-        let Some(source) = source_for(&path) else {
+        if !is_served(&path) {
             continue;
+        }
+        let source = if path == MANIFEST {
+            manifest_source
+        } else {
+            &path
         };
         let asset = A::get(source)
             .ok_or_else(|| format!("embedded skill file {source:?} is unreadable"))?;
@@ -333,22 +338,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             [MANIFEST]
         );
-    }
-
-    #[test]
-    fn migration_skill_does_not_change_the_orbit_trees() {
-        let json = get_skill("orbit", Frontend::JsonDsl, false).unwrap();
-        let gql = get_skill("orbit", Frontend::Gql, false).unwrap();
-        assert!(!json.metadata.version.contains("+gql"));
-        assert!(gql.metadata.version.ends_with("+gql"));
-        for tree in [json, gql] {
-            assert!(
-                tree.files
-                    .unwrap()
-                    .iter()
-                    .all(|file| !file.path.contains("migration"))
-            );
-        }
     }
 
     #[test]

@@ -1,3 +1,0 @@
-MATCH (mr:MergeRequest {project_id: 278964})
-RETURN properties(mr)
-LIMIT 5
