@@ -114,13 +114,8 @@ fn check_value_type(value: &serde_json::Value, expected: DataType) -> Option<Str
                 return Some(format!("is {}, not a string", json_type_name(value)));
             }
         }
-        DataType::Date => match value.as_str() {
-            Some(text) if is_calendar_date(text) => {}
-            Some(_) => return Some("is not a valid date; use YYYY-MM-DD".to_string()),
-            None => return Some(format!("is {}, not a string", json_type_name(value))),
-        },
-        DataType::DateTime => match value.as_str() {
-            Some(text) if is_calendar_date(text) || is_timestamp(text) => {}
+        DataType::Date | DataType::DateTime => match value.as_str() {
+            Some(text) if is_date_literal(text) => {}
             Some(_) => {
                 return Some(
                     "is not a valid date; use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS[.ffffff][Z]"
@@ -257,19 +252,17 @@ fn at_or_before_epoch(value: &str) -> bool {
     calendar_prefix(value).is_some_and(|date| date <= "1970-01-01")
 }
 
-fn is_calendar_date(value: &str) -> bool {
-    let value = value.strip_suffix('Z').unwrap_or(value);
-    value.len() == 10
-        && calendar_prefix(value).is_some()
-        && chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
-}
-
-fn is_timestamp(value: &str) -> bool {
+/// Matches what the ClickHouse HTTP parameter parser accepts once the client strips a trailing `Z`.
+fn is_date_literal(value: &str) -> bool {
     let value = value.strip_suffix('Z').unwrap_or(value);
     calendar_prefix(value).is_some()
-        && ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S%.f"]
-            .iter()
-            .any(|format| chrono::NaiveDateTime::parse_from_str(value, format).is_ok())
+        && if value.len() == 10 {
+            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
+        } else {
+            ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S%.f"]
+                .iter()
+                .any(|format| chrono::NaiveDateTime::parse_from_str(value, format).is_ok())
+        }
 }
 
 fn is_aggregate_scalar(data_type: DataType) -> bool {

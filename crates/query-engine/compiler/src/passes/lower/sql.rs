@@ -222,8 +222,7 @@ pub fn parameter_type(dt: Option<&ontology::DataType>) -> SqlType {
         Some(ontology::DataType::Int) => SqlType::Int64,
         Some(ontology::DataType::Float) => SqlType::Float64,
         Some(ontology::DataType::Bool) => SqlType::Bool,
-        Some(ontology::DataType::Date) => SqlType::Date,
-        Some(ontology::DataType::DateTime) => SqlType::Timestamp {
+        Some(ontology::DataType::DateTime | ontology::DataType::Date) => SqlType::Timestamp {
             precision: 6,
             timezone: Some(TimeZone::Utc),
         },

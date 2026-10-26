@@ -1,4 +1,4 @@
-description: Admin wildcard columns leave out admin-only fields, which appear only when named
+description: Admin wildcard columns include admin-only fields with values
 
 config:
   security: admin
@@ -19,5 +19,4 @@ expect:
     User:
       ids: [1]
       rows:
-        - { id: 1, username: alice }
-      prop_absent: [is_admin, is_auditor]
+        - { id: 1, is_admin: false, is_auditor: false }

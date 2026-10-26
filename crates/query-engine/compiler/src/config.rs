@@ -73,7 +73,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
         }
         restrict {
             reads_env: [data_model, security_ctx]
-            reads_state: [input]
+            mutates: [input]
         }
         plan_clickhouse {
             reads_env: [data_model]
@@ -236,8 +236,11 @@ where
     C: CompilerCtx,
     C::Model: query_data_model::OrbitQueryModel,
 {
-    let input = require(ctx.input().as_ref(), "input")?;
-    restrict::restrict(input, ctx.data_model(), ctx.security_ctx())
+    let security_ctx = ctx.security_ctx().clone();
+    let mut input = require(ctx.take_input(), "input")?;
+    restrict::restrict(&mut input, ctx.data_model(), &security_ctx)?;
+    ctx.set_input(input);
+    Ok(())
 }
 
 fn plan_clickhouse(

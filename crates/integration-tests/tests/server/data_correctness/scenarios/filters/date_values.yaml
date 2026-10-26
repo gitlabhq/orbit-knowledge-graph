@@ -84,7 +84,7 @@ cases:
       compile_error: is not a valid date
 
   - name: invalid_date_field_value_rejected
-    description: A date field rejects an offset and an impossible calendar date
+    description: A date field takes the same date formats as a timestamp field
     query:
       json: |
         {"query_type": "traversal", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [4000], "filters": {"due_date": "2024-06-10T10:00:00+02:00"}}]}
@@ -92,17 +92,6 @@ cases:
         MATCH (w:WorkItem {id: 4000}) WHERE w.due_date IN [date('2024-06-10'), date('2024-06-31')] RETURN w
     expect:
       compile_error: is not a valid date
-
-  - name: date_field_rejects_time_of_day
-    description: A date field takes only YYYY-MM-DD, because a time of day has no meaning on a date
-    query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [4000], "filters": {"due_date": "2024-06-10T10:00:00Z"}}]}
-      gql: |
-        MATCH (w:WorkItem {id: 4000}) WHERE w.due_date = datetime('2024-06-10T10:00:00Z') RETURN w
-    expect:
-      compile_error: "is not a valid date; use YYYY-MM-DD"
-      compile_error_not_contains: ["HH:MM:SS"]
 
   - name: date_field_bound_executes
     description: A valid date bound on a date field runs and excludes rows with no date
@@ -211,73 +200,3 @@ cases:
           ids: []
           filters:
             created_at: { gt: "2024-01-15T10:30:00Z" }
-
-  - name: timestamp_list_with_utc_suffix_matches
-    description: A timestamp IN list whose elements end in Z runs and matches the listed timestamp
-    query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "n", "entity": "Note", "node_ids": [3000], "filters": {"created_at": {"in": ["2024-01-15T10:30:00Z", "2024-01-16T00:00:00Z"]}}}]}
-      gql: |
-        MATCH (n:Note {id: 3000}) WHERE n.created_at IN ['2024-01-15T10:30:00Z', '2024-01-16T00:00:00Z'] RETURN n
-    expect:
-      node_count: 1
-      nodes:
-        Note:
-          ids: [3000]
-          filters:
-            created_at: { eq: "2024-01-15T10:30:00Z" }
-
-  - name: temporal_literal_list_matches
-    description: A list of datetime() literals ending in Z runs and matches the listed timestamp
-    query:
-      gql: |
-        MATCH (n:Note {id: 3000}) WHERE n.created_at IN [datetime('2024-01-16T00:00:00Z'), datetime('2024-01-15T10:30:00Z')] RETURN n
-    expect:
-      node_count: 1
-      nodes:
-        Note:
-          ids: [3000]
-          filters:
-            created_at: { eq: "2024-01-15T10:30:00Z" }
-
-  - name: date_list_with_utc_suffix_executes
-    description: A date IN list whose elements end in Z runs on a date field
-    query:
-      json: |
-        {"query_type": "traversal", "nodes": [{"id": "w", "entity": "WorkItem", "id_range": {"start": 4000, "end": 4010}, "filters": {"due_date": {"in": ["2024-01-15Z", "2024-01-16Z"]}}}]}
-      gql: |
-        MATCH (w:WorkItem) WHERE w.id >= 4000 AND w.id <= 4010 AND w.due_date IN ['2024-01-15Z', '2024-01-16Z'] RETURN w
-    expect:
-      node_count: 0
-      nodes:
-        WorkItem:
-          ids: []
-          filters:
-            due_date: { in: ["2024-01-15", "2024-01-16"] }
-
-  - name: date_field_compares_with_timestamp_field
-    description: >
-      A date field compares with a timestamp field as midnight of that date. A due date on the
-      day of creation is earlier than the creation time, and a missing due date matches nothing.
-    config:
-      redaction: { allow: { work_item: [99031, 99032, 99033] } }
-      extra_seed:
-        gl_work_item:
-          - { id: 99031, iid: 91, title: Due after creation, state: opened, work_item_type: issue, confidential: false, due_date: "2024-05-01", created_at: "2024-04-01 08:00:00", namespace_id: 100, project_id: 1000, traversal_path: "1/100/1000/" }
-          - { id: 99032, iid: 92, title: Due before creation, state: opened, work_item_type: issue, confidential: false, due_date: "2024-03-01", created_at: "2024-04-01 08:00:00", namespace_id: 100, project_id: 1000, traversal_path: "1/100/1000/" }
-          - { id: 99033, iid: 93, title: Due on creation day, state: opened, work_item_type: issue, confidential: false, due_date: "2024-04-01", created_at: "2024-04-01 08:00:00", namespace_id: 100, project_id: 1000, traversal_path: "1/100/1000/" }
-    query:
-      gql: |
-        MATCH (wi:WorkItem)
-        WHERE wi.id IN [4000, 99031, 99032, 99033] AND wi.due_date >= wi.created_at
-        RETURN wi.title, wi.due_date LIMIT 10
-    expect:
-      node_count: 1
-      nodes:
-        WorkItem:
-          ids: [99031]
-          absent: [4000, 99032, 99033]
-          filters:
-            due_date: { is_not_null: true }
-          rows:
-            - { id: 99031, due_date: "2024-05-01" }

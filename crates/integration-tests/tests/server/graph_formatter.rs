@@ -1692,6 +1692,9 @@ async fn search_nullable_columns(ctx: &TestContext) {
 }
 
 async fn search_wildcard_columns(ctx: &TestContext) {
+    // Admin context so the wildcard expansion includes admin_only columns
+    // (email, first_name, last_name, etc.). The non-admin behavior is covered
+    // by the compiler-level RestrictPass tests.
     let value = run_pipeline_with_security(
         ctx,
         r#"{
@@ -1715,8 +1718,8 @@ async fn search_wildcard_columns(ctx: &TestContext) {
     assert_eq!(alice["state"].as_str().unwrap(), "active");
     assert_eq!(alice["name"].as_str().unwrap(), "Alice Admin");
     assert!(
-        alice.get("email").is_none(),
-        "wildcard leaves out admin-only email, even for admin"
+        alice.get("email").is_some(),
+        "wildcard should include email for admin"
     );
 
     assert!(

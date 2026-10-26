@@ -269,9 +269,7 @@ MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {ful
 RETURN path
 ```
 
-It returns one outgoing path per endpoint pair. When an endpoint matches more
-than 500 nodes, the search uses only the 500 with the lowest IDs, and does not
-report the rest. Filter each endpoint to 500 nodes or fewer.
+It returns one outgoing path per endpoint pair.
 
 ## Troubleshooting
 
