@@ -322,7 +322,7 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
             Tree::node(
                 Operator::PathFinding,
                 format!(
-                    "{}->{} depth={} forward={} backward={} scoped={} tables=[{}] relationships=[{}] forward_kinds=[{}] backward_kinds=[{}]",
+                    "{}->{} depth={} forward={} backward={} scoped={} tables=[{}] relationships=[{}]",
                     operation.start,
                     operation.end,
                     operation.max_depth,
@@ -333,16 +333,6 @@ pub fn physical(plan: &QueryPlan, ast: &Node) -> (Tree, Tree) {
                     operation
                         .edge
                         .rel_type_filter
-                        .as_deref()
-                        .unwrap_or_default()
-                        .join(", "),
-                    operation
-                        .forward_first_hop_filter
-                        .as_deref()
-                        .unwrap_or_default()
-                        .join(", "),
-                    operation
-                        .backward_first_hop_filter
                         .as_deref()
                         .unwrap_or_default()
                         .join(", ")
