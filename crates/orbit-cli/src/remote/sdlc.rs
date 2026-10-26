@@ -108,6 +108,25 @@ fn encode(project: &str) -> String {
     project.replace('/', "%2F")
 }
 
+pub(crate) async fn is_project(client: &OrbitClient, path: &str) -> Result<bool, RemoteError> {
+    match client
+        .get_api(&format!("projects/{}", encode(path)), &[])
+        .await
+    {
+        Ok(_) => Ok(true),
+        Err(error)
+            if error
+                .message
+                .lines()
+                .next()
+                .is_some_and(|line| line.ends_with(" not found")) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 async fn branch_exists(
     client: &OrbitClient,
     project: &str,

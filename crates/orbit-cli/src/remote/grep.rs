@@ -300,19 +300,30 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
             .map(|target| target.kind.to_ascii_lowercase())
             .unwrap_or_default();
         let project = match &home_project {
-            Some(path) => path.clone(),
-            None if matches!(scope.0, "full_path" | "project_id")
-                && (kind.is_empty() || kind == "project") =>
-            {
-                scope.1.clone()
-            }
-            None if found.is_empty() => {
-                return Outcome::Skipped(format!(
+            Some(path) => Ok(path.clone()),
+            None if scope.0 == "namespace_id" || !(kind.is_empty() || kind == "project") => {
+                Err(format!(
                     "branches belong to a project; {} is not one",
                     request.target.named()
-                ));
+                ))
             }
-            None => return Outcome::Found(found.join("\n")),
+            None if kind.is_empty() && matches!(request.target, Target::Namespace(_)) => {
+                match super::sdlc::is_project(&client, &scope.1).await {
+                    Ok(true) => Ok(scope.1.clone()),
+                    Ok(false) => Err(format!(
+                        "branches belong to a project; no project named {}",
+                        request.target.named()
+                    )),
+                    Err(error) if found.is_empty() => return outcome_for(&request.target, &error),
+                    Err(error) => Err(first_line(&error.message)),
+                }
+            }
+            None => Ok(scope.1.clone()),
+        };
+        let project = match project {
+            Ok(project) => project,
+            Err(reason) if found.is_empty() => return Outcome::Skipped(reason),
+            Err(_) => return Outcome::Found(found.join("\n")),
         };
         let shown = format!("{api_host}/{project}");
         let wanted = request.keywords.join(" ");
