@@ -108,6 +108,21 @@ impl GraphWriter {
         Ok(())
     }
 
+    /// Runs `write` in one transaction, so a failure leaves the graph as it was.
+    pub fn in_transaction(&self, write: impl FnOnce() -> Result<()>) -> Result<()> {
+        self.client.execute("BEGIN TRANSACTION", &[])?;
+        match write() {
+            Ok(()) => {
+                self.client.execute("COMMIT", &[])?;
+                Ok(())
+            }
+            Err(error) => {
+                let _ = self.client.execute("ROLLBACK", &[]);
+                Err(error)
+            }
+        }
+    }
+
     pub fn complete(&self, commit: &str) -> Result<()> {
         self.client.execute(
             "INSERT INTO _orbit_meta (key, value) VALUES ('indexed_commit', ?1)",

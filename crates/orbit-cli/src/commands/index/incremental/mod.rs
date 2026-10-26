@@ -465,12 +465,24 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
     let _state_lock = lock_incremental_state(&state_dir)?;
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
     let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
-    let replacements = state::refresh_families(&git, &ontology, &state_dir, owner, changed)?;
-    let writer = GraphWriter::open(&workspace::resolve_db_path(db, &git)?, &git)?;
-    for replacement in &replacements {
-        output::apply(&writer, replacement)?;
+    let refreshed = state::refresh_families(&git, &ontology, &state_dir, owner, changed)?;
+    // Snapshots go in place only after the rows land, so a failed write keeps the files stale.
+    let written = workspace::resolve_db_path(db, &git)
+        .and_then(|path| GraphWriter::open(&path, &git))
+        .and_then(|writer| {
+            writer.in_transaction(|| {
+                refreshed
+                    .iter()
+                    .try_for_each(|family| output::apply(&writer, &family.replacement))
+            })
+        });
+    match written {
+        Ok(()) => state::commit_snapshots(&refreshed),
+        Err(error) => {
+            state::discard_snapshots(&refreshed);
+            Err(error)
+        }
     }
-    Ok(())
 }
 
 #[cfg(test)]

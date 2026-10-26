@@ -296,13 +296,42 @@ pub(super) fn changed_since_snapshot(
         .collect()
 }
 
+/// A family's new rows, and its snapshot written beside the live one until the rows are applied.
+pub(super) struct Refreshed {
+    pub replacement: super::output::Replacement,
+    pending: PathBuf,
+    snapshot: PathBuf,
+}
+
+fn pending_file(snapshot: &std::path::Path) -> PathBuf {
+    let mut name = snapshot.as_os_str().to_owned();
+    name.push(".pending");
+    PathBuf::from(name)
+}
+
+/// Puts each pending snapshot in place. The rename keeps the read time that freshness compares against.
+pub(super) fn commit_snapshots(refreshed: &[Refreshed]) -> Result<()> {
+    for family in refreshed {
+        std::fs::rename(&family.pending, &family.snapshot)
+            .with_context(|| format!("failed to save {}", family.snapshot.display()))?;
+    }
+    Ok(())
+}
+
+/// Drops the pending snapshots, so the edited files still count as changed after a failed write.
+pub(super) fn discard_snapshots(refreshed: &[Refreshed]) {
+    for family in refreshed {
+        let _ = std::fs::remove_file(&family.pending);
+    }
+}
+
 pub(super) fn refresh_families(
     git: &GitInfo,
     ontology: &ontology::Ontology,
     state_dir: &std::path::Path,
     owner: Option<SupportLang>,
     changed: Vec<String>,
-) -> Result<Vec<super::output::Replacement>> {
+) -> Result<Vec<Refreshed>> {
     let read_at = std::time::SystemTime::now();
     let repository = input::paths(&git.repo_path, changed)?;
     let mut replacements = Vec::new();
@@ -325,10 +354,24 @@ pub(super) fn refresh_families(
                 .filter_map(|index| state.trees.get(index as usize))
                 .map(|tree| tree.label.to_string()),
         );
-        save_snapshot(&env, &state, &snapshot, read_at)?;
-        replacements.push(super::output::replacement(
-            git, ontology, &env, &state, &files,
-        )?);
+        let pending = pending_file(&snapshot);
+        let replacement = super::output::replacement(git, ontology, &env, &state, &files);
+        let saved = replacement.and_then(|replacement| {
+            save_snapshot(&env, &state, &pending, read_at)?;
+            Ok(replacement)
+        });
+        match saved {
+            Ok(replacement) => replacements.push(Refreshed {
+                replacement,
+                pending,
+                snapshot,
+            }),
+            Err(error) => {
+                discard_snapshots(&replacements);
+                let _ = std::fs::remove_file(&pending);
+                return Err(error);
+            }
+        }
     }
     Ok(replacements)
 }

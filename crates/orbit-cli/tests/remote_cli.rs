@@ -791,3 +791,60 @@ fn grep_refreshes_an_edited_file_inline_or_detached() {
         orbit(fresh.path(), &["sql", "--format", "json", graph], "2000")
     );
 }
+
+fn duckdb_files(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(duckdb_files(&path));
+        } else if path.extension().is_some_and(|ext| ext == "duckdb") {
+            found.push(path);
+        }
+    }
+    found
+}
+
+#[test]
+fn a_refresh_that_cannot_write_leaves_the_file_marked_as_edited() {
+    let repo = committed_repo(
+        "https://localhost/my-group/my-project",
+        &[("util.py", "def helper():\n    return 1\n")],
+    );
+    let data = tempfile::tempdir().unwrap();
+    let orbit = |args: &[&str]| {
+        orbit_command(repo.path(), data.path(), "http://localhost:1", args)
+            .env("ORBIT_REFRESH_WAIT_MS", "0")
+            .output()
+            .expect("run orbit binary")
+    };
+    orbit(&["index", "."]);
+    std::thread::sleep(Duration::from_millis(1100));
+    std::fs::write(
+        repo.path().join("util.py"),
+        "def renamed():\n    return 1\n",
+    )
+    .unwrap();
+    let db = duckdb_files(data.path()).pop().expect("an indexed graph");
+    let mut lock_path = db.as_os_str().to_owned();
+    lock_path.push(".lock");
+    let reader = std::fs::File::open(&lock_path).expect("open the graph lock");
+    reader.lock_shared().expect("hold a reader lock");
+    let repo_path = repo.path().to_string_lossy().into_owned();
+    let refresh = orbit(&["refresh", &repo_path, "--", "util.py"]);
+    drop(reader);
+
+    assert!(
+        !refresh.status.success(),
+        "the writer could not take the lock"
+    );
+    let sql = orbit(&[
+        "sql",
+        "--format",
+        "json",
+        "SELECT list(name) AS names FROM gl_definition",
+    ]);
+    assert!(String::from_utf8_lossy(&sql.stdout).contains("helper"));
+    let grep = String::from_utf8_lossy(&orbit(&["grep", "renamed"]).stdout).into_owned();
+    assert!(grep.contains("edited since index"), "{grep}");
+}
