@@ -4,41 +4,75 @@ description: The property graph that Orbit builds and the ontology that defines 
 order: 1
 authors:
   - michaelangeloio
+  - jgdoyon1
+  - michaelusa
 ---
 
-![The SDLC graph and the code graph share the project node](../../../assets/architecture/data-model.svg)
+## What's in the graph
 
-Orbit stores GitLab data as one property graph. Nodes are typed things with properties, like a project, a merge request, or a function. Edges are typed, directed links between two nodes, like a merge request that closes a work item.
+Orbit stores GitLab data as one property graph. A node is a typed thing with
+properties, like a project, a merge request, or a function. An edge is a
+typed, directed link between two nodes, like a merge request that closes a
+work item. Here is a simplified view of the main areas and how they connect.
+
+![The SDLC graph and the code graph, joined at the project](../../../assets/architecture/data-model.svg)
 
 ## Two graphs, one store
 
-The SDLC graph holds what GitLab keeps in its database: groups, projects, work items, merge requests, CI, security findings, packages, and registries. The code graph holds the structure of your source code: branches, directories, files, definitions, imports, and the references between them. Projects belong to both, so one query can start at a merge request, go through its project, and reach the code on its branches.
+The SDLC graph holds what GitLab keeps in its database. That means groups,
+projects, people, work items, merge requests, CI, security findings, packages,
+container repositories, and agent sessions.
+
+The code graph holds the structure of the source code. That means branches,
+directories, files, definitions, and imported symbols. Edges between them
+record calls, imports, and inheritance.
+
+Each indexed branch belongs to one project. That project links the two graphs.
+A query can follow a merge request to its project and then into the code.
+
+[SDLC indexing](indexing/sdlc-indexing.md) and
+[code indexing](indexing/code-indexing.md) explain how each graph gets built.
 
 ## The ontology
 
-```mermaid
-flowchart LR
-    Ontology[Ontology] --> Storage[Storage schema]
-    Ontology --> Indexing[Indexing plans]
-    Ontology --> Validation[Query validation]
-    Ontology --> Redaction[Redaction rules]
-```
+![The ontology drives indexing and builds the query data model](../../../assets/architecture/ontology.svg)
 
-The ontology declares every node type, edge type, and property, along with where each one comes from and who can read it. Orbit derives storage, indexing, validation, and redaction from it, so most new SDLC entities need only a declaration and an extract query.
+The ontology declares every node type, edge type, and property. It also
+declares where each value comes from and who can read it. For indexing, Orbit
+derives the storage schema and the indexing plans from it. For querying, Orbit
+builds the query data model from three kinds of facts: the logical graph, the
+backend facts, and the authorization facts.
+[Query engine](querying/query-engine.md#1-load-the-data-model-for-the-active-schema-version)
+shows how every query compiles against that model.
+[The guide for adding data](../development/adding-data-to-the-knowledge-graph.md)
+lists every step to add a new entity.
 
-The ontology describes Orbit's model, not the GitLab database. Orbit Remote callers never see source or storage tables, and the Orbit CLI offers read-only SQL over its local tables. Nodes follow concepts GitLab users already know: issues, epics, and tasks are all one work item type, told apart by a property.
+The ontology describes Orbit's model, not the GitLab database. Queries to
+Orbit's graph use nodes and edges, not tables. Nodes follow the concepts that
+GitLab users already know. For example, issues, epics, and tasks are all one
+work item type. A property tells them apart.
 
 ## How rows are stored
 
-Every namespaced row carries its path, and the [security](security.md) model depends on that. Only declared global entities, like users and runners, go without one.
+Every row that belongs to a namespace carries its traversal path. Only global
+entities, like users and runners, have none. The [security](security.md) model
+depends on that path.
 
-Rows are versioned in Orbit Remote: a delete writes a new version marked as deleted, and queries read the latest version and skip deleted rows. The SDLC graph lives apart from the raw replicated data, so a new schema version can rebuild it from that data. Orbit Remote and the Orbit CLI build their storage from the same ontology, and the code graph uses the same types in both.
+In Orbit's graph, every row has a version. A delete writes a new version that
+is marked as deleted. Queries read the latest version of each row and skip
+deleted rows.
 
-Changing the stored shape of the graph means a new schema version. The [schema evolution](indexing/schema-evolution.md) page covers how a version reaches production.
+The SDLC graph is stored apart from the replicated GitLab data. A schema
+change gets a new version. That version re-indexes the tables the change
+touches and copies the rest. [Schema evolution](indexing/schema-evolution.md)
+covers how a version reaches production.
 
 ## Why we built it this way
 
-GitLab relationships have strong types and fixed endpoints, so each edge type declares its source and target node types. The ontology keeps the data agents and users ask about, not every source column, so a new kind of question can need an ontology change.
+GitLab relationships have strong types and fixed endpoints. So each edge type
+declares which node types it connects. The ontology keeps the data that agents
+and users ask about, not every source column. A new kind of question can need
+an ontology change.
 
 ## Decisions
 

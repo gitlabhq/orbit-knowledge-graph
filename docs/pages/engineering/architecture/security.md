@@ -7,12 +7,16 @@ authors:
   - dgruzd
 ---
 
+## Who sees what
+
+GitLab decides who can see what, and Orbit enforces it. Here is a simplified
+view of the three checks.
+
 ![Each request passes three separate checks](../../../assets/architecture/security.svg)
 
-GitLab decides who can see what, and Orbit enforces it. Customers already
-trust the GitLab permission model, so we enforce it instead of copying it.
-Three separate layers do that, and each one fails closed: a fault returns
-less data or an error, never more.
+Customers already trust the GitLab permission model, so we enforce it instead
+of copying it. Three separate layers do that, and each one fails closed: a
+fault returns less data or an error, never more.
 
 ## How a request is checked
 
@@ -34,10 +38,10 @@ sequenceDiagram
 ```
 
 Nobody talks to Orbit directly. GitLab authenticates the caller and finds the
-groups where they have at least the Reporter role. It sends Orbit a short-lived
-signed token with that list. Orbit limits the query to those
-groups, then asks GitLab to check every returned entity before the result
-goes back.
+groups where they have at least the Reporter role. It sends Orbit a
+short-lived signed token with that list. Orbit limits the query to those
+groups, then asks GitLab to check every returned entity before the result goes
+back.
 
 ## Paths: where each row belongs
 
@@ -75,8 +79,8 @@ expose data on its own.
 
 ## What this guarantees
 
-- GitLab stays the only source of truth for permissions, so a policy change
-  in GitLab applies to the next Orbit request.
+- GitLab stays the only source of truth for permissions, so a policy change in
+  GitLab applies to the next Orbit request.
 - Every allowed path needs at least the Reporter role. Some entities need
   more, like Security Manager for vulnerabilities.
 - We remove paths below that role before building the query, so counts and
@@ -92,8 +96,8 @@ expose data on its own.
 - Caller input never becomes query text. Names must match the graph schema,
   and every value goes to the store as a separate parameter.
 - Every query has limits on depth, size, and time.
-- Customer data goes only into expanded log fields, and the deployment
-  decides when Orbit writes them.
+- Customer data goes only into expanded log fields, and the deployment decides
+  when Orbit writes them.
 
 ## Between the services
 
@@ -126,8 +130,8 @@ build on Windows and macOS.
 ## When things go wrong
 
 If the token is missing, invalid, or expired, Orbit rejects the request before
-doing any work. If GitLab doesn't answer an item check, the query fails.
-Orbit never returns entities that GitLab didn't check.
+doing any work. If GitLab doesn't answer an item check, the query fails. Orbit
+never returns entities that GitLab didn't check.
 
 ## Further reading
 
