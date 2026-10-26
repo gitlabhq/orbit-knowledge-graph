@@ -51,7 +51,7 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
     let mut client = None;
     let mut origin = None;
     let mut repo: Option<String> = None;
-    let (mut targets, mut sdlc_targets, mut code_targets) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut targets, mut branches, mut code_targets) = (Vec::new(), Vec::new(), Vec::new());
     let mut current_ci = false;
     let mut joined: Vec<String> = Vec::new();
     for target in &args.target {
@@ -77,17 +77,12 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
             Some(Qualified::Repo(path)) => repo = Some(path),
             Some(Qualified::Target(target)) => targets.push(target),
             Some(Qualified::Code(code, value)) => code_targets.push((code, value)),
-            Some(Qualified::Sdlc(target)) => sdlc_targets.push(target),
+            Some(Qualified::Branch(branch)) => branches.push(branch),
             None => targets.push(target.clone()),
         }
     }
-    let has_branch = sdlc_targets
-        .iter()
-        .any(|target| matches!(target, crate::remote::sdlc::Target::Branch(_)));
-    if args.target.is_empty() || (current_ci && !has_branch) {
-        sdlc_targets.push(crate::remote::sdlc::Target::Branch(
-            crate::remote::sdlc::current_branch(&dir)?,
-        ));
+    if args.target.is_empty() || (current_ci && branches.is_empty()) {
+        branches.push(crate::remote::sdlc::current_branch(&dir)?);
     }
     let mut sdlc_notes = String::new();
     let other_project = repo.as_ref().is_some_and(|repo| {
@@ -153,10 +148,11 @@ pub(crate) async fn run(args: crate::ContextArgs) -> Result<()> {
             }
         }
     }
-    for target in &sdlc_targets {
-        let project = gitlab_project(&dir, &repo, &mut origin, &mut client, &target.to_string())?;
+    for branch in &branches {
+        let target = format!("branch:{branch}");
+        let project = gitlab_project(&dir, &repo, &mut origin, &mut client, &target)?;
         let found_client = client.as_ref().expect("gitlab_project sets the client");
-        match crate::remote::sdlc::read(found_client, &project, target).await {
+        match crate::remote::sdlc::read_branch(found_client, &project, branch).await {
             Ok(crate::remote::sdlc::Found::MergeRequest { note, reference }) => {
                 sdlc_notes.push_str(&note);
                 if !remote.contains(&reference) {
@@ -305,12 +301,12 @@ const LOCAL_NODES: &[&str] = &["Definition", "File"];
 enum Qualified {
     Repo(String),
     Target(String),
-    Sdlc(crate::remote::sdlc::Target),
+    Branch(String),
     Code(crate::remote::code::Code, String),
 }
 
+/// Turns shorthand into context tokens. `!42`, `#7`, and `@ref` are relative to the `origin` project.
 fn qualify(target: &str) -> Option<Qualified> {
-    use crate::remote::sdlc::Target;
     let (name, value) = target.split_once(':')?;
     if value.is_empty() || value.starts_with(':') {
         return None;
@@ -318,17 +314,17 @@ fn qualify(target: &str) -> Option<Qualified> {
     let number = value.parse::<i64>().ok().filter(|id| *id > 0);
     let hex = value.len() >= 7 && value.chars().all(|c| c.is_ascii_hexdigit());
     let qualified = match (name.to_ascii_lowercase().as_str(), number) {
-        ("mr" | "mrs" | "pr", Some(iid)) => Qualified::Target(format!("!{iid}")),
-        ("mr" | "mrs" | "pr", None) if value.contains('!') => Qualified::Target(value.into()),
-        ("mr" | "mrs" | "pr", None) => Qualified::Sdlc(Target::Branch(
-            value.strip_prefix("branch:").unwrap_or(value).into(),
-        )),
-        ("issue" | "issues", Some(iid)) => Qualified::Target(format!("#{iid}")),
-        ("issue" | "issues", None) if value.contains('#') => Qualified::Target(value.into()),
-        ("branch", _) => Qualified::Sdlc(Target::Branch(value.into())),
-        ("pipeline", Some(id)) => Qualified::Sdlc(Target::Pipeline(id)),
-        ("job", Some(id)) => Qualified::Sdlc(Target::Job(id)),
-        ("commit", _) if hex => Qualified::Sdlc(Target::Commit(value.into())),
+        ("mr" | "pr", Some(iid)) => Qualified::Target(format!("!{iid}")),
+        ("mr" | "pr", None) if value.contains('!') => Qualified::Target(value.into()),
+        ("mr" | "pr", None) => {
+            Qualified::Branch(value.strip_prefix("branch:").unwrap_or(value).into())
+        }
+        ("issue", Some(iid)) => Qualified::Target(format!("#{iid}")),
+        ("issue", None) if value.contains('#') => Qualified::Target(value.into()),
+        ("branch", _) => Qualified::Branch(value.into()),
+        ("pipeline", Some(id)) => Qualified::Target(format!("Pipeline[{id}]")),
+        ("job", Some(id)) => Qualified::Target(format!("Job[{id}]")),
+        ("commit", _) if hex => Qualified::Target(format!("@{value}")),
         (kind @ ("symbol" | "def" | "file" | "path"), _) => {
             Qualified::Code(crate::remote::code::Code::parse(kind, value), value.into())
         }
@@ -414,7 +410,7 @@ fn route(target: &str, nodes: &[&str]) -> Route {
     if let Some(token) = token::entity_reference(target) {
         return Route::Remote(token);
     }
-    if token::is_relative_reference(target) {
+    if token::is_relative_reference(target) || target.len() > 1 && target.starts_with('@') {
         return Route::Relative(target.to_string());
     }
     let Some(typed) = token::typed(target) else {
@@ -1382,12 +1378,26 @@ mod tests {
 
     #[test]
     fn qualified_targets_use_what_gitlab_shows() {
-        use crate::remote::sdlc::Target;
         assert_eq!(qualify("mr:42"), Some(Qualified::Target("!42".into())));
+        assert_eq!(qualify("issue:7"), Some(Qualified::Target("#7".into())));
         assert_eq!(
             qualify("branch:aa/fix"),
-            Some(Qualified::Sdlc(Target::Branch("aa/fix".into())))
+            Some(Qualified::Branch("aa/fix".into()))
         );
+        assert_eq!(
+            qualify("mr:aa/fix"),
+            Some(Qualified::Branch("aa/fix".into()))
+        );
+        assert_eq!(
+            qualify("pipeline:7"),
+            Some(Qualified::Target("Pipeline[7]".into()))
+        );
+        assert_eq!(qualify("job:9"), Some(Qualified::Target("Job[9]".into())));
+        assert_eq!(
+            qualify("commit:1a2b3c4"),
+            Some(Qualified::Target("@1a2b3c4".into()))
+        );
+        assert_eq!(route("@1a2b3c4", &[]), Route::Relative("@1a2b3c4".into()));
         for literal in ["src/a.rs:10-40", "MergeRequest:42", "commit:main"] {
             assert_eq!(qualify(literal), None, "{literal}");
         }

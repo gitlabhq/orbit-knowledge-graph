@@ -4,37 +4,11 @@ use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError};
 
 pub(crate) async fn fetch(client: OrbitClient, tokens: &[String]) -> Result<Vec<u8>, RemoteError> {
-    fetch_with(client, tokens, true).await
-}
-
-/// Context for tokens whose types have no graph expansion, such as branches, pipelines, and commits.
-pub(crate) async fn fetch_summary(
-    client: OrbitClient,
-    tokens: &[String],
-) -> Result<Vec<u8>, RemoteError> {
-    fetch_with(client, tokens, false).await
-}
-
-/// The first entity of a token's raw context, without expansion.
-pub(crate) async fn fetch_entity(
-    client: &OrbitClient,
-    token: &str,
-) -> Result<serde_json::Value, RemoteError> {
-    let body = request(client.clone(), token.to_string(), "raw", false).await?;
-    let response: serde_json::Value = serde_json::from_slice(&body)
-        .map_err(|error| RemoteError::new(EXIT_GENERIC, format!("unreadable response: {error}")))?;
-    Ok(response["entities"][0].clone())
-}
-
-async fn fetch_with(
-    client: OrbitClient,
-    tokens: &[String],
-    expand: bool,
-) -> Result<Vec<u8>, RemoteError> {
     let tasks: Vec<_> = tokens
         .iter()
         .map(|token| {
             let (client, token) = (client.clone(), token.clone());
+            let expand = expandable(&token);
             tokio::spawn(async move { request(client, token, "llm", expand).await })
         })
         .collect();
@@ -49,6 +23,22 @@ async fn fetch_with(
         out.extend(body);
     }
     Ok(out)
+}
+
+/// Pipelines, branches, and commits (`path@ref`) have no graph expansion, so they are not asked for one.
+fn expandable(token: &str) -> bool {
+    !token.starts_with("Pipeline[") && !token.contains('@')
+}
+
+/// The first entity of a token's raw context, without expansion.
+pub(crate) async fn fetch_entity(
+    client: &OrbitClient,
+    token: &str,
+) -> Result<serde_json::Value, RemoteError> {
+    let body = request(client.clone(), token.to_string(), "raw", false).await?;
+    let response: serde_json::Value = serde_json::from_slice(&body)
+        .map_err(|error| RemoteError::new(EXIT_GENERIC, format!("unreadable response: {error}")))?;
+    Ok(response["entities"][0].clone())
 }
 
 async fn request(
@@ -212,6 +202,14 @@ pub(crate) fn compact(text: &str) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_types_with_a_graph_expansion_ask_for_one() {
+        assert!(expandable("g/p!42"));
+        assert!(expandable("Job[9]"));
+        assert!(!expandable("Pipeline[7]"));
+        assert!(!expandable("g/p@main"));
+    }
 
     #[test]
     fn tidy_drops_html_comments_outside_code_fences() {
