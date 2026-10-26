@@ -11,7 +11,7 @@ authors:
 The SDLC graph holds everything GitLab stores about how software gets built.
 That means groups and projects, work items, merge requests, CI pipelines,
 security findings, packages, and the people involved. The
-[data model](../data-model.md) page explains how the ontology declares these
+[data model](../data-model.md) page explains the ontology that declares these
 types. Here is a simplified view of the main areas and how they connect.
 
 ![The main areas of the SDLC graph](../../../../assets/architecture/sdlc-graph.svg)

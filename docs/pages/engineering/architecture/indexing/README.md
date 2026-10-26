@@ -3,7 +3,12 @@ title: Indexing
 description: How GitLab data and code become the Orbit graph, and how the graph changes shape.
 order: 2
 authors:
+  - michaelangeloio
+  - dgruzd
   - jgdoyon1
+  - bohdanpk
+  - michaelusa
+  - aalgutifan
 ---
 
 Indexing turns GitLab data into the Orbit graph and keeps it up to date. The
