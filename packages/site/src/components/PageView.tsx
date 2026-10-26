@@ -1,19 +1,20 @@
 import { Avatar, cn, type Page, type PageBody, PageContent, SiteLink, Toc, useHeadingLinks } from "@gitlab-org/orbit-site";
 import { type ReactNode, useRef } from "react";
+import type { PageAuthor } from "../../build/avatars";
 import { Sidebar } from "./Sidebar";
 
-function Authors({ authors }: { authors: string[] }) {
+function Authors({ authors }: { authors: PageAuthor[] }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs font-semibold uppercase tracking-wide text-subtle">{authors.length > 1 ? "Authors" : "Author"}</span>
-      {authors.map((author) => (
+      {authors.map(({ username, avatar }) => (
         <SiteLink
-          key={author}
-          href={`https://gitlab.com/${author}`}
+          key={username}
+          href={`https://gitlab.com/${username}`}
           className="flex items-center gap-2 rounded-full border border-border-strong py-0.5 pr-3 pl-0.5 text-xs text-default no-underline hover:bg-hover"
         >
-          <Avatar name={author} size={22} />
-          @{author}
+          <Avatar name={username} src={avatar} size={22} />
+          @{username}
         </SiteLink>
       ))}
     </div>
