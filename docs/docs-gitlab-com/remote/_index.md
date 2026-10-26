@@ -58,7 +58,9 @@ GitLab Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-lev
 
 During the beta, GitLab Orbit queries do not consume GitLab Credits.
 
-When GitLab Orbit is generally available, queries consume GitLab Credits. Credit
-rates are published in
+When GitLab Orbit is generally available, queries draw from your organization's
+Orbit query packs, which are paid in GitLab Credits. Queries from every access
+path count, including GitLab Duo Agent Platform, MCP, the GitLab CLI, and the
+REST API. Credit rates are published in
 [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/)
 before charging begins.
