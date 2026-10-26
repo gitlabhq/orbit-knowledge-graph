@@ -1,15 +1,24 @@
 use std::path::PathBuf;
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(name = "gkg-server", about = "GitLab Orbit server")]
 pub struct Args {
+    #[command(subcommand)]
+    pub command: Option<Command>,
     #[arg(long, value_enum, default_value = "webserver")]
     pub mode: Mode,
     /// Config overlay applied over the embedded config/default.yaml; defaults to config/config.yaml when present.
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", global = true)]
     pub config: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
+pub enum Command {
+    /// Load the config as startup does, reject unknown keys, and exit without
+    /// starting a server. Secret files are not read.
+    CheckConfig,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
