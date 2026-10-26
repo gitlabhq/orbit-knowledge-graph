@@ -34,7 +34,10 @@ fn mock_server(replies: Vec<Reply>) -> (String, thread::JoinHandle<Vec<Request>>
             let deadline = std::time::Instant::now() + ACCEPT_TIMEOUT;
             let mut stream = loop {
                 match listener.accept() {
-                    Ok((stream, _)) => break stream,
+                    Ok((stream, _)) => {
+                        stream.set_nonblocking(false).unwrap();
+                        break stream;
+                    }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         assert!(
                             std::time::Instant::now() < deadline,
@@ -872,6 +875,181 @@ fn setup_full_falls_back_when_the_instance_is_unreachable() {
     assert!(output.status.success(), "{}", stderr(&output));
     installed_manifest(&skills);
     assert!(skills.join("orbit/references/local/cli.md").is_file());
+}
+
+fn ok_reply(body: &str) -> Reply {
+    Reply {
+        status: 200,
+        reason: "OK",
+        etag: None,
+        body: body.to_string(),
+    }
+}
+
+fn error_reply(status: u16) -> Reply {
+    Reply {
+        status,
+        reason: "Error",
+        etag: None,
+        body: "{\"message\":\"nope\"}".to_string(),
+    }
+}
+
+const SCHEMA_OVERVIEW: &str = r#"{"domains":[{"name":"core","node_names":["User"]}]}"#;
+const SCHEMA_EXPANDED: &str = r#"{"domains":[{"name":"core","node_names":["User"]}],"nodes":[{"name":"User","properties":[{"name":"username","enum_values":[]}]}],"edges":[]}"#;
+
+fn setup_instructions(base_url: Option<&str>) -> (Output, String) {
+    let project = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let dir = project.path().to_str().unwrap();
+    let mut command = hermetic_orbit(
+        &cache,
+        &[
+            "setup",
+            "codex",
+            "--yes",
+            "--skip",
+            "hooks",
+            "--skip",
+            "skill",
+            "--no-index",
+            "--project",
+            "--dir",
+            dir,
+        ],
+    );
+    command.current_dir(project.path());
+    if let Some(base_url) = base_url {
+        command
+            .env("ORBIT_API_BASE_URL", base_url)
+            .env("ORBIT_AUTH_HEADER_NAME", "Private-Token")
+            .env("ORBIT_AUTH_HEADER_VALUE", "glpat-test");
+    }
+    let output = command.output().unwrap();
+    let instructions = walk_files(project.path())
+        .into_iter()
+        .map(|path| std::fs::read_to_string(path).unwrap_or_default())
+        .find(|text| text.contains("orbit:setup:begin"))
+        .unwrap_or_else(|| panic!("no instruction block written: {}", stderr(&output)));
+    (output, instructions)
+}
+
+fn assert_local_only(output: &Output, instructions: &str) {
+    assert!(output.status.success(), "{}", stderr(output));
+    assert!(
+        instructions.contains("grep` must be used"),
+        "{instructions}"
+    );
+    assert!(
+        !instructions.contains("query` must be used"),
+        "{instructions}"
+    );
+    assert!(!instructions.contains("Schema for"), "{instructions}");
+    assert!(!instructions.contains("{{"), "{instructions}");
+}
+
+fn assert_remote_without_schema(output: &Output, instructions: &str) {
+    assert!(output.status.success(), "{}", stderr(output));
+    assert!(
+        instructions.contains("query` must be used"),
+        "{instructions}"
+    );
+    assert!(!instructions.contains("Schema for"), "{instructions}");
+    assert!(!instructions.contains("{{"), "{instructions}");
+}
+
+fn request_paths(requests: &[Request]) -> Vec<String> {
+    requests
+        .iter()
+        .map(|request| {
+            request
+                .line
+                .split(' ')
+                .nth(1)
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect()
+}
+
+#[test]
+fn setup_instructions_without_credentials_stay_local() {
+    let (output, instructions) = setup_instructions(None);
+    assert_local_only(&output, &instructions);
+}
+
+#[test]
+fn setup_instructions_stay_local_when_the_instance_is_unreachable() {
+    let closed = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", closed.local_addr().unwrap());
+    drop(closed);
+    let (output, instructions) = setup_instructions(Some(&url));
+    assert_local_only(&output, &instructions);
+}
+
+#[test]
+fn setup_instructions_stay_local_when_orbit_status_is_refused() {
+    for status in [401, 403, 404, 500] {
+        let (url, server) = mock_server(vec![error_reply(status)]);
+        let (output, instructions) = setup_instructions(Some(&url));
+        let requests = server.join().unwrap();
+        assert_local_only(&output, &instructions);
+        assert_eq!(
+            request_paths(&requests),
+            ["/api/v4/orbit/status"],
+            "{status}"
+        );
+    }
+}
+
+#[test]
+fn setup_instructions_skip_the_schema_when_the_schema_request_fails() {
+    let cases = [
+        vec![error_reply(401)],
+        vec![error_reply(403)],
+        vec![error_reply(500)],
+        vec![ok_reply("not json")],
+        vec![ok_reply(r#"{"domains":[]}"#)],
+        vec![ok_reply(SCHEMA_OVERVIEW), error_reply(403)],
+        vec![ok_reply(SCHEMA_OVERVIEW), ok_reply("not json")],
+        vec![ok_reply(SCHEMA_OVERVIEW), ok_reply(SCHEMA_OVERVIEW)],
+    ];
+    for schema_replies in cases {
+        let expected = 2 + schema_replies.len();
+        let mut replies = vec![ok_reply("{}"), ok_reply("[]")];
+        replies.extend(schema_replies);
+        let (url, server) = mock_server(replies);
+        let (output, instructions) = setup_instructions(Some(&url));
+        let requests = server.join().unwrap();
+        assert_remote_without_schema(&output, &instructions);
+        assert_eq!(requests.len(), expected);
+    }
+}
+
+#[test]
+fn setup_instructions_include_the_schema_when_the_instance_serves_it() {
+    let (url, server) = mock_server(vec![
+        ok_reply("{}"),
+        ok_reply("[]"),
+        ok_reply(SCHEMA_OVERVIEW),
+        ok_reply(SCHEMA_EXPANDED),
+    ]);
+    let (output, instructions) = setup_instructions(Some(&url));
+    let requests = server.join().unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        instructions.contains("  - User: username"),
+        "{instructions}"
+    );
+    assert_eq!(
+        request_paths(&requests),
+        [
+            "/api/v4/orbit/status",
+            "/api/v4/orbit/agent/commands?command_names=query_graph",
+            "/api/v4/orbit/schema",
+            "/api/v4/orbit/schema?expand=User",
+        ]
+    );
 }
 
 #[test]
