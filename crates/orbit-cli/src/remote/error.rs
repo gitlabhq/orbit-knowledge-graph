@@ -59,6 +59,12 @@ pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
              The Orbit API rejected the request with HTTP 401. Run `glab auth status`\n\
              to check your token, then `glab auth login` if it has expired.",
         ),
+        403 if body.contains("No Orbit enabled namespaces") => RemoteError::new(
+            EXIT_FORBIDDEN,
+            "Orbit isn't enabled for any of your groups\n\n\
+             GitLab context, search, and graph queries need Orbit turned on for a top-level\n\
+             group you belong to. An Owner of the group can enable it in Orbit > Configuration.",
+        ),
         403 => RemoteError::new(
             EXIT_FORBIDDEN,
             format!(
@@ -116,6 +122,20 @@ mod tests {
         assert_eq!(map_http_error(429, "").exit_code, EXIT_RATE_LIMITED);
         assert_eq!(map_http_error(503, "").exit_code, EXIT_GENERIC);
         assert_eq!(map_http_error(500, "").exit_code, EXIT_GENERIC);
+    }
+
+    #[test]
+    fn a_user_without_orbit_groups_is_told_so() {
+        let error = map_http_error(
+            403,
+            r#"{"message":"403 Forbidden - No Orbit enabled namespaces available"}"#,
+        );
+
+        assert_eq!(error.exit_code, EXIT_FORBIDDEN);
+        assert_eq!(
+            error.message.lines().next(),
+            Some("Orbit isn't enabled for any of your groups")
+        );
     }
 
     #[test]
