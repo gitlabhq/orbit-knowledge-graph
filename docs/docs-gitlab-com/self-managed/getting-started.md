@@ -18,8 +18,6 @@ Set up all four before you install GitLab Orbit.
 
 ## Prerequisites
 
-<!-- Merge after the v19.4.4-ee and v19.5.2-ee tags exist. If Product picks 19.5 as the minimum, delete the 19.4 line. -->
-
 - One of these GitLab versions:
   - 19.4.4 or a later 19.4 patch release
   - 19.5.2 or a later 19.5 patch release

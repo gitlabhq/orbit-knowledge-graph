@@ -19,7 +19,7 @@ title: GitLab Orbit on GitLab Self-Managed
 
 {{< /history >}}
 
-GitLab Orbit adds minimal load to your GitLab instance.
+GitLab Orbit is built to add minimal load to your GitLab instance.
 It reads GitLab data from a ClickHouse copy of the database, and fetches code through the GitLab internal API, never from Gitaly directly.
 The same pipeline gives you a ClickHouse data lake of your GitLab data, which you can build on and scale separately from GitLab.
 
