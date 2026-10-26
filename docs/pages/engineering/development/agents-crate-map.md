@@ -2,7 +2,7 @@
 
 Every `[workspace]` member needs a row here; `crates/xtask/build.rs` enforces this.
 
-Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, HealthCheck, ClickhouseSetup via `--mode`).
+Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, HealthCheck, ClickhouseSetup via `--mode`), plus a `check-config` subcommand that validates a configuration file.
 
 | Crate | Role |
 |---|---|

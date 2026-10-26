@@ -77,6 +77,13 @@ The binary (`gkg-server`) runs in one of five modes via `--mode`:
 
 All modes share the same configuration structure.
 
+## Checking a configuration file
+
+`gkg-server check-config --config <path>` loads the file over the embedded defaults as startup does,
+then exits without starting a server. It rejects an unknown key in any section and reads no secret
+files. A valid file exits 0 with no output. An invalid one prints the errors and exits 1. The check
+skips the rules a single mode applies at startup, such as the `grpc` ranges and quota credentials.
+
 ## NATS
 
 ### Connection
