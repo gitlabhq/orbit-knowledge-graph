@@ -218,6 +218,8 @@ impl OrbitClient {
         format!("{}{path}", self.endpoint.base_url.trim_end_matches('/'))
     }
 
+    /// Retries once only when the connection failed, so the server never saw the request. A timeout or a
+    /// server error is not retried: the server may have run the query, and a graph query is billed.
     async fn send(
         &self,
         request: reqwest::RequestBuilder,
@@ -229,11 +231,8 @@ impl OrbitClient {
             let current = pending.take().expect("a request remains");
             pending = current.try_clone().filter(|_| attempt == 1);
             match self.send_raw(current).await {
-                Ok(response) if pending.is_some() && response.status().is_server_error() => {}
                 Ok(response) => break response,
-                Err(error)
-                    if pending.is_some()
-                        && (error.is_connect() || error.is_timeout() || error.is_request()) => {}
+                Err(error) if pending.is_some() && error.is_connect() => {}
                 Err(error) => {
                     return Err(RemoteError::new(
                         EXIT_GENERIC,
