@@ -8,8 +8,10 @@ Back to the [runbook](README.md).
 <summary>GitLab.com</summary>
 
 > [!warning]
-> Do not edit live Deployments: ArgoCD removes the change. A rollback two or more schema
-> versions back starts a full reindex. Check first: [does a release reindex?](#does-a-release-reindex)
+> Do not edit live Deployments: ArgoCD removes the change. Do not delete the
+> `orbit-webserver` Service or uninstall the release: the PSC attachment uses its load
+> balancer, and GitLab then cannot reach Orbit. A rollback two or more schema versions back
+> starts a full reindex. Check first: [does a release reindex?](#does-a-release-reindex)
 
 1. Revert the last deploy MR in
    [argocd-apps](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests) and merge it.
@@ -33,8 +35,9 @@ page Orbit tier-2.
 <summary>Dedicated</summary>
 
 There is no Orbit-only rollback. The Orbit version comes with the Instrumentor version. In
-an incident, [turn Orbit off for users](README.md#emergency-actions). Ask the Dedicated EOC
-about an Instrumentor rollback.
+an incident, [turn Orbit off for users](README.md#emergency-actions): that is level 1 of the
+[Dedicated rollback](https://gitlab.com/gitlab-com/gl-infra/gitlab-dedicated/team/-/blob/main/runbooks/orbit.md#rollback). Use level 1 only. Ask the Dedicated EOC about an
+Instrumentor rollback.
 
 </details>
 
@@ -68,11 +71,11 @@ window. A faster fix needs an emergency maintenance: ask the Dedicated EOC.
 ## Does a release reindex?
 
 Only a release that changes the schema version reindexes. The deploy MR says so. To compare
-two tags, run this in the Orbit repository:
+two tags, run this in the Orbit repository. Git tags start with `v`, for example `v0.159.0`.
 
 ```shell
 git fetch origin --tags
-OLD=<running tag> NEW=<target tag>
+OLD=v<running version> NEW=v<target version>
 o=$(git show "${OLD}:config/versions.yaml" | yq '.schema')
 n=$(git show "${NEW}:config/versions.yaml" | yq '.schema')
 echo "schema $o -> $n"
@@ -91,6 +94,16 @@ During a reindex:
 - Watch the **Schema migration** row of the
   [indexer dashboard](https://dashboards.gitlab.net/d/orbit-orbit-gkg-indexer) and the graph
   ClickHouse CPU.
+
+## Silence alerts
+
+Before planned work, such as a reindex or a rotation, create a
+[silence for Orbit](https://alerts.gitlab.net/#/silences/new?filter=%7Btype%3D%22orbit%22%2C%20environment%3D%22orbit-prd%22%7D).
+Set the duration to the planned window. Put your name as the owner and link the change issue
+in the comment. Remove the silence when the work is done.
+
+Dedicated: the Dedicated EOC creates the silence in the tenant Grafana, Alerting > Silences
+([Dedicated silences](https://gitlab.com/gitlab-com/gl-infra/gitlab-dedicated/team/-/blob/main/runbooks/alert-silences.md)).
 
 ## Pause and resume indexing
 

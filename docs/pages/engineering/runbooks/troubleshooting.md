@@ -22,8 +22,15 @@ production. For staging, use `--context gke_gl-orbit-stg_us-east1_orbit-stg`.
      -o 'custom-columns=NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image'
    ```
 
-4. Read the dashboards and logs. [Monitoring](monitoring.md) says what the panels mean.
-5. Find the failed part with [If X fails](README.md#if-x-fails).
+4. Check changes outside the Orbit image:
+   [feature flags](https://gitlab.com/gitlab-com/gl-infra/feature-flag-log/-/issues/?sort=created_date&state=all&label_name%5B%5D=host%3A%3Agitlab.com&search=orbit),
+   [production changes](https://gitlab.com/gitlab-com/gl-infra/production/-/issues/?sort=created_date&state=all&label_name%5B%5D=change&search=orbit),
+   [k8s-workloads MRs](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-com/-/merge_requests?scope=all&state=merged&search=knowledge%20graph).
+   Also search for `gkg` and `knowledge graph`.
+5. Read the dashboards and logs. [Monitoring](monitoring.md) says what the panels mean. The
+   running configuration is in ConfigMap `orbit-<component>-config`. Keys that are not in it
+   use `config/default.yaml`.
+6. Find the failed part with [If X fails](README.md#if-x-fails).
 
 ## Indexing is stuck or has a high error rate
 
@@ -83,3 +90,8 @@ On Dedicated, the EOC uses `gkg-indexer-code` without `--context`.
 | TLS or authentication errors between Rails and Orbit | Certificate or JWT key mismatch | See [secret rotation](secret_rotation.md#if-a-rotation-breaks-connections). |
 | JetStream disk grows | Consumers lag | See [NATS](nats.md) and [NATS operations](https://gitlab.com/gitlab-com/runbooks/-/blob/master/docs/nats/operations.md). |
 | Dedicated: indexer logs show many 401 errors | Application is off, infra is on | Stop both indexers, see [emergency actions](README.md#emergency-actions). |
+| HTTP 422 `billing_namespace_required` for one user | The user has two or more paid Orbit groups and no default group | The user selects a default group in Preferences. No Orbit action. |
+
+`glab orbit` exit codes: `2` Orbit is off, or the group or project does not exist. `3` not
+authenticated. `4` access denied. `5` GitLab rate limit: each user can send a fixed number of
+queries per minute, and only a Rails MR changes it.

@@ -16,13 +16,15 @@ The Siphon team owns Siphon and the datalake ClickHouse. Contact them first: Sla
 | Siphon recovery | [Siphon runbook](https://runbooks.gitlab.com/siphon/), section "Failure Modes" | [Siphon operations](https://gitlab.com/gitlab-com/gl-infra/gitlab-dedicated/instrumentor/-/blob/main/docs/data_insights_siphon_operations.md) |
 | How a fresh snapshot works | [Replication and snapshot flow](https://gitlab.com/gitlab-org/analytics-section/siphon/-/blob/main/docs/replication_and_snapshot_flow.md) | Same |
 
-Continue when the Siphon team confirms that the snapshot is complete. Until then,
+A lost replication slot needs a full Siphon snapshot. On GitLab.com, expect at least one
+week of incomplete data. Continue when the Siphon team confirms that the snapshot is complete. Until then,
 [stop both indexers](../README.md#emergency-actions), so Orbit does not index incomplete data.
 
 ## 2. Check NATS
 
 If the NATS cluster was lost, ArgoCD recreates it. Orbit creates its streams again at startup.
-Check: all NATS pods are `Running`.
+A Velero backup of NATS runs every 6 hours, but Siphon streams are in it too. Do not restore
+it yourself: ask the Siphon team. Check: all NATS pods are `Running`.
 
 ```shell
 kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n nats get pods
@@ -36,6 +38,13 @@ kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n nats get pods
 | The graph has wrong data for some namespaces | [Reindex those namespaces](../manual_rebuild.md#reindex-one-namespace-project-or-entity) |
 
 On Dedicated, the Dedicated EOC runs the rebuild.
+
+A rebuild does not bring back `gkg.namespace_storage_snapshot`. To keep its history, a
+ClickHouse Cloud admin restores the daily backup (kept for 24 hours) to a new service
+([procedure](https://gitlab.com/gitlab-com/runbooks/-/blob/master/docs/clickhouse/backup-restore.md)).
+Copy only this table back with `remoteSecure`
+([ClickHouse docs](https://clickhouse.com/docs/products/cloud/guides/backups/review-and-restore-backups)),
+then delete the restored service.
 
 ## 4. Check that Orbit recovered
 

@@ -40,3 +40,5 @@ On Dedicated, only the Dedicated EOC runs commands. Use `gkg-indexer-code` and n
 
 No cause after 15 minutes: page Orbit tier-2 in incident.io ([escalation](../README.md#escalation)).
 Dedicated: the EOC runs `/inc escalate` and selects Orbit.
+
+Past incident: [incident-management#4632](https://gitlab.com/gitlab-com/gl-infra/gitlab-dedicated/incident-management/-/issues/4632), code indexing overloaded one Gitaly node.

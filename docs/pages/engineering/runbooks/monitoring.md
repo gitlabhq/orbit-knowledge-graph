@@ -14,8 +14,15 @@ Back to the [runbook](README.md). Dashboard links and alert routing are on the c
 | ClickHouse Cloud console, Monitoring > Service health | CPU and memory per replica of the graph service. |
 
 SLOs are defined in [`orbit.jsonnet`](https://gitlab.com/gitlab-com/runbooks/-/blob/master/metrics-catalog/services/orbit.jsonnet).
+SLO status per SLI: [Orbit overview](https://dashboards.gitlab.net/d/orbit-main/orbit3a-overview?var-PROMETHEUS_DS=mimir-analytics-eventsdot&var-environment=orbit-prd).
+The [error budget](https://dashboards.gitlab.net/d/product-orbit_error_budget) shows only the
+GitLab Rails part, not the Orbit service SLIs.
 
 ## Which page for which alert
+
+The alert links still open the pages in the runbooks repository. Seven older cause alerts,
+for example `OrbitCircuitBreakerOpen`, have pages only there until
+[runbooks!11925](https://gitlab.com/gitlab-com/runbooks/-/merge_requests/11925) removes them.
 
 | Alert | Page |
 | --- | --- |
@@ -29,4 +36,6 @@ SLOs are defined in [`orbit.jsonnet`](https://gitlab.com/gitlab-com/runbooks/-/b
 | `OrbitPipelineInvariantViolated` | [OrbitPipelineInvariantViolated](alerts/OrbitPipelineInvariantViolated.md) |
 | `OrbitContainerOOMKilled` | [OrbitContainerOOMKilled](alerts/OrbitContainerOOMKilled.md) |
 | `nats_disk_space` | [NATS operations](https://gitlab.com/gitlab-com/runbooks/-/blob/master/docs/nats/operations.md) |
+| `open_fds` | An Orbit process leaks file descriptors. Find the pod and page Orbit tier-2. |
+| `kube_horizontalpodautoscaler_desired_replicas` | A pool is at its KEDA maximum, see [capacity](maintenance.md#capacity) |
 | `KubeContainersWaitingInError` | Orbit containers cannot start: check the pods and the image, see [troubleshooting](troubleshooting.md) |

@@ -111,6 +111,9 @@ kubectl --context "$CTX" -n cert-manager get certificate orbit-<env>-root-ca \
 > [!warning]
 > Do not run `cmctl renew` on the root CA and do not delete its Secret. Both make a new CA key.
 
+No alert watches certificate expiry yet. After TLS errors, check the leaf certificates:
+`kubectl --context "$CTX" -n gkg get certificate` (READY must be `True`).
+
 <details>
 <summary>CA rotation</summary>
 

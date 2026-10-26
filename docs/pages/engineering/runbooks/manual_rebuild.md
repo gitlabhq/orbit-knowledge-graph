@@ -154,5 +154,6 @@ projects as indexed again.
 
 ## Dedicated
 
-The Dedicated EOC runs these steps. Names are `gkg-*`. Only the code indexer has a KEDA
+The Dedicated EOC runs these steps. Names are `gkg-*`. One ClickHouse service holds the
+datalake and the graph: drop tables only in database `gkg`. Only the code indexer has a KEDA
 ScaledObject: stop the SDLC indexer as in [emergency actions](README.md#emergency-actions).

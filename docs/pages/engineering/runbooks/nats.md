@@ -30,8 +30,11 @@ image tag with dashes, for example `0-159-0` for `0.159.0`. `<schema>` is the sc
 | `nats stream ls` | `GKG_INDEXER_V<release>` and `GKG_DEAD_LETTERS_V<release>` |
 | `nats kv ls` | `indexing_locks_v<schema>` |
 
-Use the streams whose release is the running image tag. Streams with other names come from
-older releases or older naming formats.
+Use the streams whose release is the running image tag. Old streams and buckets stay in
+production and do not affect indexing: ignore them. The dispatcher removes the streams of an
+old release about one hour after that release stops. Streams and buckets without a release
+or schema suffix, and the `_V79`, `_V80`, `_v72` and `_v94` ones, never go away by
+themselves.
 
 ## Check stream and consumer health
 

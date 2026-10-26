@@ -2,14 +2,15 @@
 
 Orbit builds a graph of GitLab data and code. Users reach it only through GitLab: the Orbit
 API, MCP, agents and Code Intelligence. If Orbit fails, Orbit features fail. GitLab
-continues to work.
+continues to work. Reports about `glab orbit index` or DuckDB are about the local CLI, not
+this service.
 
 | | |
 | --- | --- |
 | Owner | Context Systems team, Slack `#f_orbit_dev` |
 | On-call | Orbit tier-2 in incident.io: [schedule](https://app.incident.io/gitlab/on-call/schedules/01KZY9R2WH2G8GDNYMVCCFGKMP) |
-| Alerts | GitLab.com: `#f_orbit_alerts`, no pages. Dedicated: pages through incident.io. |
-| Dashboards | [Webserver](https://dashboards.gitlab.net/d/orbit-orbit-gkg-webserver), [Indexer](https://dashboards.gitlab.net/d/orbit-orbit-gkg-indexer), [all](https://dashboards.gitlab.net/dashboards/f/orbit/orbit). Logs: [Kibana](https://log.gprd.gitlab.net/app/r/s/DhOL5). |
+| Alerts | GitLab.com: `#f_orbit_alerts`. No Orbit alert pages: alerts with the PagerDuty label post to `#production`. Dedicated: `#dedicated-prod-alerts` and incident.io, no PagerDuty pages. |
+| Dashboards | [Webserver](https://dashboards.gitlab.net/d/orbit-orbit-gkg-webserver), [Indexer](https://dashboards.gitlab.net/d/orbit-orbit-gkg-indexer), [all](https://dashboards.gitlab.net/dashboards/f/orbit/orbit). Logs: [Kibana](https://log.gprd.gitlab.net/app/r/s/DhOL5). Staging: [nonprod Kibana](https://nonprod-log.gitlab.net), index `pubsub-orbit-inf-gstg`. |
 
 | | GitLab.com | Dedicated |
 | --- | --- | --- |
@@ -38,7 +39,9 @@ gcloud container clusters get-credentials orbit-prd --region us-east1 --project 
    If yes, [roll back](maintenance.md#rollback).
 3. Gitaly overloaded? [Stop code indexing](#emergency-actions). ClickHouse overloaded? Stop
    code indexing first. Still overloaded: stop SDLC indexing.
-4. Users affected? In Slack, run `/inc declare`. Add the label `Service::Orbit`.
+4. Users affected? In Slack, run `/inc declare`. Add the label `Service::Orbit`. Select the
+   [severity](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/incident-management/#incident-severity).
+   Indexing stopped and data stale: a past incident used S3.
 5. No cause after 15 minutes? In the incident channel, run `/inc escalate` and select Orbit.
 6. Other checks: [troubleshooting](troubleshooting.md).
 
@@ -48,7 +51,8 @@ gcloud container clusters get-credentials orbit-prd --region us-east1 --project 
 <summary>GitLab.com</summary>
 
 Do not use `kubectl scale` on an indexer. KEDA changes the count back, or keeps a wrong count
-while the pool is paused.
+while the pool is paused. Do not set `keda.enabled: false` or use the `paused` annotation:
+neither stops the pool.
 
 **Stop code indexing:**
 
@@ -77,6 +81,15 @@ kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n gkg annotate scaledobje
 kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n gkg annotate scaledobject orbit-indexer-sdlc autoscaling.keda.sh/paused-replicas-
 ```
 
+**Turn off Code Intelligence only.** In Slack `#production`, run
+`/chatops gitlab run feature set orbit_code_intelligence false`. To restore, run
+`/chatops gitlab run feature set orbit_code_intelligence 100 --actors`.
+
+**Turn Orbit off for all users.** In k8s-workloads `gitlab-com`, set
+`knowledgeGraph.enabled: false` in `releases/gitlab/values/gprd.yaml.gotmpl`. An SRE in
+`gl-infra` approves the MR. Effect after the deploy: the Orbit API and MCP return 404, and
+the Orbit menu and Code Intelligence go away. No data is deleted.
+
 </details>
 
 <details>
@@ -104,10 +117,18 @@ kubectl -n gkg scale deploy/gkg-indexer-sdlc --replicas=<count you wrote down>
 ```
 
 **Turn Orbit off for users:** ask the Dedicated EOC to set `orbit.application_enabled: false`
-and run an emergency maintenance. Then stop both indexers.
+and run an [emergency maintenance](https://gitlab.com/gitlab-com/gl-infra/gitlab-dedicated/team/-/blob/main/runbooks/emergency-maintenance.md). This is level 1 of the
+[Dedicated rollback](https://gitlab.com/gitlab-com/gl-infra/gitlab-dedicated/team/-/blob/main/runbooks/orbit.md#rollback). Then stop both indexers.
 
 > [!warning]
-> Do not set `orbit.infra_enabled` to `false` in an incident. It deletes the Orbit graph.
+> Do not use Dedicated rollback level 2 or 3 in an incident. They set `orbit.infra_enabled`
+> to `false`, which deletes the Orbit graph. Orbit then needs a full rebuild.
+
+Dedicated notes ([Orbit on Dedicated](https://gitlab.com/gitlab-com/gl-infra/gitlab-dedicated/team/-/blob/main/runbooks/orbit.md)):
+
+- Orbit needs the Data Insights Platform (Siphon and NATS).
+- On a large tenant, the first Siphon snapshot takes hours.
+- Do not enable indexing for the customer.
 
 </details>
 
@@ -120,16 +141,22 @@ and run an emergency maintenance. Then stop both indexers.
 | Dispatcher | No new indexing jobs. After a deploy with a new schema version, indexers wait. |
 | NATS (owned by Orbit) | All indexing and Siphon stop. New webserver pods are not ready. |
 | Graph ClickHouse `orbit-production-us-east1` (owned by Orbit) | Queries and indexing fail. |
-| Siphon or datalake ClickHouse | No new SDLC data. |
+| Health-check | `status` reports unhealthy. Queries continue. Indexer pools run their fallback pod count. |
+| Siphon or datalake ClickHouse | No new SDLC data. Code indexing after a push stops. |
 | GitLab API or Workhorse | Orbit API is down even when Orbit is healthy. Code indexing stops. |
 | Gitaly | Code indexing stops. Code tools return no file content. |
 
 ## Escalation
 
 - Orbit: in the incident channel, run `/inc escalate` and select Orbit.
+- No answer in 15 minutes: run `/inc escalate` and select the IMOC. Also contact the Context
+  Systems engineering manager in Slack `#f_orbit`.
 - Siphon or the datalake ClickHouse: Slack `#g_analytics_platform_insights`
   ([Siphon runbook](https://runbooks.gitlab.com/siphon/)).
 - Gitaly, PostgreSQL or the GitLab API: the on-call of that GitLab.com service.
+- Graph ClickHouse platform problem: open a case at
+  [console.clickhouse.cloud/support](https://console.clickhouse.cloud/support), severity S1 if
+  production is affected. Tell `#f_clickhouse`. To expedite, ask in `#clickhouse-gitlab-external431`.
 - Dedicated: the Dedicated EOC owns the tenant and runs `/inc escalate` for Orbit.
 
 <details>
@@ -141,6 +168,11 @@ and run an emergency maintenance. Then stop both indexers.
 | Deploys | ArgoCD through Lumos, role `knowledge-graph-members` | Switchboard (Dedicated team) |
 | ClickHouse console | SAML, Service Reader with SQL console read only | Break-glass only |
 | Grafana and logs | Standard GitLab.com access | Lumos tile "GitLab Dedicated Observability" |
+
+The graph ClickHouse holds Red data: code symbols and SDLC metadata of private projects
+([#1398](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1398)). Use Service
+Reader for investigation. Console actions are in the Audit tab. Database queries are in
+`system.query_log`.
 
 </details>
 
