@@ -6,16 +6,18 @@ use async_trait::async_trait;
 use chrono::{DateTime, TimeDelta, Utc};
 use clickhouse_client::FromArrowColumn;
 use ontology::EtlScope;
+use ontology::pipelines::PipelineDescriptor;
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::Histogram;
+use opentelemetry::metrics::{Histogram, ObservableGauge};
 use orbit_migrations::catalog::OntologyCatalog;
 use orbit_migrations::version::read_active_version;
 use orbit_observability::indexer::sdlc;
 use orbit_server_config::{NamespaceFreshnessConfig, ScheduleConfiguration};
+use parking_lot::Mutex;
 
 use super::datalake::render_change_query;
 use crate::checkpoint::{
-    Checkpoint, CheckpointStore, ClickHouseCheckpointStore, NAMESPACE_KEY_PREFIX,
+    Checkpoint, CheckpointStore, ClickHouseCheckpointStore, GLOBAL_SCOPE_KEY, NAMESPACE_KEY_PREFIX,
     namespace_position_key,
 };
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
@@ -49,6 +51,9 @@ pub struct NamespaceFreshness {
     catalog: OntologyCatalog,
     scan_window: TimeDelta,
     lag: Histogram<f64>,
+    oldest_sync: Arc<Mutex<Vec<(String, i64)>>>,
+    // Dropping the handle deregisters the gauge callback.
+    _oldest_sync_gauge: ObservableGauge<i64>,
     metrics: ScheduledTaskMetrics,
     config: NamespaceFreshnessConfig,
 }
@@ -61,6 +66,14 @@ struct Root {
 
 type LatestChanges = HashMap<String, HashMap<String, DateTime<Utc>>>;
 
+struct SyncState {
+    now: DateTime<Utc>,
+    scanned_from: DateTime<Utc>,
+    roots: Vec<Root>,
+    checkpoints: HashMap<String, Checkpoint>,
+    changes: LatestChanges,
+}
+
 impl NamespaceFreshness {
     pub fn new(
         graph: ArrowClickHouseClient,
@@ -70,12 +83,27 @@ impl NamespaceFreshness {
         sweep_interval_secs: u64,
     ) -> Self {
         let sweep_interval = TimeDelta::seconds(sweep_interval_secs.try_into().unwrap_or(i64::MAX));
+        let meter = orbit_observability::meter();
+        let oldest_sync: Arc<Mutex<Vec<(String, i64)>>> = Arc::default();
+        let reported = Arc::clone(&oldest_sync);
+        // Observing only the last run's plans drops a plan the served ontology no longer has.
+        let oldest_sync_gauge =
+            sdlc::FRESHNESS_OLDEST_SYNC.build_observable_gauge_i64(&meter, move |observer| {
+                for (plan, timestamp) in reported.lock().iter() {
+                    observer.observe(
+                        *timestamp,
+                        &[KeyValue::new(sdlc::labels::ENTITY, plan.clone())],
+                    );
+                }
+            });
         Self {
             graph,
             datalake,
             catalog,
             scan_window: sweep_interval + SWEEP_MARGIN,
-            lag: sdlc::FRESHNESS_LAG.build_histogram_f64(&orbit_observability::meter()),
+            lag: sdlc::FRESHNESS_LAG.build_histogram_f64(&meter),
+            oldest_sync,
+            _oldest_sync_gauge: oldest_sync_gauge,
             metrics: ScheduledTaskMetrics::new(),
             config,
         }
@@ -170,39 +198,92 @@ impl NamespaceFreshness {
             .map_err(TaskError::new)?;
         let checkpoint_store =
             ClickHouseCheckpointStore::for_version(Arc::new(self.graph.clone()), version);
+        let global_prefix = format!("{GLOBAL_SCOPE_KEY}.");
         let now = Utc::now();
         let scanned_from = now - self.scan_window;
-        let (checkpoints, roots, changes) = tokio::try_join!(
-            async {
-                checkpoint_store
-                    .load_by_prefix(NAMESPACE_KEY_PREFIX)
-                    .await
-                    .map_err(TaskError::new)
-            },
+        let (namespace_checkpoints, global_checkpoints, roots, changes) = tokio::try_join!(
+            load_checkpoints(&checkpoint_store, NAMESPACE_KEY_PREFIX),
+            load_checkpoints(&checkpoint_store, &global_prefix),
             self.enabled_roots(),
             self.latest_changes(&ontology, scanned_from, now),
         )?;
-        let checkpoints: HashMap<String, Checkpoint> = checkpoints.into_iter().collect();
+        let state = SyncState {
+            now,
+            scanned_from,
+            roots,
+            checkpoints: namespace_checkpoints
+                .into_iter()
+                .chain(global_checkpoints)
+                .collect(),
+            changes,
+        };
 
-        let plans = ontology
-            .pipeline_descriptors()
-            .into_iter()
-            .filter(|plan| plan.scope == EtlScope::Namespaced);
-        for plan in plans {
-            let labels = [KeyValue::new(sdlc::labels::ENTITY, plan.name.clone())];
-            for root in &roots {
-                let key = format!("{}.{}", root.checkpoint_prefix, plan.name);
-                let synced = checkpoints.get(&key).and_then(Checkpoint::synced_until);
-                let latest_change = changes
-                    .get(&root.path)
-                    .and_then(|targets| targets.get(&plan.entity))
-                    .copied();
-                let behind = lag(now, scanned_from, root.enabled_at, synced, latest_change);
-                self.lag.record(behind.as_seconds_f64(), &labels);
+        let mut oldest_sync = Vec::new();
+        for plan in ontology.pipeline_descriptors() {
+            let synced_until = match plan.scope {
+                EtlScope::Namespaced => self.record_plan_lag(&plan, &state),
+                EtlScope::Global => global_synced_until(&plan, &state),
+            };
+            if let Some(synced_until) = synced_until {
+                oldest_sync.push((plan.name, synced_until.timestamp()));
             }
         }
+        *self.oldest_sync.lock() = oldest_sync;
         Ok(())
     }
+
+    /// Records one lag sample per enabled root and returns the time up to which every root is in sync.
+    /// Without enabled roots there is no data to measure, so the plan reports nothing.
+    fn record_plan_lag(
+        &self,
+        plan: &PipelineDescriptor,
+        state: &SyncState,
+    ) -> Option<DateTime<Utc>> {
+        if state.roots.is_empty() {
+            return None;
+        }
+        let labels = [KeyValue::new(sdlc::labels::ENTITY, plan.name.clone())];
+        let mut most_behind = TimeDelta::zero();
+        for root in &state.roots {
+            let key = format!("{}.{}", root.checkpoint_prefix, plan.name);
+            let synced = state
+                .checkpoints
+                .get(&key)
+                .and_then(Checkpoint::synced_until);
+            let latest_change = state
+                .changes
+                .get(&root.path)
+                .and_then(|targets| targets.get(&plan.entity))
+                .copied();
+            let behind = lag(
+                state.now,
+                state.scanned_from,
+                root.enabled_at,
+                synced,
+                latest_change,
+            );
+            self.lag.record(behind.as_seconds_f64(), &labels);
+            most_behind = most_behind.max(behind);
+        }
+        Some(state.now - most_behind)
+    }
+}
+
+async fn load_checkpoints(
+    store: &ClickHouseCheckpointStore,
+    prefix: &str,
+) -> Result<Vec<(String, Checkpoint)>, TaskError> {
+    store.load_by_prefix(prefix).await.map_err(TaskError::new)
+}
+
+/// The global dispatcher targets the current time every minute, so a global checkpoint is its own sync point.
+/// A plan that never synced reports nothing; promotion requires every global plan, so only a fresh install has one.
+fn global_synced_until(plan: &PipelineDescriptor, state: &SyncState) -> Option<DateTime<Utc>> {
+    let key = format!("{GLOBAL_SCOPE_KEY}.{}", plan.name);
+    state
+        .checkpoints
+        .get(&key)
+        .and_then(Checkpoint::synced_until)
 }
 
 /// An upper bound on how far indexed data trails the datalake: merges keep only the newest version

@@ -22,6 +22,9 @@ pub fn namespace_position_key(namespace_id: i64) -> String {
 
 pub const NAMESPACE_KEY_PREFIX: &str = "ns.";
 
+/// The checkpoint scope of global plans; their keys are `global.{plan_name}`.
+pub const GLOBAL_SCOPE_KEY: &str = "global";
+
 /// Inverse of [`namespace_position_key`], tolerating the `.{plan_name}` and
 /// partition suffixes the pipeline appends.
 pub fn namespace_id_from_key(key: &str) -> Option<i64> {

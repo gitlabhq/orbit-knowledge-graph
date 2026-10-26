@@ -4,14 +4,14 @@ local o = import 'lib/orbit.libsonnet';
 local ext = import 'lib/external.libsonnet';
 
 // Emitted by the dispatcher freshness task, not the indexer.
-local FRESH = 'gkg_indexer_sdlc_freshness_lag_seconds';
+local DISPATCHER_SDLC = ['gkg_indexer_sdlc_freshness_lag_seconds', 'gkg_indexer_sdlc_freshness_oldest_sync_timestamp_seconds'];
 
 local items =
   o.externalSection('gRPC transport (webserver)', ext.GKG_GRPC, 'ORBIT_DS', o.GKG_WEB_SEL)
   + o.section('ETL engine (indexer)', o.metricsInDomain('indexer.etl'), 'ORBIT_DS', o.GKG_IDX_SEL)
   + o.section('Code pipeline (indexer)', o.metricsInDomain('indexer.code'), 'ORBIT_DS', o.GKG_IDX_SEL)
-  + o.section('SDLC pipeline (indexer)', [m for m in o.metricsInDomain('indexer.sdlc') if m.prom_name != FRESH], 'ORBIT_DS', o.GKG_IDX_SEL)
-  + o.panelsFor(o.metric(FRESH), 'ORBIT_DS', o.GKG_DSP_SEL)
+  + o.section('SDLC pipeline (indexer)', [m for m in o.metricsInDomain('indexer.sdlc') if !std.member(DISPATCHER_SDLC, m.prom_name)], 'ORBIT_DS', o.GKG_IDX_SEL)
+  + std.flattenArrays([o.panelsFor(o.metric(name), 'ORBIT_DS', o.GKG_DSP_SEL) for name in DISPATCHER_SDLC])
   + o.section('Namespace deletion (indexer)', o.metricsInDomain('indexer.namespace_deletion'), 'ORBIT_DS', o.GKG_IDX_SEL)
   + o.section('Scheduler (dispatcher)', o.metricsInDomain('indexer.scheduler'), 'ORBIT_DS', o.GKG_DSP_SEL)
   + o.section('Schema migration (dispatcher)', o.metricsInDomain('indexer.migration'), 'ORBIT_DS', o.GKG_DSP_SEL)

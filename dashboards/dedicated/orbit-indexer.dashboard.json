@@ -138,13 +138,12 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Namespace and SDLC plan pairs more than 1 hour behind the datalake at the end of the selected time range. One namespace stuck on every plan counts once per plan. See the lag chart below for the split.",
+      "description": "Age of the oldest indexed SDLC data at the end of the selected time range: how far the least synced enabled namespace and plan trails the datalake. See the per-plan chart below.",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "thresholds"
           },
-          "decimals": 0,
           "mappings": [
             {
               "options": {
@@ -167,7 +166,7 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "s"
         }
       },
       "gridPos": {
@@ -200,14 +199,14 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[15m])), 0) / on () group_left () (max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[15m])) > 0)",
+          "expr": "time() - min(gkg_indexer_sdlc_freshness_oldest_sync_timestamp_seconds{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"})",
           "instant": true,
-          "legendFormat": "Behind 1 h",
+          "legendFormat": "Oldest data",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Behind 1 h",
+      "title": "Oldest data",
       "type": "stat"
     },
     {
@@ -2602,86 +2601,17 @@
         "type": "prometheus",
         "uid": "$ORBIT_DS"
       },
-      "description": "Namespace and SDLC plan pairs more than 15 minutes behind the datalake, by how far behind, averaged per freshness run. A namespace that never finished its first sync counts from the time it was enabled.",
+      "description": "Age of the oldest indexed data for each SDLC plan, in its least synced enabled namespace. An idle namespace counts as in sync until its hourly sweep is overdue. A namespace that never finished its first sync counts from the time it was enabled.",
       "fieldConfig": {
         "defaults": {
           "custom": {
-            "barAlignment": 0,
-            "drawStyle": "bars",
-            "fillOpacity": 70,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "showPoints": "never",
-            "stacking": {
-              "group": "A",
-              "mode": "normal"
-            }
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "showPoints": "auto"
           },
-          "decimals": 0,
-          "unit": "short"
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "15 min – 1 h"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#EAB839",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "1 – 4 h"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#d95926",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "4 – 16 h"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#e66767",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "> 16 h"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "fixedColor": "#9085e9",
-                  "mode": "fixed"
-                }
-              }
-            ]
-          }
-        ]
+          "unit": "s"
+        }
       },
       "gridPos": {
         "h": 9,
@@ -2690,14 +2620,13 @@
         "y": 78
       },
       "id": 44,
-      "interval": "15m",
       "options": {
         "legend": {
           "calcs": [
-            "mean",
+            "lastNotNull",
             "max"
           ],
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "bottom"
         },
         "tooltip": {
@@ -2710,39 +2639,12 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"900.0\"}[$__interval])), 0) / on () group_left () (max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) > 0)",
-          "legendFormat": "15 min – 1 h",
+          "expr": "time() - min by (entity)(gkg_indexer_sdlc_freshness_oldest_sync_timestamp_seconds{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"})",
+          "legendFormat": "{{entity}}",
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"14400.0\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"3600.0\"}[$__interval])), 0) / on () group_left () (max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) > 0)",
-          "legendFormat": "1 – 4 h",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"57600.0\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"14400.0\"}[$__interval])), 0) / on () group_left () (max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) > 0)",
-          "legendFormat": "4 – 16 h",
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "clamp_min(sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) - sum(increase(gkg_indexer_sdlc_freshness_lag_seconds_bucket{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\", le=\"57600.0\"}[$__interval])), 0) / on () group_left () (max(changes(gkg_indexer_sdlc_freshness_lag_seconds_count{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"}[$__interval])) > 0)",
-          "legendFormat": "> 16 h",
-          "refId": "D"
         }
       ],
-      "title": "SDLC pairs behind, by lag",
+      "title": "SDLC: oldest data per plan",
       "type": "timeseries"
     },
     {
@@ -2903,67 +2805,14 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$ORBIT_DS"
-      },
-      "description": "SDLC entities that completed no run on any replica in the last 65 minutes. Every entity runs during the hourly namespace sweep, so anything above 0 means an entity has stalled.",
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "—",
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 0,
-        "y": 95
-      },
-      "id": 48,
-      "links": [
-        {
-          "targetBlank": false,
-          "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22$%7BORBIT_DS%7D%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22$%7BORBIT_DS%7D%22%7D%2C%22expr%22%3A%22count%28%28count%20by%20%28entity%29%20%28gkg_indexer_sdlc_watermark_lag_seconds%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%29%20unless%20count%20by%20%28entity%29%20%28increase%28gkg_indexer_sdlc_pipeline_duration_seconds_count%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-indexer\\%22%2C%20cluster%3D~\\%22.%2A\\%22%7D%5B65m%5D%29%20%3E%200%29%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-        }
-      ],
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value_and_name"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-          },
-          "expr": "(count((count by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}) unless count by (entity) (increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=~\"(gkg|orbit)-indexer\", cluster=~\".*\"}[65m]) > 0)))) or vector(0)",
-          "legendFormat": "SDLC: stalled entities",
-          "refId": "A"
-        }
-      ],
-      "title": "SDLC: stalled entities",
-      "type": "stat"
-    },
-    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 99
+        "y": 95
       },
-      "id": 49,
+      "id": 48,
       "panels": [],
       "title": "Fleet",
       "type": "row"
@@ -2984,9 +2833,9 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 100
+        "y": 96
       },
-      "id": 50,
+      "id": 49,
       "links": [
         {
           "targetBlank": false,
@@ -3037,9 +2886,9 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 100
+        "y": 96
       },
-      "id": 51,
+      "id": 50,
       "links": [
         {
           "targetBlank": false,
@@ -3090,9 +2939,9 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 100
+        "y": 96
       },
-      "id": 52,
+      "id": 51,
       "links": [
         {
           "targetBlank": false,
@@ -3148,9 +2997,9 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 104
+        "y": 100
       },
-      "id": 53,
+      "id": 52,
       "options": {
         "legend": {
           "calcs": [
@@ -3184,9 +3033,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 111
+        "y": 107
       },
-      "id": 54,
+      "id": 53,
       "panels": [],
       "title": "Resources",
       "type": "row"
@@ -3207,9 +3056,9 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 112
+        "y": 108
       },
-      "id": 55,
+      "id": 54,
       "links": [
         {
           "targetBlank": false,
@@ -3260,9 +3109,9 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 112
+        "y": 108
       },
-      "id": 56,
+      "id": 55,
       "links": [
         {
           "targetBlank": false,
@@ -3313,9 +3162,9 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 112
+        "y": 108
       },
-      "id": 57,
+      "id": 56,
       "links": [
         {
           "targetBlank": false,
@@ -3366,9 +3215,9 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 112
+        "y": 108
       },
-      "id": 58,
+      "id": 57,
       "links": [
         {
           "targetBlank": false,
@@ -3452,9 +3301,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 116
+        "y": 112
       },
-      "id": 59,
+      "id": 58,
       "options": {
         "legend": {
           "calcs": [
@@ -3521,9 +3370,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 116
+        "y": 112
       },
-      "id": 60,
+      "id": 59,
       "options": {
         "legend": {
           "calcs": [
@@ -3609,9 +3458,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 124
+        "y": 120
       },
-      "id": 61,
+      "id": 60,
       "options": {
         "legend": {
           "calcs": [
@@ -3678,9 +3527,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 124
+        "y": 120
       },
-      "id": 62,
+      "id": 61,
       "options": {
         "legend": {
           "calcs": [
@@ -3756,9 +3605,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 132
+        "y": 128
       },
-      "id": 63,
+      "id": 62,
       "options": {
         "legend": {
           "calcs": [
@@ -3834,9 +3683,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 132
+        "y": 128
       },
-      "id": 64,
+      "id": 63,
       "options": {
         "legend": {
           "calcs": [
@@ -3912,9 +3761,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 140
+        "y": 136
       },
-      "id": 65,
+      "id": 64,
       "options": {
         "legend": {
           "calcs": [
@@ -3975,9 +3824,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 148
+        "y": 144
       },
-      "id": 66,
+      "id": 65,
       "panels": [
         {
           "datasource": {
@@ -4000,9 +3849,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 149
+            "y": 145
           },
-          "id": 67,
+          "id": 66,
           "options": {
             "legend": {
               "calcs": [
@@ -4051,9 +3900,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 149
+            "y": 145
           },
-          "id": 68,
+          "id": 67,
           "options": {
             "legend": {
               "calcs": [
@@ -4102,9 +3951,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 157
+            "y": 153
           },
-          "id": 69,
+          "id": 68,
           "options": {
             "legend": {
               "calcs": [
@@ -4162,9 +4011,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 157
+            "y": 153
           },
-          "id": 70,
+          "id": 69,
           "options": {
             "legend": {
               "calcs": [
@@ -4222,9 +4071,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 165
+            "y": 161
           },
-          "id": 71,
+          "id": 70,
           "options": {
             "legend": {
               "calcs": [
@@ -4282,9 +4131,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 165
+            "y": 161
           },
-          "id": 72,
+          "id": 71,
           "options": {
             "legend": {
               "calcs": [
@@ -4342,9 +4191,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 173
+            "y": 169
           },
-          "id": 73,
+          "id": 72,
           "options": {
             "legend": {
               "calcs": [
@@ -4391,9 +4240,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 181
+        "y": 177
       },
-      "id": 74,
+      "id": 73,
       "panels": [],
       "title": "Schema migration",
       "type": "row"
@@ -4419,9 +4268,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 182
+        "y": 178
       },
-      "id": 75,
+      "id": 74,
       "options": {
         "legend": {
           "calcs": [
@@ -4470,9 +4319,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 182
+        "y": 178
       },
-      "id": 76,
+      "id": 75,
       "options": {
         "legend": {
           "calcs": [
@@ -4521,9 +4370,9 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 190
+        "y": 186
       },
-      "id": 77,
+      "id": 76,
       "options": {
         "legend": {
           "calcs": [
@@ -4572,9 +4421,9 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 190
+        "y": 186
       },
-      "id": 78,
+      "id": 77,
       "options": {
         "legend": {
           "calcs": [
@@ -4623,9 +4472,9 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 190
+        "y": 186
       },
-      "id": 79,
+      "id": 78,
       "options": {
         "legend": {
           "calcs": [
@@ -4659,9 +4508,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 198
+        "y": 194
       },
-      "id": 80,
+      "id": 79,
       "panels": [
         {
           "datasource": {
@@ -4684,9 +4533,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 199
+            "y": 195
           },
-          "id": 81,
+          "id": 80,
           "options": {
             "legend": {
               "calcs": [
@@ -4735,9 +4584,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 199
+            "y": 195
           },
-          "id": 82,
+          "id": 81,
           "options": {
             "legend": {
               "calcs": [
@@ -4786,9 +4635,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 199
+            "y": 195
           },
-          "id": 83,
+          "id": 82,
           "options": {
             "legend": {
               "calcs": [
@@ -4855,9 +4704,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 207
+            "y": 203
           },
-          "id": 84,
+          "id": 83,
           "options": {
             "legend": {
               "calcs": [
@@ -4906,9 +4755,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 207
+            "y": 203
           },
-          "id": 85,
+          "id": 84,
           "options": {
             "legend": {
               "calcs": [
@@ -4957,9 +4806,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 207
+            "y": 203
           },
-          "id": 86,
+          "id": 85,
           "options": {
             "legend": {
               "calcs": [
@@ -5008,9 +4857,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 215
+            "y": 211
           },
-          "id": 87,
+          "id": 86,
           "options": {
             "legend": {
               "calcs": [
@@ -5077,9 +4926,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 215
+            "y": 211
           },
-          "id": 88,
+          "id": 87,
           "options": {
             "legend": {
               "calcs": [
@@ -5128,9 +4977,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 215
+            "y": 211
           },
-          "id": 89,
+          "id": 88,
           "options": {
             "legend": {
               "calcs": [
@@ -5179,9 +5028,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 223
+            "y": 219
           },
-          "id": 90,
+          "id": 89,
           "options": {
             "legend": {
               "calcs": [
@@ -5248,9 +5097,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 223
+            "y": 219
           },
-          "id": 91,
+          "id": 90,
           "options": {
             "legend": {
               "calcs": [
@@ -5299,9 +5148,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 223
+            "y": 219
           },
-          "id": 92,
+          "id": 91,
           "options": {
             "legend": {
               "calcs": [
@@ -5350,9 +5199,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 231
+            "y": 227
           },
-          "id": 93,
+          "id": 92,
           "options": {
             "legend": {
               "calcs": [
@@ -5419,9 +5268,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 231
+            "y": 227
           },
-          "id": 94,
+          "id": 93,
           "options": {
             "legend": {
               "calcs": [
@@ -5470,9 +5319,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 231
+            "y": 227
           },
-          "id": 95,
+          "id": 94,
           "options": {
             "legend": {
               "calcs": [
@@ -5539,9 +5388,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 239
+            "y": 235
           },
-          "id": 96,
+          "id": 95,
           "options": {
             "legend": {
               "calcs": [
@@ -5590,9 +5439,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 239
+            "y": 235
           },
-          "id": 97,
+          "id": 96,
           "options": {
             "legend": {
               "calcs": [
@@ -5630,9 +5479,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 247
+        "y": 243
       },
-      "id": 98,
+      "id": 97,
       "panels": [
         {
           "datasource": {
@@ -5655,9 +5504,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 248
+            "y": 244
           },
-          "id": 99,
+          "id": 98,
           "options": {
             "legend": {
               "calcs": [
@@ -5706,9 +5555,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 248
+            "y": 244
           },
-          "id": 100,
+          "id": 99,
           "options": {
             "legend": {
               "calcs": [
@@ -5775,9 +5624,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 248
+            "y": 244
           },
-          "id": 101,
+          "id": 100,
           "options": {
             "legend": {
               "calcs": [
@@ -5826,9 +5675,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 256
+            "y": 252
           },
-          "id": 102,
+          "id": 101,
           "options": {
             "legend": {
               "calcs": [
@@ -5877,9 +5726,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 256
+            "y": 252
           },
-          "id": 103,
+          "id": 102,
           "options": {
             "legend": {
               "calcs": [
@@ -5928,9 +5777,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 256
+            "y": 252
           },
-          "id": 104,
+          "id": 103,
           "options": {
             "legend": {
               "calcs": [
@@ -5979,9 +5828,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 264
+            "y": 260
           },
-          "id": 105,
+          "id": 104,
           "options": {
             "legend": {
               "calcs": [
@@ -6048,9 +5897,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 264
+            "y": 260
           },
-          "id": 106,
+          "id": 105,
           "options": {
             "legend": {
               "calcs": [
@@ -6099,9 +5948,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 264
+            "y": 260
           },
-          "id": 107,
+          "id": 106,
           "options": {
             "legend": {
               "calcs": [
@@ -6150,9 +5999,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 272
+            "y": 268
           },
-          "id": 108,
+          "id": 107,
           "options": {
             "legend": {
               "calcs": [
@@ -6201,9 +6050,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 272
+            "y": 268
           },
-          "id": 109,
+          "id": 108,
           "options": {
             "legend": {
               "calcs": [
@@ -6270,9 +6119,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 272
+            "y": 268
           },
-          "id": 110,
+          "id": 109,
           "options": {
             "legend": {
               "calcs": [
@@ -6321,9 +6170,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 280
+            "y": 276
           },
-          "id": 111,
+          "id": 110,
           "options": {
             "legend": {
               "calcs": [
@@ -6372,9 +6221,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 280
+            "y": 276
           },
-          "id": 112,
+          "id": 111,
           "options": {
             "legend": {
               "calcs": [
@@ -6423,9 +6272,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 280
+            "y": 276
           },
-          "id": 113,
+          "id": 112,
           "options": {
             "legend": {
               "calcs": [
@@ -6474,9 +6323,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 288
+            "y": 284
           },
-          "id": 114,
+          "id": 113,
           "options": {
             "legend": {
               "calcs": [
@@ -6543,9 +6392,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 288
+            "y": 284
           },
-          "id": 115,
+          "id": 114,
           "options": {
             "legend": {
               "calcs": [
@@ -6594,9 +6443,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 288
+            "y": 284
           },
-          "id": 116,
+          "id": 115,
           "options": {
             "legend": {
               "calcs": [
@@ -6663,9 +6512,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 296
+            "y": 292
           },
-          "id": 117,
+          "id": 116,
           "options": {
             "legend": {
               "calcs": [
@@ -6714,9 +6563,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 296
+            "y": 292
           },
-          "id": 118,
+          "id": 117,
           "options": {
             "legend": {
               "calcs": [
@@ -6765,9 +6614,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 296
+            "y": 292
           },
-          "id": 119,
+          "id": 118,
           "options": {
             "legend": {
               "calcs": [
@@ -6816,9 +6665,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 304
+            "y": 300
           },
-          "id": 120,
+          "id": 119,
           "options": {
             "legend": {
               "calcs": [
@@ -6885,9 +6734,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 304
+            "y": 300
           },
-          "id": 121,
+          "id": 120,
           "options": {
             "legend": {
               "calcs": [
@@ -6936,9 +6785,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 304
+            "y": 300
           },
-          "id": 122,
+          "id": 121,
           "options": {
             "legend": {
               "calcs": [
@@ -6987,9 +6836,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 312
+            "y": 308
           },
-          "id": 123,
+          "id": 122,
           "options": {
             "legend": {
               "calcs": [
@@ -7056,9 +6905,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 312
+            "y": 308
           },
-          "id": 124,
+          "id": 123,
           "options": {
             "legend": {
               "calcs": [
@@ -7107,9 +6956,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 312
+            "y": 308
           },
-          "id": 125,
+          "id": 124,
           "options": {
             "legend": {
               "calcs": [
@@ -7158,9 +7007,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 320
+            "y": 316
           },
-          "id": 126,
+          "id": 125,
           "options": {
             "legend": {
               "calcs": [
@@ -7209,9 +7058,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 320
+            "y": 316
           },
-          "id": 127,
+          "id": 126,
           "options": {
             "legend": {
               "calcs": [
@@ -7278,9 +7127,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 320
+            "y": 316
           },
-          "id": 128,
+          "id": 127,
           "options": {
             "legend": {
               "calcs": [
@@ -7329,9 +7178,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 328
+            "y": 324
           },
-          "id": 129,
+          "id": 128,
           "options": {
             "legend": {
               "calcs": [
@@ -7380,9 +7229,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 328
+            "y": 324
           },
-          "id": 130,
+          "id": 129,
           "options": {
             "legend": {
               "calcs": [
@@ -7431,9 +7280,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 328
+            "y": 324
           },
-          "id": 131,
+          "id": 130,
           "options": {
             "legend": {
               "calcs": [
@@ -7500,9 +7349,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 336
+            "y": 332
           },
-          "id": 132,
+          "id": 131,
           "options": {
             "legend": {
               "calcs": [
@@ -7540,9 +7389,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 344
+        "y": 340
       },
-      "id": 133,
+      "id": 132,
       "panels": [
         {
           "datasource": {
@@ -7565,9 +7414,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 345
+            "y": 341
           },
-          "id": 134,
+          "id": 133,
           "options": {
             "legend": {
               "calcs": [
@@ -7616,9 +7465,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 345
+            "y": 341
           },
-          "id": 135,
+          "id": 134,
           "options": {
             "legend": {
               "calcs": [
@@ -7685,9 +7534,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 345
+            "y": 341
           },
-          "id": 136,
+          "id": 135,
           "options": {
             "legend": {
               "calcs": [
@@ -7736,9 +7585,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 353
+            "y": 349
           },
-          "id": 137,
+          "id": 136,
           "options": {
             "legend": {
               "calcs": [
@@ -7805,9 +7654,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 353
+            "y": 349
           },
-          "id": 138,
+          "id": 137,
           "options": {
             "legend": {
               "calcs": [
@@ -7856,9 +7705,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 353
+            "y": 349
           },
-          "id": 139,
+          "id": 138,
           "options": {
             "legend": {
               "calcs": [
@@ -7925,9 +7774,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 361
+            "y": 357
           },
-          "id": 140,
+          "id": 139,
           "options": {
             "legend": {
               "calcs": [
@@ -7976,9 +7825,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 361
+            "y": 357
           },
-          "id": 141,
+          "id": 140,
           "options": {
             "legend": {
               "calcs": [
@@ -8027,9 +7876,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 361
+            "y": 357
           },
-          "id": 142,
+          "id": 141,
           "options": {
             "legend": {
               "calcs": [
@@ -8078,9 +7927,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 369
+            "y": 365
           },
-          "id": 143,
+          "id": 142,
           "options": {
             "legend": {
               "calcs": [
@@ -8147,9 +7996,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 369
+            "y": 365
           },
-          "id": 144,
+          "id": 143,
           "options": {
             "legend": {
               "calcs": [
@@ -8198,9 +8047,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 369
+            "y": 365
           },
-          "id": 145,
+          "id": 144,
           "options": {
             "legend": {
               "calcs": [
@@ -8249,9 +8098,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 377
+            "y": 373
           },
-          "id": 146,
+          "id": 145,
           "options": {
             "legend": {
               "calcs": [
@@ -8318,9 +8167,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 377
+            "y": 373
           },
-          "id": 147,
+          "id": 146,
           "options": {
             "legend": {
               "calcs": [
@@ -8347,6 +8196,57 @@
           ],
           "title": "gkg_indexer_sdlc_freshness_lag_seconds — observation rate",
           "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+          },
+          "description": "One sample per SDLC plan on the served schema version: Unix time up to which its indexed data is known to match the datalake, in the least synced enabled namespace for namespaced plans.",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "lineInterpolation": "smooth",
+                "showPoints": "auto"
+              },
+              "unit": "s"
+            }
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 373
+          },
+          "id": 147,
+          "options": {
+            "legend": {
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "$ORBIT_DS"
+              },
+              "expr": "time() - min by (entity) (gkg_indexer_sdlc_freshness_oldest_sync_timestamp_seconds{container=~\"(gkg|orbit)-dispatcher\", cluster=~\".*\"})",
+              "legendFormat": "{{entity}}",
+              "refId": "A"
+            }
+          ],
+          "title": "gkg_indexer_sdlc_freshness_oldest_sync_timestamp_seconds — age",
+          "type": "timeseries"
         }
       ],
       "title": "SDLC pipeline (reference)",
@@ -8358,7 +8258,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 385
+        "y": 381
       },
       "id": 148,
       "panels": [
@@ -8383,7 +8283,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 386
+            "y": 382
           },
           "id": 149,
           "options": {
@@ -8458,7 +8358,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 386
+            "y": 382
           },
           "id": 150,
           "interval": "2m",
@@ -8517,7 +8417,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 394
+            "y": 390
           },
           "id": 151,
           "interval": "2m",
@@ -8570,7 +8470,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 394
+            "y": 390
           },
           "id": 152,
           "options": {
@@ -8645,7 +8545,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 402
+            "y": 398
           },
           "id": 153,
           "interval": "2m",
@@ -8704,7 +8604,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 402
+            "y": 398
           },
           "id": 154,
           "interval": "2m",
@@ -8757,7 +8657,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 410
+            "y": 406
           },
           "id": 155,
           "options": {
@@ -8826,7 +8726,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 410
+            "y": 406
           },
           "id": 156,
           "options": {
@@ -8877,7 +8777,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 410
+            "y": 406
           },
           "id": 157,
           "options": {
@@ -8917,7 +8817,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 418
+        "y": 414
       },
       "id": 158,
       "panels": [
@@ -8942,7 +8842,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 419
+            "y": 415
           },
           "id": 159,
           "options": {
@@ -9011,7 +8911,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 419
+            "y": 415
           },
           "id": 160,
           "options": {
@@ -9062,7 +8962,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 419
+            "y": 415
           },
           "id": 161,
           "options": {
@@ -9113,7 +9013,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 427
+            "y": 423
           },
           "id": 162,
           "options": {
@@ -9182,7 +9082,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 427
+            "y": 423
           },
           "id": 163,
           "options": {
@@ -9233,7 +9133,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 427
+            "y": 423
           },
           "id": 164,
           "options": {
@@ -9284,7 +9184,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 435
+            "y": 431
           },
           "id": 165,
           "options": {
@@ -9335,7 +9235,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 435
+            "y": 431
           },
           "id": 166,
           "options": {
