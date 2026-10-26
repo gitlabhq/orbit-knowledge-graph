@@ -1,7 +1,7 @@
 ---
 title: SDLC indexing
 description: How Orbit builds the SDLC graph from replicated GitLab data.
-order: 2
+order: 1
 authors:
   - jgdoyon1
 ---
@@ -11,10 +11,10 @@ authors:
 The SDLC graph holds everything GitLab stores about how software gets built.
 That means groups and projects, work items, merge requests, CI pipelines,
 security findings, packages, and the people involved. The
-[data model](data-model.md) page explains how the ontology declares these
+[data model](../data-model.md) page explains how the ontology declares these
 types. Here is a simplified view of the main areas and how they connect.
 
-![The main areas of the SDLC graph](../../../assets/architecture/sdlc-graph.svg)
+![The main areas of the SDLC graph](../../../../assets/architecture/sdlc-graph.svg)
 
 ## How it works
 
@@ -132,16 +132,8 @@ marked deleted.
 
 ## When things go wrong
 
-- **A worker crashes mid-run.** NATS delivers the request again, and the next
-  worker resumes from the last checkpoint.
-- **A page is written twice.** Graph tables keep the latest version of a row,
-  so it replaces itself.
-- **ClickHouse is overloaded or down.** The worker waits and retries, without
-  counting it as a failure.
-- **A request keeps failing.** It's retried a few times, then dropped. The
-  data stays in the lake for the next request.
-- **The graph needs a rebuild.** Replay everything from the lake and get the
-  same graph.
+How SDLC indexing recovers from crashes, retries, and outages is on the
+[resiliency](resiliency.md#sdlc-indexing) page.
 
 ## Why we built it this way
 
@@ -157,7 +149,7 @@ paging, retries, and memory. Code indexing also plugs into the same engine.
 
 ## Decisions
 
-- [ADR 000: ClickHouse as graph storage](../adr/000_clickhouse_graph_storage.md)
-- [ADR 013: System note edges](../adr/013_system_note_edges.md)
-- [ADR 014: Entity-level indexing](../adr/014_entity_level_indexing.md)
-- [ADR 015: Pluggable entity pipelines](../adr/015_pluggable_entity_pipelines.md)
+- [ADR 000: ClickHouse as graph storage](../../adr/000_clickhouse_graph_storage.md)
+- [ADR 013: System note edges](../../adr/013_system_note_edges.md)
+- [ADR 014: Entity-level indexing](../../adr/014_entity_level_indexing.md)
+- [ADR 015: Pluggable entity pipelines](../../adr/015_pluggable_entity_pipelines.md)

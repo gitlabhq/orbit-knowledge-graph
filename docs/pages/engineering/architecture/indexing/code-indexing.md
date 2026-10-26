@@ -1,7 +1,7 @@
 ---
 title: Code indexing
 description: How Orbit gets repository code into the graph.
-order: 3
+order: 2
 authors:
   - jgdoyon1
 ---
@@ -14,7 +14,7 @@ what the team has merged. The other branches aren't indexed yet, and
 [Why we built it this way](#why-we-built-it-this-way) explains why. Here is a
 simplified view of how a push reaches the code graph.
 
-![A push to the default branch reaches the code graph](../../../assets/architecture/code-indexing.svg)
+![A push to the default branch reaches the code graph](../../../../assets/architecture/code-indexing.svg)
 
 ## How it works
 
@@ -28,7 +28,7 @@ A push to the default branch starts the chain. GitLab records it as a task,
 and Siphon publishes it to NATS, where the dispatcher reads it directly
 instead of waiting for the data lake. The indexer then downloads the
 repository from Gitaly, builds the code graph, and writes it to ClickHouse.
-What the code graph contains is on the [code graph](code-graph.md) page.
+What the code graph contains is on the [code graph](../code-graph.md) page.
 
 ### 1. Triggers
 
@@ -135,21 +135,8 @@ them and marks their code deleted.
 
 ## When things go wrong
 
-- **A write fails.** The insert is retried a couple of times. If it still
-  fails, the run ends without a checkpoint and NATS delivers the request
-  again. Reindexing is idempotent.
-- **A run is too slow.** A run that goes over its time budget gets one more
-  try. If it times out again, it goes to the dead letter queue instead of
-  burning a worker slot over and over. A parser error that can't succeed on
-  retry goes there right away.
-- **The repository is empty or gone.** The project is checkpointed as indexed
-  with nothing in it, so it isn't retried forever. A push gets a few retries
-  first, in case Gitaly hasn't caught up with the new commit.
-- **Gitaly is overloaded.** The request goes back on the queue and nothing is
-  checkpointed. An overloaded server is never mistaken for an empty
-  repository.
-- **A project keeps failing.** The sweep gives up after a few attempts. A new
-  push still indexes it.
+How code indexing recovers from crashes, retries, and outages is on the
+[resiliency](resiliency.md#code-indexing) page.
 
 ## Why we built it this way
 
@@ -170,4 +157,4 @@ project, and a crashed worker leaves nothing behind to repair.
 
 ## Decisions
 
-- [ADR 005: Code indexing task table](../adr/005_code_indexing_task_table.md)
+- [ADR 005: Code indexing task table](../../adr/005_code_indexing_task_table.md)

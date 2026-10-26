@@ -1,7 +1,7 @@
 ---
 title: Code graph
 description: What the code graph contains and how Orbit builds it from source files.
-order: 3.5
+order: 3
 authors: []
 ---
 

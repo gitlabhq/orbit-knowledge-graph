@@ -1,7 +1,7 @@
 ---
 title: Schema evolution
 description: How a change to the graph schema reaches production without downtime.
-order: 4
+order: 3
 authors:
   - jgdoyon1
 ---
@@ -14,7 +14,7 @@ version N, which keeps answering queries the whole time. Once N+1 is complete,
 queries move to it with no downtime, and N is cleaned up. Here is a simplified
 view of that path.
 
-![A schema change builds version N+1 next to N, then switches live](../../../assets/architecture/schema-evolution.svg)
+![A schema change builds version N+1 next to N, then switches live](../../../../assets/architecture/schema-evolution.svg)
 
 ## How it works
 
@@ -118,20 +118,8 @@ away.
 
 ## When things go wrong
 
-- **The dispatcher crashes mid-migration.** It runs the migration again when
-  it restarts. Every step can be repeated, and a table that was left half
-  copied is copied again.
-- **A namespace never finishes.** The switch waits for it, with no timeout.
-  Version N keeps serving queries, and a metric shows how long the migration
-  has been running.
-- **The archive of N+1 doesn't load.** The switch doesn't happen, and the
-  check tries again on its next run.
-- **An older release comes back.** If its tables are still there, it becomes
-  active again at once. If they were already cleaned up, it rebuilds them from
-  scratch.
-- **The query service can't load the active version.** It answers that it's
-  unavailable and fails its readiness check, instead of serving the wrong
-  schema.
+How schema evolution recovers from crashes, retries, and outages is on the
+[resiliency](resiliency.md#schema-evolution) page.
 
 ## Why we built it this way
 
@@ -164,4 +152,4 @@ what lets the dispatcher trust it enough to copy everything else.
 
 ## Decisions
 
-- [ADR 017: Clone-based non-blocking migrations](../adr/017_clone_based_non_blocking_migrations.md)
+- [ADR 017: Clone-based non-blocking migrations](../../adr/017_clone_based_non_blocking_migrations.md)
