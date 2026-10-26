@@ -72,7 +72,7 @@ tests:
         AND sym.import_path = 'java.lang.annotation' AND sym.identifier_name = '*'
       RETURN caller.fqn AS caller, sym.identifier_name AS symbol
     assert:
-      - { row_count: 2 }
+      - { row_count: 1 }
 
   - name: "wildcard annotation imports do not synthesize named imported symbols"
     query: |

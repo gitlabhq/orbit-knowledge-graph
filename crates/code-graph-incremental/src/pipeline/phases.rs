@@ -485,7 +485,8 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
 /// resolve budget keeps its intra-file edges and is reported. A family that
 /// overruns keeps the edges resolved so far, is reported, and resolves in
 /// full on the next run. Manifest files join the project tree so the
-/// resolver can read module roots from them.
+/// resolver can read module roots from them. A retained edge that resolves
+/// again is kept once.
 pub struct Resolve;
 
 impl Phase<DirtyGraph> for Resolve {
@@ -539,6 +540,8 @@ impl Phase<DirtyGraph> for Resolve {
             state.trees[rsp.fi as usize].storage.node_mut(rsp.node).sym = rsp.sym;
         }
         state.edges.extend(result.cross_edges);
+        let mut seen = FxHashSet::with_capacity_and_hasher(state.edges.len(), Default::default());
+        state.edges.retain(|edge| seen.insert(*edge));
         context.run.check()?;
         // Only files parsed in this run have an entry.
         let mut resolved = Vec::with_capacity(result.file_timings.len());
