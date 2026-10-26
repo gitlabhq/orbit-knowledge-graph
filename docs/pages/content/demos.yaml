@@ -4,25 +4,25 @@ videos:
     title: GitLab Orbit explainer
     description: What Orbit is and how agents use it, in a few minutes.
     thumbnail: https://i.vimeocdn.com/video/2189929998-46e3c4b40213c14d2124a20732ae73b9f629cbc52b91d304ac9f9cc1b923e16d-d_1280?region=us
-  - provider: vimeo
-    id: "1199521642"
-    title: How Orbit works
-    description: How Orbit builds the graph from your GitLab data, in four minutes.
-    thumbnail: https://i.vimeocdn.com/video/2166895892-9d10bf43d09836de76a4b4c13cb1beb31d1df850ac62e4202ef7850de251226b-d_1280?region=us
-  - provider: vimeo
-    id: "1200369898"
-    title: Orbit demo at GitLab Transcend London
-    description: A live demo of agents that use Orbit, from GitLab Transcend London.
-    thumbnail: https://i.vimeocdn.com/video/2167441470-9cf7818a733b3ff632c5f6f54800e05806e7b59901d282d5453f650e78c64f65-d_1280?region=us
+  - provider: youtube
+    id: wddpf0rDGnA
+    title: "How we built Orbit: the AI context graph layer"
+    description: How Orbit builds the graph and answers agent queries.
   - provider: youtube
     id: ekcw1yn21jQ
     start: 1840
     title: Orbit launch at the GitLab Transcend keynote
     description: The part of the GitLab Transcend keynote where GitLab announced Orbit.
-  - provider: youtube
-    id: wddpf0rDGnA
-    title: "Technical deep dive: the AI context graph layer"
-    description: How Orbit builds the graph and answers agent queries.
+  - provider: vimeo
+    id: "1200369898"
+    title: Orbit demo at GitLab Transcend London
+    description: A live demo of agents that use Orbit, from GitLab Transcend London.
+    thumbnail: https://i.vimeocdn.com/video/2167441470-9cf7818a733b3ff632c5f6f54800e05806e7b59901d282d5453f650e78c64f65-d_1280?region=us
+  - provider: vimeo
+    id: "1199521642"
+    title: How Orbit works
+    description: How Orbit builds the graph from your GitLab data, in four minutes.
+    thumbnail: https://i.vimeocdn.com/video/2166895892-9d10bf43d09836de76a4b4c13cb1beb31d1df850ac62e4202ef7850de251226b-d_1280?region=us
   - provider: youtube
     id: tvRCt54GuII
     title: Orbit product design roadshow, March 2026
