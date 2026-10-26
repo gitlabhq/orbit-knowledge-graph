@@ -23,6 +23,8 @@ pub struct Fingerprints {
     pub sources: BTreeMap<String, String>,
     pub ddl: BTreeMap<String, String>,
     #[serde(default)]
+    pub edge_rows: String,
+    #[serde(default)]
     pub auxiliary_schema: BTreeMap<String, String>,
 }
 
@@ -61,26 +63,55 @@ impl Fingerprints {
 }
 
 #[must_use]
-pub fn source_fingerprints() -> BTreeMap<String, String> {
-    crate::loading::embedded_files()
-        .into_iter()
+pub fn source_fingerprints(sources: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    sources
+        .iter()
+        .filter(|(path, _)| !path.starts_with("sql/"))
+        .map(|(path, content)| (path.clone(), hash_source(path, content)))
+        .collect()
+}
+
+pub fn hash_edge_row_sources(sources: &BTreeMap<String, String>) -> String {
+    let hashes: String = sources
+        .iter()
         .filter(|(path, _)| !path.starts_with("sql/"))
         .map(|(path, content)| {
-            let hash = if path == ONTOLOGY_SCHEMA_FILE {
-                stable_versioned_schema_hash(&content)
-            } else if path.ends_with(".yaml") || path.ends_with(".yml") {
-                stable_yaml_hash(&content)
+            let hash = if path.starts_with("nodes/") {
+                hash_node_without_storage(content)
             } else {
-                sha256_hex(&content)
+                hash_source(path, content)
             };
-            (path, hash)
+            format!("{path}={hash}\n")
         })
-        .collect()
+        .collect();
+    sha256_hex(&hashes)
 }
 
 #[must_use]
 pub fn embedded_sources() -> BTreeMap<String, String> {
     crate::loading::embedded_files().into_iter().collect()
+}
+
+fn hash_source(path: &str, content: &str) -> String {
+    if path == ONTOLOGY_SCHEMA_FILE {
+        stable_versioned_schema_hash(content)
+    } else if path.ends_with(".yaml") || path.ends_with(".yml") {
+        stable_yaml_hash(content)
+    } else {
+        sha256_hex(content)
+    }
+}
+
+fn hash_node_without_storage(content: &str) -> String {
+    let Ok(mut value) = orbit_utils::yaml::from_str::<serde_json::Value>(content) else {
+        return sha256_hex(content);
+    };
+    if let serde_json::Value::Object(node) = &mut value {
+        node.remove("storage");
+    }
+    remove_runtime_extract_fields(&mut value);
+    sort_json_keys(&mut value);
+    sha256_hex(&value.to_string())
 }
 
 #[must_use]
@@ -305,6 +336,7 @@ mod tests {
         let base = Fingerprints {
             sources: BTreeMap::from([("a".into(), "1".into()), ("b".into(), "2".into())]),
             ddl: BTreeMap::from([("t".into(), "9".into())]),
+            edge_rows: String::new(),
             auxiliary_schema: BTreeMap::new(),
         };
         let current = Fingerprints {
@@ -314,6 +346,7 @@ mod tests {
                 ("c".into(), "3".into()),
             ]),
             ddl: BTreeMap::new(),
+            edge_rows: String::new(),
             auxiliary_schema: BTreeMap::new(),
         };
         let (sources, ddl) = current.get_versioned_diff_keys_between(&base);

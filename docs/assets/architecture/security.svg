@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-130 -110 1660 420" width="830" height="210" font-family="'GitLab Sans', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif">
+<title>Orbit security: three layers on every request</title>
+<defs><symbol viewBox="0 0 16 16" id="i-connected"><path fill-rule="evenodd" clip-rule="evenodd" d="M14.78 2.28a.75.75 0 00-1.06-1.06l-1.617 1.616a4 4 0 00-5.275.336L5.53 4.47l-.25-.25a.75.75 0 00-1.06 1.06l.25.25-1.302 1.302a4 4 0 00-.336 5.275L1.22 13.72a.75.75 0 101.06 1.06l1.613-1.612a4 4 0 005.275-.336l1.302-1.302.25.25a.75.75 0 101.06-1.06l-.25-.25 1.298-1.298a4 4 0 00.336-5.275L14.78 2.28zm-4.31 7.13l1.297-1.297a2.5 2.5 0 000-3.536l-.343-.343.404-.405-.404.405a2.5 2.5 0 00-3.536 0L6.591 5.53l3.879 3.88zM5.53 6.591l-1.3 1.301a2.5 2.5 0 000 3.536l-.4.4.4-.4.343.343a2.5 2.5 0 003.536 0L9.41 10.47 5.53 6.59z"/></symbol><symbol viewBox="0 0 16 16" id="i-search"><path fill-rule="evenodd" clip-rule="evenodd" d="M11.5 7a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zm-.82 4.74a6 6 0 111.06-1.06l3.04 3.04a.75.75 0 11-1.06 1.06l-3.04-3.04z"/></symbol><symbol viewBox="0 0 16 16" id="i-tanuki"><path fill-rule="evenodd" clip-rule="evenodd" d="M14.329 6.922l-.02-.053-1.239-3.232-.668 2.044-.337 1.035H3.936L3.598 5.68l-.667-2.043-1.24 3.237-.005.01-.004.01-.018.045a2.543 2.543 0 00.848 2.93l.005.004.01.008.01.008.009.006 3.302 2.474.004.004 1.644 1.242.5.379.501-.379 1.644-1.242.006-.004 3.325-2.489.007-.005.009-.007a2.543 2.543 0 00.844-2.939l-.003-.008zm.053 4.152l-3.337 2.497-1.643 1.242-.999.755a.675.675 0 01-.813 0l-.999-.755-1.643-1.242-3.313-2.483-.018-.014-.008-.006A4.043 4.043 0 01.267 6.395l.023-.057 1.9-4.963.013-.033.081-.212.023-.06.158-.413A.565.565 0 012.941.3a.576.576 0 01.613.415l.134.41.005.017.078.239.011.033 1.242 3.802h5.953l1.241-3.802.011-.033.078-.24.006-.016.133-.41a.575.575 0 011.088-.058l.157.409.025.064.08.211.013.033 1.903 4.963.022.058a4.043 4.043 0 01-1.343 4.671l-.01.008z"/></symbol><symbol viewBox="0 0 16 16" id="i-users"><path fill-rule="evenodd" clip-rule="evenodd" d="M6.5 4a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zm.63 2.113a3 3 0 10-4.259 0A3.997 3.997 0 001 9.5V13a2 2 0 002 2h4c.597 0 1.134-.262 1.5-.677.366.415.903.677 1.5.677h3a2 2 0 002-2v-2c0-1.218-.622-2.29-1.565-2.917a2.5 2.5 0 10-3.87 0c-.241.16-.462.35-.656.564a4.005 4.005 0 00-1.78-2.534zM5 7a2.5 2.5 0 00-2.5 2.5V13a.5.5 0 00.5.5h4a.5.5 0 00.5-.5V9.5A2.5 2.5 0 005 7zm7.5-.5a1 1 0 11-2 0 1 1 0 012 0zm-1 2.5a2 2 0 00-2 2v2a.5.5 0 00.5.5h3a.5.5 0 00.5-.5v-2a2 2 0 00-2-2z"/></symbol><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8f8e96"/></marker></defs>
+<path d="M56,0 Q227,-70 398,0" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M516,0 Q687,-70 858,0" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M976,0 Q1147,-70 1318,0" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M1324,0 Q1153,110 982,0" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M864,0 Q693,110 522,0" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<path d="M404,0 Q233,110 62,0" fill="none" stroke="#8f8e96" stroke-opacity="0.6" stroke-width="2.5" marker-end="url(#arrow)"/>
+<circle cx="0" cy="0" r="48" fill="#10B981"/>
+<use href="#i-users" x="-19.7" y="-19.7" width="39.4" height="39.4" style="fill:#1f1e24"/>
+<text x="0" y="78" font-size="26" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Caller</text>
+<circle cx="460" cy="0" r="48" fill="#FC6D26"/>
+<use href="#i-tanuki" x="440.3" y="-19.7" width="39.4" height="39.4" style="fill:#ffffff"/>
+<text x="460" y="78" font-size="26" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">GitLab</text>
+<text x="460" y="110" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">3. checks every</text>
+<text x="460" y="136" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">returned entity</text>
+<circle cx="920" cy="0" r="48" fill="#3B82F6"/>
+<use href="#i-search" x="900.3" y="-19.7" width="39.4" height="39.4" style="fill:#ffffff"/>
+<text x="920" y="78" font-size="26" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Orbit</text>
+<text x="920" y="110" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">2. every query</text>
+<text x="920" y="136" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">has a scope</text>
+<circle cx="1380" cy="0" r="48" fill="#8B5CF6"/>
+<use href="#i-connected" x="1360.3" y="-19.7" width="39.4" height="39.4" style="fill:#ffffff"/>
+<text x="1380" y="78" font-size="26" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Graph store</text>
+<text x="1380" y="110" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">1. every row</text>
+<text x="1380" y="136" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">has a path</text>
+<text x="227.0" y="-57.0" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">request</text>
+<text x="687.0" y="-57.0" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">allowed paths</text>
+<text x="1147.0" y="-57.0" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">scoped query</text>
+<text x="1153.0" y="33.0" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">rows</text>
+<text x="693.0" y="33.0" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">entities to check</text>
+<text x="233.0" y="33.0" font-size="18" font-weight="500" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">allowed entities</text>
+</svg>

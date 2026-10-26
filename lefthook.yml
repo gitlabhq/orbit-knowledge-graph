@@ -8,7 +8,7 @@ output:
 commit-msg:
   jobs:
     - name: commitlint
-      run: mise exec -- npx --yes -p @commitlint/config-conventional -p @commitlint/cli commitlint --edit {1}
+      run: mise exec -- bun install --frozen-lockfile --silent && mise exec -- bun x commitlint --edit {1}
 
 pre-push:
   parallel: true
@@ -49,7 +49,9 @@ pre-commit:
         - "AGENTS.md"
         - "CONTEXT.md"
         - "crates/*/AGENTS.md"
-        - "docs/dev/**/*.md"
+        - "docs/pages/engineering/development/**/*.md"
+        - "docs/pages/engineering/architecture/**/*.md"
+        - "docs/pages/engineering/runbooks/**/*.md"
         - "docs/design-documents/**/*.md"
         - ".gitlab/merge_request_templates/*.md"
         - ".gitlab/issue_templates/*.md"
@@ -65,9 +67,9 @@ pre-commit:
         - "AGENTS.md"
         - "CLAUDE.md"
     - name: orbit-skill-docs-sync
-      run: diff docs/source/remote/queries/query-language.md skills/orbit/references/query_language.md
+      run: diff docs/docs-gitlab-com/remote/queries/query-language.md skills/orbit/references/query_language.md
       glob:
-        - "docs/source/remote/queries/query-language.md"
+        - "docs/docs-gitlab-com/remote/queries/query-language.md"
         - "skills/orbit/references/query_language.md"
     - name: rust-toolchain-sync
       run: mise run toolchain:check
@@ -108,7 +110,7 @@ pre-commit:
         - "config/ontology/**/*.yaml"
         - "crates/xtask/src/query_docs.rs"
         - "crates/ontology/src/lib.rs"
-        - "docs/source/remote/queries/query-language.md"
+        - "docs/docs-gitlab-com/remote/queries/query-language.md"
         - "skills/orbit/references/query_language.md"
     - name: secrets-detection
       run: .lefthook/gitleaks.sh pre-commit

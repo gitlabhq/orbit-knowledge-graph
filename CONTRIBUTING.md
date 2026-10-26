@@ -27,13 +27,13 @@ Core tasks:
 | Apply lint fixes | `mise lint:code:fix` |
 | Validate doc changes | `mise lint:docs` |
 
-For the full local setup (Caproni cluster with GitLab, ClickHouse, NATS, and Siphon), see [Local development](docs/dev/local-development.md).
+For the full local setup (Caproni cluster with GitLab, ClickHouse, NATS, and Siphon), see [Local development](docs/pages/engineering/development/local-development.md).
 
 ## Testing
 
 `mise test:fast` runs the unit tests with no Docker. `mise test:integration` runs the container tests. On macOS, start Docker for them with `colima start gkg --memory 12`.
 
-For all test layers, the CI jobs, and where to add a test, see [Testing](docs/design-documents/testing.md).
+For all test layers, the CI jobs, and where to add a test, see [Testing](docs/pages/engineering/testing/README.md).
 
 ## Linting
 
@@ -51,7 +51,7 @@ Run `mise lint:docs` before pushing any documentation changes.
 - Reuse existing infrastructure before adding new infrastructure.
 - Before changing an area, read its design document and the crate-local `AGENTS.md`, if present.
 - Treat the ontology as the single source of truth for graph-shape facts.
-- Read `docs/dev/sox-billing-boundary.md` before changing billing.
+- Read `docs/pages/engineering/development/sox-billing-boundary.md` before changing billing.
 
 ## Documentation conventions
 
@@ -69,7 +69,7 @@ Run `mise lint:docs` before pushing any documentation changes.
 - Use the canonical terms in `CONTEXT.md`. Add a term only when a new domain
   concept could confuse a new contributor.
 - Follow the GitLab documentation principles in `.ai/principles/distilled/` when
-  writing pages under `docs/source/`. A green `mise lint:docs` run does not mean
+  writing pages under `docs/docs-gitlab-com/`. A green `mise lint:docs` run does not mean
   a page follows them.
 
 ## Issue conventions

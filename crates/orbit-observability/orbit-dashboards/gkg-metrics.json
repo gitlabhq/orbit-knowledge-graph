@@ -924,6 +924,18 @@
       "domain": "indexer.sdlc"
     },
     {
+      "otel_name": "gkg.indexer.sdlc.freshness.oldest_sync_timestamp",
+      "prom_name": "gkg_indexer_sdlc_freshness_oldest_sync_timestamp_seconds",
+      "description": "One sample per SDLC plan on the served schema version: Unix time up to which its indexed data is known to match the datalake, in the least synced enabled namespace for namespaced plans.",
+      "kind": "observable_gauge",
+      "unit": "s",
+      "labels": [
+        "entity"
+      ],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
       "otel_name": "gkg.indexer.sdlc.handler.duration",
       "prom_name": "gkg_indexer_sdlc_handler_duration_seconds",
       "description": "Duration of a full handler invocation across all its pipelines.",

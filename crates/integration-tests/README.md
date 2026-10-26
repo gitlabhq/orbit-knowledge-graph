@@ -33,7 +33,7 @@ The three container-test lanes run each container test one time.
 `integration-test-lane-coverage-check` fails if a test is in no lane or in two lanes.
 
 New correctness tests are YAML suites. See
-[Testing principles](../../docs/design-documents/testing.md#testing-principles).
+[Testing principles](../../docs/pages/engineering/testing/README.md#principles).
 
 ## Running
 
@@ -47,7 +47,7 @@ colima stop gkg
 ```
 
 For the other `mise test:integration:*` tasks, see
-[Container tests](../../docs/design-documents/testing.md#container-tests).
+[Container tests](../../docs/pages/engineering/testing/infrastructure.md).
 
 To run specific suites or tests directly:
 

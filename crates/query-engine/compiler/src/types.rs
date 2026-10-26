@@ -164,7 +164,7 @@ impl SecurityContext {
             .collect()
     }
 
-    pub(crate) fn validate_traversal_path(path: &TraversalPath) -> Result<()> {
+    fn validate_traversal_path(path: &TraversalPath) -> Result<()> {
         path.validate().map_err(QueryError::Security)
     }
 }
