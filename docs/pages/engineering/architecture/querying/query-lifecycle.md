@@ -64,11 +64,12 @@ flowchart LR
     SQL --> Store[(Relational store)] --> Rows
 ```
 
-The engine writes one SQL statement for one relational backend. Orbit Remote
-runs it on ClickHouse, the Orbit CLI runs it on DuckDB, and a PostgreSQL
-backend is a plan. On ClickHouse, Orbit runs the statement as a user that can
-only read, with time and memory limits for each query type. Every read keeps
-only the latest version of each row, so old and deleted versions never match.
+The engine writes one SQL statement for one relational backend, and the query
+service runs it on ClickHouse. The same engine can write SQL for DuckDB, and a
+PostgreSQL backend is a plan. Orbit runs the statement as a ClickHouse user
+that can only read, with time and memory limits for each query type. Every
+read keeps only the latest version of each row, so old and deleted versions
+never match.
 
 ### 4. GitLab redacts what SQL can't decide
 
@@ -90,7 +91,7 @@ it.
 flowchart LR
     Rows --> Hydrate --> Format --> Response
     Hydrate --> Store[(Relational store)]
-    Hydrate --> Gitaly
+    Hydrate --> GitLab --> Gitaly
 ```
 
 The main query returns IDs, plus the properties it already joined. Hydration
@@ -100,9 +101,13 @@ query.
 
 Some properties don't live in the graph at all. The ontology marks them as
 virtual, like the content of a file or the diff of a merge request. It also
-names the service that holds them. After the main query, Orbit asks GitLab for
-those properties, and GitLab reads them from Gitaly with its own permission
-checks. A filter on a virtual property runs after Orbit fetches it.
+names the service that holds them. Orbit fetches them only after GitLab has
+checked the rows, so it never reads content for a row the caller can't see. It
+asks the GitLab internal API, which reads the content from Gitaly. That call
+proves that the request comes from Orbit, not who the caller is, so the
+earlier row checks are what protect the content. A filter on a virtual
+property runs after Orbit fetches it, and only in a traversal that names its
+nodes by ID.
 
 Every query type returns the same shape: nodes, edges, optional aggregation
 rows, and paging details. Callers get raw JSON, compact TOON text for LLMs, or
@@ -121,6 +126,10 @@ and each next page is a new query.
   the caller gets an error, never a partial result.
 - **GitLab can't answer a redaction check.** The query fails, and Orbit never
   returns rows that GitLab didn't check.
+- **A virtual property can't be fetched.** That property comes back empty, and
+  the rest of the result still returns.
+- **A query asks for virtual properties on too many rows.** Orbit rejects it,
+  and the caller asks again with a smaller page.
 - **The caller disconnects.** Orbit stops the query.
 - **A new schema version is rolling out.** Orbit keeps serving the active
   graph until the new one is complete.
@@ -144,22 +153,24 @@ that follows.
 
 Virtual properties stay where they live. Copying file content or diffs into
 the graph would duplicate data that GitLab already stores and protects.
-Fetching them at query time keeps the graph small, and GitLab checks every
-read.
+Fetching them at query time keeps the graph small, and Orbit fetches content
+only for rows that GitLab already allowed.
 
 Callers never send SQL. A query language with a fixed shape lets Orbit check,
 bound, and secure every query, and LLMs can write it reliably.
 
 ## Trade-offs and what's next
 
-- **The relational store is one source among several.** The engine already
-  writes SQL for ClickHouse and DuckDB. PostgreSQL is a plan, and it needs its
-  own data model layout and its own way to read the latest row version.
+- **The relational store is one source among several.** The query service runs
+  on ClickHouse, and the engine can also write SQL for DuckDB. PostgreSQL is a
+  plan, and it needs its own data model layout and its own way to read the
+  latest row version.
 - **Hydration can fan out further.** Virtual properties come only from Gitaly
   today. Object storage and Zoekt code search are plans, and each would add
   one resolver for its own virtual properties.
 - **Virtual filters run late.** A filter on a virtual property runs after the
-  main query, so a page can hold fewer rows than its limit.
+  main query, and only in a traversal that names its nodes by ID. A page can
+  hold fewer rows than its limit.
 
 ## Decisions
 
