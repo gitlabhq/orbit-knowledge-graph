@@ -4,6 +4,9 @@ description: How indexing recovers from crashes, retries, and outages.
 order: 4
 authors:
   - jgdoyon1
+  - michaelangeloio
+  - dgruzd
+  - bohdanpk
 ---
 
 ## Built on eventual consistency
