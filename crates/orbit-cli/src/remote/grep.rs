@@ -6,43 +6,31 @@ use serde::Deserialize;
 use super::client::OrbitClient;
 use super::error::{EXIT_FORBIDDEN, EXIT_UNAVAILABLE, RemoteError};
 
-pub(crate) const SCOPES: &[(&str, &str)] = &[
-    ("WorkItem", "work_items"),
-    ("MergeRequest", "merge_requests"),
-    ("Commit", "commits"),
-    ("Note", "notes"),
-    ("Milestone", "milestones"),
-    ("User", "users"),
-    ("Project", "projects"),
-    ("Group", "groups"),
-    ("Branch", "branches"),
+/// Node kinds that GitLab grep searches. The API maps a kind to its scope, so requests send kinds as-is.
+const SEARCHED_KINDS: &[&str] = &[
+    "WorkItem",
+    "MergeRequest",
+    "Commit",
+    "Note",
+    "Milestone",
+    "User",
+    "Project",
+    "Group",
+    "Branch",
 ];
-const BRANCHES: &str = "branches";
+const BRANCH: &str = "Branch";
 const DEFAULT_SCOPES: &[&str] = &["work_items", "merge_requests", "notes"];
 const MAX_SEARCHES: usize = 5;
 /// GitLab rejects a search with no term this long as an abusive tiny search.
 const MIN_SEARCH_CHARS: usize = 2;
 
-pub(crate) fn scope_for(kind: &str) -> Option<&'static str> {
-    let lower = kind.to_ascii_lowercase();
-    let singular = lower.strip_suffix('s').unwrap_or(&lower);
-    let kind = match singular {
-        "mr" | "pr" | "merge_request" => "MergeRequest",
-        "issue" | "epic" | "work_item" => "WorkItem",
-        "comment" => "Note",
-        other => other,
-    };
-    SCOPES
+/// The node kind GitLab grep searches for `kind`, a node name in any case or snake case.
+pub(crate) fn searched_kind(kind: &str) -> Option<&'static str> {
+    let flat = kind.replace('_', "");
+    SEARCHED_KINDS
         .iter()
-        .find(|(node, _)| node.eq_ignore_ascii_case(kind))
-        .map(|(_, scope)| *scope)
-}
-
-pub(crate) fn scope_order(scope: &str) -> usize {
-    SCOPES
-        .iter()
-        .position(|(_, name)| *name == scope)
-        .unwrap_or(SCOPES.len())
+        .find(|node| node.eq_ignore_ascii_case(&flat))
+        .copied()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,7 +61,7 @@ impl Target {
 pub(crate) struct Request {
     pub(crate) target: Target,
     pub(crate) keywords: Vec<String>,
-    pub(crate) scopes: Vec<&'static str>,
+    pub(crate) kinds: Vec<&'static str>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -141,14 +129,13 @@ struct Match {
     text: String,
 }
 
-fn api_scopes(requested: &[&'static str]) -> Vec<&'static str> {
-    match requested.is_empty() {
-        true => DEFAULT_SCOPES.to_vec(),
-        false => requested
+fn api_scopes(kinds: &[&str]) -> Vec<String> {
+    match kinds.is_empty() {
+        true => DEFAULT_SCOPES
             .iter()
-            .copied()
-            .filter(|scope| *scope != BRANCHES)
+            .map(|scope| scope.to_string())
             .collect(),
+        false => kinds.iter().map(|kind| kind.to_string()).collect(),
     }
 }
 
@@ -194,21 +181,39 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
         (Target::ProjectId(id), _) => ("project_id", id.to_string()),
         (Target::GroupId(id), _) => ("namespace_id", id.to_string()),
     };
-    let api_scopes = api_scopes(&request.scopes);
-    let only_branches = !request.scopes.is_empty() && api_scopes.is_empty();
-    let keywords = match only_branches {
-        true => &[][..],
-        false => &request.keywords[..],
+    let api_scopes = api_scopes(&request.kinds);
+    // Branches belong to a project, so for the `origin` they are searched in its project, not its group.
+    let branch_project = home_project
+        .as_ref()
+        .filter(|_| request.kinds.contains(&BRANCH))
+        .map(|project| ("full_path", project.clone()));
+    let searches: Vec<((&str, String), Vec<String>)> = match &branch_project {
+        Some(project) => {
+            let others: Vec<String> = api_scopes
+                .iter()
+                .filter(|kind| *kind != BRANCH)
+                .cloned()
+                .collect();
+            let mut searches = vec![(project.clone(), vec![BRANCH.to_string()])];
+            if !others.is_empty() {
+                searches.push((scope.clone(), others));
+            }
+            searches
+        }
+        None => vec![(scope.clone(), api_scopes.clone())],
     };
     let fetch = |keywords: Vec<String>| {
         let tasks: Vec<_> = keywords
             .into_iter()
-            .map(|keywords| {
+            .flat_map(|keywords| {
+                searches.iter().map(move |(target, scopes)| {
+                    let mut params = vec![("search", keywords.clone()), target.clone()];
+                    params.push(("scopes", scopes.join(",")));
+                    params
+                })
+            })
+            .map(|params| {
                 let client = client.clone();
-                let mut params = vec![("search", keywords), scope.clone()];
-                if !api_scopes.is_empty() {
-                    params.push(("scopes", api_scopes.join(",")));
-                }
                 tokio::spawn(async move { client.get_grep(&params).await })
             })
             .collect::<Vec<_>>();
@@ -230,13 +235,14 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
             Ok(responses)
         }
     };
-    let keywords: Vec<String> = keywords
+    let keywords: Vec<String> = request
+        .keywords
         .iter()
         .filter(|k| k.trim().chars().count() >= MIN_SEARCH_CHARS)
         .take(MAX_SEARCHES)
         .cloned()
         .collect();
-    if keywords.is_empty() && !only_branches {
+    if keywords.is_empty() {
         return Outcome::Empty;
     }
     let mut responses = match fetch(keywords.to_vec()).await {
@@ -278,7 +284,7 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
             &responses,
             home_project.as_deref(),
             any_word,
-            !request.scopes.is_empty(),
+            !request.kinds.is_empty(),
         ),
     };
     if let Outcome::Found(mut text) = rendered {
@@ -293,59 +299,8 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
             found.push(text);
         }
     }
-    if request.scopes.contains(&BRANCHES) {
-        let kind = responses
-            .iter()
-            .find_map(|response| response.target.as_ref())
-            .map(|target| target.kind.to_ascii_lowercase())
-            .unwrap_or_default();
-        let project = match &home_project {
-            Some(path) => Ok(path.clone()),
-            None if scope.0 == "namespace_id" || !(kind.is_empty() || kind == "project") => {
-                Err(format!(
-                    "branches belong to a project; {} is not one",
-                    request.target.named()
-                ))
-            }
-            None if kind.is_empty() && matches!(request.target, Target::Namespace(_)) => {
-                match super::sdlc::is_project(&client, &scope.1).await {
-                    Ok(true) => Ok(scope.1.clone()),
-                    Ok(false) => Err(format!(
-                        "branches belong to a project; no project named {}",
-                        request.target.named()
-                    )),
-                    Err(error) if found.is_empty() => return outcome_for(&request.target, &error),
-                    Err(error) => Err(first_line(&error.message)),
-                }
-            }
-            None => Ok(scope.1.clone()),
-        };
-        let project = match project {
-            Ok(project) => project,
-            Err(reason) if found.is_empty() => return Outcome::Skipped(reason),
-            Err(_) => return Outcome::Found(found.join("\n")),
-        };
-        let shown = format!("{api_host}/{project}");
-        let wanted = request.keywords.join(" ");
-        match super::sdlc::search_text(&client, &shown, &project, &wanted).await {
-            Ok(Some(text)) => found.push(text),
-            Ok(None) => {}
-            Err(error)
-                if found.is_empty()
-                    && home_project.is_none()
-                    && first_line(&error.message).ends_with(" not found") =>
-            {
-                return Outcome::Skipped(format!(
-                    "branches belong to a project; no project named {}",
-                    request.target.named()
-                ));
-            }
-            Err(error) if found.is_empty() => return outcome_for(&request.target, &error),
-            Err(_) => {}
-        }
-    }
     match found.is_empty() {
-        true if !request.scopes.is_empty() => {
+        true if !request.kinds.is_empty() => {
             Outcome::Skipped(nothing_found(&request, &api_scopes, &scope.1))
         }
         true => Outcome::Empty,
@@ -353,19 +308,19 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
     }
 }
 
-fn nothing_found(request: &Request, api_scopes: &[&str], project: &str) -> String {
+fn nothing_found(request: &Request, api_scopes: &[String], project: &str) -> String {
     let launcher = crate::commands::setup::spec::launcher();
     let words = request.keywords.join(" ");
     let searched = api_scopes
         .iter()
-        .map(|scope| scope.replace('_', " "))
+        .map(|scope| plural(scope))
         .collect::<Vec<_>>()
         .join(", ");
     let mut message = format!("no {searched} match {words:?} in {project}");
     if api_scopes.len() == 1 {
-        let (qualifier, sibling, label) = match api_scopes[0] {
-            "merge_requests" => ("mr", "issue", "issues"),
-            "work_items" => ("issue", "mr", "merge requests"),
+        let (qualifier, sibling, label) = match api_scopes[0].as_str() {
+            "MergeRequest" => ("mr", "issue", "issues"),
+            "WorkItem" => ("issue", "mr", "merge requests"),
             _ => return message,
         };
         if words.chars().all(|c| c.is_ascii_digit()) {
@@ -379,13 +334,35 @@ fn nothing_found(request: &Request, api_scopes: &[&str], project: &str) -> Strin
     message
 }
 
+/// `MergeRequest` reads as `merge requests`, and a default scope such as `work_items` as `work items`.
+fn plural(scope: &str) -> String {
+    let mut words = String::new();
+    for (index, c) in scope.chars().enumerate() {
+        if c.is_ascii_uppercase() && index > 0 {
+            words.push(' ');
+        }
+        words.push(c.to_ascii_lowercase());
+    }
+    let words = words.replace('_', " ");
+    match words.ends_with('s') {
+        true => words,
+        false if words.ends_with("ch") => format!("{words}es"),
+        false => format!("{words}s"),
+    }
+}
+
+/// The API answers 404 for a target it cannot find, cannot read, or whose top-level group has Orbit off.
 fn outcome_for(target: &Target, error: &RemoteError) -> Outcome {
     let missing = first_line(&error.message).ends_with(" not found");
     match error.exit_code {
         EXIT_UNAVAILABLE if missing && target.explicit() => Outcome::Skipped(format!(
-            "no local path or GitLab project or group named {}",
+            "no local path, and no GitLab project or group named {} that you can read with Orbit enabled",
             target.named()
         )),
+        EXIT_UNAVAILABLE if missing => Outcome::Skipped(
+            "Orbit isn't enabled for the GitLab group of this repository's `origin`, or you can't read it"
+                .into(),
+        ),
         EXIT_UNAVAILABLE | EXIT_FORBIDDEN => Outcome::Skipped(first_line(&error.message)),
         _ => Outcome::Failed(first_line(&error.message)),
     }
@@ -529,6 +506,20 @@ fn render(
             .find(|target| target.kind.eq_ignore_ascii_case("project"))
             .map(|target| target.full_path.as_str())
     });
+    let mut scope_order: Vec<&str> = Vec::new();
+    for name in responses
+        .iter()
+        .flat_map(|response| response.scopes.iter().map(|scope| scope.name.as_str()))
+        .chain(
+            responses
+                .iter()
+                .flat_map(|response| response.results.iter().map(|entry| entry.scope.as_str())),
+        )
+    {
+        if !scope_order.contains(&name) {
+            scope_order.push(name);
+        }
+    }
     let mut seen = std::collections::HashSet::new();
     let mut rows: Vec<Row> = Vec::new();
     let mut files: Vec<(String, std::collections::BTreeMap<u64, String>)> = Vec::new();
@@ -570,7 +561,10 @@ fn render(
                 let _ = write!(row, "  {}", entry.text);
             }
             rows.push(Row {
-                order: scope_order(&entry.scope),
+                order: scope_order
+                    .iter()
+                    .position(|name| *name == entry.scope)
+                    .unwrap_or(scope_order.len()),
                 score: title_score(&entry.text, &title_terms),
                 full: keywords.iter().any(|keyword| {
                     let words = words(keyword);
@@ -738,6 +732,12 @@ fn label(entry: &Entry, home: Option<&str>) -> (String, Option<String>) {
             None => ("comment".to_string(), None),
         };
     }
+    if entry.scope == "branches"
+        && let Some(name) = field("name").and_then(serde_json::Value::as_str)
+    {
+        let branch = format!("branch:{name}");
+        return (branch.clone(), Some(branch));
+    }
     if let Some(sha) = field("sha").and_then(serde_json::Value::as_str) {
         let commit = format!("commit:{sha}");
         let readable = (entry.scope == "commits").then(|| commit.clone());
@@ -764,7 +764,7 @@ mod tests {
                 r#"{{"scope":"{scope}","type":"{kind}","token":"{kind}[{id}]","reference":{{"id":{id},"iid":{id},"project_path":"g/p"}},"state":"opened","text":"t{id}"}}"#
             )
         };
-        let failed = r#""scopes":[{"name":"notes","status":"error","reason":{"code":"timeout"}}]"#;
+        let failed = r#""scopes":[{"name":"work_items","status":"ok"},{"name":"merge_requests","status":"ok"},{"name":"notes","status":"error","reason":{"code":"timeout"}}]"#;
         let first = response(&format!(
             r#"{{{failed},"results":[{}]}}"#,
             item("merge_requests", "MergeRequest", 4)

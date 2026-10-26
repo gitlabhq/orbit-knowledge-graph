@@ -5,7 +5,7 @@ use orbit_search::query_alternatives;
 
 use super::term::Term;
 use super::{Options, Output, kind};
-use crate::remote::grep::{Request, Target, scope_for, scope_order};
+use crate::remote::grep::{Request, Target, searched_kind};
 use crate::remote::token;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -119,11 +119,10 @@ pub(super) fn route(
         return Ok(route);
     };
     for target in targets.drain(..) {
-        let scopes = hosted_scopes(kinds);
         route.remote.push(Request {
             target,
             keywords: keywords.clone(),
-            scopes,
+            kinds: searched_kinds(kinds),
         });
     }
     Ok(route)
@@ -144,7 +143,7 @@ fn searchable(query: Option<&str>, kinds: &[String], options: &Options) -> Optio
     if options.output != Output::Lines || options.invert || filtered {
         return None;
     }
-    if !kinds.is_empty() && hosted_scopes(kinds).is_empty() {
+    if !kinds.is_empty() && searched_kinds(kinds).is_empty() {
         return None;
     }
     let keywords: Vec<String> = query_alternatives(query?)
@@ -155,11 +154,14 @@ fn searchable(query: Option<&str>, kinds: &[String], options: &Options) -> Optio
     (!keywords.is_empty()).then_some(keywords)
 }
 
-fn hosted_scopes(kinds: &[String]) -> Vec<&'static str> {
-    let mut scopes: Vec<&'static str> = kinds.iter().filter_map(|kind| scope_for(kind)).collect();
-    scopes.sort_by_key(|scope| scope_order(scope));
-    scopes.dedup();
-    scopes
+fn searched_kinds(kinds: &[String]) -> Vec<&'static str> {
+    let mut searched: Vec<&'static str> = Vec::new();
+    for kind in kinds.iter().filter_map(|kind| searched_kind(kind)) {
+        if !searched.contains(&kind) {
+            searched.push(kind);
+        }
+    }
+    searched
 }
 
 fn every_kind_hosted(kinds: &[String]) -> bool {
@@ -167,6 +169,6 @@ fn every_kind_hosted(kinds: &[String]) -> bool {
         .map(|resolved| resolved.hosted)
         .unwrap_or_default();
     kinds.iter().all(|kind| {
-        scope_for(kind).is_some() || hosted.iter().any(|node| node.eq_ignore_ascii_case(kind))
+        searched_kind(kind).is_some() || hosted.iter().any(|node| node.eq_ignore_ascii_case(kind))
     })
 }

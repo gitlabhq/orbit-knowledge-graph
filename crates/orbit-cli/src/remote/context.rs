@@ -4,11 +4,38 @@ use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError};
 
 pub(crate) async fn fetch(client: OrbitClient, tokens: &[String]) -> Result<Vec<u8>, RemoteError> {
+    fetch_with(client, tokens, true).await
+}
+
+/// Context for tokens whose types have no graph expansion, such as branches, pipelines, and commits.
+pub(crate) async fn fetch_summary(
+    client: OrbitClient,
+    tokens: &[String],
+) -> Result<Vec<u8>, RemoteError> {
+    fetch_with(client, tokens, false).await
+}
+
+/// The first entity of a token's raw context, without expansion.
+pub(crate) async fn fetch_entity(
+    client: &OrbitClient,
+    token: &str,
+) -> Result<serde_json::Value, RemoteError> {
+    let body = request(client.clone(), token.to_string(), "raw", false).await?;
+    let response: serde_json::Value = serde_json::from_slice(&body)
+        .map_err(|error| RemoteError::new(EXIT_GENERIC, format!("unreadable response: {error}")))?;
+    Ok(response["entities"][0].clone())
+}
+
+async fn fetch_with(
+    client: OrbitClient,
+    tokens: &[String],
+    expand: bool,
+) -> Result<Vec<u8>, RemoteError> {
     let tasks: Vec<_> = tokens
         .iter()
         .map(|token| {
             let (client, token) = (client.clone(), token.clone());
-            tokio::spawn(async move { fetch_one(client, token).await })
+            tokio::spawn(async move { request(client, token, "llm", expand).await })
         })
         .collect();
     let mut out = Vec::new();
@@ -24,11 +51,16 @@ pub(crate) async fn fetch(client: OrbitClient, tokens: &[String]) -> Result<Vec<
     Ok(out)
 }
 
-async fn fetch_one(client: OrbitClient, token: String) -> Result<Vec<u8>, RemoteError> {
+async fn request(
+    client: OrbitClient,
+    token: String,
+    format: &str,
+    expand: bool,
+) -> Result<Vec<u8>, RemoteError> {
     let body = serde_json::to_vec(&serde_json::json!({
         "tokens": [token],
-        "response_format": "llm",
-        "expand": true,
+        "response_format": format,
+        "expand": expand,
     }))
     .map_err(|error| RemoteError::new(EXIT_GENERIC, error.to_string()))?;
     client

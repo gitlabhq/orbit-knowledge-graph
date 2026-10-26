@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use orbit_search::{RecallFilter, query_alternatives};
 
-use crate::remote::grep::{Outcome, scope_for};
+use crate::remote::grep::{Outcome, searched_kind};
 use local::LocalBackend;
 
 /// What a search prints, following rg: matching lines, `-l` file names, `-c` counts, or
@@ -144,7 +144,7 @@ async fn search(
         })
         .collect();
     if !pending.is_empty() {
-        filter.kinds.retain(|kind| scope_for(kind).is_none());
+        filter.kinds.retain(|kind| searched_kind(kind).is_none());
         if route.local.is_empty() && !filter.kinds.is_empty() {
             eprintln!(
                 "orbit: skipping hosted {}; use `{} query`",

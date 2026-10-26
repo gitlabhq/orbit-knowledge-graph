@@ -48,25 +48,70 @@ impl std::fmt::Display for Code {
     }
 }
 
+/// Splits `group/project/path/to/file` at the longest project path the graph knows, in one query.
 pub(crate) async fn split_project_path(
     client: &OrbitClient,
     path: &str,
 ) -> Option<(String, String)> {
     let parts: Vec<&str> = path.split('/').collect();
-    for end in 2..parts.len() {
-        let project = parts[..end].join("/");
-        let found = client
-            .get_api(&format!("projects/{}", project.replace('/', "%2F")), &[])
-            .await;
-        if found.is_ok() {
-            return Some((project, parts[end..].join("/")));
-        }
+    let candidates: Vec<String> = (2..parts.len()).map(|end| parts[..end].join("/")).collect();
+    if candidates.is_empty() {
+        return None;
     }
-    None
+    let list: Vec<String> = candidates.iter().map(|path| gql_string(path)).collect();
+    let query = format!(
+        "MATCH (p:Project) WHERE p.full_path IN [{}] RETURN p.full_path LIMIT {}",
+        list.join(", "),
+        candidates.len()
+    );
+    let nodes = query_nodes(client, &query).await.ok()?;
+    let project = nodes
+        .iter()
+        .filter_map(|node| node["full_path"].as_str())
+        .filter(|found| candidates.iter().any(|candidate| candidate == found))
+        .max_by_key(|found| found.len())?;
+    Some((project.to_string(), path[project.len() + 1..].to_string()))
 }
 
 fn error(message: impl Into<String>) -> RemoteError {
     RemoteError::new(EXIT_GENERIC, message.into())
+}
+
+async fn query_nodes(client: &OrbitClient, query: &str) -> Result<Vec<Value>, RemoteError> {
+    let request = serde_json::to_vec(&json!({"query": query, "response_format": "raw"}))
+        .map_err(|e| error(e.to_string()))?;
+    let response = client.query_raw(request).await?;
+    let response: Value = serde_json::from_slice(&response)
+        .map_err(|e| error(format!("unreadable graph response: {e}")))?;
+    Ok(response["result"]["nodes"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// The project id and default branch name from the graph.
+async fn project_branch(client: &OrbitClient, project: &str) -> Result<(i64, String), RemoteError> {
+    let query = format!(
+        "MATCH (p:Project {{full_path: {}}})-[:CONTAINS]->(b:Branch) WHERE b.is_default = true \
+         RETURN b.project_id, b.name LIMIT 1",
+        gql_string(project)
+    );
+    let nodes = query_nodes(client, &query).await?;
+    let branch = nodes
+        .iter()
+        .find(|node| node["name"].is_string() && !node["project_id"].is_null())
+        .ok_or_else(|| {
+            error(format!(
+                "{project}'s code isn't indexed in Orbit yet; Orbit indexes it once enabled for the top-level group"
+            ))
+        })?;
+    let id = match &branch["project_id"] {
+        Value::Number(id) => id.as_i64(),
+        Value::String(id) => id.parse().ok(),
+        _ => None,
+    }
+    .ok_or_else(|| error(format!("{project}: no project id")))?;
+    Ok((id, branch["name"].as_str().unwrap_or_default().to_string()))
 }
 
 pub(crate) async fn read(
@@ -74,66 +119,30 @@ pub(crate) async fn read(
     project: &str,
     code: &Code,
 ) -> Result<String, RemoteError> {
-    let body = client
-        .get_api(&format!("projects/{}", project.replace('/', "%2F")), &[])
-        .await?;
-    let found: Value =
-        serde_json::from_slice(&body).map_err(|e| error(format!("unreadable project: {e}")))?;
-    let id = found["id"]
-        .as_i64()
-        .ok_or_else(|| error(format!("{project}: no project id")))?;
-    let branch = found["default_branch"]
-        .as_str()
-        .unwrap_or("main")
-        .to_string();
-    let query = match code {
-        Code::Symbol(name) => definition_query(id, &branch, name),
-        Code::File { path, .. } => file_query(id, &branch, path),
+    let (id, branch) = project_branch(client, project).await?;
+    let nodes = match code {
+        Code::Symbol(name) => query_nodes(client, &definition_query(id, &branch, name)).await?,
+        Code::File { path, .. } => file_nodes(client, id, &branch, path).await?,
     };
-    let request = serde_json::to_vec(&json!({"query": query, "response_format": "raw"}))
-        .map_err(|e| error(e.to_string()))?;
-    let response = client.query_raw(request).await?;
-    let response: Value = serde_json::from_slice(&response)
-        .map_err(|e| error(format!("unreadable graph response: {e}")))?;
-    let mut nodes = response["result"]["nodes"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    if let Code::File { path, .. } = code {
-        let exact = nodes.iter().any(|node| node["path"] == path.as_str());
-        if !exact && let Some(content) = repository_file(client, id, &branch, path).await {
-            nodes = vec![json!({"path": path, "content": content})];
-        } else if !path.contains('/') && nodes.len() > 1 {
-            nodes.sort_by_key(|node| node["path"].as_str().map_or(usize::MAX, str::len));
-            nodes.truncate(1);
-        }
-    }
     Ok(render(project, &branch, code, &nodes))
 }
 
-async fn repository_file(
+/// Finds the file without content, which costs no Gitaly call, then reads only the one it picks.
+async fn file_nodes(
     client: &OrbitClient,
     id: i64,
     branch: &str,
     path: &str,
-) -> Option<String> {
-    let encoded: String = path
-        .bytes()
-        .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (byte as char).to_string()
-            }
-            _ => format!("%{byte:02X}"),
-        })
-        .collect();
-    let body = client
-        .get_api(
-            &format!("projects/{id}/repository/files/{encoded}/raw"),
-            &[("ref", branch.to_string())],
-        )
-        .await
-        .ok()?;
-    String::from_utf8(body).ok()
+) -> Result<Vec<Value>, RemoteError> {
+    let found = query_nodes(client, &file_query(id, branch, path, false)).await?;
+    let Some(chosen) = found
+        .iter()
+        .filter_map(|node| node["path"].as_str())
+        .min_by_key(|found| (*found != path, found.len()))
+    else {
+        return Ok(Vec::new());
+    };
+    query_nodes(client, &file_query(id, branch, chosen, true)).await
 }
 
 fn definition_query(project_id: i64, branch: &str, name: &str) -> String {
@@ -148,14 +157,17 @@ fn definition_query(project_id: i64, branch: &str, name: &str) -> String {
     )
 }
 
-fn file_query(project_id: i64, branch: &str, path: &str) -> String {
-    let by = match path.contains('/') {
+fn file_query(project_id: i64, branch: &str, path: &str, content: bool) -> String {
+    let by = match content || path.contains('/') {
         true => format!("f.path = {}", gql_string(path)),
         false => format!("f.path ENDS WITH {}", gql_string(&format!("/{path}"))),
     };
+    let (returned, limit) = match content {
+        true => ("f.path, f.content", 1),
+        false => ("f.path", 20),
+    };
     format!(
-        "MATCH (f:File {{project_id: {project_id}, branch: {}}}) WHERE {by} \
-         RETURN f.path, f.content LIMIT 5",
+        "MATCH (f:File {{project_id: {project_id}, branch: {}}}) WHERE {by} RETURN {returned} LIMIT {limit}",
         gql_string(branch)
     )
 }

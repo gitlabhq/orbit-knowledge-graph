@@ -30,7 +30,7 @@ static ALIASES: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
     let mut aliases = BTreeMap::new();
     let searchable = |node: &str| {
         matches!(node, "Definition" | "File" | "Directory")
-            || crate::remote::grep::scope_for(node).is_some()
+            || crate::remote::grep::searched_kind(node).is_some()
     };
     for node in ontology.node_names().filter(|node| searchable(node)) {
         aliases.insert(node.to_ascii_lowercase(), node.to_string());

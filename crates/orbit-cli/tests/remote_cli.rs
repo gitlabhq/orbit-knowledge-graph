@@ -354,7 +354,10 @@ fn http_403_exits_with_code_four() {
     handle.join().unwrap();
 
     assert_eq!(output.status.code(), Some(4));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("access denied"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("Orbit isn't enabled for any of your groups")
+    );
 }
 
 #[test]
@@ -466,7 +469,7 @@ fn grep_for_a_hosted_kind_searches_the_origin_group() {
     let request = handle.join().expect("join mock");
     assert_eq!(
         request.request_line,
-        "GET /api/v4/orbit/grep?search=runner&full_path=my-group&scopes=merge_requests HTTP/1.1"
+        "GET /api/v4/orbit/grep?search=runner&full_path=my-group&scopes=MergeRequest HTTP/1.1"
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("MergeRequest[42]  Add runner"));
 }
@@ -499,9 +502,10 @@ fn serve_routes(
                 }
                 let mut body = vec![0u8; content_length];
                 reader.read_exact(&mut body).expect("read request body");
+                let text = String::from_utf8_lossy(&body);
                 let response_body = routes
                     .iter()
-                    .find(|(pattern, _)| request_line.contains(pattern))
+                    .find(|(pattern, _)| request_line.contains(pattern) || text.contains(pattern))
                     .map_or("[]", |(_, body)| body);
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
@@ -524,8 +528,11 @@ fn serve_routes(
 #[test]
 fn context_branch_target_reads_its_merge_request() {
     let (base_url, handle) = serve_routes(vec![
-        ("merge_requests?", r#"[{"id":42,"iid":4,"state":"opened"}]"#),
-        ("orbit/context", "- found=true\n"),
+        (
+            r#""response_format":"raw""#,
+            r#"{"version":"1.3.0","entities":[{"token":"my-group/my-project@fix-ci","type":"Branch","id":"fix-ci","found":true,"summary":{"merge_request":{"type":"MergeRequest","id":"42","token":"MergeRequest[42]","iid":4,"project_path":"my-group/my-project","title":"Fix CI"}}}]}"#,
+        ),
+        (r#""response_format":"llm""#, "- found=true\n"),
     ]);
     let clone = committed_repo("https://localhost/my-group/my-project", &[]);
     let base_url = base_url.replace("127.0.0.1", "localhost");
@@ -539,13 +546,18 @@ fn context_branch_target_reads_its_merge_request() {
     .expect("run orbit binary");
     let requests = handle.join().expect("join mock");
     assert!(
+        requests[0].body.contains("my-group/my-project@fix-ci"),
+        "{}",
+        requests[0].body
+    );
+    assert!(
         requests[1].body.contains("my-group/my-project!4"),
         "{}",
         requests[1].body
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        "branch:fix-ci mr:4 opened\n- found=true\n"
+        "branch:fix-ci mr:4 Fix CI\n- found=true\n"
     );
 }
 

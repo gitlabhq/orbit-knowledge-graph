@@ -214,14 +214,6 @@ impl OrbitClient {
         read_body(response).await
     }
 
-    pub(crate) async fn get_api(
-        &self,
-        path: &str,
-        params: &[(&str, String)],
-    ) -> Result<Vec<u8>, RemoteError> {
-        self.get_bytes(&format!("/api/v4/{path}"), params).await
-    }
-
     fn url(&self, path: &str) -> String {
         format!("{}{path}", self.endpoint.base_url.trim_end_matches('/'))
     }

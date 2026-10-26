@@ -1,7 +1,4 @@
-use std::fmt::Write as _;
 use std::path::Path;
-
-use serde_json::Value;
 
 use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, RemoteError};
@@ -49,395 +46,86 @@ pub(crate) fn current_branch(dir: &Path) -> Result<String, RemoteError> {
     }
 }
 
-async fn get_json(
-    client: &OrbitClient,
-    path: &str,
-    params: &[(&str, String)],
-) -> Result<Value, RemoteError> {
-    let body = client.get_api(path, params).await?;
-    serde_json::from_slice(&body).map_err(|e| error(format!("unreadable response: {e}")))
-}
-
-fn text(value: &Value) -> &str {
-    value.as_str().unwrap_or_default()
-}
-
-fn names(value: &Value) -> Vec<String> {
-    value
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|branch| branch["name"].as_str().map(str::to_string))
-        .collect()
-}
-
-fn words(text: &str) -> Vec<String> {
-    let mut words: Vec<String> = text
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|word| word.len() >= 2)
-        .map(str::to_lowercase)
-        .collect();
-    words.sort();
-    words.dedup();
-    words
-}
-
-pub(crate) fn rank(wanted: &str, candidates: &[String]) -> Vec<String> {
-    let wanted_words = words(wanted);
-    let mut ranked: Vec<(usize, usize, &String)> = candidates
-        .iter()
-        .map(|name| {
-            let lower = name.to_lowercase();
-            let exact = usize::from(lower == wanted.to_lowercase());
-            let matched = wanted_words
-                .iter()
-                .filter(|word| lower.contains(word.as_str()))
-                .count();
-            (exact, matched, name)
-        })
-        .filter(|(exact, matched, _)| exact + matched > 0)
-        .collect();
-    ranked.sort_by(|a, b| (b.0, b.1).cmp(&(a.0, a.1)).then(a.2.cmp(b.2)));
-    ranked
-        .into_iter()
-        .map(|(_, _, name)| name.clone())
-        .collect()
-}
-
-fn encode(project: &str) -> String {
-    project.replace('/', "%2F")
-}
-
-pub(crate) async fn is_project(client: &OrbitClient, path: &str) -> Result<bool, RemoteError> {
-    match client
-        .get_api(&format!("projects/{}", encode(path)), &[])
-        .await
-    {
-        Ok(_) => Ok(true),
-        Err(error)
-            if error
-                .message
-                .lines()
-                .next()
-                .is_some_and(|line| line.ends_with(" not found")) =>
-        {
-            Ok(false)
-        }
-        Err(error) => Err(error),
+/// The context endpoint token for a target in `project`.
+pub(crate) fn token(project: &str, target: &Target) -> String {
+    match target {
+        Target::Branch(name) => format!("{project}@{name}"),
+        Target::Commit(sha) => format!("{project}@{sha}"),
+        Target::Pipeline(id) => format!("Pipeline[{id}]"),
+        Target::Job(id) => format!("Job[{id}]"),
     }
 }
 
-async fn branch_exists(
-    client: &OrbitClient,
-    project: &str,
-    name: &str,
-) -> Result<bool, RemoteError> {
-    let path = format!("projects/{project}/repository/branches");
-    let exact = get_json(client, &path, &[("search", format!("^{name}$"))]).await?;
-    Ok(names(&exact).iter().any(|found| found == name))
-}
-
-struct MergeRequest {
-    iid: i64,
-    state: String,
-}
-
-async fn merge_request(
-    client: &OrbitClient,
-    project: &str,
-    branch: &str,
-) -> Result<Option<MergeRequest>, RemoteError> {
-    let merge_requests = get_json(
-        client,
-        &format!("projects/{project}/merge_requests"),
-        &[
-            ("source_branch", branch.to_string()),
-            ("state", "all".into()),
-            ("order_by", "updated_at".into()),
-            ("per_page", "20".into()),
-        ],
-    )
-    .await?;
-    let list = merge_requests.as_array().cloned().unwrap_or_default();
-    let chosen = list
-        .iter()
-        .find(|mr| mr["state"] == "opened")
-        .or(list.first());
-    Ok(chosen.and_then(|mr| {
-        Some(MergeRequest {
-            iid: mr["iid"].as_i64()?,
-            state: text(&mr["state"]).to_string(),
-        })
-    }))
-}
-
-async fn latest_pipeline(
-    client: &OrbitClient,
-    project: &str,
-    branch: &str,
-) -> Result<Option<Value>, RemoteError> {
-    let pipelines = get_json(
-        client,
-        &format!("projects/{project}/pipelines"),
-        &[("ref", branch.to_string()), ("per_page", "20".into())],
-    )
-    .await?;
-    let list = pipelines.as_array().cloned().unwrap_or_default();
-    Ok(list
-        .iter()
-        .find(|pipeline| text(&pipeline["status"]) != "skipped")
-        .or(list.first())
-        .cloned())
-}
-
+/// Reads a target from the context endpoint. A branch with a merge request returns the merge
+/// request, so the caller reads it in full, as for any merge request.
 pub(crate) async fn read(
     client: &OrbitClient,
     project: &str,
     target: &Target,
 ) -> Result<Found, RemoteError> {
-    let encoded = encode(project);
-    match target {
-        Target::Branch(branch) => read_branch(client, project, &encoded, branch).await,
-        Target::Pipeline(id) => {
-            let pipeline =
-                get_json(client, &format!("projects/{encoded}/pipelines/{id}"), &[]).await?;
-            Ok(Found::Text(
-                pipeline_text(client, &encoded, &pipeline).await?,
-            ))
+    let token = token(project, target);
+    if let Target::Branch(branch) = target {
+        let entity = super::context::fetch_entity(client, &token).await?;
+        if entity["found"] != true {
+            return Ok(Found::Text(format!(
+                "branch:{branch} not found; find one with `{} grep 'branch:words'`\n",
+                crate::commands::setup::spec::launcher()
+            )));
         }
-        Target::Job(id) => {
-            let body = super::context::fetch(client.clone(), &[format!("Job[{id}]")]).await?;
-            Ok(Found::Text(super::context::tidy(
-                &String::from_utf8_lossy(&body),
-                false,
-            )))
+        if let Some(found) = merge_request(branch, &entity["summary"]["merge_request"]) {
+            return Ok(found);
         }
-        Target::Commit(sha) => Ok(Found::Text(commit_text(client, &encoded, sha).await?)),
     }
-}
-
-async fn read_branch(
-    client: &OrbitClient,
-    project: &str,
-    encoded: &str,
-    branch: &str,
-) -> Result<Found, RemoteError> {
-    if let Some(mr) = merge_request(client, encoded, branch).await? {
-        let note = format!("branch:{branch} mr:{} {}\n", mr.iid, mr.state);
-        return Ok(Found::MergeRequest {
-            note,
-            reference: format!("{project}!{}", mr.iid),
-        });
-    }
-    if let Some(pipeline) = latest_pipeline(client, encoded, branch).await? {
-        let mut out = format!("branch:{branch} no merge request\n");
-        out.push_str(&pipeline_text(client, encoded, &pipeline).await?);
-        return Ok(Found::Text(out));
-    }
-    let text = match branch_exists(client, encoded, branch).await? {
-        true => format!("branch:{branch} no merge request or pipeline\n"),
-        false => format!(
-            "branch:{branch} not found; find one with `{} grep 'branch:words'`\n",
-            crate::commands::setup::spec::launcher()
-        ),
+    let body = match target {
+        Target::Job(_) => super::context::fetch(client.clone(), &[token]).await?,
+        _ => super::context::fetch_summary(client.clone(), &[token]).await?,
     };
-    Ok(Found::Text(text))
+    Ok(Found::Text(super::context::tidy(
+        &String::from_utf8_lossy(&body),
+        false,
+    )))
 }
 
-pub(crate) async fn search_text(
-    client: &OrbitClient,
-    shown: &str,
-    project: &str,
-    wanted: &str,
-) -> Result<Option<String>, RemoteError> {
-    let encoded = encode(project);
-    let path = format!("projects/{encoded}/repository/branches");
-    let mut by_length = words(wanted);
-    by_length.sort_by_key(|word| std::cmp::Reverse(word.len()));
-    let mut candidates: Vec<String> = Vec::new();
-    for word in by_length {
-        let found = get_json(
-            client,
-            &path,
-            &[("search", word), ("per_page", "100".into())],
-        )
-        .await?;
-        for name in names(&found) {
-            if !candidates.contains(&name) {
-                candidates.push(name);
-            }
-        }
+fn merge_request(branch: &str, link: &serde_json::Value) -> Option<Found> {
+    let path = link["project_path"].as_str()?;
+    let iid = link["iid"].as_i64()?;
+    let title = link["title"].as_str().unwrap_or_default();
+    Some(Found::MergeRequest {
+        note: format!("branch:{branch} mr:{iid} {title}\n"),
+        reference: format!("{path}!{iid}"),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn targets_become_context_tokens() {
+        assert_eq!(
+            token("g/p", &Target::Branch("feature/x".into())),
+            "g/p@feature/x"
+        );
+        assert_eq!(
+            token("g/p", &Target::Commit("1a2b3c4".into())),
+            "g/p@1a2b3c4"
+        );
+        assert_eq!(token("g/p", &Target::Pipeline(7)), "Pipeline[7]");
+        assert_eq!(token("g/p", &Target::Job(9)), "Job[9]");
     }
-    let ranked = rank(wanted, &candidates);
-    if ranked.is_empty() {
-        return Ok(None);
-    }
-    let tasks: Vec<_> = ranked
-        .iter()
-        .map(|name| {
-            let (client, project, name) = (client.clone(), encoded.clone(), name.clone());
-            tokio::spawn(async move {
-                let mr = merge_request(&client, &project, &name).await;
-                let pipeline = latest_pipeline(&client, &project, &name).await;
-                (name, mr, pipeline)
+
+    #[test]
+    fn a_branch_merge_request_link_becomes_its_reference() {
+        let link = json!({"iid": 42, "project_path": "g/p", "title": "Fix it", "token": "MergeRequest[5]"});
+
+        assert_eq!(
+            merge_request("feature", &link),
+            Some(Found::MergeRequest {
+                note: "branch:feature mr:42 Fix it\n".into(),
+                reference: "g/p!42".into(),
             })
-        })
-        .collect();
-    let mut out = format!("GitLab branches matching {wanted:?} in {shown}:\n");
-    for task in tasks {
-        let Ok((name, mr, pipeline)) = task.await else {
-            continue;
-        };
-        let mut row = format!("branch:{name}");
-        match mr {
-            Ok(Some(mr)) => {
-                let _ = write!(row, "  mr:{} {}", mr.iid, mr.state);
-            }
-            Ok(None) => row.push_str("  no merge request"),
-            Err(_) => {}
-        }
-        if let Ok(Some(pipeline)) = pipeline {
-            let _ = write!(
-                row,
-                "  pipeline:{} {}",
-                pipeline["id"],
-                text(&pipeline["status"])
-            );
-        }
-        let _ = writeln!(out, "{row}");
+        );
+        assert_eq!(merge_request("feature", &serde_json::Value::Null), None);
     }
-    let _ = writeln!(
-        out,
-        "next: {} context branch:{}",
-        crate::commands::setup::spec::launcher(),
-        ranked[0]
-    );
-    Ok(Some(out))
-}
-
-async fn pipeline_text(
-    client: &OrbitClient,
-    project: &str,
-    pipeline: &Value,
-) -> Result<String, RemoteError> {
-    let id = pipeline["id"].as_i64().unwrap_or_default();
-    let mut out = format!(
-        "pipeline:{id} {} ref {} commit:{} {}\n",
-        text(&pipeline["status"]),
-        text(&pipeline["ref"]),
-        text(&pipeline["sha"]),
-        text(&pipeline["web_url"])
-    );
-    let jobs = get_json(
-        client,
-        &format!("projects/{project}/pipelines/{id}/jobs"),
-        &[("scope[]", "failed".into()), ("per_page", "100".into())],
-    )
-    .await?;
-    let mut jobs: Vec<Value> = jobs.as_array().cloned().unwrap_or_default();
-    jobs.sort_by_key(|job| job["allow_failure"].as_bool().unwrap_or(false));
-    if jobs.is_empty() {
-        return Ok(out);
-    }
-    let _ = writeln!(out, "failed_jobs[{}]:", jobs.len());
-    for job in &jobs {
-        let _ = writeln!(out, "  {}", job_line(job));
-    }
-    Ok(out)
-}
-
-fn job_line(job: &Value) -> String {
-    let flags: Vec<&str> = [
-        job["stage"].as_str(),
-        job["failure_reason"].as_str(),
-        job["allow_failure"]
-            .as_bool()
-            .filter(|allowed| *allowed)
-            .map(|_| "allowed to fail"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    format!(
-        "job:{} {} ({}) {}",
-        job["id"],
-        text(&job["name"]),
-        flags.join(", "),
-        text(&job["web_url"])
-    )
-}
-
-async fn commit_text(
-    client: &OrbitClient,
-    project: &str,
-    sha: &str,
-) -> Result<String, RemoteError> {
-    let base = format!("projects/{project}/repository/commits/{sha}");
-    let commit = get_json(client, &base, &[]).await?;
-    let mut out = format!(
-        "commit:{} {}\n  author {} {}\n",
-        text(&commit["id"]),
-        text(&commit["title"]),
-        text(&commit["author_name"]),
-        text(&commit["authored_date"])
-            .chars()
-            .take(10)
-            .collect::<String>()
-    );
-    let message = text(&commit["message"]);
-    let body: Vec<&str> = message
-        .lines()
-        .skip(1)
-        .skip_while(|line| line.trim().is_empty())
-        .collect();
-    if !body.is_empty() {
-        out.push_str("  message:\n");
-        for line in body {
-            let _ = writeln!(out, "    {line}");
-        }
-    }
-    if let Ok(diff) = get_json(
-        client,
-        &format!("{base}/diff"),
-        &[("per_page", "100".into())],
-    )
-    .await
-    {
-        let files = diff.as_array().cloned().unwrap_or_default();
-        if !files.is_empty() {
-            let _ = writeln!(out, "  changed_files[{}]:", files.len());
-            for file in &files {
-                let status = match (
-                    file["new_file"].as_bool(),
-                    file["deleted_file"].as_bool(),
-                    file["renamed_file"].as_bool(),
-                ) {
-                    (Some(true), _, _) => "A",
-                    (_, Some(true), _) => "D",
-                    (_, _, Some(true)) => "R",
-                    _ => "M",
-                };
-                let _ = writeln!(out, "    {status} {}", text(&file["new_path"]));
-            }
-        }
-    }
-    if let Ok(merge_requests) = get_json(client, &format!("{base}/merge_requests"), &[]).await {
-        let list: Vec<String> = merge_requests
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|mr| {
-                format!(
-                    "mr:{} {} {}",
-                    mr["iid"],
-                    text(&mr["state"]),
-                    text(&mr["title"])
-                )
-            })
-            .collect();
-        if !list.is_empty() {
-            let _ = writeln!(out, "  merge_requests: {}", list.join("; "));
-        }
-    }
-    Ok(out)
 }
