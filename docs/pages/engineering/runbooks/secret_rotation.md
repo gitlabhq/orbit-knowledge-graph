@@ -9,10 +9,17 @@ export CTX=gke_gl-orbit-stg_us-east1_orbit-stg   # production: gke_gl-orbit-prd_
 
 ## Before you start (GitLab.com)
 
-> [!warning]
-> Check that each Orbit ExternalSecret in
-> `services/gkg/env/orbit-<env>/values-vault-secrets.yaml` has `refreshPolicy: OnChange`.
-> Without it, a new `version` does not update the Secret. If it is missing, add it first.
+A new `version` in an ExternalSecret updates its Secret only with `refreshPolicy: OnChange`.
+Check it:
+
+```shell
+kubectl --context "$CTX" -n gkg get externalsecret \
+  -o 'custom-columns=NAME:.metadata.name,POLICY:.spec.refreshPolicy,STATUS:.status.conditions[0].reason'
+```
+
+All secrets except `gkg-security-image-pull` must show `OnChange` and `SecretSynced`. If one
+does not, add `refreshPolicy: OnChange` to it in `services/gkg/env/orbit-<env>/values-vault-secrets.yaml`
+first.
 
 | Secret | Vault path (`<env>` is `prd` or `stg`) | ExternalSecret |
 | --- | --- | --- |
