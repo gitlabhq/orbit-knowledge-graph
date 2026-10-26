@@ -77,13 +77,10 @@ Make each option name something real in the scope, so the first answer is about 
 None of the options needs input from the user, so do not ask for any.
 
 1. Find the project to use. For a project scope, it is that project.
-   For a group scope, use the project with the most open merge requests:
-
-   ```plaintext
-   MATCH (g:Group {full_path: '<group>'})-[:CONTAINS*1..3]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)
-   WHERE mr.state = 'opened'
-   RETURN p.full_path, count(mr) AS open_mrs ORDER BY open_mrs DESC LIMIT 5
-   ```
+   For a group scope, use the project with the most open merge requests.
+   Find it with one query. Follow `CONTAINS` from the group to its projects, up to three levels deep.
+   Then count the open merge requests `IN_PROJECT` for each project, and keep the top five.
+   Write every query in the query language that the Orbit skill from step 1 teaches.
 
 1. Offer these options with your question tool. Fill in the real values, as in the examples:
    - **See the open merge requests in <project>**, for example "See the open merge requests in my-project":
@@ -94,16 +91,10 @@ None of the options needs input from the user, so do not ask for any.
      the top approvers in the last 30 days, with a count for each. Useful when you need a reviewer.
    - **Find the most-called functions in <project>**:
      the functions that the most other definitions call, with their files.
-     Shows that Orbit indexes your code, not only merge requests and pipelines. Use this query:
-
-     ```plaintext
-     MATCH (c:Definition)-[:CALLS]->(d:Definition)
-     WHERE d.project_id = <project ID> AND d.definition_type IN ['Function', 'Method']
-       AND NOT d.file_path CONTAINS 'test'
-     RETURN d.name, d.file_path, count(c) AS callers ORDER BY callers DESC LIMIT 10
-     ```
-
-     In the answer, leave out macros and generated code, such as `*.pb.go` files.
+     Shows that Orbit indexes your code, not only merge requests and pipelines.
+     Count the incoming `CALLS` edges of each `Function` or `Method` definition in the project.
+     Leave out files whose path contains `test`, and keep the top 10.
+     In the answer, also leave out macros and generated code, such as `*.pb.go` files.
 
 Answer it as described in [Answer with Orbit](#answer-with-orbit).
 Then ask the user what to do next. Offer these options:
@@ -272,8 +263,10 @@ for e in lines:
     usage[m["id"]] = m.get("usage") or {}
     for c in m.get("content") or []:
         if c.get("type") == "tool_use":
-            calls += 1
             cmd = str((c.get("input") or {}).get("command") or "")
+            if re.fullmatch(r"\s*date\b[^;&|]*", cmd):
+                continue  # the start and end markers are not part of the run
+            calls += 1
             counted[c["id"]] = len(re.findall(r"\bglab\s", cmd))
             orbit += int(bool(ORBIT.search(cmd)) or "orbit" in c.get("name", "").lower())
 for e in lines:
