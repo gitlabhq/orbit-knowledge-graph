@@ -1,6 +1,6 @@
 ---
 title: Code indexing on every branch and commit with content
-description: Index code on active branches and recent commits, and search file content inside graph queries.
+description: Index code in all languages on active branches and recent commits, and search file content in queries.
 theme: code
 status: in-progress
 start: FY27 Q3
@@ -16,6 +16,7 @@ Orbit will also index file content, so one query can combine a text search with 
 ## Planned changes
 
 - Index active branches first, and then recent commits.
+- Add more languages, based on what our users ask for.
 - Update the index incrementally. After a commit, Orbit indexes only the files that changed.
 - Search file content with text and regular expressions.
 - Limit a search to graph results, for example to the files that a merge request changed.
