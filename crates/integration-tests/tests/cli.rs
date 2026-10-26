@@ -1746,8 +1746,13 @@ fn file_context_bounds_connections_and_keeps_full_definition_followups() {
     let repo_arg = repo.to_str().unwrap();
     let (out, err, ok) = run_cmd(&["context", "src/models.py", "--repo", repo_arg], dd);
     assert!(
-        ok && out.starts_with("src/models.py:1-201\n"),
+        ok && out.starts_with("src/models.py:1-200\n"),
         "{err}\n{out}"
+    );
+    assert!(
+        out.contains("» src/models.py has 201 lines; `")
+            && out.contains(" context src/models.py:201-201` reads the rest\n"),
+        "{out}"
     );
     assert!(
         out.contains(

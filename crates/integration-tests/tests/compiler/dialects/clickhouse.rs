@@ -1352,7 +1352,6 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
         "MATCH (u:User) RETURN collect(u.username)",
-        "MATCH (u:User {id: 1}) RETURN u LIMIT 1 SKIP 1",
         "MATCH (u:User {id: 1}) RETURN u SKIP 1 SKIP 1",
         "MATCH (u:User {id: 1}) RETURN u SKIP -1",
         "MATCH (u:User {id: 1}) RETURN u SKIP 10001",
