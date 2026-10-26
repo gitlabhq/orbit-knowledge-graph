@@ -68,7 +68,7 @@ function RoadmapPage() {
       ) : view === "board" ? (
         open.length > 0 ? <Board items={filtered} /> : <EmptyState message="This theme has no upcoming items." />
       ) : filtered.length > 0 ? (
-        <Timeline items={filtered} allItems={items} />
+        <Timeline items={filtered} />
       ) : (
         <EmptyState message="No items match this theme." />
       )}

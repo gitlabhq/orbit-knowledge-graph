@@ -1,12 +1,12 @@
 import { cn, Icon } from "@gitlab-org/orbit-site";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
 import { quarterFromIndex, quarterIndex, quarterLabel, quarterMonths } from "./calendar";
 import { type RoadmapItem, roadmapQuarter, themes } from "./model";
 import { statusIcon, statusLabel } from "./StatusBadge";
 import { itemRange } from "./ItemCard";
 
 const COLUMN_REM = 11;
+const WINDOW_QUARTERS = 4;
 
 function lanes(items: RoadmapItem[]): RoadmapItem[][] {
   const rows: RoadmapItem[][] = [];
@@ -18,29 +18,22 @@ function lanes(items: RoadmapItem[]): RoadmapItem[][] {
   return rows;
 }
 
-export function Timeline({ items, allItems }: { items: RoadmapItem[]; allItems: RoadmapItem[] }) {
-  const scroller = useRef<HTMLDivElement>(null);
-  const first = Math.min(...allItems.map((item) => quarterIndex(item.start)));
-  const last = Math.max(...allItems.map((item) => quarterIndex(item.end)));
-  const quarters = Array.from({ length: last - first + 1 }, (_, offset) => quarterFromIndex(first + offset));
-  const now = quarterIndex(roadmapQuarter);
+export function Timeline({ items }: { items: RoadmapItem[] }) {
+  const first = quarterIndex(roadmapQuarter);
+  const last = first + WINDOW_QUARTERS - 1;
+  const quarters = Array.from({ length: WINDOW_QUARTERS }, (_, offset) => quarterFromIndex(first + offset));
+  const visible = items.filter((item) => quarterIndex(item.end) >= first && quarterIndex(item.start) <= last);
   const columns = { gridTemplateColumns: `repeat(${quarters.length}, minmax(${COLUMN_REM}rem, 1fr))` };
-
-  useEffect(() => {
-    const element = scroller.current;
-    if (!element || element.scrollWidth <= element.clientWidth) return;
-    element.scrollLeft = (now - first) * COLUMN_REM * parseFloat(getComputedStyle(document.documentElement).fontSize);
-  }, [now, first]);
 
   return (
     <div className="card relative overflow-hidden">
-      <div ref={scroller} className="overflow-x-auto">
+      <div className="overflow-x-auto">
         <div className="relative" style={{ minWidth: `${quarters.length * COLUMN_REM}rem` }}>
           <div className="pointer-events-none absolute inset-0 grid" style={columns} aria-hidden="true">
             {quarters.map((q) => (
               <span
                 key={quarterLabel(q)}
-                className={cn("border-l border-border first:border-l-0", quarterIndex(q) === now && "bg-[color-mix(in_srgb,var(--gl-status-info-background-color)_45%,transparent)]")}
+                className={cn("border-l border-border first:border-l-0", quarterIndex(q) === first && "bg-[color-mix(in_srgb,var(--gl-status-info-background-color)_45%,transparent)]")}
               />
             ))}
           </div>
@@ -49,14 +42,14 @@ export function Timeline({ items, allItems }: { items: RoadmapItem[]; allItems: 
               <div key={quarterLabel(q)} className="relative px-4 py-3">
                 <span className="flex items-center gap-2 text-sm font-semibold text-default">
                   {quarterLabel(q)}
-                  {quarterIndex(q) === now && <span className="rounded-full bg-info-bg px-1.5 text-xs font-semibold text-info">Now</span>}
+                  {quarterIndex(q) === first && <span className="rounded-full bg-info-bg px-1.5 text-xs font-semibold text-info">Now</span>}
                 </span>
                 <span className="block text-xs text-subtle">{quarterMonths(q)}</span>
               </div>
             ))}
           </div>
           {themes.map((theme) => {
-            const themed = items.filter((item) => item.theme.id === theme.id);
+            const themed = visible.filter((item) => item.theme.id === theme.id);
             if (themed.length === 0) return null;
             return (
               <section key={theme.id} aria-labelledby={`lane-${theme.id}`} className={cn("relative border-b border-border pb-3 last:border-b-0", `tone-${theme.id}`)}>
@@ -73,7 +66,7 @@ export function Timeline({ items, allItems }: { items: RoadmapItem[]; allItems: 
                         params={{ item: item.slug }}
                         data-status={item.status}
                         className="tone-bar mx-2 flex min-w-0 items-start gap-2 rounded-control px-3 py-2 text-sm leading-snug font-medium text-default no-underline transition-transform hover:-translate-y-px hover:shadow-card motion-reduce:transition-none"
-                        style={{ gridColumn: `${quarterIndex(item.start) - first + 1} / ${quarterIndex(item.end) - first + 2}` }}
+                        style={{ gridColumn: `${Math.max(quarterIndex(item.start), first) - first + 1} / ${Math.min(quarterIndex(item.end), last) - first + 2}` }}
                       >
                         <Icon name={statusIcon(item.status)} size={14} className="mt-0.5 shrink-0 text-[var(--tone)]" />
                         <span className="line-clamp-2">{item.title}</span>
