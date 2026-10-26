@@ -486,6 +486,24 @@ impl Resolver {
             Err(k) if k.cancelled => return Err(k),
             outcome => too_many_names.or(outcome.err()),
         };
+        let mut seen: FxHashSet<_> = edges
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Calls)
+            .map(call_key)
+            .collect();
+        cross_edges.retain(|e| e.kind != EdgeKind::Calls || seen.insert(call_key(e)));
+
+        let mut import_sites: FxHashSet<_> = edges
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::Imports)
+            .map(|edge| (edge.from(), edge.to(), edge.site))
+            .collect();
+        cross_edges.retain(|edge| {
+            edge.kind != EdgeKind::Imports
+                || edge.site.is_none()
+                || import_sites.insert((edge.from(), edge.to(), edge.site))
+        });
+
         let mut non_callable = FxHashMap::default();
         for edge in edges
             .iter()
