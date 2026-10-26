@@ -356,14 +356,20 @@ local histogramPanels(spec, ds_var, selector, by=null) = (
   ]
 );
 
+// A `_timestamp_seconds` gauge holds a Unix time, so it renders as the age of its oldest series.
+local isTimestamp(spec) = std.endsWith(spec.prom_name, '_timestamp_seconds');
+
 local gaugePanels(spec, ds_var, selector, by=null) = (
   local labels = if by == null then spec.labels else by;
   local prom = spec.prom_name;
+  local expr =
+    if isTimestamp(spec) then 'time() - ' + gaugeExpr(prom, selector, labels, 'min')
+    else gaugeExpr(prom, selector, labels, gaugeAgg(spec));
   [
     timeseries(
-      prom,
+      if isTimestamp(spec) then prom + ' — age' else prom,
       spec.description,
-      [target(gaugeExpr(prom, selector, labels, gaugeAgg(spec)), legendFor(labels), ds_var)],
+      [target(expr, legendFor(labels), ds_var)],
       unitFor(spec),
     ),
   ]
