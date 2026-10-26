@@ -41,7 +41,6 @@ gcloud container clusters get-credentials orbit-prd --region us-east1 --project 
    code indexing first. Still overloaded: stop SDLC indexing.
 4. Users affected? In Slack, run `/inc declare`. Add the label `Service::Orbit`. Select the
    [severity](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/incident-management/#incident-severity).
-   Indexing stopped and data stale: a past incident used S3.
 5. No cause after 15 minutes? In the incident channel, run `/inc escalate` and select Orbit.
 6. Other checks: [troubleshooting](troubleshooting.md).
 
