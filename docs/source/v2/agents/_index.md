@@ -42,6 +42,7 @@ Setup installs the GitLab Orbit skill for your agents and indexes the repository
 To check that the repository is indexed, run `glab orbit list`.
 To load the skill, start a new session of your agent.
 To update the setup, run the command again.
+For a guided first session, see [step 3 of the quickstart](../quickstart.md#step-3-ask-your-first-question).
 
 To run setup without a terminal, for example from an agent or a script, confirm both prompts with `--yes`:
 
@@ -93,6 +94,10 @@ can also load the skill from `~/.agents/skills/orbit`.
 By default, setup installs a wrapper skill that loads the skill your GitLab instance serves,
 so the skill always matches your instance.
 If the CLI cannot get the skill from your instance, it uses the copy built into the CLI.
+
+Your instance also serves the `orbit-start` skill, which walks you through a first session.
+Setup does not install it. An agent loads it with `glab orbit skills get orbit-start`.
+For the prompt, see [step 3 of the quickstart](../quickstart.md#step-3-ask-your-first-question).
 
 Setup follows these rules:
 
