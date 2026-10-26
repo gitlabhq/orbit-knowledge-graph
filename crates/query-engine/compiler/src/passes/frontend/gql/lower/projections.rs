@@ -40,7 +40,11 @@ impl Lowering {
         for item in items {
             let alias = item.alias.map(|alias| alias.value);
             match item.expression {
-                Expression::Aggregate { function, target } => {
+                Expression::Aggregate {
+                    function,
+                    distinct,
+                    target,
+                } => {
                     let expr = match (function, target) {
                         (AggregateFunction::Count, Target::Property(p)) => {
                             AggExpr::Count(TargetRef {
@@ -65,10 +69,11 @@ impl Lowering {
                         (AggregateFunction::Min, Target::Property(p)) => AggExpr::Min(p.into()),
                         (AggregateFunction::Max, Target::Property(p)) => AggExpr::Max(p.into()),
                     };
-                    self.input
-                        .aggregation
-                        .metrics
-                        .push(InputAggregationMetric { expr, alias });
+                    self.input.aggregation.metrics.push(InputAggregationMetric {
+                        expr,
+                        alias,
+                        distinct,
+                    });
                 }
                 Expression::DateTrunc {
                     span,

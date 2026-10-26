@@ -92,6 +92,15 @@ fn aggregation_query() {
 }
 
 #[test]
+fn gql_count_distinct_renders_distinct_aggregates() {
+    let orbit_query = "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id}, count(n) AS notes, count(DISTINCT n) AS distinct_notes, count(DISTINCT n.confidential) AS flags LIMIT 10";
+    let result = compile(orbit_query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert_eq!(rendered.matches("countDistinct").count(), 2, "{rendered}");
+    assert!(rendered.contains("AS notes"), "{rendered}");
+}
+
+#[test]
 fn group_by_property_truncate_month_wraps_column() {
     let orbit_query = "MATCH (u:Note {confidential: false}) RETURN date_trunc('month', u.created_at), count(u) AS n LIMIT 50";
     let json = r#"{
@@ -1351,6 +1360,7 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u",
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
+        "MATCH (u:User {id: 1}) RETURN sum(DISTINCT u.id) AS n",
         "MATCH (u:User) RETURN collect(u.username)",
         "MATCH (u:User {id: 1}) RETURN u SKIP 1 SKIP 1",
         "MATCH (u:User {id: 1}) RETURN u SKIP -1",

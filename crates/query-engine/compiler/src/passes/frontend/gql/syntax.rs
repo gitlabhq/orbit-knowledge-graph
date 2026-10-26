@@ -433,14 +433,29 @@ impl QueryParser {
     }
 
     fn Aggregate(input: Node) -> Result<Expression> {
-        Ok(match_nodes!(input.into_children();
-            [AggregateFunction(function), PropertyExpression(property)] => Expression::Aggregate {
-                function, target: Target::Property(property),
-            },
-            [AggregateFunction(function), Variable(variable)] => Expression::Aggregate {
-                function, target: Target::Variable(variable),
-            },
-        ))
+        let span = input.as_span();
+        let (function, distinct, target) = match_nodes!(input.into_children();
+            [AggregateFunction(function), PropertyExpression(property)] =>
+                (function, false, Target::Property(property)),
+            [AggregateFunction(function), Variable(variable)] =>
+                (function, false, Target::Variable(variable)),
+            [AggregateFunction(function), Distinct(_), PropertyExpression(property)] =>
+                (function, true, Target::Property(property)),
+            [AggregateFunction(function), Distinct(_), Variable(variable)] =>
+                (function, true, Target::Variable(variable)),
+        );
+        if distinct && function != AggregateFunction::Count {
+            return Err(error_at(span, "DISTINCT works only inside count()"));
+        }
+        Ok(Expression::Aggregate {
+            function,
+            distinct,
+            target,
+        })
+    }
+
+    fn Distinct(_input: Node) -> Result<()> {
+        Ok(())
     }
 
     fn AggregateFunction(input: Node) -> Result<AggregateFunction> {
