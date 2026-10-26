@@ -5,7 +5,6 @@ theme: data
 status: exploring
 start: FY28 Q1
 end: FY28 Q1
-tracking: https://gitlab.com/groups/gitlab-org/orbit/-/work_items/10
 ---
 
 Your teams know which repositories make up a service, and who owns it.

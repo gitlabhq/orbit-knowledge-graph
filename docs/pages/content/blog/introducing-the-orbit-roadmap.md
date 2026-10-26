@@ -35,3 +35,10 @@ For the history of every item, see the [roadmap commit history](https://gitlab.c
 
 The roadmap uses GitLab fiscal quarters.
 For example, FY27 Q4 is November 2026 to January 2027.
+
+## Forward-looking information
+
+This page contains information related to upcoming products, features, and functionality.
+It is important to note that the information presented is for informational purposes only.
+Please do not rely on this information for purchasing or planning purposes.
+The development, release, and timing of any products, features, or functionality may be subject to change or delay and remain at the sole discretion of GitLab Inc.
