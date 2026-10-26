@@ -1,0 +1,41 @@
+diff --git a/crates/code-graph-incremental/src/shared/sentinel.rs b/crates/code-graph-incremental/src/shared/sentinel.rs
+index a66482700..6a42f9084 100644
+--- a/crates/code-graph-incremental/src/shared/sentinel.rs
++++ b/crates/code-graph-incremental/src/shared/sentinel.rs
+@@ -140,6 +140,7 @@ impl Clock {
+ pub struct Sentinel {
+     started: Clock,
+     budget: Duration,
++    unbounded: bool,
+     label: &'static str,
+     path: String,
+     cancelled: Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
+@@ -150,6 +151,7 @@ impl Sentinel {
+         Self {
+             started: Clock::Wall(Instant::now()),
+             budget: Duration::from_millis(budget_ms),
++            unbounded: budget_ms == u64::MAX,
+             label,
+             path: path.to_string(),
+             cancelled: None,
+@@ -165,6 +167,7 @@ impl Sentinel {
+         child.budget = child
+             .budget
+             .min(self.budget.saturating_sub(self.started.elapsed()));
++        child.unbounded &= self.unbounded;
+         child.cancelled = self.cancelled.clone();
+         child
+     }
+@@ -184,7 +187,11 @@ impl Sentinel {
+ 
+     #[inline]
+     pub fn check(&self) -> Result<(), Killed> {
+-        let over = self.started.over(self.budget);
++        let over = if self.unbounded {
++            None
++        } else {
++            self.started.over(self.budget)
++        };
+         let cancelled = self.cancelled.as_ref().is_some_and(|cancelled| cancelled());
+         if over.is_some() || cancelled {
+             return Err(Killed {

@@ -2,23 +2,43 @@ workflow:
   rules:
     - if: $CI_COMMIT_BRANCH =~ /^trident-4915-/
 
+build:
+  image: rust:1-trixie
+  tags: [saas-linux-large-amd64]
+  timeout: 1h
+  variables:
+    DUCKDB_DOWNLOAD_LIB: "1"
+    CARGO_INCREMENTAL: "0"
+  script:
+    - apt-get update -qq && apt-get install -y -qq cmake protobuf-compiler clang libclang-dev >/dev/null
+    - cargo build --release -p orbit-cli
+    - mkdir -p out && cp target/release/orbit out/orbit-base && cp target/release/deps/libduckdb.so out/
+    - git apply ci-bench/clockfix.patch && git diff --stat
+    - cargo build --release -p orbit-cli
+    - cp target/release/orbit out/orbit-clockfix
+    - ls -la out
+  artifacts:
+    paths: [out/]
+    expire_in: 1 day
+
 bench-variants:
-  image: ubuntu:24.04
+  image: debian:trixie
   tags: [saas-linux-small-amd64]
+  needs: [build]
   timeout: 2h
   variables:
     GIT_DEPTH: "1"
   script:
     - apt-get update -qq && apt-get install -y -qq git curl bc ca-certificates >/dev/null
     - B=https://gitlab.com/api/v4/projects/77960826/packages/generic/orbit-cli/0.159.0
-    - mkdir -p /opt/musl /opt/gnu
-    - curl -fsSL $B/orbit-cli-linux-musl-x86_64.tar.gz | tar xz -C /opt/musl
-    - curl -fsSL $B/orbit-cli-linux-x86_64.tar.gz | tar xz -C /opt/gnu
+    - mkdir -p /opt/musl && curl -fsSL $B/orbit-cli-linux-musl-x86_64.tar.gz | tar xz -C /opt/musl
+    - export LD_LIBRARY_PATH=$CI_PROJECT_DIR/out
     - |
-      export VARIANTS="musl-default|/opt/musl/orbit|X=1
-      gnu-default|/opt/gnu/orbit|X=1
-      musl-rayon1|/opt/musl/orbit|RAYON_NUM_THREADS=1
-      musl-rayon4|/opt/musl/orbit|RAYON_NUM_THREADS=4
-      gnu-default-2|/opt/gnu/orbit|X=1
-      musl-default-2|/opt/musl/orbit|X=1"
+      export VARIANTS="musl-release|/opt/musl/orbit|X=1
+      glibc-base|$CI_PROJECT_DIR/out/orbit-base|X=1
+      glibc-clockfix|$CI_PROJECT_DIR/out/orbit-clockfix|X=1
+      glibc-base-2|$CI_PROJECT_DIR/out/orbit-base|X=1
+      glibc-clockfix-2|$CI_PROJECT_DIR/out/orbit-clockfix|X=1
+      musl-release-2|/opt/musl/orbit|X=1"
+    - chmod +x out/orbit-*
     - bash $CI_PROJECT_DIR/ci-bench/bench.sh

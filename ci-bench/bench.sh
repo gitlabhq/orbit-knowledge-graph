@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 cg=/sys/fs/cgroup
-echo "== env"; uname -r; grep -m1 'model name' /proc/cpuinfo; echo "cpuinfo processors: $(grep -c ^processor /proc/cpuinfo)"; echo "nproc: $(nproc)"
+echo "clocksource: $(cat /sys/devices/system/clocksource/clocksource0/current_clocksource 2>&1)"; echo "== env"; uname -r; grep -m1 'model name' /proc/cpuinfo; echo "cpuinfo processors: $(grep -c ^processor /proc/cpuinfo)"; echo "nproc: $(nproc)"
 echo "cgroup fs: $(stat -fc %T $cg)"; cat /proc/self/cgroup
 for f in cpu.max cpu.weight memory.max memory.swap.max cpu.cfs_quota_us cpu.cfs_period_us memory.limit_in_bytes; do [ -f $cg/$f ] && echo "$f=$(cat $cg/$f)"; done
 free -m | head -2; df -h . | tail -1; mount | grep -E ' / | /builds' | head -3
