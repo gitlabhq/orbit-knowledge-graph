@@ -13,7 +13,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Image signing (keyless cosign, canonical project only) | `scripts/release/publish-manifest.sh`, `scripts/release/sign-image.sh`; runbook in `docs/pages/engineering/runbooks/image_signing.md` |
 | Image hardening (non-root user, Dockerfile scan, release gate, Vulnerability Report) | `Dockerfile`, `dockerfile-scan`, `release-image-scan`, `container_scanning` in `.gitlab-ci.yml`; runbook in `docs/pages/engineering/runbooks/image_signing.md` |
 | Query language reference | `docs/docs-gitlab-com/remote/queries/query-language.md` |
-| Orbit query frontend | `crates/query-engine/compiler/src/passes/frontend/`; design in `docs/pages/engineering/architecture/querying.md` |
+| Orbit query frontend | `crates/query-engine/compiler/src/passes/frontend/`; design in `docs/pages/engineering/architecture/querying/query-engine.md` |
 | SDLC indexing pipeline | `docs/pages/engineering/architecture/indexing/sdlc-indexing.md`, `docs/pages/engineering/runbooks/sdlc_indexing.md` |
 | Code indexing pipeline | `docs/pages/engineering/architecture/indexing/code-indexing.md`, `docs/pages/engineering/runbooks/code_indexing.md` |
 | Namespace deletion pipeline | `docs/pages/engineering/architecture/indexing/sdlc-indexing.md` |
