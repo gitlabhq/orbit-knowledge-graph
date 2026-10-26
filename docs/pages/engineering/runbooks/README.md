@@ -49,8 +49,8 @@ gcloud container clusters get-credentials orbit-prd --region us-east1 --project 
 <details open>
 <summary>GitLab.com</summary>
 
-Do not use `kubectl scale`, `keda.enabled: false` or the `paused` annotation on an indexer.
-They do not stop the pool.
+Do not use `kubectl scale`, `keda.enabled: false` or `autoscaling.keda.sh/paused: "true"` on an
+indexer. They do not stop the pool. Use `paused-replicas` as below.
 
 **Stop code indexing:**
 

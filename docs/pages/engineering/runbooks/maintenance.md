@@ -7,8 +7,9 @@
 
 > [!warning]
 > Do not edit live Deployments: ArgoCD removes the change. Do not delete the
-> `orbit-webserver` Service or uninstall the release: GitLab then cannot reach Orbit. A rollback two or more schema versions back
-> starts a full reindex. Check first: [does a release reindex?](#does-a-release-reindex)
+> `orbit-webserver` Service or uninstall the release: GitLab then cannot reach Orbit. A rollback
+> to an older schema version can start a full reindex. Check first:
+> [does a release reindex?](#does-a-release-reindex)
 
 1. Revert the last deploy MR in
    [argocd-apps](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests) and merge it.
@@ -83,6 +84,14 @@ git show "${NEW}:config/schema-migrations.yaml" \
 Use mikefarah yq v4 (`mise` installs it). Only the `schema` line shows: the release does
 not reindex. Scope `*` rebuilds everything, `sdlc` or `code` rebuilds only those tables, `none` rebuilds
 nothing. A version with no entry counts as `*`.
+
+For a rollback, the second command shows nothing. If the target `schema` is lower, check its
+status in the graph ClickHouse. `retired`: the rollback uses its tables, no reindex. `dropped`
+or no row: full reindex.
+
+```sql
+SELECT version, status FROM gkg.gkg_schema_version FINAL ORDER BY version DESC
+```
 
 During a reindex:
 
