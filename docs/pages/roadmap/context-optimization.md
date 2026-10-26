@@ -4,7 +4,7 @@ description: Give agents the context for a task when the task starts.
 theme: agents
 status: exploring
 start: FY28 Q1
-end: FY28 Q1
+end: FY28 Q2
 ---
 
 Agents spend time and tokens to find context before they start work.

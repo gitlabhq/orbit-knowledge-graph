@@ -16,6 +16,9 @@ Orbit will also index file content, so one query can combine a text search with 
 ## Planned changes
 
 - Index active branches first, and then recent commits.
+- Index tags and release branches.
+- Index non-code files, such as Markdown, YAML, and JSON.
+- Index infrastructure code, such as Terraform.
 - Add more languages, based on what our users ask for.
 - Update the index incrementally. After a commit, Orbit indexes only the files that changed.
 - Search file content with text and regular expressions.
