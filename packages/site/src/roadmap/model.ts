@@ -22,6 +22,7 @@ export type RoadmapItem = {
   status: Status;
   start: Quarter;
   end: Quarter;
+  rank?: number;
   link?: string;
   tracking?: string;
   tracker?: Tracker;
@@ -39,7 +40,7 @@ const STATUS_ORDER: Record<Status, number> = { "in-progress": 0, planned: 1, exp
 
 export const items: RoadmapItem[] = pages
   .flatMap((page) => (page.meta.item ? [{ page, ...page.meta.item }] : []))
-  .map(({ page, theme, status, start, end, link, tracking }) => ({
+  .map(({ page, theme, status, start, end, rank, link, tracking }) => ({
     slug: page.path.slice("roadmap/".length),
     page,
     title: page.meta.title,
@@ -48,6 +49,7 @@ export const items: RoadmapItem[] = pages
     status,
     start: parseQuarter(start),
     end: parseQuarter(end),
+    rank,
     link,
     tracking,
     tracker: tracking ? (trackers as Record<string, Tracker>)[tracking] : undefined,
@@ -56,6 +58,7 @@ export const items: RoadmapItem[] = pages
     (a, b) =>
       quarterIndex(a.start) - quarterIndex(b.start) ||
       STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
+      (a.rank ?? Infinity) - (b.rank ?? Infinity) ||
       themes.indexOf(a.theme) - themes.indexOf(b.theme) ||
       a.title.localeCompare(b.title),
   );
