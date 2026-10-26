@@ -18,7 +18,7 @@ build-musl:
     - git apply ci-bench/clockfix.patch && git diff --stat
     - mise exec -- cargo zigbuild --release --locked -p orbit-cli --bin orbit --target x86_64-unknown-linux-musl --features duckdb-client/bundled
     - cp target/x86_64-unknown-linux-musl/release/orbit out/orbit-musl-clockfix
-    - file out/* ; ls -la out
+    - ls -la out
   artifacts:
     paths: [out/]
     expire_in: 1 day
