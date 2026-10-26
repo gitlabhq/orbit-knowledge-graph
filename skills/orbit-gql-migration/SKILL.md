@@ -30,7 +30,8 @@ glab orbit query "CALL db.schema('Project')"
   ask the administrator to upgrade GitLab and Orbit. Do not rewrite queries
   you cannot run.
 - An auth error means the login is missing or expired. Fix it with
-  `glab auth login`, then rerun.
+  `glab auth login`, then rerun. An HTTP 403 can instead mean the user has no
+  Orbit access, and logging in again does not fix that. Ask the administrator.
 - A network error or HTTP 429 is not a version problem. Wait and retry.
 
 ## Traps
@@ -38,13 +39,14 @@ glab orbit query "CALL db.schema('Project')"
 - `neighbors` defaults to `direction: outgoing`. Map the direction you find,
   and write `->` when it is omitted. `-[...]-` adds the incoming neighbors and
   returns plausible extra rows.
-- A node alias that is a GQL reserved word (case-insensitive, so `End` fails too) fails with "expected a variable" at
-  the alias. Rename it. Likely ones: `end`, `desc`, `order`, `in`, `on`, `is`,
+- A node alias that is a GQL reserved word fails with "expected a variable" at
+  the alias. The check is case-insensitive, so `End` fails too. Rename it. Likely ones: `end`, `desc`, `order`, `in`, `on`, `is`,
   `as`, `by`, `all`, `any`, `case`, `of`, `set`, `with`, `limit`, `match`.
   `start` is fine.
 - The query lives in an envelope. Replace the object under `query` with a
   string of GQL and keep the other envelope fields. Never replace the whole
-  file with bare GQL, because `--file` rejects it.
+  file with bare GQL, because `--file` rejects it. A short query also runs
+  without a file: `glab orbit query '<gql>'` takes the query text directly.
 - Some constructs have no GQL form. See "Rejected constructs".
 
 ## Workflow
