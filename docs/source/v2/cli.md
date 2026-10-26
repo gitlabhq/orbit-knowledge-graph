@@ -98,7 +98,7 @@ Local commands use the local graph on your machine. They need no GitLab account 
 | `ontology` | Remote | Show the node types, properties, and relationships. |
 | `tools` | Remote | Show the Model Context Protocol (MCP) tool manifest. |
 | `graph-status` | Remote | Show the indexing progress of a group or project. |
-| `skills` | Remote when a GitLab credential is available, otherwise the built-in copy | List and print the agent skill files, such as `orbit` and `orbit-start`. |
+| `skills` | Remote when a GitLab credential is available, otherwise the built-in copy of `orbit` | List and print the agent skill files, such as `orbit` and `orbit-start`. Only `orbit` has a built-in copy. |
 | `index` | Local | Index a repository, or a directory of repositories. |
 | `grep` | Local | Search every line of code, tests, configuration, and documentation, with the enclosing definitions. |
 | `context` | Local | Show source, callers, and callees. |
