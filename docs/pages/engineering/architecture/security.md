@@ -1,113 +1,124 @@
 ---
 title: Security
 description: How Orbit makes sure each caller sees only the data that GitLab lets them see.
+order: 6
 authors:
   - michaelangeloio
+  - dgruzd
 ---
 
-**TL;DR:** Orbit never decides who can see what. GitLab decides, and Orbit
-enforces that decision at three layers. Each layer fails closed, so a fault
-removes data from a response and never adds data to it.
+![Each request passes three separate checks](../../../assets/architecture/security.svg)
 
-## Terms
+GitLab decides who can see what, and Orbit enforces it. Customers already
+trust the GitLab permission model, so we enforce it instead of copying it.
+Three separate layers do that, and each one fails closed: a fault returns
+less data or an error, never more.
 
-- The **namespace path** is the chain of IDs above a row, from the
-  organization down to its group or project.
-- The **authorized scope** is the set of namespace paths that GitLab lets the
-  caller read, with the caller's role on each path.
-- **Redaction** is the check that GitLab does on each returned item before
-  the caller receives it.
+## How a request is checked
 
-## Trust model
-
-```plantuml
-@startuml
-left to right direction
-skinparam componentStyle rectangle
-actor "Caller" as caller
-component "GitLab" as gitlab
-component "Orbit" as orbit
-database "Graph store" as store
-caller --> gitlab : authenticated request
-gitlab --> orbit : signed caller identity\nand authorized scope
-orbit --> store : scoped, parameterized query
-orbit --> gitlab : redaction check per item
-@enduml
+```mermaid
+sequenceDiagram
+    participant C as Caller
+    participant G as GitLab
+    participant O as Orbit
+    participant S as Graph store
+    C->>G: request
+    G->>O: signed identity and allowed paths
+    O->>S: query limited to those paths
+    S-->>O: rows
+    O->>G: check each returned entity
+    G-->>O: allowed entities
+    O-->>G: response
+    G-->>C: response
+    Note over O,G: Aggregation counts get no item check
 ```
 
-- Every request reaches Orbit through GitLab. No caller connects to Orbit
-  directly.
-- GitLab authenticates the caller. Then it sends Orbit a signed, short-lived
-  statement of the caller's identity and authorized scope.
-- GitLab is the only source of truth for permissions. Orbit does not
-  re-implement GitLab policy, so a policy change in GitLab applies to Orbit
-  without an Orbit change.
-- GitLab token scopes control which Orbit routes a token can call. They do
-  not filter results. The caller's own access filters results.
+Nobody talks to Orbit directly. GitLab authenticates the caller and finds the
+groups where they have at least the Reporter role. It sends Orbit a short-lived
+signed token with that list. Orbit limits the query to those
+groups, then asks GitLab to check every returned entity before the result
+goes back.
+
+## Paths: where each row belongs
+
+Every group and project in GitLab has a
+[traversal path](https://docs.gitlab.com/development/namespaces/#querying-namespaces):
+the organization ID, then the namespace IDs from the top-level group down to
+itself. Take organization 1, group 100, subgroup 200, and a project whose
+project namespace has ID 300. That project has the path `1/100/200/300/`.
+
+Everything inside a group has a path that starts with the group's path. So
+access to `1/100/200/` covers `1/100/200/300/` but not `1/100/400/`. It's the
+same rule GitLab uses for its group hierarchy, and the
+[namespaces guide](https://docs.gitlab.com/development/namespaces/#search-using-trie-data-structure)
+explains the prefix search behind it. We drop any allowed path that another
+allowed path already covers, which keeps the query small.
 
 ## The three layers
 
-1. **Tenant data in storage.** Every row that belongs to a namespace carries
-   its namespace path. A few global entities, such as users and runners, have
-   no path. GitLab redaction controls access to them.
-2. **Scope in every query.** Orbit adds the authorized scope to every read of
-   namespaced data. Before a query runs, a final check rejects it if one of
-   those reads has no scope.
-3. **Redaction of each item.** Some permissions apply to one item, not to a
-   namespace. Examples are confidential items and IP or SAML restrictions.
-   GitLab checks these items, and Orbit removes each item that GitLab denies.
+**1. Every row has a path.** Rows that belong to a group or project store
+their traversal path. A few global entities, like users and runners, have no
+path. A relationship from one of them into a group still carries one.
 
-## Guarantees
+**2. Every query has a scope.** Orbit adds the allowed paths to every read of
+data that has a path. A final check rejects the query if any read is missing
+its scope.
 
-- Access follows the GitLab group hierarchy. Access to a group gives access
-  to the groups and projects below it. Every authorized path needs at least
-  the Reporter role.
-- An entity can require a higher role than the default. For example, the security
-  entities need the Security Manager role. Orbit removes paths below that role
-  before it builds the query, so counts and groupings cannot expose the entity.
-- A filter from the caller can only make the scope smaller. It can never make
-  the scope larger.
-- Aggregations return no items to redact. The scope and the role floors are
-  the filters that protect them.
-- An empty authorized scope is an error, not an empty result.
+**3. GitLab checks every returned entity.** Some rules apply to one item, not
+to a whole group: confidential issues, SAML and IP restrictions, custom roles.
+GitLab checks each returned entity and Orbit drops the ones it denies. This
+also catches anything a bug in the first two layers lets through. Aggregation
+counts rely on the first two layers only.
+
+Each layer is a separate check, so for returned entities a single bug can't
+expose data on its own.
+
+## What this guarantees
+
+- GitLab stays the only source of truth for permissions, so a policy change
+  in GitLab applies to the next Orbit request.
+- Every allowed path needs at least the Reporter role. Some entities need
+  more, like Security Manager for vulnerabilities.
+- We remove paths below that role before building the query, so counts and
+  groupings can't leak the entity either.
+- The paths are the boundary, not the organization, so one caller's scope can
+  span more than one organization.
+- Scope comes from group membership, so access to one project without access
+  to its group isn't part of it.
+- A caller's own filter can only make the scope smaller. A query with no
+  allowed paths is an error, not an empty result.
+- Token scopes decide which Orbit routes a token can call. The caller's own
+  access decides which data comes back.
 - Caller input never becomes query text. Names must match the graph schema,
-  and every value is sent as a separate parameter.
-- Every query has limits on depth, size, and time. Orbit rejects a
-  query that asks for more than the limits allow.
-- Orbit shows the generated database query only to privileged callers who
-  ask for it. The query language and the response format are the contract.
-- Each log field is marked as safe or as expanded. A field that can hold
-  customer data is an expanded field, and configuration controls when it
-  appears.
+  and every value goes to the store as a separate parameter.
+- Every query has limits on depth, size, and time.
+- Customer data goes only into expanded log fields, and the deployment
+  decides when Orbit writes them.
 
-## Service trust
+## Between the services
 
-- Every hop between GitLab and Orbit supports TLS, and the deployment turns
-  it on. Internal listeners can use TLS too.
-- The server uses only a FIPS-validated cryptographic module. It does not
-  start if that module is not active, and it has no fallback module.
-- Each runtime role connects to the graph store with the least privilege it
-  needs. The query tier can only read. Only the indexing and dispatch
-  tiers can write, and only the one-time setup step can manage users and
-  grants.
+The signed token proves that GitLab sent the request and names the caller.
+TLS, when the deployment turns it on, proves to GitLab that it talks to the
+real Orbit server. The server uses only a FIPS 140-3 cryptographic module and won't
+start unless it runs in FIPS mode.
 
-## Supply chain
+Setup creates a separate read-only user for the graph store, so a deployment
+can give the query service read access only.
 
-- The project signs each release image. The signature identifies the
-  pipeline that built it. Release tags move only after the signatures are
-  verified.
-- Images run as a user that is not root.
-- A scan checks each release image before its tags move. A high or critical
-  vulnerability that has a fix blocks the release.
+We sign every release image, block a release that has a fixable high or
+critical vulnerability, and don't run images as root.
 
-## Failure behavior
+## When things go wrong
 
-- If GitLab does not answer a redaction check, the query fails. Orbit does
-  not return items that GitLab did not check.
-- If the signed caller identity is missing, invalid, or expired, Orbit rejects
-  the request before it does any work.
+If the token is missing, invalid, or expired, Orbit rejects the request before
+doing any work. If GitLab doesn't answer an item check, the query fails.
+Orbit never returns entities that GitLab didn't check.
 
-## Decisions
+## Further reading
 
+- [GitLab namespaces and traversal IDs](https://docs.gitlab.com/development/namespaces/)
+- [Orbit design document](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/orbit/)
 - [ADR 001: gRPC communication](../adr/001_grpc_communication.md)
 - [ADR 008: Workhorse query acceleration](../adr/008_workhorse_query_acceleration.md)
+- The [FIPS and TLS](../runbooks/fips_and_tls.md) and
+  [image signing](../runbooks/image_signing.md) runbooks

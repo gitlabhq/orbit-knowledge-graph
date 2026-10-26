@@ -1,6 +1,7 @@
 ---
 title: Code indexing
 description: How Orbit gets repository code into the graph.
+order: 3
 authors:
   - jgdoyon1
 ---

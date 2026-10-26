@@ -1,6 +1,7 @@
 ---
 title: Schema evolution
 description: How a change to the graph schema reaches production without downtime.
+order: 4
 authors:
   - jgdoyon1
 ---

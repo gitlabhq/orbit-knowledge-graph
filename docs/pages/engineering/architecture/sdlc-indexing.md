@@ -1,6 +1,7 @@
 ---
 title: SDLC indexing
 description: How Orbit builds the SDLC graph from replicated GitLab data.
+order: 2
 authors:
   - jgdoyon1
 ---
