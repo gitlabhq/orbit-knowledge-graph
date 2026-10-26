@@ -254,8 +254,14 @@ mod tests {
     #[test]
     fn unbounded_child_of_unbounded_parent_never_trips_on_time() {
         let child = Sentinel::disabled().child("link", "a.py", u64::MAX);
-        std::thread::sleep(Duration::from_millis(3));
         assert!(child.check().is_ok());
+    }
+
+    #[test]
+    fn unbounded_child_of_bounded_parent_still_trips() {
+        let child = Sentinel::new("run", "", 1).child("resolve", "", u64::MAX);
+        std::thread::sleep(Duration::from_millis(3));
+        assert!(child.check().is_err());
     }
 
     #[test]
