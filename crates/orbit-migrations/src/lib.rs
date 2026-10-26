@@ -15,7 +15,18 @@ pub mod version;
 pub(crate) mod test_helpers {
     use std::collections::BTreeSet;
 
+    use ontology::migrations::EdgeRows;
+
+    use crate::scope::MigrationScope;
+
     pub fn entity_set(names: &[&str]) -> BTreeSet<String> {
         names.iter().map(|s| s.to_string()).collect()
+    }
+
+    pub fn sdlc_scope(names: &[&str]) -> MigrationScope {
+        MigrationScope::Sdlc {
+            entities: entity_set(names),
+            edge_rows: EdgeRows::Changed,
+        }
     }
 }

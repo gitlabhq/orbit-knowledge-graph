@@ -10,7 +10,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use ontology::Ontology;
 use ontology::archive::OntologyArchive;
 use ontology::migrations::{
-    self, Fingerprints, LedgerScope, MigrationEntry, MigrationLedger, MigrationScope, derive_scope,
+    self, EdgeRows, Fingerprints, LedgerScope, MigrationEntry, MigrationLedger, MigrationScope,
+    derive_edge_rows, derive_scope,
 };
 use orbit_migrations::snapshot_check::{VerifiedSnapshot, verify_committed_snapshot};
 
@@ -145,13 +146,16 @@ fn widen_amended_entry_scope(
     Ok(existing.widened_with(declared))
 }
 
-/// Lowers a [`MigrationScope`] into the wire `scope:` + `entities:` fields of a ledger entry.
-fn split_scope_into_ledger_fields(scope: MigrationScope) -> (LedgerScope, BTreeSet<String>) {
+/// Lowers a [`MigrationScope`] into the wire `scope:`, `entities:` and `edge_rows:` fields of a ledger entry.
+fn split_scope_into_ledger_fields(
+    scope: MigrationScope,
+    edge_rows: EdgeRows,
+) -> (LedgerScope, BTreeSet<String>, EdgeRows) {
     match scope {
-        MigrationScope::Full => (LedgerScope::All, BTreeSet::new()),
-        MigrationScope::Code => (LedgerScope::Code, BTreeSet::new()),
-        MigrationScope::Sdlc(entities) => (LedgerScope::Sdlc, entities),
-        MigrationScope::None => (LedgerScope::None, BTreeSet::new()),
+        MigrationScope::Full => (LedgerScope::All, BTreeSet::new(), EdgeRows::Changed),
+        MigrationScope::Code => (LedgerScope::Code, BTreeSet::new(), EdgeRows::Changed),
+        MigrationScope::Sdlc(entities) => (LedgerScope::Sdlc, entities, edge_rows),
+        MigrationScope::None => (LedgerScope::None, BTreeSet::new(), EdgeRows::Changed),
     }
 }
 
@@ -210,20 +214,32 @@ fn check_under_declaration(
             anyhow!("no ledger entry for the bumped version {schema_version}. {REMEDIATION}")
         })?;
 
+    // A `none` entry may under-declare drift; its gate is the note check in `MigrationLedger::validate`.
+    if entry.scope == LedgerScope::None {
+        return Ok(());
+    }
+
     let (changed_sources, changed_tables) = committed.get_versioned_diff_keys_between(&base_fps);
     let source_contents = migrations::embedded_sources();
-    // A `none` entry may under-declare drift; its gate is the note check in `MigrationLedger::validate`.
     if let Some(required) = derive_scope(
         ontology,
         &source_contents,
         &changed_sources,
         &changed_tables,
-    ) && !matches!(entry.migration_scope(), MigrationScope::None)
-        && !entry.migration_scope().covers_scope_of(&required)
+    ) && !entry.migration_scope().covers_scope_of(&required)
     {
         bail!(
             "ledger entry for version {schema_version} under-declares the change: \
              detected {required} but the entry does not cover it. Widen the entry (or run `mise schema:bump`)."
+        );
+    }
+
+    if !entry.edge_rows.is_changed()
+        && derive_edge_rows(ontology, committed, &base_fps).is_changed()
+    {
+        bail!(
+            "ledger entry for version {schema_version} declares `edge_rows: unchanged`, \
+             but the change alters edge rows. Drop `edge_rows: unchanged` (or run `mise schema:bump`)."
         );
     }
 
@@ -258,6 +274,11 @@ pub fn bump(
         &changed_sources,
         &changed_tables,
     );
+    let entry_edge_rows = if explicit.is_some() {
+        EdgeRows::Changed
+    } else {
+        derive_edge_rows(&ontology, &current, &committed)
+    };
 
     let entry_declaration = if matches!(explicit, Some(MigrationScope::None)) {
         if note.as_ref().is_none_or(|n| n.trim().is_empty()) {
@@ -312,13 +333,15 @@ pub fn bump(
         if ledger.migrations.iter().any(|e| e.version == new_version) {
             bail!("ledger already has an entry for version {new_version}");
         }
-        let (scope, entities) = split_scope_into_ledger_fields(entry_declaration);
+        let (scope, entities, edge_rows) =
+            split_scope_into_ledger_fields(entry_declaration, entry_edge_rows);
         ledger.migrations.insert(
             0,
             MigrationEntry {
                 version: new_version,
                 scope,
                 entities,
+                edge_rows,
                 note,
             },
         );
@@ -329,9 +352,11 @@ pub fn bump(
             .first_mut()
             .ok_or_else(|| anyhow!("cannot amend: the ledger has no entries"))?;
         let widened = widen_amended_entry_scope(&latest.migration_scope(), &entry_declaration)?;
-        let (scope, entities) = split_scope_into_ledger_fields(widened);
+        let (scope, entities, edge_rows) =
+            split_scope_into_ledger_fields(widened, latest.edge_rows.widened_with(entry_edge_rows));
         latest.scope = scope;
         latest.entities = entities;
+        latest.edge_rows = edge_rows;
         if note.is_some() {
             latest.note = note;
         }

@@ -9,7 +9,9 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
-use crate::checkpoint::{Checkpoint, CheckpointStore, WindowBounds, namespace_position_key};
+use crate::checkpoint::{
+    Checkpoint, CheckpointStore, GLOBAL_SCOPE_KEY, WindowBounds, namespace_position_key,
+};
 
 use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
@@ -96,7 +98,7 @@ impl EntityHandler {
                     message.to_event().map_err(serialization_error)?;
                 Ok(IndexingRequest {
                     watermark: payload.watermark,
-                    scope_key: "global".to_string(),
+                    scope_key: GLOBAL_SCOPE_KEY.to_string(),
                     traversal_path: None,
                     namespace_id: None,
                     dispatch_id: payload.dispatch_id,

@@ -38,13 +38,22 @@ cases:
       compile_error: aggregates are restricted to scalars
 
   - name: scalar_metrics_compile
-    description: MIN and MAX still accept timestamps, integers, booleans, and enums
+    description: MIN and MAX still accept timestamps, integers, and booleans
     query:
       gql: |
         MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000})
-        RETURN p, min(w.created_at) AS first_created, max(w.weight) AS max_weight, max(w.confidential) AS any_confidential, min(w.state) AS min_state
+        RETURN p, min(w.created_at) AS first_created, max(w.weight) AS max_weight, max(w.confidential) AS any_confidential
     expect:
       compile_only: true
+
+  - name: enum_metrics_rejected
+    description: MIN and MAX reject enums, whose values have no order
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[:IN_PROJECT]->(p:Project {id: 1000})
+        RETURN p, min(w.state) AS min_state
+    expect:
+      compile_error: because enum values have no order
 
   - name: categorical_group_keys_compile
     description: Grouping still accepts enums, low-selectivity strings, and truncated timestamps

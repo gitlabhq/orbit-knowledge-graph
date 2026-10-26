@@ -29,4 +29,13 @@ ignore = [
     # never access rkyv archives. Fix is rkyv >= 0.8.17; 0.7 is unsupported upstream.
     # Remove when rust_decimal/duckdb drop rkyv 0.7 (check: cargo tree -i rkyv --target all).
     "RUSTSEC-2026-0235",
+    # zstd 0.13.3 / zstd-safe 7.2.4 stay in the lock for tonic 0.14.6 (gRPC compression) and
+    # arrow-ipc/parquet 58. They call only zstd::stream::read::{Encoder, Decoder}::new and the
+    # bulk API, which neither advisory affects: 0391 needs raw with_context, 0403 needs the
+    # write Decoder. 0398 needs the seekable feature, which no crate enables. Our crates use
+    # zstd 0.14.3. Remove when tonic and arrow move to zstd 0.14
+    # (check: cargo tree -i zstd@0.13.3 --target all).
+    "RUSTSEC-2026-0391",
+    "RUSTSEC-2026-0398",
+    "RUSTSEC-2026-0403",
 ]

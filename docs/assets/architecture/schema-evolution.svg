@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-150 -200 1460 600" width="720" height="296" font-family="'GitLab Sans', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif">
+<title>Orbit schema evolution: copy, re-index, switch live</title>
+<defs>
+<symbol viewBox="0 0 16 16" id="i-archive" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M1.5 4.5v-2h13v2h-13zM1 6a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1v8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6zm1.5 0v7.5h11V6h-11zM4 8.75A.75.75 0 0 1 4.75 8h6.5a.75.75 0 0 1 0 1.5h-6.5A.75.75 0 0 1 4 8.75z"/></symbol>
+<symbol viewBox="0 0 16 16" id="i-check-circle" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M14.5 8a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0zM16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-4.22-1.72a.75.75 0 0 0-1.06-1.06L6.75 9.19 5.53 7.97a.75.75 0 0 0-1.06 1.06l1.75 1.75a.75.75 0 0 0 1.06 0l4.5-4.5z"/></symbol>
+<symbol viewBox="0 0 16 16" id="i-duplicate" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M4 9.5H2.5v-7h7V4H11V2a1 1 0 0 0-1-1H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h2V9.5zm9.5 4h-7v-7h7v7zM5 6a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6z"/></symbol>
+<symbol viewBox="0 0 16 16" id="i-pencil" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M2.5 13.5v-1.879l7.28-7.28 1.88 1.879-7.28 7.28H2.5zm10.22-8.341l.805-.805a.5.5 0 0 0 0-.708l-1.171-1.171a.5.5 0 0 0-.708 0l-.805.805 1.879 1.88zM1 13.5V11l9.586-9.586a2 2 0 0 1 2.828 0l1.172 1.172a2 2 0 0 1 0 2.828L5 15H1v-1.5z"/></symbol>
+<symbol viewBox="0 0 16 16" id="i-retry" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.32.029a8 8 0 0 1 7.18 3.307V1.75a.75.75 0 0 1 1.5 0V6h-4.25a.75.75 0 0 1 0-1.5h1.727A6.5 6.5 0 0 0 1.694 6.424.75.75 0 1 1 .239 6.06 8 8 0 0 1 7.319.03zm-3.4 14.852A8 8 0 0 0 15.76 9.94a.75.75 0 0 0-1.455-.364A6.5 6.5 0 0 1 2.523 11.5H4.25a.75.75 0 0 0 0-1.5H0v4.25a.75.75 0 0 0 1.5 0v-1.586a8 8 0 0 0 2.42 2.217z"/></symbol>
+<symbol viewBox="0 0 16 16" id="i-tag" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M11.172 5.5a.5.5 0 0 1 .353.146l1.06-1.06-1.06 1.06L13.88 8l-2.354 2.354a.5.5 0 0 1-.353.146H2a.5.5 0 0 1-.5-.5V6a.5.5 0 0 1 .5-.5h9.172zm3.767 1.44l-2.353-2.354A2 2 0 0 0 11.172 4H2a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h9.172a2 2 0 0 0 1.414-.586l2.353-2.353L16 8l-1.06-1.06zm-8.189.31a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5h-3.5z"/></symbol>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8f8e96" fill-opacity="0.8"/></marker>
+<mask id="knockout" maskUnits="userSpaceOnUse" x="-150" y="-200" width="1460" height="600"><rect x="-150" y="-200" width="1460" height="600" fill="white"/><rect x="-120.4" y="57.75" width="240.8" height="40.5" rx="6" fill="black"/><rect x="-92.12" y="97.75" width="184.24" height="28.5" rx="6" fill="black"/><rect x="-38.92" y="123.75" width="77.84" height="28.5" rx="6" fill="black"/><rect x="199.83999999999997" y="57.75" width="180.32000000000002" height="40.5" rx="6" fill="black"/><rect x="203.2" y="97.75" width="173.60000000000002" height="28.5" rx="6" fill="black"/><rect x="527.64" y="-66.25" width="104.72000000000001" height="40.5" rx="6" fill="black"/><rect x="525.12" y="-26.25" width="109.76" height="28.5" rx="6" fill="black"/><rect x="541.08" y="-0.25" width="77.84" height="28.5" rx="6" fill="black"/><rect x="497.4" y="173.75" width="165.20000000000002" height="40.5" rx="6" fill="black"/><rect x="535.76" y="213.75" width="88.48" height="28.5" rx="6" fill="black"/><rect x="541.08" y="239.75" width="77.84" height="28.5" rx="6" fill="black"/><rect x="802.52" y="57.75" width="134.96" height="40.5" rx="6" fill="black"/><rect x="788.52" y="97.75" width="162.96" height="28.5" rx="6" fill="black"/><rect x="804.48" y="123.75" width="131.04000000000002" height="28.5" rx="6" fill="black"/><rect x="1100.08" y="57.75" width="119.84" height="40.5" rx="6" fill="black"/><rect x="1089.16" y="97.75" width="141.68" height="28.5" rx="6" fill="black"/><rect x="1099.8" y="123.75" width="120.4" height="28.5" rx="6" fill="black"/></mask>
+</defs>
+<g mask="url(#knockout)"><path d="M58,0 L228,0" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M342,-21 L530,-99" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M342,21 L530,99" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M630,-99 L816,-22" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M630,99 L816,22" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M928,0 L1098,0" fill="none" stroke="#8f8e96" stroke-opacity="0.55" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M-110,340 L1270,340" fill="none" stroke="#8f8e96" stroke-opacity="0.5" stroke-width="2.5" marker-end="url(#arrow)"/><path d="M870,58 L870,324" fill="none" stroke="#8f8e96" stroke-opacity="0.45" stroke-width="2" stroke-dasharray="7 7"/></g>
+<circle cx="0" cy="0" r="48" fill="#FC6D26"/>
+<use href="#i-pencil" x="-20.0" y="-20.0" width="40" height="40" style="fill:#1f1e24"/>
+<circle cx="290" cy="0" r="48" fill="#8B5CF6"/>
+<use href="#i-tag" x="270.0" y="-20.0" width="40" height="40" style="fill:#ffffff"/>
+<circle cx="580" cy="-120" r="44" fill="#14B8A6"/>
+<use href="#i-duplicate" x="561.5" y="-138.5" width="37" height="37" style="fill:#1f1e24"/>
+<circle cx="580" cy="120" r="44" fill="#FC6D26"/>
+<use href="#i-retry" x="561.5" y="101.5" width="37" height="37" style="fill:#1f1e24"/>
+<circle cx="870" cy="0" r="48" fill="#3B82F6"/>
+<use href="#i-check-circle" x="850.0" y="-20.0" width="40" height="40" style="fill:#ffffff"/>
+<circle cx="1160" cy="0" r="48" fill="#94A3B8"/>
+<use href="#i-archive" x="1140.0" y="-20.0" width="40" height="40" style="fill:#1f1e24"/>
+<rect x="870" y="333" width="400" height="14" rx="7" fill="#3B82F6" fill-opacity="0.85"/>
+<rect x="-110" y="333" width="980" height="14" rx="7" fill="#94A3B8" fill-opacity="0.85"/>
+<text x="0" y="78" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Ontology change</text>
+<text x="0" y="112" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Bumps the schema</text>
+<text x="0" y="138" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">to N+1</text>
+<text x="290" y="78" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Version N+1</text>
+<text x="290" y="112" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Built next to N</text>
+<text x="580" y="-46" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Copied</text>
+<text x="580" y="-12" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Unchanged</text>
+<text x="580" y="14" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">tables</text>
+<text x="580" y="194" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Re-indexed</text>
+<text x="580" y="228" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Changed</text>
+<text x="580" y="254" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">tables</text>
+<text x="870" y="78" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Switched</text>
+<text x="870" y="112" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">N+1 goes live,</text>
+<text x="870" y="138" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">no downtime</text>
+<text x="1160" y="78" font-size="27" font-weight="650" fill="#6b6a72" text-anchor="middle" dominant-baseline="central">Retired</text>
+<text x="1160" y="112" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">Version N is</text>
+<text x="1160" y="138" font-size="19" font-weight="450" fill="#8f8e96" text-anchor="middle" dominant-baseline="central">cleaned up</text>
+<text x="380.0" y="376" font-size="21" font-weight="650" fill="#94A3B8" text-anchor="middle" dominant-baseline="central">N serves queries</text>
+<text x="1070.0" y="376" font-size="21" font-weight="650" fill="#3B82F6" text-anchor="middle" dominant-baseline="central">N+1 serves queries</text>
+<circle cx="870" cy="340" r="13" fill="#3B82F6" stroke="#ffffff" stroke-width="4"/>
+<text x="870" y="300" font-size="19" font-weight="600" fill="#3B82F6" text-anchor="middle" dominant-baseline="central">switch</text>
+</svg>
