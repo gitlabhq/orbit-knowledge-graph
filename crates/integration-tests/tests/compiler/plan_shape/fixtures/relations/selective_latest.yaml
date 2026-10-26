@@ -16,7 +16,7 @@ cases:
             - (Filter mr.source_branch = 'feature-x', mr._deleted = false (_))
           reject: ["(Deduplicate Final (Scan Table(gl_merge_request) AS mr))"]
 
-  - name: High-selectivity filters on an unchanging column apply before the latest-row pick
+  - name: High-selectivity filters on an unchanging column apply before the pick behind the version guard
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"name":"build"},"columns":["id","name"]}],"limit":10}
@@ -28,7 +28,8 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter j._deleted = false (Deduplicate LimitBy j.traversal_path, j.id (Filter j.name = 'build' (Scan Table(gl_job) AS j))))
+            - (Deduplicate LimitBy j.traversal_path, j.id (Filter j.name = 'build' (Scan Table(gl_job) AS j)))
+            - (Filter NOT (j.traversal_path, j.id, j._version) IN ?.(traversal_path, id, _version), j._deleted = false (_))
           reject:
             - (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate Final (Scan Table(gl_job) AS j))
@@ -63,7 +64,7 @@ cases:
             - (Deduplicate LimitBy j.traversal_path, j.id (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (Scan Table(gl_job) AS j)))
           reject: ["(Deduplicate Final (Scan Table(gl_job) AS j))"]
 
-  - name: High-selectivity ranges on an unchanging column apply before the latest-row pick
+  - name: High-selectivity ranges on an unchanging column apply before the pick behind the version guard
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"j","entity":"Job","filters":{"created_at":{"gte":"2026-10-10"}},"columns":["id","created_at"]}],"limit":10}
@@ -75,7 +76,8 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter j._deleted = false (Deduplicate LimitBy j.traversal_path, j.id (Filter j.created_at >= '2026-10-10' (Scan Table(gl_job) AS j))))
+            - (Deduplicate LimitBy j.traversal_path, j.id (Filter j.created_at >= '2026-10-10' (Scan Table(gl_job) AS j)))
+            - (Filter NOT (j.traversal_path, j.id, j._version) IN ?.(traversal_path, id, _version), j._deleted = false (_))
           reject:
             - (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate Final (Scan Table(gl_job) AS j))
@@ -127,7 +129,7 @@ cases:
             - (Deduplicate LimitBy u.id (Filter u.id >= 1, u.id <= 10000, u.id IN ?.id (Scan Table(gl_user) AS u)))
           reject: ["(Deduplicate Final (Scan Table(gl_user) AS u))"]
 
-  - name: Text indexes on an unchanging column apply before the latest-row pick
+  - name: Text indexes on an unchanging column apply before the pick behind the version guard
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"f","entity":"MergeRequestDiffFile","filters":{"project_id":1000,"new_path":{"contains":"app/services"}},"columns":["new_path"]}],"limit":10}
@@ -141,7 +143,8 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter f._deleted = false (Deduplicate LimitBy f.traversal_path, f.id (Filter contains(f.new_path, 'app/services'), f.project_id = 1000 (Scan Table(gl_merge_request_diff_file) AS f))))
+            - (Deduplicate LimitBy f.traversal_path, f.id (Filter contains(f.new_path, 'app/services'), f.project_id = 1000 (Scan Table(gl_merge_request_diff_file) AS f)))
+            - (Filter NOT (f.traversal_path, f.id, f._version) IN ?.(traversal_path, id, _version), f._deleted = false (_))
           reject:
             - (Filter (f.traversal_path, f.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate Final (Scan Table(gl_merge_request_diff_file) AS f))

@@ -2,7 +2,8 @@
 //! projection, join, union, or latest-row pick. `RelationGraph::current_rows` plans a table read once
 //! and hands out the same `RelationId` for repeats.
 
-use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+use crate::ast::Op;
+use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
 use super::predicates::{Column, Predicate, Projection};
 use super::reuse::RelationUsage;
@@ -47,13 +48,13 @@ impl BindingSource {
         }
     }
 
-    pub(super) fn table(alias: &str) -> Self {
+    pub(super) fn table(alias: &str, has_traversal_path: bool) -> Self {
         Self {
             node: alias.into(),
             alias: alias.into(),
             column: DEFAULT_PRIMARY_KEY.into(),
             property_source: Some(alias.into()),
-            traversal_path: Some(Column::new(alias, TRAVERSAL_PATH_COLUMN)),
+            traversal_path: has_traversal_path.then(|| Column::new(alias, TRAVERSAL_PATH_COLUMN)),
         }
     }
 }
@@ -302,16 +303,19 @@ impl RelationGraph {
             let owned = self.owned(read, owner, alias);
             return self.filter(owned, rest);
         }
-        let (identity, rest): (Vec<_>, Vec<_>) = predicates
+        let (identity, mut rest): (Vec<_>, Vec<_>) = predicates
             .iter()
             .cloned()
             .partition(|predicate| predicate.filters_sort_key(key, true));
+        let guarded = identity
+            .iter()
+            .any(|predicate| !predicate.filters_sort_key(key, false));
         let read = self.read(table, alias, false);
         let current = self.owned(read, owner.clone(), alias);
         let mut current = self.filter(current, identity);
         if rest.iter().any(Predicate::is_selective) {
             let candidate_read = self.read(table, alias, false);
-            let candidate = self.owned(candidate_read, owner, alias);
+            let candidate = self.owned(candidate_read, owner.clone(), alias);
             let candidate = self.filter(candidate, predicates);
             let candidate = self.project(
                 candidate,
@@ -328,11 +332,88 @@ impl RelationGraph {
                         .collect(),
                     relation: candidate,
                     keys: key.to_vec(),
+                    negated: false,
                 }],
             );
         }
         let latest = self.latest(current, alias, key.to_vec(), vec![]);
+        if guarded {
+            rest.insert(0, self.later_versions(table, alias, owner, key, latest));
+        }
         self.filter(latest, rest)
+    }
+
+    fn later_versions(
+        &mut self,
+        table: &str,
+        alias: &str,
+        owner: ReadOwner,
+        key: &[String],
+        picked: RelationId,
+    ) -> Predicate {
+        let later_alias = format!("{alias}_later");
+        let later = self.read(table, &later_alias, false);
+        let later = self.owned(later, owner, &later_alias);
+        let picked_keys = self.project(
+            picked,
+            key.iter()
+                .map(|column| Projection::col(alias, column))
+                .collect(),
+        );
+        let later = self.filter(
+            later,
+            vec![Predicate::Membership {
+                columns: key
+                    .iter()
+                    .map(|column| Column::new(&later_alias, column))
+                    .collect(),
+                relation: picked_keys,
+                keys: key.to_vec(),
+                negated: false,
+            }],
+        );
+        let later = self.bind(later, &later_alias);
+        let mut on: Vec<Predicate> = key
+            .iter()
+            .skip(1)
+            .map(|column| Predicate::ColumnEq {
+                left: Column::new(&later_alias, column),
+                right: Column::new(alias, column),
+                op: Op::Eq,
+            })
+            .collect();
+        on.push(Predicate::ColumnEq {
+            left: Column::new(&later_alias, VERSION_COLUMN),
+            right: Column::new(alias, VERSION_COLUMN),
+            op: Op::Gt,
+        });
+        let superseded = self.join(
+            later,
+            picked,
+            (
+                Column::new(&later_alias, &key[0]),
+                Column::new(alias, &key[0]),
+            ),
+            on,
+        );
+        let mut guard_keys: Vec<String> = key.to_vec();
+        guard_keys.push(VERSION_COLUMN.to_string());
+        let superseded = self.project(
+            superseded,
+            guard_keys
+                .iter()
+                .map(|column| Projection::col(alias, column))
+                .collect(),
+        );
+        Predicate::Membership {
+            columns: guard_keys
+                .iter()
+                .map(|column| Column::new(alias, column))
+                .collect(),
+            relation: superseded,
+            keys: guard_keys,
+            negated: true,
+        }
     }
 
     pub fn filter(

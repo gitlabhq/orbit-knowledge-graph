@@ -615,8 +615,8 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             planned_column(column),
             text_literal(entity)
         )],
-        Predicate::ColumnEq { left, right } => vec![format!(
-            "{} = {}",
+        Predicate::ColumnEq { left, right, op } => vec![format!(
+            "{} {op} {}",
             planned_column(left),
             planned_column(right)
         )],
@@ -637,8 +637,10 @@ fn planned_predicate(value: &Predicate) -> Vec<String> {
             columns,
             relation,
             keys,
+            negated,
         } => vec![format!(
-            "{} IN _orbit_relation_{}.{}",
+            "{}{} IN _orbit_relation_{}.{}",
+            if *negated { "NOT " } else { "" },
             membership_columns(columns),
             relation.0,
             membership_keys(keys)

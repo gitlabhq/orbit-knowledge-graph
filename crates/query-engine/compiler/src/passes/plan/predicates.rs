@@ -1,6 +1,7 @@
 //! Predicates and projections the planner attaches to relations, and the facts about a predicate the
 //! planner asks for: selective, a point lookup, or filtering the sort key.
 
+use crate::ast::Op;
 use std::collections::HashSet;
 
 use ontology::constants::*;
@@ -57,6 +58,7 @@ pub enum Predicate {
     ColumnEq {
         left: Column,
         right: Column,
+        op: Op,
     },
     RelationshipKinds {
         alias: String,
@@ -70,6 +72,7 @@ pub enum Predicate {
         columns: Vec<Column>,
         relation: RelationId,
         keys: Vec<String>,
+        negated: bool,
     },
 }
 
@@ -215,11 +218,16 @@ pub fn membership(column: Column, (relation, key): (RelationId, String)) -> Pred
         columns: vec![column],
         relation,
         keys: vec![key],
+        negated: false,
     }
 }
 
 pub fn column_eq(left: Column, right: Column) -> Predicate {
-    Predicate::ColumnEq { left, right }
+    Predicate::ColumnEq {
+        left,
+        right,
+        op: Op::Eq,
+    }
 }
 
 pub fn live(alias: &str) -> Predicate {

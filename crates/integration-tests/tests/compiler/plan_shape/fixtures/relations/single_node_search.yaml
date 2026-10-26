@@ -19,7 +19,7 @@ cases:
           expect: ["(Limit 11 (_))", "(Filter u.id IN ?.id (Scan Table(gl_user) AS u))"]
           reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
 
-  - name: A multi-filter ordered single-node search keeps one node read without a join
+  - name: A multi-filter ordered single-node search guards its unchanging filter against later versions
     query:
       json: |
         {"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username","state","created_at"],"filters":{"username":{"starts_with":"admin"},"state":{"in":["active","blocked"]},"created_at":{"gte":"2024-01-01"}}}],"limit":50,"order_by":"-u.created_at"}
@@ -34,7 +34,9 @@ cases:
         planned:
           expect:
             - (Deduplicate LimitBy u.id (Filter u.id IN ?.id, ... (Scan Table(gl_user) AS u)))
-          reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
+            - (Join ON (u_later.id = u.id) AND (u_later._version > u._version) (Bind u_later (Filter u_later.id IN ?.id (Scan Table(gl_user) AS u_later))) (_))
+            - (Filter NOT (u.id, u._version) IN ?.(id, _version), ... (_))
+          reject: ["(SemiJoin ... (_) (_))"]
         emitted:
           expect: ["(Limit 51 (_))", "(Sort NullIf(u.created_at, '1970-01-01 00:00:00') DESC (_))"]
-          reject: ["(Join ... (_) (_))", "(SemiJoin ... (_) (_))"]
+          reject: ["(SemiJoin ... (_) (_))"]

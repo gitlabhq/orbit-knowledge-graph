@@ -1,7 +1,7 @@
 use orbit_server_config::QueryConfig;
 
-use crate::ast::visit::{visit_queries, visit_relations};
-use crate::ast::{Node, TableRef};
+use crate::ast::visit::{visit_expressions, visit_queries, visit_relations};
+use crate::ast::{Expr, Node, Op, TableRef};
 use crate::error::Result;
 use crate::input::{Input, QueryType};
 use crate::passes::plan::QueryPlan;
@@ -11,6 +11,7 @@ const PATHFINDING_EXECUTION_TIME_CEILING_SECONDS: u64 = 15;
 const PATHFINDING_MEMORY_CEILING_BYTES: u64 = 15 * 1024 * 1024 * 1024;
 
 const IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 1_000_000;
+const GUARDED_IN_SUBQUERY_INDEX_MAX_VALUES: u64 = 10_000_000;
 
 pub fn resolve(input: &Input, node: &Node, plan: &QueryPlan) -> Result<QueryConfig> {
     let query_type: &str = input.query_type.into();
@@ -19,18 +20,33 @@ pub fn resolve(input: &Input, node: &Node, plan: &QueryPlan) -> Result<QueryConf
     if let Node::Query(query) = node {
         let derived = &mut config.compiler_derived;
         derived.null_in_is_unknown = input.has_negation();
+        let mut has_ctes = false;
+        let mut has_negated_in = false;
         visit_queries(query, &mut |query| {
             derived.enable_materialized_cte |= query.ctes.iter().any(|cte| cte.materialized);
             visit_relations(&query.from, &mut |relation| {
                 derived.optimize_move_to_prewhere_if_final |=
                     matches!(relation, TableRef::Scan { final_: true, .. });
             });
-            if !query.ctes.is_empty() {
-                derived.use_index_for_in_with_subqueries_max_values =
-                    Some(IN_SUBQUERY_INDEX_MAX_VALUES);
+            has_ctes |= !query.ctes.is_empty();
+            if let Some(predicate) = &query.where_clause {
+                visit_expressions(predicate, &mut |expr| {
+                    has_negated_in |= matches!(
+                        expr,
+                        Expr::UnaryOp { op: Op::Not, expr } if matches!(**expr, Expr::InSubquery { .. })
+                    );
+                    Ok(())
+                })?;
             }
             Ok(())
         })?;
+        if has_negated_in {
+            derived.use_index_for_in_with_subqueries_max_values =
+                Some(GUARDED_IN_SUBQUERY_INDEX_MAX_VALUES);
+        } else if has_ctes {
+            derived.use_index_for_in_with_subqueries_max_values =
+                Some(IN_SUBQUERY_INDEX_MAX_VALUES);
+        }
     }
 
     if plan.relations().len() >= 3 {

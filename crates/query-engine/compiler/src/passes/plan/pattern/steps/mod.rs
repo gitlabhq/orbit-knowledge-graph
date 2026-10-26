@@ -96,7 +96,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             graph: self.graph,
             root,
             outputs: node.outputs(),
-            bindings: vec![BindingSource::table(&node.alias)],
+            bindings: vec![BindingSource::table(&node.alias, node.has_traversal_path)],
         })
     }
 

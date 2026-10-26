@@ -76,7 +76,7 @@ fn lower_predicate(value: &Predicate, negated: bool) -> Expr {
             column: value,
             entity,
         } => Expr::eq(column(value), Expr::string(entity)),
-        Predicate::ColumnEq { left, right } => Expr::eq(column(left), column(right)),
+        Predicate::ColumnEq { left, right, op } => Expr::binary(*op, column(left), column(right)),
         Predicate::RelationshipKinds { alias, kinds } => {
             sql::rel_kind_filter(alias, kinds).unwrap_or_else(|| Expr::lit(true))
         }
@@ -88,11 +88,19 @@ fn lower_predicate(value: &Predicate, negated: bool) -> Expr {
             columns,
             relation,
             keys,
-        } => Expr::InSubquery {
-            expr: Box::new(tuple(columns.iter().map(column).collect())),
-            cte_name: super::graph::relation_name(*relation),
-            columns: keys.clone(),
-        },
+            negated,
+        } => {
+            let membership = Expr::InSubquery {
+                expr: Box::new(tuple(columns.iter().map(column).collect())),
+                cte_name: super::graph::relation_name(*relation),
+                columns: keys.clone(),
+            };
+            if *negated {
+                Expr::unary(Op::Not, membership)
+            } else {
+                membership
+            }
+        }
     }
 }
 

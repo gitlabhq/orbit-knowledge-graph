@@ -43,7 +43,7 @@ cases:
           expect:
             - (Deduplicate LimitBy ... (Sort ... (Project * (Filter _orbit_edge_1.source_id IN ?.id, ... (Scan Table(gl_edge) AS _orbit_edge_1)))))
 
-  - name: A convergent filter-only aggregation reads each edge table once
+  - name: A convergent filter-only aggregation reads each edge table once and guards the filtered node
     query:
       json: |
         {"query_type":"aggregation","nodes":[{"id":"a","entity":"Definition","filters":{"name":"compile"}},{"id":"b","entity":"Definition"},{"id":"c","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"c"},{"type":"CALLS","from":"b","to":"c"}],"group_by":["c.name"],"aggregations":[{"count":"a","as":"n"}]}
@@ -61,7 +61,7 @@ cases:
             - (Filter c.id IN ?.id (Scan Table(gl_definition) AS c))
           occurrences:
             - { pattern: "(Scan Table(gl_code_edge) ...)", count: 2 }
-            - { pattern: "(Scan Table(gl_definition) ...)", count: 2 }
+            - { pattern: "(Scan Table(gl_definition) ...)", count: 3 }
           reject:
             - (Project ?.target_id AS id (Bind ? (Filter ... (_))))
         emitted:
