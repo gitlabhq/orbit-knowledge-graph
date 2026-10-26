@@ -140,6 +140,7 @@ impl Clock {
 pub struct Sentinel {
     started: Clock,
     budget: Duration,
+    unbounded: bool,
     label: &'static str,
     path: String,
     cancelled: Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
@@ -150,6 +151,7 @@ impl Sentinel {
         Self {
             started: Clock::Wall(Instant::now()),
             budget: Duration::from_millis(budget_ms),
+            unbounded: budget_ms == u64::MAX,
             label,
             path: path.to_string(),
             cancelled: None,
@@ -165,6 +167,7 @@ impl Sentinel {
         child.budget = child
             .budget
             .min(self.budget.saturating_sub(self.started.elapsed()));
+        child.unbounded &= self.unbounded;
         child.cancelled = self.cancelled.clone();
         child
     }
@@ -184,7 +187,11 @@ impl Sentinel {
 
     #[inline]
     pub fn check(&self) -> Result<(), Killed> {
-        let over = self.started.over(self.budget);
+        let over = if self.unbounded {
+            None
+        } else {
+            self.started.over(self.budget)
+        };
         let cancelled = self.cancelled.as_ref().is_some_and(|cancelled| cancelled());
         if over.is_some() || cancelled {
             return Err(Killed {
@@ -242,5 +249,25 @@ mod tests {
     #[test]
     fn disabled_never_trips() {
         assert!(Sentinel::disabled().check().is_ok());
+    }
+
+    #[test]
+    fn unbounded_child_of_unbounded_parent_never_trips_on_time() {
+        let child = Sentinel::disabled().child("link", "a.py", u64::MAX);
+        std::thread::sleep(Duration::from_millis(3));
+        assert!(child.check().is_ok());
+    }
+
+    #[test]
+    fn bounded_child_of_unbounded_parent_still_trips() {
+        let child = Sentinel::disabled().child("link", "a.py", 1);
+        std::thread::sleep(Duration::from_millis(3));
+        assert!(child.check().is_err());
+    }
+
+    #[test]
+    fn cancellation_trips_an_unbounded_sentinel() {
+        let s = Sentinel::disabled().with_cancellation(std::sync::Arc::new(|| true));
+        assert!(s.check().unwrap_err().cancelled);
     }
 }
