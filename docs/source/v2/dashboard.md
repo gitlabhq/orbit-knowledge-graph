@@ -86,7 +86,7 @@ Otherwise, to turn GitLab Orbit on or off:
 1. In the confirmation dialog, select **Turn on GitLab Orbit** or **Turn off GitLab Orbit**.
 
 The tab shows the new GitLab Orbit status of the group.
-When you turn off GitLab Orbit, GitLab keeps the indexed data for a limited time.
+When you turn off GitLab Orbit, GitLab retains the indexed data of the group for 30 days, then deletes it.
 For more information, see [data retention and deletion](how-it-works.md#data-retention-and-deletion).
 
 ## Related topics

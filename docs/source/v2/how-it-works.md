@@ -81,9 +81,17 @@ For more information, see [GitLab Orbit on GitLab Self-Managed](https://docs.git
 
 ## Data retention and deletion
 
-When you turn off GitLab Orbit for a group, GitLab keeps the indexed data for 30 days.
-If you turn GitLab Orbit on again in that time, indexing continues from where it stopped.
-After 30 days, GitLab deletes all graph data of the group.
+GitLab Orbit is turned off for a group when:
+
+- You turn off GitLab Orbit for the group.
+- On GitLab.com, the GitLab Orbit trial or the GitLab Orbit subscription of the group ends.
+
+GitLab retains the indexed data of the group for 30 days.
+If GitLab Orbit is turned on again in that time, indexing continues from where it stopped.
+After 30 days, GitLab deletes the indexed data of the group.
+
+On GitLab Self-Managed and GitLab Dedicated, when a trial or the GitLab Orbit subscription ends, GitLab blocks queries but does not turn off GitLab Orbit.
+Indexing continues, and GitLab does not delete the data.
 
 ## Related topics
 

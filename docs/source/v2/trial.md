@@ -55,7 +55,9 @@ At the end of the trial, GitLab turns off GitLab Orbit for the group, and querie
 To continue with GitLab Orbit, contact sales.
 For information about GitLab Orbit pricing and usage, see [GitLab Credits and usage billing](https://docs.gitlab.com/subscriptions/gitlab_credits/).
 
-GitLab keeps the indexed data for a limited time.
+GitLab retains the indexed data of the group for 30 days.
+If GitLab Orbit is turned on again in that time, indexing continues.
+After 30 days, GitLab deletes the data.
 For more information, see [data retention and deletion](how-it-works.md#data-retention-and-deletion).
 
 ## Related topics
