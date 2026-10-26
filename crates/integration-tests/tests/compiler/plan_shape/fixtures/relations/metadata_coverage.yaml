@@ -27,7 +27,7 @@ cases:
       clickhouse:
         planned:
           bind:
-            - (CTE $users (Project u.id AS id (Filter u.username = 'alice', u._deleted = false (Deduplicate Final (Scan Table(gl_user) AS u)))))
+            - (CTE $users (Project u.id AS id (Filter u.username = 'alice', ... (Deduplicate LimitBy ... (_)))))
           expect:
             - (Filter mr.author_id IN $users.id, ... (_))
             - (Scan Table(gl_merge_request) AS mr)

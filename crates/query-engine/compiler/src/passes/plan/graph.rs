@@ -181,17 +181,26 @@ struct ReadKey {
     owner: ReadOwner,
     key: Vec<String>,
     predicates: Vec<Predicate>,
-    selective_latest: bool,
+    scoped: bool,
 }
 
-#[derive(Default)]
 pub struct RelationGraph {
     nodes: Vec<RelationNode>,
     reads: Vec<(ReadKey, RelationId)>,
+    selective_latest: bool,
     exact_final_reads: bool,
 }
 
 impl RelationGraph {
+    pub fn new(selective_latest: bool) -> Self {
+        Self {
+            nodes: Vec::new(),
+            reads: Vec::new(),
+            selective_latest,
+            exact_final_reads: false,
+        }
+    }
+
     fn add(&mut self, node: RelationNode) -> RelationId {
         let id = RelationId(self.nodes.len());
         self.nodes.push(node);
@@ -267,7 +276,7 @@ impl RelationGraph {
         owner: ReadOwner,
         key: &[String],
         predicates: Vec<Predicate>,
-        selective_latest: bool,
+        scoped: bool,
     ) -> RelationId {
         let read = ReadKey {
             table: table.to_string(),
@@ -275,12 +284,12 @@ impl RelationGraph {
             owner: owner.clone(),
             key: key.to_vec(),
             predicates: predicates.clone(),
-            selective_latest,
+            scoped,
         };
         if let Some((_, id)) = self.reads.iter().find(|(planned, _)| *planned == read) {
             return *id;
         }
-        let id = self.plan_current_rows(table, alias, owner, key, predicates, selective_latest);
+        let id = self.plan_current_rows(table, alias, owner, key, predicates, scoped);
         self.reads.push((read, id));
         id
     }
@@ -292,17 +301,18 @@ impl RelationGraph {
         owner: ReadOwner,
         key: &[String],
         predicates: Vec<Predicate>,
-        selective_latest: bool,
+        scoped: bool,
     ) -> RelationId {
         let bounds_scan = |predicate: &Predicate| {
             predicate.is_selective()
                 && (!predicate.is_text_match() || predicate.filters_sort_key(key, true))
         };
-        let unpinned_mutable = !predicates.iter().any(Predicate::narrows_keys)
+        let unpinned_mutable = scoped
+            && !predicates.iter().any(Predicate::narrows_keys)
             && predicates.iter().any(|predicate| {
                 predicate.is_selective() && !predicate.filters_sort_key(key, true)
             });
-        let bounded = selective_latest && predicates.iter().any(bounds_scan);
+        let bounded = self.selective_latest && predicates.iter().any(bounds_scan);
         if !bounded || unpinned_mutable {
             self.exact_final_reads |= bounded;
             let (keyed, rest): (Vec<_>, Vec<_>) = predicates

@@ -223,7 +223,7 @@ pub(super) fn current_edge_rows<M: OrbitQueryModel + ?Sized>(
             owner,
             sort_key(model, table)?,
             predicates,
-            model.supports_selective_latest_rows(),
+            true,
         ));
     }
     edge_union(
@@ -238,7 +238,7 @@ pub(super) fn current_edge_rows<M: OrbitQueryModel + ?Sized>(
                 owner.clone(),
                 sort_key(model, table)?,
                 predicates.clone(),
-                model.supports_selective_latest_rows(),
+                true,
             ))
         },
     )
