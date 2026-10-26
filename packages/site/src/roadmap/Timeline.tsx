@@ -1,4 +1,4 @@
-import { cn, Icon } from "@gitlab-org/orbit-site";
+import { Badge, cn, Icon } from "@gitlab-org/orbit-site";
 import { Link } from "@tanstack/react-router";
 import { quarterFromIndex, quarterIndex, quarterLabel, quarterMonths } from "./calendar";
 import { type RoadmapItem, roadmapQuarter, themes } from "./model";
@@ -33,16 +33,16 @@ export function Timeline({ items }: { items: RoadmapItem[] }) {
             {quarters.map((q) => (
               <span
                 key={quarterLabel(q)}
-                className={cn("border-l border-border first:border-l-0", quarterIndex(q) === first && "bg-[color-mix(in_srgb,var(--gl-status-info-background-color)_45%,transparent)]")}
+                className={cn("border-l border-border first:border-l-0", quarterIndex(q) === first && "bg-surface-subtle")}
               />
             ))}
           </div>
           <div className="grid border-b border-border" style={columns}>
             {quarters.map((q) => (
-              <div key={quarterLabel(q)} className="relative px-4 py-3">
+              <div key={quarterLabel(q)} className="relative px-4 py-2">
                 <span className="flex items-center gap-2 text-sm font-semibold text-default">
                   {quarterLabel(q)}
-                  {quarterIndex(q) === first && <span className="rounded-full bg-info-bg px-1.5 text-xs font-semibold text-info">Now</span>}
+                  {quarterIndex(q) === first && <Badge tone="info">Now</Badge>}
                 </span>
                 <span className="block text-xs text-subtle">{quarterMonths(q)}</span>
               </div>
@@ -52,9 +52,9 @@ export function Timeline({ items }: { items: RoadmapItem[] }) {
             const themed = visible.filter((item) => item.theme.id === theme.id);
             if (themed.length === 0) return null;
             return (
-              <section key={theme.id} aria-labelledby={`lane-${theme.id}`} className={cn("relative border-b border-border pb-3 last:border-b-0", `tone-${theme.id}`)}>
+              <section key={theme.id} aria-labelledby={`lane-${theme.id}`} className={cn("relative border-b border-border pb-2 last:border-b-0", `tone-${theme.id}`)}>
                 <h2 id={`lane-${theme.id}`} className="sticky left-0 m-0 inline-flex items-center gap-2 px-4 pt-4 pb-2 text-xs font-semibold text-subtle">
-                  <span className="tone-dot" />
+                  <Icon name={theme.icon} size={16} />
                   {theme.title}
                 </h2>
                 {lanes(themed).map((row) => (
@@ -65,10 +65,10 @@ export function Timeline({ items }: { items: RoadmapItem[] }) {
                         to="/roadmap/$item"
                         params={{ item: item.slug }}
                         data-status={item.status}
-                        className="tone-bar mx-2 flex min-w-0 items-start gap-2 rounded-control px-3 py-2 text-sm leading-snug font-medium text-default no-underline transition-transform hover:-translate-y-px hover:shadow-card motion-reduce:transition-none"
+                        className="tone-bar mx-2 flex min-w-0 items-start gap-2 rounded-control px-2 py-2 text-sm text-default no-underline hover:underline"
                         style={{ gridColumn: `${Math.max(quarterIndex(item.start), first) - first + 1} / ${Math.min(quarterIndex(item.end), last) - first + 2}` }}
                       >
-                        <Icon name={statusIcon(item.status)} size={14} className="mt-0.5 shrink-0 text-[var(--tone)]" />
+                        <Icon name={statusIcon(item.status)} size={12} className="mt-1 shrink-0 text-[var(--tone)]" />
                         <span className="line-clamp-2">{item.title}</span>
                         <span className="sr-only">
                           , {statusLabel(item.status)}, {itemRange(item).months}

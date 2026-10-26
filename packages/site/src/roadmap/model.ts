@@ -7,8 +7,8 @@ import { type Horizon, horizonOf, type Status } from "./schema";
 
 export const HORIZONS: { id: Horizon; title: string; description: string }[] = [
   { id: "now", title: "Now", description: "In progress" },
-  { id: "next", title: "Next", description: "Planned soon" },
-  { id: "later", title: "Later", description: "Further out, or in exploration" },
+  { id: "next", title: "Next", description: "Planned for this quarter and next" },
+  { id: "later", title: "Later", description: "Further out or in exploration" },
 ];
 
 export type RoadmapTheme = { id: string; title: string; description: string; icon: string };

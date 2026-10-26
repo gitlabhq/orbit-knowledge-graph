@@ -1,4 +1,4 @@
-import { cn, findPage, Icon, pageHead, pageLink, site, SiteLink } from "@gitlab-org/orbit-site";
+import { findPage, Icon, pageHead, pageLink, site, SiteLink } from "@gitlab-org/orbit-site";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Board } from "../roadmap/Board";
 import { videos } from "../content/demos";
@@ -21,7 +21,7 @@ function Hero() {
     <section className="border-b border-border">
       <div className="page-container py-12">
         <h1 className="m-0 text-3xl font-semibold text-default">GitLab Orbit</h1>
-        <p className="mt-3 mb-0 max-w-2xl text-base text-subtle">
+        <p className="mt-4 mb-0 max-w-2xl text-base text-subtle">
           Orbit is a context graph of your code and your software delivery data. Agents and engineers query the graph for fast, correct answers that respect GitLab permissions.
         </p>
         <div className="mt-6 flex flex-wrap gap-2">
@@ -49,15 +49,14 @@ function Hero() {
 
 function SectionHeading({ title, description, action }: { title: string; description: string; action?: { label: string; to: string } }) {
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
         <h2 className="m-0 text-xl font-semibold text-default">{title}</h2>
         <p className="mt-1 mb-0 text-subtle">{description}</p>
       </div>
       {action && (
-        <Link to={action.to} className="inline-flex items-center gap-1.5 text-sm font-semibold no-underline hover:underline">
+        <Link to={action.to} className="gl-link text-sm">
           {action.label}
-          <Icon name="arrow-right" size={14} />
         </Link>
       )}
     </div>
@@ -66,21 +65,18 @@ function SectionHeading({ title, description, action }: { title: string; descrip
 
 function Themes() {
   return (
-    <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-5">
+    <ul className="card m-0 list-none divide-y divide-border p-0">
       {themes.map((theme) => {
         const count = items.filter((item) => item.theme.id === theme.id && item.status !== "shipped").length;
         return (
           <li key={theme.id}>
-            <Link to="/roadmap" search={{ theme: theme.id }} className={cn("card group flex h-full flex-col gap-3 p-5 no-underline", `tone-${theme.id}`)}>
-              <span className="tone-icon flex size-10 items-center justify-center rounded-control">
-                <Icon name={theme.icon} size={20} />
+            <Link to="/roadmap" search={{ theme: theme.id }} className="group flex items-start gap-4 p-4 text-default no-underline">
+              <Icon name={theme.icon} size={16} className="mt-0.5 shrink-0 text-subtle" />
+              <span className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:gap-4">
+                <span className="text-sm font-semibold group-hover:underline sm:w-56 sm:shrink-0">{theme.title}</span>
+                <span className="text-sm text-subtle">{theme.description}</span>
               </span>
-              <span className="text-base font-semibold text-default">{theme.title}</span>
-              <span className="text-sm text-subtle">{theme.description}</span>
-              <span className="mt-auto inline-flex items-center gap-1 pt-1 text-xs font-semibold text-subtle group-hover:text-default">
-                {count} upcoming
-                <Icon name="chevron-right" size={12} />
-              </span>
+              <span className="shrink-0 text-xs text-subtle">{count} upcoming {count === 1 ? "item" : "items"}</span>
             </Link>
           </li>
         );
@@ -91,11 +87,11 @@ function Themes() {
 
 function Engineering() {
   return (
-    <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-4">
+    <ul className="m-0 grid list-none gap-4 p-0 sm:grid-cols-2 lg:grid-cols-4">
       {ENGINEERING.map(({ route, label }) => (
         <li key={route}>
-          <Link {...pageLink(route)} className="card group flex h-full flex-col gap-2 p-5 no-underline">
-            <span className="text-base font-semibold text-default">{label}</span>
+          <Link {...pageLink(route)} className="card flex h-full flex-col gap-2 p-4">
+            <span className="card-title text-base font-semibold text-default">{label}</span>
             <span className="text-sm text-subtle">{findPage(route)?.meta.description}</span>
           </Link>
         </li>
