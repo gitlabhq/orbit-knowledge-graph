@@ -1,30 +1,20 @@
 cases:
-  - name: numeric_epoch_value_matches_nothing
-    description: A value ClickHouse reads as unix second zero slips past validation but the epoch guard keeps the null rows out
+  - name: numeric_epoch_value_rejected
+    description: A value that ClickHouse reads as unix seconds is not a date and is rejected
     query:
       gql: |
         MATCH (mr:MergeRequest)
         WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.merged_at = '0.0'
         RETURN mr.title LIMIT 10
     expect:
-      skip_requirements: ["filter:merged_at"]
-      node_count: 0
-      nodes:
-        MergeRequest:
-          absent: [2000, 2001, 2002, 2003, 2004, 2005]
+      compile_error: is not a valid date
 
-  - name: pre_epoch_bound_excludes_null_rows
-    description: A lower bound before the epoch still returns only the rows with a real merge time
+  - name: numeric_pre_epoch_bound_rejected
+    description: A lower bound written as negative unix seconds is not a date and is rejected
     query:
       gql: |
         MATCH (mr:MergeRequest)
         WHERE mr.id >= 2000 AND mr.id <= 2005 AND mr.merged_at >= '-86400'
         RETURN mr.title, mr.merged_at ORDER BY mr.id LIMIT 10
     expect:
-      node_count: 3
-      nodes:
-        MergeRequest:
-          order: [2002, 2004, 2005]
-          absent: [2000, 2001, 2003]
-          filters:
-            merged_at: { is_not_null: true }
+      compile_error: is not a valid date

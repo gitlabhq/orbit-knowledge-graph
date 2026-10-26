@@ -14,10 +14,10 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Image hardening (non-root user, Dockerfile scan, release gate, Vulnerability Report) | `Dockerfile`, `dockerfile-scan`, `release-image-scan`, `container_scanning` in `.gitlab-ci.yml`; runbook in `docs/pages/engineering/runbooks/image_signing.md` |
 | Query language reference | `docs/docs-gitlab-com/remote/queries/query-language.md` |
 | Orbit query frontend | `crates/query-engine/compiler/src/passes/frontend/`; design in `docs/pages/engineering/architecture/querying/query-engine.md` |
-| SDLC indexing pipeline | `docs/pages/engineering/architecture/sdlc-indexing.md`, `docs/pages/engineering/runbooks/sdlc_indexing.md` |
-| Code indexing pipeline | `docs/pages/engineering/architecture/code-indexing.md`, `docs/pages/engineering/runbooks/code_indexing.md` |
-| Namespace deletion pipeline | `docs/pages/engineering/architecture/sdlc-indexing.md` |
-| Schema migration strategy | `docs/pages/engineering/architecture/schema-evolution.md` |
+| SDLC indexing pipeline | `docs/pages/engineering/architecture/indexing/sdlc-indexing.md`, `docs/pages/engineering/runbooks/sdlc_indexing.md` |
+| Code indexing pipeline | `docs/pages/engineering/architecture/indexing/code-indexing.md`, `docs/pages/engineering/runbooks/code_indexing.md` |
+| Namespace deletion pipeline | `docs/pages/engineering/architecture/indexing/sdlc-indexing.md` |
+| Schema migration strategy | `docs/pages/engineering/architecture/indexing/schema-evolution.md` |
 | Ontology node definitions | `config/ontology/nodes/` |
 | Ontology edge definitions | `config/ontology/edges/` |
 | Edge-table routing | Edge YAML `table:` selects a table declared by `settings.edge_tables` in `config/ontology/schema.yaml`; the default is `gl_edge` |
