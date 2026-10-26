@@ -196,7 +196,8 @@ To install GitLab Orbit:
 
    Replace `<clickhouse_host>` with the host name of your ClickHouse server.
 
-1. Install the chart:
+1. Install the chart. Upgrade GitLab to 19.6 or later first. Earlier GitLab versions send queries in the
+   removed JSON Query DSL, and GitLab Orbit rejects them.
 
    ```shell
    helm upgrade --install orbit oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit \
