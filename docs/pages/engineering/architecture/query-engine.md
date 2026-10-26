@@ -8,16 +8,15 @@ authors:
 ## What the engine does
 
 ```mermaid
-%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 24, "rankSpacing": 64, "padding": 14}}}%%
+%%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 24, "rankSpacing": 64, "padding": 14, "subGraphTitleMargin": {"top": 8, "bottom": 18}}}}%%
 flowchart LR
     accTitle: Query languages and backends of the Orbit Query Engine
-    accDescr: A user query arrives in GQL or the JSON Query DSL, with SQL and GLQL planned. The Orbit Query Engine turns it into SQL for ClickHouse or DuckDB, with PostgreSQL planned.
+    accDescr: A user query arrives in GQL, with SQL and GLQL planned. The Orbit Query Engine turns it into SQL for ClickHouse or DuckDB, with PostgreSQL planned.
 
-    user(["User query"])
+    user(["User Query"])
 
     subgraph languages["Query languages"]
         gql["GQL"]
-        json["JSON Query DSL"]
         sql["SQL"]
         glql["GLQL"]
     end
@@ -31,11 +30,9 @@ flowchart LR
     end
 
     user --> gql
-    user --> json
     user -.-> sql
     user -.-> glql
     gql --> compiler
-    json --> compiler
     sql -.-> compiler
     glql -.-> compiler
     compiler --> clickhouse
@@ -47,7 +44,7 @@ flowchart LR
     classDef backend fill:#3B82F626,stroke:#3B82F6,stroke-width:1.5px
     classDef future fill:#9CA3AF26,stroke:#9CA3AF,stroke-width:1.5px,stroke-dasharray:5 4
 
-    class user,gql,json language
+    class user,gql language
     class compiler engine
     class clickhouse,duckdb backend
     class sql,glql,postgres future
@@ -55,8 +52,6 @@ flowchart LR
     style languages fill:#F59E0B12,stroke:#F59E0B
     style backends fill:#3B82F612,stroke:#3B82F6
 ```
-
-Dashed boxes are planned and not yet supported.
 
 The Orbit Query Engine is a multi-pass compiler. It turns a JSON Query DSL or
 GQL query into one parameterized SQL statement over the ontology's node and
@@ -74,12 +69,12 @@ of the SQL that it produces.
 
 <!-- markdownlint-disable MD044 -->
 
-| Query type | Example (GQL) | Meaning | SQL output fragment |
-| --- | --- | --- | --- |
-| **Traversal** | <pre><code class="language-cypher">MATCH (u:User)-[:AUTHORED]-&gt;(mr:MergeRequest {state: 'merged'})&#10;RETURN u.username, mr.title</code></pre> | Merged merge requests and the users who wrote them | <pre><code class="language-sql">FROM gl_edge AS e JOIN gl_merge_request AS mr ON mr.id = e.target_id&#10;WHERE e.relationship_kind = ? AND mr.state = ?</code></pre> |
-| **Aggregation** | <pre><code class="language-cypher">MATCH (mr:MergeRequest)-[:IN_PROJECT]-&gt;(p:Project {id: 278964})&#10;RETURN mr.state, count(mr) AS mrs</code></pre> | How many merge requests one project has in each state | <pre><code class="language-sql">SELECT mr.state, COUNT(mr.id) AS mrs ... GROUP BY mr.state</code></pre> |
-| **Path finding** | <pre><code class="language-cypher">MATCH path = ANY SHORTEST&#10;  (g:Group {id: 9970})-[:CONTAINS*1..2]-&gt;(p:Project {id: 278964})&#10;RETURN path</code></pre> | The shortest path from a group to a project | <pre><code class="language-sql">WITH forward AS (...), backward AS (...)&#10;SELECT ... FROM forward JOIN backward ON ...</code></pre> |
-| **Neighbors** | <pre><code class="language-cypher">MATCH (mr:MergeRequest {id: 42})--(n)&#10;RETURN n</code></pre> | Everything directly connected to one merge request, in either direction | <pre><code class="language-sql">SELECT ... FROM gl_edge WHERE source_id = ?&#10;UNION ALL&#10;SELECT ... FROM gl_edge WHERE target_id = ?</code></pre> |
+| Query type | Example (GQL) | SQL output fragment |
+| --- | --- | --- |
+| **Traversal**<br>Merged merge requests and the users who wrote them | <pre><code class="language-cypher">MATCH (u:User)-[:AUTHORED]-&gt;&#10;      (mr:MergeRequest {state: 'merged'})&#10;RETURN u.username, mr.title</code></pre> | <pre><code class="language-sql">FROM gl_edge AS e JOIN gl_merge_request mr&#10;  ON mr.id = e.target_id&#10;WHERE e.relationship_kind = ?&#10;  AND mr.state = ?</code></pre> |
+| **Aggregation**<br>How many merge requests one project has in each state | <pre><code class="language-cypher">MATCH (mr:MergeRequest)-[:IN_PROJECT]-&gt;&#10;      (p:Project {id: 278964})&#10;RETURN mr.state, count(mr) AS mrs</code></pre> | <pre><code class="language-sql">SELECT mr.state, COUNT(mr.id) AS mrs&#10;... GROUP BY mr.state</code></pre> |
+| **Path finding**<br>The shortest path from a group to a project | <pre><code class="language-cypher">MATCH path = ANY SHORTEST&#10;  (g:Group {id: 9970})-[:CONTAINS*1..2]-&gt;&#10;  (p:Project {id: 278964})&#10;RETURN path</code></pre> | <pre><code class="language-sql">WITH forward AS (...),&#10;     backward AS (...)&#10;SELECT ... FROM forward&#10;JOIN backward ON ...</code></pre> |
+| **Neighbors**<br>Everything directly connected to one merge request, in either direction | <pre><code class="language-cypher">MATCH (mr:MergeRequest {id: 42})--(n)&#10;RETURN n</code></pre> | <pre><code class="language-sql">SELECT ... FROM gl_edge WHERE source_id = ?&#10;UNION ALL&#10;SELECT ... FROM gl_edge WHERE target_id = ?</code></pre> |
 
 <!-- markdownlint-enable MD044 -->
 
@@ -125,29 +120,14 @@ flowchart LR
     linkStyle 7,8 stroke:#F59E0B,stroke-width:2px
 ```
 
-The engine compiles in passes, and each pass has one job. A pass declares the
-state it reads and the state it writes. That state is the IR, the query plan,
-the SQL AST, the result context, or the hydration plan. A macro turns those
-declarations into a typed context for each pipeline, so a pass sees only the
-state it declared. A pass that needs state an earlier pass hasn't produced
-fails with an invariant error, never on partial input.
-
-A pipeline is an ordered list of passes for one frontend and one backend. The
-JSON and GQL pipelines for ClickHouse share every pass after their frontend.
-The hydration pipeline reuses the remote passes, minus parsing, pagination,
-and hydration planning. The DuckDB pipelines reuse the frontends,
-normalization, lowering, pagination, and the result contract. They swap in a
-DuckDB planner and code generator, and drop restriction, bounds, and security,
-because a local graph has a single user.
-
-Every pass reads one immutable data model for the active schema version. The
-model is the only source of table names, columns, edge routes, and
-authorization rules. No identifier from the query reaches SQL unless the model
-resolves it. Each request compiles against the schema snapshot that was active
-when it started, so a schema switch never changes a query mid-compilation.
-
-The output is one SQL statement with bound parameters, plus a plan for the
-hydration statement.
+The engine compiles in small passes, and each pass declares the state it reads
+and writes, so a pass sees only what earlier passes produced. Pipelines reuse
+these passes per frontend and backend: hydration skips parsing and pagination,
+and DuckDB drops the security passes. Every pass reads one immutable data
+model for the schema version that was active when the request started. That
+model is the only source of tables, columns, and authorization rules, so
+nothing from the query reaches SQL unless the model resolves it. The output is
+one parameterized SQL statement, plus a plan for the hydration statement.
 
 Every statement that the engine emits has these guarantees:
 
@@ -176,7 +156,7 @@ MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})
 RETURN u.username, mr.title
 ```
 
-### 1. The query data model
+### 1. Load the data model for the active schema version
 
 ```mermaid
 flowchart LR
@@ -200,17 +180,14 @@ flowchart LR
     P --> S["SQL"]
 ```
 
-The server builds one data model each time it loads a schema version. The
-model combines three parts. The graph catalog holds entities, properties,
-relationships, and relationship variants under typed IDs. The layout pairs the
-physical schema with a mapping from graph identities to tables, columns, sort
-keys, foreign keys, variant routes, and sorted copies. The policy holds role
-floors, redaction metadata, and admin-only and hidden fields. Passes only read
-the model. Schema management derives the same physical schema for DDL,
-migrations, and cleanup, so the queries and the stored data cannot drift
-apart.
+When the server loads a schema version, it builds one data model from that
+version's ontology. The graph catalog holds entities, properties,
+relationships, and their variants. The layout maps each of them to ClickHouse
+tables, columns, sort keys, and edge routes. The policy holds role floors,
+redaction rules, and admin-only fields. Every pass reads the model and never
+changes it.
 
-### 2. Intermediate representation
+### 2. Turn a user query into an intermediate representation
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
@@ -240,23 +217,16 @@ flowchart LR
 ```
 
 Every pass after the frontend works on one intermediate representation (IR):
-the language-neutral compiler input. It holds node selectors, relationship
-selectors, filters, aggregations, ordering, and limits. Each query language
-has one frontend that produces the IR, and that frontend is the first pass of
-its pipelines. The JSON frontend validates the payload against the base and
-ontology-derived JSON schemas, then deserializes it. The GQL frontend parses
-against an openCypher 9 grammar and builds a typed syntax tree. Lowering then
-applies statement-wide checks: one connected pattern, unique variables, and an
-inferred query type. Both produce the same IR, so no later pass knows which
-language the query came from.
+node selectors, relationship selectors, filters, aggregations, ordering, and
+limits. The JSON frontend checks the payload against its JSON schemas, then
+deserializes it. The GQL frontend parses the statement against an openCypher 9
+grammar, then lowers it and checks for one connected pattern and unique
+variables. Both produce the same IR, so no later pass knows which language the
+query came from. A `CALL db.schema()` statement stops here and returns
+ontology metadata, and [Query languages](query-languages.md) covers both
+frontends.
 
-The GQL frontend also answers schema calls. The server parses a statement once
-and routes on the result. A `MATCH` statement continues into the compiler, and
-`CALL db.schema()` returns ontology metadata without running any further pass.
-The [query languages](query-languages.md) page covers both frontends in
-detail.
-
-### 3. Validation and normalization
+### 3. Validate and normalize the query
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
@@ -278,13 +248,14 @@ flowchart LR
     class Validate,Normalize pass
 ```
 
-Validation checks the input's shape and bounds, resolves every reference
-against the data model, and checks that filter values fit their property
-types. Normalization resolves entities to tables, coerces filter values, and
-expands wildcard projections. It also puts predicates in a canonical order, so
-equal queries produce byte-identical SQL and parameters.
+Validation checks the IR's shape and limits, resolves every name against the
+data model, and checks that filter values fit their property types. A query
+that fails a check is rejected with an error that names the problem.
+Normalization then resolves entities to tables, coerces filter values, and
+expands wildcard columns. It also sorts predicates into a fixed order, so the
+same query always produces the same SQL.
 
-### 4. Restriction
+### 4. Apply the caller's access rules
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
@@ -310,14 +281,15 @@ flowchart LR
     class Restrict pass
 ```
 
-Restriction is the first pass that reads the security context. It rejects
-queries on entities whose role floor the caller meets on no authorized path.
-It strips admin-only columns, and rejects filters, sorts, and aggregates on
-admin-only fields. It checks explicit traversal-path filters against the
-authorized set. It also rejects aggregations in which no traversal-path-scoped
-node is reachable, because aggregates bypass row-level redaction.
+Restriction is the first pass that reads the caller's security context: their
+traversal paths, and their role on each one. It rejects a query on an entity
+whose required role the caller holds on no path. It removes admin-only
+columns, and rejects filters, sorts, and aggregates on admin-only fields. It
+checks any traversal-path filter in the query against the caller's paths. It
+also rejects aggregations that no namespaced node can reach, because
+aggregates skip row-by-row redaction.
 
-### 5. Planning and latest-state reads
+### 5. Plan the reads and pick the latest row versions
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
@@ -343,36 +315,20 @@ flowchart LR
     class Planner pass
 ```
 
-The planner builds a relation graph, with one relation per relationship
-occurrence, joined through shared node bindings. Reads are edge-first. A node
-table is joined only for node data that the query consumes: a filter, a
-projection, a group key, or a sort key. Variant routing picks the edge table
-for each relationship kind and endpoint pair. A relationship that spans
-several tables becomes a `UNION ALL` with a uniform column set. Selective
-chains pass distinct-endpoint frontiers from hop to hop, and path finding runs
-a bidirectional frontier search. Foreign-key relationships join node to node
-with no edge read. A relation that is referenced more than once becomes a CTE,
-unless it is a point lookup. Planning changes access paths, never results.
+The planner turns the IR into a relation graph, with one read per
+relationship, joined through shared nodes. It reads edge tables first, and
+joins a node table only when the query needs that node's data. A relationship
+stored in several edge tables becomes a `UNION ALL`, and a selective chain
+passes each hop's results to the next hop. Tables keep old row versions until
+ClickHouse merges them, so every read must pick the latest one. The planner
+uses `FINAL` by default, and a cheaper two-step read for exact IDs and
+selective filters.
 
-Node and edge tables are `ReplacingMergeTree(_version, _deleted)`, so a read
-must resolve each key to its latest version. The default is `FINAL`, a
-streaming merge with bounded memory. For exact IDs, narrow ranges, frontiers,
-and filters that the ontology marks as selective, the planner uses a two-step
-read instead. It finds candidate keys without `FINAL`, then reads every
-version of only those keys, and keeps the latest with `LIMIT 1 BY` on the
-replacement key. Filters on sort-key and immutable columns run before the
-pick, because tombstones carry those columns. Filters on mutable columns, and
-`_deleted = false`, run after it.
+### 6. Narrow reads to the namespaces the query names
 
-### 6. Traversal-path bounds
-
-A traversal-path bound limits a read to one namespace when the query names
-that namespace. It is an extra `startsWith` filter on top of the authorization
-filter, and it lets ClickHouse skip most of the table.
-
-The example query names no project or group, so it gets no bound, and it reads
-every namespace that the caller can see. Here is the same query pinned to one
-project:
+A traversal-path bound limits a read to one namespace when the query names it,
+so ClickHouse can skip most of the table. The example names no project or
+group, so it gets no bound, and here is the same query pinned to one project:
 
 ```gql orbit-query
 MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {state: 'merged'})-[:IN_PROJECT]->(p:Project {id: 278964})
@@ -396,18 +352,13 @@ flowchart LR
     class user,mr,project state
 ```
 
-The project has a known ID, so it is the anchor. The engine reads the
-project's current path in a subquery of the same statement, so a moved project
-is bounded by its new path. `IN_PROJECT` keeps a merge request in its
-project's namespace, so the bound spreads to `mr`. `AUTHORED` edges are stored
-with their merge request, so the edge read gets the same bound. `User` is
-global and has no path, so `u` gets no bound.
+The project is the anchor, and the engine reads its current path inside the
+same statement. The bound spreads to `mr` through `IN_PROJECT`, and the
+`AUTHORED` edge read gets it too, but the global `User` gets none. A bound
+never crosses relationships like `CLOSES` that can leave the namespace, and
+the authorization filter always still applies.
 
-Some relationships, like `CLOSES`, can cross namespaces. A bound never spreads
-across them, and never from a child namespace up to its parent. A bound only
-narrows a read, and the authorization filter still applies.
-
-### 7. Lowering and result shaping
+### 7. Build the SQL tree and shape the result
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
@@ -431,17 +382,14 @@ flowchart LR
     class Page,Shape,Extras pass
 ```
 
-Lowering turns the plan into a SQL AST with physical result bindings, and
-attaches the bounds to the reads they own. Pagination sets a limit of the page
-size plus one probe row, lowers `SKIP` to an `OFFSET`, and adds tie-breakers
-so that windows are stable. The response policy caps large text projections so
-that a page fits within the Workhorse gRPC message limit. The result contract
-adds redaction ID and type columns for every returned node and edge, and
-records the result context that redaction and formatting read. The pass also
-builds the hydration plan and resolves the ClickHouse settings for the query
-type.
+Lowering turns the relation graph into a SQL syntax tree, and attaches the
+bounds to each read. Pagination asks for one row past the page, so the server
+can tell whether more rows exist. The response policy caps long text values,
+so a page fits in one response message. The result contract adds the ID and
+type columns that Rails needs for redaction. This step also plans the
+hydration statement, and sets time and memory limits for the query type.
 
-### 8. Security, verification, and code generation
+### 8. Add authorization filters, verify them, and render SQL
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "linear", "nodeSpacing": 28, "rankSpacing": 48, "padding": 14}}}%%
@@ -468,46 +416,13 @@ flowchart LR
     class Reject reject
 ```
 
-Security runs on the finished AST, after every pass that can add a read. It
-adds `startsWith(traversal_path, ?)` to every namespaced node and edge alias,
-using only the paths where the caller meets the entity's role floor. With no
-eligible path, the predicate is a constant false. Verification then walks the
-final AST, and rejects the statement if any namespaced alias lacks a
-role-eligible predicate or a fail-closed false. Code generation renders the
-AST in the backend's dialect with bound parameters. The AST has a closed
-function vocabulary, and a backend rejects any operation it can't express.
-
-## When things go wrong
-
-- **An unresolved reference.** Validation rejects the query before planning.
-- **A namespaced read without a predicate.** Verification rejects the
-  statement. It never reaches ClickHouse.
-- **An anchor that isn't indexed or is deleted.** The bound subquery returns a
-  sentinel path, and the read falls back to the authorization predicate alone.
-- **Too many anchors.** Past eight anchors on one node, the node keeps only
-  its authorization predicate.
-- **An operation the backend can't express,** such as token search on DuckDB.
-  Code generation rejects it, and never substitutes an approximation.
-- **An invariant violation between passes.** The pipeline returns an internal
-  error, not degraded SQL.
-
-## Why we built it this way
-
-Declaring each pass's state makes ordering explicit, and stops one pass from
-reading state that another hasn't produced yet. Pipelines can then reuse runs
-of passes. Hydration and local compilation share the remote passes instead of
-copying them, and running security last guarantees that verification sees the
-final AST.
-
-`FINAL` stays the default for latest-state reads. An `argMax` aggregation over
-IDs can be faster on small results, but its memory grows with result
-cardinality, which is unknown at compile time. On settled parts, `FINAL` was
-as fast or faster in every measured case, with bounded memory. A slow `FINAL`
-points to part fragmentation, and the fix belongs in storage.
-
-Bounds resolve the anchor path inside the statement, not in a lookup before
-it. That avoids a cache and its staleness window, and production `EXPLAIN`
-output shows the same granule pruning as a literal prefix.
+Security runs last, after every pass that can add a read to the tree. It adds
+a `startsWith(traversal_path, ?)` filter to every namespaced read, using only
+the paths where the caller meets the entity's role floor. Verification then
+walks the finished tree, and rejects the query if any namespaced read lacks a
+filter. Code generation renders the tree as SQL for one backend, with every
+value as a bound parameter. A backend that can't express an operation rejects
+the query instead of approximating it.
 
 ## Decisions
 
