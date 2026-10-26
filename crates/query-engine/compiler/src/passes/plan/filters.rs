@@ -26,6 +26,7 @@ pub struct BoundFilter {
     pub text_indexed: bool,
     pub unique: bool,
     pub immutable: bool,
+    pub terminal: bool,
     pub null_as_epoch: NullAsEpoch,
 }
 
@@ -53,6 +54,7 @@ impl BoundFilter {
             text_indexed: self.text_indexed,
             unique: self.unique,
             immutable: self.immutable,
+            terminal: self.terminal,
             null_as_epoch: self.null_as_epoch,
         }
     }
@@ -132,6 +134,8 @@ pub fn bind_filter(
     let column = property_id
         .and_then(|property| model.property_column(property))
         .unwrap_or(property);
+    let terminal = property_id
+        .is_some_and(|property| admits_only(&filter, model.property_terminal_values(property)));
     BoundFilter {
         filter,
         property: property_id,
@@ -145,10 +149,29 @@ pub fn bind_filter(
         text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),
         unique: property_id.is_some_and(|property| model.property_unique(property)),
         immutable: property_id.is_some_and(|property| !model.property_mutable(property)),
+        terminal,
         null_as_epoch: NullAsEpoch {
             column: property_id.is_some_and(|property| model.null_as_epoch(property)),
             rhs: false,
         },
+    }
+}
+
+fn admits_only(filter: &InputFilter, values: &[String]) -> bool {
+    let listed = |value: &serde_json::Value| {
+        value
+            .as_str()
+            .is_some_and(|value| values.iter().any(|listed| listed == value))
+    };
+    if filter.rhs_column.is_some() {
+        return false;
+    }
+    match (filter.op.unwrap_or(FilterOp::Eq), &filter.value) {
+        (FilterOp::Eq, Some(value)) => listed(value),
+        (FilterOp::In, Some(serde_json::Value::Array(candidates))) => {
+            !candidates.is_empty() && candidates.iter().all(listed)
+        }
+        _ => false,
     }
 }
 

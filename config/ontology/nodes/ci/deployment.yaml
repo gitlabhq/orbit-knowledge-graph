@@ -77,7 +77,6 @@ properties:
       4: canceled
       5: skipped
       6: blocked
-    terminal_values: [success, failed, canceled, skipped]
 
   deployable_type:
     type: string

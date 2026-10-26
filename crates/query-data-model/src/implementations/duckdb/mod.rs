@@ -96,6 +96,12 @@ impl RelationalMapping for DuckDbBindings {
             .is_none_or(|facts| facts.mutable)
     }
 
+    fn property_terminal_values(&self, property: PropertyId) -> &[String] {
+        self.property_facts
+            .get(property.index())
+            .map_or(&[], |facts| facts.terminal_values.as_slice())
+    }
+
     fn table_path_columns(&self, _table: &str) -> Option<&[crate::PathColumn]> {
         None
     }

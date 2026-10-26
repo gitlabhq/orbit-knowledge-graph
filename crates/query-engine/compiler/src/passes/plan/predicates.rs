@@ -37,6 +37,7 @@ pub enum Predicate {
         text_indexed: bool,
         unique: bool,
         immutable: bool,
+        terminal: bool,
         null_as_epoch: NullAsEpoch,
     },
     Ids {
@@ -123,28 +124,46 @@ impl Predicate {
         }
     }
 
-    pub fn filters_sort_key(&self, sort_key: &[String], immutable_ok: bool) -> bool {
+    pub fn filters_sort_key(&self, sort_key: &[String], guard_ok: bool) -> bool {
+        let (as_written, _) = self.stable_under_versions(sort_key, guard_ok);
+        as_written
+    }
+
+    fn stable_under_versions(&self, sort_key: &[String], guard_ok: bool) -> (bool, bool) {
         let in_key = |column: &str| sort_key.iter().any(|key| key == column);
+        let both = |stable: bool| (stable, stable);
         match self {
             Self::Boolean(expression) => expression.fold(
-                &|predicate| predicate.filters_sort_key(sort_key, immutable_ok),
-                &|children| children.into_iter().all(|filters| filters),
-                &|filters| filters,
+                &|predicate| predicate.stable_under_versions(sort_key, guard_ok),
+                &|children| {
+                    children.into_iter().fold(
+                        (true, true),
+                        |(as_written, negated), (child_as_written, child_negated)| {
+                            (as_written && child_as_written, negated && child_negated)
+                        },
+                    )
+                },
+                &|(as_written, negated)| (negated, as_written),
             ),
             Self::Property {
                 column,
                 filter,
                 immutable,
+                terminal,
                 ..
             } => {
-                filter.rhs_column.is_none() && (*immutable && immutable_ok || in_key(&column.name))
+                let fixed =
+                    filter.rhs_column.is_none() && (*immutable && guard_ok || in_key(&column.name));
+                (fixed || *terminal && guard_ok, fixed)
             }
             Self::Ids { column, .. }
             | Self::IdRange { column, .. }
-            | Self::EntityKind { column, .. } => in_key(&column.name),
-            Self::Membership { columns, .. } => columns.iter().all(|column| in_key(&column.name)),
-            Self::RelationshipKinds { .. } => in_key(RELATIONSHIP_KIND_COLUMN),
-            _ => false,
+            | Self::EntityKind { column, .. } => both(in_key(&column.name)),
+            Self::Membership { columns, .. } => {
+                both(columns.iter().all(|column| in_key(&column.name)))
+            }
+            Self::RelationshipKinds { .. } => both(in_key(RELATIONSHIP_KIND_COLUMN)),
+            _ => both(false),
         }
     }
 }

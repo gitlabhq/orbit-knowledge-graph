@@ -1,0 +1,66 @@
+description: A filter that admits only terminal states runs before the latest-row pick, keeps tombstones deleted, and a non-terminal state still checks the latest version
+
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      merge_request: [9960, 9961, 9962, 9963]
+  extra_seed:
+    gl_merge_request:
+      - { id: 9960, iid: 960, title: a, state: opened, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 9960, iid: 960, title: b, state: merged, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00" }
+      - { id: 9961, iid: 961, title: a, state: merged, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 9961, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00", _deleted: true }
+      - { id: 9962, iid: 962, title: a, state: opened, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 9962, iid: 962, title: b, state: closed, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00" }
+      - { id: 9963, iid: 963, title: a, state: merged, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 9963, iid: 963, title: b, state: merged, project_id: 1000, traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00" }
+
+cases:
+  - name: merged_after_open
+    description: A merge request opened and then merged returns once with its latest values
+    query:
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id IN [9960, 9963] AND mr.state = 'merged' RETURN mr.id, mr.state, mr.title
+    expect:
+      sql_contains: ["mr_later._deleted"]
+      skip_requirements: ["filter:state"]
+      node_count: 2
+      nodes:
+        MergeRequest:
+          ids: [9960, 9963]
+          rows:
+            - { id: 9960, state: merged, title: b }
+            - { id: 9963, state: merged, title: b }
+
+  - name: merged_then_tombstoned
+    description: A merged merge request whose latest version is a tombstone stays deleted
+    query:
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id IN [9960, 9961] AND mr.state = 'merged' RETURN mr.id
+    expect:
+      sql_contains: ["mr_later._deleted"]
+      skip_requirements: ["filter:state"]
+      node_count: 1
+      nodes:
+        MergeRequest: { ids: [9960] }
+
+  - name: opened_then_closed
+    description: A non-terminal state still checks the latest version, so a merge request that was opened and then closed is left out
+    query:
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id IN [9960, 9962] AND mr.state = 'opened' RETURN mr.id
+    expect:
+      skip_requirements: ["node_ids", "filter:state"]
+      node_count: 0
+
+  - name: merged_count
+    description: A count over the merged state counts each live merge request once and leaves out the tombstoned one
+    query:
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.id IN [9960, 9961, 9962, 9963] AND mr.state = 'merged' RETURN count(mr) AS n
+    expect:
+      sql_contains: ["mr_later._deleted"]
+      skip_requirements: ["node_ids", "filter:state"]
+      row_count: 1
+      row_values: [{ n: 2 }]

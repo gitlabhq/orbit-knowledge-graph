@@ -194,6 +194,10 @@ pub trait OrbitQueryModel {
         self.query_backend().property_mutable(property)
     }
 
+    fn property_terminal_values(&self, property: PropertyId) -> &[String] {
+        self.query_backend().property_terminal_values(property)
+    }
+
     fn admin_only(&self, entity: &str, property: &str) -> bool {
         self.property(entity, property)
             .is_some_and(|property| self.query_authorization().is_admin_only(property.id))

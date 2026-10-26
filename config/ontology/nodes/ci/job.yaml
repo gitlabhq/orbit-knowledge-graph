@@ -56,7 +56,6 @@ properties:
       10: waiting_for_resource
       11: waiting_for_callback
       12: canceling
-    terminal_values: [success, failed, canceled, skipped]
 
   ref:
     type: string

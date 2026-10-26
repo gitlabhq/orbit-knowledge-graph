@@ -83,6 +83,76 @@ cases:
             - (Filter (j.traversal_path, j.id) IN ?.(traversal_path, id) (_))
             - (Deduplicate Final (Scan Table(gl_job) AS j))
 
+  - name: A filter that admits only terminal values applies before the pick behind the tombstone guard
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"merged","created_at":{"gte":"2026-10-10"}},"columns":["id","state"]}],"limit":10}
+      gql: |
+        MATCH (mr:MergeRequest {state: 'merged'}) WHERE mr.created_at >= '2026-10-10' RETURN mr.id, mr.state LIMIT 10
+    logical:
+      expect: ["(Filter mr.state = 'merged', mr.created_at >= '2026-10-10' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Deduplicate LimitBy mr.traversal_path, mr.id (Filter mr.created_at >= '2026-10-10', mr.state = 'merged' (Scan Table(gl_merge_request) AS mr)))
+            - (Bind mr_later (Filter (mr_later.traversal_path, mr_later.id) IN ?.(traversal_path, id), mr_later._deleted = true (Scan Table(gl_merge_request) AS mr_later)))
+            - (Filter NOT (mr.traversal_path, mr.id, mr._version) IN ?.(traversal_path, id, _version), mr._deleted = false (_))
+          reject:
+            - (Filter (mr.traversal_path, mr.id) IN ?.(traversal_path, id) (_))
+            - (Deduplicate Final (Scan Table(gl_merge_request) AS mr))
+
+  - name: A filter on a non-terminal value checks after the pick
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":"opened","created_at":{"gte":"2026-10-10"}},"columns":["id","state"]}],"limit":10}
+      gql: |
+        MATCH (mr:MergeRequest {state: 'opened'}) WHERE mr.created_at >= '2026-10-10' RETURN mr.id, mr.state LIMIT 10
+    logical:
+      expect: ["(Filter mr.state = 'opened', mr.created_at >= '2026-10-10' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Deduplicate LimitBy mr.traversal_path, mr.id (Filter mr.created_at >= '2026-10-10' (Scan Table(gl_merge_request) AS mr)))
+            - (Filter mr.state = 'opened', ... (_))
+          reject:
+            - (Filter mr.created_at >= '2026-10-10', mr.state = 'opened' (_))
+
+  - name: A filter that mixes terminal and non-terminal values checks after the pick
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"state":{"in":["merged","opened"]},"created_at":{"gte":"2026-10-10"}},"columns":["id","state"]}],"limit":10}
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.state IN ['merged', 'opened'] AND mr.created_at >= '2026-10-10' RETURN mr.id, mr.state LIMIT 10
+    logical:
+      expect: ["(Filter mr.created_at >= '2026-10-10', mr.state IN ['merged', 'opened'] (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Deduplicate LimitBy mr.traversal_path, mr.id (Filter mr.created_at >= '2026-10-10' (Scan Table(gl_merge_request) AS mr)))
+            - (Filter mr.state IN ['merged', 'opened'], ... (_))
+          reject:
+            - (Filter mr.created_at >= '2026-10-10', mr.state IN ['merged', 'opened'] (_))
+
+  - name: A negated terminal value checks after the pick
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"mr","entity":"MergeRequest","filters":{"created_at":{"gte":"2026-10-10"}},"not":{"state":"merged"},"columns":["id","state"]}],"limit":10}
+      gql: |
+        MATCH (mr:MergeRequest) WHERE NOT mr.state = 'merged' AND mr.created_at >= '2026-10-10' RETURN mr.id, mr.state LIMIT 10
+    logical:
+      expect: ["(Filter mr.state != 'merged', mr.created_at >= '2026-10-10' (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Deduplicate LimitBy mr.traversal_path, mr.id (Filter mr.created_at >= '2026-10-10' (Scan Table(gl_merge_request) AS mr)))
+            - (Filter mr.state != 'merged', ... (_))
+          reject:
+            - (Filter mr.created_at >= '2026-10-10', mr.state != 'merged' (_))
+
   - name: Namespace anchors keep FINAL by themselves
     query:
       json: |

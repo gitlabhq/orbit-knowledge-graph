@@ -15,6 +15,7 @@ pub(super) struct PropertyBackendFacts {
     has_text_index: bool,
     unique: bool,
     mutable: bool,
+    terminal_values: Vec<String>,
     null_as_epoch: bool,
 }
 
@@ -80,6 +81,7 @@ pub(crate) fn entity_facts(ontology: &ontology::Ontology, local: bool) -> Vec<En
                                     && text_indexed.contains(&field.name.as_str()),
                                 unique: field.unique,
                                 mutable: field.mutable,
+                                terminal_values: field.terminal_values.clone().unwrap_or_default(),
                                 null_as_epoch: !local
                                     && field.nullable
                                     && matches!(
@@ -107,6 +109,7 @@ fn derive_property_backend_facts(
             has_text_index: false,
             unique: false,
             mutable: true,
+            terminal_values: Vec::new(),
             null_as_epoch: false,
         };
         graph.properties().count()

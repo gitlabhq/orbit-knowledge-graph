@@ -136,6 +136,7 @@ pub trait RelationalMapping: Send + Sync {
     fn null_as_epoch(&self, property: PropertyId) -> bool;
     fn property_unique(&self, property: PropertyId) -> bool;
     fn property_mutable(&self, property: PropertyId) -> bool;
+    fn property_terminal_values(&self, property: PropertyId) -> &[String];
     fn table_path_columns(&self, table: &str) -> Option<&[PathColumn]>;
     fn default_edge_table(&self) -> &str;
     fn relationship_table(&self, relationship: RelationshipId) -> Option<&str>;
