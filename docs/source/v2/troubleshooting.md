@@ -100,6 +100,19 @@ To resolve this issue:
 - Start a new session of your agent. A session that started before setup does not load the skill.
 - Start the prompt with `Using GitLab Orbit`.
 
+### Error: `unknown skill name "orbit-start"`
+
+`glab orbit skills get orbit-start` fails, and the list of known skills does not include `orbit-start`.
+
+This issue occurs when your GitLab instance does not serve the `orbit-start` skill,
+or when the CLI cannot reach your instance and lists only the skills built into it.
+
+To resolve this issue:
+
+- Sign in with `glab auth login`, then run `glab orbit skills` to list the skills that your instance serves.
+- If `orbit-start` is still missing, ask your agent the example questions in
+  [step 3 of the quickstart](quickstart.md#step-3-ask-your-first-question) instead.
+
 To see what setup configured, run `glab orbit setup --dry-run`.
 
 ## Remote queries

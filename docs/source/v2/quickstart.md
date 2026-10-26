@@ -91,7 +91,27 @@ To check indexing progress, run `glab orbit graph-status` until the summary ends
 
 ## Step 3: Ask your first question
 
-Ask GitLab Duo Chat or your agent about your GitLab data.
+In a clone of a project in your group, ask your agent:
+
+```plaintext
+Using GitLab Orbit, what does this project do, and how is it structured?
+```
+
+The agent writes a graph query, runs it, and answers with only the data that you can access.
+
+For a guided first session, use an agent that runs shell commands, such as Claude Code or Codex.
+Set it up as in [other agents](#other-agents), then paste this prompt:
+
+```plaintext
+Get started with GitLab Orbit: run `glab orbit skills get orbit-start`
+and follow the skill that it prints.
+```
+
+The agent asks which project or group to use, answers a first question about it,
+and offers to show how GitLab Orbit works.
+
+GitLab Duo Chat cannot run shell commands.
+In GitLab Duo Chat, or to ask your own question, use these prompts.
 Replace `<my-group>` and `<my-group>/<my-project>` with the full paths of your group and project.
 
 - Find the merge requests that a failing job blocks:
@@ -115,14 +135,6 @@ Replace `<my-group>` and `<my-group>/<my-project>` with the full paths of your g
   Using GitLab Orbit, review merge request <!123> in <my-group>/<my-project>.
   Which callers of the code that it changes are outside the merge request?
   ```
-
-The agent writes a graph query, runs it, and answers with only the data that you can access.
-
-In a clone of the project, your agent can also answer questions about the code:
-
-```plaintext
-Using GitLab Orbit, what does this project do, and how is it structured?
-```
 
 For more prompts, see [prompt examples](prompt-examples.md).
 
