@@ -22,12 +22,15 @@ week of incomplete data. Continue when the Siphon team confirms that the snapsho
 
 ## 2. Check NATS
 
-If the NATS cluster was lost, ArgoCD recreates it. Orbit creates its streams again at startup.
+If the NATS cluster was lost, ArgoCD recreates it. Orbit pods restart and create the Orbit
+streams again. Siphon does not: the Siphon team restarts Siphon.
 A Velero backup of NATS runs every 6 hours, but Siphon streams are in it too. Do not restore
-it yourself: ask the Siphon team. Check: all NATS pods are `Running`.
+it yourself: ask the Siphon team. Check: all NATS pods are `Running`, and the stream list
+shows `GKG_INDEXER_V<release>`.
 
 ```shell
 kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n nats get pods
+kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n nats exec deploy/nats-box -- nats stream ls -n
 ```
 
 ## 3. Rebuild the graph
@@ -42,9 +45,17 @@ On Dedicated, the Dedicated EOC runs the rebuild.
 A rebuild does not bring back `gkg.namespace_storage_snapshot`. To keep its history, a
 ClickHouse Cloud admin restores the daily backup (kept for 24 hours) to a new service
 ([procedure](https://gitlab.com/gitlab-com/runbooks/-/blob/master/docs/clickhouse/backup-restore.md)).
-Copy only this table back with `remoteSecure`
+Copy only this table back
 ([ClickHouse docs](https://clickhouse.com/docs/products/cloud/guides/backups/review-and-restore-backups)),
-then delete the restored service.
+then delete the restored service:
+
+```sql
+INSERT INTO gkg.namespace_storage_snapshot
+SELECT * FROM remoteSecure('<restored host>:9440', 'gkg', 'namespace_storage_snapshot', '<user>', '<password>');
+```
+
+Check: `SELECT count() FROM gkg.namespace_storage_snapshot FINAL` gives the same number on
+both services. A second copy adds no duplicates.
 
 ## 4. Check that Orbit recovered
 

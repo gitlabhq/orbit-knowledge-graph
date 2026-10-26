@@ -8,7 +8,9 @@ An Orbit container used more memory than its limit, and the kernel stopped it. T
 
 On Dedicated, only the Dedicated EOC runs commands. Use `gkg-*` names and no `--context`.
 
-1. Find the pod from the `container` label of the alert. Healthy: RESTARTS does not increase for 10 minutes.
+1. Find the pod from the `container` label of the alert. Both indexer pools use the container
+   `orbit-indexer`: check `orbit-indexer-sdlc` and `orbit-indexer-code`. Healthy: RESTARTS does
+   not increase for 10 minutes.
 
    ```shell
    kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n gkg get pods
@@ -31,7 +33,7 @@ On Dedicated, only the Dedicated EOC runs commands. Use `gkg-*` names and no `--
 
 | You see | Do this | Done when |
 | --- | --- | --- |
-| Restarts do not increase after 10 minutes | No action. | The alert resolves. |
+| Restarts do not increase after 10 minutes | No action. NATS sends the job of a killed pod again after a few minutes, so a repeated kill shows in that time. | The alert resolves. |
 | Started with a deploy | Roll back ([rollback](../maintenance.md#rollback)). | RESTARTS does not increase. |
 | The same container is killed again and again | Give it more memory: `resources` of `webserver`, `dispatcher` or `indexer.pools.<pool>` ([capacity](../maintenance.md#capacity)). | RESTARTS does not increase for 1 hour. |
 | An indexer is killed on the same repository each time | Give the pool more memory ([capacity](../maintenance.md#capacity)). Page Orbit tier-2 with the project ID from the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5). | RESTARTS does not increase. |

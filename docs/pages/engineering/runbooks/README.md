@@ -86,9 +86,13 @@ kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n gkg annotate scaledobje
 `/chatops gitlab run feature set orbit_code_intelligence 100 --actors`.
 
 **Turn Orbit off for all users.** In k8s-workloads `gitlab-com`, set
-`knowledgeGraph.enabled: false` in `releases/gitlab/values/gprd.yaml.gotmpl`. An SRE in
-`gl-infra` approves the MR. Effect after the deploy: the Orbit API and MCP return 404, and
-the Orbit menu and Code Intelligence go away. No data is deleted.
+`global.appConfig.knowledgeGraph.enabled: false` in `releases/gitlab/values/gprd.yaml.gotmpl`.
+An SRE in `gl-infra` approves the MR. Effect after the deploy:
+
+- The Orbit API and MCP return 404. `/api/v4/orbit/status` returns `available: false`.
+- The Orbit menu and Code Intelligence go away. No data is deleted.
+- SDLC indexing continues. Code indexing fails with 401 errors.
+- After you turn Orbit on again, the code of each project updates at its next push.
 
 </details>
 
@@ -102,12 +106,16 @@ kubectl -n gkg annotate scaledobject gkg-indexer-code autoscaling.keda.sh/paused
 ```
 
 **Stop SDLC indexing.** This pool has no KEDA. Write down the second number in READY (for
-example 2 in `1/2`). The next maintenance run sets the count back.
+example 2 in `1/2`). A Helm upgrade, for example in maintenance, sets the SDLC count back.
+The code pause stays until you remove it.
 
 ```shell
 kubectl -n gkg get deploy gkg-indexer-sdlc
 kubectl -n gkg scale deploy/gkg-indexer-sdlc --replicas=0
 ```
+
+Check: PAUSED of `gkg-indexer-code` is `True`, and both indexers show `0/0`:
+`kubectl -n gkg get scaledobject,deploy`.
 
 **Resume:**
 
@@ -139,7 +147,7 @@ Dedicated notes ([Orbit on Dedicated](https://gitlab.com/gitlab-com/gl-infra/git
 | Webserver | Orbit API returns errors. |
 | SDLC or code indexer | That data goes stale. |
 | Dispatcher | No new indexing jobs. After a deploy with a new schema version, indexers wait. |
-| NATS (owned by Orbit) | All indexing and Siphon stop. New webserver pods are not ready. |
+| NATS (owned by Orbit) | All indexing and Siphon stop. Indexer pods and new webserver pods crash-loop. Running webserver pods continue to serve queries. |
 | Graph ClickHouse `orbit-production-us-east1` (owned by Orbit) | Queries and indexing fail. |
 | Health-check | `status` reports unhealthy. Queries continue. Indexer pools run their fallback pod count. |
 | Siphon or datalake ClickHouse | No new SDLC data. Code indexing after a push stops. |

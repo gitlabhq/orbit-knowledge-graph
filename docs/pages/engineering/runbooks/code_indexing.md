@@ -26,14 +26,16 @@ On Dedicated, the Dedicated EOC runs the commands without `--context`. Deploymen
 
 ### Check
 
-1. Check the project. Healthy: `code_indexing.state` is `indexed`. Exit code 2: Orbit is off for it.
+1. Check the project. Healthy: `code_indexing.state` is `indexed`. This shows one full index,
+   not the newest commit. Exit code 2: no such project, no access, or Orbit is off.
 
    ```shell
-   glab orbit graph-status --project-id <project_id>
+   GITLAB_HOST=gitlab.com glab orbit graph-status --project-id <project_id>
    ```
 
 1. Check the checkpoint in the read-only console of the graph ClickHouse service. The backfill
-   indexes only the default branch. Compare `last_commit` with the last commit on that branch.
+   indexes only the default branch. Compare `last_commit` with the last commit on that branch. An empty `last_commit` means
+   that a backfill or reindex indexed the branch at `indexed_at`.
 
    ```sql
    SELECT branch, last_commit, indexed_at
@@ -55,13 +57,17 @@ On Dedicated, the Dedicated EOC runs the commands without `--context`. Deploymen
    ```
 
 1. Read the indexer logs in [Kibana](https://log.gprd.gitlab.net/app/r/s/DhOL5). Filter
-   `json.mode: indexer` and search for the project ID.
+   `json.mode: indexer` and `json.span.gl_project_id: <project_id>`.
 
 Do not delete a lock. A held lock puts the request back in the queue. The lease of a crashed
-worker expires by itself. If a lock stays for more than 15 minutes, page Orbit tier-2.
+worker expires within a few minutes. If a lock stays for more than 15 minutes, page Orbit tier-2.
 
-No code tasks for any project? The dispatcher ConfigMap `orbit-dispatcher-config` must have
-`events_stream_name: prd_siphon_event_stream` (staging: `stg_siphon_event_stream`).
+No code tasks for any project? The dispatcher ConfigMap must have
+`events_stream_name: prd_siphon_event_stream` (staging: `stg_siphon_event_stream`):
+
+```shell
+kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n gkg get configmap orbit-dispatcher-config -o jsonpath='{.data.*}' | grep events_stream_name
+```
 
 ### Fix
 
@@ -73,7 +79,7 @@ Check: `indexed_at` in the checkpoint query shows a new time.
 ## A task fails again and again
 
 A timeout goes to the dead letters after a second attempt. A fatal parse error goes there
-at once. Other errors go there after a few attempts.
+at once. Other errors go there after the last attempt, a few minutes later.
 
 ### Read the dead letters
 

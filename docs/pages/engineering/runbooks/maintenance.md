@@ -83,7 +83,8 @@ git show "${NEW}:config/schema-migrations.yaml" \
   | yq ".migrations[] | select(.version > $o and .version <= $n) | [.version, .scope] | join(\" \")"
 ```
 
-Scope `*` rebuilds everything, `sdlc` or `code` rebuilds only those tables, `none` rebuilds
+Use mikefarah yq v4 (`mise` installs it). Only the `schema` line shows: the release does
+not reindex. Scope `*` rebuilds everything, `sdlc` or `code` rebuilds only those tables, `none` rebuilds
 nothing. A version with no entry counts as `*`.
 
 During a reindex:
@@ -98,7 +99,7 @@ During a reindex:
 ## Silence alerts
 
 Before planned work, such as a reindex or a rotation, create a
-[silence for Orbit](https://alerts.gitlab.net/#/silences/new?filter=%7Btype%3D%22orbit%22%2C%20environment%3D%22orbit-prd%22%7D).
+[silence for Orbit](https://alerts.gitlab.net/#/silences/new?filter=%7Btype%3D%22orbit%22%2C%20env%3D%22orbit-prd%22%7D).
 Set the duration to the planned window. Put your name as the owner and link the change issue
 in the comment. Remove the silence when the work is done.
 

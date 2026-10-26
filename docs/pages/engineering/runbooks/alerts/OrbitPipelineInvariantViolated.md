@@ -9,7 +9,7 @@ The query compiler reached a state that its earlier checks must stop. It rejecte
 1. In [Grafana Explore](https://dashboards.gitlab.net/explore), data source `mimir-analytics-eventsdot`, find the failed stage. Healthy: `0`.
 
    ```promql
-   sum by (failure_reason) (rate(gkg_query_engine_compiler_rejected_total{failure_reason=~"lowering|enforcement|codegen|pipeline"}[5m]))
+   sum by (failure_reason) (rate(gkg_query_engine_compiler_rejected_total{failure_reason=~"lowering|codegen|pipeline"}[5m]))
    ```
 
 1. Read the [logs](https://log.gprd.gitlab.net/app/r/s/DhOL5) with the filter `json.mode: webserver` at the alert time. Copy the rejected query from the rejection log line.

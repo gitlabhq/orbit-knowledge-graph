@@ -26,7 +26,7 @@ ask an Orbit team member with Service Admin.
 - `<release>`: the current indexing stream name ends with it.
 
   ```shell
-  kubectl --context "$CTX" -n nats exec deploy/nats-box -- nats stream ls | grep GKG_INDEXER_V
+  kubectl --context "$CTX" -n nats exec deploy/nats-box -- nats stream ls -n | grep GKG_INDEXER_V
   ```
 
 - `<N>`: the active schema version.
@@ -110,7 +110,8 @@ and Vault before step 6. The datalake does not change.
 
 Mark the checkpoint rows as deleted. Orbit then indexes that data again from the start.
 
-SDLC data of one top-level namespace. The sweep key starts the reindex within a minute.
+SDLC data of one top-level namespace. The sweep key starts the reindex within a minute. It
+also starts the hourly sweep of all namespaces early. This load is normal.
 Without it, the reindex waits for the hourly sweep.
 
 ```sql

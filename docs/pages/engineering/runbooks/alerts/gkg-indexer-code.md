@@ -9,6 +9,7 @@ The code indexer fails to index repositories, or it stopped. Users see old code 
 On Dedicated, only the Dedicated EOC runs commands. Use `gkg-indexer-code` and no `--context`.
 
 1. Check the pods and the autoscaler. Healthy: pods are `Running`, RESTARTS does not increase and PAUSED is not `True`.
+   No pods in the output: the pool has 0 pods. Look at PAUSED.
 
    ```shell
    kubectl --context gke_gl-orbit-prd_us-east1_orbit-prd -n gkg get pods | grep orbit-indexer-code
@@ -29,11 +30,11 @@ On Dedicated, only the Dedicated EOC runs commands. Use `gkg-indexer-code` and n
 | --- | --- | --- |
 | Gitaly apdex alerts at the same time | [Stop code indexing](../README.md#emergency-actions). Follow [Gitaly overload](../troubleshooting.md#gitaly-overload). | Gitaly CPU goes down. |
 | Started with a deploy | [Roll back](../maintenance.md#rollback). | Code task errors are near 0. |
-| PAUSED is `True` | Someone stopped the pool. Ask in the incident channel. When the overload is gone, [resume](../README.md#emergency-actions). | Pods are `Running`. |
+| PAUSED is `True` | Someone stopped the pool. The `paused` annotation also shows `True` but keeps the pods: remove it with `autoscaling.keda.sh/paused-`. Ask in the incident channel. When the overload is gone, [resume](../README.md#emergency-actions). | Pods are `Running`. |
 | Pods restart with `OOMKilled` | Follow [OrbitContainerOOMKilled](OrbitContainerOOMKilled.md). | RESTARTS does not increase. |
 | Pods are evicted for ephemeral storage | Raise `tmpSizeLimit` and the ephemeral-storage limit together ([capacity](../maintenance.md#capacity)). | No new evictions. |
 | Archive downloads fail | Gitaly, Workhorse or the GitLab API is down. Page the on-call of that service. | Code task errors are near 0. |
-| Errors concentrate on one project | Do not purge NATS. After the last attempt, the task goes to the dead letter queue ([code indexing](../code_indexing.md)). Errors continue after 1 hour: page Orbit tier-2. | Errors for that project stop. |
+| Errors concentrate on one project | Do not purge NATS. After the last attempt, a few minutes later, the task goes to the dead letter queue ([code indexing](../code_indexing.md)). Errors continue after 1 hour: page Orbit tier-2. | Errors for that project stop. |
 | `THERE_IS_NO_COLUMN` on the ClickHouse write | Code bug. Page Orbit tier-2. | Orbit tier-2 has the issue. |
 
 ## Escalate

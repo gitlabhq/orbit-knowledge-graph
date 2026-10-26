@@ -60,7 +60,7 @@ deletes the other passwords.
 1. Make the new password in a file:
 
    ```shell
-   openssl rand -base64 32 > /tmp/pw && chmod 600 /tmp/pw
+   openssl rand -base64 32 | tr -d '\n' > /tmp/pw && chmod 600 /tmp/pw
    ```
 
 2. Add it to the SQL user in the ClickHouse console. The old password continues to work:

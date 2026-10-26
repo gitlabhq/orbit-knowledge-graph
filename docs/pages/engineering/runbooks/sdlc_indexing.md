@@ -54,7 +54,8 @@ WHERE user = 'gkg_siphon_reader' AND elapsed > 300
 ORDER BY elapsed DESC
 ```
 
-The on-call console is read-only. A person with Service Admin on that service runs
+The query needs `READ ON REMOTE` and `SELECT ON system.processes`. On `ACCESS_DENIED`, ask a
+person with Service Admin. The on-call console is read-only. A person with Service Admin on that service runs
 `KILL QUERY ON CLUSTER default WHERE query_id = '<query_id>' SYNC`. For the datalake, ask
 Analytics Platform Insights. Check: the query is not in the list. The dispatcher sends the namespace again.
 
