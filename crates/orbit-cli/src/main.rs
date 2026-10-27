@@ -68,7 +68,6 @@ struct IndexArgs {
 
     /// Index in the foreground, first waiting for a running index of the same repository
     /// (the default).
-    // Exists so callers can pin the blocking default; `into_parts` reads it once the default flips.
     #[arg(long)]
     wait: bool,
 

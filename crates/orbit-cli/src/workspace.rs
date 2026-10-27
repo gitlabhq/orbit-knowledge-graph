@@ -149,10 +149,8 @@ pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Op
     Some(IndexedRepo { git, client })
 }
 
-/// A reader over the local graph. Indexes the repository in the current directory first when
-/// it was never indexed, even if other repositories are, like `grep` does; a stale HEAD is left
-/// to refresh. It also indexes when no complete revision is readable, as after a killed first
-/// index. Outside a repository the reader's own error says what is missing.
+/// Indexes the current repository first when it was never indexed (even if others are, like
+/// `grep`) or has no complete revision; a stale HEAD is left to refresh.
 pub fn open_graph_reader(db: Option<PathBuf>) -> Result<GraphReader> {
     let here = git_toplevel(Path::new("."))
         .ok()

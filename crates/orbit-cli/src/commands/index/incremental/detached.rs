@@ -15,8 +15,7 @@ pub(crate) struct DetachedIndex {
     pub log: PathBuf,
 }
 
-/// A file whose existence is the detached child's "I hold my locks" signal. The path is unique
-/// per invocation, so a leftover can't be mistaken for it. Dropping removes it.
+/// The path is unique per invocation, so a leftover can't be mistaken for the child's signal.
 pub(super) struct ReadyFile(pub(super) PathBuf);
 
 impl ReadyFile {
@@ -31,12 +30,8 @@ impl Drop for ReadyFile {
     }
 }
 
-/// Starts `orbit workspace index --wait` detached and returns once that child creates its ready
-/// file, after it holds a repository's state and revision locks. Only the child can say so: a
-/// lock held by a reader or another index says nothing about it, and a reader started after
-/// this returns must wait for the child instead of reading the old graph. If another index
-/// already holds a repository's state lock, the child is queued and this returns at once. For
-/// a directory of repositories, the first repository the child locks signals.
+/// Returns once the child creates its ready file after taking its locks. Only the child can say
+/// so: a reader started after this returns must wait for it, not read the old graph.
 pub(crate) fn index_detached(path: &Path, options: &Options) -> Result<DetachedIndex> {
     let workspace = workspace::Workspace::open_default()?;
     let repos = workspace.resolve_repos(path)?;

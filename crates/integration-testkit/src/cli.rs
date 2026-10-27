@@ -126,7 +126,6 @@ pub fn mcp_roundtrip(data_dir: &Path, requests: &[Value]) -> Vec<Value> {
     mcp_roundtrip_in(data_dir, data_dir, requests)
 }
 
-/// Like [`mcp_roundtrip`], with the server started in `cwd`.
 pub fn mcp_roundtrip_in(cwd: &Path, data_dir: &Path, requests: &[Value]) -> Vec<Value> {
     use std::io::{BufRead, BufReader, Write};
 

@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 use duckdb_client::{DuckDbClient, sql_lit, string_column};
 use std::path::{Path, PathBuf};
 
-/// An index began this revision database and never finished it, such as after a killed index.
 #[derive(Debug)]
 pub struct IncompleteRevision(PathBuf);
 
@@ -36,7 +35,6 @@ impl std::ops::Deref for GraphReader {
 }
 
 impl GraphReader {
-    /// False when no complete revision could be attached, such as after a killed first index.
     pub fn has_revisions(&self) -> bool {
         !self._locks.is_empty()
     }

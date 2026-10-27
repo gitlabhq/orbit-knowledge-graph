@@ -8,7 +8,6 @@ use serde_json::Value;
 const WAIT_TIMED_OUT: i32 = 75;
 const ONE_FILE: &[(&str, &str)] = &[("a.py", "def a(): pass\n")];
 
-/// A repository whose index outlasts the few milliseconds the assertions need.
 fn big_repo(parent: &Path, files: usize) -> PathBuf {
     let repo = parent.join("repo");
     let sources: Vec<(String, String)> = (0..files)
@@ -82,7 +81,6 @@ fn kill_while_indexing(started: &Value, cwd: &Path, data: &Path) {
     assert_eq!(manifest_status(cwd, data), "indexing");
 }
 
-/// Indexes `repo`, then takes the revision lock the way an index (exclusive) or a reader would.
 fn hold_revision_lock(cwd: &Path, data: &Path, shared: bool) -> std::fs::File {
     assert!(orbit(&["workspace", "index"], cwd, data).status.success());
     let sql = [

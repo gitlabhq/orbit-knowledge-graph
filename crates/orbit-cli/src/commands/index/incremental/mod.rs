@@ -31,11 +31,8 @@ pub(crate) struct Options {
     pub budget_seconds: Option<u64>,
     pub cancel: Arc<AtomicBool>,
     pub progress: bool,
-    /// How long to wait for a running index of the same repository; `None` waits the default.
     pub wait: Option<Duration>,
-    /// Skip a repository whose revision is already indexed, once any running index finished.
     pub skip_current: bool,
-    /// A file to create once this index holds a repository's locks and shows as `indexing`.
     pub ready_file: Option<PathBuf>,
 }
 

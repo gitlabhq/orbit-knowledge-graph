@@ -5,9 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 
-/// How long a short critical section (manifest edits, refreshes) may wait for its lock.
 pub const BRIEF_WAIT: Duration = Duration::from_secs(5);
-/// How long reads and indexes wait on a running index, so a cold first use outlasts one.
 const DEFAULT_WAIT: Duration = Duration::from_secs(600);
 /// Exit code of a command that gave up waiting for a lock (`EX_TEMPFAIL`).
 pub const WAIT_TIMED_OUT_EXIT_CODE: i32 = 75;
@@ -40,8 +38,6 @@ pub fn lock_database_waiting(path: &Path, timeout: Duration) -> Result<File> {
     acquire_database_lock(path, false, timeout, None)
 }
 
-/// Takes a repository's state lock, which an index holds for its whole run. A wait on it is a
-/// wait for that index, so the notice and the timeout name `repo` and the index's start time.
 pub fn lock_index_state(state_dir: &Path, repo: &Path, timeout: Duration) -> Result<File> {
     acquire_database_lock(state_dir, false, timeout, Some(repo))
 }
@@ -76,8 +72,7 @@ fn open_lock_file(path: &Path) -> Result<File> {
         .open(PathBuf::from(lock_path))?)
 }
 
-/// `indexing` names what a waiter reports it is waiting to see indexed; the holder is then a
-/// writer, so the lock file's mtime is the index's start.
+/// For a writer holder, the lock file's mtime is the index's start time.
 fn acquire_database_lock(
     path: &Path,
     shared: bool,
