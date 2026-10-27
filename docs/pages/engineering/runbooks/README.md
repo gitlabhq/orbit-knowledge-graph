@@ -1,4 +1,7 @@
-# Orbit runbook
+---
+title: Orbit runbook
+description: How to operate Orbit and how to recover it after a failure.
+---
 
 Orbit builds a graph of GitLab data and code. Users reach it only through GitLab: the Orbit
 API, MCP, agents and Code Intelligence. If Orbit fails, Orbit features fail. GitLab
