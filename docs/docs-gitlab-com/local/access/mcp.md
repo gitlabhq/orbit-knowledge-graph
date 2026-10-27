@@ -135,7 +135,7 @@ You can also edit the `.mcp.json` file directly:
   "mcpServers": {
     "orbit-cli": {
       "command": "orbit",
-      "args": ["mcp", "serve"]
+      "args": ["workspace", "mcp", "serve"]
     }
   }
 }
@@ -150,7 +150,7 @@ You can also edit the `.mcp.json` file directly:
   "mcpServers": {
     "orbit-cli": {
       "command": "glab",
-      "args": ["orbit", "mcp", "serve"]
+      "args": ["orbit", "workspace", "mcp", "serve"]
     }
   }
 }
@@ -230,7 +230,7 @@ To connect to Cursor, create or edit the `mcp.json` file for the scope you want:
     "orbit-cli": {
       "type": "stdio",
       "command": "orbit",
-      "args": ["mcp", "serve"]
+      "args": ["workspace", "mcp", "serve"]
     }
   }
 }
@@ -246,7 +246,7 @@ To connect to Cursor, create or edit the `mcp.json` file for the scope you want:
     "orbit-cli": {
       "type": "stdio",
       "command": "glab",
-      "args": ["orbit", "mcp", "serve"]
+      "args": ["orbit", "workspace", "mcp", "serve"]
     }
   }
 }
@@ -277,7 +277,7 @@ Add the MCP server configuration to `opencode.json` in the repository root, or t
   "mcp": {
     "orbit-cli": {
       "type": "local",
-      "command": ["orbit", "mcp", "serve"]
+      "command": ["orbit", "workspace", "mcp", "serve"]
     }
   }
 }
@@ -293,7 +293,7 @@ Add the MCP server configuration to `opencode.json` in the repository root, or t
   "mcp": {
     "orbit-cli": {
       "type": "local",
-      "command": ["glab", "orbit", "mcp", "serve"]
+      "command": ["glab", "orbit", "workspace", "mcp", "serve"]
     }
   }
 }
@@ -328,7 +328,7 @@ edit your client's MCP configuration file:
   "mcpServers": {
     "orbit-cli": {
       "command": "orbit",
-      "args": ["mcp", "serve"]
+      "args": ["workspace", "mcp", "serve"]
     }
   }
 }
@@ -348,7 +348,7 @@ To connect using the GitLab CLI:
   "mcpServers": {
     "orbit-cli": {
       "command": "glab",
-      "args": ["orbit", "mcp", "serve"]
+      "args": ["orbit", "workspace", "mcp", "serve"]
     }
   }
 }
