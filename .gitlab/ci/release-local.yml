@@ -27,6 +27,7 @@
         - crates/orbit-cli/Cargo.toml
         - Cargo.toml
         - Cargo.lock
+        - .cargo/config.toml
         - rust-toolchain.toml
 
 .local-cli-build-linux:
