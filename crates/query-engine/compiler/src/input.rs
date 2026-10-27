@@ -96,19 +96,38 @@ pub struct Input {
     pub relationship_return: RelationshipReturn,
 }
 
+pub(crate) static ENTITY_ROWS: query_data_model::ReadGrain = query_data_model::ReadGrain::Entity;
+
 impl Input {
-    pub(crate) fn aggregation_row_nodes(
-        &self,
-        model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-    ) -> std::collections::HashSet<&str> {
+    pub(crate) fn aggregation_row_nodes<'a, M>(
+        &'a self,
+        model: &'a M,
+    ) -> HashMap<&'a str, &'a query_data_model::ReadGrain>
+    where
+        M: query_data_model::OrbitQueryModel + ?Sized,
+    {
         let groups = &self.aggregation.group_by;
-        let text_groups = property_groups(groups)
-            .filter(|(node, property)| {
-                self.entity_of(node)
-                    .is_some_and(|entity| model.property_is_free_text(entity, property))
-            })
-            .map(|(node, _)| node);
-        node_group_ids(groups).chain(text_groups).collect()
+        let mut rows: HashMap<&str, &query_data_model::ReadGrain> = node_group_ids(groups)
+            .map(|node| (node, &ENTITY_ROWS))
+            .collect();
+        for (node, property) in property_groups(groups) {
+            let Some(entity) = self.entity_of(node) else {
+                continue;
+            };
+            if rows.get(node) == Some(&&ENTITY_ROWS)
+                || !model.property_is_free_text(entity, property)
+            {
+                continue;
+            }
+            let Some(grain) = model.read_grain(entity) else {
+                continue;
+            };
+            let unique = model
+                .property(entity, property)
+                .is_some_and(|property| model.property_unique(property.id));
+            rows.insert(node, if unique { &ENTITY_ROWS } else { grain });
+        }
+        rows
     }
 
     /// Whether this query has the "search shape": a single-node table scan

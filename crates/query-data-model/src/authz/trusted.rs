@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::gitlab::{EntityAuthConfig, GitLabPolicy};
+use super::gitlab::{EntityAuthConfig, GitLabPolicy, ReadGrain};
 use super::{PropertyPolicy, derive_property_policy};
 use crate::{DataModelError, EntityId, GraphCatalog, PropertyId, RelationshipVariantId};
 
@@ -59,6 +59,10 @@ impl GitLabPolicy for TrustedLocalCatalog {
     }
 
     fn redaction_id_column(&self, _entity: EntityId) -> Option<&str> {
+        None
+    }
+
+    fn read_grain(&self, _entity: EntityId) -> Option<&ReadGrain> {
         None
     }
     fn required_access_level(&self, _entity: EntityId) -> Option<u32> {

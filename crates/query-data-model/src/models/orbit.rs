@@ -253,6 +253,11 @@ pub trait OrbitQueryModel {
         self.query_authorization().redaction_id_column(entity)
     }
 
+    fn read_grain(&self, entity: &str) -> Option<&crate::ReadGrain> {
+        self.query_authorization()
+            .read_grain(self.graph().entity_id(entity)?)
+    }
+
     fn table_has_path_columns(&self, table: &str) -> bool {
         self.query_backend()
             .table_path_columns(table)
