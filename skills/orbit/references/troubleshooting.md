@@ -81,7 +81,7 @@ Common causes: a malformed `--file` request envelope, an unreachable hostname (c
 
 ## Named-query catalog
 
-The catalog lists parameterless named queries rendered for the caller, so do not reuse another caller's response. Missing entries can require client parameters or depend on entities unavailable in the active schema.
+The catalog lists parameterless named queries filtered to the caller's access, so do not reuse another caller's response. Missing entries can require client parameters or depend on entities unavailable in the active schema.
 
 ## Query errors
 
