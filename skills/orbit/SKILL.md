@@ -42,7 +42,7 @@ Batch schema reads: make every schema read a question needs in one shell command
 glab orbit query 'CALL db.schema()'; echo; glab orbit query "CALL db.schema('Vulnerability')"; echo; glab orbit query "CALL db.schema('Pipeline')"
 ```
 
-The GraphQL field `Query.orbit.queryTemplates` lists the named queries, with `name`, `description`, and `query`. Run one with `POST /api/v4/orbit/query/:name`. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
+List the named queries with `glab api graphql -f query='{ orbit { queryTemplates { name description query } } }'`. Run one with `glab api -X POST orbit/query/NAME`. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
 
 Each `glab orbit query` has fixed per-call overhead. Prefer one aggregate query, with `count(...)` in `RETURN`, over N lookups for "how many X grouped by Y", and batch related lookups.
 
