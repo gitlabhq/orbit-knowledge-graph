@@ -54,6 +54,8 @@ Provision Smoke Fixtures
     ...                index concurrently instead of serially across test cases.
     Bootstrap E2E Credentials
     Enable Feature Flag    orbit_gql_queries
+    Disable Feature Flag    orbit_promo_access_gate
+    Disable Feature Flag    orbit_trial
     ${suffix}=    Random Suffix
     ${name}=    Set Variable    e2e-shared-${suffix}
     ${group}=    Create Group    ${name}
