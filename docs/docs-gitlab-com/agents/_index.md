@@ -52,7 +52,7 @@ glab orbit --yes setup --yes
 
 The first `--yes` confirms the download. The second skips the list of agents.
 
-To query your GitLab data, also [sign in with `glab`](../cli.md#query-the-remote-graph).
+To query your GitLab data, also [sign in with `glab`](../cli.md#query-the-gitlab-orbit-api).
 
 If you installed the [standalone binary](../cli.md#install-the-standalone-binary), run `orbit` in place of `glab orbit`.
 

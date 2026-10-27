@@ -21,6 +21,9 @@ Code layer
 Definition
 : A named code element, such as a class, function, method, or module. Its fully qualified name (`fqn`) includes the enclosing names.
 
+GitLab Orbit API
+: The GitLab Orbit service that builds a graph for each top-level group where GitLab Orbit is turned on. Its graph holds the code of your repositories and software development lifecycle (SDLC) data, such as merge requests, pipelines, work items, and security findings. Queries run on GitLab and return only the data your role lets you see.
+
 GitLab Orbit CLI
 : The `orbit` binary. `glab orbit` installs it and forwards every command to it.
 
@@ -50,9 +53,6 @@ Property graph
 
 Relationship
 : A directed connection between two nodes, such as `AUTHORED` from a user to a merge request, or `CALLS` from one definition to another.
-
-Remote graph
-: The graph GitLab builds for each top-level group where GitLab Orbit is turned on. It holds the code of your repositories and software development lifecycle (SDLC) data, such as merge requests, pipelines, work items, and security findings. Queries run on GitLab and return only the data your role lets you see.
 
 Software development lifecycle (SDLC) data
 : The part of the graph that holds GitLab objects: groups, projects, users, merge requests, pipelines, work items, packages, and security findings.

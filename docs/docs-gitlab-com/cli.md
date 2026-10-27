@@ -88,19 +88,19 @@ In the commands on this page, replace `glab orbit` with `orbit`, for example `or
 
 ## Command catalog
 
-Remote commands query the remote graph on your GitLab instance.
+API commands query the GitLab Orbit API on your GitLab instance.
 They need a GitLab credential and GitLab Orbit turned on for your group.
 Local commands use the local graph on your machine. They need no GitLab account and no network.
 `grep` and `context` use the local graph, and also GitLab when a GitLab credential is available.
 
-| Command | Graph | Purpose |
+| Command | Uses | Purpose |
 |---------|-------|---------|
-| `query` | Remote | Run a query and stream the response. |
-| `status` | Remote | Show the health of the service, or the indexing progress of a group or project. |
-| `schema` | Remote | Show the node types, properties, and relationships. |
-| `skills get` | Remote when a GitLab credential is available, otherwise the built-in copy of `orbit` | Print the agent skill files, such as `orbit` and `orbit-start`. Only `orbit` has a built-in copy. |
-| `grep` | Local and remote | Search every line of code, tests, configuration, and documentation, with the enclosing definitions, and the merge requests, issues, and comments of your GitLab group. |
-| `context` | Local and remote | Show the source of definitions with their callers and tests, and read merge requests, issues, pipelines, and jobs. |
+| `query` | API | Run a query and stream the response. |
+| `status` | API | Show the health of the service, or the indexing progress of a group or project. |
+| `schema` | API | Show the node types, properties, and relationships. |
+| `skills get` | API when a GitLab credential is available, otherwise the built-in copy of `orbit` | Print the agent skill files, such as `orbit` and `orbit-start`. Only `orbit` has a built-in copy. |
+| `grep` | Local and API | Search every line of code, tests, configuration, and documentation, with the enclosing definitions, and the merge requests, issues, and comments of your GitLab group. |
+| `context` | Local and API | Show the source of definitions with their callers and tests, and read merge requests, issues, pipelines, and jobs. |
 | `workspace index` | Local | Index a repository, or a directory of repositories. |
 | `workspace sql` | Local | Run read-only SQL. |
 | `workspace schema` | Local | List the tables and columns. |
@@ -112,7 +112,7 @@ Local commands use the local graph on your machine. They need no GitLab account 
 
 For all flags, run `glab orbit <command> --help`.
 
-## Query the remote graph
+## Query the GitLab Orbit API
 
 {{< details >}}
 
@@ -186,16 +186,16 @@ Use only one of `--full-path`, `--namespace-id`, and `--project-id`.
 
 The local graph holds the code on your machine, so your agent can find definitions, callers, and imports
 in code that you committed but have not pushed. It works offline and needs no GitLab account.
-For merge requests, pipelines, work items, and vulnerabilities, use the [remote graph](#query-the-remote-graph).
+For merge requests, pipelines, work items, and vulnerabilities, use the [GitLab Orbit API](#query-the-gitlab-orbit-api).
 
-| Attribute | Local graph | Remote graph |
+| Attribute | Local graph | GitLab Orbit API |
 |-----------|-------------|--------------|
 | Data | Code only | GitLab data and code |
 | Code version | The checkout on your machine, including commits that you have not pushed | The default branch of each project |
 | Refresh | `grep` and `context` index new commits and edited files, or you run `glab orbit workspace index` | Automatic |
 | Query with | `grep`, `context`, and `workspace sql` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
 
-Your agent can use both graphs in the same conversation.
+Your agent can use both in the same conversation.
 
 ### Index a repository
 
@@ -207,7 +207,7 @@ glab orbit workspace index .
 
 The CLI parses the files in the working tree, skips the files that `.gitignore` excludes,
 and writes definitions, imports, and cross-file references to the graph.
-The parser and [supported languages](schema.md#supported-languages) are the same as for the remote graph.
+The parser and [supported languages](schema.md#supported-languages) are the same as for the GitLab Orbit API.
 
 - When you pass the path of a directory, the CLI indexes each repository in the directory.
 - Each indexed commit keeps its own graph. When you index the same commit again, the CLI reindexes only the files that changed since the last run.
