@@ -37,10 +37,11 @@ pub use entities::{
     AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEntity, EdgeTableStorage, EdgeVariantScope, EnumType, Field, FieldSelectivity,
-    FieldSource, MaterializedViewDefinition, NodeEntity, NodeStorage, NodeStyle, PartitionConfig,
-    PartitionStrategy, RedactionConfig, RefreshableMaterializedViewDefinition, RequiredRole,
-    StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex, StorageProjection,
-    TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
+    FieldSource, GrainSplit, MaterializedViewDefinition, NodeEntity, NodeStorage, NodeStyle,
+    OwnerGrain, PartitionConfig, PartitionStrategy, RedactionConfig,
+    RefreshableMaterializedViewDefinition, RequiredRole, StatisticsConfig, StatisticsExclude,
+    StorageColumn, StorageIndex, StorageProjection, TraversalPathKind, TraversalPathLookup,
+    TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{
     ClickHouseExtract, ClickHouseExtractLookup, ClickHouseExtractLookupSource, DEFAULT_TRANSFORM,
@@ -546,6 +547,7 @@ impl Ontology {
             id_column: id_column.into(),
             ability: "read".to_string(),
             required_role: RequiredRole::Reporter,
+            owner_grain: None,
         });
         self
     }

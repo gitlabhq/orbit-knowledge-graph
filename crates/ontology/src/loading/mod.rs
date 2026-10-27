@@ -7,7 +7,8 @@ use rust_embed::Embed;
 use serde::Deserialize;
 use std::path::Path;
 
-use crate::entities::{DomainInfo, EdgeColumn, EnumType};
+use crate::constants::DEFAULT_PRIMARY_KEY;
+use crate::entities::{DataType, DomainInfo, EdgeColumn, EnumType};
 use crate::{Ontology, OntologyError};
 
 use derived::DerivedYaml;
@@ -943,6 +944,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_storage_columns(&ontology)?;
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
+    validate_owner_grains(&ontology)?;
     validate_edge_scope_annotations(&ontology)?;
     validate_derived_emits_registered(&ontology)?;
     validate_etl_edges_match_variants(&ontology)?;
@@ -1316,6 +1318,51 @@ fn validate_traversal_path_lookups(ontology: &crate::Ontology) -> Result<(), Ont
         }
     }
 
+    Ok(())
+}
+
+fn validate_owner_grains(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    for node in ontology.nodes() {
+        let Some(redaction) = &node.redaction else {
+            continue;
+        };
+        let Some(grain) = &redaction.owner_grain else {
+            continue;
+        };
+        let invalid = |reason: String| {
+            OntologyError::Validation(format!("node '{}' owner_grain: {reason}", node.name))
+        };
+        if redaction.id_column != DEFAULT_PRIMARY_KEY {
+            return Err(invalid(format!(
+                "redaction already checks the owner through '{}'",
+                redaction.id_column
+            )));
+        }
+        if grain.columns.is_empty() {
+            return Err(invalid("columns is empty".into()));
+        }
+        let field = |name: &str| node.fields.iter().find(|field| field.name == name);
+        for column in &grain.columns {
+            if !field(column).is_some_and(|field| field.data_type == DataType::Int) {
+                return Err(invalid(format!("'{column}' is not an integer property")));
+            }
+        }
+        if let Some(split) = &grain.split_by {
+            let labels = field(&split.property)
+                .and_then(|field| field.enum_values.as_ref())
+                .ok_or_else(|| invalid(format!("'{}' is not an enum property", split.property)))?;
+            if let Some(value) = split
+                .values
+                .iter()
+                .find(|value| !labels.values().any(|label| label == *value))
+            {
+                return Err(invalid(format!(
+                    "'{value}' is not a value of '{}'",
+                    split.property
+                )));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1788,6 +1835,39 @@ mod tests {
         .unwrap_err();
         assert!(error.to_string().contains("Project"), "{error}");
         assert!(error.to_string().contains("redaction"), "{error}");
+    }
+
+    #[test]
+    fn owner_grain_rejects_unknown_columns_and_split_values() {
+        let cases = [
+            (
+                "ci/job.yaml",
+                serde_json::json!({"columns": ["missing_id"]}),
+                "missing_id",
+            ),
+            (
+                "ci/job.yaml",
+                serde_json::json!({"columns": ["name"]}),
+                "name",
+            ),
+            (
+                "ci/pipeline.yaml",
+                serde_json::json!({"columns": ["project_id"], "split_by": {"property": "source", "values": ["nowhere"]}}),
+                "nowhere",
+            ),
+            (
+                "source_code/definition.yaml",
+                serde_json::json!({"columns": ["project_id"]}),
+                "already checks the owner",
+            ),
+        ];
+        for (file, grain, expected) in cases {
+            let error = load_modified_sources(&format!("nodes/{file}"), |node| {
+                node["redaction"]["owner_grain"] = grain.clone();
+            })
+            .unwrap_err();
+            assert!(error.to_string().contains(expected), "{file}: {error}");
+        }
     }
 
     #[test]

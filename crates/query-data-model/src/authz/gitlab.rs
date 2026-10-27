@@ -30,7 +30,10 @@ pub struct EntityAuthConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReadGrain {
     Entity,
-    Owner { columns: Vec<String> },
+    Owner {
+        columns: Vec<String>,
+        split: Option<ontology::GrainSplit>,
+    },
 }
 
 impl ReadGrain {
@@ -38,9 +41,16 @@ impl ReadGrain {
         if redaction.id_column != DEFAULT_PRIMARY_KEY {
             return Self::Owner {
                 columns: vec![redaction.id_column.clone()],
+                split: None,
             };
         }
-        Self::Entity
+        match &redaction.owner_grain {
+            Some(grain) => Self::Owner {
+                columns: grain.columns.clone(),
+                split: grain.split_by.clone(),
+            },
+            None => Self::Entity,
+        }
     }
 }
 

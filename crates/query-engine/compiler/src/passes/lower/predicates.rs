@@ -102,6 +102,19 @@ pub(super) fn output_value(value: &OutputValue) -> Expr {
         OutputValue::EpochAsNull(value) => sql::null_if_epoch(column(value)),
         OutputValue::Text(value) => Expr::string(value),
         OutputValue::Depth(value) => Expr::int(i64::from(*value)),
+        OutputValue::OneOf {
+            column: value,
+            values,
+        } => Expr::in_list(
+            column(value),
+            SqlType::String,
+            values
+                .iter()
+                .cloned()
+                .map(serde_json::Value::String)
+                .collect(),
+        )
+        .unwrap_or_else(|| Expr::lit(false)),
         OutputValue::Path(steps) => Expr::func(
             Function::Array,
             steps

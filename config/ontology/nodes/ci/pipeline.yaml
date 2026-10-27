@@ -16,6 +16,9 @@ redaction:
   resource_type: ci_pipeline
   id_column: id
   ability: read_pipeline
+  owner_grain:
+    columns: [project_id]
+    split_by: {property: source, values: [external]}
 
 properties:
   id:

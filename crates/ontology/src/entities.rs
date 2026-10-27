@@ -305,6 +305,23 @@ pub struct RedactionConfig {
     /// ability is only granted at that level, e.g. `read_vulnerability`.
     #[serde(default = "RedactionConfig::default_required_role")]
     pub required_role: RequiredRole,
+    #[serde(default)]
+    pub owner_grain: Option<OwnerGrain>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OwnerGrain {
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub split_by: Option<GrainSplit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GrainSplit {
+    pub property: String,
+    pub values: Vec<String>,
 }
 
 impl RedactionConfig {
