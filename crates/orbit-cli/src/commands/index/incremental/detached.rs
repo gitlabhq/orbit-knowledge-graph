@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result};
 
 use super::{Options, detached_command};
-use crate::database::{WaitTimedOut, index_is_running, wait_timeout};
+use crate::database::{WAIT_TIMED_OUT_EXIT_CODE, WaitTimedOut, index_is_running, wait_timeout};
 use crate::workspace;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -44,19 +44,16 @@ pub(crate) fn index_detached(path: &Path, options: &Options) -> Result<DetachedI
         let folder = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         return Err(super::super::NoRepositoryFound(folder).into());
     }
-    let state_dirs: Vec<PathBuf> = repos
+    let state_dirs = repos
         .iter()
-        .filter_map(|repo| workspace::git_info(repo).ok())
-        .map(|git| workspace.var_dir(git.project_id))
-        .collect();
+        .map(|repo| Ok(workspace.var_dir(workspace::git_info(repo)?.project_id)))
+        .collect::<Result<Vec<PathBuf>>>()?;
     let queued = state_dirs
         .iter()
         .map(|dir| index_is_running(dir))
         .collect::<Result<Vec<_>>>()?
         .contains(&true);
-    let dir = state_dirs
-        .first()
-        .context("cannot find a state directory")?;
+    let dir = &state_dirs[0];
     std::fs::create_dir_all(dir)?;
     let log = dir.join("detached-index.log");
     let nonce = std::time::SystemTime::now()
@@ -99,17 +96,23 @@ pub(crate) fn index_detached(path: &Path, options: &Options) -> Result<DetachedI
     let began = Instant::now();
     while !ready.0.exists() {
         if let Some(status) = child.try_wait()? {
-            anyhow::ensure!(
-                status.success(),
-                "the background index exited early ({status}); see {}",
+            if status.success() {
+                return Ok(started("indexed"));
+            }
+            let message = format!(
+                "the background index exited ({status}); see {}",
                 log.display()
             );
-            return Ok(started("indexed"));
+            return Err(if status.code() == Some(WAIT_TIMED_OUT_EXIT_CODE) {
+                WaitTimedOut(message).into()
+            } else {
+                anyhow::anyhow!(message)
+            });
         }
         if began.elapsed() >= timeout {
-            return Err(WaitTimedOut::new(format!(
-                "the background index (pid {pid}) is still waiting for readers of its revision \
-                 and keeps waiting; see {}",
+            return Err(WaitTimedOut(format!(
+                "the background index (pid {pid}) is still waiting for readers of its revision; \
+                 see {}",
                 log.display()
             ))
             .into());

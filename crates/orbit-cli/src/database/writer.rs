@@ -7,7 +7,7 @@ use arrow::record_batch::RecordBatch;
 use duckdb_client::DuckDbClient;
 use ontology::Ontology;
 
-use super::{lock_database_waiting, locks::BRIEF_WAIT, schema};
+use super::{locks::lock_database_waiting, schema};
 use crate::workspace::GitInfo;
 
 const GRAPH_SCHEMA: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
@@ -18,10 +18,6 @@ pub struct GraphWriter {
 }
 
 impl GraphWriter {
-    pub fn open(path: &Path, git: &GitInfo) -> Result<Self> {
-        Self::open_waiting(path, git, BRIEF_WAIT)
-    }
-
     pub fn open_waiting(path: &Path, git: &GitInfo, wait: Duration) -> Result<Self> {
         let lock = lock_database_waiting(path, wait)?;
         let revision = format!("{}:{}", git.project_id, git.commit_sha);

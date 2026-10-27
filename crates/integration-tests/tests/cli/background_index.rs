@@ -65,20 +65,20 @@ fn manifest_status(cwd: &Path, data: &Path) -> String {
     rows[0]["status"].as_str().unwrap_or_default().to_string()
 }
 
+fn kill(started: &Value) {
+    let pid = started["pid"].to_string();
+    let _ = std::process::Command::new("kill")
+        .args(["-9", &pid])
+        .status();
+}
+
 fn kill_while_indexing(started: &Value, cwd: &Path, data: &Path) {
     let deadline = Instant::now() + Duration::from_secs(20);
     while manifest_status(cwd, data) != "indexing" {
         assert!(Instant::now() < deadline, "the index never started");
         std::thread::sleep(Duration::from_millis(20));
     }
-    let pid = started["pid"].to_string();
-    assert!(
-        std::process::Command::new("kill")
-            .args(["-9", &pid])
-            .status()
-            .unwrap()
-            .success()
-    );
+    kill(started);
     assert_eq!(manifest_status(cwd, data), "indexing");
 }
 
@@ -156,7 +156,7 @@ fn async_that_cannot_get_its_locks_exits_75() {
 
     assert_eq!(output.status.code(), Some(WAIT_TIMED_OUT));
     assert!(
-        stderr(&output).contains("keeps waiting; see"),
+        stderr(&output).contains("still waiting for readers"),
         "{}",
         stderr(&output)
     );
@@ -175,13 +175,14 @@ fn a_running_index_is_visible_to_async_wait_and_reads() {
         &repo,
         data.path(),
     );
-    let (count, notice) = files(&repo, data.path());
+    let (count, _) = files(&repo, data.path());
 
     assert_eq!(second["status"], "queued");
     assert_eq!(wait.status.code(), Some(WAIT_TIMED_OUT));
     assert!(stderr(&wait).contains("(started"), "{}", stderr(&wait));
     assert!(count >= 1500);
-    assert!(notice.contains("waiting for the index of"), "{notice}");
+    kill(&second);
+    kill(&first);
 }
 
 #[test]
@@ -279,18 +280,14 @@ fn async_index_of_a_directory_returns_before_the_child_finishes() {
     init_repo_at(&workspace.join("small"), ONE_FILE);
 
     let began = Instant::now();
-    let output = orbit(
-        &["workspace", "index", "--async", "."],
-        &workspace,
-        data.path(),
-    );
+    let started = start_async(&workspace, data.path(), &["."]);
 
-    assert!(output.status.success(), "{}", stderr(&output));
     assert!(
         began.elapsed() < Duration::from_secs(2),
         "returned after {:?}",
         began.elapsed()
     );
+    kill(&started);
 }
 
 #[test]

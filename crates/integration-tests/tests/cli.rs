@@ -755,19 +755,21 @@ fn index_errors_when_repository_has_no_commits() {
     let empty_repo = tempfile::TempDir::new().unwrap();
     git(empty_repo.path(), &["init", "--quiet"]);
 
-    let (_, stderr, ok) = run_cmd(
-        &["workspace", "index", empty_repo.path().to_str().unwrap()],
-        data_dir.path(),
-    );
-    assert!(!ok, "index should fail when the repository has no commits");
-    assert!(
-        stderr.contains("has no commits yet"),
-        "expected no-commits error: {stderr}"
-    );
-    assert!(
-        !stderr.contains("ambiguous argument"),
-        "raw git error should not leak: {stderr}"
-    );
+    for mode in [None, Some("--async")] {
+        let mut args = vec!["workspace", "index"];
+        args.extend(mode);
+        args.push(empty_repo.path().to_str().unwrap());
+        let (_, stderr, ok) = run_cmd(&args, data_dir.path());
+        assert!(!ok, "index should fail when the repository has no commits");
+        assert!(
+            stderr.contains("has no commits yet"),
+            "expected no-commits error: {stderr}"
+        );
+        assert!(
+            !stderr.contains("ambiguous argument"),
+            "raw git error should not leak: {stderr}"
+        );
+    }
 }
 
 #[test]

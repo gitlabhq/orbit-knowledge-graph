@@ -22,13 +22,7 @@ pub fn wait_timeout() -> Duration {
 }
 
 #[derive(Debug)]
-pub struct WaitTimedOut(String);
-
-impl WaitTimedOut {
-    pub fn new(message: String) -> Self {
-        Self(message)
-    }
-}
+pub struct WaitTimedOut(pub String);
 
 impl fmt::Display for WaitTimedOut {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -122,8 +116,7 @@ fn acquire_database_lock(
                 };
                 if waited >= timeout {
                     return Err(WaitTimedOut(format!(
-                        "gave up waiting for {target} after {} s. Retry, or raise the wait with \
-                         --timeout or ORBIT_WAIT_TIMEOUT_MS.",
+                        "gave up waiting for {target} after {} s. Retry, or raise ORBIT_WAIT_TIMEOUT_MS.",
                         waited.as_secs()
                     ))
                     .into());
