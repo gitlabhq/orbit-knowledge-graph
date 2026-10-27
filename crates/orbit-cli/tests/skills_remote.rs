@@ -991,23 +991,45 @@ fn setup_instructions_stay_local_when_orbit_status_is_refused() {
         let (output, instructions) = setup_instructions(Some(&url));
         let requests = server.join().unwrap();
         assert_local_only(&output, &instructions);
-        assert_eq!(
-            request_paths(&requests),
-            ["/api/v4/orbit/status"],
-            "{status}"
-        );
+        assert_eq!(request_paths(&requests), ["/api/graphql"], "{status}");
     }
 }
 
+const SERVICE_STATUS: &str =
+    r#"{"data":{"orbit":{"serviceStatus":{"state":"HEALTHY","version":"1","components":[]}}}}"#;
+
 #[test]
 fn setup_instructions_leave_the_schema_to_failing_queries() {
-    let (url, server) = mock_server(vec![ok_reply("{}"), ok_reply("[]")]);
+    let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS), ok_reply("[]")]);
     let (output, instructions) = setup_instructions(Some(&url));
     let requests = server.join().unwrap();
     assert_remote_without_schema(&output, &instructions);
     assert_eq!(
         request_paths(&requests),
         [
+            "/api/graphql",
+            "/api/v4/orbit/agent/commands?command_names=query_graph",
+        ]
+    );
+}
+
+#[test]
+fn setup_instructions_read_the_rest_status_when_gitlab_has_no_orbit_graphql() {
+    let (url, server) = mock_server(vec![
+        ok_reply(
+            r#"{"errors":[{"message":"Field 'orbit' doesn't exist on type 'Query'",
+                "extensions":{"code":"undefinedField","typeName":"Query","fieldName":"orbit"}}]}"#,
+        ),
+        ok_reply("{}"),
+        ok_reply("[]"),
+    ]);
+    let (output, instructions) = setup_instructions(Some(&url));
+    let requests = server.join().unwrap();
+    assert_remote_without_schema(&output, &instructions);
+    assert_eq!(
+        request_paths(&requests),
+        [
+            "/api/graphql",
             "/api/v4/orbit/status",
             "/api/v4/orbit/agent/commands?command_names=query_graph",
         ]
