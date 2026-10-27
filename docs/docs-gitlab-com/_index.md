@@ -2,128 +2,261 @@
 stage: Orbit
 group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query your GitLab instance as a property graph. Find blast radius, trace dependencies, and answer SDLC questions that GitLab alone cannot.
+description: Give your agent a graph of your GitLab data and code, so the agent can answer questions about changes, pipelines, security, and code structure.
 title: GitLab Orbit
 ---
+
+<!-- The tagline sits directly under the page title, above the availability details, on purpose. -->
+<!-- gitlab-docs-review-disable lint.details-placement -->
+
+Software lifecycle context graph for AI agents
+{.product-hero-title}
 
 {{< details >}}
 
 - Tier: Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed
-- Status: Beta
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 
 {{< /details >}}
 
+<!-- gitlab-docs-review-enable -->
+
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
-- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
+- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
 - [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) for GitLab Self-Managed in GitLab 19.2.2.
+- [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
 
 {{< /history >}}
 
-> [!flag]
-> The availability of this feature is controlled by a feature flag.
-> For more information, see the history.
-> This feature is available for testing, but not ready for production use.
+<section class="product-landing product-hero">
 
-GitLab Orbit indexes your GitLab instance and exposes your entire SDLC as a queryable property graph.
-Enable it on a group and GitLab Orbit maps everything: projects, users, merge requests, pipelines,
-work items, security findings, and the source code itself, then builds a property graph of how they
-relate to each other.
+GitLab Orbit gives your agent a graph of your GitLab data and code.
+On every merge request review, failed pipeline, and new CVE, your agent queries the graph
+and answers with proof, not guesses.
+{.product-hero-lead}
 
-Query the graph to answer questions your instance cannot answer directly:
+[Quickstart](quickstart.md) [{{< icon name="play" >}} Watch GitLab Orbit in two minutes](https://www.youtube.com/watch?v=dKaPp-TWd_o)
+{.product-hero-actions}
 
-- What breaks if I change this service?
-- Which merge requests touched this file in the last 90 days?
-- Who has reviewed the most code in this group?
-- Where are the open critical vulnerabilities, and which pipelines introduced them?
-- Which projects depend on this library?
+<!-- Video published on 2026-09-03 -->
 
-GitLab Orbit is an analytical system designed for point-in-time SDLC insight, not real-time or transactional use cases. Results reflect the state of your data as of the last index cycle.
+</section>
 
-For a click-through demo, see [GitLab Orbit](https://click-through-demo-generator-v-2-d63870.gitlab.io/demos/orbit-v2/).
-<!-- Demo published on 2026-06-30 -->
+- {{< icon name="connected" >}}[Ask across code and lifecycle](prompt-examples.md)<br>One graph connects your GitLab data and code, so one question can cross both.
+- {{< icon name="search" >}}[Run one query in place of many API calls](how-it-works.md)<br>Your agent sends one graph query and gets back rows, not pages of JSON to filter.
+- {{< icon name="lock" >}}[Get only the data you can access](security.md#how-gitlab-orbit-enforces-access)<br>GitLab Orbit filters every answer by your GitLab permissions.
+{.product-cards .product-cards-icons}
 
-## GitLab Orbit Remote
+## About GitLab Orbit
 
-On GitLab.com, GitLab Orbit Remote runs as a separate service on GitLab infrastructure. Enable it on a top-level group
-and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests,
-pipelines, vulnerabilities, and source code - into a managed ClickHouse graph.
+- <img src="img/orbit-video-how-it-works-v19_6.png" alt="Thumbnail of the GitLab Orbit architecture video." width="640" height="360">[How GitLab Orbit works](https://www.youtube.com/watch?v=YtPc8kOmyi0)<br>The architecture of GitLab Orbit, from indexing to queries.
+- <img src="img/orbit-video-deep-dive-v19_6.png" alt="Thumbnail of the GitLab Orbit technical deep dive video." width="640" height="360">[How we built GitLab Orbit](https://www.youtube.com/watch?v=wddpf0rDGnA)<br>A technical deep dive into the context graph.
+{.product-cards .product-cards-2 .product-video-cards}
 
-```mermaid
-flowchart LR
-    accTitle: GitLab Orbit Remote architecture
-    accDescr: SDLC data streams from GitLab via CDC to the Data Insights Platform, then to ClickHouse. Code is served over the Rails internal API. GitLab Orbit reads both sources, builds the graph in ClickHouse, and exposes it via REST API, MCP tools, and GitLab Duo Agent Platform.
+<!-- Videos published on 2026-07-06 and 2026-06-26 -->
 
-    subgraph GitLab["GitLab instance"]
-        SDLC[SDLC data]
-        Code[Source code]
-    end
+- [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
+- [See the roadmap](https://gitlab-org.gitlab.io/orbit/knowledge-graph/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
+{.product-cards .product-cards-2}
 
-    SDLC -- CDC --> DIP[Data Insights Platform]
-    DIP --> CH[(ClickHouse)]
-    Code -- Rails API --> Orbit[GitLab Orbit service]
-    CH <--> Orbit
+## Example questions
 
-    Orbit --> REST[REST API]
-    Orbit --> MCP[MCP tools]
-    Orbit --> DAP[GitLab Duo Agent Platform]
-```
+- {{< icon name="merge-request" >}}[Review a merge request with proof](prompt-examples.md#review-a-merge-request-with-proof)<br>Which code and projects does this merge request affect? Each finding comes with the graph result that shows it.
+- {{< icon name="shield" >}}[Fix a vulnerability across projects](prompt-examples.md#fix-a-vulnerability-across-every-affected-project)<br>Which projects in my group does this CVE affect, and which fixes reached production?
+- {{< icon name="issue-type-incident" >}}[Respond to a production incident](prompt-examples.md#respond-to-a-production-incident)<br>Which changes to the failing component, and to the code that it calls, reached production this week?
+- {{< icon name="code" >}}[Change shared code safely](prompt-examples.md#change-shared-code-safely)<br>Which classes inherit from this base class, and what calls the method that I change?
+{.product-cards .product-cards-2 .product-cards-icons}
 
-GitLab Orbit Remote runs as a separate service and shares minimal load with your GitLab instance.
+For more examples, see [prompt examples](prompt-examples.md).
 
-[Get started with GitLab Orbit Remote](remote/getting-started.md)
+## Reference
 
-## GitLab Orbit Local
+{{< cards >}}
 
-GitLab Orbit Local runs entirely on your machine. The GitLab Orbit CLI (`orbit`) parses a local repository,
-extracts definitions and cross-file references, and writes the graph to a local DuckDB file.
-Query it directly from the CLI or connect an AI agent through the stdio MCP server. No GitLab
-instance or network connection is required after installation.
+- [Connect your agent](agents/_index.md)
+- [Indexed data](schema.md)
+- [Queries](queries/_index.md)
+- [Security](security.md)
+- [GitLab Self-Managed setup](https://docs.gitlab.com/orbit/self-managed/orbit-setup/ "Install GitLab Orbit on Kubernetes and connect it to GitLab.")
+- [Troubleshooting](troubleshooting.md)
 
-```mermaid
-flowchart LR
-    accTitle: GitLab Orbit Local architecture
-    accDescr: The GitLab Orbit CLI parses a local repository, builds a code graph, and writes it to a local DuckDB file. You query the graph via the CLI or connect an AI agent through the stdio MCP server.
+{{< /cards >}}
 
-    Repo[Local repository] --> CLI["orbit CLI"]
-    CLI --> DB[("DuckDB\n~/.gitlab/orbit/local/")]
-    DB --> Query[CLI query]
-    DB --> MCP[stdio MCP server]
-```
+<style>
+/* Product landing page. Visual wrappers only, with GitLab UI design tokens; the content above is Markdown. */
+/* Page title: the standard H1, with the GitLab Orbit logo after it. */
+body:has(.product-landing) h1#skipTarget {
+  display: flex;
+  align-items: center;
+  gap: var(--gl-spacing-scale-4);
+}
+body:has(.product-landing) h1#skipTarget::after {
+  content: "";
+  flex: none;
+  width: 40px;
+  height: 40px;
+  background: URL("img/orbit-logo-v19_6.svg") center / contain no-repeat;
+}
+body:has(.product-landing) .docs-content .language-plaintext {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
-GitLab Orbit Local indexes code only. SDLC data - merge requests, pipelines, work items - requires
-GitLab Orbit Remote.
+/* Hero: tagline, lead, and actions, with no panel. */
+.docs-content .product-hero {
+  margin: var(--gl-spacing-scale-5) 0 var(--gl-spacing-scale-6);
+}
+.docs-content .product-hero p { margin: 0; }
+/* Tagline: directly under the page title, smaller than a heading. */
+.docs-content .product-hero-title {
+  margin: calc(-1 * var(--gl-spacing-scale-4)) 0 var(--gl-spacing-scale-5);
+  font-size: 1.125rem;
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--gl-text-color-subtle);
+}
+.docs-content .product-hero-lead {
+  max-width: 68ch;
+}
+.docs-content .product-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gl-spacing-scale-3);
+  margin: var(--gl-spacing-scale-5) 0 var(--gl-spacing-scale-6) !important;
+}
+/* Same metrics and tokens as .btn.gl-button.btn-md: 2rem tall, 0.875rem text, 8px radius. */
+.docs-content .product-hero-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gl-spacing-scale-2);
+  min-height: 2rem;
+  padding: 0 var(--gl-spacing-scale-4);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: var(--gl-font-size-md);
+  line-height: 1rem;
+  font-weight: 400;
+  text-decoration: none !important;
+  transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+}
+.docs-content .product-hero-actions a:first-child {
+  background-color: var(--gl-button-confirm-primary-background-color-default);
+  border-color: var(--gl-button-confirm-primary-border-color-default);
+  color: var(--gl-button-confirm-primary-foreground-color-default) !important;
+}
+.docs-content .product-hero-actions a:first-child:hover {
+  background-color: var(--gl-button-confirm-primary-background-color-hover);
+  border-color: var(--gl-button-confirm-primary-border-color-hover);
+  color: var(--gl-button-confirm-primary-foreground-color-hover) !important;
+}
+.docs-content .product-hero-actions a:not(:first-child) {
+  background-color: var(--gl-button-default-primary-background-color-default);
+  border-color: var(--gl-button-default-primary-border-color-default);
+  color: var(--gl-button-default-primary-foreground-color-default) !important;
+}
+.docs-content .product-hero-actions a:not(:first-child):hover {
+  background-color: var(--gl-button-default-primary-background-color-hover);
+  border-color: var(--gl-button-default-primary-border-color-hover);
+  color: var(--gl-button-default-primary-foreground-color-hover) !important;
+}
+.docs-content .product-hero-actions a span { display: inline-flex; }
+.docs-content .product-hero-actions a svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
 
-[Get started with GitLab Orbit Local](local/getting-started.md)
+/* Value cards: a GitLab icon in a tinted badge above the title. */
+.docs-content ul.product-cards-icons > li > span:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin: 0 auto var(--gl-spacing-scale-4);
+  border-radius: var(--gl-border-radius-lg);
+  background-color: color-mix(in srgb, currentColor 12%, transparent);
+  color: var(--gl-color-purple-600);
+}
+.gl-dark .docs-content ul.product-cards-icons > li > span:first-child { color: var(--gl-color-purple-300); }
+.docs-content ul.product-cards-icons > li > span:first-child svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: currentColor;
+}
 
-## GitLab Orbit on GitLab Self-Managed
+/* Video cards: the thumbnail fills the top of the card, edge to edge, clipped to the card's rounded corners. */
+.docs-content ul.product-video-cards > li { overflow: hidden; }
+.docs-content ul.product-video-cards > li > img {
+  display: block;
+  width: calc(100% + 2.5rem);
+  max-width: none;
+  margin: -1.25rem -1.25rem var(--gl-spacing-scale-4);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
 
-On GitLab Self-Managed, you run GitLab Orbit on a Kubernetes cluster next to your instance. The deployment
-also includes the data pipeline that feeds the graph: PostgreSQL logical replication, Siphon, NATS, and
-ClickHouse. The graph and the query surfaces match GitLab.com.
-
-[Get started with GitLab Orbit on GitLab Self-Managed](self-managed/getting-started.md)
-
-## What GitLab Orbit indexes
-
-GitLab Orbit indexes two categories of data:
-
-- SDLC objects from your GitLab instance: groups, projects, users, merge requests, pipelines, jobs,
-  work items, milestones, labels, and security findings.
-
-- Source code from your repositories: files, directories, function and class definitions, and
-  cross-file import references. Code is indexed from the default branch only.
-
-GitLab Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, and PHP.
-
-[Full indexing coverage](compare-local-remote.md#indexed-data) | [Schema reference](remote/schema.md)
-
-## Get started
-
-- [Enable GitLab Orbit Remote and run your first query](remote/getting-started.md)
-- [Build a local code graph with GitLab Orbit Local](local/getting-started.md)
-- [Install GitLab Orbit on GitLab Self-Managed](self-managed/getting-started.md)
-- [Set up AI coding agents with the GitLab Orbit skill](ai_coding_agents.md)
-- [Compare GitLab Orbit Remote and Local](compare-local-remote.md)
+/* Cards: same metrics as the cards shortcode (.card-body.card.gl-rounded-lg): 1.25rem padding, 8px radius, neutral-100 border, subtle hover. */
+.docs-content ul.product-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 1.25rem;
+  margin: 0 0 var(--gl-spacing-scale-6);
+  padding: 0;
+  list-style: none;
+}
+.docs-content ul.product-cards-2 { grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+.docs-content ul.product-cards > li {
+  position: relative;
+  margin: 0;
+  padding: 1.25rem;
+  border: 1px solid var(--gl-color-neutral-100);
+  border-radius: var(--gl-border-radius-lg);
+  background-color: var(--gl-background-color-default);
+  color: var(--gl-text-color-default);
+  line-height: 1.5rem;
+  transition: all 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.docs-content ul.product-cards > li:hover { background-color: var(--gl-background-color-subtle); }
+.docs-content ul.product-cards > li > a {
+  display: inline-block;
+  padding-bottom: var(--gl-spacing-scale-3);
+  font-weight: 600;
+  color: var(--gl-text-color-default) !important;
+  text-decoration: none !important;
+}
+.docs-content ul.product-cards > li > a::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+/* Capitalised CSS function on purpose: markdownlint MD044 reads the lowercase form as the proper name URL. */
+.docs-content ul.product-cards > li > a::after {
+  content: "";
+  position: relative;
+  top: 0.15rem;
+  left: 0.25rem;
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  mask: URL("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M10.159%2010.72a.75.75%200%201%200%201.06%201.06l3.25-3.25L15%208l-.53-.53-3.25-3.25a.75.75%200%200%200-1.061%201.06l1.97%201.97H1.75a.75.75%200%201%200%200%201.5h10.379l-1.97%201.97z'/%3E%3C/svg%3E") center no-repeat;
+  background-color: transparent;
+  translate: -50% 0;
+  transition: all 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.docs-content ul.product-cards > li:hover > a::after {
+  background-color: var(--gl-text-color-default);
+  translate: 0 0;
+}
+/* Links outside GitLab.com get the site's external-link icon instead of the arrow. A larger offset keeps a gap while the icon sits half a width to the left; it still slides right on hover. */
+.docs-content ul.product-cards > li > a[href^="http"]:not([href*="GitLab.com" i])::after {
+  left: var(--gl-spacing-scale-3);
+}
+</style>

@@ -460,7 +460,7 @@ description = "Fail if the committed dashboards are out of date"
 
 [tasks."docs:query-language"]
 run = "cargo xtask query-docs"
-description = "Regenerate the ontology-derived tables in docs/docs-gitlab-com/remote/queries/query-language.md"
+description = "Regenerate the ontology-derived tables in docs/docs-gitlab-com/queries/query-language.md"
 
 [tasks."docs:query-language:check"]
 run = "cargo xtask query-docs --check"
@@ -550,6 +550,3 @@ description = "Build the docs.gitlab.com site with the user docs, as the docs_hu
 run = "DRY_RUN=true bash ./scripts/ci/sync-doc-principles.sh"
 description = "Rehearse the documentation-principles sync: fetch upstream and show the diff"
 
-[tasks."skill:sync:orbit"]
-run = "cp docs/docs-gitlab-com/remote/queries/query-language.md skills/orbit/references/query_language.md"
-description = "Sync upstream docs into the Orbit agent skill (skills/orbit/references/)"

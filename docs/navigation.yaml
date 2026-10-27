@@ -2,98 +2,41 @@
 # Source of truth until it merges in docs-gitlab-com data/en-us/navigation.yaml.
 # scripts/docs/site.sh replaces the GitLab Orbit section of the docs-gitlab-com
 # checkout with this file, so `mise docs:serve` and `mise docs:build` show these pages.
-# Until cutover, the first section is live and the second lists docs/docs-gitlab-com/v2.
 
 - title: GitLab Orbit
   url: 'orbit/'
   submenu:
-    - title: Compare GitLab Orbit Remote and Local
-      url: 'orbit/compare-local-remote/'
-    - title: GitLab Orbit skill
-      url: 'orbit/ai_coding_agents/'
-    - title: GitLab Orbit Remote
-      url: 'orbit/remote/'
-      submenu:
-        - title: Getting started
-          url: 'orbit/remote/getting-started/'
-        - title: How it works
-          url: 'orbit/remote/how-it-works/'
-        - title: Security
-          url: 'orbit/remote/security/'
-        - title: Schema reference
-          url: 'orbit/remote/schema/'
-        - title: Cookbook
-          url: 'orbit/remote/cookbook/'
-        - title: Queries
-          url: 'orbit/remote/queries/'
-          submenu:
-            - title: Query language
-              url: 'orbit/remote/queries/query-language/'
-        - title: GitLab Duo Agent Platform
-          url: 'orbit/remote/access/duo/'
-        - title: MCP
-          url: 'orbit/remote/access/mcp/'
-        - title: glab orbit
-          url: 'orbit/remote/access/glab/'
-        - title: REST API
-          url: 'orbit/remote/access/api/'
-        - title: Troubleshooting
-          url: 'orbit/remote/troubleshooting/'
-    - title: GitLab Orbit Local
-      url: 'orbit/local/'
-      submenu:
-        - title: Getting started
-          url: 'orbit/local/getting-started/'
-        - title: How it works
-          url: 'orbit/local/how-it-works/'
-        - title: Schema reference
-          url: 'orbit/local/schema/'
-        - title: Connect your tools
-          url: 'orbit/local/access/'
-          submenu:
-            - title: GitLab Orbit CLI (orbit)
-              url: 'orbit/local/access/cli/'
-            - title: GitLab CLI (glab orbit)
-              url: 'orbit/local/access/glab/'
-            - title: GitLab Orbit Local MCP
-              url: 'orbit/local/access/mcp/'
-        - title: Troubleshooting
-          url: 'orbit/local/troubleshooting/'
-
-- title: GitLab Orbit v2 (preview)
-  url: 'orbit/v2/'
-  submenu:
     - title: Quickstart
-      url: 'orbit/v2/quickstart/'
+      url: 'orbit/quickstart/'
       submenu:
         - title: Start a free trial
-          url: 'orbit/v2/trial/'
+          url: 'orbit/trial/'
     - title: Prompt examples
-      url: 'orbit/v2/prompt-examples/'
+      url: 'orbit/prompt-examples/'
     - title: Connect your agent
-      url: 'orbit/v2/agents/'
+      url: 'orbit/agents/'
       submenu:
         - title: GitLab Orbit CLI
-          url: 'orbit/v2/cli/'
+          url: 'orbit/cli/'
         - title: GitLab Duo
-          url: 'orbit/v2/agents/duo/'
+          url: 'orbit/agents/duo/'
         - title: GitLab Orbit MCP endpoint
-          url: 'orbit/v2/agents/mcp/'
+          url: 'orbit/agents/mcp/'
     - title: GitLab Orbit dashboard
-      url: 'orbit/v2/dashboard/'
+      url: 'orbit/dashboard/'
     - title: Queries
-      url: 'orbit/v2/queries/'
+      url: 'orbit/queries/'
       submenu:
         - title: Query language
-          url: 'orbit/v2/queries/query-language/'
+          url: 'orbit/queries/query-language/'
     - title: GitLab Orbit architecture
-      url: 'orbit/v2/how-it-works/'
+      url: 'orbit/how-it-works/'
       submenu:
         - title: Indexed data
-          url: 'orbit/v2/schema/'
+          url: 'orbit/schema/'
         - title: Security
-          url: 'orbit/v2/security/'
+          url: 'orbit/security/'
         - title: Glossary
-          url: 'orbit/v2/glossary/'
+          url: 'orbit/glossary/'
     - title: Troubleshooting
-      url: 'orbit/v2/troubleshooting/'
+      url: 'orbit/troubleshooting/'

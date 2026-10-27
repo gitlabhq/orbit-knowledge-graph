@@ -12,7 +12,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | FIPS posture (module guard, graph and binary gates) | `crates/orbit-server/src/fips.rs`, `scripts/checks/fips/check-graph.sh`, `scripts/checks/fips/check-binary.sh`; posture in the FIPS section of `docs/pages/engineering/architecture/security.md` |
 | Image signing (keyless cosign, canonical project only) | `scripts/release/publish-manifest.sh`, `scripts/release/sign-image.sh`; guide in `docs/pages/engineering/development/image-signing.md` |
 | Image hardening (non-root user, Dockerfile scan, release gate, Vulnerability Report) | `Dockerfile`, `dockerfile-scan`, `release-image-scan`, `container_scanning` in `.gitlab-ci.yml` |
-| Query language reference | `docs/docs-gitlab-com/remote/queries/query-language.md` |
+| Query language reference | `docs/docs-gitlab-com/queries/query-language.md` |
 | Orbit query frontend | `crates/query-engine/compiler/src/passes/frontend/`; design in `docs/pages/engineering/architecture/querying/query-engine.md` |
 | SDLC indexing pipeline | `docs/pages/engineering/architecture/indexing/sdlc-indexing.md`, `docs/pages/engineering/runbooks/sdlc_indexing.md` |
 | Code indexing pipeline | `docs/pages/engineering/architecture/indexing/code-indexing.md`, `docs/pages/engineering/runbooks/code_indexing.md` |
@@ -33,7 +33,7 @@ Canonical locations for files, schemas, configs, and tools in the knowledge-grap
 | Orbit skill sources, `orbit skills get <name> [path]` command, server contract, and build checks | `skills/orbit/` (remote), `skills/orbit-cli/` (local, with references under `references/local/`), `skills/orbit-wrapper/` (thin wrapper that loads the composed skill from the CLI; a drift test in `crates/orbit-server/src/skills/mod.rs` keeps its description equal to `skills/orbit/`), `crates/orbit-server/src/skills/mod.rs` and gRPC `ListSkills`/`GetSkill` (whole-tree contract), `crates/orbit-cli/src/skill.rs` (resolution, cache, composition, and fallback), `crates/orbit-prompts/src/marker.rs` (shared build-time/runtime marker parser and composer), and `crates/orbit-prompts/src/skill.rs` (build-time path, link, and command validation). The trees stay standalone: GKG embeds only the remote tree and the CLI embeds the local tree and the wrapper, which `orbit setup` installs as `orbit` |
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |
-| Query language reference (text-indexed properties table is generated) | `docs/docs-gitlab-com/remote/queries/query-language.md` (regenerate the ontology-derived table with `mise docs:query-language`; CI gate `query-language-docs-check`) |
+| Query language reference (text-indexed properties table is generated) | `docs/docs-gitlab-com/queries/query-language.md` (regenerate the ontology-derived table with `mise docs:query-language`; CI gate `query-language-docs-check`) |
 | Testing strategy (test layers, CI jobs, where to add a test) | `docs/pages/engineering/testing/` |
 | Query test fixtures | `fixtures/queries/` |
 | YAML query scenarios (data correctness) | `crates/integration-tests/tests/server/data_correctness/scenarios/<category>/*.yaml` (run with `mise test:integration:data`; filter with `SCENARIO_FILTER=<name>`) |

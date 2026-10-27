@@ -13,7 +13,6 @@ components:
         target: 'docs-locale/{{language}}/docs-gitlab-com/'
     ignored_paths:
       - 'docs/.*/**'
-      - 'docs/docs-gitlab-com/v2/**'
       - 'docs/docs-gitlab-com/schema.md'
       - 'docs/docs-gitlab-com/queries/query_language.md'
       - 'docs/docs-gitlab-com/queries/mcp_tools.md'

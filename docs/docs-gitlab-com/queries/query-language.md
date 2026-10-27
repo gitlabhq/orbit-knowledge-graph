@@ -172,11 +172,10 @@ LIMIT 10
 These properties have a text index:
 
 <!-- The table below is generated from the ontology's `text` storage indexes. -->
-<!-- Copy it from docs/docs-gitlab-com/remote/queries/query-language.md after `mise run docs:query-language`. That task does not update this v2 copy. -->
 <!-- BEGIN GENERATED: text-indexed-properties -->
 
 | Entity | Text-indexed properties |
-|--------|-------------------------|
+|--------|------------------------|
 | `Branch` | `name` |
 | `ContainerRepository` | `name` |
 | `Definition` | `file_path`, `fqn`, `name` |
@@ -191,6 +190,7 @@ These properties have a text index:
 | `Job` | `name`, `ref` |
 | `Label` | `description`, `title` |
 | `MergeRequest` | `description`, `source_branch`, `target_branch`, `title` |
+| `MergeRequestDiff` | `head_commit_sha` |
 | `MergeRequestDiffFile` | `new_path`, `old_path` |
 | `Milestone` | `description`, `title` |
 | `Note` | `note` |
