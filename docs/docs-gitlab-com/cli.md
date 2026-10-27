@@ -249,7 +249,8 @@ src/main.py
 - Common `rg` options such as `-A`, `-B`, `-C`, `-w`, `-l`, `-c`, `-g`, and `-t` work.
   To search definitions of one kind, start the query with the kind, such as `def:read_file` or `class:App`.
 - `grep` and `context` index files that you edited after the last index.
-  If another `orbit` process is writing the local graph, the file shows `(edited since index)` instead.
+  If indexing an edited file takes longer than two seconds or fails, `grep` marks the file `(edited since index)`
+  and does not show its definitions. For more information, see [troubleshooting](troubleshooting.md#files-marked-edited-since-index).
 - In a clone of a GitLab project, a search without paths also searches the merge requests, issues, and comments
   of the group of the `origin` remote, and prints them after the local results.
   To search only GitLab, start the query with `mr:`, `issue:`, `commit:`, or `comment:`.
