@@ -25,11 +25,52 @@ pub(crate) async fn run_query(
         QueryInput::Text(query) => build_text_request(&query, format_override)?,
         QueryInput::File(path) => build_query_request(&read_query_body(&path)?, format_override)?,
     };
+    let sends_json = sends_json_query(&request_body);
     let response = match client.query_raw(request_body).await {
         Ok(response) => response,
-        Err(error) => return Err(with_schema(&client, error).await),
+        Err(error) => {
+            let error = with_language_hint(error, sends_json);
+            return Err(with_schema(&client, error).await);
+        }
     };
     write_stdout_raw(&response)
+}
+
+const JSON_INSTANCE_HINT: &str = "This GitLab instance reads Orbit queries as JSON. GQL needs GitLab 19.6 or\n\
+     later. On GitLab 19.4 or 19.5, ask an administrator to turn on the\n\
+     `orbit_gql_queries` feature flag for you.";
+
+const GQL_INSTANCE_HINT: &str = "This GitLab instance reads Orbit queries as GQL text, such as\n\
+     `MATCH (p:Project) RETURN p.full_path LIMIT 5`. JSON query objects are not accepted.";
+
+fn sends_json_query(request: &[u8]) -> bool {
+    #[derive(Deserialize)]
+    struct Sent {
+        query: serde_json::Value,
+    }
+
+    match serde_json::from_slice::<Sent>(request).map(|sent| sent.query) {
+        Ok(serde_json::Value::Object(_)) => true,
+        Ok(serde_json::Value::String(text)) => text.trim_start().starts_with('{'),
+        _ => false,
+    }
+}
+
+fn with_language_hint(mut error: RemoteError, sends_json: bool) -> RemoteError {
+    let message = &error.message;
+    let hint = match sends_json {
+        false if message.contains("parse error:") => JSON_INSTANCE_HINT,
+        true if message.contains("Orbit query syntax at line ")
+            || message.contains("query is invalid") =>
+        {
+            GQL_INSTANCE_HINT
+        }
+        _ => return error,
+    };
+    error.message.truncate(error.message.trim_end().len());
+    error.message.push_str("\n\n");
+    error.message.push_str(hint);
+    error
 }
 
 const SCHEMA_ERRORS: [&str; 3] = [
@@ -190,5 +231,62 @@ mod tests {
     fn query_invalid_json_is_rejected() {
         let err = build_query_request(b"not json", None).unwrap_err();
         assert!(err.message.contains("not valid JSON"));
+    }
+
+    #[test]
+    fn json_queries_are_detected_in_text_and_files() {
+        let text = |query: &str| build_text_request(query, None).unwrap();
+        assert!(!sends_json_query(&text("MATCH (p:Project) RETURN p")));
+        assert!(sends_json_query(&text(r#" {"query_type":"traversal"}"#)));
+        let file = build_query_request(br#"{"query":{"query_type":"traversal"}}"#, None).unwrap();
+        assert!(sends_json_query(&file));
+        let file = build_query_request(br#"{"query":"MATCH (p) RETURN p"}"#, None).unwrap();
+        assert!(!sends_json_query(&file));
+    }
+
+    fn http_400(body: &str) -> RemoteError {
+        RemoteError::new(EXIT_GENERIC, format!("Orbit API error (HTTP 400): {body}"))
+    }
+
+    const JSON_PARSE_ERROR: &str =
+        r#"{"code":"compile_error","message":"parse error: expected value at line 1 column 1"}"#;
+    const GQL_PARSE_ERROR: &str = "{\"code\":\"compile_error\",\"message\":\"schema violation: Orbit query syntax at line 1, column 1: expected Statement\\nExpected one MATCH ... RETURN statement\"}\n";
+    const REJECTED_OBJECT: &str = r#"{"error":"query is invalid"}"#;
+
+    #[test]
+    fn language_hint_matches_what_was_sent_and_how_it_failed() {
+        for (body, sends_json, hint) in [
+            (JSON_PARSE_ERROR, false, JSON_INSTANCE_HINT),
+            (GQL_PARSE_ERROR, true, GQL_INSTANCE_HINT),
+            (REJECTED_OBJECT, true, GQL_INSTANCE_HINT),
+        ] {
+            let error = with_language_hint(http_400(body), sends_json);
+            assert!(error.message.starts_with("Orbit API error (HTTP 400)"));
+            assert!(
+                error.message.ends_with(&format!("}}\n\n{hint}")),
+                "{}",
+                error.message
+            );
+        }
+    }
+
+    #[test]
+    fn other_query_errors_get_no_language_hint() {
+        for (body, sends_json) in [
+            (GQL_PARSE_ERROR, false),
+            (JSON_PARSE_ERROR, true),
+            (r#"{"message":"parse error: missing field `nodes`"}"#, true),
+            (
+                r#"{"message":"schema violation: /nodes: unknown entity"}"#,
+                true,
+            ),
+        ] {
+            let error = with_language_hint(http_400(body), sends_json);
+            assert!(
+                !error.message.contains("This GitLab instance"),
+                "{}",
+                error.message
+            );
+        }
     }
 }
