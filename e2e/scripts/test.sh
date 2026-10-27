@@ -39,9 +39,13 @@ HELM_ARGS=(install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner"
   --set "namespaces.gitlab=$NS_GITLAB"
   --set "namespaces.gkg=$NS_GKG"
   --set "indexingBudgetMultiplier=${E2E_INDEXING_BUDGET_MULTIPLIER:-1}"
-  --set-string "codeGraphIncremental=${E2E_CODE_GRAPH_INCREMENTAL:-false}")
+  --set-string "codeGraphIncremental=${E2E_CODE_GRAPH_INCREMENTAL:-false}"
+  --set-string "gitlabLane=${E2E_GITLAB_LANE}")
 if [ -n "${E2E_ROBOT_IMAGE:-}" ]; then
   HELM_ARGS+=(--set "image=$E2E_ROBOT_IMAGE")
+fi
+if [ -n "${E2E_CLI_IMAGE:-}" ]; then
+  HELM_ARGS+=(--set "cliImage=$E2E_CLI_IMAGE")
 fi
 helm "${HELM_ARGS[@]}"
 
