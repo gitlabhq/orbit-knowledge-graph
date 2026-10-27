@@ -197,6 +197,9 @@ async fn search(
                 out.flush()?;
                 (found, printed) = (true, true);
             }
+            Outcome::NoMatches(reason) if explicit || remote_only => {
+                eprintln!("orbit: {reason}");
+            }
             Outcome::Skipped(reason) if explicit || remote_only => {
                 eprintln!("orbit: GitLab search skipped: {reason}");
             }
@@ -204,7 +207,7 @@ async fn search(
                 eprintln!("orbit: GitLab search skipped: {reason}");
             }
             Outcome::Failed(reason) => eprintln!("orbit: GitLab search failed: {reason}"),
-            Outcome::Empty | Outcome::Skipped(_) => {}
+            Outcome::Empty | Outcome::NoMatches(_) | Outcome::Skipped(_) => {}
         }
     }
     match found {

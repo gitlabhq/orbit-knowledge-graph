@@ -68,6 +68,7 @@ pub(crate) struct Request {
 pub(crate) enum Outcome {
     Found(String),
     Empty,
+    NoMatches(String),
     Skipped(String),
     Failed(String),
 }
@@ -301,7 +302,7 @@ pub(crate) async fn search(request: Request, query: String) -> Outcome {
     }
     match found.is_empty() {
         true if !request.kinds.is_empty() => {
-            Outcome::Skipped(nothing_found(&request, &api_scopes, &scope.1))
+            Outcome::NoMatches(nothing_found(&request, &api_scopes, &scope.1))
         }
         true => Outcome::Empty,
         false => Outcome::Found(found.join("\n")),
@@ -317,19 +318,15 @@ fn nothing_found(request: &Request, api_scopes: &[String], project: &str) -> Str
         .collect::<Vec<_>>()
         .join(", ");
     let mut message = format!("no {searched} match {words:?} in {project}");
-    if api_scopes.len() == 1 {
-        let (qualifier, sibling, label) = match api_scopes[0].as_str() {
-            "MergeRequest" => ("mr", "issue", "issues"),
-            "WorkItem" => ("issue", "mr", "merge requests"),
-            _ => return message,
-        };
-        if words.chars().all(|c| c.is_ascii_digit()) {
-            message.push_str(&format!(
-                "; grep searches words, `{launcher} context {qualifier}:{words}` reads that one directly"
-            ));
-        } else {
-            message.push_str(&format!("; {label}: `{launcher} grep '{sibling}:{words}'`"));
-        }
+    let qualifier = match api_scopes {
+        [scope] if scope == "MergeRequest" => "mr",
+        [scope] if scope == "WorkItem" => "issue",
+        _ => return message,
+    };
+    if words.chars().all(|c| c.is_ascii_digit()) {
+        message.push_str(&format!(
+            "; grep searches words, `{launcher} context {qualifier}:{words}` reads that one directly"
+        ));
     }
     message
 }
@@ -355,10 +352,7 @@ fn plural(scope: &str) -> String {
 fn outcome_for(target: &Target, error: &RemoteError) -> Outcome {
     let missing = first_line(&error.message).ends_with(" not found");
     match error.exit_code {
-        EXIT_UNAVAILABLE if missing && target.explicit() => Outcome::Skipped(format!(
-            "no local path, and no GitLab project or group named {} that you can read with Orbit enabled",
-            target.named()
-        )),
+        EXIT_UNAVAILABLE if missing && target.explicit() => Outcome::NoMatches(missing_target(target)),
         EXIT_UNAVAILABLE if missing => Outcome::Skipped(
             "Orbit isn't enabled for the GitLab group of this repository's `origin`, or you can't read it"
                 .into(),
@@ -366,6 +360,16 @@ fn outcome_for(target: &Target, error: &RemoteError) -> Outcome {
         EXIT_UNAVAILABLE | EXIT_FORBIDDEN => Outcome::Skipped(first_line(&error.message)),
         _ => Outcome::Failed(first_line(&error.message)),
     }
+}
+
+fn missing_target(target: &Target) -> String {
+    let name = target.named();
+    let under = std::env::current_dir()
+        .map(|dir| format!(" under {}", dir.display()))
+        .unwrap_or_default();
+    format!(
+        "no such path {name}{under}, and no GitLab project or group named {name} that you can read with Orbit enabled"
+    )
 }
 
 pub(crate) fn first_line(message: &str) -> String {
@@ -752,6 +756,35 @@ fn label(entry: &Entry, home: Option<&str>) -> (String, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_search_that_finds_nothing_says_so_without_sending_the_agent_elsewhere() {
+        let request = |words: &str| Request {
+            target: Target::Project("g/p".into()),
+            keywords: vec![words.into()],
+            kinds: vec!["MergeRequest"],
+        };
+        let scopes = ["MergeRequest".to_string()];
+        assert_eq!(
+            nothing_found(&request("survey"), &scopes, "g"),
+            "no merge requests match \"survey\" in g"
+        );
+        assert!(nothing_found(&request("42"), &scopes, "g").contains("context mr:42"));
+    }
+
+    #[test]
+    fn a_missing_explicit_target_names_the_missing_path_first() {
+        let error = RemoteError::new(EXIT_UNAVAILABLE, "Project not found");
+        let Outcome::NoMatches(message) =
+            outcome_for(&Target::Namespace("packages/runner/src".into()), &error)
+        else {
+            panic!("expected a no-matches outcome");
+        };
+        assert!(
+            message.starts_with("no such path packages/runner/src under "),
+            "{message}"
+        );
+    }
 
     fn response(json: &str) -> Response {
         serde_json::from_str(json).unwrap()
