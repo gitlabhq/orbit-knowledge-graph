@@ -56,12 +56,18 @@ impl GraphWriter {
     }
 
     /// Deletes the rows of `paths`: their files, the entities in them, and
-    /// every edge that starts or ends at one of those.
+    /// every edge that starts or ends at one of those. Directories are left
+    /// alone: one can share a path with a file it replaced.
     pub fn delete_files(&self, ontology: &Ontology, paths: &[String]) -> Result<()> {
         if paths.is_empty() {
             return Ok(());
         }
         let local = LocalTables::of(ontology)?;
+        let in_files: Vec<&LocalEntity> = local
+            .entities
+            .iter()
+            .filter(|entity| entity.name != DIRECTORY)
+            .collect();
         self.client.execute(
             "CREATE OR REPLACE TEMP TABLE _orbit_deleted_paths (path VARCHAR)",
             &[],
@@ -80,8 +86,7 @@ impl GraphWriter {
                 entity.file_column
             )
         };
-        let ids = local
-            .entities
+        let ids = in_files
             .iter()
             .map(|entity| format!("SELECT id FROM {} WHERE {}", entity.table, in_paths(entity)))
             .collect::<Vec<_>>()
@@ -98,7 +103,7 @@ impl GraphWriter {
             ),
             &[],
         )?;
-        for entity in &local.entities {
+        for entity in &in_files {
             self.client.execute(
                 &format!("DELETE FROM {} WHERE {}", entity.table, in_paths(entity)),
                 &[],
