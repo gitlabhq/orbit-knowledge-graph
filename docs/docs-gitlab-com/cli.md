@@ -161,20 +161,7 @@ glab orbit query "MATCH (p:Project) WHERE p.full_path STARTS WITH 'my-group/' RE
 
 To list the properties of node types, run `glab orbit ontology MergeRequest Project`.
 
-### Query language by GitLab version
-
-The query language that your instance accepts depends on its GitLab version.
-On GitLab 19.4.4 and later 19.4 releases, and on GitLab 19.5.2 and later 19.5 releases,
-the `orbit_gql_queries` feature flag selects GQL or JSON for each user.
-The flag is on by default.
-GitLab 19.6 and later accept only GQL.
-
-| Usage | GitLab 19.4.4+ and 19.5.2+, flag on | GitLab 19.4.4+ and 19.5.2+, flag off | GitLab 19.6 and later |
-|-------|-------------------------------------|--------------------------------------|-----------------------|
-| `glab orbit query` with GQL text | Yes | No | Yes |
-| `glab orbit query` with a JSON query, as text or with `--file` | No | Yes | No |
-| `--response-format gql` | Yes | No | Yes |
-| `grep`, `context`, `graph-status`, `ontology`, and `skills` | Yes | Yes | Yes |
+GitLab Orbit queries use GQL on GitLab 19.4.4 and later 19.4 releases, GitLab 19.5.2 and later 19.5 releases, and GitLab 19.6 and later.
 
 ### Check indexing progress
 

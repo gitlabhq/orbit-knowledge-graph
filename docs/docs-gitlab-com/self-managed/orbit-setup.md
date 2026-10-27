@@ -248,20 +248,9 @@ An hourly sweep picks up any data that indexing missed.
 ## Verify the installation
 
 Query the graph for the projects in the group that you turned on.
-On GitLab 19.4.4 and later 19.4 releases, and on GitLab 19.5.2 and later 19.5 releases,
-the `orbit_gql_queries` feature flag selects GQL or JSON for each user.
-The flag is on by default.
-With the flag on, the API parses every query as GQL, so JSON query objects fail.
-GitLab 19.6 and later accept only GQL.
-For the CLI commands that each version supports, see [query language by GitLab version](../cli.md#query-language-by-gitlab-version).
+GitLab 19.4.4 and later 19.4 releases, GitLab 19.5.2 and later 19.5 releases, and GitLab 19.6 and later accept GQL queries.
 
 To verify the installation:
-
-1. If an administrator turned off the `orbit_gql_queries` feature flag, turn it on for your user in the [Rails console](https://docs.gitlab.com/administration/operations/rails_console/):
-
-   ```ruby
-   Feature.enable(:orbit_gql_queries, User.find_by_username('<your_username>'))
-   ```
 
 1. Save the query as `query.gql`:
 
@@ -282,12 +271,6 @@ To verify the installation:
    ```
 
    Replace `<your_access_token>` with your personal access token.
-
-1. Optional. To send JSON queries again as this user, turn off the feature flag:
-
-   ```ruby
-   Feature.disable(:orbit_gql_queries, User.find_by_username('<your_username>'))
-   ```
 
 The query returns rows after the first index finishes.
 Pod status and the `/-/readiness` endpoint pass before that point, so they do not confirm indexing.
