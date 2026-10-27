@@ -1,6 +1,6 @@
 ---
 title: Content
-description: Posts, demos, and talks about GitLab Orbit.
+description: Videos, demos, and articles about GitLab Orbit.
 ---
 
-Posts, demos, and talks from the Orbit team.
+Videos, demos, and articles about GitLab Orbit.

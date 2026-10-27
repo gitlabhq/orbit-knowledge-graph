@@ -197,6 +197,8 @@ struct PropertyYaml {
     #[serde(default)]
     unique: bool,
     #[serde(default)]
+    high_fan_out: bool,
+    #[serde(default)]
     description: Option<String>,
     #[serde(default)]
     traversal_path_lookup: Option<TraversalPathLookupYaml>,
@@ -398,6 +400,7 @@ impl NodeYaml {
                     hidden: prop_def.hidden,
                     selectivity,
                     unique: prop_def.unique,
+                    high_fan_out: prop_def.high_fan_out,
                     description: prop_def.description,
                     traversal_path_lookup: prop_def.traversal_path_lookup.map(|l| {
                         TraversalPathLookupSpec {

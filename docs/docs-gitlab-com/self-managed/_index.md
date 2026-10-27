@@ -1,6 +1,6 @@
 ---
 stage: Analytics
-group: Knowledge Graph
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Run GitLab Orbit against your own GitLab instance.
 title: GitLab Orbit on GitLab Self-Managed
@@ -10,7 +10,6 @@ title: GitLab Orbit on GitLab Self-Managed
 
 - Tier: Premium, Ultimate
 - Offering: GitLab Self-Managed
-- Status: Beta
 
 {{< /details >}}
 
@@ -20,27 +19,20 @@ title: GitLab Orbit on GitLab Self-Managed
 
 {{< /history >}}
 
-> [!note]
-> GitLab Orbit on GitLab Self-Managed is in
-> [beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
-> This feature is available for testing, but not ready for production use.
-
-On GitLab.com, GitLab Orbit runs on GitLab infrastructure.
-On GitLab Self-Managed, you run GitLab Orbit next to your instance.
+GitLab Orbit is built to add minimal load to your GitLab instance.
+It reads GitLab data from a ClickHouse copy of the database, and fetches code through the GitLab internal API, never from Gitaly directly.
+The same pipeline gives you a ClickHouse data lake of your GitLab data, which you can build on and scale separately from GitLab.
 
 A GitLab Orbit deployment has two parts:
 
-- A data pipeline that copies the GitLab database into ClickHouse.
-- GitLab Orbit, which turns that copy into a queryable graph.
+- A data pipeline that copies the GitLab database into the ClickHouse data lake through PostgreSQL logical replication.
+- GitLab Orbit, which turns the data lake and the source code into a queryable graph.
 
-The data pipeline does not depend on GitLab Orbit, so you can verify the pipeline before you install
-GitLab Orbit.
+The data pipeline does not depend on GitLab Orbit, so you can verify the pipeline before you install GitLab Orbit.
 
-GitLab Orbit is distributed only as a Helm chart for Kubernetes. The Linux package does not include it.
-Install the chart on the cluster that runs GitLab, or on a separate cluster next to your instance.
-
-Because GitLab Orbit on GitLab Self-Managed is in beta, contact your account team before you plan a
-deployment to confirm current limitations.
+GitLab distributes GitLab Orbit only as a Helm chart for Kubernetes, not in the Linux package.
+Install the chart on the cluster that runs GitLab, or on a separate cluster that can reach GitLab, PostgreSQL, ClickHouse, and NATS.
+GitLab Orbit does not run on a GitLab Geo secondary site.
 
 ## Architecture
 
@@ -92,27 +84,17 @@ GitLab reaches the webserver over gRPC.
 
 | Page | Description |
 |------|-------------|
-| [Get started](getting-started.md) | Prerequisites, installation order, and shared configuration values |
+| [Get started](getting-started.md) | Prerequisites, installation order, Kubernetes, NATS, object storage, and shared values |
+| [ClickHouse](clickhouse.md) | Versions, databases, high availability, memory, log retention, and users |
 | [Set up data replication](data-replication.md) | PostgreSQL logical replication and Siphon |
-| [Set up GitLab Orbit](orbit-setup.md) | The ClickHouse database and identities, the GitLab connection, the GitLab Orbit chart, and group indexing |
-
-## Known limitations
-
-GitLab Orbit does not run on a GitLab Geo secondary site.
+| [Set up GitLab Orbit](orbit-setup.md) | The GitLab connection, the Secrets, the chart, indexing, verification, and upgrades |
+| [Networking](networking.md) | TLS, certificates, and the connections that GitLab Orbit uses |
+| [Monitor GitLab Orbit](observability.md) | Prometheus metrics, Grafana dashboards, and alerts |
+| [Troubleshooting](troubleshooting.md) | Common errors and recovery after the loss of the graph database |
 
 ## Cryptographic module
 
-The GitLab Orbit server image links the AWS-LC FIPS cryptographic module and runs all TLS
-connections (gRPC from GitLab, ClickHouse, NATS) and JWT verification inside it. The server
-refuses to start when the module is not in FIPS mode. The linked module is
-[AWS-LC-FIPS 4](https://github.com/aws/aws-lc/blob/main/crypto/fipsmodule/FIPS.md), which is
-in process at the NIST Cryptographic Module Validation Program. There is no separate FIPS image:
-every published tag carries the same module. The `orbit` command line tool for local indexing
-does not link the module.
-
-Redundancy and recovery for GitLab Orbit are not documented. GitLab Orbit holds no data of its own, so if
-you lose the graph database, you can rebuild it by indexing again.
-
-For the support that applies during beta, see
-[beta](https://docs.gitlab.com/policy/development_stages_support/#beta) and the
-[Statement of Support](https://about.gitlab.com/support/statement-of-support/).
+The GitLab Orbit server image runs all TLS connections and JWT verification in the [AWS-LC-FIPS](https://github.com/aws/aws-lc/blob/main/crypto/fipsmodule/FIPS.md) cryptographic module.
+The server does not start when the module is not in FIPS mode.
+Every published image includes the module, so you do not need a separate FIPS image.
+The `orbit` command line tool for local indexing does not include the module.

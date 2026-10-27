@@ -1118,7 +1118,9 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                     ""
                 };
                 return Err(QueryError::Validation(format!(
-                    "add filters or node_ids to at least one node{hint}{negation_hint}"
+                    "add filters or node_ids to at least one node, such as \
+                     (p:Project {{full_path: 'group/project'}}) or WHERE mr.project_id = \
+                     42{hint}{negation_hint}"
                 )));
             }
             _ => {}
@@ -1706,10 +1708,7 @@ mod tests {
 
         let plain =
             error_for(r#"{"query_type": "traversal", "nodes": [{"id": "u", "entity": "User"}]}"#);
-        assert!(
-            plain.ends_with("add filters or node_ids to at least one node"),
-            "{plain}"
-        );
+        assert!(plain.ends_with("or WHERE mr.project_id = 42"), "{plain}");
 
         let neighbors = error_for(
             r#"{"query_type": "neighbors", "nodes": [{"id": "u", "entity": "User"}],
@@ -2937,7 +2936,8 @@ mod tests {
                 "query_type": "traversal",
                 "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}]
             }"#,
-            "add filters or node_ids to at least one node \
+            "add filters or node_ids to at least one node, such as \
+             (p:Project {full_path: 'group/project'}) or WHERE mr.project_id = 42 \
              (an id_range counts only with a span of at most 100000)",
         );
         assert_ok(

@@ -21,7 +21,14 @@ async fn list_skills_returns_deployed_skill_metadata() {
         .unwrap()
         .into_inner();
 
-    assert_eq!(response.skills.len(), 1);
+    assert_eq!(
+        response
+            .skills
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>(),
+        ["orbit", "orbit-start"]
+    );
     let skill = &response.skills[0];
     assert_eq!(skill.name, "orbit");
     assert_eq!(skill.version, catalog_version(Frontend::JsonDsl));
@@ -52,7 +59,7 @@ async fn get_skill_returns_sorted_tree_with_file_hashes() {
     assert_eq!(response.version, listed.skills[0].version);
     assert_eq!(response.compatibility, listed.skills[0].compatibility);
     assert_eq!(response.server_version, listed.server_version);
-    assert_eq!(response.files.len(), 9);
+    assert_eq!(response.files.len(), 8);
     assert_eq!(response.files[0].path, "SKILL.md");
     assert!(
         response
@@ -98,7 +105,7 @@ async fn get_skill_unknown_name_lists_sorted_known_names() {
     assert_eq!(error.code(), tonic::Code::NotFound);
     assert_eq!(
         error.message(),
-        "Unknown skill \"missing\". Known skills: [\"orbit\"]"
+        "Unknown skill \"missing\". Known skills: [\"orbit\", \"orbit-start\"]"
     );
 }
 
@@ -129,4 +136,25 @@ async fn skill_requests_select_the_query_language() {
         .await
         .unwrap_err();
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
+}
+
+#[tokio::test]
+async fn get_skill_serves_the_start_skill() {
+    let response = test_service()
+        .get_skill(authed_request(GetSkillRequest {
+            name: "orbit-start".into(),
+            metadata_only: false,
+            ..Default::default()
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(response.name, "orbit-start");
+    assert_eq!(response.files.len(), 1);
+    assert_eq!(response.files[0].path, "SKILL.md");
+    assert_eq!(
+        response.files[0].sha256,
+        sha256_hex(&response.files[0].content)
+    );
 }

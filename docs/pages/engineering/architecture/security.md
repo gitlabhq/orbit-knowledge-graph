@@ -7,12 +7,16 @@ authors:
   - dgruzd
 ---
 
+## Who sees what
+
+GitLab decides who can see what, and Orbit enforces it. Here is a simplified
+view of the three checks.
+
 ![Each request passes three separate checks](../../../assets/architecture/security.svg)
 
-GitLab decides who can see what, and Orbit enforces it. Customers already
-trust the GitLab permission model, so we enforce it instead of copying it.
-Three separate layers do that, and each one fails closed: a fault returns
-less data or an error, never more.
+Customers already trust the GitLab permission model, so we enforce it instead
+of copying it. Three separate layers do that, and each one fails closed: a
+fault returns less data or an error, never more.
 
 ## How a request is checked
 
@@ -34,10 +38,10 @@ sequenceDiagram
 ```
 
 Nobody talks to Orbit directly. GitLab authenticates the caller and finds the
-groups where they have at least the Reporter role. It sends Orbit a short-lived
-signed token with that list. Orbit limits the query to those
-groups, then asks GitLab to check every returned entity before the result
-goes back.
+groups where they have at least the Reporter role. It sends Orbit a
+short-lived signed token with that list. Orbit limits the query to those
+groups, then asks GitLab to check every returned entity before the result goes
+back.
 
 ## Paths: where each row belongs
 
@@ -75,8 +79,8 @@ expose data on its own.
 
 ## What this guarantees
 
-- GitLab stays the only source of truth for permissions, so a policy change
-  in GitLab applies to the next Orbit request.
+- GitLab stays the only source of truth for permissions, so a policy change in
+  GitLab applies to the next Orbit request.
 - Every allowed path needs at least the Reporter role. Some entities need
   more, like Security Manager for vulnerabilities.
 - We remove paths below that role before building the query, so counts and
@@ -92,15 +96,14 @@ expose data on its own.
 - Caller input never becomes query text. Names must match the graph schema,
   and every value goes to the store as a separate parameter.
 - Every query has limits on depth, size, and time.
-- Customer data goes only into expanded log fields, and the deployment
-  decides when Orbit writes them.
+- Customer data goes only into expanded log fields, and the deployment decides
+  when Orbit writes them.
 
 ## Between the services
 
 The signed token proves that GitLab sent the request and names the caller.
 TLS, when the deployment turns it on, proves to GitLab that it talks to the
-real Orbit server. The server uses only a FIPS 140-3 cryptographic module and won't
-start unless it runs in FIPS mode.
+real Orbit server. The server uses only a [FIPS](#fips) 140-3 cryptographic module.
 
 Setup creates a separate read-only user for the graph store, so a deployment
 can give the query service read access only.
@@ -108,11 +111,25 @@ can give the query service read access only.
 We sign every release image, block a release that has a fixable high or
 critical vulnerability, and don't run images as root.
 
+## FIPS
+
+All server binaries use the AWS-LC FIPS 140-3 module for TLS and JWT. There is no
+non-FIPS server build. The `orbit` CLI is out of scope, because the module does not
+build on Windows and macOS.
+
+- The server does not start unless FIPS mode is on. The `starting` log line shows the
+  AWS-LC version.
+- CI fails when a second cryptographic backend enters the server build or binary.
+- A unit test pins the module generation. CI fails when a dependency bump crosses a
+  generation, because that change is a compliance event.
+- To turn on TLS between pods, follow the
+  [internal TLS checklist](../development/server-configuration.md#turn-on-internal-tls).
+
 ## When things go wrong
 
 If the token is missing, invalid, or expired, Orbit rejects the request before
-doing any work. If GitLab doesn't answer an item check, the query fails.
-Orbit never returns entities that GitLab didn't check.
+doing any work. If GitLab doesn't answer an item check, the query fails. Orbit
+never returns entities that GitLab didn't check.
 
 ## Further reading
 
@@ -120,5 +137,5 @@ Orbit never returns entities that GitLab didn't check.
 - [Orbit design document](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/orbit/)
 - [ADR 001: gRPC communication](../adr/001_grpc_communication.md)
 - [ADR 008: Workhorse query acceleration](../adr/008_workhorse_query_acceleration.md)
-- The [FIPS and TLS](../runbooks/fips_and_tls.md) and
-  [image signing](../runbooks/image_signing.md) runbooks
+- [Image signing](../development/image-signing.md)
+- [Server configuration](../development/server-configuration.md)

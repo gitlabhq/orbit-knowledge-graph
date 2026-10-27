@@ -433,14 +433,29 @@ impl QueryParser {
     }
 
     fn Aggregate(input: Node) -> Result<Expression> {
-        Ok(match_nodes!(input.into_children();
-            [AggregateFunction(function), PropertyExpression(property)] => Expression::Aggregate {
-                function, target: Target::Property(property),
-            },
-            [AggregateFunction(function), Variable(variable)] => Expression::Aggregate {
-                function, target: Target::Variable(variable),
-            },
-        ))
+        let span = input.as_span();
+        let (function, distinct, target) = match_nodes!(input.into_children();
+            [AggregateFunction(function), PropertyExpression(property)] =>
+                (function, false, Target::Property(property)),
+            [AggregateFunction(function), Variable(variable)] =>
+                (function, false, Target::Variable(variable)),
+            [AggregateFunction(function), Distinct(_), PropertyExpression(property)] =>
+                (function, true, Target::Property(property)),
+            [AggregateFunction(function), Distinct(_), Variable(variable)] =>
+                (function, true, Target::Variable(variable)),
+        );
+        if distinct && function != AggregateFunction::Count {
+            return Err(error_at(span, "DISTINCT works only inside count()"));
+        }
+        Ok(Expression::Aggregate {
+            function,
+            distinct,
+            target,
+        })
+    }
+
+    fn Distinct(_input: Node) -> Result<()> {
+        Ok(())
     }
 
     fn AggregateFunction(input: Node) -> Result<AggregateFunction> {
@@ -512,6 +527,12 @@ impl QueryParser {
 
     fn SortItem(input: Node) -> Result<Sort> {
         let span = input.as_span();
+        if let Some(call) = input
+            .children()
+            .find(|child| child.as_rule() == Rule::FunctionCall)
+        {
+            return Err(unsupported_sort_function(&call));
+        }
         Ok(match_nodes!(input.into_children();
             [FunctionCall(_)] => unreachable!("FunctionCall always errors"),
             [FunctionCall(_), SortDirection(_)] => unreachable!("FunctionCall always errors"),
@@ -682,13 +703,33 @@ fn unsupported_function(call: &Node) -> Error<Rule> {
         "type" => {
             "type() takes one relationship variable and works in WHERE type(r) = 'CLOSES', WHERE type(r) IN ['CLOSES', 'MENTIONS'], RETURN type(r), and ORDER BY type(r)"
         }
-        "count" | "sum" | "avg" | "min" | "max" | "date_trunc" | "properties" | "token_match"
-        | "all_tokens" | "any_tokens" => "this function does not accept these arguments here",
+        "count" | "sum" | "avg" | "min" | "max" => {
+            "aggregates take one variable or property, as in count(mr) or sum(mr.added_lines), and belong in RETURN with an alias: count(mr) AS n"
+        }
+        "date_trunc" | "properties" | "token_match" | "all_tokens" | "any_tokens" => {
+            "this function does not accept these arguments here"
+        }
         _ => {
             "RETURN supports count, sum, avg, min, max, date_trunc, properties, and type; WHERE supports token_match, all_tokens, any_tokens, and type"
         }
     };
     call.error(format!("function {name}() is not supported: {hint}"))
+}
+
+fn unsupported_sort_function(call: &Node) -> Error<Rule> {
+    let name = call.children().next().map_or("", |node| node.as_str());
+    let text = call.as_str();
+    let hint = match name.to_ascii_lowercase().as_str() {
+        "count" | "sum" | "avg" | "min" | "max" => format!(
+            "ORDER BY takes the alias of an aggregate, not the call: write RETURN ..., {text} AS n ORDER BY n"
+        ),
+        _ => {
+            "ORDER BY accepts a property, a variable, an aggregate's alias, or type(r)".to_string()
+        }
+    };
+    call.error(format!(
+        "function {name}() is not supported in ORDER BY: {hint}"
+    ))
 }
 
 fn mismatch(node: &Node) -> Error<Rule> {

@@ -9,9 +9,7 @@ use crate::config::{self, CompilerCtx};
 use crate::metrics::CountErr;
 use crate::{CompiledQueryContext, Input, Ontology, QueryError, Result, SecurityContext};
 use errors::{invalid, parse_failure, syntax_error};
-use ontology::introspection::{
-    IntrospectionScope, SchemaResponse, build_node_schema_response, build_schema_response,
-};
+use ontology::introspection::{IntrospectionScope, SchemaResponse, build_compact_schema_response};
 use pest_derive::Parser;
 
 #[derive(Parser)]
@@ -129,16 +127,18 @@ fn resolve_schema(
     ontology: &Ontology,
     scope: IntrospectionScope,
 ) -> Result<SchemaResponse> {
-    let Some(name) = node else {
-        return build_schema_response(ontology, scope, &[])
-            .map_err(|error| QueryError::Validation(error.to_string()));
-    };
-    if name == "*" || !scope.includes(ontology, &name) {
+    if let Some(name) = &node
+        && (name == "*" || !scope.includes(ontology, name))
+    {
         return Err(QueryError::Validation(format!(
             "schema node '{name}' is unknown or unavailable in this scope"
         )));
     }
-    Ok(build_node_schema_response(ontology, scope, &name))
+    Ok(build_compact_schema_response(
+        ontology,
+        scope,
+        node.as_deref(),
+    ))
 }
 
 fn parse_statement(raw: &str) -> Result<ast::Statement<'_>> {

@@ -23,12 +23,13 @@ pub fn orbit_cmd() -> Command {
     cmd.env("LD_LIBRARY_PATH", &lib);
     // Keep a scratch folder from resolving to a checkout that encloses TMPDIR.
     cmd.env("GIT_CEILING_DIRECTORIES", std::env::temp_dir());
+    cmd.current_dir(std::env::temp_dir());
     cmd
 }
 
 pub fn orbit_index(repo: &Path, data_dir: &Path) -> bool {
     orbit_cmd()
-        .args(["index", repo.to_str().unwrap()])
+        .args(["workspace", "index", repo.to_str().unwrap()])
         .env("ORBIT_DATA_DIR", data_dir)
         .output()
         .unwrap()
@@ -38,7 +39,8 @@ pub fn orbit_index(repo: &Path, data_dir: &Path) -> bool {
 
 pub fn orbit_sql(sql: &str, data_dir: &Path) -> Value {
     let out = orbit_cmd()
-        .args(["sql", "-F", "json", sql])
+        .args(["workspace", "sql", "-F", "json", sql])
+        .current_dir(data_dir)
         .env("ORBIT_DATA_DIR", data_dir)
         .output()
         .unwrap();
@@ -121,10 +123,15 @@ pub fn create_test_repo() -> gitalisk_core::repository::testing::local::LocalGit
 }
 
 pub fn mcp_roundtrip(data_dir: &Path, requests: &[Value]) -> Vec<Value> {
+    mcp_roundtrip_in(data_dir, data_dir, requests)
+}
+
+pub fn mcp_roundtrip_in(cwd: &Path, data_dir: &Path, requests: &[Value]) -> Vec<Value> {
     use std::io::{BufRead, BufReader, Write};
 
     let mut child = orbit_cmd()
-        .args(["mcp", "serve"])
+        .args(["workspace", "mcp", "serve"])
+        .current_dir(cwd)
         .env("ORBIT_DATA_DIR", data_dir)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

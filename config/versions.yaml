@@ -4,11 +4,11 @@
 
 # Graph schema version; prefixes every versioned ClickHouse table (vN_).
 # Bump with `mise schema:bump`, which also appends a migration ledger entry.
-schema: 115
+schema: 116
 
 # Accepted query-DSL shape. Bump when graph_query.schema.json or the
 # compiler's input/validate passes change what queries are accepted.
-query_dsl: 13.1.0
+query_dsl: 13.2.0
 
 # Response envelope of the raw (JSON) formatter.
 raw_output_format: 6.0.0

@@ -42,7 +42,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> RelationBuilder<'a, M> {
             root: None,
             outputs: Vec::new(),
             nodes: HashMap::new(),
-            graph: RelationGraph::default(),
+            graph: RelationGraph::new(pattern.model.supports_selective_latest_rows()),
             tagged: HashSet::new(),
         }
     }

@@ -4,16 +4,20 @@
 # in the templates assistants declare.
 mcp_server:
   name: orbit
-  command: "{{orbit}} mcp serve"
+  command: "{{orbit}} workspace mcp serve"
 instructions: |
   ## Orbit
 
-  - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `--kind`.
-  - `{{orbit}} context path:120-180` can be used for reading line ranges. `{{orbit}} context <name>` must be used for getting useful connections.
-  - MANDATORY: you must read all the code definitions you need in one call: `{{orbit}} context a.rs:10-40 b.rs:88-120`.
-  - Reuse shown source instead of rereading unchanged files.
+  - MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR; narrow with paths, `def:words`, or `file:x`.
+  - MANDATORY: `{{orbit}} context` must be used to read code. Batch all reads and searches you can name, code with tests: `{{orbit}} context a.rs:10-40 a_test.rs:5-60 Name; {{orbit}} grep 'x'`. Names show connections. Edit straight from its output; no separate read is needed.{{remote_gitlab}}{{remote_query}}
 
+remote:
+  remote_gitlab: "\n- MANDATORY: `{{orbit}}` must be used for reading GitLab instead of glab and glab api; writes stay with glab. `{{orbit}} grep 'mr:words'` or `'issue:words'` searches it. `{{orbit}} context mr:42 job:9` reads them; bare `{{orbit}} context` reads the branch's MR and CI failures, and `repo:group/project symbol:Name` a sibling project."
+  remote_query: "\n- MANDATORY: `{{orbit}} query` must be used for counts, rankings, and relationships across GitLab. {{query_syntax}}"
+
+nudge_gitlab: |
+  MANDATORY: `{{orbit}}` must be used for reading GitLab instead of glab; writes stay with glab. `{{orbit}} grep 'mr:words'` searches MRs, and `issue:`, `branch:`, `commit:`, `comment:` the rest. `{{orbit}} context mr:42 issue:7 branch:x pipeline:9 job:9` reads them; bare `{{orbit}} context` reads the current branch's MR and CI; `{{orbit}} context repo:group/project symbol:Name file:path` reads a sibling project's code.
 nudge_search: |
-  MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `--kind`.
+  MANDATORY: `{{orbit}} grep` must be used for search instead of grep and rg. Ignores case, `_`, `-`; `a|b` OR. Narrow with paths, as with rg, or `def:words`/`file:x`.
 template_vars:
   reminder: "[orbit] Grep means run {{orbit}} grep 'words'. rg output plus enclosing definitions."
