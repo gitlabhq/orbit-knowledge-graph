@@ -91,22 +91,21 @@ In the commands on this page, replace `glab orbit` with `orbit`, for example `or
 Remote commands query the remote graph on your GitLab instance.
 They need a GitLab credential and GitLab Orbit turned on for your group.
 Local commands use the local graph on your machine. They need no GitLab account and no network.
+`grep` and `context` use the local graph, and also GitLab when a GitLab credential is available.
 
 | Command | Graph | Purpose |
 |---------|-------|---------|
 | `query` | Remote | Run a query and stream the response. |
-| `status` | Remote | Show the health of the service. |
-| `ontology` | Remote | Show the node types, properties, and relationships. |
-| `tools` | Remote | Show the Model Context Protocol (MCP) tool manifest. |
-| `graph-status` | Remote | Show the indexing progress of a group or project. |
-| `skills` | Remote when a GitLab credential is available, otherwise the built-in copy of `orbit` | List and print the agent skill files, such as `orbit` and `orbit-start`. Only `orbit` has a built-in copy. |
-| `index` | Local | Index a repository, or a directory of repositories. |
-| `grep` | Local | Search every line of code, tests, configuration, and documentation, with the enclosing definitions. |
-| `context` | Local | Show source, callers, and callees. |
-| `repo-map` | Local | Print a compact repository map. |
-| `sql` | Local | Run read-only SQL. |
-| `schema` | Local | List the tables and columns. |
-| `list` | Local | List the indexed repositories. |
+| `status` | Remote | Show the health of the service, or the indexing progress of a group or project. |
+| `schema` | Remote | Show the node types, properties, and relationships. `ontology` is an alias. |
+| `skills get` | Remote when a GitLab credential is available, otherwise the built-in copy of `orbit` | Print the agent skill files, such as `orbit` and `orbit-start`. Only `orbit` has a built-in copy. |
+| `grep` | Local and remote | Search every line of code, tests, configuration, and documentation, with the enclosing definitions, and the merge requests, issues, and comments of your GitLab group. |
+| `context` | Local and remote | Show the source of definitions with their callers and tests, and read merge requests, issues, pipelines, and jobs. |
+| `workspace index` | Local | Index a repository, or a directory of repositories. |
+| `workspace sql` | Local | Run read-only SQL. |
+| `workspace schema` | Local | List the tables and columns. |
+| `workspace list` | Local | List the indexed repositories. |
+| `workspace mcp serve` | Local | Serve the local graph to agents over the Model Context Protocol (MCP). |
 | `setup`, `uninstall` | None | Add or remove the agent configuration. |
 | `config` | None | Read and write saved settings. |
 | `version` | None | Print the version. |
@@ -160,20 +159,19 @@ This query returns five projects in a group. Replace `my-group` with the full pa
 glab orbit query "MATCH (p:Project) WHERE p.full_path STARTS WITH 'my-group/' RETURN p.full_path LIMIT 5"
 ```
 
-To list the properties of node types, run `glab orbit ontology MergeRequest Project`.
+To list the properties of node types, run `glab orbit schema MergeRequest Project`.
 
 ### Check indexing progress
 
-To check the indexing progress of a project, run this command in a clone of the project:
+To check the indexing progress of a group or project, pass its full path:
 
 ```shell
-glab orbit graph-status
+glab orbit status --full-path <my-group/my-project>
 ```
 
-With no option, `graph-status` shows the project of the `origin` remote of the clone.
+Without `--full-path`, `--namespace-id`, or `--project-id`, `status` shows only the health of the service.
 In a terminal, it prints a summary. In a pipe or a file, it prints JSON.
 When indexing is complete, **SDLC data** and **Code** show `indexed`, and the summary ends with `Ready.`
-`status` shows only the health of the service.
 
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
@@ -194,8 +192,8 @@ For merge requests, pipelines, work items, and vulnerabilities, use the [remote 
 |-----------|-------------|--------------|
 | Data | Code only | GitLab data and code |
 | Code version | The checkout on your machine, including commits that you have not pushed | The default branch of each project |
-| Refresh | You run `glab orbit index` again | Automatic |
-| Query with | `grep`, `context`, `repo-map`, and `sql` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
+| Refresh | `grep` and `context` index new commits and edited files, or you run `glab orbit workspace index` | Automatic |
+| Query with | `grep`, `context`, and `workspace sql` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
 
 Your agent can use both graphs in the same conversation.
 
@@ -204,7 +202,7 @@ Your agent can use both graphs in the same conversation.
 `glab orbit setup` indexes the current repository for you. To index a repository yourself, run this command in it:
 
 ```shell
-glab orbit index .
+glab orbit workspace index .
 ```
 
 The CLI parses the files in the working tree, skips the files that `.gitignore` excludes,
@@ -213,12 +211,12 @@ The parser and [supported languages](schema.md#supported-languages) are the same
 
 - When you pass the path of a directory, the CLI indexes each repository in the directory.
 - Each indexed commit keeps its own graph. When you index the same commit again, the CLI reindexes only the files that changed since the last run.
-- After you switch branches, `grep` and `context` index the new commit for you.
-  Before you use `repo-map` or `sql` on the new commit, run `glab orbit index .`.
+- After you switch branches or commit, `grep` and `context` index the new commit for you.
+  `workspace sql` reads only commits that are already indexed.
 
 ### Search and read code
 
-`grep` searches every line of every file in the working tree, like `rg`, and adds definitions, callers, and callees from the graph:
+`grep` searches every line of every file in the working tree, like `rg`, and adds the enclosing definitions from the graph:
 
 ```shell
 glab orbit grep read_file
@@ -227,43 +225,51 @@ glab orbit grep read_file
 The output is similar to:
 
 ```plaintext
-grep "read_file" @ 779e8c44: 3 lines in 2 files
-Function read_file — src/utils.py:3-4 ←run
-  3|def read_file(path):
-  4|    return open(path).read()
+grep "read_file" @ 6e979595: 3 lines in 2 files
+Function read_file — src/utils.py:1-2
+  1|def read_file(path):
+  2|    return open(path).read()
 
-  src/utils.py │ Function read_file:3-4 ←run :3 def read_file(path):
-  src/main.py │ :1 from utils import read_file │ Method run:11-13 →hello,read_file :13         read_file('x')
+src/utils.py
+1-» Function read_file:1-2
+1:def read_file(path):
+
+src/main.py
+1-» imports read_file (utils) → src/utils.py:1
+1:from utils import read_file
+8-» Method run:8-10
+10:        read_file("x")
 ```
 
 - If the term names a definition, its source prints first.
-  Then each file is one row, with each match under its enclosing definition.
-  A definition shows as `Kind name:start-end`, with `←` callers and `→` callees.
-- Plain words ignore case, `_`, `-`, and spaces, so `read_file` also matches `ReadFile`.
+  Then each file prints its path once, with `line:text` for each match.
+  A `line-» Kind name:start-end` line comes before the matches inside each definition, and import lines show where the name comes from.
+- Plain words ignore case, `_`, and `-`, so `read_file` also matches `ReadFile`. Quote `a|b` to match either word.
   Patterns with regular expression characters are regular expressions. For an exact string, use `-F`.
 - Common `rg` options such as `-A`, `-B`, `-C`, `-w`, `-l`, `-c`, `-g`, and `-t` work.
-  To filter by definition type, use `--kind`, such as `--kind Class,Method`.
-- A file that differs from the last commit shows `(edited since index)` and no definitions, even after you run `glab orbit index .` again.
-  Commit the change to see its definitions.
+  To search definitions of one kind, start the query with the kind, such as `def:read_file` or `class:App`.
+- `grep` and `context` index files that you edited after the last index.
+  If another `orbit` process is writing the local graph, the file shows `(edited since index)` instead.
+- In a clone of a GitLab project, a search without paths also searches the merge requests, issues, and comments
+  of the group of the `origin` remote, and prints them after the local results.
+  To search only GitLab, start the query with `mr:`, `issue:`, `commit:`, or `comment:`.
 
-To read the source of a definition, and its callers and callees, pass its name to `context`:
+To read the source of a definition and its callers, pass its name to `context`:
 
 ```shell
 glab orbit context read_file
 ```
 
 `context` also takes fully qualified names, file paths, `path:start-end` ranges, and directories, several at a time.
-If a name matches more than five definitions, `context` lists them so you can pick one.
-
-To orient yourself in a repository, run `glab orbit repo-map`. The subcommands `tree`, `api`, `class`, `extends`,
-and `imports` show more detail.
+It also reads GitLab, in the project of the `origin` remote: `mr:42`, `issue:7`, `branch:<name>`, `pipeline:123`, `job:456`, or a GitLab URL.
+With no target, it reads the merge request and failed CI/CD jobs of the current branch.
 
 ### Run SQL on the local graph
 
 To run read-only SQL directly on the graph tables:
 
 ```shell
-glab orbit sql -F json "SELECT count(*) AS n FROM gl_definition"
+glab orbit workspace sql -F json "SELECT count(*) AS n FROM gl_definition"
 ```
 
 - By default, the query reads every indexed commit of every repository.
@@ -271,7 +277,7 @@ glab orbit sql -F json "SELECT count(*) AS n FROM gl_definition"
 - To join across repositories, join the node tables to `_orbit_manifest` on `project_id`.
 - `-F` accepts `table` (default), `json`, `ndjson`, and `csv`. `-f <file>` or `-` reads the SQL from a file or stdin.
 
-To list the tables and columns, run `glab orbit schema`. To list the indexed repositories, run `glab orbit list`.
+To list the tables and columns, run `glab orbit workspace schema`. To list the indexed repositories, run `glab orbit workspace list`.
 
 ## Settings, storage, and telemetry
 
@@ -280,7 +286,7 @@ The local graph is one DuckDB file for each indexed commit under `local/revision
 and a `local/manifest.duckdb` file that lists them.
 
 - Local commands accept `--db <path>` for a different graph file.
-- When an update of the CLI changes the format of the local graph, the next `index` rebuilds the graph file.
+- When an update of the CLI changes the format of the local graph, the next `workspace index` rebuilds the graph file.
   Index your other repositories again after you update.
 
 The CLI sends usage events, such as the command, the result, the duration, and the CLI version, to GitLab product analytics.
