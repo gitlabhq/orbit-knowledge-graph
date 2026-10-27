@@ -339,7 +339,7 @@ fn sql_long_about() -> String {
     format!(
         "Run a read-only SQL query against the local DuckDB graph.\n\n\
          Queries include all indexed revisions by default. Use --repo to select \
-         a checkout or --db to select a database. `{} schema` lists the tables.",
+         a checkout or --db to select a database. `{} workspace schema` lists the tables.",
         commands::setup::spec::launcher()
     )
 }
@@ -401,7 +401,7 @@ struct SchemaArgs {
 
     /// Optional table names to scope the output.
     /// When provided, only columns for those tables are shown.
-    /// e.g. `orbit schema gl_definition gl_edge`
+    /// e.g. `orbit workspace schema gl_definition gl_edge`
     #[arg(value_name = "TABLE")]
     tables: Vec<String>,
 }
@@ -426,23 +426,63 @@ struct McpArgs {
 }
 
 #[derive(Args, Debug, PartialEq)]
-#[command(name = "repo-map", about = descriptions::short("repo_map"), long_about = descriptions::long("repo_map"))]
-struct RepoMapArgs {
-    /// Repository path (default: current directory).
-    #[arg(long, value_name = "PATH")]
-    repo: Option<PathBuf>,
-
-    /// Limit output to source files with these extensions (repeat or
-    /// comma-separate; a leading dot is optional).
-    #[arg(long = "ext", value_name = "EXT")]
-    extensions: Vec<String>,
-
-    /// Read a specific revision DuckDB file.
-    #[arg(long, value_name = "PATH")]
-    db: Option<PathBuf>,
-
+#[command(about = descriptions::short("workspace"), long_about = descriptions::long("workspace"))]
+struct WorkspaceArgs {
     #[command(subcommand)]
-    command: Option<commands::repo_map::RepoMapCommand>,
+    command: WorkspaceCommands,
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+enum WorkspaceCommands {
+    #[command(about = descriptions::short("index"))]
+    Index(IndexArgs),
+    Sql(SqlArgs),
+    Schema(SchemaArgs),
+    List(ListArgs),
+    Mcp(McpArgs),
+}
+
+#[derive(Args, Debug, PartialEq)]
+#[command(group(clap::ArgGroup::new("graph_status_scope").args(["full_path", "namespace_id", "project_id"])))]
+struct GraphStatusArgs {
+    /// Full path of a project or group, such as `gitlab-org/gitlab`.
+    #[arg(long)]
+    full_path: Option<String>,
+
+    /// Namespace (group) ID to inspect.
+    #[arg(long)]
+    namespace_id: Option<i64>,
+
+    /// Project ID to inspect.
+    #[arg(long)]
+    project_id: Option<i64>,
+
+    #[arg(
+        long,
+        help = "Server response format. Default: a summary in a terminal, raw JSON otherwise.",
+        value_parser = clap::builder::PossibleValuesParser::new(["llm", "raw"])
+            .map(|value| match value.as_str() {
+                "raw" => remote::ResponseFormat::Raw,
+                _ => remote::ResponseFormat::Llm,
+            })
+    )]
+    response_format: Option<remote::ResponseFormat>,
+}
+
+impl GraphStatusArgs {
+    fn has_scope(&self) -> bool {
+        self.full_path.is_some() || self.namespace_id.is_some() || self.project_id.is_some()
+    }
+
+    async fn run(self) -> Result<(), remote::error::RemoteError> {
+        remote::run_graph_status(
+            self.full_path,
+            self.namespace_id,
+            self.project_id,
+            self.response_format,
+        )
+        .await
+    }
 }
 
 #[derive(Args, Debug, PartialEq)]
@@ -535,16 +575,17 @@ impl SetupFlags {
 enum Commands {
     /// Print the version string and exit.
     Version,
-    #[command(about = descriptions::short("index"))]
-    Index(IndexArgs),
     Grep(Box<GrepArgs>),
     Context(ContextArgs),
+    Workspace(WorkspaceArgs),
+    #[command(hide = true)]
+    Index(IndexArgs),
+    #[command(hide = true)]
     Sql(SqlArgs),
-    Schema(SchemaArgs),
+    #[command(hide = true)]
     List(ListArgs),
+    #[command(hide = true)]
     Mcp(McpArgs),
-    #[command(name = "repo-map")]
-    RepoMap(RepoMapArgs),
     #[command(name = "skills", alias = "skill")]
     Skills(SkillsArgs),
     #[command(about = descriptions::short("setup"), long_about = descriptions::long("setup"))]
@@ -643,47 +684,29 @@ enum Commands {
         #[arg(long, value_enum)]
         response_format: Option<remote::ResponseFormat>,
     },
-    /// Show Orbit cluster health.
-    Status,
-    /// Show the remote Orbit ontology.
-    Ontology {
+    /// Show Orbit cluster health, or indexing progress for a namespace or project.
+    ///
+    /// Without a scope flag, shows cluster health. With `--full-path`, `--namespace-id`, or
+    /// `--project-id`, shows indexing progress for that scope.
+    Status(GraphStatusArgs),
+    /// Show the remote Orbit schema: node types, properties, and edges.
+    #[command(alias = "ontology")]
+    Schema {
         /// Node names to expand with full properties and edge lists.
         #[arg(value_name = "NODE")]
         nodes: Vec<String>,
+
+        #[arg(long, value_name = "PATH", hide = true)]
+        db: Option<PathBuf>,
+
+        #[arg(long, hide = true)]
+        raw: bool,
     },
-    /// Show the Orbit query DSL JSON Schema.
-    Dsl,
-    /// Show the Orbit MCP tool manifest.
-    Tools,
     /// Show indexing progress for a namespace or project.
     ///
     /// Without a scope flag, inspects the project behind this clone's `origin` remote.
-    #[command(name = "graph-status")]
-    #[command(group(clap::ArgGroup::new("graph_status_scope").args(["full_path", "namespace_id", "project_id"])))]
-    GraphStatus {
-        /// Full path of a project or group, such as `gitlab-org/gitlab`.
-        #[arg(long)]
-        full_path: Option<String>,
-
-        /// Namespace (group) ID to inspect.
-        #[arg(long)]
-        namespace_id: Option<i64>,
-
-        /// Project ID to inspect.
-        #[arg(long)]
-        project_id: Option<i64>,
-
-        #[arg(
-            long,
-            help = "Server response format. Default: a summary in a terminal, raw JSON otherwise.",
-            value_parser = clap::builder::PossibleValuesParser::new(["llm", "raw"])
-                .map(|value| match value.as_str() {
-                    "raw" => remote::ResponseFormat::Raw,
-                    _ => remote::ResponseFormat::Llm,
-                })
-        )]
-        response_format: Option<remote::ResponseFormat>,
-    },
+    #[command(name = "graph-status", hide = true)]
+    GraphStatus(GraphStatusArgs),
     /// Read and write persisted CLI settings (`~/.gitlab/orbit/settings.json`).
     Config {
         #[command(subcommand)]
@@ -809,10 +832,15 @@ fn exit_code_for(err: &anyhow::Error) -> i32 {
 }
 
 fn subcommand_path(matches: &clap::ArgMatches) -> String {
-    matches
-        .subcommand_name()
-        .map(|top| top.replace('-', "_"))
-        .unwrap_or_default()
+    let path = match matches.subcommand() {
+        Some(("workspace", nested)) => match nested.subcommand_name() {
+            Some(verb) => format!("workspace_{verb}"),
+            None => "workspace".to_string(),
+        },
+        Some((top, _)) => top.to_string(),
+        None => String::new(),
+    };
+    path.replace('-', "_")
 }
 
 async fn send_event(command: &str, duration: Duration) {
@@ -845,48 +873,26 @@ async fn dispatch(
             println!("{}", env!("ORBIT_VERSION"));
             Ok(())
         }
-        Commands::Index(args) => {
-            let (path, options) = args.into_parts();
-            commands::index::run(path, options)
-        }
         Commands::Grep(args) => run_grep(*args).await,
         Commands::Context(args) => commands::context::run(args).await,
-        Commands::Sql(SqlArgs {
-            query,
-            file,
-            format,
-            repo,
-            all: _,
-            db,
-        }) => sql::run(query, file, format, db, repo),
-        Commands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
-        Commands::List(ListArgs { format, db }) => list::run(format, db),
-        Commands::Mcp(McpArgs {
-            command: McpCommands::Serve,
-        }) => {
-            // Logs must go to stderr only — stdout is the MCP transport.
-            let subscriber = tracing_subscriber::fmt()
-                .with_max_level(Level::INFO)
-                .with_target(false)
-                .with_ansi(false)
-                .without_time()
-                .with_writer(std::io::stderr)
-                .finish();
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("setting default subscriber failed");
-            mcp::serve(tracker, coding_agent).await
+        Commands::Workspace(WorkspaceArgs { command }) => {
+            run_workspace(command, tracker, coding_agent).await
         }
-        Commands::RepoMap(RepoMapArgs {
-            repo,
-            extensions,
-            db,
-            command,
-        }) => commands::repo_map::run(
-            repo,
-            extensions,
-            db,
-            command.unwrap_or(commands::repo_map::RepoMapCommand::Overview),
-        ),
+        Commands::Index(args) => {
+            warn_moved("index", "workspace index");
+            run_workspace(WorkspaceCommands::Index(args), tracker, coding_agent).await
+        }
+        Commands::Sql(args) => {
+            warn_moved("sql", "workspace sql");
+            run_workspace(WorkspaceCommands::Sql(args), tracker, coding_agent).await
+        }
+        Commands::List(args) => {
+            warn_moved("list", "workspace list");
+            run_workspace(WorkspaceCommands::List(args), tracker, coding_agent).await
+        }
+        Commands::Mcp(args) => {
+            run_workspace(WorkspaceCommands::Mcp(args), tracker, coding_agent).await
+        }
         Commands::Config { command } => match command {
             ConfigCommands::Get { key } => commands::config::get(&key),
             ConfigCommands::Set { key, value } => commands::config::set(&key, &value),
@@ -971,19 +977,68 @@ async fn dispatch(
             };
             Ok(remote::run_query(input, response_format).await?)
         }
-        Commands::Status => Ok(remote::run_status().await?),
-        Commands::Ontology { nodes } => Ok(remote::run_ontology(nodes).await?),
-        Commands::Dsl => Ok(remote::run_dsl().await?),
-        Commands::Tools => Ok(remote::run_tools().await?),
-        Commands::GraphStatus {
-            full_path,
-            namespace_id,
-            project_id,
-            response_format,
-        } => Ok(
-            remote::run_graph_status(full_path, namespace_id, project_id, response_format).await?,
-        ),
+        Commands::Status(args) if args.has_scope() => Ok(args.run().await?),
+        Commands::Status(GraphStatusArgs {
+            response_format: Some(_),
+            ..
+        }) => anyhow::bail!("--response-format needs --full-path, --namespace-id, or --project-id"),
+        Commands::Status(_) => Ok(remote::run_status().await?),
+        Commands::Schema { nodes, db, raw }
+            if db.is_some() || raw || nodes.iter().any(|name| is_local_table_name(name)) =>
+        {
+            warn_moved("schema <table>", "workspace schema <table>");
+            run_schema(db, raw, nodes)
+        }
+        Commands::Schema { nodes, .. } => Ok(remote::run_ontology(nodes).await?),
+        Commands::GraphStatus(args) => Ok(args.run().await?),
     }
+}
+
+async fn run_workspace(
+    command: WorkspaceCommands,
+    tracker: Option<orbit_analytics::SnowplowAnalyticsTracker>,
+    coding_agent: Option<String>,
+) -> Result<()> {
+    match command {
+        WorkspaceCommands::Index(args) => {
+            let (path, options) = args.into_parts();
+            commands::index::run(path, options)
+        }
+        WorkspaceCommands::Sql(SqlArgs {
+            query,
+            file,
+            format,
+            repo,
+            all: _,
+            db,
+        }) => sql::run(query, file, format, db, repo),
+        WorkspaceCommands::Schema(SchemaArgs { db, raw, tables }) => run_schema(db, raw, tables),
+        WorkspaceCommands::List(ListArgs { format, db }) => list::run(format, db),
+        WorkspaceCommands::Mcp(McpArgs {
+            command: McpCommands::Serve,
+        }) => {
+            // Logs must go to stderr only — stdout is the MCP transport.
+            let subscriber = tracing_subscriber::fmt()
+                .with_max_level(Level::INFO)
+                .with_target(false)
+                .with_ansi(false)
+                .without_time()
+                .with_writer(std::io::stderr)
+                .finish();
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("setting default subscriber failed");
+            mcp::serve(tracker, coding_agent).await
+        }
+    }
+}
+
+fn warn_moved(old: &str, new: &str) {
+    let launcher = commands::setup::spec::launcher();
+    eprintln!("`{launcher} {old}` is deprecated; use `{launcher} {new}`.");
+}
+
+fn is_local_table_name(name: &str) -> bool {
+    name.starts_with(|first: char| first == '_' || first.is_ascii_lowercase())
 }
 
 fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()> {
@@ -1023,7 +1078,7 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
         let missing: Vec<_> = tables.iter().filter(|t| !found.contains(*t)).collect();
         if !missing.is_empty() {
             anyhow::bail!(
-                "no table named {} in the local graph. Run `{} schema` to list tables.",
+                "no table named {} in the local graph. Run `{} workspace schema` to list tables.",
                 missing
                     .iter()
                     .map(|t| format!("'{t}'"))
@@ -1045,7 +1100,9 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, IndexArgs, SchemaArgs, tolerate_grep_flags};
+    use super::{
+        Cli, Commands, IndexArgs, SchemaArgs, WorkspaceArgs, WorkspaceCommands, tolerate_grep_flags,
+    };
     use clap::{CommandFactory, Parser};
 
     #[test]
@@ -1109,8 +1166,121 @@ mod tests {
         );
         assert_eq!(action_for(&["orbit", "sql", "SELECT 1"]), "sql");
         assert_eq!(action_for(&["orbit", "config", "set", "k", "v"]), "config");
-        assert_eq!(action_for(&["orbit", "repo-map", "tree"]), "repo_map");
         assert_eq!(action_for(&["orbit", "mcp", "serve"]), "mcp");
+        assert_eq!(
+            action_for(&["orbit", "workspace", "sql", "SELECT 1"]),
+            "workspace_sql"
+        );
+        assert_eq!(
+            action_for(&["orbit", "workspace", "mcp", "serve"]),
+            "workspace_mcp"
+        );
+        assert_eq!(action_for(&["orbit", "ontology"]), "schema");
+    }
+
+    fn workspace(argv: &[&str]) -> WorkspaceCommands {
+        let Commands::Workspace(WorkspaceArgs { command }) = Cli::parse_from(argv).command else {
+            panic!("expected workspace for {argv:?}");
+        };
+        command
+    }
+
+    #[test]
+    fn local_graph_verbs_live_under_workspace() {
+        let WorkspaceCommands::Index(index) =
+            workspace(&["orbit", "workspace", "index", "/tmp/repo", "--budget", "4"])
+        else {
+            panic!("expected index");
+        };
+        assert_eq!(index.path, std::path::PathBuf::from("/tmp/repo"));
+        assert_eq!(index.budget, Some(4));
+
+        let WorkspaceCommands::Schema(schema) =
+            workspace(&["orbit", "workspace", "schema", "gl_edge", "--raw"])
+        else {
+            panic!("expected schema");
+        };
+        assert_eq!(
+            schema,
+            SchemaArgs {
+                db: None,
+                raw: true,
+                tables: vec!["gl_edge".to_string()],
+            }
+        );
+
+        assert!(matches!(
+            workspace(&["orbit", "workspace", "sql", "SELECT 1"]),
+            WorkspaceCommands::Sql(_)
+        ));
+        assert!(matches!(
+            workspace(&["orbit", "workspace", "list"]),
+            WorkspaceCommands::List(_)
+        ));
+        assert!(matches!(
+            workspace(&["orbit", "workspace", "mcp", "serve"]),
+            WorkspaceCommands::Mcp(_)
+        ));
+        assert!(Cli::try_parse_from(["orbit", "workspace"]).is_err());
+    }
+
+    #[test]
+    fn removed_commands_are_rejected() {
+        for argv in [
+            ["orbit", "repo-map", "overview"].as_slice(),
+            &["orbit", "dsl"],
+            &["orbit", "tools"],
+        ] {
+            assert!(
+                Cli::try_parse_from(argv).is_err(),
+                "{argv:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn moved_commands_stay_hidden_from_help() {
+        let help = Cli::command().render_help().to_string();
+        for hidden in ["index", "sql", "list", "mcp", "graph-status", "ontology"] {
+            assert!(
+                !help
+                    .lines()
+                    .any(|line| line.trim_start().starts_with(hidden)),
+                "{hidden} must not be listed:\n{help}"
+            );
+        }
+        for visible in ["workspace", "schema", "status", "grep", "context", "query"] {
+            assert!(
+                help.lines()
+                    .any(|line| line.trim_start().starts_with(visible)),
+                "{visible} must be listed:\n{help}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_routes_local_table_names_to_the_workspace_graph() {
+        assert!(super::is_local_table_name("gl_definition"));
+        assert!(super::is_local_table_name("_orbit_manifest"));
+        assert!(!super::is_local_table_name("MergeRequest"));
+    }
+
+    #[test]
+    fn status_takes_graph_status_scope_flags() {
+        let Commands::Status(args) =
+            Cli::parse_from(["orbit", "status", "--full-path", "a/b"]).command
+        else {
+            panic!("expected status");
+        };
+        assert!(args.has_scope());
+        let Commands::Status(args) = Cli::parse_from(["orbit", "status"]).command else {
+            panic!("expected status");
+        };
+        assert!(!args.has_scope());
+        assert!(
+            Cli::try_parse_from(["orbit", "status", "--full-path", "a/b", "--project-id", "1"])
+                .is_err()
+        );
     }
 
     #[test]
@@ -1138,7 +1308,7 @@ mod tests {
     }
 
     #[test]
-    fn former_local_and_remote_verbs_parse_at_top_level() {
+    fn legacy_verbs_still_parse_at_top_level() {
         let Commands::Index(index) =
             Cli::parse_from(["orbit", "index", "/tmp/repo", "--budget", "4"]).command
         else {
@@ -1155,19 +1325,12 @@ mod tests {
             }
         );
 
-        let Commands::Schema(schema) =
+        let Commands::Schema { nodes, db, raw } =
             Cli::parse_from(["orbit", "schema", "gl_edge", "--raw"]).command
         else {
             panic!("expected schema");
         };
-        assert_eq!(
-            schema,
-            SchemaArgs {
-                db: None,
-                raw: true,
-                tables: vec!["gl_edge".to_string()],
-            }
-        );
+        assert_eq!((nodes, db, raw), (vec!["gl_edge".to_string()], None, true));
 
         assert!(matches!(
             Cli::parse_from(["orbit", "grep", "who calls this"]).command,
@@ -1187,20 +1350,18 @@ mod tests {
             Commands::Mcp(_)
         ));
         assert!(matches!(
-            Cli::parse_from(["orbit", "repo-map", "overview"]).command,
-            Commands::RepoMap(_)
-        ));
-        assert!(matches!(
             Cli::parse_from(["orbit", "context", "Definition:7"]).command,
             Commands::Context(_)
         ));
 
-        let Commands::Ontology { nodes } =
-            Cli::parse_from(["orbit", "ontology", "User", "Project"]).command
-        else {
-            panic!("expected ontology");
-        };
-        assert_eq!(nodes, vec!["User".to_string(), "Project".to_string()]);
+        for verb in ["ontology", "schema"] {
+            let Commands::Schema { nodes, .. } =
+                Cli::parse_from(["orbit", verb, "User", "Project"]).command
+            else {
+                panic!("expected schema for {verb}");
+            };
+            assert_eq!(nodes, vec!["User".to_string(), "Project".to_string()]);
+        }
         let Commands::Query {
             query,
             file,
@@ -1214,22 +1375,14 @@ mod tests {
         assert_eq!(response_format, Some(super::remote::ResponseFormat::Raw));
         assert!(matches!(
             Cli::parse_from(["orbit", "status"]).command,
-            Commands::Status
+            Commands::Status(_)
         ));
-        assert!(matches!(
-            Cli::parse_from(["orbit", "dsl"]).command,
-            Commands::Dsl
-        ));
-        assert!(matches!(
-            Cli::parse_from(["orbit", "tools"]).command,
-            Commands::Tools
-        ));
-        let Commands::GraphStatus { full_path, .. } =
+        let Commands::GraphStatus(args) =
             Cli::parse_from(["orbit", "graph-status", "--full-path", "a/b"]).command
         else {
             panic!("expected graph-status");
         };
-        assert_eq!(full_path.as_deref(), Some("a/b"));
+        assert_eq!(args.full_path.as_deref(), Some("a/b"));
 
         for argv in [
             ["orbit", "local", "grep", "x"].as_slice(),

@@ -7,7 +7,6 @@ use integration_testkit::cli::{
     create_test_repo, git, init_repo_at, mcp_roundtrip, mcp_tool_call, mcp_tool_text, orbit_cmd,
     orbit_index, orbit_sql, rows, rows_where, sorted_ids,
 };
-use serde::Deserialize;
 use serde_json::{Value, json};
 
 const FILES_FULL: &str = "SELECT id, name, path, branch, commit_sha FROM gl_file WHERE name IS NOT NULL ORDER BY path LIMIT 50";
@@ -91,7 +90,7 @@ fn concurrent_readers() {
     let children: Vec<_> = (0..5)
         .map(|_| {
             orbit_cmd()
-                .args(["sql", "-F", "json", FILES_SIMPLE])
+                .args(["workspace", "sql", "-F", "json", FILES_SIMPLE])
                 .env("ORBIT_DATA_DIR", data_dir.path())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -164,7 +163,7 @@ fn reader_during_writer() {
     assert!(orbit_index(&repo.path, data_dir.path()));
 
     let mut child = orbit_cmd()
-        .args(["index", repo.path.to_str().unwrap()])
+        .args(["workspace", "index", repo.path.to_str().unwrap()])
         .env("ORBIT_DATA_DIR", data_dir.path())
         .spawn()
         .unwrap();
@@ -186,7 +185,7 @@ fn concurrent_writers() {
     let children: Vec<_> = (0..2)
         .map(|_| {
             orbit_cmd()
-                .args(["index", repo.path.to_str().unwrap()])
+                .args(["workspace", "index", repo.path.to_str().unwrap()])
                 .env("ORBIT_DATA_DIR", data_dir.path())
                 .spawn()
                 .unwrap()
@@ -238,7 +237,7 @@ fn incremental_index_follows_the_working_tree() {
         assert!(orbit_index(repo, data.path()));
         let path = repo.to_str().unwrap();
         let mut sql_cmd = orbit_cmd();
-        sql_cmd.args(["sql", "-F", "json", "--repo", path, sql]);
+        sql_cmd.args(["workspace", "sql", "-F", "json", "--repo", path, sql]);
         let out = sql_cmd.env("ORBIT_DATA_DIR", data.path()).output().unwrap();
         let found: Value = serde_json::from_slice(&out.stdout).unwrap();
         rows(&found)
@@ -278,6 +277,7 @@ fn index_db_flag_writes_to_custom_path() {
     let index = || {
         orbit_cmd()
             .args([
+                "workspace",
                 "index",
                 repo.path.to_str().unwrap(),
                 "--db",
@@ -297,6 +297,7 @@ fn index_db_flag_writes_to_custom_path() {
 
     let result = orbit_cmd()
         .args([
+            "workspace",
             "sql",
             "-F",
             "json",
@@ -424,7 +425,7 @@ fn unindexable_repo_records_error_in_manifest() {
     git(repo.path(), &["init"]);
 
     let ok = orbit_cmd()
-        .args(["index", repo.path().to_str().unwrap()])
+        .args(["workspace", "index", repo.path().to_str().unwrap()])
         .env("ORBIT_DATA_DIR", data_dir.path())
         .output()
         .unwrap()
@@ -590,7 +591,7 @@ fn index_defaults_to_the_current_directory() {
     init_repo_at(&repo, &[("main.py", "def main(): pass\n")]);
 
     let indexed = orbit_cmd()
-        .arg("index")
+        .args(["workspace", "index"])
         .current_dir(&repo)
         .env("ORBIT_DATA_DIR", data_dir.path())
         .status()
@@ -636,7 +637,7 @@ fn a_busy_graph_is_reported_in_one_line() {
     let manifest = orbit_sql("SELECT database_path FROM _orbit_manifest", data_dir.path());
     let graph = std::path::Path::new(manifest[0]["database_path"].as_str().unwrap());
     let _writer = duckdb_client::DuckDbClient::open(graph).unwrap();
-    let (_, stderr, ok) = run_cmd(&["sql", "--all", "SELECT 1"], data_dir.path());
+    let (_, stderr, ok) = run_cmd(&["workspace", "sql", "--all", "SELECT 1"], data_dir.path());
 
     assert!(!ok);
     assert_eq!(stderr.lines().count(), 1, "{stderr}");
@@ -648,8 +649,8 @@ fn a_busy_graph_is_reported_in_one_line() {
 }
 
 fn indexed_repo_paths(data_dir: &std::path::Path) -> Vec<String> {
-    let (stdout, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir);
-    assert!(ok, "orbit list failed: {stderr}");
+    let (stdout, stderr, ok) = run_cmd(&["workspace", "list", "-F", "json"], data_dir);
+    assert!(ok, "orbit workspace list failed: {stderr}");
     let listed: Vec<Value> = serde_json::from_str(&stdout).unwrap();
     listed
         .iter()
@@ -676,7 +677,7 @@ fn schema_lists_duckdb_tables_and_columns() {
     let repo = create_test_repo();
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let (stdout, stderr, ok) = run_cmd(&["schema"], data_dir.path());
+    let (stdout, stderr, ok) = run_cmd(&["workspace", "schema"], data_dir.path());
     assert!(ok, "orbit schema failed: {stderr}");
 
     for want in [
@@ -699,7 +700,7 @@ fn schema_raw_is_parseable_json() {
     let repo = create_test_repo();
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let (stdout, stderr, ok) = run_cmd(&["schema", "--raw"], data_dir.path());
+    let (stdout, stderr, ok) = run_cmd(&["workspace", "schema", "--raw"], data_dir.path());
     assert!(ok, "orbit schema --raw failed: {stderr}");
 
     let v: Value = serde_json::from_str(&stdout).expect("parseable JSON");
@@ -716,7 +717,7 @@ fn schema_raw_is_parseable_json() {
 #[test]
 fn schema_errors_when_db_missing() {
     let data_dir = tempfile::TempDir::new().unwrap();
-    let (_, stderr, ok) = run_cmd(&["schema"], data_dir.path());
+    let (_, stderr, ok) = run_cmd(&["workspace", "schema"], data_dir.path());
     assert!(!ok, "schema should fail without an indexed graph");
     assert!(
         stderr.contains("no local graph found"),
@@ -735,7 +736,7 @@ fn index_errors_when_path_has_no_git_repository() {
     .unwrap();
 
     let (_, stderr, ok) = run_cmd(
-        &["index", not_a_repo.path().to_str().unwrap()],
+        &["workspace", "index", not_a_repo.path().to_str().unwrap()],
         data_dir.path(),
     );
     assert!(!ok, "index should fail when the path has no git repository");
@@ -752,7 +753,7 @@ fn index_errors_when_repository_has_no_commits() {
     git(empty_repo.path(), &["init", "--quiet"]);
 
     let (_, stderr, ok) = run_cmd(
-        &["index", empty_repo.path().to_str().unwrap()],
+        &["workspace", "index", empty_repo.path().to_str().unwrap()],
         data_dir.path(),
     );
     assert!(!ok, "index should fail when the repository has no commits");
@@ -787,7 +788,10 @@ fn index_does_not_report_an_unreadable_repository_as_empty() {
     );
     std::fs::remove_dir_all(broken.path().join(".git").join("objects")).unwrap();
 
-    let (_, stderr, ok) = run_cmd(&["index", broken.path().to_str().unwrap()], data_dir.path());
+    let (_, stderr, ok) = run_cmd(
+        &["workspace", "index", broken.path().to_str().unwrap()],
+        data_dir.path(),
+    );
     assert!(!ok, "index should fail on a repository git cannot read");
     assert!(
         !stderr.contains("has no commits yet"),
@@ -801,7 +805,7 @@ fn schema_scoped_excludes_unrequested_tables() {
     let repo = create_test_repo();
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let (stdout, stderr, ok) = run_cmd(&["schema", "gl_file"], data_dir.path());
+    let (stdout, stderr, ok) = run_cmd(&["workspace", "schema", "gl_file"], data_dir.path());
     assert!(ok, "orbit schema gl_file failed: {stderr}");
 
     assert!(stdout.contains("gl_file"), "expected gl_file in output");
@@ -821,7 +825,10 @@ fn schema_scoped_raw_contains_only_requested_table() {
     let repo = create_test_repo();
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let (stdout, stderr, ok) = run_cmd(&["schema", "--raw", "gl_definition"], data_dir.path());
+    let (stdout, stderr, ok) = run_cmd(
+        &["workspace", "schema", "--raw", "gl_definition"],
+        data_dir.path(),
+    );
     assert!(ok, "orbit schema --raw gl_definition failed: {stderr}");
 
     let v: Value = serde_json::from_str(&stdout).expect("parseable JSON");
@@ -842,15 +849,15 @@ fn schema_unknown_table_exits_with_error() {
     let repo = create_test_repo();
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let (_, stderr, ok) = run_cmd(&["schema", "gl_typo"], data_dir.path());
+    let (_, stderr, ok) = run_cmd(&["workspace", "schema", "gl_typo"], data_dir.path());
     assert!(!ok, "schema should fail for unknown table");
     assert!(
         stderr.contains("no table named 'gl_typo'"),
         "expected unknown-table error: {stderr}"
     );
     assert!(
-        stderr.contains("Run `orbit schema` to list tables"),
-        "expected suggestion to run orbit schema: {stderr}"
+        stderr.contains("Run `orbit workspace schema` to list tables"),
+        "expected suggestion to run orbit workspace schema: {stderr}"
     );
 }
 
@@ -1012,11 +1019,7 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
         "served manifest must tell binary users the version-matched access path"
     );
 
-    for path in [
-        "SKILL.md",
-        "references/local/sql.md",
-        "references/local/repo_map.md",
-    ] {
+    for path in ["SKILL.md", "references/local/sql.md"] {
         let out = hermetic_skills_cmd(cache.path())
             .args(["skills", "get", "orbit", path])
             .output()
@@ -1058,17 +1061,6 @@ fn skills_lists_and_serves_local_content_without_remote_environment() {
         .output()
         .unwrap();
     assert!(singular_alias.status.success());
-
-    let repo_map_ref = hermetic_skills_cmd(cache.path())
-        .args(["skills", "references/local/repo_map.md"])
-        .output()
-        .unwrap()
-        .stdout;
-    assert!(
-        String::from_utf8(repo_map_ref)
-            .unwrap()
-            .contains("orbit repo-map")
-    );
 }
 
 #[test]
@@ -1140,406 +1132,6 @@ fn skills_reject_unknown_names_and_paths() {
         );
         assert!(err.contains("skills get <name> [path]"));
     }
-}
-
-fn repo_map(
-    repo: &std::path::Path,
-    data_dir: &std::path::Path,
-    args: &[&str],
-) -> std::process::Output {
-    let mut cmd = orbit_cmd();
-    cmd.arg("repo-map").args(["--repo", repo.to_str().unwrap()]);
-    cmd.args(args).env("ORBIT_DATA_DIR", data_dir);
-    cmd.output().unwrap()
-}
-
-#[derive(Deserialize)]
-struct RepoMapFixture {
-    files: std::collections::BTreeMap<String, String>,
-    commands: Vec<RepoMapFixtureCommand>,
-}
-
-#[derive(Deserialize)]
-struct RepoMapFixtureCommand {
-    args: Vec<String>,
-    contains: Vec<String>,
-    #[serde(default)]
-    not_contains: Vec<String>,
-}
-
-fn load_repo_map_fixture() -> RepoMapFixture {
-    orbit_utils::yaml::from_str(include_str!("fixtures/repo_map.yaml"))
-        .expect("invalid fixtures/repo_map.yaml")
-}
-
-#[test]
-fn repo_map_yaml_fixture_suite() {
-    let fixture = load_repo_map_fixture();
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let repo_dir = tempfile::TempDir::new().unwrap();
-    let files: Vec<_> = fixture
-        .files
-        .iter()
-        .map(|(path, content)| (path.as_str(), content.as_str()))
-        .collect();
-    init_repo_at(repo_dir.path(), &files);
-    let repo = repo_dir.path().canonicalize().unwrap();
-    let repo_path = repo.display().to_string();
-    let sha = git(&repo, &["rev-parse", "HEAD"]);
-    let dd = data_dir.path();
-    assert!(orbit_index(&repo, dd));
-
-    for command in fixture.commands {
-        let args: Vec<_> = command.args.iter().map(String::as_str).collect();
-        let out = repo_map(&repo, dd, &args);
-        assert!(
-            out.status.success(),
-            "repo-map {:?} failed: {}",
-            command.args,
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let text = String::from_utf8(out.stdout)
-            .unwrap()
-            .replace(&repo_path, "<repo>")
-            .replace(&sha, "<sha>");
-        for expected in &command.contains {
-            assert!(
-                text.contains(expected),
-                "repo-map {:?} must contain {expected:?}: {text}",
-                command.args
-            );
-        }
-        for unexpected in &command.not_contains {
-            assert!(
-                !text.contains(unexpected),
-                "repo-map {:?} must not contain {unexpected:?}: {text}",
-                command.args
-            );
-        }
-    }
-}
-
-#[test]
-fn repo_map_subdir_repo_resolves_from_root() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let repo = create_test_repo();
-    let dd = data_dir.path();
-    assert!(orbit_index(&repo.path, dd));
-
-    // Pointing `--repo` at a subdirectory must still anchor at the git
-    // top-level so signature extraction (read_text against repo-root-relative
-    // paths) works, not silently degrade to bare names.
-    let subdir = repo.path.join("src");
-    let api = String::from_utf8(repo_map(&subdir, dd, &["api", "src"]).stdout).unwrap();
-    assert!(
-        api.contains("class App(Base):") && api.contains("def run(self):"),
-        "subdir --repo must extract signatures, not bare names: {api}"
-    );
-
-    let class = String::from_utf8(repo_map(&subdir, dd, &["class", "App"]).stdout).unwrap();
-    assert!(class.contains("CLASS — App") && class.contains("def run(self):"));
-}
-
-#[test]
-fn repo_map_relative_db_resolves_from_caller_cwd() {
-    let repo = create_test_repo();
-    let caller = tempfile::TempDir::new().unwrap();
-
-    let index = orbit_cmd()
-        .args(["index", repo.path.to_str().unwrap(), "--db", "graph.duckdb"])
-        .current_dir(caller.path())
-        .output()
-        .unwrap();
-    assert!(
-        index.status.success(),
-        "index --db graph.duckdb failed: {}",
-        String::from_utf8_lossy(&index.stderr)
-    );
-    assert!(caller.path().join("graph.duckdb").exists());
-
-    let out = orbit_cmd()
-        .args([
-            "repo-map",
-            "--repo",
-            repo.path.to_str().unwrap(),
-            "--db",
-            "graph.duckdb",
-            "overview",
-        ])
-        .current_dir(caller.path())
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "relative --db must resolve against caller cwd before the repo-root chdir: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(String::from_utf8(out.stdout).unwrap().contains("REPO MAP"));
-}
-
-#[test]
-fn repo_map_reports_unindexed_commit() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let repo = create_test_repo();
-    let dd = data_dir.path();
-    assert!(orbit_index(&repo.path, dd));
-
-    std::fs::write(repo.path.join("src/extra.py"), "def added(): pass\n").unwrap();
-    git(&repo.path, &["add", "-A"]);
-    git(
-        &repo.path,
-        &[
-            "-c",
-            "user.email=t@t",
-            "-c",
-            "user.name=t",
-            "commit",
-            "-m",
-            "second",
-        ],
-    );
-
-    let out = repo_map(&repo.path, dd, &["overview"]);
-    assert!(!out.status.success());
-    let err = String::from_utf8(out.stderr).unwrap();
-    assert!(err.contains("is not indexed") && err.contains("run:  orbit index ."));
-}
-
-/// Two clones at the same commit SHA indexed into one DB must be completely
-/// isolated: each repo-map must see only its own project's data. Without
-/// `project_id` scoping, the queries would combine rows from both.
-#[test]
-fn repo_map_same_sha_isolates_projects() {
-    let workspace = tempfile::TempDir::new().unwrap();
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let dd = data_dir.path();
-
-    let repo_a = workspace.path().join("alpha");
-    init_repo_at(
-        &repo_a,
-        &[
-            (
-                "src/main.py",
-                "from alpha_utils import helper\n\nclass Base:\n    pass\n\nclass AlphaChild(Base):\n    def run(self):\n        return helper()\n",
-            ),
-            ("src/alpha_utils.py", "def helper():\n    return 'alpha'\n"),
-        ],
-    );
-    let sha_a = git(&repo_a, &["rev-parse", "HEAD"]);
-
-    let repo_b = workspace.path().join("beta");
-    std::process::Command::new("git")
-        .args([
-            "clone",
-            "--local",
-            repo_a.to_str().unwrap(),
-            repo_b.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    let sha_b = git(&repo_b, &["rev-parse", "HEAD"]);
-    assert_eq!(sha_a, sha_b, "clones must share the same commit SHA");
-    std::fs::remove_file(repo_b.join("src/alpha_utils.py")).unwrap();
-    std::fs::write(
-        repo_b.join("src/main.py"),
-        "from beta_utils import helper\n\nclass Base:\n    pass\n\nclass BetaChild(Base):\n    def run(self):\n        return helper()\n",
-    )
-    .unwrap();
-    std::fs::write(
-        repo_b.join("src/beta_utils.py"),
-        "def helper():\n    return 'beta'\n",
-    )
-    .unwrap();
-
-    assert!(orbit_index(&repo_a, dd));
-    assert!(orbit_index(&repo_b, dd));
-
-    let files = orbit_sql("SELECT project_id, path FROM gl_file ORDER BY path", dd);
-    let file_rows = rows(&files);
-    let project_ids: BTreeSet<i64> = file_rows
-        .iter()
-        .filter_map(|r| r["project_id"].as_i64())
-        .collect();
-    assert_eq!(
-        project_ids.len(),
-        2,
-        "two distinct project_ids must exist: {file_rows:?}"
-    );
-
-    // Without project_id scoping, the overview file count would double (4
-    // instead of 2) because both projects share the same SHA.
-    let count_files = |repo: &std::path::Path, label: &str| -> usize {
-        let text = String::from_utf8(repo_map(repo, dd, &["overview"]).stdout).unwrap();
-        let files_line = text
-            .lines()
-            .find(|l| l.contains("python"))
-            .unwrap_or_else(|| panic!("{label} overview must contain a python row:\n{text}"));
-        files_line
-            .split('|')
-            .filter_map(|cell| cell.trim().parse().ok())
-            .next()
-            .unwrap_or_else(|| panic!("{label} python row has no count:\n{files_line}"))
-    };
-    assert_eq!(count_files(&repo_a, "alpha"), 2);
-    assert_eq!(count_files(&repo_b, "beta"), 2);
-
-    let tree_a = String::from_utf8(repo_map(&repo_a, dd, &["tree", "src"]).stdout).unwrap();
-    let tree_b = String::from_utf8(repo_map(&repo_b, dd, &["tree", "src"]).stdout).unwrap();
-    assert!(
-        tree_a.contains("AlphaChild") && !tree_a.contains("BetaChild"),
-        "alpha tree must exclude beta definitions: {tree_a}"
-    );
-    assert!(
-        tree_b.contains("BetaChild") && !tree_b.contains("AlphaChild"),
-        "beta tree must exclude alpha definitions: {tree_b}"
-    );
-
-    let extends_a = String::from_utf8(repo_map(&repo_a, dd, &["extends", "Base"]).stdout).unwrap();
-    let extends_b = String::from_utf8(repo_map(&repo_b, dd, &["extends", "Base"]).stdout).unwrap();
-    assert!(
-        extends_a.contains("AlphaChild") && !extends_a.contains("BetaChild"),
-        "alpha descendants must exclude beta definitions: {extends_a}"
-    );
-    assert!(
-        extends_b.contains("BetaChild") && !extends_b.contains("AlphaChild"),
-        "beta descendants must exclude alpha definitions: {extends_b}"
-    );
-    let table_data_rows = |output: &str, header: &str| {
-        output
-            .lines()
-            .filter(|line| line.starts_with("| ") && !line.starts_with(header))
-            .count()
-    };
-    assert_eq!(table_data_rows(&extends_a, "| depth"), 2, "{extends_a}");
-    assert_eq!(table_data_rows(&extends_b, "| depth"), 2, "{extends_b}");
-
-    let imports_a =
-        String::from_utf8(repo_map(&repo_a, dd, &["imports", "helper"]).stdout).unwrap();
-    let imports_b =
-        String::from_utf8(repo_map(&repo_b, dd, &["imports", "helper"]).stdout).unwrap();
-    assert!(
-        imports_a.contains("alpha_utils") && !imports_a.contains("beta_utils"),
-        "alpha importers must exclude beta paths: {imports_a}"
-    );
-    assert!(
-        imports_b.contains("beta_utils") && !imports_b.contains("alpha_utils"),
-        "beta importers must exclude alpha paths: {imports_b}"
-    );
-    assert_eq!(table_data_rows(&imports_a, "| symbol"), 1, "{imports_a}");
-    assert_eq!(table_data_rows(&imports_b, "| symbol"), 1, "{imports_b}");
-}
-
-/// Preflight must reject a checkout whose project_id is not indexed, even
-/// when a different project at the same SHA exists in the DB.
-#[test]
-fn repo_map_preflight_rejects_unindexed_project_at_same_sha() {
-    let workspace = tempfile::TempDir::new().unwrap();
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let dd = data_dir.path();
-
-    let repo_a = workspace.path().join("indexed");
-    init_repo_at(&repo_a, &[("lib.py", "x = 1\n")]);
-
-    let repo_b = workspace.path().join("not-indexed");
-    std::process::Command::new("git")
-        .args([
-            "clone",
-            "--local",
-            repo_a.to_str().unwrap(),
-            repo_b.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(
-        git(&repo_a, &["rev-parse", "HEAD"]),
-        git(&repo_b, &["rev-parse", "HEAD"]),
-    );
-
-    assert!(orbit_index(&repo_a, dd));
-
-    let out = repo_map(&repo_b, dd, &["overview"]);
-    assert!(
-        !out.status.success(),
-        "preflight must fail for the unindexed clone even though the SHA exists"
-    );
-    let err = String::from_utf8(out.stderr).unwrap();
-    assert!(
-        err.contains("is not indexed"),
-        "error must mention unindexed commit: {err}"
-    );
-}
-
-/// `ORBIT_DATA_DIR` set to a relative path must resolve against the caller's
-/// CWD, not the repo root that `repo-map` internally changes to.
-#[test]
-fn repo_map_relative_orbit_data_dir() {
-    let repo = create_test_repo();
-    let caller_dir = tempfile::TempDir::new().unwrap();
-
-    let idx = orbit_cmd()
-        .args(["index", repo.path.to_str().unwrap()])
-        .env("ORBIT_DATA_DIR", "orbit-data")
-        .current_dir(caller_dir.path())
-        .output()
-        .unwrap();
-    assert!(
-        idx.status.success(),
-        "index with relative ORBIT_DATA_DIR failed: {}",
-        String::from_utf8_lossy(&idx.stderr)
-    );
-    assert!(
-        caller_dir
-            .path()
-            .join("orbit-data/local/manifest.duckdb")
-            .exists()
-    );
-
-    let out = orbit_cmd()
-        .args([
-            "repo-map",
-            "--repo",
-            repo.path.to_str().unwrap(),
-            "overview",
-        ])
-        .env("ORBIT_DATA_DIR", "orbit-data")
-        .current_dir(caller_dir.path())
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "relative ORBIT_DATA_DIR must resolve before the repo-root chdir: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let text = String::from_utf8(out.stdout).unwrap();
-    assert!(
-        text.contains("REPO MAP") && text.contains("Languages"),
-        "overview output must contain expected sections: {text}"
-    );
-}
-
-#[test]
-fn repo_map_omitted_subcommand_runs_overview() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let repo = create_test_repo();
-    let dd = data_dir.path();
-    assert!(orbit_index(&repo.path, dd));
-
-    let explicit = repo_map(&repo.path, dd, &["overview"]);
-    let omitted = repo_map(&repo.path, dd, &[]);
-    assert!(explicit.status.success());
-    assert!(omitted.status.success());
-
-    let explicit_text = String::from_utf8(explicit.stdout).unwrap();
-    let omitted_text = String::from_utf8(omitted.stdout).unwrap();
-    assert!(
-        omitted_text.contains("REPO MAP") && omitted_text.contains("Languages"),
-        "omitted subcommand must produce overview output: {omitted_text}"
-    );
-    assert_eq!(
-        explicit_text.lines().next(),
-        omitted_text.lines().next(),
-        "omitted subcommand must match explicit overview heading"
-    );
 }
 
 #[test]
@@ -1700,29 +1292,6 @@ fn context_relationship_order_is_stable_across_overloads() {
 }
 
 #[test]
-fn repo_map_api_empty_prefix_succeeds() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let repo = create_test_repo();
-    let dd = data_dir.path();
-    assert!(orbit_index(&repo.path, dd));
-
-    let out = repo_map(&repo.path, dd, &["api", "nonexistent"]);
-    assert!(
-        out.status.success(),
-        "api with no matching definitions must succeed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("API MAP"));
-    assert!(stdout.contains("no matching definitions under nonexistent/"));
-    let stderr = String::from_utf8(out.stderr).unwrap();
-    assert!(
-        !stderr.contains("No files found"),
-        "must not leak DuckDB glob error: {stderr}"
-    );
-}
-
-#[test]
 fn file_context_bounds_connections_and_keeps_full_definition_followups() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();
@@ -1772,7 +1341,7 @@ fn piped_index_prints_one_json_document_per_repository() {
     let repo = create_test_repo();
 
     let out = orbit_cmd()
-        .args(["index", repo.path.to_str().unwrap()])
+        .args(["workspace", "index", repo.path.to_str().unwrap()])
         .env("ORBIT_DATA_DIR", data_dir.path())
         .output()
         .unwrap();

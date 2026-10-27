@@ -26,7 +26,7 @@ impl GraphReader {
         let Some(lock) = read_lock_database(&db_path)? else {
             anyhow::bail!(
                 "no local graph found at {}. Index a repository first \
-             (`{} index` inside it, or the `index` MCP tool).",
+             (`{} workspace index` inside it, or the `index` MCP tool).",
                 db_path.display(),
                 spec::launcher()
             );
@@ -36,7 +36,7 @@ impl GraphReader {
         if schema::stored_meta(&client, "revision")?.is_some() {
             anyhow::ensure!(
                 schema::stored_meta(&client, "indexed_commit")?.is_some(),
-                "revision at {} is not fully indexed; run `{} index` again",
+                "revision at {} is not fully indexed; run `{} workspace index` again",
                 db_path.display(),
                 spec::launcher()
             );
@@ -51,7 +51,7 @@ impl GraphReader {
         let manifest = workspace::Workspace::open_default()?.manifest_path();
         if !manifest.exists() {
             anyhow::bail!(
-                "no local graph found. Run `{} index` first.",
+                "no local graph found. Run `{} workspace index` first.",
                 spec::launcher()
             );
         }

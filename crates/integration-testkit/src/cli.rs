@@ -28,7 +28,7 @@ pub fn orbit_cmd() -> Command {
 
 pub fn orbit_index(repo: &Path, data_dir: &Path) -> bool {
     orbit_cmd()
-        .args(["index", repo.to_str().unwrap()])
+        .args(["workspace", "index", repo.to_str().unwrap()])
         .env("ORBIT_DATA_DIR", data_dir)
         .output()
         .unwrap()
@@ -38,7 +38,7 @@ pub fn orbit_index(repo: &Path, data_dir: &Path) -> bool {
 
 pub fn orbit_sql(sql: &str, data_dir: &Path) -> Value {
     let out = orbit_cmd()
-        .args(["sql", "-F", "json", sql])
+        .args(["workspace", "sql", "-F", "json", sql])
         .env("ORBIT_DATA_DIR", data_dir)
         .output()
         .unwrap();
@@ -124,7 +124,7 @@ pub fn mcp_roundtrip(data_dir: &Path, requests: &[Value]) -> Vec<Value> {
     use std::io::{BufRead, BufReader, Write};
 
     let mut child = orbit_cmd()
-        .args(["mcp", "serve"])
+        .args(["workspace", "mcp", "serve"])
         .env("ORBIT_DATA_DIR", data_dir)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
