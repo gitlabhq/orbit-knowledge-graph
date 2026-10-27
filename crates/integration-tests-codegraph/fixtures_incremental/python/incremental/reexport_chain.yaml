@@ -1,0 +1,60 @@
+name: "Python: a name re-exported through a star-import chain resolves as a full index does after a reindex"
+
+fixtures:
+  - path: near.py
+    content: |
+      def thing():
+          pass
+
+  - path: far.py
+    content: |
+      def thing():
+          pass
+
+  - path: middle.py
+    content: |
+      from far import *
+
+  - path: settings.py
+    content: |
+      DEBUG = False
+
+  - path: hub.py
+    content: |
+      from near import *
+      from middle import *
+      from settings import *
+
+  - path: app.py
+    content: |
+      from hub import *
+
+      def run():
+          thing()
+
+tests:
+  - name: run calls the thing hub imports directly
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+      WHERE caller.name = 'run'
+      RETURN callee.file_path AS file
+    assert:
+      - { row_count: 1 }
+      - { row: { file: near.py } }
+
+steps:
+  - name: edit a file hub imports, which leaves middle unchanged
+    snapshot: true
+    modify:
+      - path: settings.py
+        content: |
+          DEBUG = True
+    tests:
+      - name: run still calls the thing hub imports directly
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
+          WHERE caller.name = 'run'
+          RETURN callee.file_path AS file
+        assert:
+          - { row_count: 1 }
+          - { row: { file: near.py } }
