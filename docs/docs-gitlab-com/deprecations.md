@@ -16,9 +16,6 @@ title: GitLab Orbit deprecations and removals
 Some GitLab Orbit commands, endpoints, and settings changed for general availability.
 Move your scripts, agents, and integrations to the generally available release before you upgrade.
 
-A deprecated item still works.
-A removed item no longer works.
-
 ## Minimum versions
 
 GitLab Orbit needs these versions or later:
