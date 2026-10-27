@@ -235,6 +235,27 @@ fn ontology_star_keeps_the_properties_of_every_node() {
 }
 
 #[test]
+fn schema_fails_when_the_page_cursor_repeats() {
+    let (base_url, handle) = serve_in_order(&[
+        r#"{"data":{"orbit":{"schema":{
+            "nodes":{"pageInfo":{"hasNextPage":true,"endCursor":"MQ"},"nodes":[]},
+            "edges":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}"#,
+        r#"{"data":{"orbit":{"schema":{
+            "nodes":{"pageInfo":{"hasNextPage":true,"endCursor":"MQ"},"nodes":[]}}}}}"#,
+    ]);
+    let output = run_orbit(&base_url, &["schema"]);
+    handle.join().expect("join mock");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Orbit schema paging did not advance"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn ontology_reads_each_connection_until_its_last_page() {
     let (base_url, handle) = serve_in_order(&[
         r#"{"data":{"orbit":{"schema":{

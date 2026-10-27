@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use cynic::QueryBuilder;
 use orbit_cli_graphql::queries::ontology::{
     NodeKind, OrbitSchema, OrbitSchemaEdge as EdgeKind, PageInfo, SchemaPage, SchemaPageVariables,
@@ -5,7 +7,7 @@ use orbit_cli_graphql::queries::ontology::{
 use serde::Serialize;
 
 use super::client::OrbitClient;
-use super::error::{EXIT_UNAVAILABLE, RemoteError, build_graphql_error};
+use super::error::{EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError, build_graphql_error};
 use super::{pretty_value, write_stdout};
 
 const EXPAND_ALL: &str = "*";
@@ -19,6 +21,7 @@ struct Ontology {
 #[derive(Default)]
 struct PageCursor {
     after: Option<String>,
+    seen: HashSet<String>,
     done: bool,
 }
 
@@ -50,11 +53,11 @@ async fn read_ontology(
         nodes.read(
             schema.nodes.map(|page| (page.page_info, page.nodes)),
             &mut ontology.nodes,
-        );
+        )?;
         edges.read(
             schema.edges.map(|page| (page.page_info, page.nodes)),
             &mut ontology.edges,
-        );
+        )?;
     }
     Ok(ontology)
 }
@@ -94,18 +97,39 @@ impl Ontology {
 }
 
 impl PageCursor {
-    fn read<T>(&mut self, page: Option<(PageInfo, Option<Vec<Option<T>>>)>, kinds: &mut Vec<T>) {
+    fn read<T>(
+        &mut self,
+        page: Option<(PageInfo, Option<Vec<Option<T>>>)>,
+        kinds: &mut Vec<T>,
+    ) -> Result<(), RemoteError> {
         let Some((page_info, page_kinds)) = page else {
             self.done = true;
-            return;
+            return Ok(());
         };
         kinds.extend(page_kinds.into_iter().flatten().flatten());
         match page_info {
             PageInfo {
                 has_next_page: true,
                 end_cursor: Some(cursor),
-            } => self.after = Some(cursor),
-            _ => self.done = true,
+            } => self.advance(cursor),
+            _ => {
+                self.done = true;
+                Ok(())
+            }
         }
+    }
+
+    fn advance(&mut self, cursor: String) -> Result<(), RemoteError> {
+        if !self.seen.insert(cursor.clone()) {
+            return Err(RemoteError::new(
+                EXIT_GENERIC,
+                format!(
+                    "Orbit schema paging did not advance\n\n\
+                     The server sent the page cursor `{cursor}` again."
+                ),
+            ));
+        }
+        self.after = Some(cursor);
+        Ok(())
     }
 }
