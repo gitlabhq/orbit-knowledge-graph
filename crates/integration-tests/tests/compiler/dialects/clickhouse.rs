@@ -5,7 +5,7 @@ use compiler::input::DynamicColumnMode;
 use compiler::{Frontend, QueryError, compile};
 use ontology::introspection::{
     IntrospectionScope::{All, Local},
-    build_schema_response,
+    build_compact_schema_response,
 };
 
 #[test]
@@ -2013,18 +2013,11 @@ fn gql_prepares_queries_and_scoped_schema() {
             let node = serde_json::to_value(&response.domains[0].nodes[0]).unwrap();
             assert_eq!(node["name"], name);
             assert!(!node["props"].as_array().unwrap().is_empty());
-            assert!(!response.edges.is_empty());
-            assert!(response.edges.iter().all(|edge| {
-                ontology
-                    .get_edge(edge)
-                    .unwrap()
-                    .iter()
-                    .any(|edge| edge.source_kind == name || edge.target_kind == name)
-            }));
+            assert!(response.edges.is_empty());
         } else {
             assert_eq!(
                 serde_json::to_value(response).unwrap(),
-                serde_json::to_value(build_schema_response(&ontology, scope, &[]).unwrap())
+                serde_json::to_value(build_compact_schema_response(&ontology, scope, None))
                     .unwrap(),
             );
         }

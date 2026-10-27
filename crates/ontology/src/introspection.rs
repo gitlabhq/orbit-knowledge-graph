@@ -75,20 +75,26 @@ pub fn build_schema_response(
         return Err(UnknownNodes { unknown, valid });
     }
     Ok(SchemaResponse {
-        domains: build_domains(ontology, scope, expand_nodes, None),
+        domains: build_domains(ontology, scope, expand_nodes, None, format_property),
         edges: build_edge_names(ontology, scope, None),
     })
 }
 
 #[must_use]
-pub fn build_node_schema_response(
+pub fn build_compact_schema_response(
     ontology: &Ontology,
     scope: IntrospectionScope,
-    node: &str,
+    node: Option<&str>,
 ) -> SchemaResponse {
-    SchemaResponse {
-        domains: build_domains(ontology, scope, &[], Some(node)),
-        edges: build_edge_names(ontology, scope, Some(node)),
+    match node {
+        None => SchemaResponse {
+            domains: build_domains(ontology, scope, &[], None, format_compact_property),
+            edges: build_relationship_patterns(ontology, scope),
+        },
+        Some(node) => SchemaResponse {
+            domains: build_domains(ontology, scope, &[], Some(node), format_compact_property),
+            edges: Vec::new(),
+        },
     }
 }
 
@@ -126,6 +132,7 @@ fn build_domains(
     scope: IntrospectionScope,
     expand_nodes: &[String],
     only_node: Option<&str>,
+    format: fn(&Field) -> String,
 ) -> Vec<SchemaDomain> {
     let mut domain_map: BTreeMap<String, Vec<SchemaNode>> = BTreeMap::new();
 
@@ -158,7 +165,7 @@ fn build_domains(
                 IntrospectionScope::All => node.listed_fields().collect(),
             };
 
-            let props: Vec<String> = fields.iter().map(|f| format_property(f)).collect();
+            let props: Vec<String> = fields.iter().map(|f| format(f)).collect();
 
             let (outgoing, incoming) = node_relationships(ontology, scope, &node.name);
 
@@ -271,6 +278,21 @@ fn node_relationships(
     (outgoing, incoming)
 }
 
+fn format_compact_property(field: &Field) -> String {
+    let nullable = if field.nullable { "?" } else { "" };
+    let mut text = format!(
+        "{}:{}{}",
+        field.name,
+        field.data_type.to_string().to_lowercase(),
+        nullable
+    );
+    if let Some(values) = &field.enum_values {
+        let values: Vec<&str> = values.values().map(String::as_str).collect();
+        text.push_str(&format!(" ({})", values.join("|")));
+    }
+    text
+}
+
 fn format_property(field: &Field) -> String {
     let nullable = if field.nullable { "?" } else { "" };
     match &field.description {
@@ -376,7 +398,8 @@ mod tests {
         let schema =
             build_schema_response(&ont, IntrospectionScope::All, &["WorkItem".to_string()])
                 .unwrap();
-        let node_schema = build_node_schema_response(&ont, IntrospectionScope::All, "WorkItem");
+        let node_schema =
+            build_compact_schema_response(&ont, IntrospectionScope::All, Some("WorkItem"));
 
         for props in [
             expanded_props(&schema, "WorkItem"),
@@ -388,6 +411,33 @@ mod tests {
                 "{props:?}"
             );
         }
+    }
+
+    #[test]
+    fn compact_schema_lists_relationship_patterns_and_enum_values() {
+        let ont = load();
+        let overview = build_compact_schema_response(&ont, IntrospectionScope::All, None);
+        assert!(
+            overview
+                .edges
+                .iter()
+                .any(|edge| edge.starts_with("(User)-[:AUTHORED]->(")),
+            "{:?}",
+            overview.edges
+        );
+        assert!(overview.domains.iter().all(|domain| {
+            domain
+                .nodes
+                .iter()
+                .all(|node| matches!(node, SchemaNode::Name(_)))
+        }));
+
+        let node = build_compact_schema_response(&ont, IntrospectionScope::All, Some("WorkItem"));
+        let props = expanded_props(&node, "WorkItem");
+        let state = props.iter().find(|p| p.starts_with("state:")).unwrap();
+        assert!(state.contains("(opened|closed)"), "{state}");
+        assert!(!props.iter().any(|p| p.contains(" — ")), "{props:?}");
+        assert!(node.edges.is_empty());
     }
 
     #[test]
