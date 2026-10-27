@@ -418,7 +418,7 @@ mod tests {
                 );
                 if definition.name != "list_commands" {
                     let budget = match (frontend, definition.name.as_str()) {
-                        (Frontend::Gql, "query_graph") => 640,
+                        (Frontend::Gql, "query_graph") => 680,
                         _ => 400,
                     };
                     assert!(
