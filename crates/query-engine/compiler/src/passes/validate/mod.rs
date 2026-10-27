@@ -368,18 +368,52 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                         .is_some_and(|property| model.property_unique(property.id))
             })
         };
+        let pinned = |node: &str, property: &str| {
+            input.nodes.iter().any(|candidate| {
+                candidate.id == node
+                    && candidate.filters.get(property).is_some_and(|filters| {
+                        filters.iter().any(|filter| {
+                            matches!(filter.op, None | Some(FilterOp::Eq))
+                                && filter
+                                    .value
+                                    .as_ref()
+                                    .is_some_and(|value| !value.is_array() && !value.is_null())
+                        })
+                    })
+            })
+        };
         for (node, property) in crate::input::property_groups(groups) {
             let Some(entity) = text_key(node, property) else {
                 continue;
             };
-            if node_groups.contains(node)
-                || model.read_grain(entity) != Some(&query_data_model::ReadGrain::Entity)
-                || unique_key(node)
-            {
+            if node_groups.contains(node) || unique_key(node) {
                 continue;
             }
+            let reason = match model.read_grain(entity) {
+                None => continue,
+                Some(query_data_model::ReadGrain::Entity) => {
+                    format!("access to each {entity} is checked separately; group")
+                }
+                Some(query_data_model::ReadGrain::Owner { columns, split }) => {
+                    let owner_pinned = columns.iter().any(|column| pinned(node, column));
+                    let keys: Vec<String> = columns
+                        .iter()
+                        .take(usize::from(!owner_pinned))
+                        .chain(split.iter().map(|split| &split.property))
+                        .filter(|key| !pinned(node, key))
+                        .map(|key| format!("{node}.{key}"))
+                        .collect();
+                    if keys.is_empty() {
+                        continue;
+                    }
+                    format!(
+                        "access is checked per owner, so filter {} to one value, or group",
+                        keys.join(" and ")
+                    )
+                }
+            };
             return Err(QueryError::Validation(format!(
-                "aggregation group key {entity}.{property}: free-text values cannot be grouped because access to each {entity} is checked separately; group by a property with fixed values, by an id, or by \"{node}\""
+                "aggregation group key {entity}.{property}: free-text values cannot be grouped because {reason} by a property with fixed values, by an id, or by \"{node}\""
             )));
         }
         Ok(())

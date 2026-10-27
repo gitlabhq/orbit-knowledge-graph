@@ -19,9 +19,9 @@ cases:
     description: A free-text group key buckets each file
     query:
       gql: |
-        MATCH (f:File) WHERE f.id IN [13000, 13001, 13002] RETURN f.path AS path, count(f) AS n ORDER BY path
+        MATCH (f:File) WHERE f.project_id = 1000 AND f.id IN [13000, 13001, 13002] RETURN f.path AS path, count(f) AS n ORDER BY path
     expect:
-      skip_requirements: [node_ids, aggregation_sort]
+      skip_requirements: [node_ids, filter:project_id, aggregation_sort]
       row_values:
         - { path: README.md, n: 1 }
         - { path: src/clickhouse.rs, n: 1 }

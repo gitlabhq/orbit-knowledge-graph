@@ -28,16 +28,13 @@ cases:
         - { path: crates/compiler/src/lib.rs, n: 2 }
         - { path: crates/orbit/src/main.rs, n: 1 }
 
-  - name: owner_authorized_text_key_drops_denied_owner
-    description: A denied project's definitions leave the shared file path count
+  - name: owner_authorized_text_key_needs_one_project
+    description: Definitions from two projects cannot share a file path row
     query:
       gql: |
         MATCH (d:Definition) WHERE d.id IN [12000, 12001, 12100] RETURN d.file_path AS path, count(d) AS n
     expect:
-      skip_requirements: [node_ids]
-      row_count: 1
-      row_values:
-        - { path: crates/compiler/src/lib.rs, n: 2 }
+      compile_error: filter d.project_id to one value
 
   - name: project_grain_text_key_merges
     description: Jobs that share a name in one project count as one row
@@ -52,15 +49,13 @@ cases:
         - { name: lint, n: 1 }
 
   - name: project_grain_text_key_drops_denied_owner
-    description: Jobs in a project the caller cannot read leave the shared name count
+    description: Jobs in a project the caller cannot read leave no name count
     query:
       gql: |
-        MATCH (j:Job) WHERE j.name = 'rspec' RETURN j.name AS name, count(j) AS n
+        MATCH (j:Job) WHERE j.project_id = 1002 AND j.name = 'rspec' RETURN j.name AS name, count(j) AS n
     expect:
-      skip_requirements: [filter:name]
-      row_count: 1
-      row_values:
-        - { name: rspec, n: 2 }
+      skip_requirements: [filter:project_id, filter:name]
+      row_count: 0
 
   - name: entity_grain_text_key_rejected
     description: A free-text key of a node read per entity cannot merge its rows
