@@ -18,7 +18,7 @@ json_merges:
       - matcher: "Bash|Grep"
         hooks:
           - type: command
-            command: "{{orbit}} hook-guard search"
+            command: "{{orbit}} hook-guard search{{hook_gitlab}}"
 mcp:
   file:
     project: .mcp.json

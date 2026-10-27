@@ -4,6 +4,17 @@ static PROMPTS: LazyLock<orbit_prompts::Prompts> = LazyLock::new(|| {
     orbit_prompts::Prompts::load_embedded("local").expect("prompts are validated by build.rs")
 });
 
+static REMOTE_PROMPTS: LazyLock<orbit_prompts::Prompts> = LazyLock::new(|| {
+    orbit_prompts::Prompts::load_embedded("remote").expect("prompts are validated by build.rs")
+});
+
+pub(crate) fn gql_syntax() -> &'static str {
+    REMOTE_PROMPTS
+        .get("tools/query_graph_gql")
+        .expect("config/prompts/remote/tools/query_graph_gql.yml is embedded")
+        .description()
+}
+
 pub(crate) fn summary(name: &str) -> &'static str {
     prompt(name).summary()
 }

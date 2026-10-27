@@ -138,6 +138,17 @@ pub struct IndexedRepo {
     pub client: GraphReader,
 }
 
+pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Option<IndexedRepo> {
+    let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
+    let git = git_info(&git_toplevel(&repo_path).ok()?).ok()?;
+    let db_path = resolve_db_path(db, &git).ok()?;
+    if graph_lacks_commit(&db_path, &git.commit_sha).unwrap_or(true) {
+        return None;
+    }
+    let client = GraphReader::open(Some(db_path)).ok()?;
+    Some(IndexedRepo { git, client })
+}
+
 pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
     let top_level = git_toplevel(&repo_path)
@@ -170,9 +181,12 @@ pub fn edited_since_index(repo: &Path, files: &[&str]) -> std::collections::BTre
     }
     let git_list = |args: &[&str]| -> Option<Vec<String>> {
         let output = Command::new("git")
+            .arg("--literal-pathspecs")
             .arg("-C")
             .arg(repo)
             .args(args)
+            .arg("--")
+            .args(files)
             .stderr(Stdio::null())
             .output()
             .ok()

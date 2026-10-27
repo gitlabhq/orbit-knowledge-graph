@@ -438,6 +438,7 @@ mod tests {
                 metrics: vec![InputAggregationMetric {
                     expr: AggExpr::from_parts(function, "_u", property),
                     alias: Some("_agg".into()),
+                    distinct: false,
                 }],
                 ..Default::default()
             },
@@ -468,6 +469,7 @@ mod tests {
                 metrics: vec![InputAggregationMetric {
                     expr: AggExpr::from_parts(AggFunction::Count, "_u", None),
                     alias: Some("_agg".into()),
+                    distinct: false,
                 }],
                 ..Default::default()
             },
@@ -488,6 +490,7 @@ mod tests {
                 metrics: vec![InputAggregationMetric {
                     expr: AggExpr::from_parts(function, "_u", property),
                     alias: Some("_agg".into()),
+                    distinct: false,
                 }],
                 ..Default::default()
             },

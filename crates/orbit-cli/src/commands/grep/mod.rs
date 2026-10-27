@@ -1,10 +1,14 @@
 mod defs;
 mod kind;
 mod local;
+mod qualifier;
 mod rank;
+mod remote;
 mod render;
 mod scan;
 mod term;
+
+pub(crate) use rank::is_test;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -12,10 +16,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use orbit_search::{RecallFilter, query_alternatives};
 
+use crate::remote::grep::{Outcome, searched_kind};
 use local::LocalBackend;
 
 /// What a search prints, following rg: matching lines, `-l` file names, `-c` counts, or
-/// nothing but the exit status with `-q`; `--kind File` and `--kind Directory` list where
 /// the matches are with their definitions.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Output {
@@ -57,14 +61,198 @@ impl std::fmt::Display for NoMatches {
 
 impl std::error::Error for NoMatches {}
 
-pub(crate) fn run(
+pub(crate) async fn run(
+    query: Option<String>,
+    repo: Option<PathBuf>,
+    db: Option<PathBuf>,
+    mut paths: Vec<String>,
+    mut options: Options,
+) -> Result<()> {
+    let query = match options.fixed {
+        true => query,
+        false => query.map(|query| or_word(&query)),
+    };
+    let sections = qualifier::apply(query, &mut options, &mut paths);
+    let mut found = false;
+    for section in sections {
+        if found {
+            println!();
+        }
+        let mut options = options.clone();
+        if section.query.as_deref() == Some(".") && section.kinds.is_empty() {
+            options.output = Output::Files;
+        }
+        let filter = RecallFilter {
+            kinds: section.kinds,
+        };
+        match search(
+            section.query,
+            repo.clone(),
+            db.clone(),
+            paths.clone(),
+            filter,
+            options,
+        )
+        .await
+        {
+            Ok(()) => found = true,
+            Err(error) if error.is::<NoMatches>() => {}
+            Err(error) => return Err(error),
+        }
+    }
+    match found {
+        true => Ok(()),
+        false => Err(NoMatches.into()),
+    }
+}
+
+/// How long a plain grep waits for the implicit `origin` GitLab search once local code has matched.
+const IMPLICIT_GITLAB_BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
+
+async fn search(
     query: Option<String>,
     repo: Option<PathBuf>,
     db: Option<PathBuf>,
     paths: Vec<String>,
-    filter: RecallFilter,
-    mut options: Options,
+    mut filter: RecallFilter,
+    options: Options,
 ) -> Result<()> {
+    let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new("."))).ok();
+    let exists = |path: &str| {
+        Path::new(path).exists() || root.as_ref().is_some_and(|root| root.join(path).exists())
+    };
+    let indexed = || indexed_checkouts(db.clone());
+    let route = remote::route(
+        query.as_deref(),
+        repo.as_deref(),
+        paths,
+        &filter.kinds,
+        &options,
+        remote::Checkouts {
+            exists: &exists,
+            indexed: &indexed,
+        },
+    )?;
+    for reason in &route.skipped {
+        eprintln!("orbit: {reason}");
+    }
+    let label = query.clone().unwrap_or_default();
+    let pending: Vec<_> = route
+        .remote
+        .into_iter()
+        .map(|request| {
+            let explicit = request.target.explicit();
+            let search = crate::remote::grep::search(request, label.clone());
+            (explicit, tokio::spawn(search))
+        })
+        .collect();
+    if !pending.is_empty() {
+        filter.kinds.retain(|kind| searched_kind(kind).is_none());
+        if route.local.is_empty() && !filter.kinds.is_empty() {
+            eprintln!(
+                "orbit: skipping hosted {}; use `{} query`",
+                filter.kinds.join(", "),
+                crate::commands::setup::spec::launcher()
+            );
+        }
+    }
+    let remote_only = route.local.is_empty();
+    let deadline = tokio::time::Instant::now() + IMPLICIT_GITLAB_BUDGET;
+    let (mut found, mut printed) = (false, false);
+    for target in route.local {
+        if printed {
+            println!();
+        }
+        found |= local(
+            query.clone(),
+            target.repo,
+            db.clone(),
+            target.paths,
+            filter.clone(),
+            options.clone(),
+        )?;
+        printed = true;
+    }
+    let found_locally = found;
+    for (explicit, task) in pending {
+        // The `origin` group search runs beside the local one; once code matched, it gets a short budget.
+        let outcome = match explicit || remote_only || !found_locally {
+            true => task.await,
+            false => match tokio::time::timeout_at(deadline, task).await {
+                Ok(outcome) => outcome,
+                Err(_) => Ok(Outcome::Skipped(format!(
+                    "GitLab took over {}s; `{} grep 'mr:words'` searches it alone",
+                    IMPLICIT_GITLAB_BUDGET.as_secs(),
+                    crate::commands::setup::spec::launcher()
+                ))),
+            },
+        };
+        match outcome.unwrap_or_else(|error| Outcome::Failed(error.to_string())) {
+            Outcome::Found(text) => {
+                let mut out = std::io::stdout().lock();
+                if printed {
+                    writeln!(out)?;
+                }
+                write!(out, "{text}")?;
+                out.flush()?;
+                (found, printed) = (true, true);
+            }
+            Outcome::NoMatches(reason) if explicit || remote_only => {
+                eprintln!("orbit: {reason}");
+            }
+            Outcome::Skipped(reason) if explicit || remote_only => {
+                eprintln!("orbit: GitLab search skipped: {reason}");
+            }
+            Outcome::Skipped(reason) if found_locally && reason.starts_with("GitLab took over") => {
+                eprintln!("orbit: GitLab search skipped: {reason}");
+            }
+            Outcome::Failed(reason) => eprintln!("orbit: GitLab search failed: {reason}"),
+            Outcome::Empty | Outcome::NoMatches(_) | Outcome::Skipped(_) => {}
+        }
+    }
+    match found {
+        true => Ok(()),
+        false => Err(NoMatches.into()),
+    }
+}
+
+fn indexed_checkouts(db: Option<PathBuf>) -> Vec<(PathBuf, String, String)> {
+    if db.is_some() {
+        return Vec::new();
+    }
+    let Ok(manifest) = crate::workspace::Workspace::open_default().map(|w| w.manifest_path())
+    else {
+        return Vec::new();
+    };
+    if !manifest.exists() {
+        return Vec::new();
+    }
+    let Ok(batches) = crate::database::manifest::read(
+        &manifest,
+        "SELECT repo_path FROM _orbit_manifest WHERE CAST(status AS VARCHAR) = 'indexed'",
+    ) else {
+        return Vec::new();
+    };
+    duckdb_client::string_column(&batches, "repo_path")
+        .into_iter()
+        .map(PathBuf::from)
+        .filter_map(|checkout| {
+            let (host, full_path) = crate::remote::origin::project(&checkout)?;
+            Some((checkout, host, full_path))
+        })
+        .collect()
+}
+
+fn local(
+    query: Option<String>,
+    repo: Option<PathBuf>,
+    db: Option<PathBuf>,
+    paths: Vec<String>,
+    mut filter: RecallFilter,
+    mut options: Options,
+) -> Result<bool> {
+    let languages = kind::languages(&mut filter.kinds);
+    options.types.extend(languages.iter().cloned());
     let launcher = crate::commands::setup::spec::launcher();
     let alternatives = match &query {
         Some(query) => query_alternatives(query).map_err(|_| {
@@ -80,6 +268,7 @@ pub(crate) fn run(
     if options.fixed {
         terms = terms.iter().map(term::Term::fixed).collect();
     }
+    let mut notes: Vec<String> = Vec::new();
     let scan = match query.is_some() {
         true => {
             let matcher = term::matcher(&terms, &options).or_else(|_| {
@@ -88,11 +277,91 @@ pub(crate) fn run(
             })?;
             let root = crate::workspace::git_toplevel(repo.as_deref().unwrap_or(Path::new(".")))?;
             let scope = crate::workspace::repo_relative_paths(&root, &paths);
-            let hits = scan::scan(&root, &scope, &matcher, &options)?;
+            let scope = resolve_missing(&root, scope, &mut notes);
+            let mut hits = scan::scan(&root, &scope, &matcher, &options)?;
+            if !scope.is_empty()
+                && options.output == Output::Lines
+                && !options.invert
+                && !hits.iter().any(|hit| !hit.context)
+            {
+                let mut level = scope.clone();
+                while let Some(parents) = parents(&level) {
+                    let wider = scan::scan(&root, &parents, &matcher, &options)?;
+                    if wider.iter().any(|hit| !hit.context) {
+                        let shown = match parents.is_empty() {
+                            true => "the whole repository".to_string(),
+                            false => parents.join(", "),
+                        };
+                        notes.push(format!(
+                            "{NOTE}0 matching lines in {}; showing matches in {shown}",
+                            scope.join(", ")
+                        ));
+                        hits = wider;
+                        break;
+                    }
+                    level = parents;
+                }
+            }
+            let words: Vec<term::Term> = terms
+                .iter()
+                .filter(|term| !term.is_regex())
+                .flat_map(|term| term.raw.split_whitespace().map(term::Term::parse))
+                .collect();
+            if words.len() > terms.len()
+                && !options.fixed
+                && !options.invert
+                && options.output == Output::Lines
+                && !hits.iter().any(|hit| !hit.context)
+            {
+                let any = scan::scan(&root, &scope, &term::matcher(&words, &options)?, &options)?;
+                let mut found: std::collections::HashMap<&str, std::collections::BTreeSet<usize>> =
+                    Default::default();
+                for hit in any.iter().filter(|hit| !hit.context) {
+                    let matched = found.entry(hit.file.as_str()).or_default();
+                    matched.extend((0..words.len()).filter(|&w| words[w].mentions(&hit.text)));
+                }
+                let most = found
+                    .values()
+                    .map(|matched| matched.len())
+                    .max()
+                    .unwrap_or(0);
+                if most > 1 {
+                    let keep: std::collections::HashSet<String> = found
+                        .iter()
+                        .filter(|(_, matched)| matched.len() == most)
+                        .map(|(file, _)| file.to_string())
+                        .collect();
+                    let (kept, files) = most_words(
+                        any.into_iter()
+                            .filter(|hit| keep.contains(&hit.file))
+                            .collect(),
+                        &words,
+                    );
+                    hits = kept;
+                    let more = match files.saturating_sub(FALLBACK_FILES) {
+                        0 => String::new(),
+                        more => format!(
+                            "; {more} more files have them too, so add a word or a path to narrow it"
+                        ),
+                    };
+                    notes.push(format!(
+                        "{NOTE}0 lines contain {:?}; showing the files with {most} of its {} words, \
+                         up to {FALLBACK_LINES} lines each with the most of them{more}",
+                        alternatives.join("|"),
+                        words.len()
+                    ));
+                    terms = words;
+                }
+            }
             let mut files: Vec<&str> = hits.iter().map(|h| h.file.as_str()).collect();
             files.sort();
             files.dedup();
-            let edited = crate::workspace::edited_since_index(&root, &files);
+            use crate::commands::index::incremental::{Freshness, refresh};
+            let edited = match refresh(&root, db.clone(), &files) {
+                Ok(Freshness::Fresh | Freshness::Refreshed) => Default::default(),
+                Ok(Freshness::Stale(changed)) => changed.into_iter().collect(),
+                _ => crate::workspace::edited_since_index(&root, &files),
+            };
             Some((hits, edited))
         }
         false => None,
@@ -119,43 +388,191 @@ pub(crate) fn run(
         &kinds,
         &edited,
     )?;
-    let connections = match options.output {
-        Output::Lines => defs::connections(backend.client(), &hits)?,
-        _ => defs::Connections::new(),
-    };
     let mut header = format!("grep {query:?}");
     for path in &paths {
         header.push_str(&format!(" {path}"));
     }
     if !shown.is_empty() {
-        header.push_str(&format!(" --kind {}", shown.join(",")));
+        for kind in &shown {
+            header.push_str(&format!(" {kind}:"));
+        }
+    }
+    for language in &languages {
+        header.push_str(&format!(" -t {language}"));
     }
     header.push_str(&format!(" @ {}", backend.header()));
-    write!(
-        out,
-        "{}",
-        render::render(
-            &header,
-            &hits,
-            &alternatives,
-            &connections,
-            &edited,
-            &options,
-            render::lookup(
-                &backend.git().repo_path,
-                &hits,
-                &alternatives,
-                &connections,
-                &options
-            )
-            .as_deref(),
-        )?
+    let rendered = render::render(
+        &header,
+        &hits,
+        &alternatives,
+        &edited,
+        &options,
+        render::lookup(&backend.git().repo_path, &hits, &alternatives, &options).as_deref(),
     )?;
-    out.flush()?;
-    match hits.iter().any(|hit| !hit.context) {
-        true => Ok(()),
-        false => Err(NoMatches.into()),
+    match (options.output, rendered.split_once('\n')) {
+        (Output::Lines, Some((first, rest))) if !notes.is_empty() => {
+            write!(out, "{first}\n{}\n{rest}", notes.join("\n"))?
+        }
+        _ => {
+            for note in &notes {
+                eprintln!("orbit: {}", note.trim_start_matches(NOTE));
+            }
+            write!(out, "{rendered}")?
+        }
     }
+    out.flush()?;
+    Ok(hits.iter().any(|hit| !hit.context))
+}
+
+const NOTE: &str = "» ";
+
+const FALLBACK_LINES: usize = 4;
+const FALLBACK_FILES: usize = 5;
+
+/// The files whose lines carry the most query words, best first, each cut to its
+/// `FALLBACK_LINES` best lines, and how many files matched before the cut.
+fn most_words(hits: Vec<scan::Hit>, words: &[term::Term]) -> (Vec<scan::Hit>, usize) {
+    let mut by_file: std::collections::BTreeMap<String, Vec<(usize, scan::Hit)>> =
+        Default::default();
+    for hit in hits.into_iter().filter(|hit| !hit.context) {
+        let count = words.iter().filter(|word| word.mentions(&hit.text)).count();
+        by_file
+            .entry(hit.file.clone())
+            .or_default()
+            .push((count, hit));
+    }
+    let files = by_file.len();
+    let mut ranked: Vec<(usize, usize, Vec<scan::Hit>)> = by_file
+        .into_values()
+        .map(|mut lines| {
+            lines.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.line.cmp(&b.1.line)));
+            let best = lines.first().map_or(0, |(count, _)| *count);
+            let at_best = lines.iter().filter(|(count, _)| *count == best).count();
+            let mut lines: Vec<scan::Hit> = lines
+                .into_iter()
+                .take(FALLBACK_LINES)
+                .map(|(_, hit)| hit)
+                .collect();
+            lines.sort_by_key(|hit| hit.line);
+            (best, at_best, lines)
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+    let kept = ranked
+        .into_iter()
+        .take(FALLBACK_FILES)
+        .flat_map(|(_, _, lines)| lines)
+        .collect();
+    (kept, files)
+}
+
+static OR_WORD: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"\s+OR\s+").expect("valid pattern"));
+
+fn or_word(query: &str) -> String {
+    OR_WORD.replace_all(query, "|").into_owned()
+}
+
+fn parents(scope: &[String]) -> Option<Vec<String>> {
+    if scope.is_empty() {
+        return None;
+    }
+    let mut up: Vec<String> = scope
+        .iter()
+        .filter_map(|path| {
+            path.trim_end_matches('/')
+                .rsplit_once('/')
+                .map(|(dir, _)| dir.to_string())
+        })
+        .collect();
+    if up.len() < scope.len() {
+        return Some(Vec::new());
+    }
+    up.sort();
+    up.dedup();
+    let kept: Vec<String> = up
+        .iter()
+        .filter(|path| {
+            !up.iter()
+                .any(|outer| outer != *path && path.starts_with(&format!("{outer}/")))
+        })
+        .cloned()
+        .collect();
+    Some(kept)
+}
+const PATH_CANDIDATES: usize = 3;
+
+fn resolve_missing(root: &Path, scope: Vec<String>, notes: &mut Vec<String>) -> Vec<String> {
+    let root_text = format!("{}/", root.to_string_lossy().trim_end_matches('/'));
+    let scope: Vec<String> = scope
+        .into_iter()
+        .map(|path| {
+            path.strip_prefix(&root_text)
+                .map(str::to_string)
+                .unwrap_or(path)
+        })
+        .collect();
+    let missing = |path: &String| !path.contains(['*', '?', '[']) && !root.join(path).exists();
+    if !scope.iter().any(missing) {
+        return scope;
+    }
+    let tracked: Vec<String> = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files", "-z"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .split('\0')
+                .filter(|file| !file.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut resolved = Vec::new();
+    for path in scope {
+        if !missing(&path) {
+            resolved.push(path);
+            continue;
+        }
+        let segments: Vec<&str> = path
+            .split('/')
+            .filter(|s| !s.is_empty() && *s != ".")
+            .collect();
+        let Some(last) = segments.last().copied() else {
+            resolved.push(path);
+            continue;
+        };
+        let mut found: Vec<String> = tracked
+            .iter()
+            .filter_map(|file| {
+                let parts: Vec<&str> = file.split('/').collect();
+                let at = parts.iter().position(|part| *part == last)?;
+                Some(parts[..=at].join("/"))
+            })
+            .collect();
+        found.sort();
+        found.dedup();
+        let shared = |candidate: &str| {
+            let parts: Vec<&str> = candidate.split('/').collect();
+            segments.iter().filter(|s| parts.contains(s)).count()
+        };
+        found.sort_by_key(|c| (std::cmp::Reverse(shared(c)), is_test(c), c.len(), c.clone()));
+        found.truncate(PATH_CANDIDATES);
+        if found.is_empty() {
+            resolved.push(path);
+            continue;
+        }
+        notes.push(format!(
+            "{NOTE}{path} not found; searched {}",
+            found.join(", ")
+        ));
+        resolved.extend(found);
+    }
+    resolved
 }
 
 fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::Kinds> {
@@ -172,17 +589,29 @@ fn resolve_kinds(backend: &LocalBackend, requested: &[String]) -> Result<kind::K
     let kinds = kind::resolve(requested, &known)?;
     let launcher = crate::commands::setup::spec::launcher();
     let hosted = kinds.hosted.join(", ");
+    let ci = kinds.hosted.iter().any(|kind| {
+        matches!(
+            kind.to_ascii_lowercase().as_str(),
+            "pipeline" | "job" | "stage"
+        )
+    });
+    anyhow::ensure!(
+        !ci || kinds.hosted.len() < requested.len(),
+        "{hosted} isn't searchable; read CI with `{launcher} context` (the current branch's MR and \
+         CI), `{launcher} context branch:name`, `pipeline:ID`, or `job:ID`"
+    );
     anyhow::ensure!(
         kinds.hosted.is_empty() || kinds.hosted.len() < requested.len(),
-        "{hosted} lives in the hosted graph, which `{launcher} grep` does not search yet; \
-         use `{launcher} query`"
+        "{hosted} lives in the hosted graph; `{launcher} grep` searches GitLab for work items, \
+         merge requests, commits, notes, milestones, users, projects, and groups only without \
+         paths or file filters. Otherwise use `{launcher} query`"
     );
     if !kinds.hosted.is_empty() {
-        eprintln!("orbit: skipping hosted --kind {hosted}; use `{launcher} query`");
+        eprintln!("orbit: skipping hosted {hosted}; use `{launcher} query`");
     }
     if !kinds.unknown.is_empty() {
         eprintln!(
-            "orbit: ignoring unknown --kind {}; kinds here: File, Directory, Definition, {}",
+            "orbit: ignoring unknown {}; kinds here: File, Directory, Definition, {}",
             kinds.unknown.join(", "),
             known.join(", ")
         );

@@ -204,7 +204,8 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
     let metric_target = input.aggregation.metrics.iter().any(|metric| {
         metric.expr.node() == node.alias
             && metric.expr.property().is_some_and(|property| {
-                !matches!(metric.expr.function(), AggFunction::Count)
+                metric.distinct
+                    || !matches!(metric.expr.function(), AggFunction::Count)
                     || node
                         .entity
                         .as_deref()

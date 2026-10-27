@@ -164,28 +164,21 @@ struct GrepArgs {
     #[arg(short = 'M', long, value_name = "NUM")]
     max_columns: Option<usize>,
 
-    /// Files or directories to search, as in `rg PATTERN [PATH...]`: relative to the current
-    /// directory or the repository, and globs such as `crates/*/src/lib.rs` work.
-    #[arg(value_name = "PATH")]
+    #[arg(
+        value_name = "PATH",
+        help = "Files or directories to search, as in `rg PATTERN [PATH...]`: relative to the \
+                current directory or the repository, and globs such as `crates/*/src/lib.rs` \
+                work. A GitLab `group/project`, `Project[id]`, or `Group[id]` searches that \
+                project or group in GitLab."
+    )]
     paths: Vec<String>,
-
-    #[arg(long, value_name = "KINDS", value_parser = parse_kinds, help = KIND_ARG_HELP)]
-    kind: Option<Kinds>,
 
     /// Read a specific revision DuckDB file.
     #[arg(long, value_name = "PATH")]
     db: Option<PathBuf>,
 }
 
-const KIND_ARG_HELP: &str = "Ontology node kinds, comma-separated. Definition kinds such as \
-                             `Class,Method` narrow matches; lowercase `function` or `class` \
-                             cover the whole family. `Definition` keeps matches inside any \
-                             definition. `File` and `Directory` list where matches are.";
-
-#[derive(Debug, Clone, PartialEq)]
-struct Kinds(Vec<String>);
-
-fn run_grep(args: GrepArgs) -> Result<()> {
+async fn run_grep(args: GrepArgs) -> Result<()> {
     use commands::grep::{Options, Output};
     let mut paths = Vec::new();
     let query = match args.regexp.is_empty() {
@@ -226,16 +219,7 @@ fn run_grep(args: GrepArgs) -> Result<()> {
             _ => Output::Lines,
         },
     };
-    commands::grep::run(
-        query,
-        args.repo,
-        args.db,
-        paths,
-        orbit_search::RecallFilter {
-            kinds: kind_names(args.kind),
-        },
-        options,
-    )
+    commands::grep::run(query, args.repo, args.db, paths, options).await
 }
 
 /// grep and rg flags that `orbit grep` already behaves as: line numbers, recursion, ignoring
@@ -312,6 +296,13 @@ fn tolerate_grep_flags(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString>
             out.extend(["-C".into(), cluster.into()]);
             continue;
         }
+        let first = cluster.chars().next().expect("cluster is not empty");
+        let flag_like = cluster.chars().all(|c| c.is_ascii_alphanumeric())
+            || short(first).is_some_and(takes_value);
+        if !flag_like {
+            out.push(format!("--regexp={text}").into());
+            continue;
+        }
         let (mut kept, mut value_next) = (String::new(), false);
         for (at, c) in cluster.char_indices() {
             match short(c) {
@@ -337,23 +328,9 @@ fn tolerate_grep_flags(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString>
     out
 }
 
-fn parse_kinds(value: &str) -> Result<Kinds, String> {
-    let kinds: Vec<String> = value
-        .split([',', '|'])
-        .map(str::trim)
-        .filter(|kind| !kind.is_empty())
-        .map(str::to_string)
-        .collect();
-    Ok(Kinds(kinds))
-}
-
-fn kind_names(kinds: Option<Kinds>) -> Vec<String> {
-    kinds.map(|Kinds(names)| names).unwrap_or_default()
-}
-
 fn context_target_help() -> String {
     format!(
-        "File:<id>, Definition:<id> from `{} grep`, file paths, path:start-end line ranges, or directories. Mix or repeat targets; quote paths with spaces.",
+        "File:<id>, Definition:<id> from `{} grep`, file paths, path:start-end line ranges, directories, names, or GitLab targets: mr:42, issue:7, branch:name, pipeline:123, job:456, commit:sha, GitLab URLs, with repo:group/project for another project. Mix or repeat targets; quote paths with spaces. No targets reads the current branch.",
         commands::setup::spec::launcher()
     )
 }
@@ -370,7 +347,7 @@ fn sql_long_about() -> String {
 #[derive(Args, Debug, PartialEq)]
 #[command(about = descriptions::short("context"), long_about = descriptions::long("context"))]
 struct ContextArgs {
-    #[arg(value_name = "TARGET", help = context_target_help(), required = true)]
+    #[arg(value_name = "TARGET", help = context_target_help())]
     target: Vec<String>,
 
     /// Repository path (default: current directory).
@@ -625,6 +602,10 @@ enum Commands {
 
         #[arg(long, hide = true, value_name = "MODE")]
         mode: Option<String>,
+
+        /// Also point glab calls at Orbit's GitLab search and context; setup adds it when Orbit reaches GitLab.
+        #[arg(long, hide = true)]
+        gitlab: bool,
     },
     /// Sends one command event; `hook-guard` runs it detached so hooks never wait on telemetry.
     #[command(hide = true)]
@@ -634,6 +615,15 @@ enum Commands {
 
         #[arg(long, value_name = "MS")]
         duration_ms: u64,
+    },
+    /// Refreshes edited files into the incremental graph; `grep` and `context` run it detached.
+    #[command(hide = true)]
+    Refresh {
+        repo: PathBuf,
+        #[arg(long, value_name = "PATH")]
+        db: Option<PathBuf>,
+        #[arg(last = true)]
+        files: Vec<String>,
     },
     /// POST a query to the remote Orbit API and stream the response.
     #[command(group(clap::ArgGroup::new("input").required(true).args(["query", "file"])))]
@@ -736,9 +726,9 @@ async fn main() -> Result<()> {
     };
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
     match &cli.command {
-        Commands::HookGuard { kind, .. } => {
+        Commands::HookGuard { kind, gitlab, .. } => {
             let started = Instant::now();
-            if commands::hook_guard::run(*kind) {
+            if commands::hook_guard::run(*kind, *gitlab) {
                 telemetry::spawn_detached_event(&subcommand_path(&matches), started.elapsed());
             }
             return Ok(());
@@ -749,6 +739,13 @@ async fn main() -> Result<()> {
         } => {
             send_event(command, Duration::from_millis(*duration_ms)).await;
             return Ok(());
+        }
+        Commands::Refresh { repo, db, files } => {
+            return commands::index::incremental::refresh_now(
+                repo.clone(),
+                db.clone(),
+                files.clone(),
+            );
         }
         _ => {}
     }
@@ -852,8 +849,8 @@ async fn dispatch(
             let (path, options) = args.into_parts();
             commands::index::run(path, options)
         }
-        Commands::Grep(args) => run_grep(*args),
-        Commands::Context(args) => commands::context::run(args),
+        Commands::Grep(args) => run_grep(*args).await,
+        Commands::Context(args) => commands::context::run(args).await,
         Commands::Sql(SqlArgs {
             query,
             file,
@@ -956,11 +953,12 @@ async fn dispatch(
             kind,
             graph_first: _,
             mode: _,
+            gitlab,
         } => {
-            commands::hook_guard::run(kind);
+            commands::hook_guard::run(kind, gitlab);
             Ok(())
         }
-        Commands::SendEvent { .. } => Ok(()),
+        Commands::SendEvent { .. } | Commands::Refresh { .. } => Ok(()),
         Commands::Query {
             query,
             file,
@@ -1047,8 +1045,18 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, IndexArgs, SchemaArgs};
+    use super::{Cli, Commands, IndexArgs, SchemaArgs, tolerate_grep_flags};
     use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn grep_reads_a_dash_pattern_that_is_no_flag_as_the_pattern() {
+        let args = ["orbit", "grep", "- +1.75", "-g*.rs"].map(std::ffi::OsString::from);
+        let Commands::Grep(grep) = Cli::parse_from(tolerate_grep_flags(args.to_vec())).command
+        else {
+            panic!("expected grep");
+        };
+        assert_eq!(grep.regexp, ["- +1.75"]);
+    }
 
     #[test]
     fn cli_command_tree_verifies() {
@@ -1140,10 +1148,10 @@ mod tests {
             index,
             IndexArgs {
                 path: "/tmp/repo".into(),
-                budget: Some(4),
                 stats: false,
                 verbose: false,
                 db: None,
+                budget: Some(4),
             }
         );
 
@@ -1307,7 +1315,10 @@ mod tests {
             Cli::parse_from(["orbit", "context", "src/lib.rs"]).command,
             Commands::Context(_)
         ));
-        assert!(Cli::try_parse_from(["orbit", "context"]).is_err());
+        let Commands::Context(bare) = Cli::parse_from(["orbit", "context"]).command else {
+            panic!("expected context");
+        };
+        assert!(bare.target.is_empty());
         assert!(Cli::try_parse_from(["orbit", "context", "--file", "src/lib.rs"]).is_err());
         for removed in ["--outline", "--related", "--tests"] {
             assert!(

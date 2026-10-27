@@ -120,6 +120,16 @@ pub(crate) async fn install(
         components::install(&selection, &target, report)
     })?;
     tui::card("Configured", summary::format_components_per_agent(&plan))?;
+    if selection.components.contains(&Component::Instructions) && !spec::reaches_gitlab() {
+        tui::card(
+            "GitLab",
+            format!(
+                "Not signed in, so agent instructions cover local code only. Run `glab auth \
+                 login`, then `{} setup` again to add GitLab search.",
+                spec::launcher()
+            ),
+        )?;
+    }
 
     let index_outcome = match index_repo::repository_root(&target) {
         None => IndexOutcome::OutsideRepository,
@@ -1486,7 +1496,8 @@ mod tests {
 
         let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
         assert!(
-            settings.contains("\"orbit hook-guard search\""),
+            settings.contains("\"orbit hook-guard search\"")
+                || settings.contains("\"orbit hook-guard search --gitlab\""),
             "{settings}"
         );
         assert!(!settings.contains("--mode"));

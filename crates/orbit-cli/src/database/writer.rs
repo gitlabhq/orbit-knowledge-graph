@@ -76,6 +76,53 @@ impl GraphWriter {
         Ok(duckdb_client::scalar_i64(&self.client.query_arrow(sql)?) as usize)
     }
 
+    pub fn delete_files(
+        &self,
+        edge_table: &str,
+        tables: &[(&str, &str)],
+        files: &[&str],
+    ) -> Result<()> {
+        if files.is_empty() || tables.is_empty() {
+            return Ok(());
+        }
+        let list = files
+            .iter()
+            .map(|file| duckdb_client::sql_lit(file))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let ids = tables
+            .iter()
+            .map(|(table, column)| format!("SELECT id FROM {table} WHERE {column} IN ({list})"))
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ");
+        self.client.execute(
+            &format!("DELETE FROM {edge_table} WHERE source_id IN ({ids}) OR target_id IN ({ids})"),
+            &[],
+        )?;
+        for (table, column) in tables {
+            self.client.execute(
+                &format!("DELETE FROM {table} WHERE {column} IN ({list})"),
+                &[],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Runs `write` in one transaction, so a failure leaves the graph as it was.
+    pub fn in_transaction(&self, write: impl FnOnce() -> Result<()>) -> Result<()> {
+        self.client.execute("BEGIN TRANSACTION", &[])?;
+        match write() {
+            Ok(()) => {
+                self.client.execute("COMMIT", &[])?;
+                Ok(())
+            }
+            Err(error) => {
+                let _ = self.client.execute("ROLLBACK", &[]);
+                Err(error)
+            }
+        }
+    }
+
     pub fn complete(&self, commit: &str) -> Result<()> {
         self.client.execute(
             "INSERT INTO _orbit_meta (key, value) VALUES ('indexed_commit', ?1)",
