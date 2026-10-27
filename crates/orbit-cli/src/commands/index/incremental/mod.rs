@@ -474,31 +474,35 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
         .filter_map(|name| SupportLang::from_family(name))
         .collect();
     let working = workspace::git_working_changes(&git.repo_path)?;
+    let saved_files = state::saved_files(&state_dir, &families);
     let (changed, removed) =
-        state::refresh_changes(&git.repo_path, &state_dir, &families, working, files);
+        state::refresh_changes(&git.repo_path, &state_dir, &saved_files, working, files);
     if changed.is_empty() && removed.is_empty() {
         return Ok(());
     }
     let _state_lock = lock_index_state(&state_dir, &git.repo_path, crate::database::BRIEF_WAIT)?;
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
     let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
-    let refresh = state::refresh_families(
-        &git, &ontology, &state_dir, owner, &families, changed, removed,
-    )?;
+    let reader = state::Reader {
+        git: &git,
+        ontology: &ontology,
+        state_dir: &state_dir,
+        owner,
+        families: &families,
+        saved_files: &saved_files,
+        stats: false,
+        context: &|env, paths| {
+            Ok(code_graph_incremental::pipeline::Context::new(
+                env,
+                input::paths(&git.repo_path, paths)?,
+            ))
+        },
+    };
+    let refresh = reader.read(reader.work(changed, removed)?, u64::MAX, &|| false)?;
     // Snapshots go in place only after the rows land, so a failed write keeps the files stale.
     let written = workspace::resolve_db_path(db, &git)
         .and_then(|path| GraphWriter::open_waiting(&path, &git, crate::database::BRIEF_WAIT))
-        .and_then(|writer| {
-            writer.in_transaction(|| {
-                for family in &refresh.families {
-                    output::apply(&writer, &family.replacement)?;
-                }
-                match &refresh.directories {
-                    Some(rows) => output::apply_directories(&writer, rows),
-                    None => Ok(()),
-                }
-            })
-        });
+        .and_then(|writer| writer.in_transaction(|| output::apply_refresh(&writer, &refresh)));
     match written {
         Ok(()) => state::commit_snapshots(&refresh.families),
         Err(error) => {

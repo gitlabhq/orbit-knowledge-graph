@@ -68,23 +68,6 @@ impl GraphWriter {
         Ok(())
     }
 
-    /// Whether the last index of `commit` finished writing.
-    pub fn is_complete(&self, commit: &str) -> Result<bool> {
-        let batches = self.client.query_arrow_json(
-            "SELECT CAST(count(*) AS BIGINT) FROM _orbit_meta WHERE key = 'indexed_commit' AND value = ?1",
-            &[commit.into()],
-        )?;
-        Ok(duckdb_client::scalar_i64(&batches) > 0)
-    }
-
-    /// Marks the graph unfinished until [`Self::complete`], in its own
-    /// statement, so a run that stops halfway leaves it marked.
-    pub fn mark_incomplete(&self) -> Result<()> {
-        self.client
-            .execute("DELETE FROM _orbit_meta WHERE key = 'indexed_commit'", &[])?;
-        Ok(())
-    }
-
     /// Deletes the rows of `paths`: their files, the entities in them, and
     /// every edge that starts or ends at one of those.
     pub fn delete_files(&self, paths: &[String]) -> Result<()> {
@@ -161,7 +144,7 @@ impl GraphWriter {
 
     pub fn complete(&self, commit: &str) -> Result<()> {
         self.client.execute(
-            "INSERT INTO _orbit_meta (key, value) VALUES ('indexed_commit', ?1)",
+            "INSERT OR REPLACE INTO _orbit_meta (key, value) VALUES ('indexed_commit', ?1)",
             &[commit.into()],
         )?;
         Ok(())

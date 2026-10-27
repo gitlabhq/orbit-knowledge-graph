@@ -358,25 +358,20 @@ impl State {
         remove_unreferenced_blocks(path)
     }
 
-    /// [`Self::save`] over the snapshot this graph was loaded from, when only
-    /// the files in `touched` changed since: a block with none of them, and
-    /// the same files as before, keeps its file without being serialised.
-    pub fn save_changed(&self, env: &Env, path: &Path, touched: &FxHashSet<u32>) -> io::Result<()> {
-        self.write(env, path, path, Some(touched))?;
-        remove_unreferenced_blocks(path)
-    }
-
-    /// [`Self::save_changed`] with the index written to `staged`: the
-    /// snapshot at `path` stays readable as it was until
-    /// [`State::commit_staged`] puts the staged one in its place.
-    pub fn stage_changed(
+    /// Writes the blocks beside the snapshot at `path` and the index to
+    /// `staged`; the snapshot at `path` stays as it was until
+    /// [`State::commit_staged`] puts the staged one in its place. With
+    /// `touched`, the files that changed since the graph was loaded from
+    /// `path`, a block with none of them, and the same files as before, keeps
+    /// its file without being serialised.
+    pub fn stage(
         &self,
         env: &Env,
         path: &Path,
         staged: &Path,
-        touched: &FxHashSet<u32>,
+        touched: Option<&FxHashSet<u32>>,
     ) -> io::Result<()> {
-        self.write(env, path, staged, Some(touched))
+        self.write(env, path, staged, touched)
     }
 
     /// Puts the index staged for `path` in place and removes the blocks the
@@ -452,16 +447,18 @@ impl State {
         if previous.buckets != buckets || previous.resolved != resolved {
             return FxHashMap::default();
         }
-        let before = bucket_members(previous.labels.iter().map(String::as_str), buckets);
-        let now = bucket_members(self.trees.iter().map(|tree| tree.label.as_str()), buckets);
+        let before: FxHashSet<&str> = previous.labels.iter().map(String::as_str).collect();
+        let now: FxHashSet<&str> = self.trees.iter().map(|tree| tree.label.as_str()).collect();
         let changed: FxHashSet<u32> = touched
             .iter()
-            .map(|&fi| bucket(&self.trees[fi as usize].label, buckets))
+            .map(|&fi| self.trees[fi as usize].label.as_str())
+            .chain(before.symmetric_difference(&now).copied())
+            .map(|label| bucket(label, buckets))
             .collect();
         previous
             .blocks
             .into_iter()
-            .filter(|(b, _)| !changed.contains(b) && before.get(b) == now.get(b))
+            .filter(|(b, _)| !changed.contains(b))
             .collect()
     }
 
@@ -634,23 +631,6 @@ impl State {
         state.resolver.lookup = walk.lookup;
         Ok((env, state))
     }
-}
-
-fn bucket_members<'a>(
-    labels: impl Iterator<Item = &'a str>,
-    buckets: u32,
-) -> FxHashMap<u32, Vec<&'a str>> {
-    let mut members: FxHashMap<u32, Vec<&str>> = FxHashMap::default();
-    for label in labels {
-        members
-            .entry(bucket(label, buckets))
-            .or_default()
-            .push(label);
-    }
-    for files in members.values_mut() {
-        files.sort_unstable();
-    }
-    members
 }
 
 fn bucket(label: &str, buckets: u32) -> u32 {

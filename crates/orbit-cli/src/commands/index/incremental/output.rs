@@ -11,7 +11,7 @@ use rustc_hash::FxHashSet;
 use crate::database::GraphWriter;
 use crate::workspace::GitInfo;
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct FamilyOutput {
     family: String,
     files: usize,
@@ -31,7 +31,7 @@ impl FamilyOutput {
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 struct SlowFile {
     path: String,
     language: String,
@@ -46,7 +46,6 @@ pub(super) struct Exporter<'a> {
     directories: FxHashSet<i64>,
     files: FxHashSet<i64>,
     containment: FxHashSet<(i64, i64)>,
-    replaced: FxHashSet<String>,
 }
 
 impl<'a> Exporter<'a> {
@@ -62,12 +61,9 @@ impl<'a> Exporter<'a> {
             directories: FxHashSet::default(),
             files: FxHashSet::default(),
             containment: FxHashSet::default(),
-            replaced: FxHashSet::default(),
         }
     }
 
-    /// Writes the rows of `family`: all of them, or with `only`, the rows of
-    /// those files after deleting what the graph held for them.
     pub(super) fn write(
         &mut self,
         family: SupportLang,
@@ -75,42 +71,20 @@ impl<'a> Exporter<'a> {
         state: &State,
         report: &Report,
         stats: bool,
-        only: Option<&FxHashSet<u32>>,
     ) -> Result<FamilyOutput> {
-        if let Some(only) = only {
-            let paths: Vec<String> = only
-                .iter()
-                .map(|&fi| &state.trees[fi as usize].label)
-                .filter(|path| self.replaced.insert((*path).clone()))
-                .cloned()
-                .collect();
-            self.writer.delete_files(&paths)?;
-        }
         let plan = ExportPlan::from_config(&env.export_config, self.ontology, &env.lang)?;
-        let tables = code_graph_incremental::export::export_trees(
+        let tables = code_graph_incremental::export::export(
             &state.trees,
             &state.edges,
             &env.lang,
             &plan,
-            &self.envelope(),
-            only.is_none(),
+            &envelope(self.git),
+            true,
             &|_| true,
-            only,
             &code_graph_incremental::Sentinel::disabled(),
         )?;
         self.insert(tables)?;
         Ok(family_output(family, state.trees.len(), report, stats))
-    }
-
-    /// Replaces every directory, and the edges between them, with those of
-    /// `paths`.
-    pub(super) fn write_directories(&mut self, paths: &[&str]) -> Result<()> {
-        self.writer.delete_directories()?;
-        self.insert(directory_rows(self.git, self.ontology, paths)?)
-    }
-
-    fn envelope(&self) -> Envelope<'a> {
-        envelope(self.git)
     }
 
     fn insert(&mut self, tables: Vec<(String, RecordBatch)>) -> Result<()> {
@@ -310,19 +284,26 @@ pub(super) fn directory_rows(
     )?)
 }
 
-/// Replaces every directory, and the edges between them, with `rows`.
-pub(super) fn apply_directories(
-    writer: &GraphWriter,
-    rows: &[(String, RecordBatch)],
-) -> Result<()> {
-    writer.delete_directories()?;
-    for (table, batch) in rows {
-        writer.insert_batch(table, batch)?;
+/// Writes what a refresh read: each family's rows, then every directory
+/// again when files came or went.
+pub(super) fn apply_refresh(writer: &GraphWriter, refresh: &super::state::Refresh) -> Result<()> {
+    for replacement in refresh
+        .families
+        .iter()
+        .filter_map(|family| family.replacement.as_ref())
+    {
+        apply(writer, replacement)?;
+    }
+    if let Some(rows) = &refresh.directories {
+        writer.delete_directories()?;
+        for (table, batch) in rows {
+            writer.insert_batch(table, batch)?;
+        }
     }
     Ok(())
 }
 
-pub(super) fn apply(writer: &GraphWriter, replacement: &Replacement) -> Result<()> {
+fn apply(writer: &GraphWriter, replacement: &Replacement) -> Result<()> {
     writer.delete_files(&replacement.files)?;
     for (table, batch) in &replacement.rows {
         writer.insert_batch(table, batch)?;
