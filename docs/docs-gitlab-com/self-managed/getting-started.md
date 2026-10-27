@@ -43,20 +43,7 @@ You can verify steps 1 to 3 before you install GitLab Orbit.
 
 ## Reference architectures
 
-GitLab Dedicated sizes GitLab Orbit for these tiers.
-Pod cells give the pod count and the limits for one pod, and node cells give the node count and size.
-Repository count and push rate drive the indexer load more than user count.
-
-| GitLab users | Webserver | `sdlc` indexer | `code` indexer | NATS volume | Kubernetes nodes |
-|--------------|-----------|----------------|----------------|-------------|------------------|
-| 2,000 | 1, 2 CPU, 4 GiB | 1, 2 CPU, 16 GiB | 1, 4 CPU, 10 GiB, 30 GiB disk | 20 GiB | 1 to 3, 8 vCPU, 32 GiB |
-| 5,000 | 2, 2 CPU, 6 GiB | 2, 4 CPU, 24 GiB | 1 to 3, 8 CPU, 18 GiB, 60 GiB disk | 100 GiB | 2 to 5, 16 vCPU, 64 GiB |
-| 10,000 | 2, 2 CPU, 6 GiB | 2, 4 CPU, 24 GiB | 1 to 3, 12 CPU, 26 GiB, 60 GiB disk | 200 GiB | 2 to 6, 16 vCPU, 64 GiB |
-| 25,000 | 3, 4 CPU, 8 GiB | 3, 8 CPU, 32 GiB | 2 to 3, 12 CPU, 34 GiB, 65 GiB disk | 3 x 400 GiB | 3 to 8, 16 vCPU, 64 GiB |
-| 50,000 | 3, 4 CPU, 8 GiB | 3, 8 CPU, 32 GiB | 2 to 3, 16 CPU, 34 GiB, 65 GiB disk | 3 x 500 GiB | 3 to 10, 32 vCPU, 128 GiB |
-
-Each Siphon deployment runs one pod with up to 2 CPU and 2 to 10 GiB of memory.
-For ClickHouse, see [Memory and disk](clickhouse.md#memory-and-disk).
+For the pod, node, NATS, Siphon, and ClickHouse sizes, see [GitLab Orbit reference architectures](reference-architectures.md).
 For the chart defaults, see [`values.yaml`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/blob/main/chart/values.yaml).
 
 ## High availability
@@ -93,7 +80,7 @@ config:
 
 Replace the following values:
 
-- `<volume_size>`: the size of the JetStream volume, from [Reference architectures](#reference-architectures).
+- `<volume_size>`: the size of the JetStream volume, from [NATS](reference-architectures.md#nats).
 
 Keep the `<<` and `>>` marks around `64MB`, so the chart writes the value without quotes.
 
