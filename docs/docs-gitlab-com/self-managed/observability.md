@@ -21,7 +21,7 @@ Collect the metrics first, then load the dashboards.
 
 Prerequisites:
 
-- Prometheus with the [Prometheus Operator](https://prometheus-operator.dev/), kube-state-metrics, and kubelet cAdvisor metrics.
+- Prometheus with the [Prometheus Operator](https://prometheus-operator.dev/), kube-state-metrics, and container resource metrics.
   The [`kube-prometheus-stack`](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) Helm chart includes all of them.
   To use Prometheus without the Operator, see [Scrape without the Prometheus Operator](#scrape-without-the-prometheus-operator).
 - Grafana, with Prometheus as a data source.
@@ -79,8 +79,25 @@ metrics:
 The chart adds a PodMonitor for the webserver, the dispatcher, and each indexer pool.
 Each pod serves metrics on port `9394` at `/-/metrics`.
 
-If `tls.internal.enabled` is `true`, Prometheus scrapes over HTTPS.
-Set `metrics.prometheus.podMonitor.endpointConfig.tlsConfig` with `ca` and `serverName`.
+If `tls.internal.enabled` is `true`, Prometheus scrapes over HTTPS and must trust the certificate:
+
+```yaml
+metrics:
+  prometheus:
+    podMonitor:
+      endpointConfig:
+        tlsConfig:
+          serverName: <certificate_name>
+          ca:
+            secret:
+              name: <ca_secret>
+              key: ca.crt
+```
+
+Replace the following values:
+
+- `<certificate_name>`: A name in the certificate. Prometheus connects to the pod IP, so it checks this name instead.
+- `<ca_secret>`: A Secret in the GitLab Orbit namespace that holds the CA certificate.
 
 ### Siphon
 
@@ -139,7 +156,8 @@ Use this method when Grafana runs in Kubernetes with the dashboard sidecar, such
 
 After each install and upgrade, a Job copies the dashboards from the GitLab Orbit image into ConfigMaps with the label `grafana_dashboard: "1"`.
 The Job also removes the ConfigMaps of dashboards that the image no longer includes.
-The sidecar loads the ConfigMaps from all namespaces.
+In `kube-prometheus-stack`, the sidecar loads the ConfigMaps from all namespaces.
+For another Grafana chart, set `sidecar.dashboards.searchNamespace` to include the GitLab Orbit namespace.
 
 The Job applies the ConfigMaps with the image in `dashboards.applyImage`.
 In an offline environment, copy this image to your registry, and set `dashboards.applyImage` to the copy.
@@ -157,7 +175,7 @@ Do these steps again after each GitLab Orbit upgrade.
    docker rm orbit-dashboards
    ```
 
-   Replace `<orbit_version>` with the GitLab Orbit version that you run.
+   Replace `<orbit_version>` with the image tag that you run, such as `0.159.1`.
 
 1. Copy the files in `./orbit-dashboards/` to `/var/lib/grafana/dashboards/orbit/` on the Grafana server.
 1. Save the following as `/etc/grafana/provisioning/dashboards/orbit.yaml`:
@@ -191,7 +209,8 @@ alerts:
   aggregationLabels: []
 ```
 
-The alerts need `metrics.prometheus.enabled: true`.
+The alerts need `metrics.prometheus.enabled: true` and the Prometheus Operator.
+The default `aggregationLabels` are for GitLab.com.
 
 ## Verify the setup
 
@@ -201,15 +220,23 @@ The alerts need `metrics.prometheus.enabled: true`.
    up{container=~"orbit-.*"}
    ```
 
-   The result has one series for each GitLab Orbit pod, and each value is `1`.
+   The result has one series for each webserver, indexer, and dispatcher pod, and each value is `1`.
 
 1. In Grafana, open the `Orbit` folder.
    The folder has six dashboards.
-1. Open the **Overview** dashboard, and confirm that the panels show data.
+1. Open the **Overview** dashboard, and confirm that the **Webserver**, **Indexer**, and **Siphon** rows show data.
+   Error panels show no data until the first error.
+   The row for GitLab calls to GitLab Orbit needs GitLab metrics, which this page does not cover.
 
 ## Scrape without the Prometheus Operator
 
-If your Prometheus does not use the Prometheus Operator, set `metrics.prometheus.podMonitor.enabled: false` in `orbit-values.yaml`.
+Without the Prometheus Operator, a chart install that creates a PodMonitor or a PrometheusRule fails.
+Change the values from [Collect metrics](#collect-metrics):
+
+- In `orbit-values.yaml`, set `metrics.prometheus.podMonitor.enabled: false`, and do not turn on the alerts.
+- In `siphon-values.yaml`, remove `podmonitor: true`.
+- In the NATS values, keep `promExporter.enabled: true`, and set `promExporter.podMonitor.enabled: false`.
+
 Then add a scrape job to your Prometheus configuration.
 
 The dashboards need the `namespace`, `pod`, and `container` labels on each series.
@@ -242,7 +269,8 @@ scrape_configs:
 ```
 
 Change the namespaces if you installed the components in other namespaces.
-The resource panels also need kube-state-metrics and the kubelet cAdvisor metrics.
+If `tls.internal.enabled` is `true`, scrape the GitLab Orbit pods in a separate job with `scheme: https` and a `tls_config`.
+The resource panels also need kube-state-metrics and container resource metrics.
 
 ## Related topics
 
