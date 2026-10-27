@@ -25,6 +25,7 @@ pub struct EntityFacts {
     pub global: bool,
     pub has_traversal_path: bool,
     pub high_fan_out: bool,
+    pub reference_properties: Vec<String>,
     pub default_properties: Vec<String>,
     pub(crate) properties: Vec<(String, PropertyBackendFacts)>,
 }
@@ -50,6 +51,7 @@ pub(crate) fn entity_facts(ontology: &ontology::Ontology, local: bool) -> Vec<En
                 global: node.global,
                 has_traversal_path: node.has_traversal_path,
                 high_fan_out: node.high_fan_out,
+                reference_properties: node.reference_properties().map(String::from).collect(),
                 default_properties: node.default_columns.clone(),
                 properties: node
                     .fields

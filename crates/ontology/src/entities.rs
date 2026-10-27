@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt};
 
 use crate::constants::DEFAULT_PRIMARY_KEY;
-use crate::etl::{EdgeMapping, NodeRef, Pipeline, ReindexSource};
+use crate::etl::{EdgeMapping, NodeRef, NodeRefKind, Pipeline, ReindexSource};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -369,6 +369,20 @@ impl Default for NodeEntity {
 }
 
 impl NodeEntity {
+    pub fn reference_properties(&self) -> impl Iterator<Item = &str> {
+        self.pipelines
+            .iter()
+            .flat_map(|pipeline| pipeline.transform.edges())
+            .flat_map(|edge| [&edge.source, &edge.target])
+            .filter(|end| !matches!(&end.kind, NodeRefKind::Literal(kind) if *kind == self.name))
+            .filter_map(|end| {
+                self.fields
+                    .iter()
+                    .find(|field| field.column_name() == Some(end.field.as_str()))
+            })
+            .map(|field| field.name.as_str())
+    }
+
     /// Column-backed fields marked `mutable: false` outside the sort key. A tombstone must carry
     /// them, or a pre-pick filter on one rejects the tombstone and resurrects an older live row.
     pub fn immutable_columns(&self) -> Vec<&str> {

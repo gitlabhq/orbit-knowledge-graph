@@ -262,11 +262,18 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                 TableLayout::from_storage(physical, source.entity, source.path_columns.clone());
             tables.insert(layout.name.clone(), layout);
         }
+        let reference_properties = storage.metadata.entities.iter().flat_map(|node| {
+            let entity = graph.entity_id(&node.name);
+            node.reference_properties
+                .iter()
+                .filter_map(move |name| graph.property_id(entity?, name))
+        });
         let foreign_key_properties = variant_routes
             .iter()
             .flatten()
             .filter_map(|route| route.foreign_key)
             .map(|foreign_key| foreign_key.property)
+            .chain(reference_properties)
             .collect();
         Ok(ClickHouseBindings {
             materialized_joins,
