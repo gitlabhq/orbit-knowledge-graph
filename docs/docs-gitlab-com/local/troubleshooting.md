@@ -29,7 +29,7 @@ following issues.
 You might get an error that states:
 
 ```plaintext
-Error: no local graph found. Run `orbit workspace index` first.
+Error: no local graph found. Run `orbit index` first.
 ```
 
 This issue occurs when the repository is not indexed yet, or when the `--db` path you specified
@@ -40,7 +40,7 @@ On earlier versions of GitLab Orbit Local, this error was reported as
 To resolve this issue, index the repository:
 
 ```shell
-glab orbit workspace index /path/to/your/repo
+glab orbit index /path/to/your/repo
 ```
 
 ## Error: `Could not set lock on file`
@@ -85,7 +85,7 @@ To resolve this issue, update the managed binary, then start the stdio MCP serve
 
 ```shell
 glab orbit --update
-glab orbit workspace mcp serve
+glab orbit mcp serve
 ```
 
 If you installed `orbit` directly, run the installer again.

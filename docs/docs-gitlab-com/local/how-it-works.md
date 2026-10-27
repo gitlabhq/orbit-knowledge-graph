@@ -27,7 +27,7 @@ title: How GitLab Orbit Local works
 
 ## Indexing pipeline
 
-When you run `orbit workspace index`, GitLab Orbit Local:
+When you run `orbit index`, GitLab Orbit Local:
 
 1. Walks the current working tree, including uncommitted files and respecting `.gitignore`.
 1. Passes each source file to a language-specific parser (rust-analyzer, tree-sitter, or a custom parser depending on language).
@@ -55,9 +55,9 @@ Edges connect files to their definitions, files to their imports, and definition
 ## Query execution
 
 GitLab Orbit Local exposes the graph as a DuckDB database. Run any read-only SQL
-against it with `orbit workspace sql`:
+against it with `orbit sql`:
 
-1. `orbit workspace sql` attaches all indexed revisions read-only to one DuckDB client. Use `--repo` to select a checkout revision.
+1. `orbit sql` attaches all indexed revisions read-only to one DuckDB client. Use `--repo` to select a checkout revision.
 1. Your SQL runs directly against the graph tables — no DSL compilation,
    no authorization layer.
 1. Results stream back as a table, JSON, NDJSON, or CSV.

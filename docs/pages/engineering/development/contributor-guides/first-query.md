@@ -40,7 +40,7 @@ Move into any Git repository, then index it:
 
 ```shell
 cd /path/to/any/git/repo
-orbit workspace index .
+orbit index .
 ```
 
 Orbit parses the repository and writes its revision graph under `~/.gitlab/orbit/local/revisions/`.
@@ -70,7 +70,7 @@ The exact counts depend on the repository and supported languages in it.
 Before writing a query, inspect the graph tables:
 
 ```shell
-orbit workspace schema
+orbit schema
 ```
 
 Orbit Local indexes four code graph node types:
@@ -96,7 +96,7 @@ row has a source node, a relationship kind, and a target node:
 Start with a small query that lists files from the indexed repository:
 
 ```shell
-orbit workspace sql 'SELECT path, language FROM gl_file ORDER BY path LIMIT 5'
+orbit sql 'SELECT path, language FROM gl_file ORDER BY path LIMIT 5'
 ```
 
 Example output:
@@ -120,7 +120,7 @@ table.
 Now filter definitions by name:
 
 ```shell
-orbit workspace sql "SELECT file_path, name, definition_type, start_line FROM gl_definition WHERE lower(name) LIKE '%parse%' ORDER BY file_path, start_line LIMIT 10"
+orbit sql "SELECT file_path, name, definition_type, start_line FROM gl_definition WHERE lower(name) LIKE '%parse%' ORDER BY file_path, start_line LIMIT 10"
 ```
 
 This looks for definitions whose name contains `parse`, then returns where each
@@ -145,7 +145,7 @@ Relationships let you move from one node type to another. This query starts at
 definitions declared in each file:
 
 ```shell
-orbit workspace sql "SELECT f.path, d.name, d.definition_type, d.start_line FROM gl_file f JOIN gl_edge e ON e.source_kind = 'File' AND e.relationship_kind = 'DEFINES' AND e.target_kind = 'Definition' AND e.source_id = f.id JOIN gl_definition d ON d.id = e.target_id ORDER BY f.path, d.start_line LIMIT 5"
+orbit sql "SELECT f.path, d.name, d.definition_type, d.start_line FROM gl_file f JOIN gl_edge e ON e.source_kind = 'File' AND e.relationship_kind = 'DEFINES' AND e.target_kind = 'Definition' AND e.source_id = f.id JOIN gl_definition d ON d.id = e.target_id ORDER BY f.path, d.start_line LIMIT 5"
 ```
 
 Example output:
@@ -167,11 +167,11 @@ The graph part is the join through `gl_edge`:
 
 ## Change the output format
 
-The default `orbit workspace sql` output is a table. Use `-F json` when you want a shape
+The default `orbit sql` output is a table. Use `-F json` when you want a shape
 that is easier to pipe into another tool:
 
 ```shell
-orbit workspace sql -F json 'SELECT path, language FROM gl_file ORDER BY path LIMIT 2'
+orbit sql -F json 'SELECT path, language FROM gl_file ORDER BY path LIMIT 2'
 ```
 
 Example output:
@@ -192,8 +192,8 @@ Example output:
 Other formats are available:
 
 ```shell
-orbit workspace sql -F ndjson 'SELECT path FROM gl_file LIMIT 2'
-orbit workspace sql -F csv 'SELECT path, language FROM gl_file LIMIT 2'
+orbit sql -F ndjson 'SELECT path FROM gl_file LIMIT 2'
+orbit sql -F csv 'SELECT path, language FROM gl_file LIMIT 2'
 ```
 
 ## Try one more repository
@@ -203,8 +203,8 @@ repository-specific and which parts come from the Orbit graph model:
 
 ```shell
 cd /path/to/another/git/repo
-orbit workspace index .
-orbit workspace sql 'SELECT language, count(*) AS files FROM gl_file GROUP BY language ORDER BY files DESC LIMIT 10'
+orbit index .
+orbit sql 'SELECT language, count(*) AS files FROM gl_file GROUP BY language ORDER BY files DESC LIMIT 10'
 ```
 
 The local graph can contain multiple indexed repositories. Rows include

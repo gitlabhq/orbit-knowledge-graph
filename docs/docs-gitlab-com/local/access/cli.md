@@ -69,7 +69,7 @@ invoke it directly.
 ## Index a repository
 
 ```shell
-orbit workspace index /path/to/your/repo
+orbit index /path/to/your/repo
 ```
 
 GitLab Orbit Local indexes the current working tree, including uncommitted source
@@ -89,10 +89,10 @@ Other indexed commits remain available.
 
 ## Inspect the schema
 
-`orbit workspace schema` lists every table and column in the local DuckDB graph:
+`orbit schema` lists every table and column in the local DuckDB graph:
 
 ```shell
-orbit workspace schema
+orbit schema
 ```
 
 GitLab Orbit selects the database files automatically, so you do not need to locate or attach them.
@@ -100,8 +100,8 @@ GitLab Orbit selects the database files automatically, so you do not need to loc
 Pass table names as positional arguments to scope the output:
 
 ```shell
-orbit workspace schema gl_definition              # scoped to one table
-orbit workspace schema gl_definition gl_edge      # scoped to two tables
+orbit schema gl_definition              # scoped to one table
+orbit schema gl_definition gl_edge      # scoped to two tables
 ```
 
 | Flag | Purpose |
@@ -112,10 +112,10 @@ orbit workspace schema gl_definition gl_edge      # scoped to two tables
 ## Run SQL against the local graph
 
 ```shell
-orbit workspace sql 'SELECT count(*) FROM gl_definition'
-orbit workspace sql -F json 'SELECT name FROM gl_definition LIMIT 3'
-echo 'SELECT 1+1' | orbit workspace sql -
-orbit workspace sql --file query.sql
+orbit sql 'SELECT count(*) FROM gl_definition'
+orbit sql -F json 'SELECT name FROM gl_definition LIMIT 3'
+echo 'SELECT 1+1' | orbit sql -
+orbit sql --file query.sql
 ```
 
 | Flag | Purpose |
@@ -131,8 +131,8 @@ orbit workspace sql --file query.sql
 The graph can hold more than one repository. To see what it contains, run:
 
 ```shell
-orbit workspace list
-orbit workspace list -F json
+orbit list
+orbit list -F json
 ```
 
 Each row reports the repository path, branch, commit, database path, indexing status,
@@ -147,9 +147,9 @@ here instead of silently disappearing.
 | `-F`, `--format` | `table` (default), `json`, `ndjson`, or `csv`. |
 | `--db` | Read a specific manifest database. Defaults to `~/.gitlab/orbit/local/manifest.duckdb`. |
 
-If nothing has been indexed yet, `orbit workspace list` exits `0`. The table view
+If nothing has been indexed yet, `orbit list` exits `0`. The table view
 prints nothing; structured formats emit valid empty output (`[]` for `json`,
-no records for `ndjson`) so pipelines like `orbit workspace list -F json | jq` keep
+no records for `ndjson`) so pipelines like `orbit list -F json | jq` keep
 working.
 
 ## Run as an MCP server
@@ -157,7 +157,7 @@ working.
 Expose the local graph to any MCP-compatible AI agent over stdio:
 
 ```shell
-orbit workspace mcp serve
+orbit mcp serve
 ```
 
 It serves `run_sql`, `get_graph_schema`, and `index` against the revision databases
@@ -271,14 +271,14 @@ Graph files use `revisions/<project-id>/<commit-sha>.duckdb`.
 The `manifest.duckdb` file records their paths and status.
 The canonical checkout path determines the project ID.
 Reindexing replaces that commit's graph and preserves other revisions.
-Use `orbit workspace list -F json` to see database paths, or set `ORBIT_DATA_DIR` to change the workspace root. `orbit config` then reads and writes `$ORBIT_DATA_DIR/settings.json` too.
+Use `orbit list -F json` to see database paths, or set `ORBIT_DATA_DIR` to change the workspace root. `orbit config` then reads and writes `$ORBIT_DATA_DIR/settings.json` too.
 
 Queries wait up to five seconds for busy revisions before returning an error.
 Workspace queries skip missing or incomplete revisions with a diagnostic.
 Explicit `--db` queries fail for those files.
 Tables combine by column name across revision schemas.
 
-If you used the earlier shared `graph.duckdb`, run `orbit workspace index` to populate the new layout.
+If you used the earlier shared `graph.duckdb`, run `orbit index` to populate the new layout.
 The old file remains on disk.
 
 ## Configure the CLI

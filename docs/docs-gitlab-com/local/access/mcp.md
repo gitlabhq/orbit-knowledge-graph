@@ -65,7 +65,7 @@ To add the MCP server for the current project, run:
 {{< tab title="GitLab Orbit CLI (orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli -- orbit workspace mcp serve
+claude mcp add orbit-cli -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -73,7 +73,7 @@ claude mcp add orbit-cli -- orbit workspace mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli -- glab orbit workspace mcp serve
+claude mcp add orbit-cli -- glab orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -87,7 +87,7 @@ To add the server for all of your projects, run:
 {{< tab title="GitLab Orbit CLI (orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli --scope user -- orbit workspace mcp serve
+claude mcp add orbit-cli --scope user -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -95,7 +95,7 @@ claude mcp add orbit-cli --scope user -- orbit workspace mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli --scope user -- glab orbit workspace mcp serve
+claude mcp add orbit-cli --scope user -- glab orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -109,7 +109,7 @@ To add the server for everyone who checks out the repository, run:
 {{< tab title="GitLab Orbit CLI (orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli --scope project -- orbit workspace mcp serve
+claude mcp add orbit-cli --scope project -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -117,7 +117,7 @@ claude mcp add orbit-cli --scope project -- orbit workspace mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli --scope project -- glab orbit workspace mcp serve
+claude mcp add orbit-cli --scope project -- glab orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -185,7 +185,7 @@ To connect to Codex, run:
 {{< tab title="GitLab Orbit CLI (orbit)" >}}
 
 ```shell
-codex mcp add orbit-cli -- orbit workspace mcp serve
+codex mcp add orbit-cli -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -193,7 +193,7 @@ codex mcp add orbit-cli -- orbit workspace mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-codex mcp add orbit-cli -- glab orbit workspace mcp serve
+codex mcp add orbit-cli -- glab orbit mcp serve
 ```
 
 {{< /tab >}}
