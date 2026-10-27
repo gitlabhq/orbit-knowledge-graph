@@ -320,8 +320,7 @@ To upgrade GitLab:
 
 ## Related topics
 
-- [What GitLab Orbit indexes](../schema.md)
-- [Schema reference](../schema.md#get-the-live-schema)
+- [GitLab Orbit indexed data](../schema.md)
 - [Query language](../queries/_index.md)
 - [Networking for GitLab Orbit](networking.md)
 - [Troubleshooting GitLab Orbit on GitLab Self-Managed](troubleshooting.md)
