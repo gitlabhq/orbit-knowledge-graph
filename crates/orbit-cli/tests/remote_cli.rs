@@ -132,24 +132,27 @@ fn run_orbit_in(dir: &Path, base_url: &str, args: &[&str]) -> std::process::Outp
 }
 
 #[test]
-fn ontology_sends_get_with_expand_and_auth_header() {
-    let (base_url, handle) = serve_once(r#"{"schema_version":"1"}"#, "application/json");
-    let output = run_orbit(&base_url, &["ontology", "User", "Project"]);
-    let request = handle.join().expect("join mock");
+fn schema_sends_get_with_expand_and_auth_header() {
+    for verb in ["schema", "ontology"] {
+        let (base_url, handle) = serve_once(r#"{"schema_version":"1"}"#, "application/json");
+        let output = run_orbit(&base_url, &[verb, "User", "Project"]);
+        let request = handle.join().expect("join mock");
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        request.request_line,
-        "GET /api/v4/orbit/schema?expand=User%2CProject HTTP/1.1"
-    );
-    assert_eq!(request.auth_header.as_deref(), Some("glpat-test"));
+        assert!(
+            output.status.success(),
+            "{verb} stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            request.request_line,
+            "GET /api/v4/orbit/schema?expand=User%2CProject HTTP/1.1"
+        );
+        assert_eq!(request.auth_header.as_deref(), Some("glpat-test"));
 
-    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
-    assert_eq!(stdout["schema_version"], "1");
+        let stdout: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("json stdout");
+        assert_eq!(stdout["schema_version"], "1");
+    }
 }
 
 #[test]
@@ -167,39 +170,35 @@ fn status_endpoint_is_get_orbit_status() {
 }
 
 #[test]
-fn dsl_endpoint_is_get_orbit_schema_dsl() {
-    let (base_url, handle) = serve_once(r#"{"$schema":"draft"}"#, "application/json");
-    let output = run_orbit(&base_url, &["dsl"]);
-    let request = handle.join().expect("join mock");
+fn graph_status_sends_full_path_query() {
+    for verb in ["status", "graph-status"] {
+        let (base_url, handle) = serve_once(r#"{"projects":{"indexed":1}}"#, "application/json");
+        let output = run_orbit(&base_url, &[verb, "--full-path", "gitlab-org/gitlab"]);
+        let request = handle.join().expect("join mock");
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        request.request_line,
-        "GET /api/v4/orbit/schema/dsl HTTP/1.1"
-    );
+        assert!(
+            output.status.success(),
+            "{verb} stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            request.request_line,
+            "GET /api/v4/orbit/graph_status?full_path=gitlab-org%2Fgitlab HTTP/1.1"
+        );
+    }
 }
 
 #[test]
-fn graph_status_sends_full_path_query() {
-    let (base_url, handle) = serve_once(r#"{"projects":{"indexed":1}}"#, "application/json");
+fn status_rejects_a_response_format_without_a_scope() {
     let output = run_orbit(
-        &base_url,
-        &["graph-status", "--full-path", "gitlab-org/gitlab"],
+        "http://127.0.0.1:9",
+        &["status", "--response-format", "raw"],
     );
-    let request = handle.join().expect("join mock");
-
+    assert!(!output.status.success());
     assert!(
-        output.status.success(),
-        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr).contains("--response-format needs --full-path"),
+        "{}",
         String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(
-        request.request_line,
-        "GET /api/v4/orbit/graph_status?full_path=gitlab-org%2Fgitlab HTTP/1.1"
     );
 }
 
@@ -251,7 +250,7 @@ fn graph_status_llm_format_prints_the_formatted_text() {
     let output = run_orbit(
         &base_url,
         &[
-            "graph-status",
+            "status",
             "--namespace-id",
             "9970",
             "--response-format",
@@ -390,7 +389,7 @@ fn ontology_advertises_compression_and_decodes_gzip_response() {
     let compressed = encoder.finish().expect("finish gzip");
 
     let (base_url, handle) = serve_once_encoded(compressed, "application/json", Some("gzip"));
-    let output = run_orbit(&base_url, &["ontology"]);
+    let output = run_orbit(&base_url, &["schema"]);
     let request = handle.join().expect("join mock");
 
     assert!(
@@ -639,7 +638,7 @@ fn context_appends_the_local_code_a_merge_request_changes() {
         clone.path(),
         data.path(),
         "http://localhost:1",
-        &["index", "."],
+        &["workspace", "index", "."],
     )
     .output()
     .expect("run orbit binary");
@@ -690,7 +689,7 @@ fn grep_without_a_line_holding_every_word_shows_the_best_few_files() {
             .output()
             .expect("run orbit binary")
     };
-    let indexed = orbit(&["index", "."]);
+    let indexed = orbit(&["workspace", "index", "."]);
     assert!(
         indexed.status.success(),
         "{}",
@@ -719,7 +718,7 @@ fn context_prints_each_anchored_line_once() {
         clone.path(),
         data.path(),
         "http://localhost:1",
-        &["index", "."],
+        &["workspace", "index", "."],
     )
     .output()
     .expect("run orbit binary");
@@ -769,7 +768,7 @@ fn context_reads_a_definition_named_after_its_path() {
             .output()
             .expect("run orbit binary")
     };
-    let indexed = orbit(&["index", "."]);
+    let indexed = orbit(&["workspace", "index", "."]);
     assert!(
         indexed.status.success(),
         "{}",
@@ -800,7 +799,7 @@ fn context_stops_a_whole_file_and_says_how_to_read_the_rest() {
             .output()
             .expect("run orbit binary")
     };
-    let indexed = orbit(&["index", "."]);
+    let indexed = orbit(&["workspace", "index", "."]);
     assert!(
         indexed.status.success(),
         "{}",
@@ -836,7 +835,7 @@ fn grep_refreshes_an_edited_file_inline_or_detached() {
         String::from_utf8_lossy(&output.stdout).into_owned()
     };
     let pause = || std::thread::sleep(Duration::from_millis(1100));
-    orbit(edited.path(), &["index", "."], "2000");
+    orbit(edited.path(), &["workspace", "index", "."], "2000");
     pause();
     write(
         "util.py",
@@ -848,7 +847,7 @@ fn grep_refreshes_an_edited_file_inline_or_detached() {
         orbit(edited.path(), &["grep", "later"], "0").contains("Function later")
     });
     assert!(landed, "a detached refresh lands the edit");
-    orbit(fresh.path(), &["index", "."], "2000");
+    orbit(fresh.path(), &["workspace", "index", "."], "2000");
     let graph = "SELECT (SELECT list(fqn ORDER BY fqn) FROM gl_definition) AS defs, (SELECT count(*) FROM gl_edge) AS edges";
     assert_eq!(
         orbit(edited.path(), &["sql", "--format", "json", graph], "2000"),
@@ -882,7 +881,7 @@ fn a_refresh_that_cannot_write_leaves_the_file_marked_as_edited() {
             .output()
             .expect("run orbit binary")
     };
-    orbit(&["index", "."]);
+    orbit(&["workspace", "index", "."]);
     std::thread::sleep(Duration::from_millis(1100));
     std::fs::write(
         repo.path().join("util.py"),

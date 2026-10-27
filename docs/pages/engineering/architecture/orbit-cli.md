@@ -37,13 +37,13 @@ Orbit skill to each agent. Then it indexes the current repository. The
 `glab orbit uninstall` command removes what setup wrote, except files you
 edited since.
 
-The `glab orbit mcp serve` command serves the local graph to any MCP agent.
+The `glab orbit workspace mcp serve` command serves the local graph to any MCP agent.
 The `glab orbit skills` command fetches the skills that match your GitLab
 instance.
 
 ### 3. Index a checkout
 
-The `glab orbit index .` command walks the working tree of the checkout in the
+The `glab orbit workspace index .` command walks the working tree of the checkout in the
 current folder. So uncommitted and untracked files are part of the graph. It
 skips what `.gitignore` excludes. It lists binary, minified, and very large
 files, but it doesn't parse them. Tree-sitter grammars parse each
@@ -51,7 +51,7 @@ files, but it doesn't parse them. Tree-sitter grammars parse each
 into the code types that the [data model](data-model.md) page describes.
 
 Each checkout and commit gets its own file on your machine. The
-`glab orbit sql` command reads every indexed checkout at once, so one query
+`glab orbit workspace sql` command reads every indexed checkout at once, so one query
 can span several repositories. A repeat run on the same commit parses only the
 files that changed. The `glab orbit grep` and `glab orbit context` commands
 index the current commit when it isn't indexed yet.
@@ -64,9 +64,7 @@ The main commands that read the local graph are:
   definition, with that definition's callers and callees.
 - `glab orbit context` expands a definition, a file, a line range, or a
   folder.
-- `glab orbit repo-map` prints a compact map of a repository for a language
-  model.
-- `glab orbit sql` runs DuckDB SQL on the local graph.
+- `glab orbit workspace sql` runs DuckDB SQL on the local graph.
 
 ### 5. Ask Orbit's graph
 
@@ -75,10 +73,9 @@ pipelines, vulnerabilities, and the code of every indexed project. The main
 commands that ask Orbit's graph through the GitLab API are:
 
 - `glab orbit query` sends a question to Orbit's graph.
-- `glab orbit ontology` shows the node and edge types.
-- `glab orbit dsl` shows the query language.
-- `glab orbit graph-status` shows the indexing progress of a project or a
-  group.
+- `glab orbit schema` shows the node and edge types.
+- `glab orbit status --full-path <path>` shows the indexing progress of a
+  project or a group.
 
 GitLab checks who you are and which groups you can see, as
 [security](security.md) explains. The GitLab CLI passes your sign-in to the

@@ -184,7 +184,7 @@ pub(crate) fn index_command_line(path: &str) -> String {
         true => path.to_string(),
         false => format!("'{}'", path.replace('\'', "'\\''")),
     };
-    format!("{} index {argument}", spec::launcher())
+    format!("{} workspace index {argument}", spec::launcher())
 }
 
 pub(crate) fn example_repository_path() -> &'static str {

@@ -244,7 +244,7 @@ impl Project<'_> {
         manifest::load_incremental_state(self.manifest_path, self.git.project_id)?.with_context(
             || {
                 format!(
-                    "no incremental state for {}; run `orbit index` first",
+                    "no incremental state for {}; run `orbit workspace index` first",
                     self.git.repo_path.display()
                 )
             },

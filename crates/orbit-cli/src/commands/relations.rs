@@ -300,7 +300,7 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
                 if omitted_rows.iter().any(|row| row.direct) {
                     writeln!(
                         out,
-                        "  … {omitted} connections omitted; list all file edges: {} sql \"SELECT * FROM gl_edge WHERE source_id = {} OR target_id = {}\"",
+                        "  … {omitted} connections omitted; list all file edges: {} workspace sql \"SELECT * FROM gl_edge WHERE source_id = {} OR target_id = {}\"",
                         spec::launcher(),
                         node.id,
                         node.id

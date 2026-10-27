@@ -30,7 +30,7 @@ pub fn run(format: Format, db: Option<PathBuf>) -> Result<()> {
 fn run_to<W: Write>(format: Format, db_path: &Path, out: W) -> Result<()> {
     let batches = manifest::read(db_path, MANIFEST_QUERY)?;
     // An empty table render is noise for humans, but structured formats
-    // must stay parseable on empty input (`orbit list -F json | jq`), so
+    // must stay parseable on empty input (`orbit workspace list -F json | jq`), so
     // only the table view suppresses the writers.
     if matches!(format, Format::Table) && batches.iter().all(|b| b.num_rows() == 0) {
         return Ok(());

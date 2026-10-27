@@ -24,7 +24,7 @@ fn checkout_revision_journey_through_cli_and_mcp() {
         );
         String::from_utf8(output.stdout).unwrap()
     };
-    command(&["index", "."]);
+    command(&["workspace", "index", "."]);
     git(&repo.path, &["switch", "-c", "feature"]);
     std::fs::write(
         repo.path.join("feature.py"),
@@ -34,10 +34,11 @@ fn checkout_revision_journey_through_cli_and_mcp() {
     git(&repo.path, &["add", "feature.py"]);
     git(&repo.path, &["commit", "-m", "add feature"]);
     let second = git(&repo.path, &["rev-parse", "HEAD"]);
-    command(&["index", "."]);
-    command(&["index", "."]);
+    command(&["workspace", "index", "."]);
+    command(&["workspace", "index", "."]);
 
-    let listed: Value = serde_json::from_str(&command(&["list", "-F", "json"])).unwrap();
+    let listed: Value =
+        serde_json::from_str(&command(&["workspace", "list", "-F", "json"])).unwrap();
     assert_eq!(rows(&listed).len(), 2);
     for commit in [&first, &second] {
         assert_eq!(
@@ -46,6 +47,7 @@ fn checkout_revision_journey_through_cli_and_mcp() {
         );
     }
     let all: Value = serde_json::from_str(&command(&[
+        "workspace",
         "sql",
         "-F",
         "json",
@@ -60,6 +62,7 @@ fn checkout_revision_journey_through_cli_and_mcp() {
     for (commit, files) in [(&second, 3), (&first, 2)] {
         git(&repo.path, &["checkout", "--detach", commit]);
         let scoped: Value = serde_json::from_str(&command(&[
+            "workspace",
             "sql",
             "--repo",
             ".",
@@ -71,7 +74,6 @@ fn checkout_revision_journey_through_cli_and_mcp() {
         assert_eq!(scoped, json!([{"files": files}]));
         assert!(command(&["grep", "hello"]).contains("src/main.py"));
         assert!(command(&["context", "src/main.py"]).contains("hello"));
-        assert!(command(&["repo-map", "overview"]).contains(commit.as_str()));
     }
     let responses = mcp_roundtrip(
         data.path(),
@@ -132,7 +134,7 @@ fn workspace_queries_match_columns_by_name_and_include_tables_from_each_revision
         orbit_sql("SELECT * FROM gl_new", data.path()),
         json!([{"id":42}])
     );
-    let (_, error, ok) = run_cmd(&["schema", "--raw"], data.path());
+    let (_, error, ok) = run_cmd(&["workspace", "schema", "--raw"], data.path());
     assert!(ok, "{error}");
 }
 
@@ -180,7 +182,7 @@ fn workspace_queries_skip_abandoned_and_missing_revisions() {
             }
         }
         let (output, error, ok) = run_cmd(
-            &["sql", "-F", "json", "SELECT * FROM gl_probe"],
+            &["workspace", "sql", "-F", "json", "SELECT * FROM gl_probe"],
             data.path(),
         );
         assert!(ok, "{error}");
@@ -203,7 +205,13 @@ fn workspace_queries_skip_abandoned_and_missing_revisions() {
     );
     assert_ne!(responses[1]["result"]["isError"], true);
     let (_, error, ok) = run_cmd(
-        &["sql", "--db", broken.to_str().unwrap(), "SELECT 1"],
+        &[
+            "workspace",
+            "sql",
+            "--db",
+            broken.to_str().unwrap(),
+            "SELECT 1",
+        ],
         data.path(),
     );
     assert!(!ok, "explicit missing file must fail: {error}");
@@ -223,7 +231,13 @@ fn workspace_queries_skip_abandoned_and_missing_revisions() {
         json!([{"id":42}])
     );
     let (_, error, ok) = run_cmd(
-        &["sql", "--db", missing.to_str().unwrap(), "SELECT 1"],
+        &[
+            "workspace",
+            "sql",
+            "--db",
+            missing.to_str().unwrap(),
+            "SELECT 1",
+        ],
         data.path(),
     );
     assert!(!ok, "explicit missing file must fail: {error}");
@@ -264,7 +278,7 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
     let second_sha = git(&repo.path, &["rev-parse", "HEAD"]);
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let (listed, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir.path());
+    let (listed, stderr, ok) = run_cmd(&["workspace", "list", "-F", "json"], data_dir.path());
     assert!(ok, "{stderr}");
     let listed: Value = serde_json::from_str(&listed).unwrap();
     assert_eq!(rows(&listed).len(), 2);
@@ -281,6 +295,7 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
     let query_commits = |scoped: bool| {
         let mut command = orbit_cmd();
         command.args([
+            "workspace",
             "sql",
             "-F",
             "json",
@@ -306,6 +321,7 @@ fn revisions_keep_their_data_and_do_not_share_write_locks() {
 
     let mismatch = orbit_cmd()
         .args([
+            "workspace",
             "sql",
             "--repo",
             repo.path.to_str().unwrap(),
@@ -347,7 +363,11 @@ fn revision_read_locks_block_writers_and_release_when_reader_exits() {
         .open(format!("{path}.lock"))
         .unwrap();
     let mut reader = orbit_cmd()
-        .args(["sql", "SELECT sum(sin(i)) FROM range(1000000000000) t(i)"])
+        .args([
+            "workspace",
+            "sql",
+            "SELECT sum(sin(i)) FROM range(1000000000000) t(i)",
+        ])
         .env("ORBIT_DATA_DIR", data_dir.path())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -356,7 +376,7 @@ fn revision_read_locks_block_writers_and_release_when_reader_exits() {
     wait_for_reader(&lock);
     assert!(!orbit_index(&repo.path, data_dir.path()));
     assert_eq!(rows(&orbit_sql(FILES_SIMPLE, data_dir.path())).len(), 2);
-    let (_, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir.path());
+    let (_, stderr, ok) = run_cmd(&["workspace", "list", "-F", "json"], data_dir.path());
     assert!(ok, "{stderr}");
     reader.kill().unwrap();
     reader.wait().unwrap();
@@ -387,7 +407,10 @@ fn busy_revision_fails_the_whole_query_and_releases_prior_locks() {
         })
         .collect();
     locks[1].lock().unwrap();
-    let (stdout, stderr, ok) = run_cmd(&["sql", "-F", "json", FILES_SIMPLE], data_dir.path());
+    let (stdout, stderr, ok) = run_cmd(
+        &["workspace", "sql", "-F", "json", FILES_SIMPLE],
+        data_dir.path(),
+    );
     assert!(!ok);
     assert!(stdout.is_empty(), "must not return partial rows");
     assert!(stderr.contains("is busy; retry"), "{stderr}");
@@ -396,14 +419,14 @@ fn busy_revision_fails_the_whole_query_and_releases_prior_locks() {
         .expect("failed reader releases earlier shared locks");
     locks[0].unlock().unwrap();
     let reader = orbit_cmd()
-        .args(["sql", "-F", "json", FILES_SIMPLE])
+        .args(["workspace", "sql", "-F", "json", FILES_SIMPLE])
         .env("ORBIT_DATA_DIR", data_dir.path())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
     wait_for_reader(&locks[0]);
-    let (_, stderr, ok) = run_cmd(&["list", "-F", "json"], data_dir.path());
+    let (_, stderr, ok) = run_cmd(&["workspace", "list", "-F", "json"], data_dir.path());
     assert!(
         ok,
         "waiting for a revision must not hold the manifest lock: {stderr}"
@@ -430,7 +453,7 @@ fn fresh_repositories_index_concurrently_into_separate_databases() {
         .iter()
         .map(|repo| {
             orbit_cmd()
-                .args(["index", repo.path.to_str().unwrap()])
+                .args(["workspace", "index", repo.path.to_str().unwrap()])
                 .env("ORBIT_DATA_DIR", data_dir.path())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())

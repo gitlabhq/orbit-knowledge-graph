@@ -596,9 +596,9 @@ The query did not match the DSL JSON Schema. Common causes:
 - Multi-node `traversal` without at least two nodes and one relationship.
 - `aggregation` without any `aggregations` entries.
 - `hops` upper bound or `max_depth` above 3, the server-enforced ceiling.
-- `allowlist rejected` or `not valid under 'oneOf'` on a `columns` entry. The column is not in the entity's allowlist. Run `glab orbit ontology <Entity>` for the valid list.
+- `allowlist rejected` or `not valid under 'oneOf'` on a `columns` entry. The column is not in the entity's allowlist. Run `glab orbit schema <Entity>` for the valid list.
 
-Fix: validate against the live schema from `glab orbit dsl`. Full field reference in [`query_language.md`](query_language.md).
+Fix: validate against the live schema from `glab orbit schema <Entity>`. Full field reference in [`query_language.md`](query_language.md).
 
 ## More examples
 
