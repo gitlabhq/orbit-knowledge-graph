@@ -46,6 +46,7 @@ Results include only the data that the token owner can access.
 Each user can send 60 requests every minute to GitLab Orbit.
 The CLI, the REST API, MCP clients, and GitLab Duo Agent Platform share this limit.
 The limit is the same on every offering, and administrators cannot change it.
+On GitLab Self-Managed, administrators can [allow specific users to bypass rate limits](https://docs.gitlab.com/administration/settings/user_and_ip_rate_limits/#allow-specific-users-to-bypass-authenticated-request-rate-limiting).
 
 These requests count toward the limit:
 
