@@ -9,7 +9,7 @@ authors:
 
 ## Row ownership and query scope
 
-Every row in the graph records the group or project that owns it.
+Almost every row in the graph records the group or project that owns it.
 Every query reads only the rows that belong to the groups of the caller.
 These two rules are tiers 1 and 2, and together they keep the data of one customer away from another.
 
@@ -60,6 +60,7 @@ The graph store reads only the data of the allowed groups and skips the rest.
 GitLab builds the scope of the caller before the request reaches Orbit:
 
 1. GitLab finds the groups where the caller has at least the Reporter role, through membership or a group share.
+1. GitLab keeps only the groups under top-level groups where Orbit is turned on. A caller with no such group gets an error.
 1. GitLab records the access levels of the caller on each of those paths, as GitLab access numbers such as 20 for Reporter.
 1. GitLab removes each path that a shorter path with the same role already covers.
 1. GitLab signs the other paths into a token with a short lifetime, and sends the token with the request.
@@ -80,10 +81,11 @@ The token carries claims like this example:
 ```
 
 The token also carries the standard JSON Web Token (JWT) claims and a `source_type`.
-Orbit rejects a token without `source_type`.
+Orbit rejects a token without `source_type` or `organization_id`.
 
 Orbit turns the claims into a security context.
-For an administrator, the context holds one path, the root of the organization.
+The `admin` claim is true for a caller who can read all resources in GitLab: an administrator in Admin Mode, or an auditor.
+For that caller, the context holds one path, the root of the organization.
 For any other caller, the context holds the paths from the token.
 A token with no paths is an error, so a misconfigured caller fails and does not get an empty result.
 
@@ -93,8 +95,8 @@ The compiler checks the query against the security context before it plans any r
 The compiler applies these rules:
 
 - An entity can declare a minimum role. The compiler rejects a query on that entity when the caller has the role on no path.
-- A property can be admin-only. For a caller who is not an administrator, the compiler removes the property from the output. The compiler also rejects a filter, sort, or group on the property.
-- The traversal path is a hidden property, so a caller cannot filter on the path. The scope filter is the only path filter in a query.
+- A property can be admin-only. For a caller without the `admin` claim, the compiler removes the property from the output. The compiler also rejects a filter, sort, or group on the property.
+- The traversal path is a hidden property, so a caller cannot filter on the path. Any other path condition that the compiler adds only narrows the scope filter.
 
 [Schema and identity](schema-and-ids.md#entity-access-settings) shows where the ontology declares these rules.
 

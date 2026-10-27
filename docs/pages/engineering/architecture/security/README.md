@@ -9,7 +9,8 @@ authors:
 
 ## Access control model
 
-Orbit is a read-only mirror of the GitLab data and the access permissions of each user.
+Orbit is a read-only mirror of GitLab data.
+Orbit gets the permissions of each caller from GitLab on each request.
 We treat GitLab as an authentication and authorization proxy for Orbit, so that the feature stays modular.
 GitLab decides who can see what, and Orbit enforces those decisions.
 Three tiers enforce the model on every query.
@@ -78,8 +79,10 @@ Each request carries a JSON Web Token (JWT) that GitLab signs with the secret:
 - **The token carries the scope.** The claims name the caller and the allowed paths, so Orbit needs no second lookup.
 
 Orbit rejects a token that is absent, invalid, or expired before it compiles the query.
-The indexer also calls GitLab, for example to fetch repository data.
-For those calls, Orbit signs its own short-lived token with a signing key in the same way.
+Orbit also calls GitLab, with its own short-lived token that it signs with a signing key in the same way.
+The indexer uses the token to fetch repository data.
+The query service uses the token to fetch file content and merge request diffs during [hydration](redaction.md#4-finish-the-result).
+The token does not belong to a user, so the query service fetches content only for rows that passed redaction.
 To replace a secret, see the [secret rotation runbook](../../runbooks/secret_rotation.md).
 
 Setup creates a separate read-only user for the graph store.

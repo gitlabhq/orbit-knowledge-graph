@@ -51,7 +51,7 @@ Two flags on a property limit who can see the property:
 | Flag | Schema tool output | Query results |
 | ---- | ------------------ | ------------- |
 | `hidden` | Not listed | Not available to any caller |
-| `admin_only` | Listed | Removed for callers who are not administrators |
+| `admin_only` | Listed | Removed for callers without the `admin` claim |
 
 The traversal path is a hidden property on each namespaced entity.
 The email address of a user is an admin-only property.
@@ -128,7 +128,7 @@ Callers read the graph schema through the schema tool of the Orbit API, the MCP 
 The tool reads the ontology of the active schema version and returns each node type, edge type, and listed property.
 The schema is the same for each caller.
 The compiler applies access when the query compiles, not when a caller reads the schema.
-A caller who is not an administrator can see that `User.email` exists, but no query returns the value to that caller.
+A caller without the `admin` claim can see that `User.email` exists, but no query returns the value to that caller.
 
 ### Result schema
 
@@ -167,6 +167,7 @@ Each query type puts its entities in different columns:
 | Neighbors | The center node and each neighbor | The internal columns of the center alias, and a neighbor ID and neighbor type column |
 
 A node with no ID in a row makes the row unauthorized.
+A path or neighbor column with no ID or type fails the whole query.
 
 ## Design rationale
 

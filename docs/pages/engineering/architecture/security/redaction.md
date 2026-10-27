@@ -104,7 +104,7 @@ An entity counts as denied when any of these conditions is true:
 - GitLab returned false for the ID.
 - GitLab returned no decision for the ID.
 - The ontology has no redaction settings for the type.
-- The row has no ID for the entity.
+- The row has no ID for the entity. A path or neighbor column with no ID fails the whole query.
 
 Orbit removes the row.
 Orbit never returns a row with empty values in place of a denied entity.
@@ -117,11 +117,13 @@ This step is hydration.
 Orbit fills in the other properties only for allowed rows.
 Content that lives outside the graph, such as file content and merge request diffs, comes from GitLab only after redaction.
 Orbit never reads content for a row that the caller cannot see.
+**This order is a security control.** The query service fetches content with a service token, not a token of the caller.
+Redaction must run first.
 The formatter then removes the internal columns, so the response holds no redaction IDs.
 
 ## Design rationale
 
-We reuse the ability check of GitLab search results, so a new permission rule in GitLab applies to Orbit with no change to Orbit.
+We reuse the standard GitLab ability checks, so a new permission rule in GitLab applies to Orbit with no change to Orbit.
 
 If Orbit cannot look up the authorization of a row, Orbit does not return the row.
 We chose to fail closed here, because a missing answer can hide a bug in tiers 1 and 2.

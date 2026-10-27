@@ -54,7 +54,7 @@ Orbit compiles the query against the data model of the active schema version.
 The compiler checks every name, plans the reads, and adds a namespace filter
 to every read that the caller's roles allow. It rejects the query if any read
 lacks its filter, which is the second of the
-[three layers](../security/README.md#authorization-tiers). The
+[three tiers](../security/README.md#authorization-tiers). The
 [Orbit Query Engine](query-engine.md) page walks through each step.
 
 ### 3. The relational store runs it
@@ -81,7 +81,7 @@ flowchart LR
 Some rules exist only in GitLab, like who can see a confidential work item.
 For those, Orbit sends the IDs of the returned resources back through the
 stream. GitLab checks each one with its normal permission rules, and Orbit
-drops every row that GitLab denies. This is the third layer, and the
+drops every row that GitLab denies. This is the third tier, and the
 [Redaction](../security/redaction.md) page covers it. Aggregation counts skip
 it.
 
