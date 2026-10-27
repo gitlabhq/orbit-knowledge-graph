@@ -81,7 +81,7 @@ commands that ask Orbit's graph through the GitLab API are:
   group.
 
 GitLab checks who you are and which groups you can see, as
-[security](security.md) explains. The GitLab CLI passes your sign-in to the
+[security](security/README.md) explains. The GitLab CLI passes your sign-in to the
 Orbit CLI in its environment. The Orbit CLI never stores the token.
 
 ## Why use the Orbit CLI
