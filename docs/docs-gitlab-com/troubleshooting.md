@@ -30,13 +30,15 @@ To resolve this issue, [update `glab`](https://docs.gitlab.com/cli/), then run `
 You might get an error that states:
 
 ```plaintext
-error: unrecognized subcommand 'repo-map'
+error: unrecognized subcommand 'workspace'
 ```
 
-This issue occurs when your `orbit` binary is from a release earlier than the one that added the command.
+This issue occurs when your `orbit` binary is from a release earlier than the one that added the command,
+or when the command was removed, such as `repo-map` and `tools`.
 
 To resolve this issue, run `glab orbit --update`.
 If you installed `orbit` without `glab`, run the [installer](cli.md#install-the-standalone-binary) again.
+For the current commands, see the [command catalog](cli.md#command-catalog).
 
 ### Error: `GLIBC_2.28' not found`
 
@@ -169,10 +171,10 @@ This issue occurs when the indexer has not finished indexing the group or projec
 To resolve this issue, check the progress, and send the query again when indexing is complete:
 
 ```shell
-glab orbit graph-status --full-path <my-group>
+glab orbit status --full-path <my-group>
 ```
 
-`glab orbit status` shows only the health of the service, not indexing progress.
+Without `--full-path`, `glab orbit status` shows only the health of the service, not indexing progress.
 
 ## Tokens and service accounts
 
@@ -264,27 +266,14 @@ These issues affect the [local graph](cli.md#local-graph).
 You might get an error that states:
 
 ```plaintext
-Error: no local graph found. Run `glab orbit index` first.
+Error: no local graph found. Run `glab orbit workspace index` first.
 ```
 
 This issue occurs when the repository is not indexed, or when the path you gave with `--db` does not exist.
 Earlier versions report `Table 'Definition' does not exist`.
 
-To resolve this issue, run `glab orbit index <repository_path>`.
+To resolve this issue, run `glab orbit workspace index <repository_path>`.
 If you passed `--db`, check that the path exists.
-
-### Error: `current commit is not indexed`
-
-`glab orbit repo-map` exits with code 1 with an error that states:
-
-```plaintext
-Error: current commit 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b is not indexed in the local graph
-       run:  glab orbit index .
-```
-
-This issue occurs when the local graph does not contain the current commit, because `repo-map` does not index the checkout for you.
-
-To resolve this issue, run `glab orbit index .`, then run `repo-map` again.
 
 ### Error: `The local graph is busy`
 
@@ -311,12 +300,11 @@ To resolve this issue, search for a shorter term, or remove options that narrow 
 
 ### Files marked `(edited since index)`
 
-`grep` marks a file `(edited since index)` and shows no definitions for it.
+`grep` marks a file `(edited since index)`, and its definitions might not match the file.
 
-This issue occurs when the file differs from the last commit.
+This issue occurs when `grep` cannot index the edited file, because another `orbit` process is writing the local graph.
 
-To resolve this issue, commit the change.
-The next `grep` indexes the new commit.
+To resolve this issue, wait for the other process to finish, then run `grep` again.
 
 ### Warning: `ignoring unsupported flag`
 
@@ -324,13 +312,13 @@ This issue occurs when you pass an option that `grep` does not support, such as 
 `grep` drops the option and reads its value as a path, so it then fails with an error like `no such path in the repository: 5`.
 
 To resolve this issue, remove the option.
-To narrow the search, give paths, or use `-g`, `-t`, or `--kind`.
+To narrow the search, give paths, use `-g` or `-t`, or start the query with a kind, such as `def:`.
 
 ### Repositories missing after an update
 
 Repositories that you indexed before an update are missing from the local graph.
 
-This issue occurs when the update changed the format of the local graph, and the next `index` rebuilt the graph file.
+This issue occurs when the update changed the format of the local graph, and the next `workspace index` rebuilt the graph file.
 
 To resolve this issue, index your repositories again.
 

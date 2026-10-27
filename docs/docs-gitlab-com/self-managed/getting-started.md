@@ -18,9 +18,9 @@ Set up all four before you install GitLab Orbit.
 
 ## Prerequisites
 
-- One of these GitLab versions:
-  - 19.4.4 or a later 19.4 patch release
-  - 19.5.2 or a later 19.5 patch release
+- One of these GitLab versions, which accept GQL queries by default:
+  - 19.4.4
+  - 19.5.2
   - 19.6.0 or later
 - Administrator access to the GitLab instance and to its PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.

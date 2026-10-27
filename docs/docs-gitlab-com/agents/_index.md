@@ -39,7 +39,7 @@ To set up your agent:
 1. In the list of agents, keep or clear the agents that setup selected, then press <kbd>Enter</kbd>.
 
 Setup installs the GitLab Orbit skill for your agents and indexes the repository for code search.
-To check that the repository is indexed, run `glab orbit list`.
+To check that the repository is indexed, run `glab orbit workspace list`.
 To load the skill, start a new session of your agent.
 To update the setup, run the command again.
 For a guided first session, see [step 3 of the quickstart](../quickstart.md#step-3-ask-your-first-question).
