@@ -33,7 +33,7 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `utils` | Shared SQL parameter types (`ScalarType`, `SqlType`), ClickHouse encoding helpers, strict-mode YAML parse/serialize helpers (`yaml`) |
 | `utils/arrow` | Arrow extraction utilities, `BatchBuilder`, generic `AsRecordBatch<Ctx>` trait, logical byte sizes (kept as a separate sub-crate for compile-time isolation) |
 | `clickhouse-client` | Async ClickHouse client, Arrow-IPC streaming, `QuerySummary` from `X-ClickHouse-Summary` header, `QueryProfiler` for profiling |
-| `named-queries` | Named queries: parses/validates YAML under `config/named_queries/` with a JSON and a GQL spelling per query, embeds it via `rust-embed`, and renders the selected spelling with JSON-schema-validated client parameters and separate server-derived `BindingValues` (`$binding`/`$param` placeholders for JSON, MiniJinja `binding`/`param`/`identifier`/`integer` lookups for GQL); `orbit-server` executes `QUERY_TYPE_NAMED` with the spelling and frontend selected by the separate Rails-derived `QueryLanguage` value, and its unit tests compile both examples against the ontology |
+| `named-queries` | Named queries: parses/validates YAML under `config/named_queries/` with a GQL spelling per query, embeds it via `rust-embed`, and renders it with JSON-schema-validated client parameters and separate server-derived `BindingValues` (MiniJinja `binding`/`param`/`identifier`/`integer` lookups); `orbit-server` executes `QUERY_TYPE_NAMED` with the GQL frontend, and its unit tests compile the examples against the ontology |
 | `nats-client` | Shared NATS client wrapper (`NatsClient`), KV bucket services (`KvServices`), circuit-breaking decorator (`CircuitBreakingNatsClient`), testkit feature |
 | `circuit-breaker` | Generic circuit breaker (`CircuitBreaker`, `CircuitBreakableError`) with observer hooks and per-circuit config |
 | `query-engine/profiler` | Standalone CLI for profiling GKG queries directly against ClickHouse |
@@ -47,5 +47,5 @@ Single binary: `gkg-server` (5 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `integration-testkit` | Shared ClickHouse service helpers, `MockRedactionService`, `ResponseView` assertion framework, YAML query scenario runner (`query_scenario` module: `QueryScenario` format, preset system, assertion enforcement), indexer scenario runner (`scenario`), plan-shape runner (`plan_shape`), `GKG_TEST_ONTOLOGY_OVERLAY` loader, CLI test harness (`cli` module) |
 | `integration-tests` | Test binaries: `local` (compiler, plan shape), `server_containers`, `indexer_containers`, `cli`, and `billing_boundary`. See [Testing](../testing/README.md) |
 | `integration-tests-codegraph` | YAML suites for `code-graph` (`fixtures/`) and `code-graph-incremental` (`fixtures_incremental/`); `build.rs` generates one test per suite |
-| `fuzz` | Bolero fuzz targets for the JSON and GQL query frontends, code parsers, and indexer messages |
+| `fuzz` | Bolero fuzz targets for the GQL query frontend, code parsers, and indexer messages |
 | `xtask` | Developer task runner (synthetic data generation, query evaluation, schema management) |
