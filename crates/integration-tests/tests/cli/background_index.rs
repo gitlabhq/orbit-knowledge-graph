@@ -316,6 +316,12 @@ fn a_failed_background_index_leaves_its_error_in_the_log() {
         .find(|log| log.exists())
         .expect("the detached index leaves a log in its state directory");
     assert!(!output.status.success());
+    let relative_log = log.strip_prefix(data.path()).unwrap().to_str().unwrap();
+    assert!(
+        stderr(&output).contains(relative_log),
+        "{}",
+        stderr(&output)
+    );
     assert!(
         std::fs::read_to_string(log)
             .unwrap()
