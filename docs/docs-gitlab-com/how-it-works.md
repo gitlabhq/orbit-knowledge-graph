@@ -84,7 +84,6 @@ For more information, see [GitLab Orbit on GitLab Self-Managed](https://docs.git
 On GitLab.com and GitLab Dedicated, GitLab Orbit queries have a 99.9% monthly availability commitment.
 It covers queries through the REST API, the CLI, the [MCP endpoint](agents/mcp.md),
 the [GitLab MCP server](https://docs.gitlab.com/user/model_context_protocol/mcp_server/), and GitLab Duo Agent Platform.
-It does not cover data freshness, query latency, or the correctness of results.
 For the full definition, see the
 [GitLab Orbit service level agreement](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/service-level-agreement/#gitlab-orbit-service-level-agreement---availability-definition).
 
