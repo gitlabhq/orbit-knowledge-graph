@@ -106,21 +106,11 @@ impl<'a> Exporter<'a> {
     /// `paths`.
     pub(super) fn write_directories(&mut self, paths: &[&str]) -> Result<()> {
         self.writer.delete_directories()?;
-        let tables = code_graph_incremental::export::export_directories(
-            paths,
-            code_graph_incremental::export::ExportConfig::embedded(),
-            self.ontology,
-            &self.envelope(),
-        )?;
-        self.insert(tables)
+        self.insert(directory_rows(self.git, self.ontology, paths)?)
     }
 
     fn envelope(&self) -> Envelope<'a> {
-        Envelope::new([
-            ("project_id", Scalar::Int(self.git.project_id)),
-            ("branch", Scalar::Str(&self.git.branch)),
-            ("commit_sha", Scalar::Str(&self.git.commit_sha)),
-        ])
+        envelope(self.git)
     }
 
     fn insert(&mut self, tables: Vec<(String, RecordBatch)>) -> Result<()> {
@@ -226,11 +216,7 @@ pub(super) fn replacement(
     state: &State,
     files: &FxHashSet<String>,
 ) -> Result<Replacement> {
-    let envelope = Envelope::new([
-        ("project_id", Scalar::Int(git.project_id)),
-        ("branch", Scalar::Str(&git.branch)),
-        ("commit_sha", Scalar::Str(&git.commit_sha)),
-    ]);
+    let envelope = envelope(git);
     let plan = ExportPlan::from_config(&env.export_config, ontology, &env.lang)?;
     let edge_table = ontology
         .local_edge_table_name()
@@ -300,6 +286,40 @@ pub(super) fn replacement(
         rows,
         edges,
     })
+}
+
+fn envelope(git: &GitInfo) -> Envelope<'_> {
+    Envelope::new([
+        ("project_id", Scalar::Int(git.project_id)),
+        ("branch", Scalar::Str(&git.branch)),
+        ("commit_sha", Scalar::Str(&git.commit_sha)),
+    ])
+}
+
+/// The directories that hold `paths`, and the edges between them.
+pub(super) fn directory_rows(
+    git: &GitInfo,
+    ontology: &ontology::Ontology,
+    paths: &[&str],
+) -> Result<Vec<(String, RecordBatch)>> {
+    Ok(code_graph_incremental::export::export_directories(
+        paths,
+        code_graph_incremental::export::ExportConfig::embedded(),
+        ontology,
+        &envelope(git),
+    )?)
+}
+
+/// Replaces every directory, and the edges between them, with `rows`.
+pub(super) fn apply_directories(
+    writer: &GraphWriter,
+    rows: &[(String, RecordBatch)],
+) -> Result<()> {
+    writer.delete_directories()?;
+    for (table, batch) in rows {
+        writer.insert_batch(table, batch)?;
+    }
+    Ok(())
 }
 
 pub(super) fn apply(writer: &GraphWriter, replacement: &Replacement) -> Result<()> {

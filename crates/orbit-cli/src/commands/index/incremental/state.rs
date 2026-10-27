@@ -435,6 +435,13 @@ pub(super) struct Refreshed {
     snapshot: PathBuf,
 }
 
+/// What a refresh writes: each family's rows, and the directories again
+/// when files came or went.
+pub(super) struct Refresh {
+    pub families: Vec<Refreshed>,
+    pub directories: Option<Vec<(String, arrow::record_batch::RecordBatch)>>,
+}
+
 fn pending_file(snapshot: &std::path::Path) -> PathBuf {
     let mut name = snapshot.as_os_str().to_owned();
     name.push(".pending");
@@ -457,52 +464,159 @@ pub(super) fn discard_snapshots(refreshed: &[Refreshed]) {
     }
 }
 
+/// The working-tree files a refresh must read and remove: edited since
+/// their family read them, or not in any snapshot yet, as after a
+/// `git mv`; and gone, though a snapshot still holds them.
+pub(super) fn refresh_changes(
+    repo: &std::path::Path,
+    state_dir: &std::path::Path,
+    families: &[SupportLang],
+    working: workspace::GitChanges,
+    files: Vec<String>,
+) -> (Vec<String>, Vec<String>) {
+    let indexed: FxHashSet<String> = families
+        .iter()
+        .flat_map(|family| State::labels(&snapshot_file(state_dir, *family)).unwrap_or_default())
+        .collect();
+    let mut candidates: Vec<String> = working.changed.into_iter().chain(files).collect();
+    candidates.sort();
+    candidates.dedup();
+    let candidates: Vec<&str> = candidates.iter().map(String::as_str).collect();
+    let mut changed = changed_since_snapshot(repo, state_dir, &candidates);
+    changed.extend(
+        candidates
+            .iter()
+            .filter(|path| !indexed.contains(**path) && repo.join(path).is_file())
+            .filter(|path| SupportLang::from_path(path).is_some_and(|lang| lang.has_rules()))
+            .map(|path| path.to_string()),
+    );
+    changed.sort();
+    changed.dedup();
+    let removed = working
+        .removed
+        .into_iter()
+        .filter(|path| indexed.contains(path) && !repo.join(path).exists())
+        .collect();
+    (changed, removed)
+}
+
 pub(super) fn refresh_families(
     git: &GitInfo,
     ontology: &ontology::Ontology,
     state_dir: &std::path::Path,
     owner: Option<SupportLang>,
+    families: &[SupportLang],
     changed: Vec<String>,
-) -> Result<Vec<Refreshed>> {
+    removed: Vec<String>,
+) -> Result<Refresh> {
     let read_at = std::time::SystemTime::now();
     let repository = input::paths(&git.repo_path, changed)?;
-    let mut replacements = Vec::new();
+    let mut work: BTreeMap<&'static str, (SupportLang, Vec<String>, Vec<String>)> = BTreeMap::new();
     for (family, paths) in input::split(&repository, owner).into_values() {
-        let snapshot = snapshot_file(state_dir, family);
-        let (env, state) = State::load(&snapshot, family)
-            .with_context(|| format!("failed to load {}", snapshot.display()))?;
-        let resolved = templates::reindex(
-            Context::new(&env, input::paths(&git.repo_path, paths.clone())?),
-            state,
-            Vec::new(),
-        )?;
-        let touched = resolved.value().touched.clone();
-        let (_, displayed) = resolved.then(Display)?.finish();
-        let state = displayed.state;
-        let files: FxHashSet<String> = touched
-            .iter()
-            .filter_map(|&index| state.trees.get(index as usize))
-            .map(|tree| tree.label.to_string())
-            .collect();
-        let pending = pending_file(&snapshot);
-        let replacement = super::output::replacement(git, ontology, &env, &state, &files);
-        let saved = replacement.and_then(|replacement| {
-            state.stage_changed(&env, &snapshot, &pending, &touched)?;
-            set_read_time(&pending, read_at)?;
-            Ok(replacement)
-        });
-        match saved {
-            Ok(replacement) => replacements.push(Refreshed {
-                replacement,
-                pending,
-                snapshot,
-            }),
+        work.entry(family.family())
+            .or_insert((family, Vec::new(), Vec::new()))
+            .1 = paths;
+    }
+    for (name, paths) in input::split_removed(removed, owner, families) {
+        if let Some(family) = SupportLang::from_family(name) {
+            work.entry(name)
+                .or_insert((family, Vec::new(), Vec::new()))
+                .2 = paths;
+        }
+    }
+    let mut refreshed = Vec::new();
+    let mut labels: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
+    let mut labels_changed = false;
+    for (family, paths, removed) in work.into_values() {
+        let family_refresh =
+            refresh_family(git, ontology, state_dir, family, paths, removed, read_at);
+        match family_refresh {
+            Ok((family_refreshed, family_labels, changed)) => {
+                labels_changed |= changed;
+                labels.insert(family.family(), family_labels);
+                refreshed.push(family_refreshed);
+            }
             Err(error) => {
-                discard_snapshots(&replacements);
-                let _ = std::fs::remove_file(&pending);
+                discard_snapshots(&refreshed);
                 return Err(error);
             }
         }
     }
-    Ok(replacements)
+    let directories = match labels_changed {
+        false => None,
+        true => {
+            let mut paths: Vec<String> = families
+                .iter()
+                .filter(|family| !labels.contains_key(family.family()))
+                .flat_map(|family| {
+                    State::labels(&snapshot_file(state_dir, *family)).unwrap_or_default()
+                })
+                .collect();
+            paths.extend(labels.into_values().flatten());
+            paths.sort_unstable();
+            paths.dedup();
+            let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
+            Some(super::output::directory_rows(git, ontology, &paths)?)
+        }
+    };
+    Ok(Refresh {
+        families: refreshed,
+        directories,
+    })
+}
+
+/// Reads `paths` into one family and drops `removed`, staging its snapshot
+/// beside the live one. Returns the family's files now, and whether the
+/// set of them changed.
+fn refresh_family(
+    git: &GitInfo,
+    ontology: &ontology::Ontology,
+    state_dir: &std::path::Path,
+    family: SupportLang,
+    paths: Vec<String>,
+    removed: Vec<String>,
+    read_at: std::time::SystemTime,
+) -> Result<(Refreshed, Vec<String>, bool)> {
+    let snapshot = snapshot_file(state_dir, family);
+    let (env, state) = State::load(&snapshot, family)
+        .with_context(|| format!("failed to load {}", snapshot.display()))?;
+    let before = state.trees.len();
+    let known: FxHashSet<&str> = state.trees.iter().map(|tree| tree.label.as_str()).collect();
+    let added = paths.iter().any(|path| !known.contains(path.as_str()));
+    drop(known);
+    let resolved = templates::reindex(
+        Context::new(&env, input::paths(&git.repo_path, paths)?),
+        state,
+        removed.clone(),
+    )?;
+    let touched = resolved.value().touched.clone();
+    let (_, displayed) = resolved.then(Display)?.finish();
+    let state = displayed.state;
+    let labels: Vec<String> = state.trees.iter().map(|tree| tree.label.clone()).collect();
+    let labels_changed = added || state.trees.len() != before;
+    let files: FxHashSet<String> = touched
+        .iter()
+        .filter_map(|&index| state.trees.get(index as usize))
+        .map(|tree| tree.label.to_string())
+        .chain(removed)
+        .collect();
+    let replacement = super::output::replacement(git, ontology, &env, &state, &files)?;
+    let pending = pending_file(&snapshot);
+    let staged = state
+        .stage_changed(&env, &snapshot, &pending, &touched)
+        .map_err(anyhow::Error::from)
+        .and_then(|()| set_read_time(&pending, read_at));
+    if let Err(error) = staged {
+        let _ = std::fs::remove_file(&pending);
+        return Err(error);
+    }
+    Ok((
+        Refreshed {
+            replacement,
+            pending,
+            snapshot,
+        },
+        labels,
+        labels_changed,
+    ))
 }

@@ -269,71 +269,119 @@ fn incremental_index_follows_the_working_tree() {
     assert_eq!(names(files), ["lib/greeter.rb", "py/mod.py", "src/main.rs"]);
 }
 
+const MIXED_REPO: &[(&str, &str)] = &[
+    (
+        "lib/settings.rb",
+        "class Settings\n  def self.load\n  end\nend\n",
+    ),
+    (
+        "config/application.rb",
+        "require \"rails\"\nrequire_relative \"../lib/settings\"\n\nmodule Demo\n  class Application\n    def boot\n      config.eager_load = true\n      Settings.load\n    end\n  end\nend\n",
+    ),
+    ("near.py", "def thing():\n    pass\n"),
+    ("far.py", "def thing():\n    pass\n"),
+    ("middle.py", "from far import *\n"),
+    ("hub.py", "from near import *\nfrom middle import *\n"),
+    ("app.py", "from hub import *\n\ndef run():\n    thing()\n"),
+    ("README.md", "# demo\n"),
+];
+
+fn write_file(repo: &std::path::Path, path: &str, text: &str) {
+    let path = repo.join(path);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
+}
+
+/// Every row of every graph table, in a stable order.
+fn graph_tables(data: &std::path::Path) -> Vec<Value> {
+    [
+        "gl_directory",
+        "gl_file",
+        "gl_definition",
+        "gl_imported_symbol",
+        "gl_edge",
+    ]
+    .iter()
+    .map(|table| orbit_sql(&format!("SELECT * FROM {table} ORDER BY ALL"), data))
+    .collect()
+}
+
+fn full_index_tables(repo: &std::path::Path) -> Vec<Value> {
+    let full = tempfile::TempDir::new().unwrap();
+    assert!(orbit_index(repo, full.path()));
+    graph_tables(full.path())
+}
+
 #[test]
 fn an_incremental_index_matches_a_full_index_of_the_same_tree() {
     let incremental = tempfile::TempDir::new().unwrap();
     let repo_dir = tempfile::TempDir::new().unwrap();
     let repo = repo_dir.path();
-    let write = |path: &str, text: &str| {
-        let path = repo.join(path);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, text).unwrap();
-    };
-    init_repo_at(
-        repo,
-        &[
-            (
-                "lib/settings.rb",
-                "class Settings\n  def self.load\n  end\nend\n",
-            ),
-            (
-                "config/application.rb",
-                "require \"rails\"\nrequire_relative \"../lib/settings\"\n\nmodule Demo\n  class Application\n    def boot\n      config.eager_load = true\n      Settings.load\n    end\n  end\nend\n",
-            ),
-            ("near.py", "def thing():\n    pass\n"),
-            ("far.py", "def thing():\n    pass\n"),
-            ("middle.py", "from far import *\n"),
-            ("hub.py", "from near import *\nfrom middle import *\n"),
-            ("app.py", "from hub import *\n\ndef run():\n    thing()\n"),
-            ("README.md", "# demo\n"),
-        ],
-    );
-    let graph = |data: &std::path::Path| -> Vec<Value> {
-        assert!(orbit_index(repo, data));
-        [
-            "gl_directory",
-            "gl_file",
-            "gl_definition",
-            "gl_imported_symbol",
-            "gl_edge",
-        ]
-        .iter()
-        .map(|table| orbit_sql(&format!("SELECT * FROM {table} ORDER BY ALL"), data))
-        .collect()
-    };
+    init_repo_at(repo, MIXED_REPO);
     let matches_a_full_index = |step: &str| {
-        let full = tempfile::TempDir::new().unwrap();
-        assert_eq!(graph(incremental.path()), graph(full.path()), "{step}");
+        assert!(orbit_index(repo, incremental.path()));
+        assert_eq!(
+            graph_tables(incremental.path()),
+            full_index_tables(repo),
+            "{step}"
+        );
     };
 
     matches_a_full_index("first index");
-    write(
+    write_file(
+        repo,
         "lib/settings.rb",
         "class Settings\n  def self.load\n  end\n\n  def self.reload\n  end\nend\n",
     );
     matches_a_full_index("edit a required file");
-    write(
+    write_file(
+        repo,
         "lib/tools/runner.rb",
         "class Runner\n  def go\n    Settings.reload\n  end\nend\n",
     );
     matches_a_full_index("add a file in a new directory");
     git(repo, &["mv", "near.py", "close.py"]);
-    write("hub.py", "from close import *\nfrom middle import *\n");
+    write_file(
+        repo,
+        "hub.py",
+        "from close import *\nfrom middle import *\n",
+    );
     matches_a_full_index("rename a file");
     std::fs::remove_file(repo.join("far.py")).unwrap();
     matches_a_full_index("remove a file");
     std::fs::remove_dir_all(repo.join("lib/tools")).unwrap();
     matches_a_full_index("remove a directory");
+}
+
+#[test]
+fn a_refresh_matches_a_full_index_when_files_come_and_go() {
+    let data = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    init_repo_at(repo, MIXED_REPO);
+    assert!(orbit_index(repo, data.path()));
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    write_file(repo, "pkg/sub/deep.py", "def deep():\n    run()\n");
+    git(repo, &["mv", "near.py", "close.py"]);
+    write_file(
+        repo,
+        "hub.py",
+        "from close import *\nfrom middle import *\n",
+    );
+    std::fs::remove_file(repo.join("far.py")).unwrap();
+    let refreshed = orbit_cmd()
+        .args(["refresh", repo.to_str().unwrap()])
+        .env("ORBIT_DATA_DIR", data.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        refreshed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&refreshed.stderr)
+    );
+    assert_eq!(graph_tables(data.path()), full_index_tables(repo));
 }
 
 #[test]
