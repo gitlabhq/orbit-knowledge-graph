@@ -272,6 +272,37 @@ fn saving_after_a_one_file_edit_rewrites_one_block() {
 }
 
 #[test]
+fn a_block_from_another_snapshot_is_refused_with_an_error() {
+    let env = Env::for_lang(SupportLang::Python).unwrap();
+    let saved = |file: &str| {
+        let repo = tempfile::tempdir().unwrap();
+        write(repo.path(), &[(file, UTILS)]);
+        let dir = tempfile::tempdir().unwrap();
+        index(&env, repo.path())
+            .save(&env, &dir.path().join("graph.bin"))
+            .unwrap();
+        dir
+    };
+    let block = |dir: &Path| {
+        std::fs::read_dir(dir.join("graph.blocks"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path()
+    };
+    let (ours, theirs) = (saved("ours.py"), saved("theirs.py"));
+    std::fs::copy(block(theirs.path()), block(ours.path())).unwrap();
+
+    let Err(error) = State::load(&ours.path().join("graph.bin"), SupportLang::Python) else {
+        panic!("a block from another snapshot loaded");
+    };
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("theirs.py"), "{error}");
+}
+
+#[test]
 fn a_snapshot_from_another_format_version_is_refused_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let snapshot = dir.path().join("graph.bin");

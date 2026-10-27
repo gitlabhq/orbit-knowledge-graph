@@ -286,16 +286,20 @@ pub(super) fn directory_rows(
 
 /// Writes what a refresh read: each family's rows, then every directory
 /// again when files came or went.
-pub(super) fn apply_refresh(writer: &GraphWriter, refresh: &super::state::Refresh) -> Result<()> {
+pub(super) fn apply_refresh(
+    writer: &GraphWriter,
+    ontology: &ontology::Ontology,
+    refresh: &super::state::Refresh,
+) -> Result<()> {
     for replacement in refresh
         .families
         .iter()
         .filter_map(|family| family.replacement.as_ref())
     {
-        apply(writer, replacement)?;
+        apply(writer, ontology, replacement)?;
     }
     if let Some(rows) = &refresh.directories {
-        writer.delete_directories()?;
+        writer.delete_directories(ontology)?;
         for (table, batch) in rows {
             writer.insert_batch(table, batch)?;
         }
@@ -303,8 +307,12 @@ pub(super) fn apply_refresh(writer: &GraphWriter, refresh: &super::state::Refres
     Ok(())
 }
 
-fn apply(writer: &GraphWriter, replacement: &Replacement) -> Result<()> {
-    writer.delete_files(&replacement.files)?;
+fn apply(
+    writer: &GraphWriter,
+    ontology: &ontology::Ontology,
+    replacement: &Replacement,
+) -> Result<()> {
+    writer.delete_files(ontology, &replacement.files)?;
     for (table, batch) in &replacement.rows {
         writer.insert_batch(table, batch)?;
     }

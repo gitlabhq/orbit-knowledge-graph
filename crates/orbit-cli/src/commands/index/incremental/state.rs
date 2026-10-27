@@ -116,7 +116,7 @@ impl Project<'_> {
         let refresh = reader.read(work, self.budget_ms, &|| self.cancelled())?;
         let written = self
             .writer
-            .in_transaction(|| output::apply_refresh(self.writer, &refresh));
+            .in_transaction(|| output::apply_refresh(self.writer, self.ontology, &refresh));
         let outputs: Vec<FamilyOutput> = names
             .iter()
             .filter_map(|name| {

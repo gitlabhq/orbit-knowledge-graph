@@ -502,7 +502,9 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
     // Snapshots go in place only after the rows land, so a failed write keeps the files stale.
     let written = workspace::resolve_db_path(db, &git)
         .and_then(|path| GraphWriter::open_waiting(&path, &git, crate::database::BRIEF_WAIT))
-        .and_then(|writer| writer.in_transaction(|| output::apply_refresh(&writer, &refresh)));
+        .and_then(|writer| {
+            writer.in_transaction(|| output::apply_refresh(&writer, &ontology, &refresh))
+        });
     match written {
         Ok(()) => state::commit_snapshots(&refresh.families),
         Err(error) => {

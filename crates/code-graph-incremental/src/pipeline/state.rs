@@ -530,7 +530,8 @@ impl State {
             .map(|(i, &fi)| (fi, u32::try_from(i).expect("block index exceeds u32")))
             .collect();
         for file in &mut stored {
-            renumber(file, |fi| local[&fi]);
+            renumber(file, |fi| local.get(&fi).copied())
+                .expect("a block's paths hold every file it refers to");
         }
         Block {
             paths: paths.iter().map(|fi| label(fi).to_string()).collect(),
@@ -593,8 +594,20 @@ impl State {
                 })
                 .collect::<io::Result<_>>()?;
             for mut file in block.files {
-                renumber(&mut file, |local| global[local as usize]);
-                let fi = position[file.tree.label.as_str()] as usize;
+                renumber(&mut file, |local| global.get(local as usize).copied()).ok_or_else(
+                    || {
+                        invalid(format!(
+                            "snapshot block for {} refers past its paths",
+                            file.tree.label
+                        ))
+                    },
+                )?;
+                let fi = *position.get(file.tree.label.as_str()).ok_or_else(|| {
+                    invalid(format!(
+                        "snapshot block holds {}, which the index does not list",
+                        file.tree.label
+                    ))
+                })? as usize;
                 files[fi] = Some(file);
             }
         }
@@ -673,16 +686,18 @@ fn references(file: &StoredFile) -> impl Iterator<Item = u32> + '_ {
 }
 
 /// Rewrites every file reference in `file` through `to`.
-fn renumber(file: &mut StoredFile, to: impl Fn(u32) -> u32) {
+/// `None` when `to` has no number for one of them.
+fn renumber(file: &mut StoredFile, to: impl Fn(u32) -> Option<u32>) -> Option<()> {
     for edge in &mut file.edges {
-        edge.from_tree = to(edge.from_tree);
-        edge.to_tree = to(edge.to_tree);
+        edge.from_tree = to(edge.from_tree)?;
+        edge.to_tree = to(edge.to_tree)?;
     }
     for (_, loc) in &mut file.visible {
-        loc.fi = to(loc.fi);
+        loc.fi = to(loc.fi)?;
     }
     for req in &mut file.reqs {
-        req.fi = to(req.fi);
-        req.target_fi = to(req.target_fi);
+        req.fi = to(req.fi)?;
+        req.target_fi = to(req.target_fi)?;
     }
+    Some(())
 }

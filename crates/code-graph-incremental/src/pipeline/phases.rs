@@ -526,11 +526,15 @@ impl Phase<DirtyGraph> for Resolve {
             .iter()
             .filter_map(|(path, tags)| Some((*tree_by_path.get(path.as_str())?, tags.as_slice())))
             .collect();
+        let keys: FxHashSet<u32> = walk.tag_keys.iter().copied().collect();
         let project_tags = |tree: &Tree<crate::tree::Compact>| {
-            let mut tags: Vec<(u32, u32)> = walk
-                .tag_keys
-                .iter()
-                .filter_map(|&key| Some((key, tree.get_tag(0, key)?)))
+            let mut tags: Vec<(u32, u32)> = tree
+                .tags
+                .get(&0)
+                .into_iter()
+                .flatten()
+                .filter(|tag| keys.contains(&tag.key))
+                .map(|tag| (tag.key, tag.val))
                 .collect();
             tags.sort_unstable();
             tags
