@@ -58,7 +58,7 @@ and answers with proof, not guesses.
 <!-- Videos published on 2026-07-06 and 2026-06-26 -->
 
 - [Read the launch blog post](https://about.gitlab.com/blog/introducing-gitlab-orbit/)<br>Introducing GitLab Orbit, from the GitLab blog.
-- [See the roadmap](https://gitlab-org.gitlab.io/orbit/roadmap/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
+- [See the roadmap](https://gitlab-org.gitlab.io/orbit/knowledge-graph/)<br>The work the GitLab Orbit team plans next, on the public GitLab Orbit roadmap.
 {.product-cards .product-cards-2}
 
 ## Example questions
