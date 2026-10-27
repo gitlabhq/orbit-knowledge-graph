@@ -248,12 +248,16 @@ An hourly sweep picks up any data that indexing missed.
 ## Verify the installation
 
 Query the graph for the projects in the group that you turned on.
-If your GitLab version has the `orbit_gql_queries` feature flag, the API accepts GQL queries only from users that have the flag on.
-For these users, the API parses every query as GQL, so JSON query objects fail.
+On GitLab 19.4.4 and later 19.4 releases, and on GitLab 19.5.2 and later 19.5 releases,
+the `orbit_gql_queries` feature flag selects GQL or JSON for each user.
+The flag is on by default.
+With the flag on, the API parses every query as GQL, so JSON query objects fail.
+GitLab 19.6 and later accept only GQL.
+For the CLI commands that each version supports, see [query language by GitLab version](../cli.md#query-language-by-gitlab-version).
 
 To verify the installation:
 
-1. If your GitLab version has the `orbit_gql_queries` feature flag, turn it on for your user in the [Rails console](https://docs.gitlab.com/administration/operations/rails_console/):
+1. If an administrator turned off the `orbit_gql_queries` feature flag, turn it on for your user in the [Rails console](https://docs.gitlab.com/administration/operations/rails_console/):
 
    ```ruby
    Feature.enable(:orbit_gql_queries, User.find_by_username('<your_username>'))
