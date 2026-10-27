@@ -57,7 +57,7 @@ Three-hop traversals on more than 20 million rows ran at a p95 below 300 ms, whi
 
 - Graph nodes live in typed ClickHouse tables.
 - Relationships live in edge tables that the ontology configures, with ordering and projections tuned for adjacency.
-- The query layer compiles an intermediate JSON query language into parameterized ClickHouse SQL, and does not run OpenCypher natively.
+- The query layer compiles GQL queries into parameterized ClickHouse SQL, and does not run OpenCypher natively.
 - PostgreSQL remains the backup option, and it can reuse the OpenCypher-to-PostgreSQL work.
 
 ## Why not the alternatives
