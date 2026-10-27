@@ -101,14 +101,14 @@ pub(crate) fn build_not_found_error(resource: &str) -> RemoteError {
     )
 }
 
-pub(crate) fn build_graphql_error(context: &str, errors: &[GraphQlError]) -> RemoteError {
+pub(crate) fn build_graphql_error<E>(context: &str, errors: &[GraphQlError<E>]) -> RemoteError {
     RemoteError::new(
         EXIT_GENERIC,
         format!("{context}: {}", join_messages(errors)),
     )
 }
 
-fn join_messages(errors: &[GraphQlError]) -> String {
+fn join_messages<E>(errors: &[GraphQlError<E>]) -> String {
     errors
         .iter()
         .map(|error| error.message.as_str())

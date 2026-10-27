@@ -8,6 +8,7 @@ use cynic::{GraphQlResponse, Operation};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use super::api::{Api, ErrorExtensions};
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
 
 const DEFAULT_GITLAB_BASE_URL: &str = "https://gitlab.com";
@@ -18,7 +19,6 @@ const SKILL_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 const STATUS_PATH: &str = "/api/v4/orbit/status";
 const QUERY_PATH: &str = "/api/v4/orbit/query";
-const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
 const GRAPHQL_PATH: &str = "/api/graphql";
 const SKILLS_PATH: &str = "/api/v4/orbit/skills";
 const GREP_PATH: &str = "/api/v4/orbit/grep";
@@ -149,13 +149,6 @@ impl OrbitClient {
         self.get_bytes(STATUS_PATH, &[]).await
     }
 
-    pub(crate) async fn get_graph_status(
-        &self,
-        params: &[(&str, String)],
-    ) -> Result<Vec<u8>, RemoteError> {
-        self.get_bytes(GRAPH_STATUS_PATH, params).await
-    }
-
     pub(crate) async fn get_grep(&self, params: &[(&str, String)]) -> Result<Vec<u8>, RemoteError> {
         let response = self
             .send(
@@ -179,11 +172,14 @@ impl OrbitClient {
     pub(crate) async fn graphql<Q, V>(
         &self,
         operation: &Operation<Q, V>,
-    ) -> Result<GraphQlResponse<Q>, RemoteError>
+    ) -> Result<Option<GraphQlResponse<Q, ErrorExtensions>>, RemoteError>
     where
         Q: DeserializeOwned,
         V: Serialize,
     {
+        if Api::selected() == Some(Api::Rest) {
+            return Ok(None);
+        }
         let request = serde_json::to_vec(operation).map_err(|error| {
             RemoteError::new(
                 EXIT_GENERIC,
@@ -191,12 +187,15 @@ impl OrbitClient {
             )
         })?;
         let body = self.post_json(GRAPHQL_PATH, request).await?;
-        serde_json::from_slice(&body).map_err(|error| {
-            RemoteError::new(
-                EXIT_GENERIC,
-                format!("unexpected GraphQL response: {error}"),
-            )
-        })
+        let response: GraphQlResponse<Q, ErrorExtensions> =
+            serde_json::from_slice(&body).map_err(|error| {
+                RemoteError::new(
+                    EXIT_GENERIC,
+                    format!("unexpected GraphQL response: {error}"),
+                )
+            })?;
+        let api = Api::remember_from(response.errors.as_deref().unwrap_or_default());
+        Ok((api == Api::Graphql).then_some(response))
     }
 
     async fn post_json(&self, path: &str, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
@@ -405,8 +404,8 @@ pub(crate) fn gitlab_usable(dir: &Path) -> bool {
         .map(|(_, path)| path);
     block_on_short(async move {
         match origin {
-            Some(path) => client.get_graph_status(&[("full_path", path)]).await,
-            None => client.get_status().await,
+            Some(path) => client.check_graph_status(path).await,
+            None => client.get_status().await.map(drop),
         }
     })
     .is_some()

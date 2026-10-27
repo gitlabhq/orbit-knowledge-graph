@@ -2,12 +2,14 @@ use std::io::Write;
 
 use self::error::{EXIT_GENERIC, RemoteError};
 
+pub(crate) mod api;
 pub(crate) mod client;
 pub(crate) mod code;
 pub(crate) mod context;
 pub(crate) mod error;
 pub(crate) mod graph_status;
 pub(crate) mod grep;
+mod legacy;
 pub(crate) mod ontology;
 pub(crate) mod origin;
 pub(crate) mod query;

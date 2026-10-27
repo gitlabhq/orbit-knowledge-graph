@@ -294,14 +294,64 @@ fn ontology_reads_each_connection_until_its_last_page() {
     assert_eq!(stdout["edges"], serde_json::json!([]));
 }
 
+fn run_schema_on_rest(graphql_body: &'static str) -> std::process::Output {
+    let (base_url, handle) = serve_routes(vec![
+        ("POST /api/graphql", graphql_body),
+        ("GET /api/v4/orbit/schema", r#"{"schema_version":"1"}"#),
+    ]);
+    let output = run_orbit(&base_url, &["schema", "User", "Project"]);
+    let requests = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        requests[1].request_line,
+        "GET /api/v4/orbit/schema?expand=User%2CProject HTTP/1.1"
+    );
+    output
+}
+
 #[test]
-fn ontology_without_the_orbit_graphql_api_exits_unavailable() {
-    let (base_url, handle) = serve_once(r#"{"data":{"orbit":null}}"#, "application/json");
+fn schema_falls_back_to_rest_when_graphql_has_no_orbit_schema() {
+    let output = run_schema_on_rest(r#"{"data":{"orbit":null}}"#);
+
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(stdout["schema_version"], "1");
+}
+
+#[test]
+fn schema_falls_back_to_rest_when_graphql_has_no_orbit_field() {
+    let output = run_schema_on_rest(
+        r#"{"errors":[{"message":"Field 'orbit' doesn't exist on type 'Query'",
+            "extensions":{"code":"undefinedField","typeName":"Query","fieldName":"orbit"}}]}"#,
+    );
+
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(stdout["schema_version"], "1");
+}
+
+#[test]
+fn schema_without_a_schema_under_orbit_exits_unavailable() {
+    let (base_url, handle) =
+        serve_once(r#"{"data":{"orbit":{"schema":null}}}"#, "application/json");
     let output = run_orbit(&base_url, &["schema"]);
     handle.join().expect("join mock");
 
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("Orbit schema not available"));
+}
+
+#[test]
+fn schema_does_not_fall_back_to_rest_on_http_401() {
+    let (base_url, handle) = serve_routes_with_status(vec![("POST /api/graphql", 401, "{}")]);
+    let output = run_orbit(&base_url, &["schema"]);
+    let requests = handle.join().expect("join mock");
+
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(requests.len(), 1);
 }
 
 #[test]
@@ -512,18 +562,106 @@ fn graph_status_without_orbit_for_the_user_exits_unavailable() {
 }
 
 #[test]
-fn graph_status_with_a_token_that_cannot_read_orbit_exits_forbidden() {
-    let (base_url, handle) = serve_once(
-        r#"{"data":{"group":{"orbit":null},"project":null}}"#,
-        "application/json",
+fn graph_status_falls_back_to_rest_when_graphql_has_no_orbit_field() {
+    let (base_url, handle) = serve_routes(vec![
+        ("GET /api/v4/groups/7", r#"{"full_path":"gsd-alpha"}"#),
+        (
+            "POST /api/graphql",
+            r#"{"errors":[{"message":"Field 'orbit' doesn't exist on type 'Group'",
+                "extensions":{"code":"undefinedField","typeName":"Group","fieldName":"orbit"}}]}"#,
+        ),
+        (
+            "GET /api/v4/orbit/graph_status",
+            r#"{"projects":{"indexed":1}}"#,
+        ),
+    ]);
+    let output = run_orbit(&base_url, &["status", "--namespace-id", "7"]);
+    let requests = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let output = run_orbit(&base_url, &["graph-status", "--full-path", "gsd-alpha"]);
+    assert_eq!(
+        requests[2].request_line,
+        "GET /api/v4/orbit/graph_status?namespace_id=7 HTTP/1.1"
+    );
+}
+
+#[test]
+fn graph_status_falls_back_to_rest_text_for_the_llm_format() {
+    let (base_url, handle) = serve_routes(vec![
+        (
+            "POST /api/graphql",
+            r#"{"data":{"group":{"orbit":null},"project":null}}"#,
+        ),
+        (
+            "GET /api/v4/orbit/graph_status",
+            r#"{"formatted_text":"projects: 1"}"#,
+        ),
+    ]);
+    let output = run_orbit(
+        &base_url,
+        &[
+            "status",
+            "--full-path",
+            "gsd-alpha",
+            "--response-format",
+            "llm",
+        ],
+    );
+    let requests = handle.join().expect("join mock");
+
+    assert_eq!(
+        requests[1].request_line,
+        "GET /api/v4/orbit/graph_status?full_path=gsd-alpha&response_format=llm HTTP/1.1"
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "projects: 1\n");
+}
+
+#[test]
+fn graph_status_keeps_the_rest_exit_code_after_a_fallback() {
+    let (base_url, handle) = serve_routes_with_status(vec![
+        (
+            "POST /api/graphql",
+            200,
+            r#"{"data":{"group":{"orbit":null},"project":null}}"#,
+        ),
+        ("GET /api/v4/orbit/graph_status", 403, "{}"),
+    ]);
+    let output = run_orbit(&base_url, &["status", "--full-path", "gsd-alpha"]);
     handle.join().expect("join mock");
 
     assert_eq!(output.status.code(), Some(4));
+}
+
+#[test]
+fn graph_status_falls_back_to_rest_for_a_token_that_cannot_read_orbit_graphql() {
+    let (base_url, handle) = serve_routes(vec![
+        (
+            "POST /api/graphql",
+            r#"{"data":{"group":{"orbit":null},"project":null}}"#,
+        ),
+        (
+            "GET /api/v4/orbit/graph_status",
+            r#"{"projects":{"indexed":1}}"#,
+        ),
+    ]);
+    let output = run_orbit(&base_url, &["status", "--full-path", "gsd-alpha"]);
+    let requests = handle.join().expect("join mock");
+
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("This token cannot read Orbit status")
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
+    assert_eq!(
+        requests[1].request_line,
+        "GET /api/v4/orbit/graph_status?full_path=gsd-alpha HTTP/1.1"
+    );
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(stdout["projects"]["indexed"], 1);
 }
 
 #[test]
@@ -545,7 +683,7 @@ fn graph_status_prints_the_data_and_fails_on_a_field_error() {
 #[test]
 fn graph_status_prints_nothing_on_a_query_error() {
     let (base_url, handle) = serve_once(
-        r#"{"errors":[{"message":"Field 'unknownField' doesn't exist on type 'OrbitIndexing'"}]}"#,
+        r#"{"errors":[{"message":"Query has complexity of 300, which exceeds max complexity of 250"}]}"#,
         "application/json",
     );
     let output = run_orbit(&base_url, &["graph-status", "--full-path", "gsd-alpha"]);
@@ -553,7 +691,7 @@ fn graph_status_prints_nothing_on_a_query_error() {
 
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unknownField"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("exceeds max complexity"));
 }
 
 #[test]

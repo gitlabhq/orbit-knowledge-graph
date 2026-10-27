@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::remote::client::OrbitClient;
 use crate::remote::error::{EXIT_GENERIC, RemoteError};
 
-pub(super) enum Scope {
+pub(crate) enum Scope {
     FullPath(String),
     NamespaceId(i64),
     ProjectId(i64),

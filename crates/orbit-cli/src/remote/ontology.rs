@@ -8,6 +8,7 @@ use serde::Serialize;
 
 use super::client::OrbitClient;
 use super::error::{EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError, build_graphql_error};
+use super::legacy;
 use super::{pretty_value, write_stdout};
 
 const EXPAND_ALL: &str = "*";
@@ -27,7 +28,9 @@ struct PageCursor {
 
 pub(crate) async fn run_ontology(nodes: Vec<String>) -> Result<(), RemoteError> {
     let client = OrbitClient::from_env()?;
-    let mut ontology = read_ontology(&client, !nodes.is_empty()).await?;
+    let Some(mut ontology) = read_ontology(&client, !nodes.is_empty()).await? else {
+        return legacy::run_ontology(&client, &nodes).await;
+    };
     ontology.keep_properties_of(&nodes);
     write_stdout(&pretty_value(&ontology))
 }
@@ -35,11 +38,11 @@ pub(crate) async fn run_ontology(nodes: Vec<String>) -> Result<(), RemoteError> 
 async fn read_ontology(
     client: &OrbitClient,
     with_properties: bool,
-) -> Result<Ontology, RemoteError> {
+) -> Result<Option<Ontology>, RemoteError> {
     let mut ontology = Ontology::default();
     let (mut nodes, mut edges) = (PageCursor::default(), PageCursor::default());
     while !(nodes.done && edges.done) {
-        let schema = read_schema_page(
+        let Some(schema) = read_schema_page(
             client,
             SchemaPageVariables {
                 nodes_after: nodes.after.as_deref(),
@@ -49,7 +52,10 @@ async fn read_ontology(
                 with_properties,
             },
         )
-        .await?;
+        .await?
+        else {
+            return Ok(None);
+        };
         nodes.read(
             schema.nodes.map(|page| (page.page_info, page.nodes)),
             &mut ontology.nodes,
@@ -59,29 +65,29 @@ async fn read_ontology(
             &mut ontology.edges,
         )?;
     }
-    Ok(ontology)
+    Ok(Some(ontology))
 }
 
 async fn read_schema_page(
     client: &OrbitClient,
     variables: SchemaPageVariables<'_>,
-) -> Result<OrbitSchema, RemoteError> {
-    let response = client.graphql(&SchemaPage::build(variables)).await?;
+) -> Result<Option<OrbitSchema>, RemoteError> {
+    let Some(response) = client.graphql(&SchemaPage::build(variables)).await? else {
+        return Ok(None);
+    };
     if let Some(errors) = response.errors.filter(|errors| !errors.is_empty()) {
         return Err(build_graphql_error("Orbit schema query failed", &errors));
     }
-    response
-        .data
-        .and_then(|data| data.orbit)
-        .and_then(|orbit| orbit.schema)
-        .ok_or_else(|| {
-            RemoteError::new(
-                EXIT_UNAVAILABLE,
-                "Orbit schema not available\n\n\
-                 This GitLab version has no Orbit GraphQL API, or Orbit is not available\n\
-                 for your user.",
-            )
-        })
+    let Some(orbit) = response.data.and_then(|data| data.orbit) else {
+        return Ok(None);
+    };
+    orbit.schema.map(Some).ok_or_else(|| {
+        RemoteError::new(
+            EXIT_UNAVAILABLE,
+            "Orbit schema not available\n\n\
+             The Orbit GraphQL API returned no schema for your user.",
+        )
+    })
 }
 
 impl Ontology {
