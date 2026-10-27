@@ -75,8 +75,8 @@ To set up an agent on your machine:
 
    ```plaintext
    Set up GitLab Orbit for this agent. In this repository, run
-   `glab orbit --yes setup --yes`, then run `glab orbit graph-status` and
-   show me the result. If a command fails, see
+   `glab orbit --yes setup --yes`, then run `glab orbit status --full-path`
+   with this repository's GitLab project path and show me the result. If a command fails, see
    https://docs.gitlab.com/orbit/troubleshooting/.
    ```
 
@@ -87,7 +87,7 @@ To set up an agent on your machine:
 
 To run setup yourself, see [connect your agent](agents/_index.md).
 
-To check indexing progress, run `glab orbit graph-status` until the summary ends with `Ready.`
+To check indexing progress, run `glab orbit status --full-path <my-group/my-project>` until the summary ends with `Ready.`
 
 ## Step 3: Ask your first question
 
