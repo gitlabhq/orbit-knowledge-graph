@@ -43,21 +43,28 @@ Results include only the data that the token owner can access.
 
 ## Rate limits
 
-Each user can send 60 requests per minute to GitLab Orbit.
-The CLI, the API, MCP clients, and GitLab Duo Agent Platform share this limit.
+Each user can send 60 requests every minute to GitLab Orbit.
+The CLI, the REST API, MCP clients, and GitLab Duo Agent Platform share this limit.
+The limit is the same on every offering, and administrators cannot change it.
 
 These requests count toward the limit:
 
-- Queries, including the `query_graph` tool on the [MCP endpoint](../agents/mcp.md) and the
-  [GitLab MCP server](https://docs.gitlab.com/user/model_context_protocol/mcp_server/).
-- `grep` and `context` requests from the [CLI](../cli.md).
+- Queries, including the `query_graph` command on the [MCP endpoint](../agents/mcp.md) and the `query_graph` tool
+  on the [GitLab MCP server](https://docs.gitlab.com/user/model_context_protocol/mcp_server/).
+- `grep` and `context` requests that the [CLI](../cli.md) sends to GitLab.
   `grep` also counts toward the [search rate limit](https://docs.gitlab.com/administration/instance_limits/#search-rate-limit).
-- Skill downloads.
+- Requests that list or download the [GitLab Orbit skill](../agents/_index.md).
 
-Requests for the schema, the status, and the list of tools do not count.
+Requests for the schema, the service status, and the list of tools or commands do not count.
+The indexing status of a group or project, which `glab orbit status` shows with `--full-path`, `--namespace-id`,
+or `--project-id`, has a separate limit of 10 requests every minute for each user and group or project.
 
-When you exceed the limit, the API and the MCP endpoint return `429 Too Many Requests` with a `Retry-After` header.
-The GitLab MCP server returns a tool error with the number of seconds to wait.
+When you exceed a limit:
+
+- The REST API and the MCP endpoint return `429 Too Many Requests` with a `Retry-After` header.
+- The GitLab MCP server returns a tool error with the number of seconds to wait.
+- The CLI exits with code `5` and the message `rate limited`. Wait up to one minute, then try again.
+
 To stay under the limit, combine small queries into one [aggregation](query-language.md#aggregate-results).
 
 For the limits on a single query, see [query language limits](query-language.md#limits).

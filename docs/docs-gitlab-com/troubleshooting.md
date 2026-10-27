@@ -133,7 +133,7 @@ Sign in with `glab auth login`, then run the command again.
 | `2` | Ends with `not found`, such as `Project not found` or `Namespace not found` | The path or ID is wrong, or you are not a member. | Check the path or ID. |
 | `3` | `not authenticated` | You are not signed in, or your token expired. | Run `glab auth login`. |
 | `4` | `Orbit access denied` | No top-level group that you belong to has GitLab Orbit turned on. | Ask a user with the Owner role for the group to [turn on GitLab Orbit](quickstart.md#step-1-turn-on-gitlab-orbit). |
-| `5` | `rate limited` | You exceeded the [rate limit](queries/_index.md#rate-limits). | Wait for the time in the `Retry-After` header. Combine small queries into one aggregation. |
+| `5` | `rate limited` | You exceeded the [rate limit](queries/_index.md#rate-limits). | Wait up to one minute, then try again. Combine small queries into one aggregation. |
 
 For all exit codes, see [exit codes](cli.md#exit-codes).
 
