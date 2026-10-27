@@ -7,7 +7,6 @@ use ontology::constants::DEFAULT_PRIMARY_KEY;
 
 use query_data_model::{OrbitQueryModel, ReadGrain};
 
-use crate::constants::{owner_key_column, partial_count_column};
 use crate::error::Result;
 use crate::input::{
     AggExpr, AggFunction, Input, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
@@ -125,29 +124,30 @@ fn aggregation_plan<M: OrbitQueryModel + ?Sized>(
             }
         }
     }
-    let split_nodes = input.owner_split_nodes(model);
     for (node, grain) in input.aggregation_row_nodes(model) {
         let ReadGrain::Owner { columns, split } = grain else {
             continue;
         };
-        let keys = columns
-            .iter()
-            .map(|column| OutputValue::Column(execution.property(node, column)))
-            .chain(split.iter().map(|split| OutputValue::OneOf {
-                column: execution.property(node, &split.property),
-                values: split.values.clone(),
-            }));
-        let split_node = split_nodes.iter().any(|(candidate, _)| *candidate == node);
-        for (index, value) in keys.enumerate() {
-            let group = Group {
-                value,
-                truncate: None,
-            };
-            if split_node {
-                plan.group_outputs
-                    .push((group.clone(), owner_key_column(node, index)));
-            }
-            add_group(&mut plan.groups, group);
+        for column in columns {
+            add_group(
+                &mut plan.groups,
+                Group {
+                    value: OutputValue::Column(execution.property(node, column)),
+                    truncate: None,
+                },
+            );
+        }
+        if let Some(split) = split {
+            add_group(
+                &mut plan.groups,
+                Group {
+                    value: OutputValue::OneOf {
+                        column: execution.property(node, &split.property),
+                        values: split.values.clone(),
+                    },
+                    truncate: None,
+                },
+            );
         }
     }
     for metric in &aggregation.metrics {
@@ -181,28 +181,11 @@ fn aggregation_plan<M: OrbitQueryModel + ?Sized>(
                 execution.property(&property.node, &property.property),
             )),
         };
-        let name = metric.output_name();
-        let function = metric.expr.function();
-        if function == AggFunction::Avg && !split_nodes.is_empty() {
-            plan.measures.push(Measure {
-                function: AggFunction::Count,
-                argument: argument.clone(),
-                distinct: false,
-                name: partial_count_column(&name),
-            });
-            plan.measures.push(Measure {
-                function: AggFunction::Sum,
-                argument,
-                distinct: false,
-                name,
-            });
-            continue;
-        }
         plan.measures.push(Measure {
-            function,
+            function: metric.expr.function(),
             argument,
             distinct: metric.distinct,
-            name,
+            name: metric.output_name(),
         });
     }
     plan

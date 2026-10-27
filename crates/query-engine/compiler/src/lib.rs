@@ -80,10 +80,7 @@ pub use passes::hydrate::{
 };
 pub use passes::normalize::build_entity_auth;
 pub use passes::plan::HydrationCompileOptions;
-pub use passes::result_contract::{
-    EdgeMeta, Fold, MAX_SPLIT_GROUPS, MAX_SPLIT_OWNERS, OwnerSplit, RedactionNode, ResultContext,
-    SplitMeasure, SplitOwner,
-};
+pub use passes::result_contract::{EdgeMeta, RedactionNode, ResultContext};
 pub use types::{AccessLevel, AuthorizedPath, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext};
 
 use metrics::CountErr;

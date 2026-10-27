@@ -43,16 +43,6 @@ pub(crate) fn redaction_type_column(alias: &str) -> String {
     format!("{}{alias}_type", internal_column_prefix())
 }
 
-pub(crate) fn owner_key_column(alias: &str, index: usize) -> String {
-    format!("{}{alias}_owner{index}", internal_column_prefix())
-}
-
-pub(crate) fn partial_count_column(measure: &str) -> String {
-    format!("{}{measure}_count", internal_column_prefix())
-}
-
-internal_col!(split_partials_column, "partials");
-
 /// Hidden column carrying the entity's `traversal_path` value from the base
 /// query into the hydration pipeline. Used to narrow hydration scans via
 /// `startsWith(traversal_path, tp)`, pruning granules through the primary key.

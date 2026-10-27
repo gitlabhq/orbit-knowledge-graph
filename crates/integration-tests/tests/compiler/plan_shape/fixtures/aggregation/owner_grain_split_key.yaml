@@ -14,4 +14,4 @@ physical:
   clickhouse:
     planned:
       expect:
-        - (Aggregate group pl.ref, group pl.project_id, group pl.source IN ('external'), pl.ref AS pl_ref, pl.project_id AS _orbit_pl_owner0, pl.source IN ('external') AS _orbit_pl_owner1, COUNT() AS n (_))
+        - (Aggregate group pl.ref, group pl.project_id, group pl.source IN ('external'), pl.ref AS pl_ref, COUNT() AS n (_))
