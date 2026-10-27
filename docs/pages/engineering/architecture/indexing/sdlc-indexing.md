@@ -20,9 +20,7 @@ types. Here is a simplified view of the main areas and how they connect.
 
 ```mermaid
 flowchart LR
-    PG[(PostgreSQL)] --> Siphon --> Lake[(Data lake)]
-    Lake --> Indexer --> Graph[(Graph)]
-    Dispatcher --> Indexer
+    PG[(PostgreSQL)] --> Siphon --> Lake[(Data lake)] --> Indexer --> Graph[(Graph)]
 ```
 
 GitLab data reaches the graph in two hops. Siphon first replicates the GitLab
@@ -34,9 +32,7 @@ follow the data along that path.
 
 ```mermaid
 flowchart LR
-    PG[(PostgreSQL)] -- changes --> Siphon
-    Replica[(Read replica)] -- snapshot --> Siphon
-    Siphon --> NATS --> Lake[(Data lake)]
+    PG[(PostgreSQL)] -- changes --> Siphon --> NATS --> Lake[(Data lake)]
 ```
 
 Siphon is the GitLab Change Data Capture service. It reads every insert,
@@ -54,9 +50,7 @@ let Orbit find exactly what changed since its last run.
 
 ```mermaid
 flowchart LR
-    Owner[Group owner] -- turns on --> GitLab
-    GitLab --> List[(Enabled groups)]
-    List -- Siphon --> Lake[(Data lake)]
+    Owner[Group owner] -- turns on --> GitLab --> List[(Enabled groups)] -- Siphon --> Lake[(Data lake)]
 ```
 
 Orbit only indexes the top-level groups that have it turned on. A group Owner
@@ -71,10 +65,7 @@ to index.
 
 ```mermaid
 flowchart LR
-    Enabled[Group turned on] --> D[Dispatcher]
-    Changes[New data] --> D
-    Sweep[Hourly sweep] --> D
-    D -- one per namespace --> Queue[Work queue]
+    New[New data or sweep] --> D[Dispatcher] -- one per namespace --> Queue[Work queue]
 ```
 
 The dispatcher decides when a namespace needs indexing and puts a request for
@@ -91,10 +82,7 @@ lake for the next run.
 
 ```mermaid
 flowchart LR
-    C[(Checkpoint)] --> E[Extract]
-    E --> T[Transform]
-    T --> L[Write]
-    L -- next page --> C
+    C[(Checkpoint)] --> E[Extract] --> T[Transform] --> L[Write] --> Next[Next page]
 ```
 
 A worker takes the request and indexes each type of entity in the namespace,
@@ -113,9 +101,7 @@ that arrive mid-run wait for the next one, so nothing falls between two runs.
 
 ```mermaid
 flowchart LR
-    Off[Group turned off] --> Grace{30 days}
-    Grace -- back on --> Kept[Data kept]
-    Grace -- still off --> Gone[Data deleted]
+    Off[Group turned off] --> Grace[30-day grace] -- still off --> Gone[Data deleted]
 ```
 
 Orbit never deletes rows in place. When GitLab deletes a row, the lake flags

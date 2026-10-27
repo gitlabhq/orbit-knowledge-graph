@@ -25,7 +25,6 @@ simplified view of how source files become the graph.
 ```mermaid
 flowchart LR
     Parse --> Rewrite --> Link --> Resolve --> Export
-    Spec[Language spec] --> Rewrite
 ```
 
 The engine reads every file in the repository and groups the files by
@@ -40,9 +39,7 @@ repository reaches the engine and where the rows go.
 
 ```mermaid
 flowchart LR
-    Repo[Repository] --> Check{Has a spec?}
-    Check -- yes --> Family[Language family]
-    Check -- no --> Listed[Listed only]
+    Repo[Repository] --> Listed[Every file listed] -- has a spec --> Parsed
 ```
 
 Every file in the repository becomes a file in the graph. Only files in a

@@ -21,11 +21,7 @@ view of that path.
 
 ```mermaid
 flowchart LR
-    Change[Ontology change] --> Dispatcher
-    Dispatcher --> Next[(Version N+1)]
-    Indexer --> Next
-    Current[(Version N)] --> Queries
-    Next -. switch .-> Queries
+    Change[Ontology change] --> Build[Build N+1] --> Fill[Fill N+1] -- switch --> Queries
 ```
 
 Every table in the graph carries its schema version in its name, so two
@@ -38,9 +34,7 @@ N+1 is ready to take over.
 
 ```mermaid
 flowchart LR
-    Change[Ontology change] --> Bump[Version N+1]
-    Bump --> Ledger[(Migration ledger)]
-    Bump --> Archive[(Ontology archive)]
+    Change[Ontology change] --> Bump[Version N+1] --> Ledger[(Migration ledger)]
 ```
 
 The schema version is a single number in the repository. A change to the
@@ -58,9 +52,7 @@ ontology for that version, so every running service can load it later.
 
 ```mermaid
 flowchart LR
-    D[Dispatcher] --> C{Table changed?}
-    C -- no --> Copy[Copied from N]
-    C -- yes --> Empty[Created empty]
+    D[Dispatcher] --> Copy[Copy unchanged tables] --> Empty[Create changed tables empty]
 ```
 
 When the new release starts, the dispatcher sees that its version is newer
@@ -80,8 +72,7 @@ change. Only the work that the change invalidated runs again.
 
 ```mermaid
 flowchart LR
-    Indexer --> Next[(Version N+1)]
-    Current[(Version N)] --> Queries
+    Indexer -- writes --> Next[(Version N+1)]
 ```
 
 Indexers never change tables themselves. A new indexer waits until its version

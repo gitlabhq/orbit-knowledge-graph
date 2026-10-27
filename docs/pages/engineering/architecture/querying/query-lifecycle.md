@@ -47,7 +47,6 @@ explains the stream.
 ```mermaid
 flowchart LR
     Query --> Engine --> SQL
-    Model[(Data model)] --> Engine
 ```
 
 Orbit compiles the query against the data model of the active schema version.
@@ -90,8 +89,6 @@ it.
 ```mermaid
 flowchart LR
     Rows --> Hydrate --> Format --> Response
-    Hydrate --> Store[(Relational store)]
-    Hydrate --> GitLab --> Gitaly
 ```
 
 The main query returns IDs, plus the properties it already joined. Hydration

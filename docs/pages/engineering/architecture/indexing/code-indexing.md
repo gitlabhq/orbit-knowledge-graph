@@ -23,7 +23,6 @@ simplified view of how a push reaches the code graph.
 ```mermaid
 flowchart LR
     Siphon --> NATS --> Dispatcher --> Indexer --> Graph[(Graph)]
-    Gitaly[(Gitaly)] --> Indexer
 ```
 
 A push to the default branch starts the chain. GitLab records it as a task,
@@ -37,7 +36,6 @@ What the code graph contains is on the [code graph](../code-graph.md) page.
 ```mermaid
 flowchart LR
     GitLab -- task --> Siphon --> NATS --> D[Dispatcher]
-    Lake[(Data lake)] -- projects --> D
 ```
 
 A push counts whether it comes from `git push`, a web edit, or a merge. The
@@ -58,9 +56,7 @@ are dropped. The graph can then trail the latest commit until the next push.
 
 ```mermaid
 flowchart LR
-    R[Request] --> C{Already indexed?}
-    C -- yes --> Done
-    C -- no --> L[Take the lock] --> I[Index]
+    R[Request] -- not indexed yet --> L[Take the lock] --> I[Index]
 ```
 
 A worker first checks the project's checkpoint, which records the last task
@@ -126,8 +122,7 @@ request does the work again.
 
 ```mermaid
 flowchart LR
-    Off[Group turned off] --> Grace{30 days} -- still off --> Gone[Code deleted]
-    Moved[Project deleted or moved] --> Check[Periodic check] --> Gone
+    Off[Group turned off] --> Grace[30-day grace] -- still off --> Gone[Code deleted]
 ```
 
 When a group turns Orbit off, its code is removed with the rest of its data

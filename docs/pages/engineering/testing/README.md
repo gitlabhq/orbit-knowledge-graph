@@ -4,6 +4,8 @@ description: How Orbit proves that a change is correct before it ships.
 authors:
   - michaelangeloio
   - michaelusa
+  - jgdoyon1
+  - bohdanpk
 ---
 
 Orbit tests behavior at the highest layer that can see it. New
@@ -41,22 +43,9 @@ Orbit has its own tests in the GitLab project.
 
 ## Layers
 
-```plantuml
-@startuml
-left to right direction
-skinparam componentStyle rectangle
-component "Build checks" as build
-component "Unit tests" as unit
-component "Integration\nwithout infrastructure" as local
-component "Integration\nwith real infrastructure" as containers
-component "End-to-end stack" as e2e
-component "Performance and\nproduction rollouts" as perf
-build --> unit
-unit --> local
-local --> containers
-containers --> e2e
-e2e --> perf
-@enduml
+```mermaid
+flowchart LR
+    Build[Build checks] --> Unit[Unit tests] --> Local[Integration] --> Infra[Real infrastructure] --> E2E[End-to-end] --> Perf[Performance]
 ```
 
 | Page | What it covers |

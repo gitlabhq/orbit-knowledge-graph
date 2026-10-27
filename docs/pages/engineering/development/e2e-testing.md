@@ -21,17 +21,7 @@ The `e2e-ha` job adds `-ha` to the SHA.
 
 ```mermaid
 flowchart LR
-    R[Robot suites] -->|REST API| G[GitLab Rails]
-    G --> PG[(PostgreSQL)]
-    PG -->|logical replication| SP[Siphon producer]
-    SP --> N[NATS]
-    N --> SC[Siphon consumer]
-    SC --> CH[(ClickHouse)]
-    D[Orbit dispatcher] --> N
-    N --> I[Orbit indexer]
-    I <--> CH
-    G -->|gRPC over TLS| W[Orbit webserver]
-    W --> CH
+    R[Robot suites] --> G[GitLab] --> SP[Siphon] --> N[NATS] --> CH[(ClickHouse)] --> O[Orbit]
 ```
 
 The Robot suites call the GitLab REST API and push over Git HTTP. Rails calls the Orbit webserver over gRPC with TLS.
