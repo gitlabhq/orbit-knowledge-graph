@@ -28,5 +28,5 @@ query:
 
 expect:
   skip_requirements: ["node_ids", "filter:name", "filter:title"]
-  sql_contains: ["LIMIT 1 BY p.traversal_path, p.id", "p.name = 'project'", "p._deleted = false"]
+  sql_contains: ["AS p FINAL", "p.name = 'project'", "p._deleted = false"]
   row_count: 0

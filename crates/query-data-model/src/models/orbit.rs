@@ -108,6 +108,12 @@ pub trait OrbitQueryModel {
             .is_some_and(|entity| self.query_backend().entity_is_global(entity))
     }
 
+    fn entity_high_fan_out(&self, entity: &str) -> bool {
+        self.graph()
+            .entity_id(entity)
+            .is_some_and(|entity| self.query_backend().entity_high_fan_out(entity))
+    }
+
     fn property_column_named(&self, entity: &str, property: &str) -> Option<&str> {
         let property = self.property(entity, property)?;
         self.property_column(property.id)

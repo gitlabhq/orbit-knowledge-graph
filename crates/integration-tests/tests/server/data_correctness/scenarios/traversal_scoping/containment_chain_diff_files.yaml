@@ -54,7 +54,7 @@ query:
     MATCH (g:Group)-[:`CONTAINS`]->(p:Project)<-[:IN_PROJECT]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile) WHERE g.full_path = 'g701' RETURN p, count(f) AS c LIMIT 10
 
 expect:
-  sql_contains: ["gl_group AS _scope FINAL WHERE", "_scope.full_path = 'g701'", "LIMIT 1 BY g.traversal_path, g.id", "relationship_kind = 'CONTAINS'"]
+  sql_contains: ["gl_group AS _scope FINAL WHERE", "_scope.full_path = 'g701'", "AS g FINAL", "relationship_kind = 'CONTAINS'"]
   skip_requirements: ["filter:full_path"]
   groups:
     p:

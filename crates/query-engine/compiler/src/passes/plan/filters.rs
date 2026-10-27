@@ -22,6 +22,7 @@ pub struct BoundFilter {
     pub data_type: Option<ontology::DataType>,
     pub selectivity: ontology::FieldSelectivity,
     pub namespace_anchor: bool,
+    pub foreign_key: bool,
     pub in_sort_key: bool,
     pub text_indexed: bool,
     pub unique: bool,
@@ -53,6 +54,7 @@ impl BoundFilter {
             text_indexed: self.text_indexed,
             unique: self.unique,
             immutable: self.immutable,
+            foreign_key: self.foreign_key,
             null_as_epoch: self.null_as_epoch,
         }
     }
@@ -141,6 +143,8 @@ pub fn bind_filter(
             .or_else(|| data_type.map(ontology::FieldSelectivity::from_data_type))
             .unwrap_or_default(),
         namespace_anchor: model.anchor_foreign_keys().contains_key(column),
+        foreign_key: property_id
+            .is_some_and(|property| model.query_backend().property_is_foreign_key(property)),
         in_sort_key,
         text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),
         unique: property_id.is_some_and(|property| model.property_unique(property)),

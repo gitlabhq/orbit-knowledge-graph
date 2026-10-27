@@ -1,4 +1,4 @@
-description: A candidate read found through an old version drops the merge request when its latest version no longer matches
+description: A FINAL read drops the merge request when only an old version matches
 
 config:
   unmerged_seed: true
@@ -16,6 +16,7 @@ query:
     MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE mr.source_branch = 'feature-zz' RETURN mr.title, mr.source_branch, p LIMIT 10
 
 expect:
-  sql_contains: ["tuple(mr.traversal_path, mr.id) IN (SELECT traversal_path, id FROM _orbit_relation_"]
+  sql_contains: ["AS mr FINAL"]
+  sql_not_contains: ["tuple(mr.traversal_path, mr.id) IN"]
   skip_requirements: ["node_ids", "filter:source_branch", "relationship:IN_PROJECT"]
   node_count: 0
