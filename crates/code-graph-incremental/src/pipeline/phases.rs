@@ -428,6 +428,7 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             items,
             mut dirty,
         } = input;
+        let first_inserted = u32::try_from(state.trees.len()).expect("file index exceeds u32");
         for file in items {
             let fi = u32::try_from(state.trees.len()).expect("file index exceeds u32");
             dirty.insert(fi);
@@ -477,7 +478,13 @@ impl Phase<Workset<Vec<LinkedFile>>> for Insert {
             unparsed.push(Tree::unparsed(lang, path, file.size, &reason).into());
         }
         state.trees.extend(unparsed);
-        Ok(DirtyGraph { state, dirty })
+        let inserted =
+            first_inserted..u32::try_from(state.trees.len()).expect("file index exceeds u32");
+        Ok(DirtyGraph {
+            state,
+            dirty,
+            inserted,
+        })
     }
 }
 
@@ -497,7 +504,11 @@ impl Phase<DirtyGraph> for Resolve {
     }
 
     fn run(self, context: &mut Context, input: DirtyGraph) -> Result<Resolved, Error> {
-        let DirtyGraph { mut state, dirty } = input;
+        let DirtyGraph {
+            mut state,
+            dirty,
+            inserted,
+        } = input;
         let env = context.env;
         let resolve_budget =
             context
@@ -515,6 +526,16 @@ impl Phase<DirtyGraph> for Resolve {
             .iter()
             .filter_map(|(path, tags)| Some((*tree_by_path.get(path.as_str())?, tags.as_slice())))
             .collect();
+        let project_tags = |tree: &Tree<crate::tree::Compact>| {
+            let mut tags: Vec<(u32, u32)> = walk
+                .tag_keys
+                .iter()
+                .filter_map(|&key| Some((key, tree.get_tag(0, key)?)))
+                .collect();
+            tags.sort_unstable();
+            tags
+        };
+        let tagged_before: Vec<_> = state.trees.iter().map(project_tags).collect();
         for tree in &mut state.trees {
             tree.clear_tags(0, &walk.tag_keys);
         }
@@ -523,6 +544,16 @@ impl Phase<DirtyGraph> for Resolve {
                 state.trees[i].set_tag(0, tag.key, tag.val);
             }
         }
+        let mut touched: FxHashSet<u32> = inserted.collect();
+        touched.extend(
+            state
+                .trees
+                .iter()
+                .zip(&tagged_before)
+                .enumerate()
+                .filter(|(_, (tree, before))| project_tags(tree) != **before)
+                .map(|(fi, _)| u32::try_from(fi).expect("file index exceeds u32")),
+        );
         let result = state.resolver.resolve(
             &state.trees,
             &mut state.edges,
@@ -562,11 +593,18 @@ impl Phase<DirtyGraph> for Resolve {
         for k in result.killed {
             context.skip(k);
         }
-        Ok(Resolved { state, resolved })
+        touched.extend(&resolved);
+        Ok(Resolved {
+            state,
+            resolved,
+            touched,
+        })
     }
 }
 
 /// The language's display rules: the tags export reads (`fqn`, `def_type`, ...).
+/// Only the touched trees are displayed again; the others keep the tags
+/// their snapshot saved.
 pub struct Display;
 
 impl Phase<Resolved> for Display {
@@ -579,7 +617,9 @@ impl Phase<Resolved> for Display {
     fn run(
         self,
         context: &mut Context,
-        Resolved { mut state, .. }: Resolved,
+        Resolved {
+            mut state, touched, ..
+        }: Resolved,
     ) -> Result<Displayed, Error> {
         let env = context.env;
         let edges = EdgeIndex::new(&state.edges);
@@ -589,7 +629,7 @@ impl Phase<Resolved> for Display {
             .enumerate()
             .map(|(fi, tree)| {
                 let rules = &env.rules_for(&tree.label).display_rules;
-                if rules.is_empty() {
+                if rules.is_empty() || !touched.contains(&(fi as u32)) {
                     return Ok(tree);
                 }
                 let ctx = EdgeCtx {

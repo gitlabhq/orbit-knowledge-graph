@@ -67,6 +67,86 @@ impl GraphWriter {
         Ok(())
     }
 
+    /// Whether the last index of `commit` finished writing.
+    pub fn is_complete(&self, commit: &str) -> Result<bool> {
+        let batches = self.client.query_arrow_json(
+            "SELECT CAST(count(*) AS BIGINT) FROM _orbit_meta WHERE key = 'indexed_commit' AND value = ?1",
+            &[commit.into()],
+        )?;
+        Ok(duckdb_client::scalar_i64(&batches) > 0)
+    }
+
+    /// Runs `write` in one transaction, marking the graph incomplete until
+    /// [`Self::complete`]; a failure leaves the graph as it was.
+    pub fn transaction<T>(&self, write: impl FnOnce() -> Result<T>) -> Result<T> {
+        self.client.execute("BEGIN TRANSACTION", &[])?;
+        let written = self
+            .client
+            .execute("DELETE FROM _orbit_meta WHERE key = 'indexed_commit'", &[])
+            .map_err(anyhow::Error::from)
+            .and_then(|_| write());
+        match written {
+            Ok(value) => {
+                self.client.execute("COMMIT", &[])?;
+                Ok(value)
+            }
+            Err(error) => {
+                self.client.execute("ROLLBACK", &[])?;
+                Err(error)
+            }
+        }
+    }
+
+    /// Deletes the rows of `paths`: their files, the entities in them, and
+    /// every edge that starts or ends at one of those.
+    pub fn delete_files(&self, paths: &[String]) -> Result<()> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        self.client.execute(
+            "CREATE OR REPLACE TEMP TABLE _orbit_deleted_paths (path VARCHAR)",
+            &[],
+        )?;
+        self.client.insert_batch(
+            "_orbit_deleted_paths",
+            &RecordBatch::try_from_iter([(
+                "path",
+                std::sync::Arc::new(arrow::array::StringArray::from_iter_values(paths))
+                    as arrow::array::ArrayRef,
+            )])?,
+        )?;
+        self.client.execute(
+            "CREATE OR REPLACE TEMP TABLE _orbit_deleted_ids AS
+             SELECT id FROM gl_file WHERE path IN (SELECT path FROM _orbit_deleted_paths)
+             UNION ALL SELECT id FROM gl_definition WHERE file_path IN (SELECT path FROM _orbit_deleted_paths)
+             UNION ALL SELECT id FROM gl_imported_symbol WHERE file_path IN (SELECT path FROM _orbit_deleted_paths)",
+            &[],
+        )?;
+        for sql in [
+            "DELETE FROM gl_edge WHERE source_id IN (SELECT id FROM _orbit_deleted_ids)
+             OR target_id IN (SELECT id FROM _orbit_deleted_ids)",
+            "DELETE FROM gl_file WHERE path IN (SELECT path FROM _orbit_deleted_paths)",
+            "DELETE FROM gl_definition WHERE file_path IN (SELECT path FROM _orbit_deleted_paths)",
+            "DELETE FROM gl_imported_symbol WHERE file_path IN (SELECT path FROM _orbit_deleted_paths)",
+            "DROP TABLE _orbit_deleted_ids",
+            "DROP TABLE _orbit_deleted_paths",
+        ] {
+            self.client.execute(sql, &[])?;
+        }
+        Ok(())
+    }
+
+    /// Deletes every directory and the edges between directories; the edges
+    /// from a directory to a file go with the file.
+    pub fn delete_directories(&self) -> Result<()> {
+        self.client.execute(
+            "DELETE FROM gl_edge WHERE source_kind = 'Directory' AND target_kind = 'Directory'",
+            &[],
+        )?;
+        self.client.execute("DELETE FROM gl_directory", &[])?;
+        Ok(())
+    }
+
     pub fn insert_batch(&self, table: &str, batch: &RecordBatch) -> Result<()> {
         self.client.insert_batch(table, batch)?;
         Ok(())

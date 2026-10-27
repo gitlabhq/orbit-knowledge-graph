@@ -7,10 +7,11 @@ use anyhow::{Context as _, Result};
 use code_graph_incremental::pipeline::{Context, Display, Report};
 use code_graph_incremental::treesitter::SupportLang;
 use code_graph_incremental::{Env, State, templates};
+use rustc_hash::FxHashSet;
 
 use super::RepositoryBars;
 use super::input;
-use super::output::{Exporter, FamilyOutput};
+use super::output::{self, Exporter, FamilyOutput};
 use crate::database::{GraphWriter, manifest};
 use crate::tui;
 use crate::workspace::{self, GitInfo};
@@ -26,6 +27,41 @@ pub(super) struct Project<'a> {
     pub cancel: &'a Arc<AtomicBool>,
     pub progress: Option<&'a Arc<RepositoryBars>>,
     pub working: workspace::GitChanges,
+}
+
+/// Which rows of the graph a run writes: all of them, after clearing it, or
+/// only those of the files the run read, resolved again, or removed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Rows {
+    All,
+    Changed,
+}
+
+/// A family's graph after this run read its files.
+struct Indexed {
+    env: Env,
+    report: Report,
+    state: State,
+    touched: FxHashSet<u32>,
+    removed: Vec<String>,
+    labels_changed: bool,
+}
+
+/// What one language family wrote, and the files it now holds.
+struct Written {
+    output: FamilyOutput,
+    labels: Vec<String>,
+    labels_changed: bool,
+}
+
+impl Written {
+    fn new(output: FamilyOutput, state: &State, labels_changed: bool) -> Self {
+        Self {
+            output,
+            labels: state.trees.iter().map(|tree| tree.label.clone()).collect(),
+            labels_changed,
+        }
+    }
 }
 
 enum Work {
@@ -45,7 +81,7 @@ impl Project<'_> {
         let work = families
             .into_values()
             .map(|(family, paths)| (family, Work::Index(paths)));
-        self.run(work, owner)
+        self.run(work, owner, Rows::All)
     }
 
     pub(super) fn index_changed(&self) -> Result<Vec<FamilyOutput>> {
@@ -81,7 +117,7 @@ impl Project<'_> {
         for (family, paths) in changed.into_values() {
             work.insert(family.family(), (family, Work::Index(paths)));
         }
-        self.run(work.into_values(), owner)
+        self.run(work.into_values(), owner, Rows::Changed)
     }
 
     fn changes(
@@ -92,9 +128,15 @@ impl Project<'_> {
     ) -> Result<workspace::GitChanges> {
         let repo = &self.git.repo_path;
         let mut changes = workspace::git_committed_changes(repo, &saved.commit_sha)?;
+        let indexed: FxHashSet<String> = families
+            .iter()
+            .flat_map(|family| State::labels(&self.snapshot_path(*family)).unwrap_or_default())
+            .collect();
         for path in self.working.paths().chain(&saved.dirty_paths) {
             match repo.join(path).is_file() {
-                true if self.edited_since_read(path, owner, families) => {
+                true if !indexed.contains(path)
+                    || self.edited_since_read(path, owner, families) =>
+                {
                     changes.changed.push(path.clone())
                 }
                 true => {}
@@ -130,6 +172,7 @@ impl Project<'_> {
         &self,
         work: impl IntoIterator<Item = (SupportLang, Work)>,
         owner: Option<SupportLang>,
+        mut rows: Rows,
     ) -> Result<Vec<FamilyOutput>> {
         let work: Vec<_> = work.into_iter().collect();
         for (family, job) in &work {
@@ -139,8 +182,9 @@ impl Project<'_> {
                     .with_context(|| format!("failed to open {}", snapshot.display()))?;
             }
         }
-        self.writer.clear(self.ontology)?;
-        let mut exporter = Exporter::new(self.git, self.writer, self.ontology);
+        if rows == Rows::Changed && !self.writer.is_complete(&self.git.commit_sha)? {
+            rows = Rows::All;
+        }
         std::fs::create_dir_all(&self.state_dir)?;
         if let Some(bars) = self.progress {
             let files = |work: &Work| match work {
@@ -153,12 +197,32 @@ impl Project<'_> {
                 .collect();
             bars.begin(&counts);
         }
-        let mut families = Vec::new();
-        let mut outputs = Vec::new();
-        for (family, work) in work {
-            families.push(family.family().to_string());
-            outputs.push(self.family(family, work, &mut exporter)?);
-        }
+        let families: Vec<String> = work
+            .iter()
+            .map(|(family, _)| family.family().to_string())
+            .collect();
+        let outputs = self.writer.transaction(|| {
+            if rows == Rows::All {
+                self.writer.clear(self.ontology)?;
+            }
+            let mut exporter = Exporter::new(self.git, self.writer, self.ontology);
+            let mut labels = Vec::new();
+            let mut labels_changed = false;
+            let mut outputs = Vec::new();
+            for (family, work) in work {
+                let written = self.family(family, work, rows, &mut exporter)?;
+                labels.extend(written.labels);
+                labels_changed |= written.labels_changed;
+                outputs.push(written.output);
+            }
+            if rows == Rows::Changed && labels_changed {
+                labels.sort_unstable();
+                labels.dedup();
+                let paths: Vec<&str> = labels.iter().map(String::as_str).collect();
+                exporter.write_directories(&paths)?;
+            }
+            Ok(outputs)
+        })?;
         self.save_state(&families, owner)?;
         Ok(outputs)
     }
@@ -167,41 +231,103 @@ impl Project<'_> {
         &self,
         family: SupportLang,
         work: Work,
+        rows: Rows,
         exporter: &mut Exporter,
-    ) -> Result<FamilyOutput> {
+    ) -> Result<Written> {
         if self.cancelled() {
             return Err(tui::cancelled("Indexing cancelled."));
         }
         let snapshot = self.snapshot_path(family);
         let read_at = std::time::SystemTime::now();
-        let mut env;
-        let (report, state) = match work {
-            Work::Index(paths) => {
-                env = Env::for_lang(family)?;
-                env.limits.total_ms = self.budget_ms;
-                let context = self.context(&env, paths)?;
-                let (context, displayed) = templates::index(context)?.then(Display)?.finish();
-                (context.report, displayed.state)
-            }
-            Work::Reindex { paths, removed } => {
-                let (loaded, state) = State::load(&snapshot, family)
-                    .with_context(|| format!("failed to load {}", snapshot.display()))?;
-                env = loaded;
-                env.limits.total_ms = self.budget_ms;
-                let context = self.context(&env, paths)?;
-                let (context, displayed) = templates::reindex(context, state, removed)?
-                    .then(Display)?
-                    .finish();
-                (context.report, displayed.state)
-            }
-            Work::Keep => {
-                let (env, state) = State::load(&snapshot, family)
-                    .with_context(|| format!("failed to load {}", snapshot.display()))?;
-                return exporter.write(family, &env, &state, &Report::default(), self.stats);
+        let indexed = match work {
+            Work::Keep => return self.keep(family, rows, exporter),
+            Work::Index(paths) => self.index_family(family, paths)?,
+            Work::Reindex { paths, removed } => self.reindex_family(family, paths, removed)?,
+        };
+        save_snapshot(&indexed, &snapshot, read_at)?;
+        let only = match rows {
+            Rows::All => None,
+            Rows::Changed => {
+                self.writer.delete_files(&indexed.removed)?;
+                Some(&indexed.touched)
             }
         };
-        save_snapshot(&env, &state, &snapshot, read_at)?;
-        exporter.write(family, &env, &state, &report, self.stats)
+        let output = exporter.write(
+            family,
+            &indexed.env,
+            &indexed.state,
+            &indexed.report,
+            self.stats,
+            only,
+        )?;
+        Ok(Written::new(output, &indexed.state, indexed.labels_changed))
+    }
+
+    /// A family with no changes writes nothing unless the graph is written
+    /// whole; it reads only its file list.
+    fn keep(&self, family: SupportLang, rows: Rows, exporter: &mut Exporter) -> Result<Written> {
+        let snapshot = self.snapshot_path(family);
+        let failed = || format!("failed to load {}", snapshot.display());
+        if rows == Rows::Changed {
+            let labels = State::labels(&snapshot).with_context(failed)?;
+            return Ok(Written {
+                output: output::family_output(family, labels.len(), &Report::default(), false),
+                labels,
+                labels_changed: false,
+            });
+        }
+        let (env, state) = State::load(&snapshot, family).with_context(failed)?;
+        let output = exporter.write(family, &env, &state, &Report::default(), self.stats, None)?;
+        Ok(Written::new(output, &state, false))
+    }
+
+    fn index_family(&self, family: SupportLang, paths: Vec<String>) -> Result<Indexed> {
+        let mut env = Env::for_lang(family)?;
+        env.limits.total_ms = self.budget_ms;
+        let context = self.context(&env, paths)?;
+        let (context, displayed) = templates::index(context)?.then(Display)?.finish();
+        let report = context.report;
+        let state = displayed.state;
+        Ok(Indexed {
+            touched: (0..state.trees.len() as u32).collect(),
+            env,
+            report,
+            state,
+            removed: Vec::new(),
+            labels_changed: true,
+        })
+    }
+
+    /// Reads `paths` into the family's saved graph and resolves again what
+    /// depends on them.
+    fn reindex_family(
+        &self,
+        family: SupportLang,
+        paths: Vec<String>,
+        removed: Vec<String>,
+    ) -> Result<Indexed> {
+        let snapshot = self.snapshot_path(family);
+        let (mut env, state) = State::load(&snapshot, family)
+            .with_context(|| format!("failed to load {}", snapshot.display()))?;
+        env.limits.total_ms = self.budget_ms;
+        let known: FxHashSet<&str> = state.trees.iter().map(|t| t.label.as_str()).collect();
+        let labels_changed =
+            !removed.is_empty() || paths.iter().any(|path| !known.contains(path.as_str()));
+        drop(known);
+        let context = self.context(&env, paths)?;
+        let resolved = templates::reindex(context, state, removed.clone())?;
+        let touched = resolved.value().touched.clone();
+        let (context, displayed) = resolved.then(Display)?.finish();
+        let state = displayed.state;
+        let report = context.report;
+        Ok(Indexed {
+            env,
+            report,
+            state,
+            touched,
+            removed,
+            labels_changed,
+        })
     }
 
     fn context<'e>(&self, env: &'e Env, paths: Vec<String>) -> Result<Context<'e>> {
@@ -256,12 +382,13 @@ fn snapshot_file(state_dir: &std::path::Path, family: SupportLang) -> PathBuf {
 }
 
 fn save_snapshot(
-    env: &Env,
-    state: &State,
+    indexed: &Indexed,
     snapshot: &std::path::Path,
     read_at: std::time::SystemTime,
 ) -> Result<()> {
-    state.save(env, snapshot)?;
+    indexed
+        .state
+        .save_changed(&indexed.env, snapshot, &indexed.touched)?;
     std::fs::File::options()
         .write(true)
         .open(snapshot)?

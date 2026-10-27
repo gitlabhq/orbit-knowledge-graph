@@ -46,6 +46,7 @@ pub(super) struct Exporter<'a> {
     directories: FxHashSet<i64>,
     files: FxHashSet<i64>,
     containment: FxHashSet<(i64, i64)>,
+    replaced: FxHashSet<String>,
 }
 
 impl<'a> Exporter<'a> {
@@ -61,9 +62,12 @@ impl<'a> Exporter<'a> {
             directories: FxHashSet::default(),
             files: FxHashSet::default(),
             containment: FxHashSet::default(),
+            replaced: FxHashSet::default(),
         }
     }
 
+    /// Writes the rows of `family`: all of them, or with `only`, the rows of
+    /// those files after deleting what the graph held for them.
     pub(super) fn write(
         &mut self,
         family: SupportLang,
@@ -71,36 +75,60 @@ impl<'a> Exporter<'a> {
         state: &State,
         report: &Report,
         stats: bool,
+        only: Option<&FxHashSet<u32>>,
     ) -> Result<FamilyOutput> {
-        let envelope = Envelope::new([
-            ("project_id", Scalar::Int(self.git.project_id)),
-            ("branch", Scalar::Str(&self.git.branch)),
-            ("commit_sha", Scalar::Str(&self.git.commit_sha)),
-        ]);
+        if let Some(only) = only {
+            let paths: Vec<String> = only
+                .iter()
+                .map(|&fi| &state.trees[fi as usize].label)
+                .filter(|path| self.replaced.insert((*path).clone()))
+                .cloned()
+                .collect();
+            self.writer.delete_files(&paths)?;
+        }
         let plan = ExportPlan::from_config(&env.export_config, self.ontology, &env.lang)?;
-        for (table, batch) in code_graph_incremental::export::export(
+        let tables = code_graph_incremental::export::export_trees(
             &state.trees,
             &state.edges,
             &env.lang,
             &plan,
-            &envelope,
-            true,
+            &self.envelope(),
+            only.is_none(),
             &|_| true,
+            only,
             &code_graph_incremental::Sentinel::disabled(),
-        )? {
+        )?;
+        self.insert(tables)?;
+        Ok(family_output(family, state.trees.len(), report, stats))
+    }
+
+    /// Replaces every directory, and the edges between them, with those of
+    /// `paths`.
+    pub(super) fn write_directories(&mut self, paths: &[&str]) -> Result<()> {
+        self.writer.delete_directories()?;
+        let tables = code_graph_incremental::export::export_directories(
+            paths,
+            code_graph_incremental::export::ExportConfig::embedded(),
+            self.ontology,
+            &self.envelope(),
+        )?;
+        self.insert(tables)
+    }
+
+    fn envelope(&self) -> Envelope<'a> {
+        Envelope::new([
+            ("project_id", Scalar::Int(self.git.project_id)),
+            ("branch", Scalar::Str(&self.git.branch)),
+            ("commit_sha", Scalar::Str(&self.git.commit_sha)),
+        ])
+    }
+
+    fn insert(&mut self, tables: Vec<(String, RecordBatch)>) -> Result<()> {
+        for (table, batch) in tables {
             let batch = self.unseen(&table, &batch)?;
             self.writer.insert_batch(&table, &batch)?;
         }
-        Ok(FamilyOutput {
-            family: family.family().to_string(),
-            files: state.trees.len(),
-            skipped_files: report.skipped.len(),
-            slowest_files: if stats {
-                slowest_files(report, 20)
-            } else {
-                Vec::new()
-            },
-        })
+        Ok(())
     }
 
     fn unseen(&mut self, table: &str, batch: &RecordBatch) -> Result<RecordBatch> {
@@ -139,6 +167,23 @@ impl<'a> Exporter<'a> {
             batch,
             &BooleanArray::from(keep),
         )?)
+    }
+}
+
+pub(super) fn family_output(
+    family: SupportLang,
+    files: usize,
+    report: &Report,
+    stats: bool,
+) -> FamilyOutput {
+    FamilyOutput {
+        family: family.family().to_string(),
+        files,
+        skipped_files: report.skipped.len(),
+        slowest_files: match stats {
+            true => slowest_files(report, 20),
+            false => Vec::new(),
+        },
     }
 }
 

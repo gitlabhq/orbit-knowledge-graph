@@ -269,6 +269,73 @@ fn incremental_index_follows_the_working_tree() {
 }
 
 #[test]
+fn an_incremental_index_matches_a_full_index_of_the_same_tree() {
+    let incremental = tempfile::TempDir::new().unwrap();
+    let repo_dir = tempfile::TempDir::new().unwrap();
+    let repo = repo_dir.path();
+    let write = |path: &str, text: &str| {
+        let path = repo.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    init_repo_at(
+        repo,
+        &[
+            (
+                "lib/settings.rb",
+                "class Settings\n  def self.load\n  end\nend\n",
+            ),
+            (
+                "config/application.rb",
+                "require \"rails\"\nrequire_relative \"../lib/settings\"\n\nmodule Demo\n  class Application\n    def boot\n      config.eager_load = true\n      Settings.load\n    end\n  end\nend\n",
+            ),
+            ("near.py", "def thing():\n    pass\n"),
+            ("far.py", "def thing():\n    pass\n"),
+            ("middle.py", "from far import *\n"),
+            ("hub.py", "from near import *\nfrom middle import *\n"),
+            ("app.py", "from hub import *\n\ndef run():\n    thing()\n"),
+            ("README.md", "# demo\n"),
+        ],
+    );
+    let graph = |data: &std::path::Path| -> Vec<Value> {
+        assert!(orbit_index(repo, data));
+        [
+            "gl_directory",
+            "gl_file",
+            "gl_definition",
+            "gl_imported_symbol",
+            "gl_edge",
+        ]
+        .iter()
+        .map(|table| orbit_sql(&format!("SELECT * FROM {table} ORDER BY ALL"), data))
+        .collect()
+    };
+    let matches_a_full_index = |step: &str| {
+        let full = tempfile::TempDir::new().unwrap();
+        assert_eq!(graph(incremental.path()), graph(full.path()), "{step}");
+    };
+
+    matches_a_full_index("first index");
+    write(
+        "lib/settings.rb",
+        "class Settings\n  def self.load\n  end\n\n  def self.reload\n  end\nend\n",
+    );
+    matches_a_full_index("edit a required file");
+    write(
+        "lib/tools/runner.rb",
+        "class Runner\n  def go\n    Settings.reload\n  end\nend\n",
+    );
+    matches_a_full_index("add a file in a new directory");
+    git(repo, &["mv", "near.py", "close.py"]);
+    write("hub.py", "from close import *\nfrom middle import *\n");
+    matches_a_full_index("rename a file");
+    std::fs::remove_file(repo.join("far.py")).unwrap();
+    matches_a_full_index("remove a file");
+    std::fs::remove_dir_all(repo.join("lib/tools")).unwrap();
+    matches_a_full_index("remove a directory");
+}
+
+#[test]
 fn index_db_flag_writes_to_custom_path() {
     let tmp = tempfile::TempDir::new().unwrap();
     let db_path = tmp.path().join("custom.duckdb");
