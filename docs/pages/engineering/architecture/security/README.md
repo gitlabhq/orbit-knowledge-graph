@@ -53,7 +53,7 @@ Tier 3 checks the entity in a group key, but not the counted entities, so aggreg
 <details>
 <summary>The rules that hold for every Orbit query</summary>
 
-- GitLab is the source of truth for permissions. Redaction uses current permissions, and the signed scope can lag a membership change by up to five minutes.
+- GitLab is the source of truth for permissions. Redaction uses current permissions, and the signed scope can lag a membership change by a few minutes.
 - Each allowed path needs at least the Reporter role, and some entities need a higher role.
 - Access to one project without access to its group gives no scope.
 - A query with no allowed paths is an error, not an empty result.
@@ -69,13 +69,13 @@ Tier 3 checks the entity in a group key, but not the counted entities, so aggreg
 No caller connects to Orbit directly.
 GitLab authenticates the caller, and the two services then authenticate each other with a shared secret and [TLS](#tls).
 
-GitLab and Orbit share one secret, a random 32-byte key that each side reads from a mounted secret file.
+GitLab and Orbit share one secret, a random key that each side reads from a mounted secret file.
 The secret never travels in a request.
 Each request carries a JSON Web Token (JWT) that GitLab signs with the secret:
 
 - **The signature proves the sender.** Orbit checks the HMAC-SHA256 (HS256) signature with the same secret. Only a service that holds the secret can make a valid token.
-- **The claims bind the token to Orbit.** The issuer must be `gitlab`, and the audience must be `gitlab-knowledge-graph`. A token for another GitLab service fails.
-- **The lifetime is short.** GitLab sets the expiry to five minutes after issue. Orbit allows a small clock skew and rejects an expired token.
+- **The claims bind the token to Orbit.** The issuer must be GitLab, and the audience must be Orbit. A token for another GitLab service fails.
+- **The lifetime is short.** GitLab sets an expiry of a few minutes. Orbit allows a small clock skew and rejects an expired token.
 - **The token carries the scope.** The claims name the caller and the allowed paths, so Orbit needs no second lookup.
 
 Orbit rejects a token that is absent, invalid, or expired before it compiles the query.
@@ -85,8 +85,7 @@ The query service uses the token to fetch file content and merge request diffs d
 The token does not belong to a user, so the query service fetches content only for rows that passed redaction.
 To replace a secret, see the [secret rotation runbook](../../runbooks/secret_rotation.md).
 
-Setup creates a separate read-only user for the graph store.
-The Helm chart connects the query service with that user.
+Setup creates a separate read-only user for the graph store, and the query service connects with that user.
 Each release image is signed, and images do not run as root.
 A fixable vulnerability of high or critical severity blocks a release.
 
@@ -105,9 +104,9 @@ All server binaries use the AWS-LC Federal Information Processing Standards (FIP
 No server build exists without FIPS.
 The `orbit` CLI is out of scope, because the module does not build on Windows and macOS.
 
-- The server does not start unless FIPS mode is on. The `starting` log line shows the AWS-LC version.
-- Continuous integration (CI) fails when the `ring` library or the non-FIPS AWS-LC library enters the server build or binary.
-- A unit test pins the module generation. CI fails when a dependency bump crosses a generation, because that change is a compliance event.
+- The server does not start unless FIPS mode is on. The startup log shows the module version.
+- Continuous integration (CI) fails when a cryptography library without FIPS validation enters the server build or binary.
+- CI fails when a dependency update changes the validated module, because that change is a compliance event.
 
 ## Decisions
 

@@ -80,8 +80,8 @@ The token carries claims like this example:
 }
 ```
 
-The token also carries the standard JSON Web Token (JWT) claims and a `source_type`.
-Orbit rejects a token without `source_type` or `organization_id`.
+The token also carries the standard JSON Web Token (JWT) claims and the source of the request.
+Orbit rejects a token without a source or an organization.
 
 Orbit turns the claims into a security context.
 The `admin` claim is true for a caller who can read all resources in GitLab: an administrator in Admin Mode, or an auditor.
@@ -177,5 +177,5 @@ We left custom roles out to keep the scope and the complexity small.
 
 The prefix match uses the sort key of each namespaced table, so the scope filter costs little.
 GitLab compacts the paths before it signs the token, so the filter stays small for callers in many groups.
-GitLab also caps the token at 500 paths and drops the rest.
+GitLab also caps the number of paths in one token after compaction.
 The compiler adds the scope filters after all other steps, so no later step can add a read that the final check does not see.
