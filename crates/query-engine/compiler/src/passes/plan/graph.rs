@@ -179,6 +179,17 @@ pub enum ReadScope {
     Unscoped,
     Scoped,
     HighFanOut,
+    Edge,
+}
+
+impl ReadScope {
+    pub fn reads_final(self, predicates: &[Predicate]) -> bool {
+        match self {
+            Self::Unscoped | Self::Edge => false,
+            Self::Scoped => true,
+            Self::HighFanOut => !predicates.iter().any(Predicate::narrows_keys),
+        }
+    }
 }
 
 #[derive(PartialEq)]
@@ -314,18 +325,14 @@ impl RelationGraph {
             predicate.is_selective()
                 && (!predicate.is_text_match() || predicate.filters_sort_key(key, true))
         };
-        let final_allowed = match scope {
-            ReadScope::Unscoped => false,
-            ReadScope::Scoped => true,
-            ReadScope::HighFanOut => !predicates.iter().any(Predicate::narrows_keys),
-        };
-        let mutable_selective = final_allowed
+        let bounded = self.selective_latest && predicates.iter().any(bounds_scan);
+        let read_once = bounded
+            && scope.reads_final(&predicates)
             && predicates.iter().any(|predicate| {
                 predicate.is_selective() && !predicate.filters_sort_key(key, true)
             });
-        let bounded = self.selective_latest && predicates.iter().any(bounds_scan);
-        if !bounded || mutable_selective {
-            self.exact_final_reads |= bounded;
+        if !bounded || read_once {
+            self.exact_final_reads |= read_once;
             let (keyed, rest): (Vec<_>, Vec<_>) = predicates
                 .into_iter()
                 .partition(|predicate| predicate.filters_sort_key(key, false));

@@ -262,6 +262,12 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                 TableLayout::from_storage(physical, source.entity, source.path_columns.clone());
             tables.insert(layout.name.clone(), layout);
         }
+        let foreign_key_properties = variant_routes
+            .iter()
+            .flatten()
+            .filter_map(|route| route.foreign_key)
+            .map(|foreign_key| foreign_key.property)
+            .collect();
         Ok(ClickHouseBindings {
             materialized_joins,
             reordered_layouts: storage.copies().to_vec(),
@@ -269,6 +275,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
             entities,
             relationships,
             variant_routes,
+            foreign_key_properties,
             property_facts,
             tables,
             denormalized: DenormalizedCatalog::new(denormalized),

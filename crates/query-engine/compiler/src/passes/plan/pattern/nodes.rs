@@ -60,7 +60,14 @@ impl NodePlan {
             node_ids: node.node_ids.clone(),
             id_range: node.id_range.clone(),
             has_traversal_path: model.entity_has_traversal_path(entity),
-            high_fan_out: model.entity_high_fan_out(entity),
+            read_scope: match (
+                model.entity_has_traversal_path(entity),
+                model.entity_high_fan_out(entity),
+            ) {
+                (false, _) => ReadScope::Unscoped,
+                (true, false) => ReadScope::Scoped,
+                (true, true) => ReadScope::HighFanOut,
+            },
             redaction_id_column: model
                 .redaction_id_column_named(entity)
                 .unwrap_or(DEFAULT_PRIMARY_KEY)
@@ -91,14 +98,6 @@ impl NodePlan {
 
     pub(crate) fn is_pinned(&self) -> bool {
         !self.node_ids.is_empty() || self.id_range.is_some()
-    }
-
-    pub(crate) fn read_scope(&self) -> ReadScope {
-        match (self.has_traversal_path, self.high_fan_out) {
-            (false, _) => ReadScope::Unscoped,
-            (true, false) => ReadScope::Scoped,
-            (true, true) => ReadScope::HighFanOut,
-        }
     }
 
     pub(crate) fn id_predicates(&self, column: Column) -> Vec<Predicate> {

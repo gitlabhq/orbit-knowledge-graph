@@ -122,9 +122,8 @@ pub trait RelationalMapping: Send + Sync {
     fn entity_table(&self, entity: EntityId) -> Option<&str>;
     fn entity_has_traversal_path(&self, entity: EntityId) -> bool;
     fn entity_is_global(&self, entity: EntityId) -> bool;
-    fn entity_high_fan_out(&self, _entity: EntityId) -> bool {
-        false
-    }
+    fn entity_high_fan_out(&self, entity: EntityId) -> bool;
+    fn property_is_foreign_key(&self, property: PropertyId) -> bool;
     fn default_properties(&self, entity: EntityId) -> &[PropertyId];
     fn property_column(&self, property: PropertyId) -> Option<&str> {
         match self.property_realization(property)? {

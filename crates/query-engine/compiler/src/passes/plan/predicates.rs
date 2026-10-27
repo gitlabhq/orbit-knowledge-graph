@@ -36,7 +36,7 @@ pub enum Predicate {
         text_indexed: bool,
         unique: bool,
         immutable: bool,
-        anchor: bool,
+        foreign_key: bool,
         null_as_epoch: NullAsEpoch,
     },
     Ids {
@@ -99,8 +99,13 @@ impl Predicate {
     pub fn narrows_keys(&self) -> bool {
         match self {
             Self::Ids { .. } | Self::IdRange { .. } | Self::Membership { .. } => true,
-            Self::Property { anchor, filter, .. } => {
-                *anchor
+            Self::Property {
+                in_sort_key,
+                foreign_key,
+                filter,
+                ..
+            } => {
+                (*in_sort_key || *foreign_key)
                     && filter.rhs_column.is_none()
                     && matches!(filter.op, None | Some(FilterOp::Eq | FilterOp::In))
             }
