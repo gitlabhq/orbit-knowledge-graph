@@ -49,6 +49,22 @@ webserver:
       service.beta.kubernetes.io/aws-load-balancer-attributes: load_balancing.cross_zone.enabled=true
 ```
 
+## Billing connections
+
+When billing and quota checks are enabled, allow outbound HTTPS on port 443 from the GitLab Orbit webserver to:
+
+| Destination | Purpose |
+|-------------|---------|
+| `customers.gitlab.com` | Subscription quota checks |
+| `billing.prdsub.gitlab.net` | Usage-event delivery |
+
+The webserver also needs access to the GitLab internal API to retrieve the Cloud Connector token used for event delivery.
+Do not disable certificate verification to reach these endpoints.
+If a firewall blocks CustomersDot, quota checks deny queries.
+Blocking only the collector can prevent event delivery while queries continue to succeed.
+
+For the configuration and license requirements, see [Billing and quota requirements](orbit-setup.md#billing-and-quota-requirements).
+
 ## Trust the webserver certificate in GitLab
 
 When the webserver certificate is self-signed or comes from a private CA, add the CA certificate to the GitLab trust store.

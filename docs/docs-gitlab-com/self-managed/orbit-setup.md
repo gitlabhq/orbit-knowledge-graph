@@ -192,6 +192,15 @@ To install GitLab Orbit:
    tls:
      enabled: true
      existingSecret: orbit-webserver-tls
+
+   billing:
+     enabled: true
+     collector_url: https://billing.prdsub.gitlab.net
+     auth_mode: cloud_connector
+     quota:
+       enabled: true
+       customers_dot_url: https://customers.gitlab.com
+       auth_mode: license_checksum
    ```
 
    Replace `<clickhouse_host>` with the host name of your ClickHouse server.
@@ -220,6 +229,27 @@ Adjust the values for your environment:
 For TLS, private certificate authorities, NATS TLS, and plaintext connections, see [Networking for GitLab Orbit](networking.md).
 For every value and its default, see the [GitLab Orbit Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts).
 For pod sizes, see [Reference architectures](getting-started.md#reference-architectures).
+
+### Billing and quota requirements
+
+The billing settings send usage events to GitLab and check whether your subscription permits queries.
+They require an online cloud license and GitLab 19.5 or later, with the license-checksum claim and Cloud Connector token endpoint.
+Also meet the patch-version requirements in [Prerequisites](getting-started.md#prerequisites).
+Do not assume that the GitLab 19.4 installation minimum includes billing support.
+Offline licenses and air-gapped installations do not provide the same billing path.
+
+The webserver needs outbound HTTPS on port 443 to `customers.gitlab.com` and `billing.prdsub.gitlab.net`.
+For more information, see [Billing connections](networking.md#billing-connections).
+
+Keep both authentication modes explicit, even if a future server release changes its defaults.
+The license-checksum mode requires no CustomersDot admin-token Secret.
+Do not configure the GitLab.com-only `oidc` or `admin_token` modes on GitLab Self-Managed.
+
+A successful query does not prove that billing events were delivered.
+Check the webserver logs for successful event delivery and quota decisions.
+A skipped quota check caused by a missing license checksum does not verify your license configuration.
+When quota checks reach CustomersDot, authentication errors, connection failures, and unexpected responses deny the query.
+The CustomersDot charging settings do not bypass these failures.
 
 ## Turn on indexing for a group
 
@@ -296,6 +326,11 @@ Plan ClickHouse disk for a second copy of the graph.
 
 To upgrade GitLab Orbit:
 
+1. Check the release notes for billing enforcement.
+   Before installing an image built with billing enforcement, configure billing and quota as shown in [Install GitLab Orbit](#install-gitlab-orbit).
+   Enforced images refuse to start with either setting disabled, unapproved endpoint pairs, or incompatible authentication modes.
+   Changing configuration cannot turn off a compiled enforcement switch.
+   If you must disable quota to recover access, use an approved rollback image that is compatible with your deployment.
 1. Run the `helm upgrade` command from [Install GitLab Orbit](#install-gitlab-orbit).
 1. Run the query from [Verify the installation](#verify-the-installation).
 
