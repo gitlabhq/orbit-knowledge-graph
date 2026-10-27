@@ -6,11 +6,17 @@ variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Note, id: id }
     description: "Merge request has note."
+    fk_column: noteable_id
+    fk_type: { column: noteable_type, values: [MergeRequest] }
 
   - from_node: { type: WorkItem, id: id }
     to_node: { type: Note, id: id }
     description: "Work item has note."
+    fk_column: noteable_id
+    fk_type: { column: noteable_type, values: [Issue] }
 
   - from_node: { type: Vulnerability, id: id }
     to_node: { type: Note, id: id }
     description: "Vulnerability has note."
+    fk_column: noteable_id
+    fk_type: { column: noteable_type, values: [Vulnerability] }

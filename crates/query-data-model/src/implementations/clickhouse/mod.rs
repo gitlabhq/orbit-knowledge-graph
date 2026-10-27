@@ -253,12 +253,12 @@ impl RelationalMapping for ClickHouseBindings {
     ) -> Option<ForeignKey> {
         let mut foreign_keys = relationships.iter().map(|relationship| {
             let variant = graph.variant_id(*relationship, source, target)?;
-            self.variant_route(variant)?.foreign_key
+            self.variant_route(variant)?.foreign_key.as_ref()
         });
         let first = foreign_keys.next()??;
         foreign_keys
             .all(|foreign_key| foreign_key == Some(first))
-            .then_some(first)
+            .then(|| first.clone())
     }
 
     fn table_columns(&self, table: &str) -> Option<&HashSet<String>> {

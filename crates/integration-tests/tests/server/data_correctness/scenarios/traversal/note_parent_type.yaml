@@ -1,0 +1,169 @@
+description: Note hops match a parent only through notes whose noteable_type names that parent, even when an MR and a work item share an id
+
+config:
+  security: { org_id: 1, paths: ["1/100/"], access_level: 30 }
+  extra_seed:
+    gl_merge_request:
+      - { id: 4000, iid: 7, title: MR sharing a work item id, state: opened, source_branch: shared-id, target_branch: main, project_id: 1000, author_id: 1, traversal_path: "1/100/1000/" }
+    gl_note:
+      - { id: 3100, note: Note on the MR, noteable_type: MergeRequest, noteable_id: 4000, confidential: false, internal: false, traversal_path: "1/100/1000/" }
+      - { id: 3101, note: Note on the work item, noteable_type: Issue, noteable_id: 4000, confidential: false, internal: false, traversal_path: "1/100/1000/" }
+      - { id: 3102, note: Note on the vulnerability, noteable_type: Vulnerability, noteable_id: 8000, confidential: false, internal: false, traversal_path: "1/100/1000/" }
+      - { id: 3103, note: Legacy epic note, noteable_type: Epic, noteable_id: 4000, confidential: false, internal: false, traversal_path: "1/100/1000/" }
+    gl_edge:
+      - { traversal_path: "1/100/1000/", source_id: 4000, source_kind: MergeRequest, relationship_kind: HAS_NOTE, target_id: 3100, target_kind: Note, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 4000, source_kind: WorkItem, relationship_kind: HAS_NOTE, target_id: 3101, target_kind: Note, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: HAS_NOTE, target_id: 3102, target_kind: Note, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 4000, source_kind: WorkItem, relationship_kind: HAS_NOTE, target_id: 3103, target_kind: Note, source_tags: [], target_tags: [] }
+  redaction:
+    allow:
+      merge_request: [4000]
+      work_item: [4000]
+      vulnerability: [8000]
+      note: [3100, 3101, 3102, 3103]
+
+steps:
+  - query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "w", "entity": "WorkItem", "columns": ["id"]},
+            {"id": "n", "entity": "Note", "node_ids": [3100, 3101], "columns": ["id"]}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "w", "to": "n"}]
+        }
+      gql: |
+        MATCH (w:WorkItem)-[:HAS_NOTE]->(n:Note)
+        WHERE n.id IN [3100, 3101]
+        RETURN w.id, n.id
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [4000]
+        Note:
+          ids: [3101]
+      edges:
+        HAS_NOTE:
+          - [4000, 3101]
+
+  - query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "w", "entity": "WorkItem", "columns": ["id"]},
+            {"id": "n", "entity": "Note", "filters": {"note": {"starts_with": "Note on"}}, "columns": ["id", "note"]}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "w", "to": "n"}]
+        }
+      gql: |
+        MATCH (w:WorkItem)-[:HAS_NOTE]->(n:Note)
+        WHERE n.note STARTS WITH 'Note on'
+        RETURN w.id, n.id, n.note
+    expect:
+      node_count: 2
+      nodes:
+        WorkItem:
+          ids: [4000]
+        Note:
+          ids: [3101]
+          filters:
+            note: { starts_with: Note on }
+      edges:
+        HAS_NOTE:
+          - [4000, 3101]
+
+  - query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "w", "entity": "WorkItem", "columns": ["id"]},
+            {"id": "n", "entity": "Note", "node_ids": [3103], "columns": ["id"]}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "w", "to": "n"}]
+        }
+      gql: |
+        MATCH (w:WorkItem)-[:HAS_NOTE]->(n:Note {id: 3103})
+        RETURN w.id, n.id
+    expect:
+      node_count: 0
+      skip_requirements: ["node_ids", "relationship:HAS_NOTE"]
+
+  - query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "w", "entity": "WorkItem", "node_ids": [4000]},
+            {"id": "n", "entity": "Note"}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "w", "to": "n"}],
+          "aggregations": [{"count": "n", "as": "c"}]
+        }
+      gql: |
+        MATCH (w:WorkItem {id: 4000})-[:HAS_NOTE]->(n:Note)
+        RETURN count(n) AS c
+    expect:
+      row_count: 1
+      row_values: [{ c: 1 }]
+      skip_requirements: ["node_ids", "relationship:HAS_NOTE"]
+
+  - query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "node_ids": [4000]},
+            {"id": "n", "entity": "Note"}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+          "aggregations": [{"count": "n", "as": "c"}]
+        }
+      gql: |
+        MATCH (mr:MergeRequest {id: 4000})-[:HAS_NOTE]->(n:Note)
+        RETURN count(n) AS c
+    expect:
+      row_count: 1
+      row_values: [{ c: 1 }]
+      skip_requirements: ["node_ids", "relationship:HAS_NOTE"]
+
+  - query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 1000}},
+            {"id": "n", "entity": "Note"}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+          "aggregations": [{"count": "n", "as": "c"}]
+        }
+      gql: |
+        MATCH (mr:MergeRequest {project_id: 1000})-[:HAS_NOTE]->(n:Note)
+        RETURN count(n) AS c
+    expect:
+      row_count: 1
+      row_values: [{ c: 5 }]
+      skip_requirements: ["filter:project_id", "relationship:HAS_NOTE"]
+
+  - query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "v", "entity": "Vulnerability", "node_ids": [8000]},
+            {"id": "n", "entity": "Note"}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "v", "to": "n"}],
+          "aggregations": [{"count": "n", "as": "c"}]
+        }
+      gql: |
+        MATCH (v:Vulnerability {id: 8000})-[:HAS_NOTE]->(n:Note)
+        RETURN count(n) AS c
+    expect:
+      row_count: 1
+      row_values: [{ c: 1 }]
+      skip_requirements: ["node_ids", "relationship:HAS_NOTE"]

@@ -60,6 +60,7 @@ pub struct EdgeRelation {
 pub struct Fk {
     pub node: String,
     pub column: String,
+    pub type_filter: Option<Predicate>,
 }
 
 pub(super) struct Pattern<'a, M: OrbitQueryModel + ?Sized> {
@@ -116,6 +117,17 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
             denormalized: super::filters::denormalized_facts(input, model),
             scans: Vec::new(),
         };
+        for key in pattern
+            .relations
+            .iter()
+            .filter_map(|relation| relation.fk.as_ref())
+        {
+            if let (Some(filter), Some(holder)) =
+                (&key.type_filter, pattern.nodes.get_mut(&key.node))
+            {
+                holder.predicates.push(filter.clone());
+            }
+        }
         let placement = conditions::place_conditions(&pattern)?;
         conditions::bind_scan_conditions(&mut pattern, &placement)?;
         nodes::assign_node_access(&mut pattern, &placement.joined_nodes);

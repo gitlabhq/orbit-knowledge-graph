@@ -944,6 +944,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
     validate_edge_scope_annotations(&ontology)?;
+    validate_fk_types(&ontology)?;
     validate_derived_emits_registered(&ontology)?;
     validate_etl_edges_match_variants(&ontology)?;
     validate_unique_pipeline_names(&ontology)?;
@@ -1474,6 +1475,12 @@ pub(crate) fn resolve_denormalized_join(
                     hop.relationship, hop.from, hop.to
                 ))
             })?;
+            if variant.fk_type.is_some() {
+                return Err(fail(format!(
+                    "{} ({} -> {}) has an fk_type, so it cannot be realized via fk",
+                    hop.relationship, hop.from, hop.to
+                )));
+            }
             if has_column(from_node, fk) {
                 link(&mut target, fk, DEFAULT_PRIMARY_KEY);
             } else {
@@ -1536,6 +1543,61 @@ fn validate_unique_denormalized_joins(ontology: &crate::Ontology) -> Result<(), 
             return Err(OntologyError::Validation(format!(
                 "denormalized_joins: duplicate name '{}'",
                 join.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_fk_types(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    for edge in ontology.edges() {
+        let Some(fk_type) = &edge.fk_type else {
+            continue;
+        };
+        let fail = |reason: String| {
+            OntologyError::Validation(format!(
+                "{} ({}→{}): fk_type {reason}",
+                edge.relationship_kind, edge.source_kind, edge.target_kind
+            ))
+        };
+        let fk = edge
+            .fk_column
+            .as_deref()
+            .ok_or_else(|| fail("requires fk_column".into()))?;
+        let holder = [&edge.source_kind, &edge.target_kind]
+            .into_iter()
+            .find(|kind| ontology.node_has_property(kind, fk))
+            .ok_or_else(|| fail(format!("needs a holder with property '{fk}'")))?;
+        let field = ontology
+            .get_node(holder)
+            .and_then(|node| {
+                node.fields
+                    .iter()
+                    .find(|field| field.name == fk_type.column)
+            })
+            .ok_or_else(|| {
+                fail(format!(
+                    "column '{}' is not a property of {holder}",
+                    fk_type.column
+                ))
+            })?;
+        let declared = field.enum_values.as_ref().ok_or_else(|| {
+            fail(format!(
+                "column '{}' of {holder} is not an enum",
+                fk_type.column
+            ))
+        })?;
+        if fk_type.values.is_empty() {
+            return Err(fail("needs at least one value".into()));
+        }
+        if let Some(value) = fk_type
+            .values
+            .iter()
+            .find(|value| !declared.values().any(|declared| declared == *value))
+        {
+            return Err(fail(format!(
+                "value '{value}' is not declared on {holder}.{}",
+                fk_type.column
             )));
         }
     }
@@ -1928,6 +1990,7 @@ mod tests {
         );
         assert!(err(&[hop("REVIEWER", "User", "Project", false)]).contains("no REVIEWER variant"));
         assert!(err(&[hop("REVIEWER", "User", "MergeRequest", true)]).contains("no fk_column"));
+        assert!(err(&[hop("HAS_NOTE", "WorkItem", "Note", true)]).contains("has an fk_type"));
         // Cross-namespace hops are fine: each table keeps its own path in the row.
         for (name, hop_) in [
             ("closes", hop("CLOSES", "MergeRequest", "WorkItem", false)),
@@ -1935,6 +1998,35 @@ mod tests {
         ] {
             resolve_denormalized_join(&ontology, name, &[hop_]).unwrap();
         }
+    }
+
+    #[test]
+    fn fk_type_must_name_declared_values_of_a_holder_enum() {
+        let err = |fk_column: Option<&str>, column: &str, values: &[&str]| {
+            let mut ontology = crate::Ontology::load_embedded().unwrap();
+            let variant = ontology
+                .edges
+                .get_mut("HAS_NOTE")
+                .and_then(|variants| variants.iter_mut().find(|v| v.source_kind == "WorkItem"))
+                .unwrap();
+            variant.fk_column = fk_column.map(str::to_string);
+            variant.fk_type = Some(crate::entities::FkType {
+                column: column.to_string(),
+                values: values.iter().map(|value| value.to_string()).collect(),
+            });
+            validate_fk_types(&ontology).map_err(|error| error.to_string())
+        };
+        let noteable = Some("noteable_id");
+        assert_eq!(err(noteable, "noteable_type", &["Issue"]), Ok(()));
+        let failure = |result: Result<(), String>| result.unwrap_err();
+        assert!(failure(err(None, "noteable_type", &["Issue"])).contains("requires fk_column"));
+        assert!(failure(err(noteable, "kind", &["Issue"])).contains("not a property of Note"));
+        assert!(failure(err(noteable, "note", &["Issue"])).contains("not an enum"));
+        assert!(failure(err(noteable, "noteable_type", &[])).contains("at least one value"));
+        assert!(
+            failure(err(noteable, "noteable_type", &["Epic"]))
+                .contains("value 'Epic' is not declared on Note.noteable_type")
+        );
     }
 
     #[test]

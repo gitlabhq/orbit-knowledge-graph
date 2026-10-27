@@ -9,7 +9,7 @@ use crate::implementations::derive_property_backend_facts;
 use crate::{
     DataModelError, DenormalizedCatalog, DenormalizedDirection, DenormalizedKey,
     DenormalizedProperty, Endpoint, EntityId, ForeignKey, GraphCatalog, PathColumn,
-    PropertyRealization, TraversalPathLookup,
+    PropertyRealization, TraversalPathLookup, TypeFilter,
 };
 use crate::{Mapping, Relational};
 
@@ -134,18 +134,28 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                         ))
                     })?;
                 let foreign_key = edge.foreign_key.as_deref().and_then(|column| {
-                    let (holder, property, referenced) = match graph.property_id(source, column) {
-                        Some(property) => (Endpoint::Source, property, target),
-                        None => (Endpoint::Target, graph.property_id(target, column)?, source),
+                    let (holder, holder_entity, referenced) =
+                        match graph.property_id(source, column) {
+                            Some(_) => (Endpoint::Source, source, target),
+                            None => (Endpoint::Target, target, source),
+                        };
+                    let property = graph.property_id(holder_entity, column)?;
+                    let type_filter = match &edge.foreign_key_type {
+                        Some(fk_type) => Some(TypeFilter {
+                            property: graph.property_id(holder_entity, &fk_type.column)?,
+                            values: fk_type.values.clone(),
+                        }),
+                        None => None,
                     };
                     Some(ForeignKey {
                         holder,
                         property,
                         referenced_key: graph
                             .property_id(referenced, ontology::constants::DEFAULT_PRIMARY_KEY)?,
+                        type_filter,
                     })
                 });
-                if let Some(foreign_key) = foreign_key {
+                if let Some(foreign_key) = &foreign_key {
                     property_facts[foreign_key.property.index()].foreign_key = true;
                 }
                 variant_routes[variant_id.index()] = Some(VariantRoute {

@@ -302,7 +302,7 @@
     },
     "redactionConfig": {
       "type": "object",
-      "description": "Redaction configuration for access control. Defines how query results for this entity are validated against Rails' RedactionService to filter out entities the user cannot access. The query engine includes id/type columns in results, and orbit-server validates these against the user's permissions before returning data.",
+      "description": "Redaction configuration for access control: how orbit-server validates this entity's result ids against Rails' RedactionService before returning data.",
       "properties": {
         "resource_type": {
           "type": "string",
@@ -326,7 +326,7 @@
             "maintainer",
             "owner"
           ],
-          "description": "Minimum GitLab role a user must hold on a traversal path for this entity's rows to be visible. Applied by the compiler security pass: traversal paths where the user holds a lower role are dropped from the startsWith() predicate for this entity's table, closing the aggregation-query bypass where target nodes (e.g. Vulnerability) were never redacted. Defaults to 'reporter' for entities that do not opt in."
+          "description": "Minimum GitLab role a user must hold on a traversal path to see this entity's rows. The security pass drops paths where the user holds a lower role from this entity's startsWith() predicate. Defaults to 'reporter'."
         }
       },
       "required": [
@@ -1291,7 +1291,7 @@
         "prune_to_source",
         "prune_to_target"
       ],
-      "description": "How traversal_path scope crosses an edge. namespace_anchor uses a Project or Group FK. same_namespace propagates within one subtree. prune_to_source and prune_to_target scope only the edge scan to that path-scopable endpoint. An omitted value does not scope or propagate."
+      "description": "How traversal_path scope crosses an edge. namespace_anchor uses a Project or Group FK. same_namespace propagates within one subtree. prune_to_source/prune_to_target scope only the edge scan to that endpoint. Omitted: no scope."
     },
     "edgeVariant": {
       "type": "object",
@@ -1310,7 +1310,28 @@
         },
         "fk_column": {
           "type": "string",
-          "description": "Foreign key column on one of the two node tables that encodes this relationship (e.g. 'project_id', 'author_id'). The loader resolves which node has the column. When present, the compiler can join node tables directly instead of scanning the edge table."
+          "description": "Key column on one endpoint's node table encoding this relationship; lets the compiler skip the edge table."
+        },
+        "fk_type": {
+          "type": "object",
+          "description": "Holder enum column and values that make fk_column reference this variant.",
+          "properties": {
+            "column": {
+              "type": "string"
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "column",
+            "values"
+          ],
+          "additionalProperties": false
         },
         "scope": {
           "$ref": "#/definitions/edgeVariantScope",

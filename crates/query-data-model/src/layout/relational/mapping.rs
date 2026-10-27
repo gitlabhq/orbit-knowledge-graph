@@ -22,11 +22,18 @@ pub enum Endpoint {
     Target,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForeignKey {
     pub holder: Endpoint,
     pub property: PropertyId,
     pub referenced_key: PropertyId,
+    pub type_filter: Option<TypeFilter>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeFilter {
+    pub property: PropertyId,
+    pub values: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

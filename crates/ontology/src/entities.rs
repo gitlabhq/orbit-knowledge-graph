@@ -454,8 +454,16 @@ pub struct EdgeEntity {
     /// relationship (e.g. "project_id", "author_id"). When present, the
     /// compiler can join node tables directly instead of scanning the edge table.
     pub fk_column: Option<String>,
+    pub fk_type: Option<FkType>,
     /// Namespace scope relationship; see [`EdgeVariantScope`].
     pub scope: Option<EdgeVariantScope>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FkType {
+    pub column: String,
+    pub values: Vec<String>,
 }
 
 /// An entity extracted from the datalake and turned into edges by a named

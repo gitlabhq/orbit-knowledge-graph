@@ -2,10 +2,12 @@ config:
   extra_seed:
     gl_vulnerability:
       - { id: 8000, title: SQLi in login, state: detected, severity: critical, report_type: sast, resolved_on_default_branch: false, present_on_default_branch: true, project_id: 1000, finding_id: 90000, traversal_path: "1/100/1000/" }
+    gl_note:
+      - { id: 3200, note: Role floor note, noteable_type: Vulnerability, noteable_id: 8000, confidential: false, internal: false, traversal_path: "1/100/1000/" }
     gl_vulnerability_occurrence:
       - { id: 90000, uuid: role-floor-occurrence, name: Role Floor Occurrence, severity: critical, report_type: sast, project_id: 1000, traversal_path: "1/100/1000/" }
     gl_edge:
-      - { traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: HAS_NOTE, target_id: 3000, target_kind: Note, source_tags: [], target_tags: [] }
+      - { traversal_path: "1/100/1000/", source_id: 8000, source_kind: Vulnerability, relationship_kind: HAS_NOTE, target_id: 3200, target_kind: Note, source_tags: [], target_tags: [] }
 
 query:
   json: |
@@ -13,7 +15,7 @@ query:
       "query_type": "aggregation",
       "nodes": [
         {"id": "v", "entity": "Vulnerability"},
-        {"id": "n", "entity": "Note", "node_ids": [3000]},
+        {"id": "n", "entity": "Note", "node_ids": [3200]},
         {"id": "f", "entity": "VulnerabilityOccurrence", "node_ids": [90000, 90001]}
       ],
       "relationships": [
@@ -23,7 +25,7 @@ query:
       "aggregations": [{"count": "v", "as": "n"}]
     }
   gql: |
-    MATCH (v:Vulnerability)-[:HAS_NOTE]->(n:Note {id: 3000})
+    MATCH (v:Vulnerability)-[:HAS_NOTE]->(n:Note {id: 3200})
     MATCH (v)-[:HAS_FINDING]->(f:VulnerabilityOccurrence)
     WHERE f.id IN [90000, 90001]
     RETURN count(v) AS n

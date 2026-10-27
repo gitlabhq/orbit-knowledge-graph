@@ -10,7 +10,32 @@ use super::{EdgeRelation, Fk, NodePlan};
 use crate::constants::internal_column_prefix;
 use crate::error::{QueryError, Result};
 use crate::input::*;
-use crate::passes::plan::filters::{FilterOwner, ordered_filters};
+use crate::passes::plan::filters::{FilterOwner, bind_filter, ordered_filters};
+use crate::passes::plan::predicates::{Predicate, property_filter};
+
+fn type_filter<M>(
+    model: &M,
+    holder: &str,
+    alias: &str,
+    filter: query_data_model::TypeFilter,
+) -> Option<Predicate>
+where
+    M: OrbitQueryModel + ?Sized,
+{
+    let entity = model.graph().entity_id(holder)?;
+    let property = model.graph().property(filter.property).name.clone();
+    let bound = bind_filter(
+        &property,
+        InputFilter {
+            op: Some(FilterOp::In),
+            value: Some(serde_json::json!(filter.values)),
+            ..InputFilter::default()
+        },
+        &FilterOwner::Entity(entity),
+        model,
+    );
+    Some(property_filter(alias, &property, &bound))
+}
 
 impl EdgeRelation {
     pub(super) fn reversed(&self) -> Self {
@@ -127,8 +152,17 @@ where
                         query_data_model::Endpoint::Source => source_node.clone(),
                         query_data_model::Endpoint::Target => target_node.clone(),
                     };
-                    model.entity_table(input.entity_of(&node)?)?;
-                    Some(Fk { node, column })
+                    let holder = input.entity_of(&node)?;
+                    model.entity_table(holder)?;
+                    let type_filter = match foreign_key.type_filter {
+                        Some(filter) => Some(type_filter(model, holder, &node, filter)?),
+                        None => None,
+                    };
+                    Some(Fk {
+                        node,
+                        column,
+                        type_filter,
+                    })
                 })
                 .flatten();
             let filters = ordered_filters(

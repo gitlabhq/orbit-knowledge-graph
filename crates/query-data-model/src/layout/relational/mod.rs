@@ -5,7 +5,7 @@ pub use mapping::VariantRoute;
 pub use mapping::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint,
     ForeignKey, PathColumn, PropertyRealization, RelationalMapping, RelationshipRoute,
-    TraversalPathLookup,
+    TraversalPathLookup, TypeFilter,
 };
 pub use materialized::{MaterializedJoin, MaterializedNode, MaterializedRelationship};
 use std::fmt::Debug;

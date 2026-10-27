@@ -37,10 +37,11 @@ pub use entities::{
     AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEntity, EdgeTableStorage, EdgeVariantScope, EnumType, Field, FieldSelectivity,
-    FieldSource, MaterializedViewDefinition, NodeEntity, NodeStorage, NodeStyle, PartitionConfig,
-    PartitionStrategy, RedactionConfig, RefreshableMaterializedViewDefinition, RequiredRole,
-    StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex, StorageProjection,
-    TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
+    FieldSource, FkType, MaterializedViewDefinition, NodeEntity, NodeStorage, NodeStyle,
+    PartitionConfig, PartitionStrategy, RedactionConfig, RefreshableMaterializedViewDefinition,
+    RequiredRole, StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex,
+    StorageProjection, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec,
+    VirtualSource,
 };
 pub use etl::{
     ClickHouseExtract, ClickHouseExtractLookup, ClickHouseExtractLookupSource, DEFAULT_TRANSFORM,
@@ -3117,6 +3118,22 @@ properties:
             Some("project_id"),
             "IN_PROJECT MR→Project should declare fk_column = project_id"
         );
+    }
+
+    #[test]
+    fn fk_type_loaded_from_edge_yaml() {
+        let ontology = Ontology::load_embedded().expect("should load");
+        let has_note = |source: &str| {
+            ontology
+                .edges()
+                .find(|e| e.relationship_kind == "HAS_NOTE" && e.source_kind == source)
+                .and_then(|e| e.fk_type.clone())
+                .map(|fk_type| (fk_type.column, fk_type.values))
+        };
+        let expected = |value: &str| Some(("noteable_type".to_string(), vec![value.to_string()]));
+        assert_eq!(has_note("WorkItem"), expected("Issue"));
+        assert_eq!(has_note("MergeRequest"), expected("MergeRequest"));
+        assert_eq!(has_note("Vulnerability"), expected("Vulnerability"));
     }
 
     #[test]

@@ -5,26 +5,26 @@ query:
     {
         "query_type": "traversal",
         "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]},
-            {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["created_at"]}
+            {"id": "u", "entity": "User", "node_ids": [1]},
+            {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000}, "columns": ["created_at"]}
         ],
-        "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+        "relationships": [{"type": "ASSIGNED", "from": "u", "to": "w"}],
         "limit": 10
     }
   gql: |
-    MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note) WHERE n.id >= 1 AND n.id <= 10000 RETURN n.created_at LIMIT 10
+    MATCH (u:User {id: 1})-[:ASSIGNED]->(w:WorkItem) WHERE w.id >= 1 AND w.id <= 10000 RETURN w.created_at LIMIT 10
 
 expect:
   hydration: static
-  sql_not_contains: ["AS n_created_at"]
-  node_count: 4
+  sql_not_contains: ["AS w_created_at"]
+  node_count: 2
   edge_exists:
-    HAS_NOTE:
-      - [2000, 3000]
+    ASSIGNED:
+      - [1, 4000]
   nodes:
-    MergeRequest:
-      ids: [2000]
-    Note:
-      ids: [3000, 3002, 3003]
+    User:
+      ids: [1]
+    WorkItem:
+      ids: [4000]
       rows:
-        - { id: 3000, created_at: "2024-01-15T10:30:00Z" }
+        - { id: 4000, created_at: "2024-03-01T09:00:00Z" }

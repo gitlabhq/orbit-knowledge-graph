@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 use crate::OntologyError;
-use crate::entities::{EdgeEntity, EdgeVariantScope};
+use crate::entities::{EdgeEntity, EdgeVariantScope, FkType};
 use crate::etl::{EtlScope, Pipeline, ReindexSource};
 
 use super::node::{IndexerYaml, PipelineYaml, convert_reindex_on};
@@ -33,6 +33,8 @@ struct EdgeVariantYaml {
     table: Option<String>,
     #[serde(default)]
     fk_column: Option<String>,
+    #[serde(default)]
+    fk_type: Option<FkType>,
     #[serde(default)]
     scope: Option<EdgeVariantScope>,
 }
@@ -74,6 +76,7 @@ impl EdgeYaml {
                     target_kind: variant.to_node.node_type.clone(),
                     destination_table,
                     fk_column: variant.fk_column.clone(),
+                    fk_type: variant.fk_type.clone(),
                     scope: variant.scope,
                 }
             })

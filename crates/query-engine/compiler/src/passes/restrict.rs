@@ -911,6 +911,7 @@ mod tests {
             target_kind: "MergeRequest".into(),
             destination_table: edge_table,
             fk_column: None,
+            fk_type: None,
             scope: Some(ontology::EdgeVariantScope::PruneToTarget),
         })
     }

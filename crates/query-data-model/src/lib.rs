@@ -22,5 +22,6 @@ pub use layout::relational::RelationalMapping;
 pub use layout::relational::{
     DenormalizedCatalog, DenormalizedDirection, DenormalizedKey, DenormalizedProperty, Endpoint,
     ForeignKey, PathColumn, PropertyRealization, RelationshipRoute, TraversalPathLookup,
+    TypeFilter,
 };
 pub use models::orbit::{ClickHouseDataModel, DuckDbDataModel, OrbitQueryModel};

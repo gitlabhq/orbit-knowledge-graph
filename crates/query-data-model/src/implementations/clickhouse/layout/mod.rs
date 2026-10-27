@@ -194,6 +194,7 @@ pub struct EdgeRoute {
     pub target: String,
     pub table: String,
     pub foreign_key: Option<String>,
+    pub foreign_key_type: Option<ontology::FkType>,
 }
 
 #[derive(Debug)]

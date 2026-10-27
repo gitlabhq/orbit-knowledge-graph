@@ -401,6 +401,30 @@ mod tests {
                 )
                 .is_none()
         );
+        assert_eq!(
+            model
+                .foreign_key(&["IN_PROJECT".into()], "MergeRequest", "Project")
+                .unwrap()
+                .type_filter,
+            None
+        );
+        for (source, value) in [
+            ("WorkItem", "Issue"),
+            ("MergeRequest", "MergeRequest"),
+            ("Vulnerability", "Vulnerability"),
+        ] {
+            let key = model
+                .foreign_key(&["HAS_NOTE".into()], source, "Note")
+                .unwrap();
+            assert_eq!(key.holder, Endpoint::Target);
+            assert_eq!(model.graph().property(key.property).name, "noteable_id");
+            let filter = key.type_filter.unwrap();
+            assert_eq!(
+                model.graph().property(filter.property).name,
+                "noteable_type"
+            );
+            assert_eq!(filter.values, [value]);
+        }
     }
 
     #[test]
