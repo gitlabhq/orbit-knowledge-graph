@@ -108,10 +108,15 @@ pub trait OrbitQueryModel {
             .is_some_and(|entity| self.query_backend().entity_is_global(entity))
     }
 
-    fn entity_high_fan_out(&self, entity: &str) -> bool {
+    fn high_fan_out_columns(&self, entity: EntityId) -> Vec<String> {
         self.graph()
-            .entity_id(entity)
-            .is_some_and(|entity| self.query_backend().entity_high_fan_out(entity))
+            .entity(entity)
+            .properties
+            .iter()
+            .filter(|property| self.query_backend().property_is_high_fan_out(**property))
+            .filter_map(|property| self.property_column(*property))
+            .map(String::from)
+            .collect()
     }
 
     fn property_column_named(&self, entity: &str, property: &str) -> Option<&str> {

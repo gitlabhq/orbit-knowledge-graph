@@ -62,11 +62,11 @@ impl NodePlan {
             has_traversal_path: model.entity_has_traversal_path(entity),
             read_scope: match (
                 model.entity_has_traversal_path(entity),
-                model.entity_high_fan_out(entity),
+                model.high_fan_out_columns(entity_id),
             ) {
                 (false, _) => ReadScope::Unscoped,
-                (true, false) => ReadScope::Scoped,
-                (true, true) => ReadScope::HighFanOut,
+                (true, columns) if columns.is_empty() => ReadScope::Scoped,
+                (true, columns) => ReadScope::HighFanOut(columns),
             },
             redaction_id_column: model
                 .redaction_id_column_named(entity)

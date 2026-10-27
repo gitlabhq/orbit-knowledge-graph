@@ -52,11 +52,7 @@ impl RelationalMapping for DuckDbBindings {
         false
     }
 
-    fn entity_high_fan_out(&self, _entity: EntityId) -> bool {
-        false
-    }
-
-    fn property_is_foreign_key(&self, _property: PropertyId) -> bool {
+    fn property_is_high_fan_out(&self, _property: PropertyId) -> bool {
         false
     }
 

@@ -174,20 +174,22 @@ impl RelationNode {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum ReadScope {
     Unscoped,
     Scoped,
-    HighFanOut,
+    HighFanOut(Vec<String>),
     Edge,
 }
 
 impl ReadScope {
-    pub fn reads_final(self, predicates: &[Predicate]) -> bool {
+    pub fn reads_final(&self, predicates: &[Predicate]) -> bool {
         match self {
             Self::Unscoped | Self::Edge => false,
             Self::Scoped => true,
-            Self::HighFanOut => !predicates.iter().any(Predicate::narrows_keys),
+            Self::HighFanOut(columns) => !predicates
+                .iter()
+                .any(|predicate| predicate.pins_fan_out(columns)),
         }
     }
 }
@@ -301,7 +303,7 @@ impl RelationGraph {
         if let Some((_, id)) = self.reads.iter().find(|(planned, _)| *planned == read) {
             return *id;
         }
-        let id = self.plan_current_rows(table, alias, owner, key, predicates, scope);
+        let id = self.plan_current_rows(table, alias, owner, key, predicates, &read.scope);
         self.reads.push((read, id));
         id
     }
@@ -313,7 +315,7 @@ impl RelationGraph {
         owner: ReadOwner,
         key: &[String],
         predicates: Vec<Predicate>,
-        scope: ReadScope,
+        scope: &ReadScope,
     ) -> RelationId {
         let bounds_scan = |predicate: &Predicate| {
             predicate.is_selective()

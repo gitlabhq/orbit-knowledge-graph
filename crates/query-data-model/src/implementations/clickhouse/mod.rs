@@ -55,7 +55,6 @@ pub struct EntityLayout {
     pub table: String,
     pub has_traversal_path: bool,
     pub global: bool,
-    pub high_fan_out: bool,
     pub default_properties: Vec<PropertyId>,
 }
 
@@ -159,15 +158,10 @@ impl RelationalMapping for ClickHouseBindings {
         self.entity(entity).is_some_and(|layout| layout.global)
     }
 
-    fn entity_high_fan_out(&self, entity: EntityId) -> bool {
-        self.entity(entity)
-            .is_some_and(|layout| layout.high_fan_out)
-    }
-
-    fn property_is_foreign_key(&self, property: PropertyId) -> bool {
+    fn property_is_high_fan_out(&self, property: PropertyId) -> bool {
         self.property_facts
             .get(property.index())
-            .is_some_and(|facts| facts.foreign_key)
+            .is_some_and(|facts| facts.high_fan_out)
     }
 
     fn default_properties(&self, entity: EntityId) -> &[PropertyId] {

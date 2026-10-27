@@ -36,7 +36,6 @@ pub enum Predicate {
         text_indexed: bool,
         unique: bool,
         immutable: bool,
-        foreign_key: bool,
         null_as_epoch: NullAsEpoch,
     },
     Ids {
@@ -96,16 +95,15 @@ impl Predicate {
         matches!(self, Self::Property { filter, .. } if filter.op.is_some_and(FilterOp::is_text))
     }
 
-    pub fn narrows_keys(&self) -> bool {
+    pub fn pins_fan_out(&self, fan_out_columns: &[String]) -> bool {
+        let pins = |column: &Column| {
+            column.name == DEFAULT_PRIMARY_KEY || fan_out_columns.contains(&column.name)
+        };
         match self {
-            Self::Ids { .. } | Self::IdRange { .. } | Self::Membership { .. } => true,
-            Self::Property {
-                in_sort_key,
-                foreign_key,
-                filter,
-                ..
-            } => {
-                (*in_sort_key || *foreign_key)
+            Self::Ids { column, .. } | Self::IdRange { column, .. } => pins(column),
+            Self::Membership { columns, .. } => columns.iter().any(pins),
+            Self::Property { column, filter, .. } => {
+                pins(column)
                     && filter.rhs_column.is_none()
                     && matches!(filter.op, None | Some(FilterOp::Eq | FilterOp::In))
             }

@@ -87,7 +87,7 @@ impl<M: OrbitQueryModel + ?Sized> Pattern<'_, M> {
             ReadOwner::Node(node.alias.clone()),
             sort_key(self.model, table)?,
             self.node_conditions(node),
-            node.read_scope,
+            node.read_scope.clone(),
         ))
     }
 
