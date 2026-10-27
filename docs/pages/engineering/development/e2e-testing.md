@@ -1,12 +1,12 @@
 # E2E Testing Harness
 
 The e2e harness deploys the full GitLab stack and every Orbit component on a shared GKE cluster. Then it runs Robot Framework suites against the stack.
-For the purpose and scope of e2e tests, see [Testing strategy](../testing/end-to-end.md).
+For how a run works and what the suites check, see [End-to-end tests](../testing/end-to-end/README.md). This page holds the commands and the harness details.
 
 ## Architecture
 
 Each run gets five namespaces: `e2e-<sha>-{gkg,nats,clickhouse,gitlab,siphon}`.
-The `e2e-ha` job adds `-ha` to the SHA.
+The `e2e-ha` job adds `-ha` to the SHA, and the `e2e-gitlab-stable` lanes add `-gl<lane>`.
 
 `e2e/helmfile.yaml.gotmpl` deploys these releases:
 
@@ -34,7 +34,7 @@ flowchart LR
     W --> CH
 ```
 
-The Robot suites call the GitLab REST API and push over Git HTTP. Rails calls the Orbit webserver over gRPC with TLS.
+The Robot suites call the GitLab REST and GraphQL APIs and push over Git HTTP. Rails calls the Orbit webserver over gRPC with TLS.
 
 ## Cluster
 
@@ -56,13 +56,15 @@ e2e/scripts/teardown.sh --sha=abc1234 -y
 This includes CI runs and the runs of other engineers. The `-y` flag skips the confirmation prompt.
 
 Local runs deploy the `gkg:dev` image, which is the latest `main` build. `lib.sh` sets `E2E_GKG_TAG=dev` when you do not set it.
-Local runs do not deploy your local branch or the `gkg.image.tag` pin in `versions.yaml`.
+Local runs do not deploy your local branch.
 To deploy a different image, set `E2E_GKG_TAG`. To use a different registry repository, also set `E2E_GKG_IMAGE`:
 
 ```shell
 E2E_GKG_TAG=<tag> e2e/scripts/setup.sh
 E2E_GKG_IMAGE=<repository> E2E_GKG_TAG=<tag> e2e/scripts/setup.sh
 ```
+
+To run the incremental code-graph engine, set `E2E_CODE_GRAPH_INCREMENTAL=true` for both `setup.sh` and `test.sh`. Suite 03 then expects the definition types that the incremental engine emits. No CI job sets this flag.
 
 ## CI
 
@@ -80,47 +82,34 @@ A job retry uses the image again if it exists.
 
 On failure, `after_script` runs `dump-diagnostics.sh` before teardown. Green runs skip the dump. Then `after_script` runs `teardown.sh --sha=<sha> -y`.
 
-### HA variant
+### ClickHouse HA variant
 
 The `e2e-ha` job extends `e2e` and runs the same suites on a ClickHouse cluster with three replicas.
 
 - `ch-chaos.sh backfill` kills `clickhouse-1` at the end of setup.
 - `ch-chaos.sh indexing` kills `clickhouse-2` 60 seconds after suite 01 passes.
 - `E2E_INDEXING_BUDGET_MULTIPLIER=5` gives the polls more time, because quorum inserts are slower.
-- A daily schedule runs the job. On MRs it is manual with `allow_failure: true`. It does not run on `main` pushes.
+- A schedule with `SCHEDULE_ONLY=e2e-ha` and every push to `main` run the job. On MRs it is manual with `allow_failure: true`.
 - The timeout is 90 minutes.
 
 ### GitLab versions
 
 The `e2e-gitlab-stable` job runs the `e2e` suites against each GitLab EE version in its `E2E_GITLAB_LANE` matrix, pinned under `gitlab_lanes` in `versions.yaml`.
+A schedule with `SCHEDULE_ONLY=e2e-gitlab-stable` and every push to `main` run it. It runs without blocking on the pin-bump MR, and it is manual on other MRs.
 
 ### Pin bump
 
 The `e2e-pin-bump` job runs on a daily schedule. It runs these scripts:
 
-- `bump-gitlab-pins.sh`: the newest devel chart, the `gitlab-org/gitlab` ref, and the four CNG image digests.
+- `bump-gitlab-pins.sh`: the newest devel chart, the `gitlab-org/gitlab` ref, and the four CNG image digests, for master and for each lane. It skips a lane that sets `repository`, which marks a hand-pinned lane.
 - `bump-siphon-pins.sh`: the newest Siphon chart in the `stable` channel and the newest `0.0.N-beta` image.
-- `bump-orbit-pins.sh`: the latest Orbit release tag. You change the chart pin manually.
+- `bump-orbit-pins.sh`: the latest Orbit release tag in `gkg.image.tag`. CI and local runs always set `E2E_GKG_TAG`, so no run deploys this pin. You change the chart pin manually.
 
 Then `scripts/ci/open-e2e-bump-mr.sh` pushes `automation/e2e-pin-bump` and opens or refreshes one rolling MR.
 
 ## Test suites
 
-| Suite | What it tests |
-|---|---|
-| `01_setup_and_smoke.robot` | Bootstrap e2e-bot, enable `orbit_gql_queries`, provision the shared namespace, smoke-test the pipeline |
-| `02_indexing.robot` | Create projects, issues, notes, epics; assert SDLC nodes and edges land in Orbit |
-| `03_code_indexing.robot` | Push fixture repos; assert File/Definition/IMPORTS/DEFINES via Orbit |
-| `04_code_backfill.robot` | Enable KG on a populated namespace and verify backfill dispatches code indexing |
-| `05_role_scoped_authz.robot` | Issue #347: aggregation queries enforce per-entity authz on the target node. Seeds a victim user with Reporter/Security Manager/Developer/Maintainer/nested-subgroup memberships and replays the original oracle matrix per role. Requires Ultimate (`bootstrap-instance.sh` activates it during setup) and a GitLab image past `gitlab-org/gitlab@7e57f842dada` (publishes role-tagged traversal IDs). |
-| `06_incremental_update.robot` | Rails-side note delete propagates; Orbit stops returning the tombstoned node |
-| `07_namespace_lifecycle.robot` | Disable retains indexed data (30-day grace); re-enable resumes indexing |
-| `08_private_redaction.robot` | Private project/issue redacted from a non-member, visible to admin |
-| `09_api_surface.robot` | Read-only Orbit endpoints: schema, `CALL db.schema()`, schema/format, graph_status, tools, commands |
-| `10_query_shapes.robot` | neighbors, path_finding, llm (TOON) response format, and a truncated date group key that serializes as an ISO date string |
-| `11_security_graph.robot` | Vulnerability node plus IN_PROJECT/AUTHORED/OCCURRENCE_OF edges |
-| `12_membership_graph.robot` | MEMBER_OF (User→Group) and CREATOR (User→Project) edges |
-| `13_cross_namespace_traversal.robot` | Scoped-query traversal-path pruning must not drop cross-namespace related entities |
+The suites are the `NN_name.robot` files in `e2e/tests/`. [Suites](../testing/end-to-end/suites.md) covers what they check and the rules for a new suite.
 
 ## Query language
 
@@ -149,9 +138,10 @@ other suite runs in a parallel worker pool.
 - Suites must not depend on state created by other downstream suites, and
   instance-global mutations (feature flags, license) belong in 01 before the
   barrier.
-- Plain `robot` runs still work for local debugging: PabotLib degrades to an
-  in-process value store, so `robot tests/` executes the suites sequentially
-  with identical semantics.
+- Plain `robot` runs work for local debugging: PabotLib degrades to an
+  in-process value store, so `robot tests/` executes the suites sequentially.
+  The services are cluster-internal, so port-forward GitLab and set
+  `GITLAB_URL` and `GITLAB_ROOT_PAT` first.
 - In CI the runner pod uses the prebaked `e2e-robot` image. The
   `e2e-robot-image` job builds it from `e2e/Dockerfile.robot` whenever that file
   changes, tagged by its content hash. Local runs default to
@@ -174,7 +164,8 @@ other suite runs in a parallel worker pool.
 
 `gitlab-org/gitlab` defines the CDC tables in `db/siphon/tables` at the pinned `gitlab.ref`.
 `bump-gitlab-pins.sh` runs `publish-siphon-tables.sh`, which publishes these definitions as the `siphon-ssot-tables` package.
-`sync-cdc-tables.sh` downloads that package, keeps the `database: main` tables, and generates the Siphon producer, consumer, and reconciler values.
+`sync-cdc-tables.sh` downloads that package, keeps the `database: main` tables, and moves the vulnerability tables that suite 05 needs into `main`.
+Then it generates the Siphon producer, consumer, and reconciler values, and makes the reconcilers of the `_without_traversal_path` tables run more often.
 
 `e2e/config/siphon-layout.yaml` holds only the layout: the stream name, the producer, consumer, and reconciler identifiers, and the refresh mode.
 It does not list tables. `pg-cdc-setup` creates an empty publication, and Siphon adds the tables to it.
@@ -188,7 +179,7 @@ It does not list tables. `pg-cdc-setup` creates an empty publication, and Siphon
 - `e2e/charts/`: local charts (`e2e-bootstrap`, `pg-cdc-setup`, `clickhouse`, `robot-runner`)
 - `e2e/scripts/setup.sh`, `test.sh`, `teardown.sh`: deploy, test, and remove a run
 - `e2e/scripts/ch-chaos.sh`: ClickHouse replica kills for `e2e-ha`
-- `e2e/scripts/dump-diagnostics.sh`: diagnostics dump on CI failure
+- `e2e/scripts/dump-diagnostics.sh`: diagnostics dump on failure, from `after_script` in CI and from `test.sh` locally
 - `e2e/scripts/bump-gitlab-pins.sh`, `bump-siphon-pins.sh`, `bump-orbit-pins.sh`: pin updates for the pin-bump job
 - `e2e/tests/`: Robot Framework suites, resources, and `ordering.txt`
 - `e2e/fixtures/`: the `weather-app` repositories that suites 03 and 04 push

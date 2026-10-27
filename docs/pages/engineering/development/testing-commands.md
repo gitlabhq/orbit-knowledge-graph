@@ -11,7 +11,8 @@ This page lists where each test layer lives and the command that runs it. The pr
 | CLI integration | `crates/integration-tests/tests/cli.rs` | `mise test:cli` |
 | Container tests | `crates/integration-tests/tests/` | `mise test:integration` |
 | E2E | `e2e/` | `e2e/scripts/setup.sh`, then `e2e/scripts/test.sh` |
-| Performance | `code-indexing-benchmark.yaml`, `crates/query-engine/profiler/` | `mise query:profile` |
+| Load test | `scripts/ci/orbit-perf/`, `crates/integration-tests/tests/server/performance/scenarios/` | `bash scripts/ci/orbit-perf.sh` |
+| Performance tools | `code-indexing-benchmark.yaml`, `crates/query-engine/profiler/` | `mise query:profile` |
 | Fuzzing | `crates/fuzz/` | `mise test:fuzz`, `mise fuzz:<target>` |
 
 Other commands:
@@ -19,6 +20,7 @@ Other commands:
 - `mise test:plan-shape` runs the plan-shape fixtures.
 - `mise bench:run` measures code indexing on real repositories, and `mise bench:smoke` runs one indexing pass for each repository.
 - `mise query:diff` compares two query profiles.
+- `bash scripts/ci/orbit-perf.sh` runs the [load test](../testing/performance/load-test.md) on your machine with the small synthetic profile. It deploys the Orbit image tag from the Caproni values. Set `GKG_IMAGE` and `GKG_IMAGE_TAG` to test another published image, and `SYNTH_CONFIG` or `ROUNDS` to change the size or the length of the run.
 - `mise perf:gtime` and `mise perf:rss` record the time and memory of `orbit workspace index` for before and after comparisons.
 - `mise test:fast` skips the integration-test, code-graph, fuzz, and profiler crates, which have their own jobs.
 
