@@ -23,8 +23,8 @@ GitLab Orbit graph. It includes:
   JSON Query DSL or read-only openCypher 9-based syntax.
 - **Troubleshooting** - exit codes, empty-result diagnostics, and common
   pitfalls.
-- **Repository maps** - the local `repo-map` command for a checkout.
-  JSON mode also includes a helper script for GitLab Orbit Remote.
+- **Repository maps** - in JSON mode, a helper script that maps a project
+  indexed in GitLab Orbit Remote.
 
 The skill works with both [GitLab Orbit Remote](remote/_index.md) and
 [GitLab Orbit Local](local/_index.md).

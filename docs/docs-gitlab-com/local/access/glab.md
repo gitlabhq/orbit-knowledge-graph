@@ -25,9 +25,9 @@ title: Use GitLab Orbit Local with the GitLab CLI (`glab`)
 
 The [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) is the canonical way to
 install, run, and integrate GitLab Orbit with your AI agent. `glab orbit`
-forwards one flat command tree to the managed `orbit` binary. Commands such as
-`index`, `grep`, and `sql` use the local graph, while commands such as `query`
-and `ontology` use the hosted graph.
+forwards one command tree to the managed `orbit` binary. `grep`, `context`, and
+the `workspace` commands use the local graph, while commands such as `query`
+and `schema` use the hosted graph.
 
 > [!note]
 > The flat `glab orbit` command tree requires `glab` 1.117 or later.
@@ -40,10 +40,10 @@ and configures supported AI agents.
 - `glab` 1.117 or later is installed.
 - A local Git repository to index.
 
-The local-graph verbs (`index`, `grep`, `context`, `sql`, `schema`, `list`,
-`mcp`, and `repo-map`) require no GitLab account or network connection once the
-binary is installed. Hosted verbs (`query`, `status`, `ontology`, `dsl`, `tools`,
-and `graph-status`) require an authenticated GitLab account and network access.
+The local-graph commands (`grep`, `context`, and `workspace index`, `sql`,
+`schema`, `list`, and `mcp serve`) require no GitLab account or network
+connection once the binary is installed. Hosted commands (`query`, `status`,
+and `schema`) require an authenticated GitLab account and network access.
 
 ## Install
 
@@ -84,7 +84,7 @@ with `glab skills install --global orbit`.
 ## Index a repository
 
 ```shell
-glab orbit index /path/to/your/repo
+glab orbit workspace index /path/to/your/repo
 ```
 
 | Flag | Purpose |
@@ -96,8 +96,8 @@ glab orbit index /path/to/your/repo
 ## Run SQL against the graph
 
 ```shell
-glab orbit sql 'SELECT count(*) FROM gl_definition'
-echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit sql -
+glab orbit workspace sql 'SELECT count(*) FROM gl_definition'
+echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit workspace sql -
 ```
 
 Queries include all indexed revisions through one DuckDB client by default.
@@ -113,19 +113,19 @@ Use `--db /path/to/revision.duckdb` to select one database file.
 
 ## Inspect the schema
 
-`glab orbit schema` lists the graph tables and their columns. The
+`glab orbit workspace schema` lists the graph tables and their columns. The
 per-project search-index tables and the schema fingerprint are hidden; name one
 explicitly to see it:
 
 ```shell
-glab orbit schema
+glab orbit workspace schema
 ```
 
 Pass table names as positional arguments to scope the output:
 
 ```shell
-glab orbit schema gl_definition              # scoped to one table
-glab orbit schema gl_definition gl_edge      # scoped to two tables
+glab orbit workspace schema gl_definition              # scoped to one table
+glab orbit workspace schema gl_definition gl_edge      # scoped to two tables
 ```
 
 | Flag | Purpose |
@@ -138,7 +138,7 @@ glab orbit schema gl_definition gl_edge      # scoped to two tables
 Expose the local graph to any MCP-compatible AI agent:
 
 ```shell
-glab orbit mcp serve
+glab orbit workspace mcp serve
 ```
 
 It serves `run_sql`, `get_graph_schema`, and `index` over the MCP protocol
@@ -152,7 +152,7 @@ with details on stderr. Scripts and agents can branch on success or failure.
 
 ## Billing
 
-The local-graph verbs (`index`, `grep`, `context`, `sql`, `schema`, `list`,
-`mcp`, and `repo-map`) process data locally and do not consume GitLab Credits.
+The local-graph commands (`grep`, `context`, and the `workspace` commands)
+process data locally and do not consume GitLab Credits.
 Hosted verbs require network access, and `query`
 [consumes GitLab Credits](../../remote/access/glab.md#billing).

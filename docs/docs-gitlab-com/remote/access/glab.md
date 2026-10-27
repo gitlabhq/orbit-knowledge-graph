@@ -37,8 +37,8 @@ query GitLab Orbit from the command line.
 binary, which `glab` downloads, verifies, and keeps up to date for you. Run
 `glab orbit <command> --help` for the binary's own command reference.
 
-Hosted commands such as `query`, `status`, `ontology`, `dsl`, `tools`, and
-`graph-status` call the GitLab Orbit Remote REST API. `glab` injects your GitLab
+Hosted commands such as `query`, `status`, and `schema` call the GitLab Orbit
+Remote REST API. `glab` injects your GitLab
 credential automatically. `glab orbit setup` provides guided onboarding and
 configures supported AI agents.
 
@@ -78,20 +78,16 @@ confirmations in scripts. Put it before the subcommand, as in
 | Subcommand | Endpoint | Purpose |
 |------------|----------|---------|
 | `glab orbit status` | `GET orbit/status` | Cluster health. |
-| `glab orbit ontology [node...]` | `GET orbit/schema` | Graph ontology. Positional args expand specific nodes. |
-| `glab orbit dsl` | `GET orbit/schema/dsl` | Query DSL JSON Schema. The source of truth for the query body shape. |
-| `glab orbit tools` | `GET orbit/tools` | MCP tool manifest with the full DSL JSON Schema. |
+| `glab orbit status --full-path <path>` | `GET orbit/graph_status` | Indexing progress for a namespace, project, or full path. |
+| `glab orbit schema [node...]` | `GET orbit/schema` | Graph schema. Positional args expand specific nodes. |
 | `glab orbit query <query>` | `POST orbit/query` | Run query text, or a request envelope with `--file <file\|->`. |
-| `glab orbit graph-status` | `GET orbit/graph_status` | Indexing progress for a namespace, project, or full path. |
 
 ### Discover the schema
 
 ```shell
 glab orbit status
-glab orbit ontology
-glab orbit ontology MergeRequest Project
-glab orbit dsl
-glab orbit tools
+glab orbit schema
+glab orbit schema MergeRequest Project
 ```
 
 ### Run a query
@@ -131,17 +127,15 @@ as the final fallback.
 
 ### Check indexing progress
 
-Inside a clone, run `graph-status` without flags to inspect the project of
-its `origin` remote. To inspect a different scope, pass one scope flag:
+Pass one scope flag to `status` to inspect a project or group:
 
 ```shell
-glab orbit graph-status
-glab orbit graph-status --full-path your-group/your-project
-glab orbit graph-status --namespace-id 24
-glab orbit graph-status --project-id 2
+glab orbit status --full-path your-group/your-project
+glab orbit status --namespace-id 24
+glab orbit status --project-id 2
 ```
 
-In a terminal, `graph-status` shows a summary of the indexing state and the
+In a terminal, `status` with a scope flag shows a summary of the indexing state and the
 largest entity counts in each domain. When the output goes to a pipe or a
 file, it prints the full JSON response. Use `--response-format raw` for JSON
 or `--response-format llm` for compact text in a terminal.
@@ -165,5 +159,4 @@ can branch on them without parsing stderr.
 During the beta, `glab orbit query` does not consume GitLab Credits.
 
 When GitLab Orbit is generally available, `glab orbit query` consumes GitLab Credits
-the same way as MCP queries. `status`, `ontology`, `tools`, and `graph-status` calls
-stay free.
+the same way as MCP queries. `status` and `schema` calls stay free.
