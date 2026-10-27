@@ -149,6 +149,28 @@ pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Op
     Some(IndexedRepo { git, client })
 }
 
+/// A reader over the local graph. With no complete revision yet (never indexed, or the first
+/// index was killed), indexes the repository in the current directory first, like `grep` does.
+/// Outside a repository the reader's own error says what is missing.
+pub fn open_graph_reader(db: Option<PathBuf>) -> Result<GraphReader> {
+    let graph_exists = match &db {
+        Some(path) => path.try_exists()?,
+        None => Workspace::open_default()?.manifest_path().try_exists()?,
+    };
+    let reader = graph_exists
+        .then(|| GraphReader::open(db.clone()))
+        .transpose()?;
+    if reader.as_ref().is_some_and(GraphReader::has_revisions) {
+        return Ok(reader.expect("checked above"));
+    }
+    drop(reader);
+    if let Ok(top_level) = git_toplevel(Path::new(".")) {
+        crate::commands::index::index_before_first_query(top_level, db.clone())
+            .context("failed to index the repository")?;
+    }
+    GraphReader::open(db)
+}
+
 pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
     let repo_path = repo.unwrap_or_else(|| PathBuf::from("."));
     let top_level = git_toplevel(&repo_path)

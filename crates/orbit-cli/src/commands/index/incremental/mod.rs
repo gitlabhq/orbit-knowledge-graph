@@ -10,7 +10,8 @@ use code_graph_incremental::treesitter::SupportLang;
 
 use ontology::Ontology;
 
-use crate::database::{GraphWriter, lock_incremental_state, manifest};
+use crate::database::schema::graph_lacks_commit;
+use crate::database::{GraphWriter, lock_incremental_state, manifest, wait_timeout};
 use crate::{tui, workspace};
 
 mod input;
@@ -28,6 +29,10 @@ pub(crate) struct Options {
     pub budget_seconds: Option<u64>,
     pub cancel: Arc<AtomicBool>,
     pub progress: bool,
+    /// How long to wait for a running index of the same repository; `None` waits the default.
+    pub wait: Option<Duration>,
+    /// Skip a repository whose revision is already indexed, once any running index finished.
+    pub skip_current: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -234,6 +239,7 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
         return Err(super::NoRepositoryFound(folder).into());
     }
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
+    let wait = options.wait.unwrap_or_else(wait_timeout);
     let mut outputs = Vec::new();
     for repo in repos {
         let started = std::time::Instant::now();
@@ -245,12 +251,15 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
             }
         };
         let state_dir = workspace.var_dir(git.project_id);
-        let _state_lock = lock_incremental_state(&state_dir)?;
+        let _state_lock = lock_incremental_state(&state_dir, wait)?;
         let db_path = workspace::resolve_db_path(options.db.clone(), &git)?;
+        if options.skip_current && !graph_lacks_commit(&db_path, &git.commit_sha)? {
+            continue;
+        }
         let snapshot = options.db.is_none()
             && db_path.exists()
             && manifest::load_incremental_state(&manifest_path, git.project_id)?.is_some();
-        let writer = GraphWriter::open(&db_path, &git)?;
+        let writer = GraphWriter::open_waiting(&db_path, &git, wait)?;
         let progress = options
             .progress
             .then(|| Arc::new(RepositoryBars::open(&git)));
@@ -362,21 +371,78 @@ fn refresh_wait() -> Duration {
         .map_or(REFRESH_WAIT, Duration::from_millis)
 }
 
-fn spawn_refresh(repo: &Path, db: Option<&Path>, files: &[String]) -> Option<Child> {
+fn detached_command() -> Option<Command> {
     let mut command = Command::new(std::env::current_exe().ok()?);
-    command.arg("refresh").arg(repo);
-    if let Some(db) = db {
-        command.arg("--db").arg(db);
-    }
     command
-        .arg("--")
-        .args(files)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    command.spawn().ok()
+    Some(command)
+}
+
+fn spawn_refresh(repo: &Path, db: Option<&Path>, files: &[String]) -> Option<Child> {
+    let mut command = detached_command()?;
+    command.arg("refresh").arg(repo);
+    if let Some(db) = db {
+        command.arg("--db").arg(db);
+    }
+    command.arg("--").args(files).spawn().ok()
+}
+
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
+pub(crate) enum DetachedIndex {
+    Running { pid: u32 },
+    Finished { pid: u32 },
+}
+
+/// Starts `orbit workspace index --wait` detached and returns once the child holds the state
+/// lock, because that lock does not exist for the first moments after launch. A caller that
+/// probes it sooner would see no index running. Indexing a directory of repositories hands
+/// off after the first repository's lock.
+pub(crate) fn index_detached(path: &Path, options: &Options) -> Result<DetachedIndex> {
+    let workspace = workspace::Workspace::open_default()?;
+    let repos = workspace.resolve_repos(path)?;
+    let Some(first) = repos.first() else {
+        let folder = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        return Err(super::NoRepositoryFound(folder).into());
+    };
+    let state_dir = workspace.var_dir(workspace::git_info(first)?.project_id);
+
+    let mut command = detached_command().context("cannot locate the orbit executable")?;
+    command.args(["workspace", "index", "--wait"]).arg(path);
+    if let Some(db) = &options.db {
+        command.arg("--db").arg(db);
+    }
+    if let Some(seconds) = options.budget_seconds {
+        command.arg("--budget").arg(seconds.to_string());
+    }
+    let mut child = command
+        .spawn()
+        .context("failed to start the background index")?;
+    let pid = child.id();
+
+    let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            anyhow::ensure!(
+                status.success(),
+                "the background index exited early ({status}); run it in the foreground to see why"
+            );
+            return Ok(DetachedIndex::Finished { pid });
+        }
+        if crate::database::index_is_running(&state_dir)? {
+            return Ok(DetachedIndex::Running { pid });
+        }
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "the background index (pid {pid}) did not take its lock within {} s",
+            HANDSHAKE_TIMEOUT.as_secs()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn finished_within(mut child: Child, wait: Duration) -> bool {
@@ -462,7 +528,7 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
     if changed.is_empty() {
         return Ok(());
     }
-    let _state_lock = lock_incremental_state(&state_dir)?;
+    let _state_lock = lock_incremental_state(&state_dir, crate::database::BRIEF_WAIT)?;
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
     let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
     let refreshed = state::refresh_families(&git, &ontology, &state_dir, owner, changed)?;

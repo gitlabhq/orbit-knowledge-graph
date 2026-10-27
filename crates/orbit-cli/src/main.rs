@@ -61,18 +61,32 @@ struct IndexArgs {
     /// Seconds a language family may take before the run stops (default: no limit).
     #[arg(long, value_name = "SECONDS")]
     budget: Option<u64>,
+
+    /// Start the index in the background and return once it holds its lock.
+    #[arg(long = "async", conflicts_with_all = ["wait", "timeout"])]
+    detach: bool,
+
+    /// Index in the foreground, first waiting for a running index of the same repository
+    /// (the default).
+    #[arg(long)]
+    wait: bool,
+
+    /// Seconds to wait for a running index before exiting with code 75 (default: 600).
+    #[arg(long, value_name = "SECONDS")]
+    timeout: Option<u64>,
 }
 
 impl IndexArgs {
-    fn into_parts(self) -> (PathBuf, commands::index::incremental::Options) {
+    fn into_parts(self) -> (PathBuf, commands::index::incremental::Options, bool) {
         let options = commands::index::incremental::Options {
             stats: self.stats,
             verbose: self.verbose,
             db: self.db,
             budget_seconds: self.budget,
+            wait: self.timeout.map(Duration::from_secs),
             ..Default::default()
         };
-        (self.path, options)
+        (self.path, options, self.detach)
     }
 }
 
@@ -806,6 +820,8 @@ async fn main() -> Result<()> {
         eprintln!("{}", remote.message);
     } else if let Some(message) = workspace::describe_graph_lock_conflict(err) {
         eprintln!("{message}");
+    } else if err.is::<database::WaitTimedOut>() {
+        eprintln!("{err}");
     } else if err.is::<commands::grep::NoMatches>() {
     } else if !tui::is_cancelled(err) {
         return result;
@@ -826,6 +842,8 @@ fn exit_code_for(err: &anyhow::Error) -> i32 {
         remote.exit_code
     } else if tui::is_cancelled(err) {
         130
+    } else if err.is::<database::WaitTimedOut>() {
+        database::WAIT_TIMED_OUT_EXIT_CODE
     } else {
         1
     }
@@ -1001,8 +1019,8 @@ async fn run_workspace(
 ) -> Result<()> {
     match command {
         WorkspaceCommands::Index(args) => {
-            let (path, options) = args.into_parts();
-            commands::index::run(path, options)
+            let (path, options, detach) = args.into_parts();
+            commands::index::run(path, options, detach)
         }
         WorkspaceCommands::Sql(SqlArgs {
             query,
@@ -1042,7 +1060,7 @@ fn is_local_table_name(name: &str) -> bool {
 }
 
 fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()> {
-    let client = database::GraphReader::open(db)?;
+    let client = workspace::open_graph_reader(db)?;
 
     let batches = if tables.is_empty() {
         sql::query(&client, &sql::schema_introspection_sql())?
@@ -1225,6 +1243,22 @@ mod tests {
     }
 
     #[test]
+    fn index_async_and_wait_are_mutually_exclusive() {
+        for argv in [
+            ["orbit", "index", "--async", "--wait"].as_slice(),
+            &["orbit", "index", "--async", "--timeout", "5"],
+        ] {
+            assert!(Cli::try_parse_from(argv).is_err(), "{argv:?}");
+        }
+        for argv in [
+            ["orbit", "index", "--async"].as_slice(),
+            &["orbit", "index", "--wait", "--timeout", "5"],
+        ] {
+            assert!(Cli::try_parse_from(argv).is_ok(), "{argv:?}");
+        }
+    }
+
+    #[test]
     fn removed_commands_are_rejected() {
         for argv in [
             ["orbit", "repo-map", "overview"].as_slice(),
@@ -1322,6 +1356,9 @@ mod tests {
                 verbose: false,
                 db: None,
                 budget: Some(4),
+                detach: false,
+                wait: false,
+                timeout: None,
             }
         );
 

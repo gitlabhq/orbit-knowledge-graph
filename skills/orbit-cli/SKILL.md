@@ -25,8 +25,13 @@ metadata:
 The local CLI parses a checkout into a DuckDB property graph. `grep` finds
 every matching line in code, tests, config, and docs, labeled with its enclosing definition. `context` reads their source and relationships. Both
 index the working tree on first use and refresh the index when it is stale, so
-you never need to index by hand. `workspace sql` runs read-only aggregations.
-For production data, use the `orbit` skill.
+you never need to index by hand. `workspace sql` and `workspace schema` index
+the repository first when nothing is indexed yet, and run read-only aggregations.
+A read waits up to 10 minutes for a running index and then exits with code 75.
+To index ahead of time without blocking a short shell timeout, run
+`workspace index --async`, which returns once the index runs in the background.
+`workspace index --wait` waits for a running index (`--timeout SECONDS`) and then
+indexes in the foreground, which is the default. For production data, use the `orbit` skill.
 
 The binary is `orbit`, or `glab orbit` through the wrapper. In non-interactive
 shells, put glab's `--yes` before the subcommand so glab skips its install and

@@ -1,12 +1,13 @@
 use std::fs::File;
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 use duckdb_client::DuckDbClient;
 use ontology::Ontology;
 
-use super::{lock_database, schema};
+use super::{lock_database_waiting, locks::BRIEF_WAIT, schema};
 use crate::workspace::GitInfo;
 
 const GRAPH_SCHEMA: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
@@ -18,7 +19,11 @@ pub struct GraphWriter {
 
 impl GraphWriter {
     pub fn open(path: &Path, git: &GitInfo) -> Result<Self> {
-        let lock = lock_database(path)?;
+        Self::open_waiting(path, git, BRIEF_WAIT)
+    }
+
+    pub fn open_waiting(path: &Path, git: &GitInfo, wait: Duration) -> Result<Self> {
+        let lock = lock_database_waiting(path, wait)?;
         let revision = format!("{}:{}", git.project_id, git.commit_sha);
         if path.exists() {
             let client = DuckDbClient::open_read_only(path)?;

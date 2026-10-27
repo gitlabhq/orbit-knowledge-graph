@@ -19,6 +19,11 @@ impl std::ops::Deref for GraphReader {
 }
 
 impl GraphReader {
+    /// False when no complete revision could be attached, such as after a killed first index.
+    pub fn has_revisions(&self) -> bool {
+        !self._locks.is_empty()
+    }
+
     pub fn open(db: Option<PathBuf>) -> Result<Self> {
         let Some(db_path) = db else {
             return Self::open_workspace();

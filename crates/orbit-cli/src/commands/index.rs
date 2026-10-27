@@ -15,7 +15,10 @@ use crate::database::GraphReader;
 use crate::tui;
 use crate::workspace::{self, GitInfo};
 
-pub(crate) fn run(path: PathBuf, options: incremental::Options) -> Result<()> {
+pub(crate) fn run(path: PathBuf, options: incremental::Options, detach: bool) -> Result<()> {
+    if detach {
+        return start_in_background(&path, &options);
+    }
     let person_is_watching = std::io::stdout().is_terminal();
     install_tracing(options.verbose, person_is_watching);
     if !person_is_watching {
@@ -49,6 +52,15 @@ pub(crate) fn run(path: PathBuf, options: incremental::Options) -> Result<()> {
     tui::outro("Done.")
 }
 
+fn start_in_background(path: &Path, options: &incremental::Options) -> Result<()> {
+    let (status, pid) = match incremental::index_detached(path, options)? {
+        incremental::DetachedIndex::Running { pid } => ("indexing", pid),
+        incremental::DetachedIndex::Finished { pid } => ("indexed", pid),
+    };
+    println!("{}", serde_json::json!({ "status": status, "pid": pid }));
+    Ok(())
+}
+
 pub(crate) fn index_with_progress(path: PathBuf, db: Option<PathBuf>) -> Result<Option<String>> {
     let outputs = index_showing_progress(
         path,
@@ -61,11 +73,16 @@ pub(crate) fn index_with_progress(path: PathBuf, db: Option<PathBuf>) -> Result<
 }
 
 pub(crate) fn index_before_first_query(path: PathBuf, db: Option<PathBuf>) -> Result<()> {
+    let options = incremental::Options {
+        db,
+        skip_current: true,
+        ..Default::default()
+    };
     if !std::io::stderr().is_terminal() {
-        return collect(path, false, db).map(drop);
+        return incremental::index(path, options).map(drop);
     }
     tui::intro("Orbit index")?;
-    close_screen_on_failure(index_with_progress(path, db))?;
+    close_screen_on_failure(index_showing_progress(path, options))?;
     tui::outro("Indexed.")
 }
 

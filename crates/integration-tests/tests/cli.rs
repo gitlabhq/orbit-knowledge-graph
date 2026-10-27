@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+#[path = "cli/background_index.rs"]
+mod background_index;
 #[path = "cli/revisions.rs"]
 mod revisions;
 
@@ -661,6 +663,7 @@ fn indexed_repo_paths(data_dir: &std::path::Path) -> Vec<String> {
 fn run_cmd(args: &[&str], data_dir: &std::path::Path) -> (String, String, bool) {
     let out = orbit_cmd()
         .args(args)
+        .current_dir(data_dir)
         .env("ORBIT_DATA_DIR", data_dir)
         .output()
         .expect("spawn orbit");
