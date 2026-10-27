@@ -47,6 +47,10 @@ pub struct SchemaDomain {
 #[serde(untagged)]
 pub enum SchemaNode {
     Name(String),
+    Listed {
+        name: String,
+        props: String,
+    },
     Expanded {
         name: String,
         props: Vec<String>,
@@ -88,13 +92,55 @@ pub fn build_compact_schema_response(
 ) -> SchemaResponse {
     match node {
         None => SchemaResponse {
-            domains: build_domains(ontology, scope, &[], None, format_compact_property),
+            domains: build_overview_domains(ontology, scope),
             edges: build_relationship_patterns(ontology, scope),
         },
         Some(node) => SchemaResponse {
             domains: build_domains(ontology, scope, &[], Some(node), format_compact_property),
             edges: Vec::new(),
         },
+    }
+}
+
+const OVERVIEW_DOMAINS: [&str; 3] = ["core", "code_review", "plan"];
+
+fn build_overview_domains(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaDomain> {
+    let mut domains = build_domains(ontology, scope, &[], None, format_compact_property);
+    for domain in &mut domains {
+        if !OVERVIEW_DOMAINS.contains(&domain.name.as_str()) {
+            continue;
+        }
+        for node in &mut domain.nodes {
+            let SchemaNode::Name(name) = node else {
+                continue;
+            };
+            let Some(entity) = ontology.get_node(name) else {
+                continue;
+            };
+            let fields: Vec<&Field> = match scope {
+                IntrospectionScope::Local => ontology.local_entity_fields(name).unwrap_or_default(),
+                IntrospectionScope::All => entity.listed_fields().collect(),
+            };
+            let props = fields
+                .iter()
+                .map(|field| format_listed_property(field))
+                .collect::<Vec<_>>();
+            *node = SchemaNode::Listed {
+                name: name.clone(),
+                props: props.join(", "),
+            };
+        }
+    }
+    domains
+}
+
+fn format_listed_property(field: &Field) -> String {
+    match &field.enum_values {
+        Some(values) => {
+            let values: Vec<&str> = values.values().map(String::as_str).collect();
+            format!("{} ({})", field.name, values.join("|"))
+        }
+        None => field.name.clone(),
     }
 }
 
@@ -331,7 +377,9 @@ mod tests {
             .flat_map(|d| {
                 d.nodes.iter().map(|n| match n {
                     SchemaNode::Name(s) => s.clone(),
-                    SchemaNode::Expanded { name, .. } => name.clone(),
+                    SchemaNode::Listed { name, .. } | SchemaNode::Expanded { name, .. } => {
+                        name.clone()
+                    }
                 })
             })
             .collect();
@@ -425,12 +473,23 @@ mod tests {
             "{:?}",
             overview.edges
         );
-        assert!(overview.domains.iter().all(|domain| {
-            domain
-                .nodes
+        let listed = |wanted: &str| {
+            overview
+                .domains
                 .iter()
-                .all(|node| matches!(node, SchemaNode::Name(_)))
-        }));
+                .flat_map(|domain| &domain.nodes)
+                .find_map(|node| match node {
+                    SchemaNode::Listed { name, props } if name == wanted => Some(props.clone()),
+                    _ => None,
+                })
+        };
+        assert!(listed("User").unwrap().contains("username"));
+        assert!(
+            listed("WorkItem")
+                .unwrap()
+                .contains("state (opened|closed)")
+        );
+        assert!(listed("Pipeline").is_none());
 
         let node = build_compact_schema_response(&ont, IntrospectionScope::All, Some("WorkItem"));
         let props = expanded_props(&node, "WorkItem");
@@ -450,7 +509,9 @@ mod tests {
             .flat_map(|d| {
                 d.nodes.iter().map(|n| match n {
                     SchemaNode::Name(s) => s.clone(),
-                    SchemaNode::Expanded { name, .. } => name.clone(),
+                    SchemaNode::Listed { name, .. } | SchemaNode::Expanded { name, .. } => {
+                        name.clone()
+                    }
                 })
             })
             .collect();
