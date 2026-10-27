@@ -55,7 +55,7 @@ work item type. A property tells them apart.
 ## How rows are stored
 
 Every row that belongs to a namespace carries its traversal path. Only global
-entities, like users and runners, have none. The [security](security.md) model
+entities, like users and runners, have none. The [security](security/README.md) model
 depends on that path.
 
 In Orbit's graph, every row has a version. A delete writes a new version that
