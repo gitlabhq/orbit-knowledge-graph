@@ -47,6 +47,10 @@ pub struct SchemaDomain {
 #[serde(untagged)]
 pub enum SchemaNode {
     Name(String),
+    Listed {
+        name: String,
+        props: String,
+    },
     Expanded {
         name: String,
         props: Vec<String>,
@@ -75,20 +79,68 @@ pub fn build_schema_response(
         return Err(UnknownNodes { unknown, valid });
     }
     Ok(SchemaResponse {
-        domains: build_domains(ontology, scope, expand_nodes, None),
+        domains: build_domains(ontology, scope, expand_nodes, None, format_property),
         edges: build_edge_names(ontology, scope, None),
     })
 }
 
 #[must_use]
-pub fn build_node_schema_response(
+pub fn build_compact_schema_response(
     ontology: &Ontology,
     scope: IntrospectionScope,
-    node: &str,
+    node: Option<&str>,
 ) -> SchemaResponse {
-    SchemaResponse {
-        domains: build_domains(ontology, scope, &[], Some(node)),
-        edges: build_edge_names(ontology, scope, Some(node)),
+    match node {
+        None => SchemaResponse {
+            domains: build_overview_domains(ontology, scope),
+            edges: build_relationship_patterns(ontology, scope),
+        },
+        Some(node) => SchemaResponse {
+            domains: build_domains(ontology, scope, &[], Some(node), format_compact_property),
+            edges: Vec::new(),
+        },
+    }
+}
+
+const OVERVIEW_DOMAINS: [&str; 3] = ["core", "code_review", "plan"];
+
+fn build_overview_domains(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaDomain> {
+    let mut domains = build_domains(ontology, scope, &[], None, format_compact_property);
+    for domain in &mut domains {
+        if !OVERVIEW_DOMAINS.contains(&domain.name.as_str()) {
+            continue;
+        }
+        for node in &mut domain.nodes {
+            let SchemaNode::Name(name) = node else {
+                continue;
+            };
+            let Some(entity) = ontology.get_node(name) else {
+                continue;
+            };
+            let fields: Vec<&Field> = match scope {
+                IntrospectionScope::Local => ontology.local_entity_fields(name).unwrap_or_default(),
+                IntrospectionScope::All => entity.listed_fields().collect(),
+            };
+            let props = fields
+                .iter()
+                .map(|field| format_listed_property(field))
+                .collect::<Vec<_>>();
+            *node = SchemaNode::Listed {
+                name: name.clone(),
+                props: props.join(", "),
+            };
+        }
+    }
+    domains
+}
+
+fn format_listed_property(field: &Field) -> String {
+    match &field.enum_values {
+        Some(values) => {
+            let values: Vec<&str> = values.values().map(String::as_str).collect();
+            format!("{} ({})", field.name, values.join("|"))
+        }
+        None => field.name.clone(),
     }
 }
 
@@ -126,6 +178,7 @@ fn build_domains(
     scope: IntrospectionScope,
     expand_nodes: &[String],
     only_node: Option<&str>,
+    format: fn(&Field) -> String,
 ) -> Vec<SchemaDomain> {
     let mut domain_map: BTreeMap<String, Vec<SchemaNode>> = BTreeMap::new();
 
@@ -158,7 +211,7 @@ fn build_domains(
                 IntrospectionScope::All => node.listed_fields().collect(),
             };
 
-            let props: Vec<String> = fields.iter().map(|f| format_property(f)).collect();
+            let props: Vec<String> = fields.iter().map(|f| format(f)).collect();
 
             let (outgoing, incoming) = node_relationships(ontology, scope, &node.name);
 
@@ -271,6 +324,21 @@ fn node_relationships(
     (outgoing, incoming)
 }
 
+fn format_compact_property(field: &Field) -> String {
+    let nullable = if field.nullable { "?" } else { "" };
+    let mut text = format!(
+        "{}:{}{}",
+        field.name,
+        field.data_type.to_string().to_lowercase(),
+        nullable
+    );
+    if let Some(values) = &field.enum_values {
+        let values: Vec<&str> = values.values().map(String::as_str).collect();
+        text.push_str(&format!(" ({})", values.join("|")));
+    }
+    text
+}
+
 fn format_property(field: &Field) -> String {
     let nullable = if field.nullable { "?" } else { "" };
     match &field.description {
@@ -309,7 +377,9 @@ mod tests {
             .flat_map(|d| {
                 d.nodes.iter().map(|n| match n {
                     SchemaNode::Name(s) => s.clone(),
-                    SchemaNode::Expanded { name, .. } => name.clone(),
+                    SchemaNode::Listed { name, .. } | SchemaNode::Expanded { name, .. } => {
+                        name.clone()
+                    }
                 })
             })
             .collect();
@@ -376,7 +446,8 @@ mod tests {
         let schema =
             build_schema_response(&ont, IntrospectionScope::All, &["WorkItem".to_string()])
                 .unwrap();
-        let node_schema = build_node_schema_response(&ont, IntrospectionScope::All, "WorkItem");
+        let node_schema =
+            build_compact_schema_response(&ont, IntrospectionScope::All, Some("WorkItem"));
 
         for props in [
             expanded_props(&schema, "WorkItem"),
@@ -391,6 +462,44 @@ mod tests {
     }
 
     #[test]
+    fn compact_schema_lists_relationship_patterns_and_enum_values() {
+        let ont = load();
+        let overview = build_compact_schema_response(&ont, IntrospectionScope::All, None);
+        assert!(
+            overview
+                .edges
+                .iter()
+                .any(|edge| edge.starts_with("(User)-[:AUTHORED]->(")),
+            "{:?}",
+            overview.edges
+        );
+        let listed = |wanted: &str| {
+            overview
+                .domains
+                .iter()
+                .flat_map(|domain| &domain.nodes)
+                .find_map(|node| match node {
+                    SchemaNode::Listed { name, props } if name == wanted => Some(props.clone()),
+                    _ => None,
+                })
+        };
+        assert!(listed("User").unwrap().contains("username"));
+        assert!(
+            listed("WorkItem")
+                .unwrap()
+                .contains("state (opened|closed)")
+        );
+        assert!(listed("Pipeline").is_none());
+
+        let node = build_compact_schema_response(&ont, IntrospectionScope::All, Some("WorkItem"));
+        let props = expanded_props(&node, "WorkItem");
+        let state = props.iter().find(|p| p.starts_with("state:")).unwrap();
+        assert!(state.contains("(opened|closed)"), "{state}");
+        assert!(!props.iter().any(|p| p.contains(" — ")), "{props:?}");
+        assert!(node.edges.is_empty());
+    }
+
+    #[test]
     fn all_scope_contains_server_entities() {
         let ont = load();
         let response = build_schema_response(&ont, IntrospectionScope::All, &[]).unwrap();
@@ -400,7 +509,9 @@ mod tests {
             .flat_map(|d| {
                 d.nodes.iter().map(|n| match n {
                     SchemaNode::Name(s) => s.clone(),
-                    SchemaNode::Expanded { name, .. } => name.clone(),
+                    SchemaNode::Listed { name, .. } | SchemaNode::Expanded { name, .. } => {
+                        name.clone()
+                    }
                 })
             })
             .collect();

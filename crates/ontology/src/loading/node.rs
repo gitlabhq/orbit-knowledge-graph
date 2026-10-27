@@ -197,6 +197,8 @@ struct PropertyYaml {
     #[serde(default)]
     unique: bool,
     #[serde(default)]
+    high_fan_out: bool,
+    #[serde(default)]
     description: Option<String>,
     #[serde(default)]
     traversal_path_lookup: Option<TraversalPathLookupYaml>,
@@ -373,6 +375,14 @@ impl NodeYaml {
                     )));
                 }
 
+                if prop_def.data_type == DataType::Enum
+                    && prop_def.values.as_ref().is_none_or(BTreeMap::is_empty)
+                {
+                    return Err(OntologyError::Validation(format!(
+                        "property '{prop_name}' on node '{name}': enum requires values"
+                    )));
+                }
+
                 let selectivity = prop_def
                     .selectivity
                     .unwrap_or_else(|| FieldSelectivity::from_data_type(prop_def.data_type));
@@ -390,6 +400,7 @@ impl NodeYaml {
                     hidden: prop_def.hidden,
                     selectivity,
                     unique: prop_def.unique,
+                    high_fan_out: prop_def.high_fan_out,
                     description: prop_def.description,
                     traversal_path_lookup: prop_def.traversal_path_lookup.map(|l| {
                         TraversalPathLookupSpec {
@@ -1143,6 +1154,18 @@ mod tests {
         )
         .unwrap();
         assert!(hub.global);
+    }
+
+    #[test]
+    fn enum_requires_values() {
+        let error = parse_test_node(
+            "node_type: entity\ndomain: test\ndestination_table: gl_test\nproperties:\n  state: {type: enum, source: state}\n",
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("enum requires values"),
+            "{error}"
+        );
     }
 
     #[test]

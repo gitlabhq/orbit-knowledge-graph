@@ -25,6 +25,7 @@ pub struct Group {
 pub struct Measure {
     pub function: AggFunction,
     pub argument: Option<OutputValue>,
+    pub distinct: bool,
     pub name: String,
 }
 
@@ -124,6 +125,14 @@ fn aggregation_plan(
     }
     for metric in &aggregation.metrics {
         let argument = match &metric.expr {
+            AggExpr::Count(target) if metric.distinct => Some(property_value(
+                nodes,
+                &target.node,
+                execution.property(
+                    &target.node,
+                    target.property.as_deref().unwrap_or(DEFAULT_PRIMARY_KEY),
+                ),
+            )),
             AggExpr::Count(target) => target
                 .property
                 .as_ref()
@@ -148,6 +157,7 @@ fn aggregation_plan(
         plan.measures.push(Measure {
             function: metric.expr.function(),
             argument,
+            distinct: metric.distinct,
             name: metric.output_name(),
         });
     }

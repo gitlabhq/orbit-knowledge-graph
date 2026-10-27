@@ -22,13 +22,13 @@ export function quarterMonths(q: Quarter): string {
   const first = monthOf(q, 0);
   const last = monthOf(q, 2);
   return first.getUTCFullYear() === last.getUTCFullYear()
-    ? `${MONTHS[first.getUTCMonth()]} to ${monthYear(last)}`
-    : `${monthYear(first)} to ${monthYear(last)}`;
+    ? `${MONTHS[first.getUTCMonth()]}–${monthYear(last)}`
+    : `${monthYear(first)}–${monthYear(last)}`;
 }
 
 export function quarterRange(start: Quarter, end: Quarter): { label: string; months: string } {
   if (quarterIndex(start) === quarterIndex(end)) return { label: quarterLabel(start), months: quarterMonths(start) };
-  return { label: `${quarterLabel(start)} to ${quarterLabel(end)}`, months: `${monthYear(monthOf(start, 0))} to ${monthYear(monthOf(end, 2))}` };
+  return { label: `${quarterLabel(start)}–${quarterLabel(end)}`, months: `${monthYear(monthOf(start, 0))}–${monthYear(monthOf(end, 2))}` };
 }
 
 export function quarterOf(date: Date): Quarter {

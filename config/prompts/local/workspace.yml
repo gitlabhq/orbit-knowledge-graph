@@ -1,0 +1,11 @@
+name: workspace
+version: 1.0.0
+short: Index and query the local code graph built from your checkouts
+description: >-
+  Index and query the local code graph built from your checkouts
+
+
+  `grep` and `context` index the working tree on their own, so agents rarely
+  need these commands. Use `index` from hooks or scripts to warm the graph.
+  `sql` and `schema` run read-only DuckDB queries, `list` shows what is
+  indexed, and `mcp serve` exposes the graph to MCP agents.

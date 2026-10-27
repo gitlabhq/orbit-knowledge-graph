@@ -193,15 +193,15 @@ impl Resolver {
         }
         let mut invalidated: FxHashSet<u32> = self
             .reqs
-            .iter()
+            .par_iter()
             .filter(|req| {
                 self.lookup != *lookup
                     || !resolve_glob(&req.target_path, &self.file_index, &lookup.prefixes)
                         .contains(&Loc::new(req.target_fi as usize, req.anchor))
             })
             .map(|req| req.fi)
-            .chain(dirty_fis.iter().copied())
             .collect();
+        invalidated.extend(dirty_fis);
         let added_keys = self
             .file_index
             .keys
@@ -228,21 +228,7 @@ impl Resolver {
                     .map(|req| req.fi),
             );
         }
-        if !invalidated.is_empty() {
-            let mut dependents: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
-            for req in &self.reqs {
-                dependents.entry(req.target_fi).or_default().push(req.fi);
-            }
-            let mut pending: VecDeque<_> = invalidated.iter().copied().collect();
-            while let Some(target) = pending.pop_front() {
-                for &dependent in dependents.get(&target).into_iter().flatten() {
-                    if invalidated.insert(dependent) {
-                        pending.push_back(dependent);
-                    }
-                }
-            }
-        }
-        invalidated
+        with_dependents(&self.reqs, invalidated)
     }
 
     /// Renumbers the resolver's memory after files left the graph. Returns
@@ -307,6 +293,27 @@ impl Resolver {
         lost_a_name
     }
 
+    /// The files outside `dirty` whose visible names differ from `previous`,
+    /// and every file that imports one of them.
+    fn importers_of_changed_names(
+        &self,
+        previous: &VisibleMap,
+        dirty: &FxHashSet<u32>,
+    ) -> FxHashSet<u32> {
+        let none = FxHashMap::default();
+        let changed = self
+            .visible
+            .iter()
+            .enumerate()
+            .filter(|(fi, names)| previous.get(*fi).unwrap_or(&none) != *names)
+            .map(|(fi, _)| u32::try_from(fi).expect("file index exceeds u32"))
+            .collect();
+        with_dependents(&self.reqs, changed)
+            .difference(dirty)
+            .copied()
+            .collect()
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn resolve(
         &mut self,
@@ -323,21 +330,21 @@ impl Resolver {
     ) -> Result<ResolveResult, Killed> {
         let index_names = support_lang.index_names();
         let previous_index = self.rebuild_file_index(trees, env, entrypoints);
-        let dirty_fis = &self.invalidate(&previous_index, trees, dirty_fis, lookup, env);
+        let mut dirty = self.invalidate(&previous_index, trees, dirty_fis, lookup, env);
         self.lookup = lookup.clone();
-        edges.retain(|edge| edge.from_tree == edge.to_tree || !dirty_fis.contains(&edge.from_tree));
 
-        self.visible.resize_with(trees.len(), Default::default);
-        for &fi in dirty_fis {
-            let fi = fi as usize;
-            if fi < trees.len() {
-                self.visible[fi] = gather_visible_one(&trees[fi], fi, self.tags.exports);
-            }
-        }
-        self.reqs.retain(|r| !dirty_fis.contains(&r.fi));
+        self.reqs.retain(|r| !dirty.contains(&r.fi));
         let (new_reqs, mut cross_edges) =
-            gather_imports_for(trees, lang, &self.file_index, lookup, config, dirty_fis);
+            gather_imports_for(trees, lang, &self.file_index, lookup, config, &dirty);
         self.reqs.extend(new_reqs);
+        let previous_visible = std::mem::replace(
+            &mut self.visible,
+            trees
+                .iter()
+                .enumerate()
+                .map(|(fi, tree)| gather_visible_one(tree, fi, self.tags.exports))
+                .collect(),
+        );
         let packages: Vec<_> = match config.merge_same_named_types {
             true => trees.iter().map(package_owners).collect(),
             false => Vec::new(),
@@ -352,6 +359,15 @@ impl Resolver {
             run,
             env.limits.max_cross_file_names,
         );
+        if too_many_names.is_none() && run.check().is_ok() {
+            let added = self.importers_of_changed_names(&previous_visible, &dirty);
+            let (_, import_edges) =
+                gather_imports_for(trees, lang, &self.file_index, lookup, config, &added);
+            cross_edges.extend(import_edges);
+            dirty.extend(added);
+        }
+        let dirty_fis = &dirty;
+        edges.retain(|edge| edge.from_tree == edge.to_tree || !dirty_fis.contains(&edge.from_tree));
         let resolved_source_paths: Vec<ResolvedSourcePath> = self
             .reqs
             .iter()
@@ -559,6 +575,24 @@ impl Resolver {
             file_timings,
         })
     }
+}
+
+/// `files`, and every file that imports one of them, directly or through
+/// other imports.
+fn with_dependents(reqs: &[ImportReq], mut files: FxHashSet<u32>) -> FxHashSet<u32> {
+    let mut dependents: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+    for req in reqs {
+        dependents.entry(req.target_fi).or_default().push(req.fi);
+    }
+    let mut pending: VecDeque<_> = files.iter().copied().collect();
+    while let Some(target) = pending.pop_front() {
+        for &dependent in dependents.get(&target).into_iter().flatten() {
+            if files.insert(dependent) {
+                pending.push_back(dependent);
+            }
+        }
+    }
+    files
 }
 
 fn call_key(e: &Edge) -> (u32, u32, Option<u32>, u32, u32) {

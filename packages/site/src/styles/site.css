@@ -17,52 +17,11 @@
 }
 
 @layer components {
-  .eyebrow {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--gl-color-orange-600);
-  }
-
-  .gl-dark .eyebrow {
-    color: var(--gl-color-orange-300);
-  }
-
-  .page-container {
-    width: 100%;
-    max-width: 76rem;
-    margin-inline: auto;
-    padding-inline: 1.25rem;
-  }
-
-  @media (min-width: 640px) {
-    .page-container {
-      padding-inline: 2rem;
-    }
-  }
-
-  .prose-measure {
-    max-width: 45rem;
-  }
-
   .tone-platform { --tone: var(--tone-platform); }
   .tone-agents { --tone: var(--tone-agents); }
   .tone-code { --tone: var(--tone-code); }
   .tone-data { --tone: var(--tone-data); }
   .tone-trust { --tone: var(--tone-trust); }
-
-  .tone-dot {
-    display: inline-block;
-    width: 0.5rem;
-    height: 0.5rem;
-    flex-shrink: 0;
-    border-radius: 9999px;
-    background: var(--tone);
-  }
-
-  .tone-icon {
-    color: var(--tone);
-    background: color-mix(in srgb, var(--tone) 14%, transparent);
-  }
 
   .tone-bar {
     background: color-mix(in srgb, var(--tone) 16%, var(--gl-background-color-default));

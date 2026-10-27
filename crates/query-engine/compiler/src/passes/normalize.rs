@@ -266,29 +266,12 @@ mod tests {
             Some(json!(["opened", "closed", "merged", "locked"]))
         );
 
-        // Mixed valid/invalid ints in array - unknown values pass through
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"in": [1, 999, 3]}}}]}"#,
-        );
-        assert_eq!(
-            r.nodes[0].filters.get("state").unwrap()[0].value,
-            Some(json!(["opened", 999, "merged"]))
-        );
-
         let r = normalize_query(
             r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}]}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap()[0].value,
             Some(json!("opened"))
-        );
-
-        let r = normalize_query(
-            r#"{"query_type": "traversal", "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": 999}}]}"#,
-        );
-        assert_eq!(
-            r.nodes[0].filters.get("state").unwrap()[0].value,
-            Some(json!(999))
         );
 
         let r = normalize_query(

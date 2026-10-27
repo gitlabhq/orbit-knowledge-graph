@@ -121,6 +121,7 @@ pub(super) struct ProjectionItem<'i> {
 pub(super) enum Expression<'i> {
     Aggregate {
         function: AggregateFunction,
+        distinct: bool,
         target: Target<'i>,
     },
     DateTrunc {

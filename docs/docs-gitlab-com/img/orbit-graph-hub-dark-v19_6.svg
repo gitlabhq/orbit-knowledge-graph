@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 272" width="680" height="272" role="img" aria-labelledby="t d">
+<title id="t">How GitLab Orbit links GitLab data and code</title>
+<desc id="d">A merge request, a pipeline, a vulnerability, and a branch belong to a project. The merge request runs the pipeline and fixes the vulnerability. A file is on the branch and defines a definition.</desc>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9.5" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0.5 1.2 L9.5 5 L0.5 8.8 Z" fill="#737278"/></marker>
+</defs>
+<style>
+text{font-family:"GitLab Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans",Ubuntu,Cantarell,"Helvetica Neue",sans-serif;}
+.n{font-size:13px;font-weight:500;fill:#ececef;}
+.h{font-size:13px;font-weight:600;fill:#ffffff;}
+.c{font-size:10.5px;font-weight:400;fill:#bfbfc3;}
+.e{font-size:11px;font-weight:400;fill:#bfbfc3;paint-order:stroke;stroke-width:7px;stroke-linejoin:round;}
+.g{font-size:11px;font-weight:500;fill:#bfbfc3;letter-spacing:0.01em;}
+.ln{fill:none;stroke:#737278;stroke-width:1.25;stroke-linecap:round;stroke-linejoin:round;}
+</style>
+<path class="ln" d="M100 120 L100 56" marker-end="url(#ah)"/>
+<path class="ln" d="M100 152 L100 216" marker-end="url(#ah)"/>
+<path class="ln" d="M160 40 C220 40 220 127 280 127" marker-end="url(#ah)"/>
+<path class="ln" d="M160 136 C220 136 220 136 280 136" marker-end="url(#ah)"/>
+<path class="ln" d="M160 232 C220 232 220 145 280 145" marker-end="url(#ah)"/>
+<path class="ln" d="M520 40 C460 40 460 136 400 136" marker-end="url(#ah)"/>
+<path class="ln" d="M580 120 L580 56" marker-end="url(#ah)"/>
+<path class="ln" d="M580 152 L580 216" marker-end="url(#ah)"/>
+<text class="e" x="100" y="91.8" text-anchor="middle" stroke="#18171d">runs</text>
+<text class="e" x="100" y="187.8" text-anchor="middle" stroke="#18171d">fixes</text>
+<text class="e" x="220" y="87.3" text-anchor="middle" stroke="#18171d">belongs to</text>
+<text class="e" x="220" y="139.8" text-anchor="middle" stroke="#18171d">belongs to</text>
+<text class="e" x="220" y="192.3" text-anchor="middle" stroke="#18171d">belongs to</text>
+<text class="e" x="460" y="91.8" text-anchor="middle" stroke="#18171d">belongs to</text>
+<text class="e" x="580" y="91.8" text-anchor="middle" stroke="#18171d">is on</text>
+<text class="e" x="580" y="187.8" text-anchor="middle" stroke="#18171d">defines</text>
+<rect x="40" y="24" width="120" height="32" rx="6" fill="#28272d" stroke="#626168" stroke-width="1"/>
+<text class="n" x="100" y="44.5" text-anchor="middle">Pipeline</text>
+<rect x="40" y="120" width="120" height="32" rx="6" fill="#28272d" stroke="#626168" stroke-width="1"/>
+<text class="n" x="100" y="140.5" text-anchor="middle">Merge request</text>
+<rect x="40" y="216" width="120" height="32" rx="6" fill="#28272d" stroke="#626168" stroke-width="1"/>
+<text class="n" x="100" y="236.5" text-anchor="middle">Vulnerability</text>
+<rect x="280" y="120" width="120" height="32" rx="6" fill="#3a383f" stroke="#626168" stroke-width="1"/>
+<text class="h" x="340" y="140.5" text-anchor="middle">Project</text>
+<rect x="520" y="24" width="120" height="32" rx="6" fill="#28272d" stroke="#626168" stroke-width="1"/>
+<text class="n" x="580" y="44.5" text-anchor="middle">Branch</text>
+<rect x="520" y="120" width="120" height="32" rx="6" fill="#28272d" stroke="#626168" stroke-width="1"/>
+<text class="n" x="580" y="140.5" text-anchor="middle">File</text>
+<rect x="520" y="216" width="120" height="32" rx="6" fill="#28272d" stroke="#626168" stroke-width="1"/>
+<text class="n" x="580" y="236.5" text-anchor="middle">Definition</text>
+</svg>

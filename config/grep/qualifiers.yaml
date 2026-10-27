@@ -1,0 +1,5 @@
+MergeRequest: [mr, pr]
+WorkItem: [issue, epic, task]
+Note: [comment]
+Definition: [def, symbol]
+Directory: [dir, folder]

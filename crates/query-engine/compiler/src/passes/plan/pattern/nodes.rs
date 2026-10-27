@@ -10,6 +10,7 @@ use super::{NodePlan, Pattern};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 use crate::passes::plan::filters::{FilterOwner, ordered_filters};
+use crate::passes::plan::graph::ReadScope;
 use crate::passes::plan::predicates::{
     Column, OutputValue, Predicate, Projection, live, property_filter,
 };
@@ -59,6 +60,14 @@ impl NodePlan {
             node_ids: node.node_ids.clone(),
             id_range: node.id_range.clone(),
             has_traversal_path: model.entity_has_traversal_path(entity),
+            read_scope: match (
+                model.entity_has_traversal_path(entity),
+                model.entity_high_fan_out(entity),
+            ) {
+                (false, _) => ReadScope::Unscoped,
+                (true, false) => ReadScope::Scoped,
+                (true, true) => ReadScope::HighFanOut,
+            },
             redaction_id_column: model
                 .redaction_id_column_named(entity)
                 .unwrap_or(DEFAULT_PRIMARY_KEY)
@@ -195,7 +204,8 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
     let metric_target = input.aggregation.metrics.iter().any(|metric| {
         metric.expr.node() == node.alias
             && metric.expr.property().is_some_and(|property| {
-                !matches!(metric.expr.function(), AggFunction::Count)
+                metric.distinct
+                    || !matches!(metric.expr.function(), AggFunction::Count)
                     || node
                         .entity
                         .as_deref()

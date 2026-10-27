@@ -2,9 +2,11 @@
 //! the resolver's memory of how it linked them; and its snapshot on disk.
 
 use std::io::{self, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use lasso::Key;
+use rayon::prelude::*;
+use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
 use crate::env::Env;
@@ -169,11 +171,12 @@ impl From<&Tree<Compact>> for TreeSnapshot {
                 parent,
             });
         }
-        let tags: Vec<(u32, Vec<Tag>)> = tree
+        let mut tags: Vec<(u32, Vec<Tag>)> = tree
             .tags
             .iter()
             .map(|(&node, tags)| (node, tags.to_vec()))
             .collect();
+        tags.sort_unstable_by_key(|(node, _)| *node);
         Self {
             nodes,
             label: tree.label.clone(),
@@ -237,49 +240,44 @@ impl From<TreeSnapshot> for Tree<Compact> {
     }
 }
 
+/// One file as a block stores it. Every file it refers to, itself
+/// included, is an index into the block's `paths`, so the block does not
+/// change when other files move in the tree list.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct ResolverSnapshot {
-    pub visible: Vec<Vec<(u32, Loc)>>,
-    pub reqs: Vec<ImportReq>,
-}
-
-impl Resolver {
-    pub fn to_snapshot(&self) -> ResolverSnapshot {
-        let visible = self
-            .visible()
-            .iter()
-            .map(|map| map.iter().map(|(&sym, &loc)| (sym, loc)).collect())
-            .collect();
-        ResolverSnapshot {
-            visible,
-            reqs: self.reqs().to_vec(),
-        }
-    }
-
-    pub fn from_snapshot(snap: ResolverSnapshot, lang: &Lang) -> Self {
-        let visible = snap
-            .visible
-            .into_iter()
-            .map(|entries| entries.into_iter().collect())
-            .collect();
-        Self::from_parts(visible, snap.reqs, lang)
-    }
-}
-
-/// Everything but the trees; those follow one frame each, so neither
-/// saving nor loading holds more than one tree's snapshot at a time.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-struct Header {
+struct StoredFile {
+    tree: TreeSnapshot,
     edges: Vec<Edge>,
+    visible: Vec<(u32, Loc)>,
+    reqs: Vec<ImportReq>,
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+struct Block {
+    paths: Vec<String>,
+    files: Vec<StoredFile>,
+}
+
+/// The tree order and the blocks that hold the trees; read on its own by
+/// [`State::labels`].
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+struct Index {
+    labels: Vec<String>,
+    buckets: u32,
+    blocks: Vec<(u32, String)>,
+    resolved: bool,
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+struct Shared {
     lang: LangSnapshot,
-    resolver: ResolverSnapshot,
     configs: Vec<(String, String)>,
-    trees: u64,
 }
 
 /// Bump when any snapshot struct changes shape; an older file then fails
 /// with a clear message instead of a decode error.
-pub const SNAPSHOT_VERSION: u32 = 16;
+pub const SNAPSHOT_VERSION: u32 = 17;
+
+const FILES_PER_BLOCK: usize = 64;
 
 type Error = rkyv::rancor::BoxedError;
 
@@ -312,60 +310,332 @@ where
     rkyv::from_bytes::<T, Error>(buf).map_err(io::Error::other)
 }
 
+fn invalid(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
+
+/// The block files of the snapshot at `path`, in a directory beside it.
+fn blocks_dir(path: &Path) -> PathBuf {
+    path.with_extension("blocks")
+}
+
+/// Writes through a temporary file, so a reader never sees half a file.
+fn write_atomically(
+    path: &Path,
+    write: impl FnOnce(&mut std::fs::File) -> io::Result<()>,
+) -> io::Result<()> {
+    let temporary = path.with_extension("tmp");
+    let mut file = std::fs::File::create(&temporary)?;
+    write(&mut file)?;
+    std::fs::rename(&temporary, path)
+}
+
+fn open_index(
+    path: &Path,
+) -> io::Result<(zstd::Decoder<'static, io::BufReader<std::fs::File>>, Index)> {
+    let mut input = zstd::Decoder::new(std::fs::File::open(path)?)?;
+    let mut version = [0u8; 4];
+    input
+        .read_exact(&mut version)
+        .map_err(|_| invalid("snapshot is too short to carry a version"))?;
+    let version = u32::from_le_bytes(version);
+    if version != SNAPSHOT_VERSION {
+        return Err(invalid(format!(
+            "snapshot format v{version}; this build reads v{SNAPSHOT_VERSION}"
+        )));
+    }
+    let index = read_frame(&mut input, &mut rkyv::util::AlignedVec::new())?;
+    Ok((input, index))
+}
+
 impl State {
+    /// Saves the graph as a small index file at `path` plus blocks of about
+    /// [`FILES_PER_BLOCK`] files, grouped by a hash of their path. A block is
+    /// named by the hash of its content, so a save writes only the blocks
+    /// whose files changed and removes the ones nothing refers to any more.
     pub fn save(&self, env: &Env, path: &Path) -> io::Result<()> {
-        let header = Header {
-            edges: self.edges.clone(),
+        self.write(env, path, path, None)?;
+        remove_unreferenced_blocks(path)
+    }
+
+    /// Writes the blocks beside the snapshot at `path` and the index to
+    /// `staged`; the snapshot at `path` stays as it was until
+    /// [`State::commit_staged`] puts the staged one in its place. With
+    /// `touched`, the files that changed since the graph was loaded from
+    /// `path`, a block with none of them, and the same files as before, keeps
+    /// its file without being serialised.
+    pub fn stage(
+        &self,
+        env: &Env,
+        path: &Path,
+        staged: &Path,
+        touched: Option<&FxHashSet<u32>>,
+    ) -> io::Result<()> {
+        self.write(env, path, staged, touched)
+    }
+
+    /// Puts the index staged for `path` in place and removes the blocks the
+    /// old one alone referred to.
+    pub fn commit_staged(staged: &Path, path: &Path) -> io::Result<()> {
+        std::fs::rename(staged, path)?;
+        remove_unreferenced_blocks(path)
+    }
+
+    fn write(
+        &self,
+        env: &Env,
+        path: &Path,
+        index_path: &Path,
+        touched: Option<&FxHashSet<u32>>,
+    ) -> io::Result<()> {
+        let dir = blocks_dir(path);
+        std::fs::create_dir_all(&dir)?;
+        let buckets = self
+            .trees
+            .len()
+            .div_ceil(FILES_PER_BLOCK)
+            .max(1)
+            .next_power_of_two() as u32;
+        let resolved = !self.resolver.visible().is_empty();
+        let kept = match touched {
+            Some(touched) => self.unchanged_blocks(path, buckets, resolved, touched),
+            None => FxHashMap::default(),
+        };
+        let blocks: Vec<(u32, String)> = self
+            .blocks(buckets)
+            .into_par_iter()
+            .map(|(bucket, files)| match kept.get(&bucket) {
+                Some(name) => Ok((bucket, name.clone())),
+                None => Ok((bucket, self.save_block(&files, &dir)?)),
+            })
+            .collect::<io::Result<_>>()?;
+        let index = Index {
+            labels: self.trees.iter().map(|tree| tree.label.clone()).collect(),
+            buckets,
+            blocks,
+            resolved,
+        };
+        let shared = Shared {
             lang: LangSnapshot::from(&env.lang),
-            resolver: self.resolver.to_snapshot(),
             configs: self
                 .configs
                 .iter()
                 .map(|c| (c.path.clone(), c.content.clone()))
                 .collect(),
-            trees: self.trees.len() as u64,
         };
-        // zstd level 3: about 4x smaller for less time than serialising.
-        let mut enc = zstd::Encoder::new(std::fs::File::create(path)?, 3)?;
-        enc.write_all(&SNAPSHOT_VERSION.to_le_bytes())?;
-        write_frame(&mut enc, &header)?;
-        for tree in &self.trees {
-            write_frame(&mut enc, &TreeSnapshot::from(tree))?;
+        write_atomically(index_path, |file| {
+            let mut out = zstd::Encoder::new(file, 3)?;
+            out.write_all(&SNAPSHOT_VERSION.to_le_bytes())?;
+            write_frame(&mut out, &index)?;
+            write_frame(&mut out, &shared)?;
+            out.finish().map(drop)
+        })
+    }
+
+    /// The blocks of the saved snapshot at `path` that still hold exactly
+    /// the same files, none of them touched, by bucket.
+    fn unchanged_blocks(
+        &self,
+        path: &Path,
+        buckets: u32,
+        resolved: bool,
+        touched: &FxHashSet<u32>,
+    ) -> FxHashMap<u32, String> {
+        let Ok((_, previous)) = open_index(path) else {
+            return FxHashMap::default();
+        };
+        if previous.buckets != buckets || previous.resolved != resolved {
+            return FxHashMap::default();
         }
-        enc.finish()?;
-        Ok(())
+        let before: FxHashSet<&str> = previous.labels.iter().map(String::as_str).collect();
+        let now: FxHashSet<&str> = self.trees.iter().map(|tree| tree.label.as_str()).collect();
+        let changed: FxHashSet<u32> = touched
+            .iter()
+            .map(|&fi| self.trees[fi as usize].label.as_str())
+            .chain(before.symmetric_difference(&now).copied())
+            .map(|label| bucket(label, buckets))
+            .collect();
+        previous
+            .blocks
+            .into_iter()
+            .filter(|(b, _)| !changed.contains(b))
+            .collect()
+    }
+
+    /// The file indices of each non-empty bucket.
+    fn blocks(&self, buckets: u32) -> Vec<(u32, Vec<u32>)> {
+        let mut blocks: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+        for (fi, tree) in self.trees.iter().enumerate() {
+            let fi = u32::try_from(fi).expect("file index exceeds u32");
+            blocks
+                .entry(bucket(&tree.label, buckets))
+                .or_default()
+                .push(fi);
+        }
+        blocks.into_iter().collect()
+    }
+
+    fn save_block(&self, files: &[u32], dir: &Path) -> io::Result<String> {
+        let block = self.block(files);
+        let bytes = rkyv::to_bytes::<Error>(&block).map_err(io::Error::other)?;
+        let name = format!("{:032x}.bin", twox_hash::XxHash3_128::oneshot(&bytes));
+        let path = dir.join(&name);
+        if !path.exists() {
+            write_atomically(&path, |file| {
+                let mut out = zstd::Encoder::new(file, 3)?;
+                out.write_all(&bytes)?;
+                out.finish().map(drop)
+            })?;
+        }
+        Ok(name)
+    }
+
+    fn block(&self, files: &[u32]) -> Block {
+        let label = |fi: &u32| self.trees[*fi as usize].label.as_str();
+        let mut files = files.to_vec();
+        files.sort_unstable_by(|a, b| label(a).cmp(label(b)));
+        let members: FxHashSet<u32> = files.iter().copied().collect();
+        let mut edges: FxHashMap<u32, Vec<Edge>> = FxHashMap::default();
+        for edge in self.edges.iter().filter(|e| members.contains(&e.from_tree)) {
+            edges.entry(edge.from_tree).or_default().push(*edge);
+        }
+        let mut reqs: FxHashMap<u32, Vec<ImportReq>> = FxHashMap::default();
+        for req in self
+            .resolver
+            .reqs()
+            .iter()
+            .filter(|r| members.contains(&r.fi))
+        {
+            reqs.entry(req.fi).or_default().push(req.clone());
+        }
+        let mut stored: Vec<StoredFile> = files
+            .iter()
+            .map(|&fi| StoredFile {
+                tree: TreeSnapshot::from(&self.trees[fi as usize]),
+                edges: edges.remove(&fi).unwrap_or_default(),
+                visible: self.visible_names(fi),
+                reqs: reqs.remove(&fi).unwrap_or_default(),
+            })
+            .collect();
+        let mut paths: Vec<u32> = files
+            .iter()
+            .copied()
+            .chain(stored.iter().flat_map(references))
+            .collect();
+        paths.sort_unstable_by(|a, b| label(a).cmp(label(b)));
+        paths.dedup();
+        let local: FxHashMap<u32, u32> = paths
+            .iter()
+            .enumerate()
+            .map(|(i, &fi)| (fi, u32::try_from(i).expect("block index exceeds u32")))
+            .collect();
+        for file in &mut stored {
+            renumber(file, |fi| local.get(&fi).copied())
+                .expect("a block's paths hold every file it refers to");
+        }
+        Block {
+            paths: paths.iter().map(|fi| label(fi).to_string()).collect(),
+            files: stored,
+        }
+    }
+
+    fn visible_names(&self, fi: u32) -> Vec<(u32, Loc)> {
+        let mut names: Vec<(u32, Loc)> = self
+            .resolver
+            .visible()
+            .get(fi as usize)
+            .into_iter()
+            .flatten()
+            .map(|(&sym, &loc)| (sym, loc))
+            .collect();
+        names.sort_unstable_by_key(|(sym, _)| *sym);
+        names
+    }
+
+    /// The labels of the snapshot at `path`, in tree order, without reading
+    /// its blocks.
+    pub fn labels(path: &Path) -> io::Result<Vec<String>> {
+        Ok(open_index(path)?.1.labels)
     }
 
     pub fn load(path: &Path, lang_id: SupportLang) -> io::Result<(Env, Self)> {
-        let mut input = zstd::Decoder::new(std::fs::File::open(path)?)?;
-        let mut version = [0u8; 4];
-        input.read_exact(&mut version).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "snapshot is too short to carry a version",
-            )
-        })?;
-        let version = u32::from_le_bytes(version);
-        if version != SNAPSHOT_VERSION {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("snapshot format v{version}; this build reads v{SNAPSHOT_VERSION}"),
-            ));
-        }
-        let mut buf = rkyv::util::AlignedVec::new();
-        let header: Header = read_frame(&mut input, &mut buf)?;
-        let env = Env::with_lang(lang_id, Lang::from(header.lang), Limits::UNLIMITED)
+        let (mut input, index) = open_index(path)?;
+        let shared: Shared = read_frame(&mut input, &mut rkyv::util::AlignedVec::new())?;
+        let env = Env::with_lang(lang_id, Lang::from(shared.lang), Limits::UNLIMITED)
             .map_err(io::Error::other)?;
-        let mut trees = Vec::with_capacity(header.trees as usize);
-        for _ in 0..header.trees {
-            let tree: TreeSnapshot = read_frame(&mut input, &mut buf)?;
-            trees.push(tree.into());
+        let position: FxHashMap<&str, u32> = index
+            .labels
+            .iter()
+            .enumerate()
+            .map(|(fi, label)| {
+                (
+                    label.as_str(),
+                    u32::try_from(fi).expect("file index exceeds u32"),
+                )
+            })
+            .collect();
+        let dir = blocks_dir(path);
+        let blocks: Vec<Block> = index
+            .blocks
+            .par_iter()
+            .map(|(_, name)| read_block(&dir.join(name)))
+            .collect::<io::Result<_>>()?;
+        let mut files: Vec<Option<StoredFile>> = (0..index.labels.len()).map(|_| None).collect();
+        for block in blocks {
+            let global: Vec<u32> = block
+                .paths
+                .iter()
+                .map(|label| {
+                    position.get(label.as_str()).copied().ok_or_else(|| {
+                        invalid(format!(
+                            "snapshot block names {label}, which the index does not list"
+                        ))
+                    })
+                })
+                .collect::<io::Result<_>>()?;
+            for mut file in block.files {
+                renumber(&mut file, |local| global.get(local as usize).copied()).ok_or_else(
+                    || {
+                        invalid(format!(
+                            "snapshot block for {} refers past its paths",
+                            file.tree.label
+                        ))
+                    },
+                )?;
+                let fi = *position.get(file.tree.label.as_str()).ok_or_else(|| {
+                    invalid(format!(
+                        "snapshot block holds {}, which the index does not list",
+                        file.tree.label
+                    ))
+                })? as usize;
+                files[fi] = Some(file);
+            }
+        }
+        let files: Vec<StoredFile> = files
+            .into_iter()
+            .zip(&index.labels)
+            .map(|(file, label)| {
+                file.ok_or_else(|| invalid(format!("snapshot has no block for {label}")))
+            })
+            .collect::<io::Result<_>>()?;
+        let mut trees = Vec::with_capacity(files.len());
+        let mut edges = Vec::new();
+        let mut visible = Vec::with_capacity(files.len());
+        let mut reqs = Vec::new();
+        for file in files {
+            trees.push(file.tree.into());
+            edges.extend(file.edges);
+            visible.push(file.visible.into_iter().collect());
+            reqs.extend(file.reqs);
+        }
+        if !index.resolved {
+            visible = Vec::new();
         }
         let mut state = State {
             trees,
-            edges: header.edges,
-            resolver: Resolver::from_snapshot(header.resolver, &env.lang),
-            configs: header.configs.into_iter().map(Into::into).collect(),
+            edges,
+            resolver: Resolver::from_parts(visible, reqs, &env.lang),
+            configs: shared.configs.into_iter().map(Into::into).collect(),
         };
         let walk = state.project_tree(&env);
         state
@@ -374,4 +644,60 @@ impl State {
         state.resolver.lookup = walk.lookup;
         Ok((env, state))
     }
+}
+
+fn bucket(label: &str, buckets: u32) -> u32 {
+    (twox_hash::XxHash3_64::oneshot(label.as_bytes()) % u64::from(buckets)) as u32
+}
+
+/// Removes the blocks beside `path` that its index does not refer to.
+fn remove_unreferenced_blocks(path: &Path) -> io::Result<()> {
+    let (_, index) = open_index(path)?;
+    let referenced: FxHashSet<&str> = index.blocks.iter().map(|(_, name)| name.as_str()).collect();
+    for entry in std::fs::read_dir(blocks_dir(path))? {
+        let entry = entry?;
+        if !referenced.contains(entry.file_name().to_string_lossy().as_ref()) {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+fn read_block(path: &Path) -> io::Result<Block> {
+    let mut bytes = rkyv::util::AlignedVec::<16>::new();
+    let mut input = zstd::Decoder::new(std::fs::File::open(path)?)?;
+    let mut chunk = [0u8; 1 << 16];
+    loop {
+        let read = input.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+    }
+    rkyv::from_bytes::<Block, Error>(&bytes).map_err(io::Error::other)
+}
+
+/// Every file `file` refers to.
+fn references(file: &StoredFile) -> impl Iterator<Item = u32> + '_ {
+    let edges = file.edges.iter().flat_map(|e| [e.from_tree, e.to_tree]);
+    let names = file.visible.iter().map(|(_, loc)| loc.fi);
+    let reqs = file.reqs.iter().flat_map(|r| [r.fi, r.target_fi]);
+    edges.chain(names).chain(reqs)
+}
+
+/// Rewrites every file reference in `file` through `to`.
+/// `None` when `to` has no number for one of them.
+fn renumber(file: &mut StoredFile, to: impl Fn(u32) -> Option<u32>) -> Option<()> {
+    for edge in &mut file.edges {
+        edge.from_tree = to(edge.from_tree)?;
+        edge.to_tree = to(edge.to_tree)?;
+    }
+    for (_, loc) in &mut file.visible {
+        loc.fi = to(loc.fi)?;
+    }
+    for req in &mut file.reqs {
+        req.fi = to(req.fi)?;
+        req.target_fi = to(req.target_fi)?;
+    }
+    Some(())
 }

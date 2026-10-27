@@ -5,7 +5,7 @@ use compiler::input::DynamicColumnMode;
 use compiler::{Frontend, QueryError, compile};
 use ontology::introspection::{
     IntrospectionScope::{All, Local},
-    build_schema_response,
+    build_compact_schema_response,
 };
 
 #[test]
@@ -89,6 +89,15 @@ fn aggregation_query() {
 
     assert!(rendered.contains("COUNT()") || rendered.contains("countIf"));
     assert!(rendered.contains("GROUP BY"));
+}
+
+#[test]
+fn gql_count_distinct_renders_distinct_aggregates() {
+    let orbit_query = "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id}, count(n) AS notes, count(DISTINCT n) AS distinct_notes, count(DISTINCT n.confidential) AS flags LIMIT 10";
+    let result = compile(orbit_query, Frontend::Gql, &test_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert_eq!(rendered.matches("countDistinct").count(), 2, "{rendered}");
+    assert!(rendered.contains("AS notes"), "{rendered}");
 }
 
 #[test]
@@ -1351,8 +1360,8 @@ fn orbit_query_rejects_unsupported_syntax_and_shapes() {
         "MATCH (u:User) WHERE u.created_at = DATE '2024-01-01' RETURN u",
         "MATCH (u:User) RETURN DISTINCT u",
         "MATCH (u:User) RETURN count(*)",
+        "MATCH (u:User {id: 1}) RETURN sum(DISTINCT u.id) AS n",
         "MATCH (u:User) RETURN collect(u.username)",
-        "MATCH (u:User {id: 1}) RETURN u LIMIT 1 SKIP 1",
         "MATCH (u:User {id: 1}) RETURN u SKIP 1 SKIP 1",
         "MATCH (u:User {id: 1}) RETURN u SKIP -1",
         "MATCH (u:User {id: 1}) RETURN u SKIP 10001",
@@ -2004,18 +2013,11 @@ fn gql_prepares_queries_and_scoped_schema() {
             let node = serde_json::to_value(&response.domains[0].nodes[0]).unwrap();
             assert_eq!(node["name"], name);
             assert!(!node["props"].as_array().unwrap().is_empty());
-            assert!(!response.edges.is_empty());
-            assert!(response.edges.iter().all(|edge| {
-                ontology
-                    .get_edge(edge)
-                    .unwrap()
-                    .iter()
-                    .any(|edge| edge.source_kind == name || edge.target_kind == name)
-            }));
+            assert!(response.edges.is_empty());
         } else {
             assert_eq!(
                 serde_json::to_value(response).unwrap(),
-                serde_json::to_value(build_schema_response(&ontology, scope, &[]).unwrap())
+                serde_json::to_value(build_compact_schema_response(&ontology, scope, None))
                     .unwrap(),
             );
         }

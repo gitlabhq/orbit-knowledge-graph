@@ -19,7 +19,7 @@ Other commands:
 - `mise test:plan-shape` runs the plan-shape fixtures.
 - `mise bench:run` measures code indexing on real repositories, and `mise bench:smoke` runs one indexing pass for each repository.
 - `mise query:diff` compares two query profiles.
-- `mise perf:gtime` and `mise perf:rss` record the time and memory of `orbit index` for before and after comparisons.
+- `mise perf:gtime` and `mise perf:rss` record the time and memory of `orbit workspace index` for before and after comparisons.
 - `mise test:fast` skips the integration-test, code-graph, fuzz, and profiler crates, which have their own jobs.
 
 ## Container tests

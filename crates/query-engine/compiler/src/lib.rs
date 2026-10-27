@@ -1320,15 +1320,18 @@ mod tests {
     }
 
     #[test]
-    fn final_prewhere_setting_follows_final_scans() {
+    fn final_settings_follow_final_scans() {
         let sql = compile_sql(
             r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","filters":{"state":"active"}}],"limit":10}"#,
         );
         assert!(sql.contains(" FINAL"), "{sql}");
-        assert!(
-            sql.contains("optimize_move_to_prewhere_if_final = 1"),
-            "{sql}"
-        );
+        for setting in [
+            "optimize_move_to_prewhere_if_final = 1",
+            "use_skip_indexes_if_final = 1",
+            "use_skip_indexes_if_final_exact_mode = 1",
+        ] {
+            assert!(sql.contains(setting), "{sql}");
+        }
         assert!(
             !sql.contains("use_index_for_in_with_subqueries_max_values"),
             "no IN (subquery) in this query, got:\n{sql}"

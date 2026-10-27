@@ -50,7 +50,9 @@ pub enum CallResolution {
     Reference,
 }
 
-#[derive(Clone, Copy, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct Edge {
     pub from_tree: u32,
     pub from_node: u32,

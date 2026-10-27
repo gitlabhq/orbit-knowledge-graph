@@ -18,17 +18,12 @@ Set the GQL version to the JSON version plus `+gql` so caches never mix them.
 The server tests check those four fields, each mode's file set, and relative links.
 Both manifests' front matter and local-section placeholders are validated at build time.
 
-## Syncing the query-language reference
+## Query-language reference
 
-`references/query_language.md` is synced from
-`docs/docs-gitlab-com/remote/queries/query-language.md`. Edit it, then run:
-
-```bash
-mise run skill:sync:orbit
-```
-
-The lefthook `orbit-skill-docs-sync` job fails the commit if the two files
-drift. Do **not** edit `references/query_language.md` directly.
+`references/query_language.md` is the JSON DSL reference for the skill.
+Edit it in place. `mise run docs:query-language` regenerates its
+text-indexed properties table and the same table in
+`docs/docs-gitlab-com/queries/query-language.md`.
 
 ## Version bumps
 

@@ -15,11 +15,11 @@ Retired engineering abbreviation for Orbit ("GitLab Knowledge Graph"). Still pre
 _Avoid_: using GKG in user-facing contexts
 
 **Orbit Remote**:
-The hosted Orbit service. Indexes all GitLab.com SDLC and code data; queries are user-scoped and JWT-authenticated. The flat `orbit` command tree reaches it with the `query`, `status`, `ontology`, `dsl`, `tools`, and `graph-status` verbs.
+The hosted Orbit service. Indexes all GitLab.com SDLC and code data; queries are user-scoped and JWT-authenticated. The `orbit` command tree reaches it with the `query`, `status`, and `schema` verbs. `grep` also searches GitLab entities, and `context` reads GitLab entity tokens such as `MergeRequest[42]`, through the GitLab grep and context endpoints.
 _Avoid_: "the server", "production GKG"
 
 **Orbit Local**:
-The local backend of the `orbit` binary: indexes a single repository into a DuckDB database for offline analysis. The same flat command tree reaches it with the `index`, `grep`, `context`, `sql`, `schema`, `list`, `repo-map`, and `mcp` verbs. `glab orbit` installs the binary and forwards all verbs to it.
+The local backend of the `orbit` binary: indexes a single repository into a DuckDB database for offline analysis. The same command tree reaches it with `grep` and `context`, which index the working tree on their own. The `workspace` group holds `index`, `sql`, `schema`, `list`, and `mcp serve`. `glab orbit` installs the binary and forwards all verbs to it.
 _Avoid_: "the CLI" (ambiguous: one binary serves both backends)
 
 **Skill Placeholder**:

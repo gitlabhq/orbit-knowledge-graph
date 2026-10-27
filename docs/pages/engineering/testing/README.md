@@ -4,6 +4,8 @@ description: How Orbit proves that a change is correct before it ships.
 authors:
   - michaelangeloio
   - michaelusa
+  - jgdoyon1
+  - bohdanpk
 ---
 
 Orbit tests behavior at the highest layer that can see it. New

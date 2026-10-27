@@ -7,8 +7,8 @@
 // One anchored root rejects prefixes, query composition, and text after the optional semicolon.
 Statement = { SOI ~ SP? ~ (Query | SchemaCall) ~ SP? ~ ";"? ~ SP? ~ EOI }
 
-// Clauses have one supported order. SKIP precedes LIMIT, and DEBUG must be last.
-Query = { Matches ~ SP? ~ Return ~ (SP ~ Order)? ~ (SP ~ Skip)? ~ (SP ~ Limit)? ~ (SP ~ Debug)? }
+// SKIP and LIMIT may appear in either order, and DEBUG must be last.
+Query = { Matches ~ SP? ~ Return ~ (SP ~ Order)? ~ (SP ~ Skip ~ SP ~ Limit | SP ~ Limit ~ SP ~ Skip | SP ~ Skip | SP ~ Limit)? ~ (SP ~ Debug)? }
 
 // Consecutive MATCH clauses are valid. Lowering combines their patterns and predicates.
 Matches = { Match ~ (SP? ~ Match)* }
@@ -113,7 +113,8 @@ NodeProjection = { Variable ~ SP? ~ "{" ~ SP? ~ ProjectionProperty ~ (SP? ~ "," 
 ProjectionProperty = { "." ~ SP? ~ SchemaName }
 
 // count(*) is intentionally absent. Every aggregate targets one node or node property.
-Aggregate = { AggregateFunction ~ SP? ~ "(" ~ SP? ~ (PropertyExpression | Variable) ~ SP? ~ ")" }
+Aggregate = { AggregateFunction ~ SP? ~ "(" ~ SP? ~ (Distinct ~ SP)? ~ (PropertyExpression | Variable) ~ SP? ~ ")" }
+Distinct = @{ ^"DISTINCT" ~ !IdentifierPart }
 AggregateFunction = @{ ^"count" | ^"sum" | ^"avg" | ^"min" | ^"max" }
 DateTrunc = { ^"date_trunc" ~ SP? ~ "(" ~ SP? ~ StringLiteral ~ SP? ~ "," ~ SP? ~ PropertyExpression ~ SP? ~ ")" }
 AllProperties = { ^"properties" ~ SP? ~ "(" ~ SP? ~ Variable ~ SP? ~ ")" }
