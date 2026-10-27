@@ -5,7 +5,7 @@ theme: trust
 status: shipped
 start: FY27 Q3
 end: FY27 Q3
-link: https://docs.gitlab.com/orbit/remote/security/#fine-grained-personal-access-tokens
+link: https://docs.gitlab.com/orbit/security/#fine-grained-personal-access-tokens
 tracking: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/992
 ---
 
