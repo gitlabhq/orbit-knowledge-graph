@@ -22,20 +22,36 @@ ${ORBIT_CLI_DIR}    %{ORBIT_CLI_DIR=}
 CLI Reports Service Health
     [Tags]    cli
     ${status}=    Orbit CLI JSON    status
-    Should Be True    $status.get("state") == "HEALTHY" or $status.get("status") == "healthy"    ${status}
+    ${healthy}=    Set Variable    ${{ $status.get("state") == "HEALTHY" }}
+    ${legacy_healthy}=    Set Variable    ${{ $status.get("status") == "healthy" }}
+    CLI Answer Came From GraphQL Or Legacy    ${healthy}    ${legacy_healthy}    ${status}
 
 CLI Reports The Shared Group Status
     [Tags]    cli
     ${status}=    Orbit CLI JSON    status    --full-path    ${SHARED_NAMESPACE_NAME}
-    Should Be True    $status.get("domains") or $status.get("itemCounts", {}).get("domains")    ${status}
+    ${graphql}=    Set Variable    ${{ bool($status.get("itemCounts", {}).get("domains")) }}
+    ${legacy}=    Set Variable    ${{ bool($status.get("domains")) }}
+    CLI Answer Came From GraphQL Or Legacy    ${graphql}    ${legacy}    ${status}
 
 CLI Lists The Schema
     [Tags]    cli
-    ${out}=    Orbit CLI    schema    Project
-    Should Contain    ${out}    "name": "Project"
+    ${schema}=    Orbit CLI JSON    schema    Project
+    ${graphql}=    Set Variable    ${{ "Project" in [n["name"] for n in $schema.get("nodes") or []] }}
+    ${legacy}=    Set Variable    ${{ "Project" in [n["name"] for d in $schema.get("domains") or [] for n in d["nodes"]] }}
+    CLI Answer Came From GraphQL Or Legacy    ${graphql}    ${legacy}    ${schema}
 
 
 *** Keywords ***
+CLI Answer Came From GraphQL Or Legacy
+    [Documentation]    The default lane tracks master, so the CLI must answer from GraphQL there. A
+    ...                pinned stable lane (E2E_GITLAB_LANE) may predate the fields, so the legacy
+    ...                REST shape passes too.
+    [Arguments]    ${graphql}    ${legacy}    ${answer}
+    IF    $E2E_GITLAB_LANE
+        Should Be True    $graphql or $legacy    ${answer}
+    ELSE
+        Should Be True    $graphql    The CLI did not answer from GraphQL: ${answer}
+    END
 Orbit CLI JSON
     [Arguments]    @{args}
     ${out}=    Orbit CLI    @{args}

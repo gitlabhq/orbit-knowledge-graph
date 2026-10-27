@@ -980,7 +980,7 @@ cli-integration-test:
   artifacts:
     paths:
       - orbit-cli-e2e/
-    expire_in: 1 day
+    expire_in: 1 week
     reports:
       junit:
         - target/nextest/ci/junit-cli.xml
