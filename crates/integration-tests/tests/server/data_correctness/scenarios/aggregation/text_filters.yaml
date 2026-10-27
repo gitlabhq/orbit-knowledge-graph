@@ -78,15 +78,13 @@ cases:
       skip_requirements: [node_ids, filter:title, aggregation]
       empty_aggregation: true
 
-  - name: text_group_key_rows
-    description: A text group key returns one row per readable work item
+  - name: text_group_key_rejected
+    description: A free-text key of a work item cannot merge rows that are read per item
     query:
       gql: |
         MATCH (w:WorkItem)-[:IN_GROUP]->(g:Group {id: 100}) RETURN w.title AS title, count(w) AS n
     expect:
-      skip_requirements: [node_ids, aggregation]
-      row_values:
-        - { title: Implement login page, n: 1 }
+      compile_error: free-text values cannot be grouped
 
   - name: code_text_filter_compiles
     description: Code entities keep text filters on ungrouped nodes

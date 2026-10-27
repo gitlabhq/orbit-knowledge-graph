@@ -1,0 +1,82 @@
+config:
+  redaction:
+    allow:
+      project: [1000]
+      merge_request: [2000, 2001, 2004, 2005]
+      ci_build: [9501, 9502, 9503]
+    deny:
+      project: [1001]
+      ci_build: [9511, 9512]
+  extra_seed:
+    gl_job:
+      - { id: 9501, name: rspec, status: failed, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 9502, name: rspec, status: failed, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 9503, name: lint, status: failed, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 9511, name: rspec, status: failed, project_id: 1002, traversal_path: "1/100/1002/" }
+      - { id: 9512, name: rspec, status: failed, project_id: 1002, traversal_path: "1/100/1002/" }
+
+cases:
+  - name: owner_authorized_text_key_merges
+    description: Definitions that share a file path in one project count as one row
+    query:
+      gql: |
+        MATCH (d:Definition) WHERE d.project_id = 1000 RETURN d.file_path AS path, count(d) AS n ORDER BY n DESC
+    expect:
+      skip_requirements: [filter:project_id, aggregation_sort]
+      row_count: 2
+      row_values:
+        - { path: crates/compiler/src/lib.rs, n: 2 }
+        - { path: crates/orbit/src/main.rs, n: 1 }
+
+  - name: owner_authorized_text_key_drops_denied_owner
+    description: A denied project's definitions leave the shared file path count
+    query:
+      gql: |
+        MATCH (d:Definition) WHERE d.id IN [12000, 12001, 12100] RETURN d.file_path AS path, count(d) AS n
+    expect:
+      skip_requirements: [node_ids]
+      row_count: 1
+      row_values:
+        - { path: crates/compiler/src/lib.rs, n: 2 }
+
+  - name: project_grain_text_key_merges
+    description: Jobs that share a name in one project count as one row
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.project_id = 1000 RETURN j.name AS name, count(j) AS n ORDER BY n DESC LIMIT 20
+    expect:
+      skip_requirements: [filter:project_id, aggregation_sort]
+      row_count: 2
+      row_values:
+        - { name: rspec, n: 2 }
+        - { name: lint, n: 1 }
+
+  - name: project_grain_text_key_drops_denied_owner
+    description: Jobs in a project the caller cannot read leave the shared name count
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.name = 'rspec' RETURN j.name AS name, count(j) AS n
+    expect:
+      skip_requirements: [filter:name]
+      row_count: 1
+      row_values:
+        - { name: rspec, n: 2 }
+
+  - name: entity_grain_text_key_rejected
+    description: A free-text key of a node read per entity cannot merge its rows
+    query:
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.project_id = 1000 RETURN mr.target_branch AS branch, count(mr) AS n
+    expect:
+      compile_error: free-text values cannot be grouped
+
+  - name: entity_grain_unique_key_groups
+    description: A unique free-text key still groups a node read per entity
+    query:
+      gql: |
+        MATCH (p:Project) WHERE p.id IN [1000, 1002] RETURN p.full_path AS path, count(p) AS n ORDER BY path
+    expect:
+      skip_requirements: [node_ids, aggregation_sort]
+      row_count: 1
+      row_values:
+        - { path: public-group/public-project, n: 1 }
