@@ -8,7 +8,7 @@ pub(crate) async fn run_status() -> Result<(), RemoteError> {
     write_stdout(&select_status_output(&body)?)
 }
 
-fn select_status_output(body: &[u8]) -> Result<Vec<u8>, RemoteError> {
+pub(crate) fn select_status_output(body: &[u8]) -> Result<Vec<u8>, RemoteError> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
         return Ok(body.to_vec());
     };
