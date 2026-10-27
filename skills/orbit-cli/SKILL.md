@@ -9,12 +9,12 @@ description: >
   Works on the working tree and unpushed branches, and also searches and reads
   the project's GitLab. Not a fit: reading one known file, or counts and
   relationships across GitLab (use the `orbit` skill).
-version: 0.30.0
+version: 0.31.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
   audience: developers
-  keywords: orbit, orbit-cli, orbit-local, knowledge-graph, code-graph, duckdb, sql, repo-map
+  keywords: orbit, orbit-cli, orbit-local, knowledge-graph, code-graph, duckdb, sql, workspace
   workflow: ai
   source-project: gitlab-org/orbit/knowledge-graph
   source-path: skills/orbit-cli
@@ -23,13 +23,14 @@ metadata:
 # Orbit local CLI skill
 
 The local CLI parses a checkout into a DuckDB property graph. `grep` finds
-every matching line in code, tests, config, and docs, labeled with its enclosing definition. `context` reads their source and relationships. `sql` runs
-read-only aggregations. `repo-map` orients you at the directory level. For
-production data, use the `orbit` skill.
+every matching line in code, tests, config, and docs, labeled with its enclosing definition. `context` reads their source and relationships. Both
+index the working tree on first use and refresh the index when it is stale, so
+you never need to index by hand. `workspace sql` runs read-only aggregations.
+For production data, use the `orbit` skill.
 
 The binary is `orbit`, or `glab orbit` through the wrapper. In non-interactive
 shells, put glab's `--yes` before the subcommand so glab skips its install and
-run prompts: `glab orbit --yes sql "..."`. The binary rejects `--yes` after
+run prompts: `glab orbit --yes workspace sql "..."`. The binary rejects `--yes` after
 other subcommands. Only `setup` and `uninstall` take their own `--yes`
 (`glab orbit --yes setup --yes`). Run `orbit <command> --help` before you guess
 a flag. Run `orbit skills` to list available skills. Use
@@ -47,7 +48,6 @@ If they decline, note the discrepancy in one line and continue with the correcte
 ## Find, then read
 
 ```shell
-orbit index .
 orbit grep "method:rate limit" src
 orbit grep 'query_arrow|insert_batch|execute' crates/duckdb-client
 orbit context duckdb_client::search::DuckDbSearch::grep src/lib.rs:120-180 crates/duckdb-client
@@ -109,12 +109,12 @@ Line ranges show only the numbered lines.
 - `orbit grep 'a|b'` searches code, tests, config, and docs and labels each match with its enclosing definition. A plain query also searches the GitLab group behind `origin`.
 - `orbit context <name> <path>:<lines> mr:42 job:9` reads several targets in one call. Definitions come with their callers and tests, and GitLab merge requests, issues, branches, pipelines, and jobs come with the local code they point at. A bare `orbit context` reads the current branch's merge request and CI failures.
 - `orbit query` answers relationship and aggregation questions across GitLab entities, such as who reviewed which merge requests or which changes to an area failed CI. Write the query in the language below.
-- `orbit sql` aggregates over the local code graph, and `orbit repo-map overview` maps the directories.
+- `orbit workspace sql` aggregates over the local code graph, and `orbit workspace schema` lists its tables.
 
 ```shell
 orbit grep 'retry_backoff|RetryBackoff'
 orbit context src/retry.rs:40-90 retry_backoff mr:42
-orbit repo-map overview
+orbit workspace sql "SELECT definition_type, count(*) n FROM gl_definition GROUP BY 1 ORDER BY n DESC"
 ```
 
 <!-- /orbit:section -->
@@ -126,7 +126,7 @@ Gotchas:
   belongs to Orbit Remote.
 - `definition_type` values are capitalized. `WHERE definition_type='function'`
   returns zero rows.
-- `sql` queries all indexed revisions by default. Use `--repo .` for the current
+- `workspace sql` queries all indexed revisions by default. Use `--repo .` for the current
   checkout revision, or `--db PATH` for one file. Index a commit before querying it.
 
 ## References
@@ -135,4 +135,3 @@ Gotchas:
 |---|---|
 | CLI wrapper flags, config keys, pass-through args | [`references/cli.md`](references/local/cli.md) |
 | DuckDB tables and paste-ready SQL recipes | [`references/sql.md`](references/local/sql.md) |
-| Repository-map workflow (`orbit repo-map`) | [`references/repo_map.md`](references/local/repo_map.md) |

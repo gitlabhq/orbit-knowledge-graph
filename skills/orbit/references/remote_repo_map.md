@@ -1,8 +1,8 @@
 # Orbit remote repo map reference
 
-`remote_repo_map.py` is the remote counterpart to the local [`glab orbit repo-map`](local_repo_map.md) command. It maps code structure for any project indexed in Orbit Remote by shelling out to `glab orbit query`. It needs no local checkout or Orbit Local index.
+`remote_repo_map.py` maps code structure for any project indexed in Orbit Remote by shelling out to `glab orbit query`. It needs no local checkout or Orbit Local index.
 
-Use it for inheritance trees, ancestor chains, included concerns, class members, directory API surfaces, or call sites in a project that Orbit Remote has indexed. Prefer the local command when you are in a checkout and need branch-local or unmerged code. Prefer a raw query from [`recipes.md`](recipes.md) for a single known entity or a cross-domain SDLC question.
+Use it for inheritance trees, ancestor chains, included concerns, class members, directory API surfaces, or call sites in a project that Orbit Remote has indexed. Prefer `glab orbit grep` and `glab orbit context` when you are in a checkout and need branch-local or unmerged code. Prefer a raw query from [`recipes.md`](recipes.md) for a single known entity or a cross-domain SDLC question.
 
 ## Prerequisites
 

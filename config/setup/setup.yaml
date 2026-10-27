@@ -4,7 +4,7 @@
 # in the templates assistants declare.
 mcp_server:
   name: orbit
-  command: "{{orbit}} mcp serve"
+  command: "{{orbit}} workspace mcp serve"
 instructions: |
   ## Orbit
 

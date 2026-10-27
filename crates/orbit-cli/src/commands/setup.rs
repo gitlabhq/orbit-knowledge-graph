@@ -572,14 +572,17 @@ mod tests {
             read_json(&dir.path().join("opencode.json"))["mcp"]["orbit"],
             json!({
                 "type": "local",
-                "command": ["orbit", "mcp", "serve"],
+                "command": ["orbit", "workspace", "mcp", "serve"],
                 "enabled": true,
                 "environment": {"AI_AGENT": "opencode"}
             })
         );
         let codex = std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap();
         assert!(codex.contains("[mcp_servers.orbit]"), "{codex}");
-        assert!(codex.contains(r#"args = ["mcp", "serve"]"#), "{codex}");
+        assert!(
+            codex.contains(r#"args = ["workspace", "mcp", "serve"]"#),
+            "{codex}"
+        );
         assert!(codex.contains(r#"env = { AI_AGENT = "codex" }"#), "{codex}");
         assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
 
@@ -632,7 +635,7 @@ mod tests {
             json!({
                 "type": "stdio",
                 "command": "orbit",
-                "args": ["mcp", "serve"],
+                "args": ["workspace", "mcp", "serve"],
                 "env": {"AI_AGENT": "claude-code"}
             })
         );

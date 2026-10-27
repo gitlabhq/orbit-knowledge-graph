@@ -97,10 +97,45 @@ pub(super) fn is_family(name: &str) -> bool {
     FAMILIES.iter().any(|aliases| aliases.contains(&name))
 }
 
-/// The family of a definition kind: the shared repo-map lists first, then the name, so
-/// labels such as `DecoratedClass` or a new language's kinds still land somewhere.
+const TYPE_KINDS: &[&str] = &[
+    "Class",
+    "Struct",
+    "Enum",
+    "Trait",
+    "Interface",
+    "Module",
+    "Type",
+    "TypeAlias",
+    "Record",
+    "Object",
+    "Namespace",
+    "DataClass",
+    "ValueClass",
+    "AnnotationClass",
+];
+
+const CALLABLE_KINDS: &[&str] = &[
+    "Method",
+    "Function",
+    "AssociatedFunction",
+    "SingletonMethod",
+    "StaticMethod",
+    "Constructor",
+    "ExtensionFunction",
+    "AsyncFunction",
+    "DecoratedFunction",
+    "DecoratedMethod",
+    "DecoratedAsyncFunction",
+    "DecoratedAsyncMethod",
+    "Lambda",
+    "Macro",
+];
+
+const MEMBER_EXTRA_KINDS: &[&str] = &["Field", "Attribute", "Property", "ComputedProperty"];
+
+/// The family of a definition kind: the kind lists first, then the name, so labels such as
+/// `DecoratedClass` or a new language's kinds still land somewhere.
 fn family_of(kind: &str) -> Option<usize> {
-    use crate::commands::repo_map::{CALLABLE_KINDS, MEMBER_EXTRA_KINDS, TYPE_KINDS};
     let has = |parts: &[&str]| parts.iter().any(|part| kind.contains(part));
     if CALLABLE_KINDS.contains(&kind) || has(&["Function", "Method", "Constructor"]) {
         Some(0)
