@@ -66,7 +66,7 @@ prometheus:
     ruleSelectorNilUsesHelmValues: false
 ```
 
-If you use a custom selector instead, add its labels to the GitLab Orbit and Siphon resources.
+If you use a custom selector instead, add its labels to the GitLab Orbit, Siphon, and NATS resources.
 
 ### GitLab Orbit
 
@@ -112,16 +112,6 @@ promExporter:
 ```
 
 The exporter reads the JetStream metrics when `config.jetstream.enabled` is `true`.
-
-### GitLab
-
-The **Overview** and **Webserver** dashboards include panels for the GitLab calls to GitLab Orbit.
-These panels need the GitLab Rails metrics in the same Prometheus.
-If you skip this step, these panels show no data, and the other panels work.
-
-- For the GitLab Helm chart, set `gitlab.webservice.metrics.serviceMonitor.enabled: true`.
-- For the Linux package, configure your Prometheus to scrape GitLab.
-  For more information, see [Use an external Prometheus server](https://docs.gitlab.com/administration/monitoring/prometheus/#using-an-external-prometheus-server).
 
 ## Load the dashboards
 
