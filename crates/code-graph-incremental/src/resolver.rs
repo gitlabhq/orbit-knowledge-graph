@@ -193,15 +193,15 @@ impl Resolver {
         }
         let mut invalidated: FxHashSet<u32> = self
             .reqs
-            .iter()
+            .par_iter()
             .filter(|req| {
                 self.lookup != *lookup
                     || !resolve_glob(&req.target_path, &self.file_index, &lookup.prefixes)
                         .contains(&Loc::new(req.target_fi as usize, req.anchor))
             })
             .map(|req| req.fi)
-            .chain(dirty_fis.iter().copied())
             .collect();
+        invalidated.extend(dirty_fis);
         let added_keys = self
             .file_index
             .keys
