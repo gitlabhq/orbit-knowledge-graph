@@ -81,23 +81,14 @@ For more information, see [GitLab Orbit on GitLab Self-Managed](https://docs.git
 
 ## Service level agreement
 
-On GitLab.com, GitLab Orbit queries have a 99.9% monthly availability commitment.
-The commitment covers queries through the REST API and the CLI, the [MCP endpoint](agents/mcp.md),
+On GitLab.com and GitLab Dedicated, GitLab Orbit queries have a 99.9% monthly availability commitment.
+It covers queries through the REST API, the CLI, the [MCP endpoint](agents/mcp.md),
 the [GitLab MCP server](https://docs.gitlab.com/user/model_context_protocol/mcp_server/), and GitLab Duo Agent Platform.
-GitLab measures GitLab Orbit availability separately from GitLab.com availability.
-
-The commitment does not cover:
-
-- How soon changes in GitLab appear in the graph.
-- How long a query takes.
-- The correctness of query results.
-
-For eligibility, how GitLab measures availability, and service credits, see the
+It does not cover data freshness, query latency, or the correctness of results.
+For the full definition, see the
 [GitLab Orbit service level agreement](https://handbook.gitlab.com/handbook/engineering/infrastructure-platforms/service-level-agreement/#gitlab-orbit-service-level-agreement---availability-definition).
 
-GitLab Orbit has no service level agreement on GitLab Dedicated or GitLab Self-Managed.
-
-For help with GitLab Orbit on any offering, contact [GitLab Support](https://about.gitlab.com/support/).
+On GitLab Self-Managed, you run GitLab Orbit, so no service level agreement applies.
 For what GitLab Support covers, see the [Statement of Support](https://about.gitlab.com/support/statement-of-support/).
 
 ## Data retention and deletion
