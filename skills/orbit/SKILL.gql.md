@@ -34,7 +34,7 @@ Queries use read-only openCypher 9-based syntax (`MATCH ... RETURN`). `glab orbi
 
 `glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available skills. Run `glab orbit skills get orbit` to print the composed skill (`SKILL.md` by default), or append a path such as `references/local/sql.md` to print a file.
 
-For entity properties and relationship types, run `CALL db.schema('Node')` with an explicit node name. `CALL db.schema()` lists every node and relationship type; call it at most once per session, because the schema does not change mid-session. Query syntax and paste-ready queries are in [`references/gql.md`](references/gql.md).
+Run `CALL db.schema()` once per session, because the schema does not change mid-session. It lists every relationship as `(Source)-[:TYPE]->(Target)` and the properties of the common nodes, such as `User`, `Project`, `Group`, `MergeRequest`, and `WorkItem`. Run `CALL db.schema('Node')` only for a node it does not list properties for. Query syntax and paste-ready queries are in [`references/gql.md`](references/gql.md).
 
 The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in your mode. Do not reuse discovery results across users or mode changes. Entries contain only `name`, `description`, and `raw_query`; there is no client language selector. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
 
