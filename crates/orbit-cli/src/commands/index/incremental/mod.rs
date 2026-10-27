@@ -287,6 +287,7 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
             stats: options.stats,
             cancel: &options.cancel,
             progress: progress.as_ref(),
+            working: workspace::git_working_changes(&git.repo_path)?,
         };
         let cancelled = || options.cancel.load(Ordering::Relaxed);
         let output = match snapshot {
@@ -467,36 +468,47 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
     let refreshing = lock_file(&state_dir, REFRESHING)?;
     refreshing.lock()?;
     drop(queued);
-    let mut candidates: Vec<String> = workspace::git_working_changes(&git.repo_path)?
-        .changed
-        .into_iter()
-        .chain(files)
+    let families: Vec<SupportLang> = saved
+        .families
+        .iter()
+        .filter_map(|name| SupportLang::from_family(name))
         .collect();
-    candidates.sort();
-    candidates.dedup();
-    let candidates: Vec<&str> = candidates.iter().map(String::as_str).collect();
-    let changed = state::changed_since_snapshot(&git.repo_path, &state_dir, &candidates);
-    if changed.is_empty() {
+    let working = workspace::git_working_changes(&git.repo_path)?;
+    let saved_files = state::saved_files(&state_dir, &families);
+    let (changed, removed) =
+        state::refresh_changes(&git.repo_path, &state_dir, &saved_files, working, files);
+    if changed.is_empty() && removed.is_empty() {
         return Ok(());
     }
     let _state_lock = lock_index_state(&state_dir, &git.repo_path, crate::database::BRIEF_WAIT)?;
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
     let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
-    let refreshed = state::refresh_families(&git, &ontology, &state_dir, owner, changed)?;
+    let reader = state::Reader {
+        git: &git,
+        ontology: &ontology,
+        state_dir: &state_dir,
+        owner,
+        families: &families,
+        saved_files: &saved_files,
+        stats: false,
+        context: &|env, paths| {
+            Ok(code_graph_incremental::pipeline::Context::new(
+                env,
+                input::paths(&git.repo_path, paths)?,
+            ))
+        },
+    };
+    let refresh = reader.read(reader.work(changed, removed)?, u64::MAX, &|| false)?;
     // Snapshots go in place only after the rows land, so a failed write keeps the files stale.
     let written = workspace::resolve_db_path(db, &git)
         .and_then(|path| GraphWriter::open_waiting(&path, &git, crate::database::BRIEF_WAIT))
         .and_then(|writer| {
-            writer.in_transaction(|| {
-                refreshed
-                    .iter()
-                    .try_for_each(|family| output::apply(&writer, &family.replacement))
-            })
+            writer.in_transaction(|| output::apply_refresh(&writer, &ontology, &refresh))
         });
     match written {
-        Ok(()) => state::commit_snapshots(&refreshed),
+        Ok(()) => state::commit_snapshots(&refresh.families),
         Err(error) => {
-            state::discard_snapshots(&refreshed);
+            state::discard_snapshots(&refresh.families);
             Err(error)
         }
     }

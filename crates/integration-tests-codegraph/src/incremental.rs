@@ -141,10 +141,10 @@ fn index_and_check(yaml: &str) {
 
     for step in &suite.steps {
         if step.snapshot {
-            let snapshot = repo.path().join("graph.bin");
+            let snapshot = tempfile::tempdir().expect("snapshot directory");
+            let snapshot = snapshot.path().join("graph.bin");
             state.save(&env, &snapshot).expect("save snapshot");
             (env, state) = State::load(&snapshot, lang_id).expect("load snapshot");
-            std::fs::remove_file(&snapshot).ok();
         }
         for removed in &step.remove {
             std::fs::remove_file(repo.path().join(removed)).ok();
