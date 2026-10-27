@@ -58,5 +58,5 @@ both services. A second copy adds no duplicates.
 - The [health check](../README.md#first-5-minutes) passes.
 - The [indexer dashboard](https://dashboards.gitlab.net/d/orbit-orbit-gkg-indexer) shows
   freshness back to normal.
-- `GITLAB_HOST=gitlab.com glab orbit graph-status --full-path <group>` reports the projects as
+- `GITLAB_HOST=gitlab.com glab orbit status --full-path <group>` reports the projects as
   indexed.

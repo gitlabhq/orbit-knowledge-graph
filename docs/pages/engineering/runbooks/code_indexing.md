@@ -30,7 +30,7 @@ On Dedicated, the Dedicated EOC runs the commands without `--context`. Deploymen
    not the newest commit. Exit code 2: no such project, no access, or Orbit is off.
 
    ```shell
-   GITLAB_HOST=gitlab.com glab orbit graph-status --project-id <project_id>
+   GITLAB_HOST=gitlab.com glab orbit status --project-id <project_id>
    ```
 
 1. Check the checkpoint in the read-only console of the graph ClickHouse service. The backfill
