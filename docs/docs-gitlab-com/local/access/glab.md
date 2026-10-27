@@ -25,9 +25,10 @@ title: Use GitLab Orbit Local with the GitLab CLI (`glab`)
 
 The [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) is the canonical way to
 install, run, and integrate GitLab Orbit with your AI agent. `glab orbit`
-forwards one command tree to the managed `orbit` binary. `grep`, `context`, and
-the `workspace` commands use the local graph, while commands such as `query`
-and `schema` use the hosted graph.
+forwards one flat command tree to the managed `orbit` binary. The `workspace`
+commands use the local graph, and commands such as `query` and `schema` use
+the hosted graph. `grep` and `context` route on their own: they read local
+code and, in a GitLab clone, also reach GitLab.
 
 > [!note]
 > The flat `glab orbit` command tree requires `glab` 1.117 or later.
@@ -40,10 +41,11 @@ and configures supported AI agents.
 - `glab` 1.117 or later is installed.
 - A local Git repository to index.
 
-The local-graph commands (`grep`, `context`, and `workspace index`, `sql`,
-`schema`, `list`, and `mcp serve`) require no GitLab account or network
-connection once the binary is installed. Hosted commands (`query`, `status`,
-and `schema`) require an authenticated GitLab account and network access.
+The `workspace` commands require no GitLab account or network connection once
+the binary is installed. `grep` and `context` work offline on local code. With
+a GitLab sign-in, they also search the project or group behind `origin`.
+Hosted commands (`query`, `status`, and `schema`) require an authenticated
+GitLab account and network access.
 
 ## Install
 
@@ -152,7 +154,7 @@ with details on stderr. Scripts and agents can branch on success or failure.
 
 ## Billing
 
-The local-graph commands (`grep`, `context`, and the `workspace` commands)
-process data locally and do not consume GitLab Credits.
-Hosted verbs require network access, and `query`
+The `workspace` commands, and `grep` and `context` on local code, process data
+locally and do not consume GitLab Credits.
+Hosted commands require network access, and `query`
 [consumes GitLab Credits](../../remote/access/glab.md#billing).

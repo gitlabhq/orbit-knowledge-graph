@@ -66,6 +66,10 @@ The main commands that read the local graph are:
   folder.
 - `glab orbit workspace sql` runs DuckDB SQL on the local graph.
 
+`grep` and `context` also reach GitLab. A plain `grep` adds the issues, merge
+requests, and notes of the group behind `origin`. `context` reads GitLab
+targets such as `mr:42`, `issue:7`, and `pipeline:123`.
+
 ### 5. Ask Orbit's graph
 
 Orbit's graph answers what the local context can't. It holds merge requests,

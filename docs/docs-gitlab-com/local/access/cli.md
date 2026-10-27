@@ -72,6 +72,13 @@ invoke it directly.
 orbit workspace index /path/to/your/repo
 ```
 
+> [!note]
+> Earlier releases ran `index`, `sql`, `list`, and `mcp serve` at the top
+> level, for example `orbit index`. Those names still work, so existing MCP
+> configurations keep running. All except `mcp serve` print a deprecation
+> notice on stderr. `orbit schema` now shows the remote schema; use
+> `orbit workspace schema` for the local graph.
+
 GitLab Orbit Local indexes the current working tree, including uncommitted source
 files not excluded by `.gitignore`. It does not enumerate or check out other Git
 branches.

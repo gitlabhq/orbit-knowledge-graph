@@ -38,9 +38,9 @@ binary, which `glab` downloads, verifies, and keeps up to date for you. Run
 `glab orbit <command> --help` for the binary's own command reference.
 
 Hosted commands such as `query`, `status`, and `schema` call the GitLab Orbit
-Remote REST API. `glab` injects your GitLab
-credential automatically. `glab orbit setup` provides guided onboarding and
-configures supported AI agents.
+Remote REST API. `glab` injects your GitLab credential automatically.
+`glab orbit setup` provides guided onboarding and configures supported AI
+agents.
 
 ## Prerequisites
 
@@ -78,7 +78,7 @@ confirmations in scripts. Put it before the subcommand, as in
 | Subcommand | Endpoint | Purpose |
 |------------|----------|---------|
 | `glab orbit status` | `GET orbit/status` | Cluster health. |
-| `glab orbit status --full-path <path>` | `GET orbit/graph_status` | Indexing progress for a namespace, project, or full path. |
+| `glab orbit status --full-path <path>`, `--namespace-id <id>`, or `--project-id <id>` | `GET orbit/graph_status` | Indexing progress for a project or group. |
 | `glab orbit schema [node...]` | `GET orbit/schema` | Graph schema. Positional args expand specific nodes. |
 | `glab orbit query <query>` | `POST orbit/query` | Run query text, or a request envelope with `--file <file\|->`. |
 
@@ -135,10 +135,10 @@ glab orbit status --namespace-id 24
 glab orbit status --project-id 2
 ```
 
-In a terminal, `status` with a scope flag shows a summary of the indexing state and the
-largest entity counts in each domain. When the output goes to a pipe or a
-file, it prints the full JSON response. Use `--response-format raw` for JSON
-or `--response-format llm` for compact text in a terminal.
+In a terminal, `status` with a scope flag shows a summary of the indexing
+state and the largest entity counts in each domain. When the output goes to a
+pipe or a file, it prints the full JSON response. Use `--response-format raw`
+for JSON or `--response-format llm` for compact text in a terminal.
 
 ## Exit codes
 
