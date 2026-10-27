@@ -146,7 +146,7 @@ impl AnalyticsObserver {
 
 // RFC 6761 reserves .test for testing, so no real GitLab instance lives there.
 fn is_test_host(host: &str) -> bool {
-    host.ends_with(".test")
+    host.to_ascii_lowercase().ends_with(".test")
 }
 
 #[cfg(test)]
@@ -211,21 +211,23 @@ mod tests {
     }
 
     #[test]
-    fn emits_nothing_for_a_test_host() {
-        let tracker = Arc::new(InMemoryAnalyticsTracker::new());
-        let obs = AnalyticsObserver::new(
-            Some(tracker.clone()),
-            Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
-            Claims {
-                host_name: Some("gitlab.caproni.test".into()),
-                ..test_claims()
-            },
-            "query_graph",
-            UserAgent::default(),
-            "33".to_string(),
-        );
-        obs.finish(10, 0);
-        assert!(tracker.drain().is_empty());
+    fn emits_nothing_for_a_test_host_in_any_case() {
+        for host in ["gitlab.caproni.test", "GitLab.Caproni.Test"] {
+            let tracker = Arc::new(InMemoryAnalyticsTracker::new());
+            let obs = AnalyticsObserver::new(
+                Some(tracker.clone()),
+                Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
+                Claims {
+                    host_name: Some(host.into()),
+                    ..test_claims()
+                },
+                "query_graph",
+                UserAgent::default(),
+                "33".to_string(),
+            );
+            obs.finish(10, 0);
+            assert!(tracker.drain().is_empty(), "{host}");
+        }
     }
 
     #[test]
