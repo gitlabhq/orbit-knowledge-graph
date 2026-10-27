@@ -1,0 +1,70 @@
+config:
+  redaction:
+    allow:
+      ci_build: [9601, 9602, 9603, 9611, 9612, 9613]
+      ci_pipeline: [8200, 8201, 8202]
+    deny:
+      ci_build: [9621, 9622]
+  extra_seed:
+    gl_job:
+      - { id: 9601, name: rspec, status: failed, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 9602, name: rspec, status: failed, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 9603, name: lint, status: success, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 9611, name: rspec, status: success, project_id: 1002, traversal_path: "1/100/1002/" }
+      - { id: 9612, name: lint, status: failed, project_id: 1002, traversal_path: "1/100/1002/" }
+      - { id: 9613, name: lint, status: failed, project_id: 1002, traversal_path: "1/100/1002/" }
+      - { id: 9621, name: build, status: failed, project_id: 1010, traversal_path: "1/100/200/1010/" }
+      - { id: 9622, name: build, status: failed, project_id: 1010, traversal_path: "1/100/200/1010/" }
+    gl_pipeline:
+      - { id: 8200, iid: 1, status: success, ref: main, source: push, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 8201, iid: 2, status: failed, ref: main, source: push, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 8202, iid: 3, status: success, ref: main, source: external, project_id: 1000, traversal_path: "1/100/1000/" }
+
+cases:
+  - name: unpinned_project_rejected
+    description: A job name shared by two projects cannot be counted as one row
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.project_id IN [1000, 1002] RETURN j.name AS name, count(j) AS n
+    expect:
+      compile_error: filter j.project_id to one value
+
+  - name: pinned_project_counts_exact
+    description: Jobs that share a name in one pinned project count as one row
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.project_id = 1002 RETURN j.name AS name, count(j) AS n ORDER BY name
+    expect:
+      skip_requirements: [filter:project_id, aggregation_sort]
+      row_count: 2
+      row_values:
+        - { name: lint, n: 2 }
+        - { name: rspec, n: 1 }
+
+  - name: pinned_denied_project_returns_nothing
+    description: A pinned project the caller cannot read contributes no rows
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.project_id = 1010 RETURN j.name AS name, count(j) AS n
+    expect:
+      skip_requirements: [filter:project_id]
+      row_count: 0
+
+  - name: pinned_pipeline_needs_source
+    description: External and other pipelines of one project are checked apart, so a ref needs one source
+    query:
+      gql: |
+        MATCH (pl:Pipeline) WHERE pl.project_id = 1000 RETURN pl.ref AS ref, count(pl) AS n
+    expect:
+      compile_error: filter pl.source to one value
+
+  - name: pinned_pipeline_source_counts_exact
+    description: Pipelines of one project and source that share a ref count as one row
+    query:
+      gql: |
+        MATCH (pl:Pipeline) WHERE pl.project_id = 1000 AND pl.source = 'push' RETURN pl.ref AS ref, count(pl) AS n
+    expect:
+      skip_requirements: [filter:project_id, filter:source]
+      row_count: 1
+      row_values:
+        - { ref: main, n: 2 }
