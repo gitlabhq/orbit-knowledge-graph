@@ -130,6 +130,41 @@ impl Input {
         rows
     }
 
+    pub(crate) fn owner_split_nodes<'a, M>(&'a self, model: &'a M) -> Vec<(&'a str, &'a [String])>
+    where
+        M: query_data_model::OrbitQueryModel + ?Sized,
+    {
+        let mut nodes: Vec<_> = self
+            .aggregation_row_nodes(model)
+            .into_iter()
+            .filter_map(|(node, grain)| match grain {
+                query_data_model::ReadGrain::Owner { columns, split } => (split.is_some()
+                    || !self.pins_any(node, columns))
+                .then_some((node, columns.as_slice())),
+                query_data_model::ReadGrain::Entity => None,
+            })
+            .collect();
+        nodes.sort_unstable();
+        nodes
+    }
+
+    fn pins_any(&self, node: &str, columns: &[String]) -> bool {
+        let Some(node) = self.nodes.iter().find(|candidate| candidate.id == node) else {
+            return false;
+        };
+        columns.iter().any(|column| {
+            node.filters.get(column).is_some_and(|filters| {
+                filters.iter().any(|filter| {
+                    matches!(filter.op, None | Some(FilterOp::Eq))
+                        && filter
+                            .value
+                            .as_ref()
+                            .is_some_and(|value| !value.is_array() && !value.is_null())
+                })
+            })
+        })
+    }
+
     /// Whether this query has the "search shape": a single-node table scan
     /// with no relationships (traversal with 1 node + 0 relationships).
     pub fn is_search(&self) -> bool {

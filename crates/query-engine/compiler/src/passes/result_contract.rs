@@ -1,9 +1,10 @@
-use crate::ast::{Expr, Node, Query, SelectExpr};
+use crate::ast::{Expr, Function, Node, Query, SelectExpr, TableRef};
 use crate::constants::{
-    primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
+    owner_key_column, partial_count_column, primary_key_column, redaction_id_column,
+    redaction_type_column, split_partials_column, traversal_path_column,
 };
 use crate::error::{QueryError, Result};
-use crate::input::{AggFunction, ENTITY_ROWS, Input, QueryType};
+use crate::input::{AggFunction, ENTITY_ROWS, Input, OrderDirection, QueryType};
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::{EntityAuthConfig, ReadGrain};
@@ -33,12 +34,47 @@ pub struct EdgeMeta {
     pub relationship: usize,
 }
 
+pub const MAX_SPLIT_GROUPS: u32 = 1_000;
+pub const MAX_SPLIT_OWNERS: usize = 500;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Fold {
+    Add,
+    Min,
+    Max,
+    Mean { count: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SplitMeasure {
+    pub name: String,
+    pub fold: Fold,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SplitOwner {
+    pub id_column: String,
+    pub key: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerSplit {
+    pub partials_column: String,
+    pub partials: Vec<String>,
+    pub owners: Vec<SplitOwner>,
+    pub measures: Vec<SplitMeasure>,
+    pub order: Vec<(String, bool)>,
+    pub skip: usize,
+    pub limit: usize,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ResultContext {
     pub query_type: Option<QueryType>,
     nodes: HashMap<String, RedactionNode>,
     entity_auth: HashMap<String, EntityAuthConfig>,
     edges: Vec<EdgeMeta>,
+    split: Option<OwnerSplit>,
 }
 
 impl ResultContext {
@@ -99,6 +135,15 @@ impl ResultContext {
     pub fn edges(&self) -> &[EdgeMeta] {
         &self.edges
     }
+
+    pub fn split(&self) -> Option<&OwnerSplit> {
+        self.split.as_ref()
+    }
+
+    pub fn with_split(mut self, split: OwnerSplit) -> Self {
+        self.split = Some(split);
+        self
+    }
 }
 
 pub fn apply(
@@ -151,7 +196,11 @@ fn apply_with(
                 &metadata.nodes,
                 model,
                 redaction_column,
-            )?
+            )?;
+            let split_nodes = input.owner_split_nodes(model);
+            if input.query_type == QueryType::Aggregation && !split_nodes.is_empty() {
+                ctx.split = Some(roll_up(q, input, &split_nodes)?);
+            }
         }
         Node::Insert(_) => return Ok(()),
     }
@@ -182,6 +231,101 @@ fn apply_with(
         }
     }
     Ok(())
+}
+
+fn roll_up(q: &mut Query, input: &Input, nodes: &[(&str, &[String])]) -> Result<OwnerSplit> {
+    let measures = input
+        .aggregation
+        .metrics
+        .iter()
+        .map(|metric| {
+            let name = metric.output_name();
+            let fold = match metric.expr.function() {
+                AggFunction::Count | AggFunction::Sum => Fold::Add,
+                AggFunction::Min => Fold::Min,
+                AggFunction::Max => Fold::Max,
+                AggFunction::Avg => Fold::Mean {
+                    count: partial_count_column(&name),
+                },
+                AggFunction::Collect => {
+                    return Err(QueryError::PipelineInvariant(format!(
+                        "aggregation \"{name}\" cannot be folded across owners"
+                    )));
+                }
+            };
+            Ok(SplitMeasure { name, fold })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let owners: Vec<SplitOwner> = nodes
+        .iter()
+        .map(|(node, _)| SplitOwner {
+            id_column: redaction_id_column(node),
+            key: (0..)
+                .map(|index| owner_key_column(node, index))
+                .take_while(|column| q.selects_alias(column))
+                .collect(),
+        })
+        .collect();
+    let is_partial = |alias: &String| {
+        measures.iter().any(|measure| {
+            measure.name == *alias
+                || matches!(&measure.fold, Fold::Mean { count } if count == alias)
+        }) || owners
+            .iter()
+            .any(|owner| owner.id_column == *alias || owner.key.contains(alias))
+    };
+
+    let mut inner = std::mem::take(q);
+    inner.order_by.clear();
+    inner.limit = None;
+    inner.offset = None;
+    let (partials, groups): (Vec<String>, Vec<String>) = inner
+        .select
+        .iter()
+        .filter_map(|select| select.alias.clone())
+        .partition(is_partial);
+    let partials_column = split_partials_column().to_string();
+    let collected = Expr::Aggregate {
+        function: AggFunction::Collect,
+        argument: Some(Box::new(Expr::func(
+            Function::Tuple,
+            partials.iter().map(Expr::ident).collect(),
+        ))),
+        distinct: false,
+        condition: None,
+    };
+    *q = Query {
+        ctes: std::mem::take(&mut inner.ctes),
+        select: groups
+            .iter()
+            .map(|group| SelectExpr::new(Expr::ident(group), group))
+            .chain([SelectExpr::new(collected, &partials_column)])
+            .collect(),
+        from: TableRef::Subquery {
+            query: Box::new(inner),
+            alias: "owners".into(),
+        },
+        group_by: groups.iter().map(Expr::ident).collect(),
+        limit: Some(MAX_SPLIT_GROUPS + 1),
+        ..Query::default()
+    };
+
+    let order = input
+        .aggregation
+        .sort
+        .iter()
+        .map(|sort| (sort.column.clone(), sort.direction == OrderDirection::Desc))
+        .chain(groups.into_iter().map(|group| (group, false)))
+        .collect();
+    Ok(OwnerSplit {
+        partials_column,
+        partials,
+        owners,
+        measures,
+        order,
+        skip: input.skip.unwrap_or(0) as usize,
+        limit: input.fetch_limit() as usize,
+    })
 }
 
 fn ensure_in_group_by(q: &mut Query, query_type: QueryType, expr: Expr) {

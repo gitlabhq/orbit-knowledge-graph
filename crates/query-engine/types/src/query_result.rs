@@ -6,10 +6,12 @@ use compiler::constants::{
     edge_kinds_column, neighbor_id_column, neighbor_type_column, path_column,
 };
 use compiler::internal_column_prefix;
-use compiler::{QueryType, RedactionNode, ResultContext};
+use compiler::{MAX_SPLIT_GROUPS, MAX_SPLIT_OWNERS, QueryType, RedactionNode, ResultContext};
 
 use super::{ResourceAuthorization, ResourceCheck};
 use orbit_arrow::{ArrowUtils, ColumnValue};
+
+mod owner_split;
 
 #[derive(Debug, Clone)]
 pub struct NodeRef {
@@ -170,14 +172,39 @@ impl QueryResultRow {
 pub struct QueryResult {
     rows: Vec<QueryResultRow>,
     ctx: ResultContext,
+    split_ends: Option<Vec<usize>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct QueryResultError;
+pub enum QueryResultError {
+    InvalidMetadata,
+    TooManyGroups,
+    TooManyOwners,
+}
+
+impl QueryResultError {
+    pub fn is_limit(self) -> bool {
+        !matches!(self, Self::InvalidMetadata)
+    }
+}
 
 impl std::fmt::Display for QueryResultError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("query result has invalid dynamic authorization metadata")
+        match self {
+            Self::InvalidMetadata => {
+                formatter.write_str("query result has invalid dynamic authorization metadata")
+            }
+            Self::TooManyGroups => write!(
+                formatter,
+                "The aggregation returns more than {MAX_SPLIT_GROUPS} groups that span several \
+                 projects or groups. Filter it to fewer values or to one project."
+            ),
+            Self::TooManyOwners => write!(
+                formatter,
+                "The aggregation spans more than {MAX_SPLIT_OWNERS} projects or groups whose \
+                 access must be checked. Filter it to fewer projects or to one project."
+            ),
+        }
     }
 }
 
@@ -221,7 +248,7 @@ impl<'a> DynamicNodeColumns<'a> {
             }
             Self::Neighbor { ids, types } => {
                 if ids.is_null(row) || types.is_null(row) {
-                    return Err(QueryResultError);
+                    return Err(QueryResultError::InvalidMetadata);
                 }
                 Ok(vec![NodeRef::new(ids.value(row), types.value(row))])
             }
@@ -233,38 +260,38 @@ fn column<'a, A: 'static>(batch: &'a RecordBatch, name: &str) -> Result<&'a A, Q
     let index = batch
         .schema()
         .index_of(name)
-        .map_err(|_| QueryResultError)?;
+        .map_err(|_| QueryResultError::InvalidMetadata)?;
     batch
         .column(index)
         .as_any()
         .downcast_ref()
-        .ok_or(QueryResultError)
+        .ok_or(QueryResultError::InvalidMetadata)
 }
 
 fn path_nodes(path: &ListArray, row: usize) -> Result<Vec<NodeRef>, QueryResultError> {
     if path.is_null(row) {
-        return Err(QueryResultError);
+        return Err(QueryResultError::InvalidMetadata);
     }
     let values = path.value(row);
     let nodes = values
         .as_any()
         .downcast_ref::<StructArray>()
-        .ok_or(QueryResultError)?;
+        .ok_or(QueryResultError::InvalidMetadata)?;
     if nodes.null_count() > 0 || nodes.num_columns() < 2 {
-        return Err(QueryResultError);
+        return Err(QueryResultError::InvalidMetadata);
     }
     let ids = nodes
         .column(0)
         .as_any()
         .downcast_ref::<Int64Array>()
-        .ok_or(QueryResultError)?;
+        .ok_or(QueryResultError::InvalidMetadata)?;
     let types = nodes
         .column(1)
         .as_any()
         .downcast_ref::<StringArray>()
-        .ok_or(QueryResultError)?;
+        .ok_or(QueryResultError::InvalidMetadata)?;
     if ids.null_count() > 0 || types.null_count() > 0 {
-        return Err(QueryResultError);
+        return Err(QueryResultError::InvalidMetadata);
     }
     Ok((0..nodes.len())
         .map(|index| NodeRef::new(ids.value(index), types.value(index)))
@@ -276,6 +303,14 @@ impl QueryResult {
         batches: &[RecordBatch],
         ctx: &ResultContext,
     ) -> Result<Self, QueryResultError> {
+        if let Some(split) = ctx.split() {
+            let (rows, ends) = owner_split::expand(batches, split, ctx)?;
+            return Ok(Self {
+                rows,
+                ctx: ctx.clone(),
+                split_ends: Some(ends),
+            });
+        }
         let is_path_finding = ctx.query_type == Some(QueryType::PathFinding);
 
         let mut rows = Vec::new();
@@ -298,6 +333,7 @@ impl QueryResult {
         Ok(Self {
             rows,
             ctx: ctx.clone(),
+            split_ends: None,
         })
     }
 
@@ -408,6 +444,9 @@ impl QueryResult {
             }
         }
 
+        if let (Some(split), Some(ends)) = (self.ctx.split(), self.split_ends.take()) {
+            self.rows = owner_split::fold(std::mem::take(&mut self.rows), &ends, split);
+        }
         redacted_count
     }
 

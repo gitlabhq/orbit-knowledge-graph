@@ -385,6 +385,27 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         Ok(())
     }
 
+    fn check_owner_split_measures(&self, input: &Input) -> Result<()> {
+        let model = self.model.get();
+        let Some((node, columns)) = input.owner_split_nodes(model).into_iter().next() else {
+            return Ok(());
+        };
+        let Some(metric) = input
+            .aggregation
+            .metrics
+            .iter()
+            .find(|metric| metric.distinct)
+        else {
+            return Ok(());
+        };
+        Err(QueryError::Validation(format!(
+            "aggregation \"{}\": count(DISTINCT ...) cannot be added up across several {} values of \"{node}\"; filter {node}.{} to one value or drop DISTINCT",
+            metric.output_name(),
+            columns.join("/"),
+            columns[0],
+        )))
+    }
+
     fn check_aggregation_text_filters(&self, input: &Input) -> Result<()> {
         let model = self.model.get();
         let row_nodes = input.aggregation_row_nodes(model);
@@ -1479,6 +1500,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         }
 
         self.check_aggregation_text_groups(input)?;
+        self.check_owner_split_measures(input)?;
         self.check_aggregation_text_filters(input)?;
 
         if let Some(sort) = &input.aggregation.sort {

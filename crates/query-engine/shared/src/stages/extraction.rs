@@ -1,3 +1,4 @@
+use compiler::RejectionReason;
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 use types::QueryResult;
 
@@ -21,7 +22,17 @@ impl PipelineStage for ExtractionStage {
             .ok_or_else(|| PipelineError::Execution("ExecutionOutput not found in phases".into()))
             .inspect_err(|e| obs.record_error(e))?;
         let query_result = QueryResult::from_batches(&input.batches, &input.result_context)
-            .map_err(|error| PipelineError::Authorization(error.to_string()))
+            .map_err(|error| {
+                if error.is_limit() {
+                    PipelineError::Compile {
+                        message: error.to_string(),
+                        client_safe: true,
+                        reason: RejectionReason::Limit,
+                    }
+                } else {
+                    PipelineError::Authorization(error.to_string())
+                }
+            })
             .inspect_err(|e| obs.record_error(e))?;
         Ok(ExtractionOutput { query_result })
     }

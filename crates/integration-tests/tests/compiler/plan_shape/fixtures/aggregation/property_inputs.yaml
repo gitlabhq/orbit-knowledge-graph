@@ -24,10 +24,10 @@ physical:
       expect:
         - (Deduplicate LimitBy ... (_))
         - (Scan Table(gl_definition) AS d)
-        - (Aggregate group d.name, group d.project_id, d.name AS d_name, COUNT() AS n (_))
+        - (Aggregate group d.name, group d.project_id, d.name AS d_name, d.project_id AS _orbit_d_owner0, COUNT() AS n (_))
     emitted:
       expect:
-        - (Aggregate group d.name, group d.project_id, Concat(Substring(d.name, 1, 349525), If(ByteLength(d.name) > ByteLength(Substring(d.name, 1, 349525)), ' [truncated]', '')) AS d_name, COUNT() AS n (_))
+        - (Aggregate group d.name, group d.project_id, Concat(Substring(d.name, 1, 349525), If(ByteLength(d.name) > ByteLength(Substring(d.name, 1, 349525)), ' [truncated]', '')) AS d_name, d.project_id AS _orbit_d_owner0, COUNT() AS n (_))
   duckdb:
     planned:
       expect:
