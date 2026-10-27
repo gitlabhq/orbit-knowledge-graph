@@ -14,10 +14,12 @@ use crate::database::schema::graph_lacks_commit;
 use crate::database::{GraphWriter, lock_index_state, manifest, wait_timeout};
 use crate::{tui, workspace};
 
+mod detached;
 mod input;
 mod output;
 mod state;
 
+pub(crate) use detached::{DetachedStatus, HandshakeTimedOut, index_detached};
 pub(crate) use output::FamilyOutput;
 use state::Project;
 
@@ -33,7 +35,7 @@ pub(crate) struct Options {
     pub wait: Option<Duration>,
     /// Skip a repository whose revision is already indexed, once any running index finished.
     pub skip_current: bool,
-    /// A file to create once this index holds a repository's state and revision locks.
+    /// A file to create once this index holds a repository's locks and shows as `indexing`.
     pub ready_file: Option<PathBuf>,
 }
 
@@ -242,6 +244,7 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
     }
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
     let wait = options.wait.unwrap_or_else(wait_timeout);
+    let mut ready = options.ready_file.as_deref().map(detached::ReadyFile::new);
     let mut outputs = Vec::new();
     for repo in repos {
         let started = std::time::Instant::now();
@@ -262,10 +265,6 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
             && db_path.exists()
             && manifest::load_incremental_state(&manifest_path, git.project_id)?.is_some();
         let writer = GraphWriter::open_waiting(&db_path, &git, wait)?;
-        if let Some(ready_file) = &options.ready_file {
-            std::fs::write(ready_file, std::process::id().to_string())
-                .context("failed to signal that the index holds its locks")?;
-        }
         let progress = options
             .progress
             .then(|| Arc::new(RepositoryBars::open(&git)));
@@ -276,6 +275,9 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
             None,
             &db_path,
         )?;
+        if let Some(ready) = &mut ready {
+            ready.signal()?;
+        }
         let project = Project {
             git: &git,
             writer: &writer,
@@ -377,7 +379,7 @@ fn refresh_wait() -> Duration {
         .map_or(REFRESH_WAIT, Duration::from_millis)
 }
 
-fn detached_command() -> Option<Command> {
+pub(super) fn detached_command() -> Option<Command> {
     let mut command = Command::new(std::env::current_exe().ok()?);
     command
         .stdin(Stdio::null())
@@ -395,80 +397,6 @@ fn spawn_refresh(repo: &Path, db: Option<&Path>, files: &[String]) -> Option<Chi
         command.arg("--db").arg(db);
     }
     command.arg("--").args(files).spawn().ok()
-}
-
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
-
-pub(crate) struct DetachedIndex {
-    pub pid: u32,
-    pub finished: bool,
-    pub log: PathBuf,
-}
-
-/// Starts `orbit workspace index --wait` detached and returns once that child reports, through
-/// a file it creates, that it holds a repository's state and revision locks. Only the child can
-/// say so: a lock held by another index or by a reader says nothing about it, and a reader
-/// started after this returns must wait for the child instead of reading the old graph. Waiting
-/// for open readers can delay the return, up to the handshake timeout. Indexing a directory of
-/// repositories signals on whichever repository the child locks first.
-pub(crate) fn index_detached(path: &Path, options: &Options) -> Result<DetachedIndex> {
-    let workspace = workspace::Workspace::open_default()?;
-    if workspace.resolve_repos(path)?.is_empty() {
-        let folder = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        return Err(super::NoRepositoryFound(folder).into());
-    }
-    let log = workspace.detached_index_log_path();
-    let ready_file = workspace.detached_index_ready_path();
-    if let Some(parent) = log.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let _ = std::fs::remove_file(&ready_file);
-
-    let mut command = detached_command().context("cannot locate the orbit executable")?;
-    command
-        .args(["workspace", "index", "--wait", "--ready-file"])
-        .arg(&ready_file)
-        .arg(path)
-        .stderr(std::fs::File::create(&log).context("failed to open the detached index log")?);
-    if let Some(db) = &options.db {
-        command.arg("--db").arg(db);
-    }
-    if let Some(seconds) = options.budget_seconds {
-        command.arg("--budget").arg(seconds.to_string());
-    }
-    let mut child = command
-        .spawn()
-        .context("failed to start the background index")?;
-    let pid = child.id();
-
-    let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
-    let outcome = loop {
-        if let Some(status) = child.try_wait()? {
-            anyhow::ensure!(
-                status.success(),
-                "the background index exited early ({status}); see {}",
-                log.display()
-            );
-            break true;
-        }
-        if ready_file.exists() {
-            break false;
-        }
-        anyhow::ensure!(
-            Instant::now() < deadline,
-            "the background index (pid {pid}) is still waiting for its locks after {} s, \
-             probably for readers or another index, and keeps waiting; see {}",
-            HANDSHAKE_TIMEOUT.as_secs(),
-            log.display()
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    };
-    let _ = std::fs::remove_file(&ready_file);
-    Ok(DetachedIndex {
-        pid,
-        finished: outcome,
-        log,
-    })
 }
 
 fn finished_within(mut child: Child, wait: Duration) -> bool {

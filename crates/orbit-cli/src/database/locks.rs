@@ -35,7 +35,7 @@ impl fmt::Display for WaitTimedOut {
             Some(started_ago) => write!(
                 f,
                 "{} is still indexing (started {} s ago); gave up after waiting {waited} s. \
-                 Retry, or raise ORBIT_WAIT_TIMEOUT_MS.",
+                 Retry, or raise the wait with --timeout or ORBIT_WAIT_TIMEOUT_MS.",
                 self.path.display(),
                 started_ago.as_secs()
             ),
@@ -71,6 +71,14 @@ pub fn read_lock_database(path: &Path) -> Result<Option<File>> {
     }
     let lock = acquire_database_lock(path, true, wait_timeout(), Some(path))?;
     Ok(path.try_exists()?.then_some(lock))
+}
+
+pub fn index_is_running(state_dir: &Path) -> Result<bool> {
+    match open_lock_file(state_dir)?.try_lock_shared() {
+        Ok(()) => Ok(false),
+        Err(TryLockError::WouldBlock) => Ok(true),
+        Err(TryLockError::Error(error)) => Err(error.into()),
+    }
 }
 
 fn open_lock_file(path: &Path) -> Result<File> {

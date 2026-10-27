@@ -47,18 +47,6 @@ impl Workspace {
             .join(format!("{}.duckdb", git.commit_sha))
     }
 
-    /// Where a detached index leaves its stderr, for whoever finds it failed.
-    pub fn detached_index_log_path(&self) -> PathBuf {
-        self.root.join("var/detached-index.log")
-    }
-
-    /// A file a detached index creates once it holds its locks, named for the starting process.
-    pub fn detached_index_ready_path(&self) -> PathBuf {
-        self.root
-            .join("var")
-            .join(format!("detached-index-ready-{}", std::process::id()))
-    }
-
     pub fn var_dir(&self, project_id: i64) -> PathBuf {
         self.root.join("var").join(project_id.to_string())
     }

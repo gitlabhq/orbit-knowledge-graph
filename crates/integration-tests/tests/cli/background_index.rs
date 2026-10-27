@@ -9,8 +9,12 @@ const EXIT_WAIT_TIMED_OUT: i32 = 75;
 
 /// Large enough that an index outlasts the few milliseconds the assertions below need.
 fn slow_repo(parent: &Path) -> std::path::PathBuf {
+    repo_with_files(parent, 1500)
+}
+
+fn repo_with_files(parent: &Path, count: usize) -> std::path::PathBuf {
     let repo = parent.join("repo");
-    let files: Vec<(String, String)> = (0..1500)
+    let files: Vec<(String, String)> = (0..count)
         .map(|n| {
             let body = (0..20)
                 .map(|m| {
@@ -264,7 +268,7 @@ fn async_index_of_a_directory_of_repositories_returns_promptly() {
     let data_dir = tempfile::tempdir().unwrap();
     let scratch = tempfile::tempdir().unwrap();
     let workspace = scratch.path().join("workspace");
-    let big = slow_repo(&workspace);
+    let big = repo_with_files(&workspace, 3000);
     std::fs::rename(&big, workspace.join("big")).unwrap();
     init_repo_at(&workspace.join("small"), &[("a.py", "def a(): pass\n")]);
 
@@ -276,7 +280,11 @@ fn async_index_of_a_directory_of_repositories_returns_promptly() {
     );
 
     assert!(output.status.success(), "{}", stderr_of(&output));
-    assert!(began.elapsed() < Duration::from_secs(10));
+    assert!(
+        began.elapsed() < Duration::from_secs(2),
+        "returned after {:?}, before the child could signal",
+        began.elapsed()
+    );
 }
 
 #[test]
@@ -302,13 +310,14 @@ fn a_failed_background_index_leaves_its_error_in_the_log() {
         data_dir.path(),
     );
 
-    let log = data_dir.path().join("var/detached-index.log");
     assert!(!output.status.success());
-    assert!(
-        stderr_of(&output).contains("detached-index.log"),
-        "{}",
-        stderr_of(&output)
-    );
+    let stderr = stderr_of(&output);
+    let log = stderr
+        .split("see ")
+        .nth(1)
+        .expect("the error names the log")
+        .trim();
+    assert!(log.ends_with(".log"), "{stderr}");
     assert!(
         std::fs::read_to_string(log)
             .unwrap()
@@ -396,4 +405,43 @@ fn hold_revision_lock_shared(data_dir: &Path, repo: &Path) -> std::fs::File {
     lock.unlock().unwrap();
     lock.lock_shared().unwrap();
     lock
+}
+
+#[test]
+fn async_index_behind_a_running_index_returns_queued_at_once() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let repo = slow_repo(scratch.path());
+    let first = start_async(&repo, data_dir.path());
+    assert_eq!(first["status"], "indexing", "{first}");
+
+    let second = start_async(&repo, data_dir.path());
+
+    assert_eq!(second["status"], "queued", "{second}");
+    assert_ne!(second["log"], first["log"]);
+}
+
+#[test]
+fn async_index_that_cannot_get_its_locks_exits_with_the_distinct_code() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let repo = scratch.path().join("repo");
+    init_repo_at(&repo, &[("a.py", "def a(): pass\n")]);
+    let _reader = hold_revision_lock_shared(data_dir.path(), &repo);
+    std::fs::write(repo.join("b.py"), "def b(): pass\n").unwrap();
+
+    let output = orbit_cmd()
+        .args(["workspace", "index", "--async"])
+        .current_dir(&repo)
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .env("ORBIT_WAIT_TIMEOUT_MS", "500")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(EXIT_WAIT_TIMED_OUT));
+    assert!(
+        stderr_of(&output).contains("keeps waiting; see"),
+        "{}",
+        stderr_of(&output)
+    );
 }

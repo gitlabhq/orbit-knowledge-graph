@@ -32,6 +32,9 @@ trigger an index.
 A read waits up to 10 minutes for a running index and then exits with code 75.
 To index ahead of time without blocking a short shell timeout, run
 `workspace index --async`, which returns once the background index holds its locks.
+It prints `{"status": ...}` with `indexing`, `indexed`, or `queued` (another index
+of the repository already runs). If open readers hold the locks for 30 s, it exits
+with code 75 while the background index keeps waiting.
 `workspace index --wait` waits for a running index (`--timeout SECONDS`) and then
 indexes in the foreground, which is the default. For production data, use the `orbit` skill.
 

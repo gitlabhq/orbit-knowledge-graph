@@ -827,6 +827,10 @@ async fn main() -> Result<()> {
         eprintln!("{message}");
     } else if let Some(timed_out) = err.downcast_ref::<database::WaitTimedOut>() {
         eprintln!("{timed_out}");
+    } else if let Some(timed_out) =
+        err.downcast_ref::<commands::index::incremental::HandshakeTimedOut>()
+    {
+        eprintln!("{timed_out}");
     } else if err.is::<commands::grep::NoMatches>() {
     } else if !tui::is_cancelled(err) {
         return result;
@@ -847,7 +851,9 @@ fn exit_code_for(err: &anyhow::Error) -> i32 {
         remote.exit_code
     } else if tui::is_cancelled(err) {
         130
-    } else if err.is::<database::WaitTimedOut>() {
+    } else if err.is::<database::WaitTimedOut>()
+        || err.is::<commands::index::incremental::HandshakeTimedOut>()
+    {
         database::WAIT_TIMED_OUT_EXIT_CODE
     } else {
         1
