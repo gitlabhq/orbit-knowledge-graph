@@ -49,7 +49,8 @@ pub enum SchemaNode {
     Name(String),
     Listed {
         name: String,
-        props: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        props: Vec<String>,
     },
     Expanded {
         name: String,
@@ -107,27 +108,29 @@ const OVERVIEW_DOMAINS: [&str; 3] = ["core", "code_review", "plan"];
 fn build_overview_domains(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaDomain> {
     let mut domains = build_domains(ontology, scope, &[], None, format_compact_property);
     for domain in &mut domains {
-        if !OVERVIEW_DOMAINS.contains(&domain.name.as_str()) {
-            continue;
-        }
+        let listed = OVERVIEW_DOMAINS.contains(&domain.name.as_str());
         for node in &mut domain.nodes {
             let SchemaNode::Name(name) = node else {
                 continue;
             };
-            let Some(entity) = ontology.get_node(name) else {
-                continue;
+            let props = match (listed, ontology.get_node(name)) {
+                (true, Some(entity)) => {
+                    let fields: Vec<&Field> = match scope {
+                        IntrospectionScope::Local => {
+                            ontology.local_entity_fields(name).unwrap_or_default()
+                        }
+                        IntrospectionScope::All => entity.listed_fields().collect(),
+                    };
+                    fields
+                        .iter()
+                        .map(|field| format_listed_property(field))
+                        .collect()
+                }
+                _ => Vec::new(),
             };
-            let fields: Vec<&Field> = match scope {
-                IntrospectionScope::Local => ontology.local_entity_fields(name).unwrap_or_default(),
-                IntrospectionScope::All => entity.listed_fields().collect(),
-            };
-            let props = fields
-                .iter()
-                .map(|field| format_listed_property(field))
-                .collect::<Vec<_>>();
             *node = SchemaNode::Listed {
                 name: name.clone(),
-                props: props.join(", "),
+                props,
             };
         }
     }
@@ -483,13 +486,24 @@ mod tests {
                     _ => None,
                 })
         };
-        assert!(listed("User").unwrap().contains("username"));
+        assert!(listed("User").unwrap().iter().any(|p| p == "username"));
         assert!(
             listed("WorkItem")
                 .unwrap()
-                .contains("state (opened|closed)")
+                .iter()
+                .any(|p| p == "state (opened|closed)")
         );
-        assert!(listed("Pipeline").is_none());
+        assert!(listed("Pipeline").unwrap().is_empty());
+        let raw = serde_json::to_value(&overview).unwrap();
+        assert!(
+            raw["domains"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|domain| domain["nodes"].as_array().unwrap())
+                .all(|node| node.is_object()
+                    && node["props"].as_array().is_none_or(|p| !p.is_empty()))
+        );
 
         let node = build_compact_schema_response(&ont, IntrospectionScope::All, Some("WorkItem"));
         let props = expanded_props(&node, "WorkItem");
