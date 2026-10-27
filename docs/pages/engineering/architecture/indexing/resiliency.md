@@ -30,7 +30,10 @@ later.
 
 ```mermaid
 flowchart LR
-    Queue[Work queue] --> Worker -- crashed --> Again[Delivered again] -- gave up --> Dead[Dead letters]
+    Queue[Work queue] --> Worker
+    Worker -- done --> Ack[Acknowledged]
+    Worker -- crashed or failed --> Queue
+    Worker -- gave up --> Dead[Dead letters]
 ```
 
 Every part of indexing leans on the same few safety nets. Work arrives as
