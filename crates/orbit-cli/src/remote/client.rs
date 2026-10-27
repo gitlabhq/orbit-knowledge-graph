@@ -17,7 +17,6 @@ const READ_TIMEOUT: Duration = Duration::from_secs(120);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const SKILL_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
-const STATUS_PATH: &str = "/api/v4/orbit/status";
 const QUERY_PATH: &str = "/api/v4/orbit/query";
 const GRAPHQL_PATH: &str = "/api/graphql";
 const SKILLS_PATH: &str = "/api/v4/orbit/skills";
@@ -143,10 +142,6 @@ impl OrbitClient {
             .map(str::to_string);
         let body = read_body(response).await?;
         Ok(SkillHttpResponse { status, etag, body })
-    }
-
-    pub(crate) async fn get_status(&self) -> Result<Vec<u8>, RemoteError> {
-        self.get_bytes(STATUS_PATH, &[]).await
     }
 
     pub(crate) async fn get_grep(&self, params: &[(&str, String)]) -> Result<Vec<u8>, RemoteError> {
@@ -405,7 +400,7 @@ pub(crate) fn gitlab_usable(dir: &Path) -> bool {
     block_on_short(async move {
         match origin {
             Some(path) => client.check_graph_status(path).await,
-            None => client.get_status().await.map(drop),
+            None => client.check_status().await,
         }
     })
     .is_some()

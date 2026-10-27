@@ -383,18 +383,69 @@ fn ontology_fails_on_a_graphql_error() {
     );
 }
 
+const SERVICE_STATUS_RESPONSE: &str = r#"{"data":{"orbit":{"serviceStatus":{
+    "state":"HEALTHY","version":"0.161.0","components":[{"name":"clickhouse","state":"HEALTHY"}]}}}}"#;
+
 #[test]
-fn status_endpoint_is_get_orbit_status() {
-    let (base_url, handle) = serve_once(r#"{"status":"healthy"}"#, "application/json");
+fn status_asks_graphql_for_the_service_status() {
+    let (base_url, handle) = serve_once(SERVICE_STATUS_RESPONSE, "application/json");
     let output = run_orbit(&base_url, &["status"]);
     let request = handle.join().expect("join mock");
 
     assert!(
         output.status.success(),
-        "stderr: {}",
+        "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(request.request_line, "GET /api/v4/orbit/status HTTP/1.1");
+    assert_eq!(request.request_line, "POST /api/graphql HTTP/1.1");
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(
+        stdout,
+        serde_json::json!({
+            "state": "HEALTHY",
+            "version": "0.161.0",
+            "components": [{"name": "clickhouse", "state": "HEALTHY"}]
+        })
+    );
+}
+
+#[test]
+fn status_falls_back_to_rest_when_graphql_has_no_service_status() {
+    let (base_url, handle) = serve_in_order(&[
+        r#"{"errors":[{"message":"Field 'serviceStatus' doesn't exist on type 'Orbit'",
+            "path":["query ServiceStatus","orbit","serviceStatus"],
+            "extensions":{"code":"undefinedField","typeName":"Orbit","fieldName":"serviceStatus"}}]}"#,
+        r#"{"user":{"available":true},"system":{"status":"healthy"}}"#,
+    ]);
+    let output = run_orbit(&base_url, &["status"]);
+    let requests = handle.join().expect("join mock");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        requests[1].request_line,
+        "GET /api/v4/orbit/status HTTP/1.1"
+    );
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(stdout, serde_json::json!({"status": "healthy"}));
+}
+
+#[test]
+fn status_without_orbit_for_the_user_exits_unavailable() {
+    let (base_url, handle) = serve_once(
+        r#"{"data":{"orbit":{"serviceStatus":null}}}"#,
+        "application/json",
+    );
+    let output = run_orbit(&base_url, &["status"]);
+    handle.join().expect("join mock");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Orbit is not available for your user")
+    );
 }
 
 const GRAPH_STATUS_RESPONSE: &str = r#"{"data":{"group":null,"project":{"orbit":{
@@ -538,19 +589,13 @@ fn run_graph_status_without_orbit(bodies: &'static [&'static str]) -> std::proce
     let (base_url, handle) = serve_in_order(bodies);
     let output = run_orbit(&base_url, &["graph-status", "--full-path", "gsd-alpha"]);
     let requests = handle.join().expect("join mock");
-    assert_eq!(
-        requests[1].request_line,
-        "GET /api/v4/orbit/status HTTP/1.1"
-    );
+    assert_eq!(requests[1].request_line, "POST /api/graphql HTTP/1.1");
     output
 }
 
 #[test]
 fn graph_status_without_orbit_for_the_scope_exits_forbidden() {
-    let output = run_graph_status_without_orbit(&[
-        STATUS_WITHOUT_ORBIT,
-        r#"{"user":{"available":true},"system":{"status":"healthy"}}"#,
-    ]);
+    let output = run_graph_status_without_orbit(&[STATUS_WITHOUT_ORBIT, SERVICE_STATUS_RESPONSE]);
 
     assert_eq!(output.status.code(), Some(4));
     assert!(
@@ -561,10 +606,24 @@ fn graph_status_without_orbit_for_the_scope_exits_forbidden() {
 }
 
 #[test]
+fn graph_status_without_orbit_for_the_scope_exits_forbidden_when_the_token_cannot_read_status() {
+    let output = run_graph_status_without_orbit(&[
+        STATUS_WITHOUT_ORBIT,
+        r#"{"data":{"orbit":{"serviceStatus":null}},"errors":[{"message":"insufficient scope",
+            "path":["orbit","serviceStatus"]}]}"#,
+    ]);
+
+    assert_eq!(output.status.code(), Some(4));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Orbit is not turned on for gsd-alpha")
+    );
+}
+
+#[test]
 fn graph_status_without_orbit_for_the_user_exits_unavailable() {
     let output = run_graph_status_without_orbit(&[
         STATUS_WITHOUT_ORBIT,
-        r#"{"user":{"available":false},"system":null}"#,
+        r#"{"data":{"orbit":{"serviceStatus":null}}}"#,
     ]);
 
     assert_eq!(output.status.code(), Some(2));

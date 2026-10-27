@@ -12,10 +12,11 @@ use self::summary::Summary;
 use super::api::ErrorExtensions;
 use super::client::OrbitClient;
 use super::error::{
-    EXIT_FORBIDDEN, EXIT_GENERIC, RemoteError, build_graphql_error, build_not_found_error,
+    EXIT_FORBIDDEN, EXIT_GENERIC, EXIT_UNAVAILABLE, RemoteError, build_graphql_error,
+    build_not_found_error,
 };
 use super::legacy;
-use super::status::select_status_output;
+use super::status::read_service_status;
 use super::{ResponseFormat, pretty_value, write_stdout};
 use crate::tui;
 
@@ -158,14 +159,11 @@ fn is_orbit_field_error(error: &GraphQlError<ErrorExtensions>) -> bool {
 }
 
 async fn explain_missing_status(client: &OrbitClient, scope: &Scope) -> RemoteError {
-    let unavailable = match client.get_status().await {
-        Ok(body) => select_status_output(&body).err(),
-        Err(error) => Some(error),
-    };
-    unavailable.unwrap_or_else(|| {
-        RemoteError::new(
+    match read_service_status(client).await {
+        Err(error) if error.exit_code == EXIT_UNAVAILABLE => error,
+        _ => RemoteError::new(
             EXIT_FORBIDDEN,
             format!("Orbit is not turned on for {scope}, or your role is below Reporter."),
-        )
-    })
+        ),
+    }
 }
