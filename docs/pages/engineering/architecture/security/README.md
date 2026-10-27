@@ -32,7 +32,7 @@ The design has three parts:
 
 - **A permission tree for each request.** The service sends a tree of the traversal paths of the user, with the role on each path. Orbit compiles that tree into scope filters, which prune the data before the graph store reads it.
 - **A decision for each single entity.** The redaction layer asks the service whether the user can read one entity, by type and ID. The service applies its own rules, and Orbit drops each denied entity.
-- **No permission state in Orbit.** Orbit stores no memberships, roles, or policies. A different authorization service can replace GitLab if it supplies the same tree and the same decisions.
+- **Little permission state in Orbit.** Orbit stores no memberships or roles. It keeps only the access rules in the ontology, such as the minimum role of each entity. A different authorization service can replace GitLab if it supplies the same tree and the same decisions.
 
 ## Authorization tiers
 
@@ -66,7 +66,7 @@ Tier 3 checks the entity in a group key, but not the counted entities, so aggreg
 ## Service boundary
 
 No caller connects to Orbit directly.
-GitLab authenticates the caller, and the two services then authenticate each other with a shared secret and TLS.
+GitLab authenticates the caller, and the two services then authenticate each other with a shared secret and [TLS](#tls).
 
 GitLab and Orbit share one secret, a random 32-byte key that each side reads from a mounted secret file.
 The secret never travels in a request.
@@ -82,13 +82,19 @@ The indexer also calls GitLab, for example to fetch repository data.
 For those calls, Orbit signs its own short-lived token with a signing key in the same way.
 To replace a secret, see the [secret rotation runbook](../../runbooks/secret_rotation.md).
 
-The token authenticates GitLab to Orbit.
-Transport Layer Security (TLS), when the deployment turns it on, authenticates Orbit to GitLab and encrypts the stream.
-TLS is one-way: Orbit presents a server certificate and does not check a client certificate, because the token already proves the caller.
 Setup creates a separate read-only user for the graph store.
 The Helm chart connects the query service with that user.
 Each release image is signed, and images do not run as root.
 A fixable vulnerability of high or critical severity blocks a release.
+
+## TLS
+
+The token authenticates GitLab to Orbit.
+Transport Layer Security (TLS) authenticates Orbit to GitLab and encrypts the stream.
+
+- **One-way TLS.** Orbit presents a server certificate. Orbit does not check a client certificate, because the token already proves the caller.
+- **Off by default.** A deployment turns on TLS for the query listener with a certificate and a key.
+- **Internal listeners.** The probe and health check listeners have a separate TLS setting. See the [internal TLS checklist](../../development/server-configuration.md#turn-on-internal-tls).
 
 ## FIPS
 
@@ -99,8 +105,6 @@ The `orbit` CLI is out of scope, because the module does not build on Windows an
 - The server does not start unless FIPS mode is on. The `starting` log line shows the AWS-LC version.
 - Continuous integration (CI) fails when the `ring` library or the non-FIPS AWS-LC library enters the server build or binary.
 - A unit test pins the module generation. CI fails when a dependency bump crosses a generation, because that change is a compliance event.
-
-To turn on TLS between pods, see the [internal TLS checklist](../../development/server-configuration.md#turn-on-internal-tls).
 
 ## Decisions
 
