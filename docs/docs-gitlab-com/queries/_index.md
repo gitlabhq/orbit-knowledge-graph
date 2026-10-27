@@ -41,6 +41,27 @@ Results include only the data that the token owner can access.
 - For GitLab Orbit data in the GraphQL API, such as the groups where GitLab Orbit is turned on and the schema,
   see [`Query.orbit`](https://docs.gitlab.com/api/graphql/reference/queries/#orbit).
 
+## Rate limits
+
+Each user can send 60 requests per minute to GitLab Orbit.
+The CLI, the API, MCP clients, and GitLab Duo Agent Platform share this limit.
+
+These requests count toward the limit:
+
+- Queries, including the `query_graph` tool on the [MCP endpoint](../agents/mcp.md) and the
+  [GitLab MCP server](https://docs.gitlab.com/user/model_context_protocol/mcp_server/).
+- `grep` and `context` requests from the [CLI](../cli.md).
+  `grep` also counts toward the [search rate limit](https://docs.gitlab.com/administration/instance_limits/#search-rate-limit).
+- Skill downloads.
+
+Requests for the schema, the status, and the list of tools do not count.
+
+When you exceed the limit, the API and the MCP endpoint return `429 Too Many Requests` with a `Retry-After` header.
+The GitLab MCP server returns a tool error with the number of seconds to wait.
+To stay under the limit, combine small queries into one [aggregation](query-language.md#aggregate-results).
+
+For the limits on a single query, see [query language limits](query-language.md#limits).
+
 ## Query shapes
 
 | Use case | Query shape |
