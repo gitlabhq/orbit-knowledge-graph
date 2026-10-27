@@ -8,6 +8,15 @@ spec:
   template:
     spec:
       restartPolicy: Never
+{{- if .Values.cliImage }}
+      initContainers:
+      - name: orbit-cli
+        image: {{ .Values.cliImage }}
+        command: ["cp", "-r", "/opt/orbit-cli/.", "/orbit-cli/"]
+        volumeMounts:
+        - name: orbit-cli
+          mountPath: /orbit-cli
+{{- end }}
       containers:
       - name: robot
         image: {{ .Values.image }}
@@ -44,6 +53,8 @@ spec:
           value: {{ .Values.indexingBudgetMultiplier | quote }}
         - name: CODE_GRAPH_INCREMENTAL
           value: {{ .Values.codeGraphIncremental | quote }}
+        - name: E2E_GITLAB_LANE
+          value: {{ .Values.gitlabLane | quote }}
         - name: GITLAB_URL
           value: "http://gitlab-webservice-default.{{ .Values.namespaces.gitlab }}.svc.cluster.local:8181"
         - name: GITLAB_ROOT_PAT
@@ -51,6 +62,10 @@ spec:
             secretKeyRef:
               name: {{ .Values.rootPatSecret }}
               key: {{ .Values.rootPatSecretKey }}
+{{- if .Values.cliImage }}
+        - name: ORBIT_CLI_DIR
+          value: /orbit-cli
+{{- end }}
         volumeMounts:
         - name: tests
           mountPath: /tests
@@ -58,6 +73,11 @@ spec:
         - name: fixtures
           mountPath: /fixtures-archive
           readOnly: true
+{{- if .Values.cliImage }}
+        - name: orbit-cli
+          mountPath: /orbit-cli
+          readOnly: true
+{{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
       volumes:
@@ -67,3 +87,7 @@ spec:
       - name: fixtures
         configMap:
           name: {{ .Values.fixturesConfigMap }}
+{{- if .Values.cliImage }}
+      - name: orbit-cli
+        emptyDir: {}
+{{- end }}

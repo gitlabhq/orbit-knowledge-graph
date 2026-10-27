@@ -1,4 +1,5 @@
 image: python:3.14-slim
+cliImage: ""
 
 robotframework:
   version: "7.5"
@@ -23,6 +24,7 @@ fixturesConfigMap: e2e-robot-fixtures
 rootPatSecret: gitlab-root-pat
 indexingBudgetMultiplier: "1"
 codeGraphIncremental: "false"
+gitlabLane: ""
 rootPatSecretNamespace: ""
 rootPatSecretKey: pat
 ttlSecondsAfterFinished: 600

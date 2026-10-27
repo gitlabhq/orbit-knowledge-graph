@@ -972,11 +972,15 @@ cli-integration-test:
   needs: []
   script:
     - cargo build -p orbit-cli
+    - bash e2e/scripts/stage-orbit-cli.sh orbit-cli-e2e
     - cargo nextest run --profile ci --test cli --test outside_repository --no-fail-fast
     - mv target/nextest/ci/junit.xml target/nextest/ci/junit-cli.xml
     - cargo nextest run --profile ci -p orbit-cli --test remote_cli --no-fail-fast
     - sccache --show-stats || true
   artifacts:
+    paths:
+      - orbit-cli-e2e/
+    expire_in: 1 day
     reports:
       junit:
         - target/nextest/ci/junit-cli.xml
@@ -1525,6 +1529,8 @@ e2e:
     - job: docker-build-amd64
       optional: true
     - job: e2e-robot-image
+      optional: true
+    - job: cli-integration-test
       optional: true
   rules:
     - !reference [.skip-on-solo-schedule, rules]

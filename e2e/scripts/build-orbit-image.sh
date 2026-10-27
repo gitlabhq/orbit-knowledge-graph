@@ -38,3 +38,14 @@ else
     ) &
   fi
 fi
+
+export E2E_CLI_IMAGE="${CI_REGISTRY_IMAGE}/orbit-cli-e2e:${CI_COMMIT_SHORT_SHA}"
+if docker manifest inspect "$E2E_CLI_IMAGE" >/dev/null 2>&1; then
+  echo "Reusing existing image ${E2E_CLI_IMAGE}"
+elif [ -f orbit-cli-e2e/orbit ]; then
+  docker build -t "$E2E_CLI_IMAGE" -f e2e/Dockerfile.cli orbit-cli-e2e
+  docker push "$E2E_CLI_IMAGE"
+else
+  echo "No orbit CLI artifact from cli-integration-test; the CLI suite skips"
+  unset E2E_CLI_IMAGE
+fi
