@@ -271,6 +271,7 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
             stats: options.stats,
             cancel: &options.cancel,
             progress: progress.as_ref(),
+            working: workspace::git_working_changes(&git.repo_path)?,
         };
         let cancelled = || options.cancel.load(Ordering::Relaxed);
         let output = match snapshot {

@@ -25,6 +25,7 @@ pub(super) struct Project<'a> {
     pub stats: bool,
     pub cancel: &'a Arc<AtomicBool>,
     pub progress: Option<&'a Arc<RepositoryBars>>,
+    pub working: workspace::GitChanges,
 }
 
 enum Work {
@@ -91,8 +92,7 @@ impl Project<'_> {
     ) -> Result<workspace::GitChanges> {
         let repo = &self.git.repo_path;
         let mut changes = workspace::git_committed_changes(repo, &saved.commit_sha)?;
-        let working = workspace::git_working_changes(repo)?;
-        for path in working.paths().chain(&saved.dirty_paths) {
+        for path in self.working.paths().chain(&saved.dirty_paths) {
             match repo.join(path).is_file() {
                 true if self.edited_since_read(path, owner, families) => {
                     changes.changed.push(path.clone())
@@ -226,14 +226,13 @@ impl Project<'_> {
     }
 
     fn save_state(&self, families: &[String], owner: Option<SupportLang>) -> Result<()> {
-        let dirty = workspace::git_working_changes(&self.git.repo_path)?;
         manifest::save_incremental_state(
             self.manifest_path,
             self.git.project_id,
             &manifest::IncrementalState {
                 commit_sha: self.git.commit_sha.clone(),
-                dirty_paths: dirty.paths().cloned().collect(),
-                dirty_removed: dirty.removed,
+                dirty_paths: self.working.paths().cloned().collect(),
+                dirty_removed: self.working.removed.clone(),
                 families: families.to_vec(),
                 owner: owner.map(|lang| lang.family().to_string()),
             },
