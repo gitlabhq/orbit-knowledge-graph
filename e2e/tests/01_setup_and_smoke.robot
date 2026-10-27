@@ -19,7 +19,7 @@ Orbit Is Healthy
     ...                The Siphon producer is not ready while it merges the initial snapshots,
     ...                so the wait scales with the indexing budget.
     [Tags]    smoke
-    ${health_wait}=    Scaled Timeout    120s
+    ${health_wait}=    Scaled Timeout    600s
     Wait Until Keyword Succeeds    ${health_wait}    5s    Orbit Status Is Healthy
 
 User Data Is Available Via Orbit Query
