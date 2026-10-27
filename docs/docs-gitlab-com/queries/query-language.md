@@ -285,7 +285,7 @@ the later pages move by one row, so a row can repeat or be missing.
 
 - Each relationship spans at most three hops. `-[:CONTAINS*1..3]->` is a bounded variable-length hop.
 - A query has at most five nodes and five relationships.
-- A query has at most 16 filter conditions in total, including property filters in node patterns.
+- A query has at most 16 filter conditions.
 - A query returns at most 10 aggregations and groups by at most four keys.
 - `ORDER BY` takes one sort key.
 - `LIMIT` accepts 1 to 1000 rows. The default is 30.
@@ -293,8 +293,6 @@ the later pages move by one row, so a row can repeat or be missing.
 - Each node returns at most 50 properties and filters on at most 500 IDs.
 - The query text is at most 32 KiB.
 - A query runs for at most 30 seconds. If it runs longer, GitLab Orbit stops it and returns a timeout error.
-
-For the number of requests you can send, see [rate limits](_index.md#rate-limits).
 
 ## Debug a query
 
