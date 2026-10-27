@@ -1,0 +1,36 @@
+query GraphStatus($fullPath: ID!) {
+  group(fullPath: $fullPath) {
+    orbit @gl_introduced(version: "19.4.0") {
+      ...OrbitStatus
+    }
+  }
+  project(fullPath: $fullPath) {
+    orbit @gl_introduced(version: "19.4.0") {
+      ...OrbitStatus
+    }
+  }
+}
+
+fragment OrbitStatus on OrbitNamespace {
+  indexing {
+    state
+    areas {
+      name
+      state
+    }
+    projects {
+      indexed
+      totalKnown
+      gaps
+    }
+  }
+  itemCounts {
+    domains {
+      name
+      entities {
+        name
+        count
+      }
+    }
+  }
+}
