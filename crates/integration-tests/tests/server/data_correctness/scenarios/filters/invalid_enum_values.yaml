@@ -101,3 +101,31 @@ cases:
         MATCH (u:User {id: 1}) WHERE u.state = 'not_a_state' RETURN u LIMIT 10
     expect:
       compile_error_contains: [not_a_state, "Valid values", active, blocked]
+
+  - name: substring_matching_no_value
+    description: A text operator on an enum rejects a pattern that no declared value can match, ignoring case
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":{"starts_with":"bot"}}}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.user_type STARTS WITH 'bot' RETURN u LIMIT 10
+    expect:
+      compile_error_contains: ["no enum value starts with", "bot", "6 (project_bot)"]
+
+  - name: comparison_within_one_domain
+    description: Two enum fields with the same declared values compare by value
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) WHERE g.visibility_level = p.visibility_level RETURN p LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        Group:
+          ids: [100]
+        Project:
+          ids: [1000]
+          absent: [1002]
+          filters:
+            visibility_level: { eq: public }
+      edges:
+        CONTAINS: [[100, 1000]]

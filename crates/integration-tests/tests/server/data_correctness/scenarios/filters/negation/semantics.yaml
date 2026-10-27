@@ -34,16 +34,30 @@ cases:
 
   - name: anchor_rewrite_keeps_relationship
     description: |
-      The aggregation group-anchor rewrite removes the CONTAINS hop, and a NOT group on the IN_PROJECT relationship still reads IN_PROJECT. Every IN_PROJECT edge has source_kind MergeRequest, so the group is false and both merge requests with valid authors count. Reading the AUTHORED edge instead would drop the opened merge requests.
+      The aggregation group-anchor rewrite removes the CONTAINS hop, and a NOT group on the IN_PROJECT relationship still reads IN_PROJECT. Every IN_PROJECT edge has source_kind MergeRequest, so the group removes the opened merge requests, which are the only ones with authors. Reading the AUTHORED edge instead would keep them.
     query:
       gql: |
         MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)<-[a:AUTHORED]-(u:User)
-        WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
+        WHERE NOT (r.source_kind = 'MergeRequest' AND mr.state = 'opened')
+        RETURN p{.name}, count(mr) AS mrs LIMIT 10
+    expect:
+      skip_requirements: ["node_ids"]
+      sql_contains:
+        - "(_orbit_edge_1.relationship_kind = 'IN_PROJECT')"
+        - "NOT ((_orbit_edge_1.source_kind = 'MergeRequest') AND ((mr.state = 'opened') AND has(_orbit_edge_1.source_tags, 'state:opened')))"
+      row_count: 0
+
+  - name: anchor_rewrite_last_relationship
+    description: |
+      When the group-anchor rewrite removes the first relationship, a NOT group on the remaining IN_PROJECT relationship still binds to its edge scan and removes the opened merge requests in the project.
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)
+        WHERE NOT (r.source_kind = 'MergeRequest' AND mr.state = 'opened')
         RETURN p{.name}, count(mr) AS mrs LIMIT 10
     expect:
       sql_contains:
-        - "(_orbit_edge_1.relationship_kind = 'IN_PROJECT')"
-        - "NOT ((_orbit_edge_1.source_kind = 'User') AND ((mr.state = 'opened') AND has(_orbit_edge_1.source_tags, 'state:opened')))"
+        - "NOT ((_orbit_edge_1.source_kind = 'MergeRequest') AND has(_orbit_edge_1.source_tags, 'state:opened'))"
       groups:
         p:
           entity: Project
@@ -52,26 +66,6 @@ cases:
             - entity: Project
               id: 1000
               values: { mrs: 2 }
-
-  - name: anchor_rewrite_last_relationship
-    description: |
-      When the group-anchor rewrite removes the first relationship, a NOT group on the remaining IN_PROJECT relationship still binds to its edge scan and counts every merge request in the project.
-    query:
-      gql: |
-        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project)<-[r:IN_PROJECT]-(mr:MergeRequest)
-        WHERE NOT (r.source_kind = 'User' AND mr.state = 'opened')
-        RETURN p{.name}, count(mr) AS mrs LIMIT 10
-    expect:
-      sql_contains:
-        - "NOT ((_orbit_edge_1.source_kind = 'User') AND has(_orbit_edge_1.source_tags, 'state:opened'))"
-      groups:
-        p:
-          entity: Project
-          ids: [1000]
-          rows:
-            - entity: Project
-              id: 1000
-              values: { mrs: 4 }
 
   - name: and_not_callee_name_in
     description: AND NOT callee.name IN keeps a call whose callee is outside the exclusion list
@@ -284,18 +278,24 @@ cases:
           - [1, 4002]
 
   - name: not_fk_relationship_filter
-    description: A complemented NOT on a foreign-key relationship column keeps the edge scan and excludes every row
+    description: A complemented NOT on a foreign-key relationship column keeps the edge scan and excludes the matching row
     query:
       gql: |
         MATCH (p:Project {id: 1000})<-[r:IN_PROJECT]-(mr:MergeRequest)
-        WHERE NOT r.source_kind = 'MergeRequest'
+        WHERE NOT r.source_id = 2000
         RETURN p.name, mr.title LIMIT 20
     expect:
       skip_requirements: [node_ids]
-      sql_contains: ["source_kind != 'MergeRequest'"]
-      node_count: 0
+      sql_contains: ["source_id != 2000"]
+      node_count: 4
+      nodes:
+        Project:
+          ids: [1000]
+        MergeRequest:
+          ids: [2001, 2004, 2005]
+          absent: [2000]
       edges:
-        IN_PROJECT: []
+        IN_PROJECT: [[2001, 1000], [2004, 1000], [2005, 1000]]
 
   - name: not_id_list_stays_filter
     description: NOT over an ID list stays a filter and does not become an ID selector
