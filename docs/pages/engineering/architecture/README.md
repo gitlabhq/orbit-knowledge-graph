@@ -37,7 +37,7 @@ checks each result again before it goes back. Results show the graph as of the
 last indexing run.
 
 [Querying](querying/README.md) follows a request from start to end.
-[Security](security.md) explains each check.
+[Security](security/README.md) explains each check.
 
 ## Why we built it this way
 
