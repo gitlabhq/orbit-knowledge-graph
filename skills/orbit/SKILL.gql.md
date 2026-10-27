@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.0+gql
+version: 0.35.1+gql
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
 metadata:
@@ -29,6 +29,8 @@ If they decline, note the discrepancy in one line and continue with the correcte
 ## Query language
 
 Queries use read-only openCypher 9-based syntax (`MATCH ... RETURN`).
+
+If you find a legacy JSON query (an object with `query_type`, `nodes`, or `relationships`), run `glab orbit skills get orbit-gql-migration` and convert it to GQL. The JSON language is deprecated.
 
 ## Discovery
 

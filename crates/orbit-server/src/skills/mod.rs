@@ -19,6 +19,12 @@ const GQL_MANIFEST: &str = "SKILL.gql.md";
 #[folder = "$SKILLS_DIR/orbit"]
 struct SkillAssets;
 
+const MIGRATION_SKILL_NAME: &str = "orbit-gql-migration";
+
+#[derive(Embed)]
+#[folder = "$SKILLS_DIR/orbit-gql-migration"]
+struct MigrationAssets;
+
 #[derive(Embed)]
 #[folder = "$SKILLS_DIR/orbit-start"]
 struct StartAssets;
@@ -104,8 +110,9 @@ impl SkillCatalog {
                 }
             })
         })?;
+        let migration = load_skill::<MigrationAssets>(MIGRATION_SKILL_NAME, |path| Some(path))?;
         let start = load_skill::<StartAssets>(START_SKILL_NAME, |path| Some(path))?;
-        let skills = [orbit, start]
+        let skills = [orbit, migration, start]
             .into_iter()
             .map(|skill| (skill.metadata.name.clone(), skill))
             .collect();
@@ -206,7 +213,7 @@ mod tests {
                 .iter()
                 .map(|skill| skill.name.as_str())
                 .collect::<Vec<_>>(),
-            [SKILL_NAME, START_SKILL_NAME]
+            [SKILL_NAME, MIGRATION_SKILL_NAME, START_SKILL_NAME]
         );
         let skill = &skills[0];
         assert_eq!(skill.name, "orbit");
@@ -313,6 +320,22 @@ mod tests {
     }
 
     #[test]
+    fn migration_skill_is_served_unchanged_in_both_modes() {
+        let json = get_skill(MIGRATION_SKILL_NAME, Frontend::JsonDsl, false).unwrap();
+        let gql = get_skill(MIGRATION_SKILL_NAME, Frontend::Gql, false).unwrap();
+        assert_eq!(json, gql);
+        assert!(!json.metadata.version.contains("+gql"));
+        let files = json.files.unwrap();
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            [MANIFEST]
+        );
+    }
+
+    #[test]
     fn metadata_only_omits_files() {
         let full = get_skill("orbit", Frontend::JsonDsl, false).unwrap();
         let metadata = get_skill("orbit", Frontend::JsonDsl, true).unwrap();
@@ -348,7 +371,10 @@ mod tests {
     fn unknown_skill_error_carries_sorted_known_names() {
         let error = get_skill("unknown", Frontend::JsonDsl, false).unwrap_err();
         assert_eq!(error.name, "unknown");
-        assert_eq!(error.known_names, [SKILL_NAME, START_SKILL_NAME]);
+        assert_eq!(
+            error.known_names,
+            [SKILL_NAME, MIGRATION_SKILL_NAME, START_SKILL_NAME]
+        );
     }
 
     #[test]
