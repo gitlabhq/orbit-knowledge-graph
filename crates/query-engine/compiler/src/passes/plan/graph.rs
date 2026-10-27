@@ -206,7 +206,6 @@ pub struct RelationGraph {
     nodes: Vec<RelationNode>,
     reads: Vec<(ReadKey, RelationId)>,
     selective_latest: bool,
-    exact_final_reads: bool,
 }
 
 impl RelationGraph {
@@ -215,7 +214,6 @@ impl RelationGraph {
             nodes: Vec::new(),
             reads: Vec::new(),
             selective_latest,
-            exact_final_reads: false,
         }
     }
 
@@ -234,10 +232,6 @@ impl RelationGraph {
             .iter()
             .enumerate()
             .map(|(index, node)| (RelationId(index), node))
-    }
-
-    pub fn has_exact_final_reads(&self) -> bool {
-        self.exact_final_reads
     }
 
     pub fn usage(&self, root: RelationId) -> RelationUsage {
@@ -332,7 +326,6 @@ impl RelationGraph {
                 predicate.is_selective() && !predicate.filters_sort_key(key, true)
             });
         if !bounded || read_once {
-            self.exact_final_reads |= read_once;
             let (keyed, rest): (Vec<_>, Vec<_>) = predicates
                 .into_iter()
                 .partition(|predicate| predicate.filters_sort_key(key, false));

@@ -58,14 +58,6 @@ pub enum QueryPlan {
 }
 
 impl QueryPlan {
-    pub fn execution(&self) -> Option<&graph::ExecutionPlan> {
-        match self {
-            Self::Traversal(plan) => Some(&plan.operation.execution),
-            Self::Aggregation(plan) => Some(&plan.operation.execution),
-            _ => None,
-        }
-    }
-
     pub fn relations(&self) -> &[EdgeRelation] {
         match self {
             Self::Traversal(plan) => &plan.relations,
