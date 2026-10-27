@@ -19,8 +19,7 @@ Siphon connects over the native protocol on port 9000.
 
 ## Supported versions
 
-GitLab Orbit requires ClickHouse 26.4 or later, in a release that GitLab supports.
-For the releases that GitLab supports, see [Supported ClickHouse versions](https://docs.gitlab.com/integration/clickhouse/#supported-clickhouse-versions).
+For the ClickHouse versions that each GitLab Orbit release supports, see [Version requirements](version-requirements.md#clickhouse).
 
 ## Databases
 

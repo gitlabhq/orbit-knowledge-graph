@@ -296,6 +296,8 @@ Plan ClickHouse disk for a second copy of the graph.
 
 To upgrade GitLab Orbit:
 
+1. Confirm that the new GitLab Orbit version supports your GitLab, Helm chart, and ClickHouse versions.
+   See [Version requirements](version-requirements.md).
 1. Run the `helm upgrade` command from [Install GitLab Orbit](#install-gitlab-orbit).
 1. Run the query from [Verify the installation](#verify-the-installation).
 
@@ -305,6 +307,8 @@ When you upgrade GitLab, upgrade Siphon and GitLab Orbit with it.
 
 To upgrade GitLab:
 
+1. Confirm that your GitLab Orbit version supports the new GitLab version.
+   See [Version requirements](version-requirements.md#gitlab).
 1. Upgrade GitLab.
 1. In `siphon-values.yaml`, set `global.gitlabVersion` to the new GitLab version, then upgrade Siphon.
 1. [Upgrade GitLab Orbit](#upgrade-gitlab-orbit).
