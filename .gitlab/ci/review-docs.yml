@@ -37,10 +37,6 @@
 review-docs-deploy:
   extends:
   - .review-docs
-  variables:
-    DOCS_BRANCH: michaelangeloio/orbit-docs-v2
-  needs: []
-  when: on_success
   environment:
     name: review/mr-${CI_MERGE_REQUEST_IID}
     url: https://docs-upstream-${DOCS_GITLAB_REPO_SUFFIX}-${CI_MERGE_REQUEST_IID}.gitlab-marketing.workers.dev
