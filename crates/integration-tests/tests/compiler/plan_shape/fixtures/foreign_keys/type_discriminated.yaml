@@ -1,17 +1,18 @@
 cases:
-  - name: A work item note hop reads issue notes by their noteable key instead of edges
+  - name: A selective note filter drives a work item note hop through issue note keys
     query:
       json: |
         {
           "query_type": "traversal",
           "nodes": [
             {"id": "w", "entity": "WorkItem", "columns": ["id"]},
-            {"id": "n", "entity": "Note", "filters": {"internal": true}, "columns": ["id"]}
+            {"id": "n", "entity": "Note", "filters": {"note": {"contains": "pipeline"}}, "columns": ["id"]}
           ],
           "relationships": [{"type": "HAS_NOTE", "from": "w", "to": "n"}]
         }
       gql: |
-        MATCH (w:WorkItem)-[:HAS_NOTE]->(n:Note {internal: true})
+        MATCH (w:WorkItem)-[:HAS_NOTE]->(n:Note)
+        WHERE n.note CONTAINS 'pipeline'
         RETURN w.id, n.id
     logical:
       expect:
@@ -25,19 +26,20 @@ cases:
           reject:
             - (Scan Table(gl_edge) ...)
 
-  - name: A merge request note hop reads merge request notes by their noteable key
+  - name: A selective note filter keeps the key route when the merge request is pinned too
     query:
       json: |
         {
           "query_type": "traversal",
           "nodes": [
             {"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "columns": ["id"]},
-            {"id": "n", "entity": "Note", "columns": ["id"]}
+            {"id": "n", "entity": "Note", "filters": {"note": {"contains": "pipeline"}}, "columns": ["id"]}
           ],
           "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}]
         }
       gql: |
         MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note)
+        WHERE n.note CONTAINS 'pipeline'
         RETURN mr.id, n.id
     logical:
       expect:
@@ -51,34 +53,34 @@ cases:
           reject:
             - (Scan Table(gl_edge) ...)
 
-  - name: A vulnerability note count reads vulnerability notes by their noteable key
+  - name: Pinned notes drive a vulnerability note count through vulnerability note keys
     query:
       json: |
         {
           "query_type": "aggregation",
           "nodes": [
-            {"id": "v", "entity": "Vulnerability", "filters": {"severity": "critical"}},
-            {"id": "n", "entity": "Note"}
+            {"id": "v", "entity": "Vulnerability"},
+            {"id": "n", "entity": "Note", "node_ids": [3000, 3001]}
           ],
           "relationships": [{"type": "HAS_NOTE", "from": "v", "to": "n"}],
-          "aggregations": [{"count": "n", "as": "c"}]
+          "aggregations": [{"count": "v", "as": "c"}]
         }
       gql: |
-        MATCH (v:Vulnerability {severity: 'critical'})-[:HAS_NOTE]->(n:Note)
-        RETURN count(n) AS c
+        MATCH (v:Vulnerability)-[:HAS_NOTE]->(n:Note)
+        WHERE n.id IN [3000, 3001]
+        RETURN count(v) AS c
     logical:
       expect:
-        - (Aggregate COUNT(n) AS c (_))
+        - (Aggregate COUNT(v) AS c (_))
     physical:
       clickhouse:
         planned:
           expect:
             - (Filter ..., n.noteable_type IN ['Vulnerability'] (_))
-            - (Scan Table(gl_vulnerability) AS v)
           reject:
             - (Scan Table(gl_edge) ...)
 
-  - name: An earlier note read joins the work item hop only through issue notes
+  - name: A note reached through an earlier hop drives the work item hop through issue note keys
     query:
       json: |
         {
@@ -107,10 +109,29 @@ cases:
           reject:
             - (Scan Table(gl_edge) ...)
 
-  - name: A note hop that returns type(r) reads the relationship from issue note keys
+  - name: A note-driven hop that returns its relationship reads it from issue note keys
     query:
       gql: |
-        MATCH (w:WorkItem {id: 100})-[r:HAS_NOTE]->(n:Note)
+        MATCH (w:WorkItem)-[r:HAS_NOTE]->(n:Note)
+        WHERE n.id IN [3000, 3001]
+        RETURN w, r, n
+    missing_frontends: { json: The JSON frontend has no relationship return. }
+    logical:
+      expect: ["(EdgeScan HAS_NOTE w->n AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter ..., n.noteable_type IN ['Issue'] (_))
+            - (Project ..., n.noteable_id AS e0_src (_))
+          reject:
+            - (Scan Table(gl_edge) ...)
+
+  - name: A note-driven hop that returns type(r) reads the relationship from issue note keys
+    query:
+      gql: |
+        MATCH (w:WorkItem)-[r:HAS_NOTE]->(n:Note)
+        WHERE n.id IN [3000, 3001]
         RETURN w.id, n.id, type(r)
     missing_frontends: { json: The JSON frontend cannot return type(r). }
     logical:
@@ -124,7 +145,104 @@ cases:
           reject:
             - (Scan Table(gl_edge) ...)
 
-  - name: A wildcard hop narrowed by type(r) reads issue notes by their noteable key
+  - name: A pinned merge request drives its note hop through the edge table
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "node_ids": [2000], "columns": ["id"]},
+            {"id": "n", "entity": "Note", "columns": ["id"]}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}]
+        }
+      gql: |
+        MATCH (mr:MergeRequest {id: 2000})-[:HAS_NOTE]->(n:Note)
+        RETURN mr.id, n.id
+    logical:
+      expect:
+        - (EdgeScan HAS_NOTE mr->n AS e0)
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter ..., _orbit_edge_0.source_id = 2000 (_))
+            - (Scan Table(gl_edge) AS _orbit_edge_0)
+          reject:
+            - (Filter ..., n.noteable_type IN ['MergeRequest'] (_))
+
+  - name: A pinned merge request drives a note chain to authors through the edge table
+    query:
+      json: |
+        {
+          "query_type": "aggregation",
+          "nodes": [
+            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "n", "entity": "Note"},
+            {"id": "mr", "entity": "MergeRequest", "node_ids": [2000]}
+          ],
+          "relationships": [
+            {"type": "AUTHORED", "from": "u", "to": "n"},
+            {"type": "HAS_NOTE", "from": "mr", "to": "n"}
+          ],
+          "group_by": ["u"],
+          "aggregations": [{"count": "n", "as": "c"}]
+        }
+      gql: |
+        MATCH (u:User)-[:AUTHORED]->(n:Note)<-[:HAS_NOTE]-(mr:MergeRequest {id: 2000})
+        RETURN u{.id, .username}, count(n) AS c
+    logical:
+      expect: ["(Aggregate group u AS u, COUNT(n) AS c (_))"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Scan Table(gl_edge) ...)
+          reject:
+            - (Filter ..., n.noteable_type IN ['MergeRequest'] (_))
+
+  - name: A merge request reached from a project drives its note hop through the edge table
+    query:
+      gql: |
+        MATCH (n:Note)<-[:HAS_NOTE]-(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'group/project'})
+        RETURN mr, count(n) AS note_count
+    missing_frontends: { json: The JSON frontend cannot group by a returned node with a count. }
+    logical:
+      expect: ["(EdgeScan HAS_NOTE mr->n AS e0)"]
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Scan Table(gl_edge) ...)
+          reject:
+            - (Filter ..., n.noteable_type IN ['MergeRequest'] (_))
+
+  - name: A note hop with neither endpoint narrowed reads the edge table
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}, "columns": ["id"]},
+            {"id": "n", "entity": "Note", "columns": ["id"]}
+          ],
+          "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}]
+        }
+      gql: |
+        MATCH (mr:MergeRequest {state: 'merged'})-[:HAS_NOTE]->(n:Note)
+        RETURN mr.id, n.id
+    logical:
+      expect:
+        - (EdgeScan HAS_NOTE mr->n AS e0)
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Scan Table(gl_edge) ...)
+          reject:
+            - (Filter ..., n.noteable_type IN ['MergeRequest'] (_))
+
+  - name: A wildcard note hop narrowed by type(r) with neither endpoint narrowed reads the edge table
     query:
       gql: |
         MATCH (w:WorkItem)-[r]->(n:Note {internal: true})
@@ -137,9 +255,9 @@ cases:
       clickhouse:
         planned:
           expect:
-            - (Filter ..., n.noteable_type IN ['Issue'] (_))
-          reject:
             - (Scan Table(gl_edge) ...)
+          reject:
+            - (Filter ..., n.noteable_type IN ['Issue'] (_))
 
   - name: A variable-length note hop keeps the stored edge
     query:
@@ -160,7 +278,7 @@ cases:
   - name: An undirected note hop keeps the stored edge
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"w","entity":"WorkItem","node_ids":[100]},{"id":"n","entity":"Note"}],"relationships":[{"type":"HAS_NOTE","from":"w","to":"n","direction":"both"}]}
+        {"query_type":"traversal","nodes":[{"id":"w","entity":"WorkItem","node_ids":[100]},{"id":"n","entity":"Note","node_ids":[3000]}],"relationships":[{"type":"HAS_NOTE","from":"w","to":"n","direction":"both"}]}
     missing_frontends: { gql: GQL accepts undirected hops only in neighbors queries. }
     logical:
       expect: ["(EdgeScan ...)"]
@@ -171,20 +289,3 @@ cases:
             - (Scan Table(gl_edge) ...)
           reject:
             - (Filter ..., n.noteable_type IN ['Issue'] (_))
-
-  - name: A note hop that returns its relationship reads it from issue note keys
-    query:
-      gql: |
-        MATCH (w:WorkItem {id: 100})-[r:HAS_NOTE]->(n:Note)
-        RETURN w, r, n
-    missing_frontends: { json: The JSON frontend has no relationship return. }
-    logical:
-      expect: ["(EdgeScan HAS_NOTE w->n AS e0)"]
-    physical:
-      clickhouse:
-        planned:
-          expect:
-            - (Filter ..., n.noteable_type IN ['Issue'] (_))
-            - (Project ..., n.noteable_id AS e0_src (_))
-          reject:
-            - (Scan Table(gl_edge) ...)

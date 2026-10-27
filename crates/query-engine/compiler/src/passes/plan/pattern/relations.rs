@@ -270,19 +270,52 @@ pub(super) fn linearize_relations(
     Ok(())
 }
 
+pub(super) fn route_typed_keys(
+    relations: &mut [EdgeRelation],
+    nodes: &HashMap<String, NodePlan>,
+) -> Result<()> {
+    let mut order = relations.to_vec();
+    linearize_relations(&mut order, nodes)?;
+    let mut reached = HashSet::new();
+    let mut edge_routed = HashSet::new();
+    for relation in &order {
+        if let Some(key) = relation.fk.as_ref().filter(|key| key.type_filter.is_some()) {
+            let other = relation.other_end(&key.node);
+            let holder_drives = nodes
+                .get(&key.node)
+                .is_some_and(|holder| endpoint_selectivity(holder) > 0)
+                || reached.contains(&key.node) && !reached.contains(other);
+            if !holder_drives {
+                edge_routed.insert(relation.input_index);
+            }
+        }
+        reached.insert(relation.from_node.clone());
+        reached.insert(relation.to_node.clone());
+    }
+    for relation in relations
+        .iter_mut()
+        .filter(|relation| edge_routed.contains(&relation.input_index))
+    {
+        relation.fk = None;
+    }
+    Ok(())
+}
+
+fn endpoint_selectivity(node: &NodePlan) -> u8 {
+    if node.is_pinned() {
+        2
+    } else if node.filters.iter().any(|(_, filter)| filter.is_selective()) {
+        1
+    } else {
+        0
+    }
+}
+
 fn relation_selectivity(relation: &EdgeRelation, nodes: &HashMap<String, NodePlan>) -> u8 {
     let endpoint = [&relation.from_node, &relation.to_node]
         .into_iter()
         .filter_map(|node| nodes.get(node))
-        .map(|node| {
-            if node.is_pinned() {
-                2
-            } else if node.filters.iter().any(|(_, filter)| filter.is_selective()) {
-                1
-            } else {
-                0
-            }
-        })
+        .map(endpoint_selectivity)
         .max()
         .unwrap_or_default();
     endpoint.max(u8::from(

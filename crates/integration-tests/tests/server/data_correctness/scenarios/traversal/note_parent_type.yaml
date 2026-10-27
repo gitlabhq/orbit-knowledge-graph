@@ -98,13 +98,14 @@ steps:
           "query_type": "aggregation",
           "nodes": [
             {"id": "w", "entity": "WorkItem", "node_ids": [4000]},
-            {"id": "n", "entity": "Note"}
+            {"id": "n", "entity": "Note", "id_range": {"start": 3000, "end": 3200}}
           ],
           "relationships": [{"type": "HAS_NOTE", "from": "w", "to": "n"}],
           "aggregations": [{"count": "n", "as": "c"}]
         }
       gql: |
         MATCH (w:WorkItem {id: 4000})-[:HAS_NOTE]->(n:Note)
+        WHERE n.id >= 3000 AND n.id <= 3200
         RETURN count(n) AS c
     expect:
       row_count: 1
@@ -117,13 +118,14 @@ steps:
           "query_type": "aggregation",
           "nodes": [
             {"id": "mr", "entity": "MergeRequest", "node_ids": [4000]},
-            {"id": "n", "entity": "Note"}
+            {"id": "n", "entity": "Note", "id_range": {"start": 3000, "end": 3200}}
           ],
           "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
           "aggregations": [{"count": "n", "as": "c"}]
         }
       gql: |
         MATCH (mr:MergeRequest {id: 4000})-[:HAS_NOTE]->(n:Note)
+        WHERE n.id >= 3000 AND n.id <= 3200
         RETURN count(n) AS c
     expect:
       row_count: 1
@@ -136,13 +138,14 @@ steps:
           "query_type": "aggregation",
           "nodes": [
             {"id": "mr", "entity": "MergeRequest", "filters": {"project_id": 1000}},
-            {"id": "n", "entity": "Note"}
+            {"id": "n", "entity": "Note", "id_range": {"start": 3000, "end": 3200}}
           ],
           "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
           "aggregations": [{"count": "n", "as": "c"}]
         }
       gql: |
         MATCH (mr:MergeRequest {project_id: 1000})-[:HAS_NOTE]->(n:Note)
+        WHERE n.id >= 3000 AND n.id <= 3200
         RETURN count(n) AS c
     expect:
       row_count: 1
@@ -155,13 +158,14 @@ steps:
           "query_type": "aggregation",
           "nodes": [
             {"id": "v", "entity": "Vulnerability", "node_ids": [8000]},
-            {"id": "n", "entity": "Note"}
+            {"id": "n", "entity": "Note", "id_range": {"start": 3000, "end": 3200}}
           ],
           "relationships": [{"type": "HAS_NOTE", "from": "v", "to": "n"}],
           "aggregations": [{"count": "n", "as": "c"}]
         }
       gql: |
         MATCH (v:Vulnerability {id: 8000})-[:HAS_NOTE]->(n:Note)
+        WHERE n.id >= 3000 AND n.id <= 3200
         RETURN count(n) AS c
     expect:
       row_count: 1
