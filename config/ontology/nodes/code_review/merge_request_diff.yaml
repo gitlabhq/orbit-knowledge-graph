@@ -33,6 +33,7 @@ properties:
     source: merge_request_id
     nullable: false
     mutable: false
+    high_fan_out: true
     description: "Parent merge request ID."
 
   state:

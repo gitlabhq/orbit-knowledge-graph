@@ -1,4 +1,4 @@
-description: A candidate read that finds both versions of a merge request returns the latest one once
+description: A FINAL read over two matching versions of a merge request returns the latest one once
 
 config:
   unmerged_seed: true
@@ -16,7 +16,8 @@ query:
     MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1000}) WHERE mr.source_branch = 'feature-zz' RETURN mr.title, mr.source_branch, p LIMIT 10
 
 expect:
-  sql_contains: ["tuple(mr.traversal_path, mr.id) IN (SELECT traversal_path, id FROM _orbit_relation_"]
+  sql_contains: ["AS mr FINAL"]
+  sql_not_contains: ["tuple(mr.traversal_path, mr.id) IN"]
   node_count: 2
   nodes:
     MergeRequest:
