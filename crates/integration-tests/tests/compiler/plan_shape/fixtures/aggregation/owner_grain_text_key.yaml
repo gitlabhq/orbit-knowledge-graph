@@ -1,0 +1,17 @@
+name: A free-text key on a project-grain node groups by the owner, not the entity
+
+query:
+  json: |
+    {"query_type": "aggregation", "nodes": [{"id": "j", "entity": "Job", "filters": {"project_id": 1000}}], "group_by": ["j.name"], "aggregations": [{"count": "j", "as": "n"}]}
+  gql: |
+    MATCH (j:Job) WHERE j.project_id = 1000 RETURN j.name, count(j) AS n
+
+logical:
+  expect:
+    - (Aggregate group j.name AS j_name, COUNT(j) AS n (_))
+
+physical:
+  clickhouse:
+    planned:
+      expect:
+        - (Aggregate group j.name, group j.project_id, j.name AS j_name, COUNT() AS n (_))
