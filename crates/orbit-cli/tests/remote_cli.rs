@@ -334,6 +334,18 @@ fn schema_falls_back_to_rest_when_graphql_has_no_orbit_field() {
 }
 
 #[test]
+fn schema_falls_back_to_rest_when_graphql_has_no_version_directive() {
+    let output = run_schema_on_rest(
+        r#"{"errors":[{"message":"Directive @gl_introduced is not defined",
+            "path":["query","orbit"],
+            "extensions":{"code":"undefinedDirective","directiveName":"gl_introduced"}}]}"#,
+    );
+
+    let stdout: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json stdout");
+    assert_eq!(stdout["schema_version"], "1");
+}
+
+#[test]
 fn schema_without_a_schema_under_orbit_exits_unavailable() {
     let (base_url, handle) =
         serve_once(r#"{"data":{"orbit":{"schema":null}}}"#, "application/json");

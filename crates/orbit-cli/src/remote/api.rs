@@ -18,13 +18,14 @@ impl Api {
 
     pub(crate) fn remember_from(errors: &[GraphQlError<ErrorExtensions>]) -> Api {
         *SELECTED.get_or_init(|| {
-            match errors
+            let missing_schema = errors
                 .iter()
                 .filter_map(|error| error.extensions.as_ref())
-                .any(ErrorExtensions::is_missing_schema)
-            {
-                true => Api::Rest,
-                false => Api::Graphql,
+                .any(ErrorExtensions::is_missing_schema);
+            if missing_schema {
+                Api::Rest
+            } else {
+                Api::Graphql
             }
         })
     }
@@ -39,7 +40,7 @@ impl ErrorExtensions {
     fn is_missing_schema(&self) -> bool {
         matches!(
             self.code.as_deref(),
-            Some("undefinedField" | "undefinedType" | "argumentNotAccepted")
+            Some("undefinedField" | "undefinedType" | "argumentNotAccepted" | "undefinedDirective")
         )
     }
 }
@@ -54,6 +55,7 @@ mod tests {
             ("undefinedField", true),
             ("undefinedType", true),
             ("argumentNotAccepted", true),
+            ("undefinedDirective", true),
             ("missingRequiredArguments", false),
         ] {
             let extensions = ErrorExtensions {
