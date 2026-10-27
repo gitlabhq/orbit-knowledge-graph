@@ -9,7 +9,7 @@ use crate::workspace::git_toplevel;
 
 pub(super) enum IndexOutcome {
     OutsideRepository,
-    /// `index_path` is what the user should pass to `orbit index`.
+    /// `index_path` is what the user should pass to `orbit workspace index`.
     NotIndexed {
         index_path: String,
     },

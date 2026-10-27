@@ -1,5 +1,5 @@
 Statement = { SOI ~ SP? ~ (Query | SchemaCall) ~ SP? ~ ";"? ~ SP? ~ EOI }
-Query = { Matches ~ SP? ~ Return ~ (SP ~ Order)? ~ (SP ~ Skip)? ~ (SP ~ Limit)? ~ (SP ~ Debug)? }
+Query = { Matches ~ SP? ~ Return ~ (SP ~ Order)? ~ (SP ~ Skip ~ SP ~ Limit | SP ~ Limit ~ SP ~ Skip | SP ~ Skip | SP ~ Limit)? ~ (SP ~ Debug)? }
 Matches = { Match ~ (SP? ~ Match)* }
 SchemaCall = { ^"CALL" ~ SP ~ "db.schema" ~ SP? ~ "(" ~ SP? ~ (StringLiteral ~ SP?)? ~ ")" }
 Match = { ^"MATCH" ~ SP? ~ Pattern ~ (SP? ~ Where)? }
@@ -50,7 +50,8 @@ ProjectionItem = { ProjectionExpression ~ (SP ~ ^"AS" ~ SP ~ Variable)? }
 ProjectionExpression = { Aggregate | DateTrunc | AllProperties | RelationshipType | FunctionCall | NodeProjection | PropertyExpression | Variable }
 NodeProjection = { Variable ~ SP? ~ "{" ~ SP? ~ ProjectionProperty ~ (SP? ~ "," ~ SP? ~ ProjectionProperty)* ~ SP? ~ "}" }
 ProjectionProperty = { "." ~ SP? ~ SchemaName }
-Aggregate = { AggregateFunction ~ SP? ~ "(" ~ SP? ~ (PropertyExpression | Variable) ~ SP? ~ ")" }
+Aggregate = { AggregateFunction ~ SP? ~ "(" ~ SP? ~ (Distinct ~ SP)? ~ (PropertyExpression | Variable) ~ SP? ~ ")" }
+Distinct = @{ ^"DISTINCT" ~ !IdentifierPart }
 AggregateFunction = @{ ^"count" | ^"sum" | ^"avg" | ^"min" | ^"max" }
 DateTrunc = { ^"date_trunc" ~ SP? ~ "(" ~ SP? ~ StringLiteral ~ SP? ~ "," ~ SP? ~ PropertyExpression ~ SP? ~ ")" }
 AllProperties = { ^"properties" ~ SP? ~ "(" ~ SP? ~ Variable ~ SP? ~ ")" }

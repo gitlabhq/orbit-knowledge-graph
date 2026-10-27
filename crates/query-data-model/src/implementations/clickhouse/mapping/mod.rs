@@ -58,6 +58,7 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                 table: node.table.clone(),
                 has_traversal_path: node.has_traversal_path,
                 global: node.global,
+                high_fan_out: node.high_fan_out,
                 default_properties,
             });
             tables.insert(
@@ -144,6 +145,9 @@ impl Mapping<Relational<ClickHouse>> for ClickHouseBindings {
                             .property_id(referenced, ontology::constants::DEFAULT_PRIMARY_KEY)?,
                     })
                 });
+                if let Some(foreign_key) = foreign_key {
+                    property_facts[foreign_key.property.index()].foreign_key = true;
+                }
                 variant_routes[variant_id.index()] = Some(VariantRoute {
                     table: edge.table.clone(),
                     foreign_key,

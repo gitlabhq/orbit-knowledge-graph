@@ -1,3 +1,35 @@
+## [0.160.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.159.1...v0.160.0) (2026-10-27)
+
+### Features
+
+* **cli:** add orbit workspace index --async and --wait, and make reads wait for a running index ([f84cf0f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f84cf0f44510cc8615246e9ec225be74c6064d09)) by Dmitry Gruzd
+* **cli:** group local graph commands under orbit workspace ([310127e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/310127e9162daf8023387a2dc212cdead2b5dda4)) by Aaron Algutifan
+* **orbit-cli:** add GitLab-aware grep and context, refresh on read, and one Orbit skill ([b4a8bd6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b4a8bd6d4d75366794ab5d9f2bce02931e14df1d)) by Aaron Algutifan
+* **skills:** add the orbit-start skill for a guided first session ([cc2084c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cc2084c57b6bd0d8624ab61212c10dab651646f4)) by Gabriel Engel
+
+### Fixes
+
+* **code-graph-incremental:** rebuild re-exported names on every resolve ([2747440](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/274744063c6ecebb15df2c9087667e9a28c75fcf)) by Michael Usachenko
+* **code-graph-incremental:** stop a reindex from re-adding kept edges ([8366ecd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8366ecd82c8071a6bab9069f3a9d42f23bc9c8f7)) by Michael Usachenko
+* **dashboards:** drop gkg namespace from webserver resource panels ([cf0cc34](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cf0cc34fbdbd2c7b943fe01aea5e469b02b8f392)) by Bohdan Parkhomchuk
+
+### Performance
+
+* **cli:** route C malloc through mimalloc on musl ([cfc3dc5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cfc3dc52b685934c2c59c88da20111864c75d8ec)) by Dmitry Gruzd
+* **code-graph-incremental:** skip the clock in Sentinel::check when unbounded ([2a54948](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2a54948c1ebbeaaec2853dc7492195e5a6954af7)) by Dmitry Gruzd
+* **query-engine:** read changing-column filters once with FINAL and exact-mode skip indexes ([3babfa7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3babfa7397846c1562bdde03a2075fb476a9245e)) by Michael Usachenko
+
+### Other
+
+* add self-managed observability page ([3eccce6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3eccce6b872bb970ba3bd38006c0b21a04b49c92)) by Bohdan Parkhomchuk
+* **architecture:** add the Code graph page ([13a5dfb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/13a5dfbe7632496004c644e8408ee3dcd6581f38)) by Michael Usachenko
+* **architecture:** add the Query lifecycle page ([aad6e47](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aad6e4795245394a98c338088db588e5fc1e6e9a)) by Michael Usachenko
+* **architecture:** rewrite the overview, data model, and Orbit CLI pages and restyle the headers ([2dd8309](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2dd8309e5c489a820a79e656b5167953a9cb131d)) by Jean-Gabriel Doyon
+* **roadmap:** add the public roadmap content ([b04b53c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b04b53cc13da37d257bf6b1499f6ab3a9b20ad23)) by Michael Angelo Rivera
+* **runbooks:** restructure Orbit runbooks into an on-call card ([00f9b1d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/00f9b1d461fa35826b7d9a5263208bd8c7f124ca)) by Bohdan Parkhomchuk
+* **self-managed:** fix install facts from field reports ([ece79ab](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ece79ab9db41b6d7eb3ea15bd2c76db02904f762)) by Michael Angelo Rivera
+* **testing:** rewrite the end-to-end page and use banner diagrams ([b15bdb5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b15bdb5cce24fa4abef258f057d461a9755a121f)) by Jean-Gabriel Doyon
+
 ## [0.159.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.159.0...v0.159.1) (2026-10-26)
 
 ### Fixes

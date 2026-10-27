@@ -995,7 +995,7 @@ fn exact_assertions_preserve_nested_filter_order() {
             values: vec![2],
         },
     ];
-    let mut graph = RelationGraph::default();
+    let mut graph = RelationGraph::new(true);
     let read = graph.read("gl_project", "p", false);
     let source = predicates.iter().fold(read, |relation, predicate| {
         graph.filter(relation, vec![predicate.clone()])

@@ -26,7 +26,7 @@ distributions.
 ## Usage
 
 ```shell
-orbit index /path/to/your/repo
+orbit workspace index /path/to/your/repo
 orbit help
 ```
 

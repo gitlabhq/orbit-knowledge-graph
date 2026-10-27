@@ -34,7 +34,7 @@ On Dedicated, only the Dedicated EOC runs commands. Use `gkg-indexer-sdlc` and n
 | Errors on the ClickHouse write | The graph ClickHouse is slow or down. Page Orbit tier-2. | Handler errors are near 0. |
 | Traffic stopped, pods are healthy | Nothing sends work. Follow [dispatcher alerts](gkg-dispatcher.md) and check the [Siphon dashboard](https://dashboards.gitlab.net/d/orbit-orbit-siphon). | Traffic is above 0. |
 | The same namespace fails on each cycle | Do not purge NATS. Page Orbit tier-2 with the error from the logs. | Errors for that namespace stop. |
-| One namespace never finishes | [Reindex the namespace](../manual_rebuild.md#reindex-one-namespace-project-or-entity). | `GITLAB_HOST=gitlab.com glab orbit graph-status --full-path <group>` shows it indexed. |
+| One namespace never finishes | [Reindex the namespace](../manual_rebuild.md#reindex-one-namespace-project-or-entity). | `GITLAB_HOST=gitlab.com glab orbit status --full-path <group>` shows it indexed. |
 | Consumer lag grows, no errors | [Add SDLC capacity](../maintenance.md#capacity). | Lag stops growing. |
 
 ## Escalate
