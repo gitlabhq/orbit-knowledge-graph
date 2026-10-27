@@ -234,13 +234,18 @@ To turn on indexing for a group:
 
 To index every top-level group, turn on **Turn on GitLab Orbit for all top-level groups automatically**.
 
-You can also turn on indexing with the API:
+You can also turn on indexing with the API.
+Use a personal access token of an administrator, with the `api` scope.
+If Admin Mode is on, the token also needs the `admin_mode` scope.
 
 ```shell
 curl --request PUT \
   --header "PRIVATE-TOKEN: <your_access_token>" \
   --url "https://gitlab.example.com/api/v4/admin/knowledge_graph/namespaces/<group_id>"
 ```
+
+Replace `<group_id>` with the ID or URL-encoded path of a top-level group.
+For a subgroup, the API returns `400 Bad Request`.
 
 The first index takes from several minutes to a few hours.
 An hourly sweep picks up any data that indexing missed.

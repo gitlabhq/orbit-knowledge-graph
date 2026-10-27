@@ -32,6 +32,12 @@ Agents on the [Model Context Protocol (MCP) endpoint](../agents/mcp.md) send the
 
 ## Use the GitLab Orbit API
 
+{{< details >}}
+
+- Status: Beta
+
+{{< /details >}}
+
 From a script, a scheduled report, or a custom tool, send the same query text to the GitLab REST API.
 Authenticate with a personal access token, or with a [service account](../security.md#service-accounts)
 for automation without a personal account.
@@ -40,6 +46,7 @@ Results include only the data that the token owner can access.
 - For the endpoints, parameters, and examples, see the [GitLab Orbit API](https://docs.gitlab.com/api/orbit/).
 - For GitLab Orbit data in the GraphQL API, such as the groups where GitLab Orbit is turned on and the schema,
   see [`Query.orbit`](https://docs.gitlab.com/api/graphql/reference/queries/#orbit).
+  `Query.orbit` is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 
 ## Query shapes
 
