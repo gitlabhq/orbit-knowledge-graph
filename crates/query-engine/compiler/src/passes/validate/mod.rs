@@ -351,6 +351,40 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             .map(|property| property.data_type)
     }
 
+    fn check_aggregation_text_groups(&self, input: &Input) -> Result<()> {
+        let model = self.model.get();
+        let groups = &input.aggregation.group_by;
+        let node_groups: HashSet<&str> = crate::input::node_group_ids(groups).collect();
+        let text_key = |node: &str, property: &str| {
+            input
+                .entity_of(node)
+                .filter(|entity| model.property_is_free_text(entity, property))
+        };
+        let unique_key = |node: &str| {
+            crate::input::property_groups(groups).any(|(other, property)| {
+                other == node
+                    && text_key(node, property)
+                        .and_then(|entity| model.property(entity, property))
+                        .is_some_and(|property| model.property_unique(property.id))
+            })
+        };
+        for (node, property) in crate::input::property_groups(groups) {
+            let Some(entity) = text_key(node, property) else {
+                continue;
+            };
+            if node_groups.contains(node)
+                || model.read_grain(entity) != Some(&query_data_model::ReadGrain::Entity)
+                || unique_key(node)
+            {
+                continue;
+            }
+            return Err(QueryError::Validation(format!(
+                "aggregation group key {entity}.{property}: free-text values cannot be grouped because access to each {entity} is checked separately; group by a property with fixed values, by an id, or by \"{node}\""
+            )));
+        }
+        Ok(())
+    }
+
     fn check_aggregation_text_filters(&self, input: &Input) -> Result<()> {
         let model = self.model.get();
         let row_nodes = input.aggregation_row_nodes(model);
@@ -1444,6 +1478,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             }
         }
 
+        self.check_aggregation_text_groups(input)?;
         self.check_aggregation_text_filters(input)?;
 
         if let Some(sort) = &input.aggregation.sort {
