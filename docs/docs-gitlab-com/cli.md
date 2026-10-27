@@ -59,12 +59,6 @@ If you cannot use `glab`, install the standalone `orbit` binary.
 The binary runs the same commands as `glab orbit`.
 In the commands on this page, replace `glab orbit` with `orbit`, for example `orbit setup`.
 
-- With npm:
-
-  ```shell
-  npm install -g @gitlab/orbit
-  ```
-
 - On macOS and Linux:
 
   ```shell
@@ -81,6 +75,12 @@ In the commands on this page, replace `glab orbit` with `orbit`, for example `or
 
   ```powershell
   irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 | iex
+  ```
+
+- With npm:
+
+  ```shell
+  npm install -g @gitlab/orbit
   ```
 
 - By hand: download the archive for your platform from the
