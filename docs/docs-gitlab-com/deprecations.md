@@ -27,11 +27,10 @@ GitLab Orbit needs these versions or later:
 |-----------|-----------------|
 | GitLab CLI (`glab`) | 1.120 |
 | GitLab Orbit CLI (`orbit`) | 0.161.0 |
-| GitLab Self-Managed and GitLab Dedicated | 19.5 |
+| GitLab Orbit Helm chart | 4.0.0 |
+| GitLab Self-Managed | 19.4.4, 19.5.2, or 19.6.0 |
 
-To check your `glab` version, run `glab version`.
-
-To check your GitLab Orbit CLI version, run `glab orbit version`.
+On GitLab 19.4 and 19.5, use the listed patch release or a later patch release.
 
 To update the GitLab Orbit CLI, run `glab orbit --update`.
 
@@ -81,7 +80,6 @@ The JSON output uses the GraphQL field names.
 | `projects.indexed` | `indexing.projects.indexed` |
 | `projects.total_known` | `indexing.projects.totalKnown` |
 | `projects.gaps` | `indexing.projects.gaps` |
-| `indexing.state` | `indexing.state` |
 | `sdlc_indexing` | `indexing.areas` |
 | `code_indexing` | `indexing.areas` |
 | `domains` | `itemCounts.domains` |
@@ -128,32 +126,9 @@ GitLab.com removed them first.
 | `GET /api/v4/orbit/graph_status` | The `orbit` field of a group or project in the GraphQL API |
 | `GET /api/v4/orbit/schema/dsl` | No replacement |
 
-## REST API endpoint status
-
-Each REST API endpoint has a [development stage](https://docs.gitlab.com/policy/development_stages_support/).
-An experiment endpoint can change or be removed without notice.
-
-| Endpoint | Status |
-|----------|--------|
-| `POST /api/v4/orbit/query` | Beta |
-| `POST /api/v4/orbit/query/:name` | Beta |
-| `GET /api/v4/orbit/query/templates` | Beta |
-| `GET /api/v4/orbit/status` | Beta |
-| `GET /api/v4/orbit/skills` | Beta |
-| `GET /api/v4/orbit/skills/:name` | Beta |
-| `GET /api/v4/orbit/skills/:name/*path` | Beta |
-| `GET /api/v4/orbit/schema` | Experiment |
-| `GET /api/v4/orbit/schema/format` | Experiment |
-| `GET /api/v4/orbit/tools` | Experiment |
-| `GET /api/v4/orbit/grep` | Experiment |
-| `POST /api/v4/orbit/context` | Experiment |
-| `GET /api/v4/orbit/agent/commands` | Experiment |
-| `POST /api/v4/orbit/agent/commands/:name` | Experiment |
-
 ## MCP endpoint tools
 
 GitLab 19.3 removed two tools from the MCP endpoint at `/api/v4/orbit/mcp`.
-The endpoint has two tools: `list_commands` and `invoke_command`.
 A call to a removed tool returns an `Unknown tool` error.
 
 | Removed tool | Use instead |
@@ -190,6 +165,23 @@ Skills from the beta use the removed `glab orbit remote` commands.
 
 To replace the skill in your agents, run `glab orbit setup`.
 Setup removes the old `orbit-cli` skill.
+
+## GitLab Orbit Helm chart
+
+{{< details >}}
+
+- Offering: GitLab Self-Managed
+
+{{< /details >}}
+
+Chart 4.0.0 renamed the chart from `gkg` to `orbit`.
+The `gkg` chart gets no new releases.
+Change your chart reference to `oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit`.
+
+To upgrade from chart 3.x to 4.0.0, follow [Upgrading to 4.0](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts#upgrading-to-40) in the chart README.
+
+GitLab Orbit 0.143.0 removed the `/live` and `/ready` probe endpoints.
+Charts earlier than 3.0.0 do not work with GitLab Orbit 0.143.0 or later.
 
 ## GitLab Orbit server configuration
 
