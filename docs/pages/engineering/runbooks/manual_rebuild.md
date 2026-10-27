@@ -123,7 +123,7 @@ about 4 hours on GitLab.com and 7 minutes in staging.
    kubectl --context "$CTX" -n gkg annotate scaledobject orbit-indexer-code autoscaling.keda.sh/paused-replicas-
    ```
 
-8. Done when `GITLAB_HOST=gitlab.com glab orbit graph-status --full-path <group>` reports the
+8. Done when `GITLAB_HOST=gitlab.com glab orbit status --full-path <group>` reports the
    projects as indexed.
 
 To move to another ClickHouse service, change the host and the passwords in the ArgoCD values
@@ -168,7 +168,7 @@ GROUP BY traversal_path, project_id, branch HAVING argMax(_deleted, _version) = 
 For all projects in a namespace, use
 `WHERE startsWith(traversal_path, '<org_id>/<root_namespace_id>/')`.
 
-Check: `GITLAB_HOST=gitlab.com glab orbit graph-status --full-path <group>` shows the
+Check: `GITLAB_HOST=gitlab.com glab orbit status --full-path <group>` shows the
 projects as indexed again.
 
 > [!warning]
