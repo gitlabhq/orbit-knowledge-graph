@@ -215,7 +215,7 @@ fn string_column<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a StringArr
 pub(super) struct Replacement {
     edge_table: String,
     files: Vec<String>,
-    rows: Vec<(String, &'static str, RecordBatch)>,
+    rows: Vec<(String, RecordBatch)>,
     edges: Vec<RecordBatch>,
 }
 
@@ -275,14 +275,10 @@ pub(super) fn replacement(
         let keep: BooleanArray = (0..batch.num_rows())
             .map(|row| Some(files.contains(paths.value(row))))
             .collect();
-        rows.push((
-            table,
-            column,
-            arrow::compute::filter_record_batch(&batch, &keep)?,
-        ));
+        rows.push((table, arrow::compute::filter_record_batch(&batch, &keep)?));
     }
     let mut ids = FxHashSet::default();
-    for (_, _, batch) in &rows {
+    for (_, batch) in &rows {
         ids.extend(int_column(batch, "id")?.values().iter().copied());
     }
     let edges = edges
@@ -307,14 +303,8 @@ pub(super) fn replacement(
 }
 
 pub(super) fn apply(writer: &GraphWriter, replacement: &Replacement) -> Result<()> {
-    let tables: Vec<(&str, &str)> = replacement
-        .rows
-        .iter()
-        .map(|(table, column, _)| (table.as_str(), *column))
-        .collect();
-    let files: Vec<&str> = replacement.files.iter().map(String::as_str).collect();
-    writer.delete_files(&replacement.edge_table, &tables, &files)?;
-    for (table, _, batch) in &replacement.rows {
+    writer.delete_files(&replacement.files)?;
+    for (table, batch) in &replacement.rows {
         writer.insert_batch(table, batch)?;
     }
     for batch in &replacement.edges {

@@ -354,17 +354,45 @@ impl State {
     /// named by the hash of its content, so a save writes only the blocks
     /// whose files changed and removes the ones nothing refers to any more.
     pub fn save(&self, env: &Env, path: &Path) -> io::Result<()> {
-        self.write(env, path, None)
+        self.write(env, path, path, None)?;
+        remove_unreferenced_blocks(path)
     }
 
     /// [`Self::save`] over the snapshot this graph was loaded from, when only
     /// the files in `touched` changed since: a block with none of them, and
     /// the same files as before, keeps its file without being serialised.
     pub fn save_changed(&self, env: &Env, path: &Path, touched: &FxHashSet<u32>) -> io::Result<()> {
-        self.write(env, path, Some(touched))
+        self.write(env, path, path, Some(touched))?;
+        remove_unreferenced_blocks(path)
     }
 
-    fn write(&self, env: &Env, path: &Path, touched: Option<&FxHashSet<u32>>) -> io::Result<()> {
+    /// [`Self::save_changed`] with the index written to `staged`: the
+    /// snapshot at `path` stays readable as it was until
+    /// [`State::commit_staged`] puts the staged one in its place.
+    pub fn stage_changed(
+        &self,
+        env: &Env,
+        path: &Path,
+        staged: &Path,
+        touched: &FxHashSet<u32>,
+    ) -> io::Result<()> {
+        self.write(env, path, staged, Some(touched))
+    }
+
+    /// Puts the index staged for `path` in place and removes the blocks the
+    /// old one alone referred to.
+    pub fn commit_staged(staged: &Path, path: &Path) -> io::Result<()> {
+        std::fs::rename(staged, path)?;
+        remove_unreferenced_blocks(path)
+    }
+
+    fn write(
+        &self,
+        env: &Env,
+        path: &Path,
+        index_path: &Path,
+        touched: Option<&FxHashSet<u32>>,
+    ) -> io::Result<()> {
         let dir = blocks_dir(path);
         std::fs::create_dir_all(&dir)?;
         let buckets = self
@@ -400,22 +428,13 @@ impl State {
                 .map(|c| (c.path.clone(), c.content.clone()))
                 .collect(),
         };
-        write_atomically(path, |file| {
+        write_atomically(index_path, |file| {
             let mut out = zstd::Encoder::new(file, 3)?;
             out.write_all(&SNAPSHOT_VERSION.to_le_bytes())?;
             write_frame(&mut out, &index)?;
             write_frame(&mut out, &shared)?;
             out.finish().map(drop)
-        })?;
-        let referenced: FxHashSet<&str> =
-            index.blocks.iter().map(|(_, name)| name.as_str()).collect();
-        for entry in std::fs::read_dir(&dir)? {
-            let entry = entry?;
-            if !referenced.contains(entry.file_name().to_string_lossy().as_ref()) {
-                std::fs::remove_file(entry.path())?;
-            }
-        }
-        Ok(())
+        })
     }
 
     /// The blocks of the saved snapshot at `path` that still hold exactly
@@ -636,6 +655,19 @@ fn bucket_members<'a>(
 
 fn bucket(label: &str, buckets: u32) -> u32 {
     (twox_hash::XxHash3_64::oneshot(label.as_bytes()) % u64::from(buckets)) as u32
+}
+
+/// Removes the blocks beside `path` that its index does not refer to.
+fn remove_unreferenced_blocks(path: &Path) -> io::Result<()> {
+    let (_, index) = open_index(path)?;
+    let referenced: FxHashSet<&str> = index.blocks.iter().map(|(_, name)| name.as_str()).collect();
+    for entry in std::fs::read_dir(blocks_dir(path))? {
+        let entry = entry?;
+        if !referenced.contains(entry.file_name().to_string_lossy().as_ref()) {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 fn read_block(path: &Path) -> io::Result<Block> {

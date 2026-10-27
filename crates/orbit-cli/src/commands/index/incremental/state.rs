@@ -201,7 +201,8 @@ impl Project<'_> {
             .iter()
             .map(|(family, _)| family.family().to_string())
             .collect();
-        let outputs = self.writer.transaction(|| {
+        self.writer.mark_incomplete()?;
+        let outputs = self.writer.in_transaction(|| {
             if rows == Rows::All {
                 self.writer.clear(self.ontology)?;
             }
@@ -389,6 +390,11 @@ fn save_snapshot(
     indexed
         .state
         .save_changed(&indexed.env, snapshot, &indexed.touched)?;
+    set_read_time(snapshot, read_at)
+}
+
+/// Freshness compares a file's mtime with the time its family last read it.
+fn set_read_time(snapshot: &std::path::Path, read_at: std::time::SystemTime) -> Result<()> {
     std::fs::File::options()
         .write(true)
         .open(snapshot)?
@@ -438,7 +444,7 @@ fn pending_file(snapshot: &std::path::Path) -> PathBuf {
 /// Puts each pending snapshot in place. The rename keeps the read time that freshness compares against.
 pub(super) fn commit_snapshots(refreshed: &[Refreshed]) -> Result<()> {
     for family in refreshed {
-        std::fs::rename(&family.pending, &family.snapshot)
+        State::commit_staged(&family.pending, &family.snapshot)
             .with_context(|| format!("failed to save {}", family.snapshot.display()))?;
     }
     Ok(())
@@ -470,20 +476,19 @@ pub(super) fn refresh_families(
             state,
             Vec::new(),
         )?;
-        let revisited: Vec<u32> = resolved.value().resolved.clone();
+        let touched = resolved.value().touched.clone();
         let (_, displayed) = resolved.then(Display)?.finish();
         let state = displayed.state;
-        let mut files: rustc_hash::FxHashSet<String> = paths.into_iter().collect();
-        files.extend(
-            revisited
-                .into_iter()
-                .filter_map(|index| state.trees.get(index as usize))
-                .map(|tree| tree.label.to_string()),
-        );
+        let files: FxHashSet<String> = touched
+            .iter()
+            .filter_map(|&index| state.trees.get(index as usize))
+            .map(|tree| tree.label.to_string())
+            .collect();
         let pending = pending_file(&snapshot);
         let replacement = super::output::replacement(git, ontology, &env, &state, &files);
         let saved = replacement.and_then(|replacement| {
-            save_snapshot(&env, &state, &pending, read_at)?;
+            state.stage_changed(&env, &snapshot, &pending, &touched)?;
+            set_read_time(&pending, read_at)?;
             Ok(replacement)
         });
         match saved {

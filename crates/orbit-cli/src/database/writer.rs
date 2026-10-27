@@ -77,25 +77,12 @@ impl GraphWriter {
         Ok(duckdb_client::scalar_i64(&batches) > 0)
     }
 
-    /// Runs `write` in one transaction, marking the graph incomplete until
-    /// [`Self::complete`]; a failure leaves the graph as it was.
-    pub fn transaction<T>(&self, write: impl FnOnce() -> Result<T>) -> Result<T> {
-        self.client.execute("BEGIN TRANSACTION", &[])?;
-        let written = self
-            .client
-            .execute("DELETE FROM _orbit_meta WHERE key = 'indexed_commit'", &[])
-            .map_err(anyhow::Error::from)
-            .and_then(|_| write());
-        match written {
-            Ok(value) => {
-                self.client.execute("COMMIT", &[])?;
-                Ok(value)
-            }
-            Err(error) => {
-                self.client.execute("ROLLBACK", &[])?;
-                Err(error)
-            }
-        }
+    /// Marks the graph unfinished until [`Self::complete`], in its own
+    /// statement, so a run that stops halfway leaves it marked.
+    pub fn mark_incomplete(&self) -> Result<()> {
+        self.client
+            .execute("DELETE FROM _orbit_meta WHERE key = 'indexed_commit'", &[])?;
+        Ok(())
     }
 
     /// Deletes the rows of `paths`: their files, the entities in them, and
@@ -157,45 +144,13 @@ impl GraphWriter {
         Ok(duckdb_client::scalar_i64(&self.client.query_arrow(sql)?) as usize)
     }
 
-    pub fn delete_files(
-        &self,
-        edge_table: &str,
-        tables: &[(&str, &str)],
-        files: &[&str],
-    ) -> Result<()> {
-        if files.is_empty() || tables.is_empty() {
-            return Ok(());
-        }
-        let list = files
-            .iter()
-            .map(|file| duckdb_client::sql_lit(file))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let ids = tables
-            .iter()
-            .map(|(table, column)| format!("SELECT id FROM {table} WHERE {column} IN ({list})"))
-            .collect::<Vec<_>>()
-            .join(" UNION ALL ");
-        self.client.execute(
-            &format!("DELETE FROM {edge_table} WHERE source_id IN ({ids}) OR target_id IN ({ids})"),
-            &[],
-        )?;
-        for (table, column) in tables {
-            self.client.execute(
-                &format!("DELETE FROM {table} WHERE {column} IN ({list})"),
-                &[],
-            )?;
-        }
-        Ok(())
-    }
-
     /// Runs `write` in one transaction, so a failure leaves the graph as it was.
-    pub fn in_transaction(&self, write: impl FnOnce() -> Result<()>) -> Result<()> {
+    pub fn in_transaction<T>(&self, write: impl FnOnce() -> Result<T>) -> Result<T> {
         self.client.execute("BEGIN TRANSACTION", &[])?;
         match write() {
-            Ok(()) => {
+            Ok(value) => {
                 self.client.execute("COMMIT", &[])?;
-                Ok(())
+                Ok(value)
             }
             Err(error) => {
                 let _ = self.client.execute("ROLLBACK", &[]);
