@@ -38,18 +38,21 @@ fi
 
 # Gate on the migrations Job, not the toolbox pod: toolbox goes Running
 # before migrations finish and rails-runner crashes on an unmigrated DB.
-MIGRATED=""
-for _ in $(seq 1 120); do
-  MIGRATED=$($KC get jobs -n "$NS_GITLAB" \
-    -o jsonpath='{range .items[?(@.status.succeeded>=1)]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
-    | grep -m1 'migrations' || true)
-  [[ -n "$MIGRATED" ]] && break
+MIGRATIONS=""
+for _ in $(seq 1 360); do
+  MIGRATIONS=$($KC get jobs -n "$NS_GITLAB" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
+    | tr ' ' '\n' | grep -m1 'migrations' || true)
+  [[ -n "$MIGRATIONS" ]] && break
   sleep 5
 done
-if [[ -z "$MIGRATED" ]]; then
-  echo "GitLab migrations job not complete in $NS_GITLAB after 600s"
+if [[ -z "$MIGRATIONS" ]]; then
+  echo "GitLab migrations job not created in $NS_GITLAB after 1800s"
   exit 1
 fi
+$KC wait -n "$NS_GITLAB" "job/$MIGRATIONS" --for=condition=complete --timeout=600s || {
+  echo "GitLab migrations job $MIGRATIONS not complete in $NS_GITLAB after 600s"
+  exit 1
+}
 
 TOOLBOX=""
 for _ in $(seq 1 60); do
