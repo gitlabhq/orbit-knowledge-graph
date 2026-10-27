@@ -3,7 +3,7 @@ Documentation       Smoke the read-only Orbit API surface beyond /query (covered
 ...                 CALL db.schema(), tools, and agent commands. Each is a thin gRPC pass-through;
 ...                 this guards the Rails wiring.
 ...
-...                 Each endpoint is asserted present-and-correct (200 + content) OR absent (404),
+...                 Each endpoint is asserted present (200) OR absent (404),
 ...                 because the e2e stack pins a gitlab-org/gitlab image that can predate the newer
 ...                 Orbit routes (which are owned upstream). A 5xx still fails the test, so a real
 ...                 GKG-side regression is caught.

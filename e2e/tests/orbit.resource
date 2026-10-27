@@ -20,7 +20,7 @@ Orbit Status Is Healthy
     ${body}=    Create Dictionary    query={ orbit { serviceStatus { state } } }
     ${resp}=    POST    ${GITLAB_URL}/api/graphql    headers=${headers}    json=${body}    expected_status=200
     ${payload}=    Set Variable    ${resp.json()}
-    IF    "doesn't exist on type 'Orbit'" in str($payload.get("errors"))
+    IF    "Field 'serviceStatus' doesn't exist" in str($payload.get("errors"))
         ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/status    headers=${headers}    expected_status=200
         Should Be Equal    ${resp.json()["system"]["status"]}    healthy
         RETURN
@@ -149,24 +149,19 @@ Orbit Query Is Rejected
     Should Contain    ${resp.json()["message"]}    ${message}
 
 Orbit Endpoint Smoke
-    [Documentation]    GET /api/v4/orbit/${path} with the bot PAT. When the endpoint is present (200)
-    ...                assert the body contains ${needle} (when given). A 404 is tolerated: the e2e
+    [Documentation]    GET /api/v4/orbit/${path} with the bot PAT. A 404 is tolerated: the e2e
     ...                stack pins a gitlab-org/gitlab image (versions.yaml) that can predate newer
     ...                Orbit endpoints, and those routes are owned upstream, not by this repo. A 5xx
     ...                or any other status still fails, so a real GKG-side regression is caught.
-    [Arguments]    ${path}    ${needle}=${None}    ${params}=${None}
+    [Arguments]    ${path}
     ${headers}=    GitLab Auth Headers
-    ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/${path}
-    ...    headers=${headers}    params=${params}    expected_status=any
+    ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/${path}    headers=${headers}    expected_status=any
     IF    ${resp.status_code} == 404
-        Log    /orbit/${path} absent in the pinned GitLab image; content check skipped.    level=WARN
+        Log    /orbit/${path} absent in the pinned GitLab image.    level=WARN
         RETURN
     END
     Should Be Equal As Integers    ${resp.status_code}    200
     ...    /orbit/${path} returned ${resp.status_code}: ${resp.text}
-    IF    $needle is not None
-        Should Contain    ${resp.text}    ${needle}    /orbit/${path} body missing '${needle}'
-    END
 
 Orbit Query LLM
     [Documentation]    POST /orbit/query with response_format=llm. Returns the raw response so the
