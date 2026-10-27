@@ -23,8 +23,6 @@ pub fn orbit_cmd() -> Command {
     cmd.env("LD_LIBRARY_PATH", &lib);
     // Keep a scratch folder from resolving to a checkout that encloses TMPDIR.
     cmd.env("GIT_CEILING_DIRECTORIES", std::env::temp_dir());
-    // Reads index the current directory's repository on first use, so a default cwd inside
-    // the checkout would index the checkout.
     cmd.current_dir(std::env::temp_dir());
     cmd
 }

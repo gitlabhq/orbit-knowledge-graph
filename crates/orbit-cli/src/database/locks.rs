@@ -96,7 +96,6 @@ fn acquire_database_lock(
         match result {
             Ok(()) => {
                 if !shared {
-                    // A blocked waiter reads the holder's start time from the file's mtime.
                     let _ = file.set_modified(SystemTime::now());
                 }
                 return Ok(file);
