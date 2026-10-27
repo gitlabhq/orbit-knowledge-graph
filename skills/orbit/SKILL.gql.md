@@ -38,7 +38,7 @@ If you find a legacy JSON query (an object with `query_type`, `nodes`, or `relat
 
 Run `CALL db.schema()` once per session, because the schema does not change mid-session. It lists every relationship as `(Source)-[:TYPE]->(Target)` and the properties of the common nodes, such as `User`, `Project`, `Group`, `MergeRequest`, and `WorkItem`. Run `CALL db.schema('Node')` only for a node it does not list properties for. Query syntax and paste-ready queries are in [`references/gql.md`](references/gql.md).
 
-The GraphQL field `Query.orbit.queryTemplates` lists the named queries, with `name`, `description`, and `query`. Run one with `POST /api/v4/orbit/query/:name`. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
+List the named queries with `glab api graphql -f query='{ orbit { queryTemplates { name description query } } }'`. Run one with `glab api -X POST orbit/query/NAME`. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
 
 Each `glab orbit query` has fixed per-call overhead. Prefer one aggregate query, with `count(...)` in `RETURN`, over N lookups for "how many X grouped by Y", and batch related lookups.
 
