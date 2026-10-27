@@ -22,9 +22,7 @@ pub fn resolve(input: &Input, node: &Node, plan: &QueryPlan) -> Result<QueryConf
         visit_queries(query, &mut |query| {
             derived.enable_materialized_cte |= query.ctes.iter().any(|cte| cte.materialized);
             visit_relations(&query.from, &mut |relation| {
-                let final_scan = matches!(relation, TableRef::Scan { final_: true, .. });
-                derived.optimize_move_to_prewhere_if_final |= final_scan;
-                derived.use_skip_indexes_if_final_exact |= final_scan;
+                derived.final_scan |= matches!(relation, TableRef::Scan { final_: true, .. });
             });
             if !query.ctes.is_empty() {
                 derived.use_index_for_in_with_subqueries_max_values =
