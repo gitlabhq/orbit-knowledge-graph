@@ -2,7 +2,7 @@
 # Source of truth until it merges in docs-gitlab-com data/en-us/navigation.yaml.
 # scripts/docs/site.sh replaces the GitLab Orbit section of the docs-gitlab-com
 # checkout with this file, so `mise docs:serve` and `mise docs:build` show these pages.
-# Until cutover, the first section is live and the second lists docs/source/v2.
+# Until cutover, the first section is live and the second lists docs/docs-gitlab-com/v2.
 
 - title: GitLab Orbit
   url: 'orbit/'

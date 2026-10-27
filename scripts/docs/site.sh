@@ -127,7 +127,7 @@ build() {
     run make add-latest-icons build-data
     rm -rf public
     run hugo --gc --printPathWarnings --panicOnWarning
-    run make check-index-pages SEARCH_DIR=../orbit/docs/source
+    run make check-index-pages SEARCH_DIR=../orbit/docs/docs-gitlab-com
     check_navigation
 }
 
