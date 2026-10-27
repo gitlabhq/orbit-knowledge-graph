@@ -374,7 +374,13 @@ fn revision_read_locks_block_writers_and_release_when_reader_exits() {
         .spawn()
         .unwrap();
     wait_for_reader(&lock);
-    assert!(!orbit_index(&repo.path, data_dir.path()));
+    let blocked = orbit_cmd()
+        .args(["workspace", "index", "--timeout", "1"])
+        .arg(&repo.path)
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(blocked.status.code(), Some(75));
     assert_eq!(rows(&orbit_sql(FILES_SIMPLE, data_dir.path())).len(), 2);
     let (_, stderr, ok) = run_cmd(&["workspace", "list", "-F", "json"], data_dir.path());
     assert!(ok, "{stderr}");
@@ -407,13 +413,19 @@ fn busy_revision_fails_the_whole_query_and_releases_prior_locks() {
         })
         .collect();
     locks[1].lock().unwrap();
-    let (stdout, stderr, ok) = run_cmd(
-        &["workspace", "sql", "-F", "json", FILES_SIMPLE],
-        data_dir.path(),
+    let out = orbit_cmd()
+        .args(["workspace", "sql", "-F", "json", FILES_SIMPLE])
+        .env("ORBIT_DATA_DIR", data_dir.path())
+        .env("ORBIT_WAIT_TIMEOUT_MS", "300")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(out.stdout.is_empty(), "must not return partial rows");
+    assert!(
+        stderr.contains("gave up waiting for the index of"),
+        "{stderr}"
     );
-    assert!(!ok);
-    assert!(stdout.is_empty(), "must not return partial rows");
-    assert!(stderr.contains("is busy; retry"), "{stderr}");
     locks[0]
         .try_lock()
         .expect("failed reader releases earlier shared locks");

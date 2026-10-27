@@ -9,7 +9,7 @@ description: >
   Works on the working tree and unpushed branches, and also searches and reads
   the project's GitLab. Not a fit: reading one known file, or counts and
   relationships across GitLab (use the `orbit` skill).
-version: 0.31.0
+version: 0.32.0
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab); local indexing needs filesystem access to the checkout.
 metadata:
@@ -25,8 +25,18 @@ metadata:
 The local CLI parses a checkout into a DuckDB property graph. `grep` finds
 every matching line in code, tests, config, and docs, labeled with its enclosing definition. `context` reads their source and relationships. Both
 index the working tree on first use and refresh the index when it is stale, so
-you never need to index by hand. `workspace sql` runs read-only aggregations.
-For production data, use the `orbit` skill.
+you never need to index by hand. `workspace sql` and `workspace schema` index
+the current repository first when it was never indexed, even if other
+repositories are, and run read-only aggregations. A new commit alone does not
+trigger an index.
+A read waits up to 10 minutes for a running index and then exits with code 75.
+To index ahead of time without blocking a short shell timeout, run
+`workspace index --async`, which returns once the background index holds its locks.
+It prints `{"status": ...}` with `indexing`, `indexed`, or `queued` (another index
+of the repository already runs). If open readers hold the locks for 30 s, it exits
+with code 75 while the background index keeps waiting.
+`workspace index --wait` waits for a running index (`--timeout SECONDS`) and then
+indexes in the foreground, which is the default. For production data, use the `orbit` skill.
 
 The binary is `orbit`, or `glab orbit` through the wrapper. In non-interactive
 shells, put glab's `--yes` before the subcommand so glab skips its install and

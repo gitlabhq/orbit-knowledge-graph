@@ -10,13 +10,16 @@ use code_graph_incremental::treesitter::SupportLang;
 
 use ontology::Ontology;
 
-use crate::database::{GraphWriter, lock_incremental_state, manifest};
+use crate::database::schema::graph_lacks_commit;
+use crate::database::{GraphWriter, lock_index_state, manifest, wait_timeout};
 use crate::{tui, workspace};
 
+mod detached;
 mod input;
 mod output;
 mod state;
 
+pub(crate) use detached::index_detached;
 pub(crate) use output::FamilyOutput;
 use state::Project;
 
@@ -28,6 +31,9 @@ pub(crate) struct Options {
     pub budget_seconds: Option<u64>,
     pub cancel: Arc<AtomicBool>,
     pub progress: bool,
+    pub wait: Option<Duration>,
+    pub skip_current: bool,
+    pub ready_file: Option<PathBuf>,
 }
 
 #[derive(serde::Serialize)]
@@ -234,6 +240,8 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
         return Err(super::NoRepositoryFound(folder).into());
     }
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
+    let wait = options.wait.unwrap_or_else(wait_timeout);
+    let ready = options.ready_file.clone().map(detached::ReadyFile);
     let mut outputs = Vec::new();
     for repo in repos {
         let started = std::time::Instant::now();
@@ -245,12 +253,15 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
             }
         };
         let state_dir = workspace.var_dir(git.project_id);
-        let _state_lock = lock_incremental_state(&state_dir)?;
+        let _state_lock = lock_index_state(&state_dir, &git.repo_path, wait)?;
         let db_path = workspace::resolve_db_path(options.db.clone(), &git)?;
+        if options.skip_current && !graph_lacks_commit(&db_path, &git.commit_sha)? {
+            continue;
+        }
         let snapshot = options.db.is_none()
             && db_path.exists()
             && manifest::load_incremental_state(&manifest_path, git.project_id)?.is_some();
-        let writer = GraphWriter::open(&db_path, &git)?;
+        let writer = GraphWriter::open_waiting(&db_path, &git, wait)?;
         let progress = options
             .progress
             .then(|| Arc::new(RepositoryBars::open(&git)));
@@ -261,6 +272,9 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
             None,
             &db_path,
         )?;
+        if let Some(ready) = &ready {
+            ready.signal()?;
+        }
         let project = Project {
             git: &git,
             writer: &writer,
@@ -362,21 +376,24 @@ fn refresh_wait() -> Duration {
         .map_or(REFRESH_WAIT, Duration::from_millis)
 }
 
-fn spawn_refresh(repo: &Path, db: Option<&Path>, files: &[String]) -> Option<Child> {
+pub(super) fn detached_command() -> Option<Command> {
     let mut command = Command::new(std::env::current_exe().ok()?);
-    command.arg("refresh").arg(repo);
-    if let Some(db) = db {
-        command.arg("--db").arg(db);
-    }
     command
-        .arg("--")
-        .args(files)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    command.spawn().ok()
+    Some(command)
+}
+
+fn spawn_refresh(repo: &Path, db: Option<&Path>, files: &[String]) -> Option<Child> {
+    let mut command = detached_command()?;
+    command.arg("refresh").arg(repo);
+    if let Some(db) = db {
+        command.arg("--db").arg(db);
+    }
+    command.arg("--").args(files).spawn().ok()
 }
 
 fn finished_within(mut child: Child, wait: Duration) -> bool {
@@ -462,13 +479,13 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
     if changed.is_empty() {
         return Ok(());
     }
-    let _state_lock = lock_incremental_state(&state_dir)?;
+    let _state_lock = lock_index_state(&state_dir, &git.repo_path, crate::database::BRIEF_WAIT)?;
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
     let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
     let refreshed = state::refresh_families(&git, &ontology, &state_dir, owner, changed)?;
     // Snapshots go in place only after the rows land, so a failed write keeps the files stale.
     let written = workspace::resolve_db_path(db, &git)
-        .and_then(|path| GraphWriter::open(&path, &git))
+        .and_then(|path| GraphWriter::open_waiting(&path, &git, crate::database::BRIEF_WAIT))
         .and_then(|writer| {
             writer.in_transaction(|| {
                 refreshed
