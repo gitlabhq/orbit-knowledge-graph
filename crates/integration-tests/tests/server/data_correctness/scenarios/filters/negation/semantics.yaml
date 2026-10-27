@@ -317,10 +317,10 @@ cases:
     description: NOT IN on a non-nullable denormalized property reads the edge tags and removes the closed work item
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2]},{"id":"wi","entity":"WorkItem","not":{"state":{"in":["closed","locked"]}},"columns":["state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"wi"}],"limit":20}
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1,2]},{"id":"wi","entity":"WorkItem","not":{"state":{"in":["closed"]}},"columns":["state"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"wi"}],"limit":20}
       gql: |
         MATCH (u:User)-[:AUTHORED]->(wi:WorkItem)
-        WHERE u.id IN [1, 2] AND NOT wi.state IN ['closed', 'locked']
+        WHERE u.id IN [1, 2] AND NOT wi.state IN ['closed']
         RETURN u, wi.state LIMIT 20
     expect:
       node_count: 3
