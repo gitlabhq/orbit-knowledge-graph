@@ -61,11 +61,12 @@ index the current commit when it isn't indexed yet.
 The main commands that read the local graph are:
 
 - `glab orbit grep` works like grep. It shows each match inside its enclosing
-  definition, with that definition's callers and callees. It also searches the
-  issues, merge requests, and notes of the top-level group behind `origin`.
+  definition, with that definition's callers and callees. When authenticated
+  with `glab`, it also searches the issues, merge requests, and notes of the
+  top-level group behind `origin`.
 - `glab orbit context` expands a definition, a file, a line range, or a
-  folder. It also reads GitLab targets such as `mr:42`, `issue:7`, and
-  `pipeline:123`.
+  folder. When authenticated with `glab`, it also reads GitLab targets such as
+  `mr:42`, `issue:7`, and `pipeline:123`.
 - `glab orbit workspace sql` runs DuckDB SQL on the local graph.
 
 ### 5. Ask Orbit's graph
