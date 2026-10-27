@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { quarterFromIndex, quarterIndex, quarterLabel, quarterMonths } from "./calendar";
 import { type RoadmapItem, roadmapQuarter, themes } from "./model";
 import { statusIcon, statusLabel } from "./StatusBadge";
+import { EmptyState } from "./EmptyState";
 import { itemRange } from "./ItemCard";
 
 const COLUMN_REM = 11;
@@ -24,6 +25,7 @@ export function Timeline({ items }: { items: RoadmapItem[] }) {
   const quarters = Array.from({ length: WINDOW_QUARTERS }, (_, offset) => quarterFromIndex(first + offset));
   const visible = items.filter((item) => quarterIndex(item.end) >= first && quarterIndex(item.start) <= last);
   const columns = { gridTemplateColumns: `repeat(${quarters.length}, minmax(${COLUMN_REM}rem, 1fr))` };
+  if (visible.length === 0) return <EmptyState message="No items match this theme in these quarters." />;
 
   return (
     <div className="card relative overflow-hidden">

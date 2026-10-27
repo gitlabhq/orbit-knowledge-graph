@@ -66,10 +66,8 @@ function RoadmapPage() {
         <EmptyState message="The roadmap has no items." reset={false} />
       ) : view === "board" ? (
         open.length > 0 ? <Board items={filtered} /> : <EmptyState message="This theme has no upcoming items." />
-      ) : filtered.length > 0 ? (
-        <Timeline items={filtered} />
       ) : (
-        <EmptyState message="No items match this theme." />
+        <Timeline items={filtered} />
       )}
       {view === "board" && shipped.length > 0 && (
         <section aria-labelledby="shipped" className="mt-14">

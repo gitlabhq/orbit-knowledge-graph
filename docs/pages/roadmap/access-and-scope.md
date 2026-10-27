@@ -16,5 +16,5 @@ We will explore how to give you this control.
 
 - Turn Orbit on for a subgroup or a project, not only a top-level group.
 - Exclude subgroups and projects from the graph, not only top-level groups.
-- Exclude files and paths with a file in your repository, like a `.gitignore` file.
+- Add a file to your repository, like a `.gitignore` file, that lists the files and paths to exclude.
 - Limit Orbit to the users, roles, or service accounts that you pick.
