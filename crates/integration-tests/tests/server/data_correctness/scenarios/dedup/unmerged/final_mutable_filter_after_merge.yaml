@@ -1,0 +1,84 @@
+description: A selective filter on a changing column reads once with FINAL and checks the latest version, so an older matching version never returns; a high fan out child pinned by its parent keeps find then check
+
+config:
+  unmerged_seed: true
+  redaction:
+    allow:
+      ci_pipeline: [9910]
+      ci_build: [9910]
+  extra_seed:
+    gl_pipeline:
+      - { id: 9910, iid: 910, status: running, ref: main, source: push, project_id: 1000, created_at: "2024-01-10 00:00:00", finished_at: "2024-01-15 00:00:00", traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 9910, iid: 910, status: success, ref: main, source: push, project_id: 1000, created_at: "2024-01-10 00:00:00", finished_at: "2024-01-15 00:00:00", traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00" }
+    gl_job:
+      - { id: 9910, name: build, status: running, pipeline_id: 9910, project_id: 1000, created_at: "2024-01-10 00:00:00", finished_at: "2024-01-15 00:00:00", traversal_path: "1/100/1000/", _version: "2024-01-01 00:00:00" }
+      - { id: 9910, name: build, status: success, pipeline_id: 9910, project_id: 1000, created_at: "2024-01-10 00:00:00", finished_at: "2024-01-15 00:00:00", traversal_path: "1/100/1000/", _version: "2024-06-01 00:00:00" }
+
+cases:
+  - name: stale_status_excluded
+    description: Only the older version is running, so the running filter returns nothing
+    query:
+      gql: |
+        MATCH (p:Pipeline) WHERE p.status = 'running' AND p.finished_at >= '2024-01-01' AND p.finished_at < '2024-02-01' RETURN p.id, p.status, p.finished_at
+    expect:
+      sql_contains: ["AS p FINAL", "use_skip_indexes_if_final_exact_mode = 1"]
+      sql_not_contains: ["tuple(p.traversal_path, p.id) IN"]
+      skip_requirements: ["node_ids", "filter:status", "filter:finished_at"]
+      node_count: 0
+
+  - name: latest_status_once
+    description: The latest version is success, so the success filter returns the pipeline once
+    query:
+      gql: |
+        MATCH (p:Pipeline) WHERE p.status = 'success' AND p.finished_at >= '2024-01-01' AND p.finished_at < '2024-02-01' RETURN p.id, p.status, p.finished_at
+    expect:
+      sql_contains: ["AS p FINAL"]
+      node_count: 1
+      nodes:
+        Pipeline:
+          ids: [9910]
+          filters:
+            status: success
+            finished_at: { gte: "2024-01-01T00:00:00Z", lt: "2024-02-01T00:00:00Z" }
+
+  - name: latest_status_count
+    description: A count over the same filter agrees with the search
+    query:
+      gql: |
+        MATCH (p:Pipeline) WHERE p.status = 'success' AND p.finished_at >= '2024-01-01' AND p.finished_at < '2024-02-01' RETURN count(p) AS n
+    expect:
+      skip_requirements: ["filter:status", "filter:finished_at"]
+      row_count: 1
+      row_values: [{ n: 1 }]
+
+  - name: stale_status_count
+    description: A count over the stale status counts nothing
+    query:
+      gql: |
+        MATCH (p:Pipeline) WHERE p.status = 'running' AND p.finished_at >= '2024-01-01' AND p.finished_at < '2024-02-01' RETURN count(p) AS n
+    expect:
+      skip_requirements: ["filter:status", "filter:finished_at"]
+      row_count: 1
+      row_values: [{ n: 0 }]
+
+  - name: unpinned_high_fan_out_child_reads_final
+    description: An unpinned job filter reads once with FINAL and drops the stale version
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.status = 'running' AND j.finished_at >= '2024-01-01' AND j.finished_at < '2024-02-01' RETURN j.id, j.status, j.finished_at
+    expect:
+      sql_contains: ["AS j FINAL"]
+      sql_not_contains: ["tuple(j.traversal_path, j.id) IN"]
+      skip_requirements: ["node_ids", "filter:status", "filter:finished_at"]
+      node_count: 0
+
+  - name: pinned_high_fan_out_child_finds_then_checks
+    description: A job pinned by its pipeline is a high fan out child, so the filter finds then checks and still drops the stale version
+    query:
+      gql: |
+        MATCH (j:Job {pipeline_id: 9910}) WHERE j.status = 'running' AND j.finished_at >= '2024-01-01' AND j.finished_at < '2024-02-01' RETURN j.id, j.status, j.finished_at
+    expect:
+      sql_contains: ["tuple(j.traversal_path, j.id) IN"]
+      sql_not_contains: ["AS j FINAL"]
+      skip_requirements: ["node_ids", "filter:status", "filter:finished_at", "filter:pipeline_id"]
+      node_count: 0

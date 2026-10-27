@@ -1,0 +1,17 @@
+description: count(DISTINCT p) counts each project once where count(mr) counts every row
+
+config:
+  security:
+    paths: ["1/"]
+
+query:
+  gql: |
+    MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE u.id >= 1 AND u.id <= 10000 RETURN u{.username}, count(mr) AS mr_count, count(DISTINCT p) AS project_count LIMIT 10
+
+expect:
+  groups:
+    u:
+      rows:
+        - { entity: User, id: 1, values: { mr_count: 2, project_count: 1 }, properties: { username: alice } }
+        - { entity: User, id: 2, values: { mr_count: 1, project_count: 1 }, properties: { username: bob } }
+        - { entity: User, id: 3, values: { mr_count: 1, project_count: 1 }, properties: { username: charlie } }

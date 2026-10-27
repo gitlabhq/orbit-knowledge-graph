@@ -71,22 +71,22 @@ Index the knowledge-graph repository itself as a test target, then query the
 resulting DuckDB graph with SQL:
 
 ```shell
-./target/release/orbit index .
+./target/release/orbit workspace index .
 
 # Count the extracted definitions:
-./target/release/orbit sql 'SELECT count(*) FROM gl_definition'
+./target/release/orbit workspace sql 'SELECT count(*) FROM gl_definition'
 
 # Find up to three definitions named "main":
-./target/release/orbit sql "SELECT name, definition_type, file_path
+./target/release/orbit workspace sql "SELECT name, definition_type, file_path
   FROM gl_definition WHERE name = 'main' LIMIT 3"
 
 # Structured output for scripts:
-./target/release/orbit sql -F json 'SELECT path, language FROM gl_file LIMIT 5'
+./target/release/orbit workspace sql -F json 'SELECT path, language FROM gl_file LIMIT 5'
 ```
 
-Revision graphs and a separate manifest are written under `~/.gitlab/orbit/local/`. `orbit schema` lists every
+Revision graphs and a separate manifest are written under `~/.gitlab/orbit/local/`. `orbit workspace schema` lists every
 table and column in it. Orbit Local is queried with DuckDB SQL only; the JSON
-query DSL documented under `docs/docs-gitlab-com/remote/` applies to Orbit Remote.
+query DSL documented under `docs/docs-gitlab-com/queries/` applies to Orbit Remote.
 
 ## Run tests without infrastructure
 

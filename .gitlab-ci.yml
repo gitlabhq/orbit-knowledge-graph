@@ -50,7 +50,7 @@ workflow:
       # Every path outside docs/, plus the docs/ files that code checks read.
       # Keep that list in sync with docs-in-code-mr-check.
       changes:
-        regexp: '\A(?!docs/)|\Adocs/(docs-gitlab-com/remote/queries/query-language|pages/engineering/development/agents-crate-map)\.md\z'
+        regexp: '\A(?!docs/)|\Adocs/(docs-gitlab-com/queries/query-language|pages/engineering/development/agents-crate-map)\.md\z'
       auto_cancel:
         on_new_commit: interruptible
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
@@ -302,7 +302,7 @@ docs-in-code-mr-check:
       git cat-file -e "${BASE}^{commit}" 2>/dev/null || git fetch origin "$BASE" --depth=1 || git fetch --unshallow origin "$CI_COMMIT_SHA"
       CHANGED=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE" HEAD)
       # Keep the docs/ files that code checks read in sync with the workflow regexp.
-      DOCS=$(echo "$CHANGED" | grep '^docs/' | grep -vxF -e docs/docs-gitlab-com/remote/queries/query-language.md -e docs/pages/engineering/development/agents-crate-map.md || true)
+      DOCS=$(echo "$CHANGED" | grep '^docs/' | grep -vxF -e docs/docs-gitlab-com/queries/query-language.md -e docs/pages/engineering/development/agents-crate-map.md || true)
       # GitLab reads a Gitaly error as "no changed paths", which makes a code MR docs-only.
       if [ "${DOCS_ONLY:-}" = "true" ] && [ "$DOCS" != "$CHANGED" ]; then
         echo "This pipeline skipped the code jobs, but the MR changes code. Run a new pipeline."

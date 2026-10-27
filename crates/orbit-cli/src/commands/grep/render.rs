@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 
 use anyhow::Result;
@@ -6,91 +6,35 @@ use grep_matcher::Matcher;
 
 use super::{Options, Output};
 
-use super::defs::{Connections, Def, connection_label};
+use super::defs::Def;
 use super::rank::{is_code, is_test, names, ranked};
 use super::scan::Hit;
 use super::term::{Term, matcher};
 
-/// Graph context rides on rg's context-line form (`path-N-`), so every line keeps its path.
 const NOTE: &str = "» ";
 /// A query that names a definition gets that definition's source first, so `head` keeps it.
 const LOOKUP_MAX_DEFINITIONS: usize = 3;
 const LOOKUP_LINES: usize = 80;
-/// Rows print each file once: the first few matching lines of a definition in full, the rest as
-/// line numbers.
-const SEP: &str = " │ ";
-const FULL_LINES: usize = 3;
-const LINE_CHARS: usize = 160;
 const EDITED_MARK: &str = " (edited since index)";
+const FILE_INDEX_MIN: usize = 20;
+const FILE_INDEX_DIRECTORIES: usize = 30;
+const OUTSIDE: &str = "outside indexed definitions";
+const STALE: &str = "edited since index; definitions not shown";
 
-fn located(lines: &[&Hit], max_columns: Option<usize>) -> String {
-    let mut parts: Vec<String> = lines
-        .iter()
-        .take(FULL_LINES)
-        .map(|h| match max_columns {
-            Some(max) if h.text.len() > max => format!(":{} [Omitted long line]", h.line),
-            None if h.text.chars().count() > LINE_CHARS => format!(
-                ":{} {}…",
-                h.line,
-                h.text.chars().take(LINE_CHARS).collect::<String>()
-            ),
-            _ => format!(":{} {}", h.line, h.text),
-        })
-        .collect();
-    let rest: Vec<usize> = lines.iter().skip(FULL_LINES).map(|h| h.line).collect();
-    if !rest.is_empty() {
-        parts.push(runs(&rest));
-    }
-    parts.join(SEP)
+#[derive(PartialEq)]
+enum Scope<'a> {
+    Start,
+    Def(&'a Def),
+    Imports(usize),
+    Outside,
+    Stale,
 }
 
-fn runs(lines: &[usize]) -> String {
-    let mut parts = Vec::new();
-    let mut index = 0;
-    while index < lines.len() {
-        let mut end = index;
-        while end + 1 < lines.len() && lines[end + 1] == lines[end] + 1 {
-            end += 1;
-        }
-        parts.push(match end > index {
-            true => format!(":{}-{}", lines[index], lines[end]),
-            false => format!(":{}", lines[index]),
-        });
-        index = end + 1;
-    }
-    parts.join(" ")
-}
-
-fn code_row(hits: &[&Hit], connections: &Connections, max_columns: Option<usize>) -> String {
-    let mut groups: Vec<(Option<&Def>, Vec<&Hit>)> = Vec::new();
-    for hit in hits {
-        match groups.last_mut() {
-            Some((def, list)) if *def == hit.def.as_ref() => list.push(hit),
-            _ => groups.push((hit.def.as_ref(), vec![hit])),
-        }
-    }
-    groups
-        .iter()
-        .map(|(def, list)| {
-            let label = def.map(|d| format!("{} ", definition_note(d, connections)));
-            format!(
-                "{}{}",
-                label.unwrap_or_default(),
-                located(list, max_columns)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(SEP)
-}
-
-fn definition_note(def: &Def, connections: &Connections) -> String {
-    let span = match def.end > def.start {
+fn definition_note(def: &Def) -> String {
+    match def.end > def.start {
         true => format!("{} {}:{}-{}", def.kind, def.name, def.start, def.end),
         false => format!("{} {}", def.kind, def.name),
-    };
-    format!("{span} {}", connection_label(def, connections))
-        .trim_end()
-        .to_string()
+    }
 }
 
 fn defined(hits: &[&Hit]) -> String {
@@ -111,7 +55,6 @@ pub(super) fn render(
     header: &str,
     hits: &[Hit],
     alternatives: &[Term],
-    connections: &Connections,
     edited: &BTreeSet<String>,
     options: &Options,
     lookup: Option<&str>,
@@ -184,53 +127,146 @@ pub(super) fn render(
         out.push_str(body);
         out.push('\n');
     }
-    if options.before == 0 && options.after == 0 {
-        for (file, list) in &rows {
-            let mark = if edited.contains(file) {
-                EDITED_MARK
-            } else {
-                ""
-            };
-            let row = match is_code(file) {
-                true => code_row(list, connections, options.max_columns),
-                false => located(list, options.max_columns),
-            };
-            out.push_str(&format!("  {file}{mark}{SEP}{row}\n"));
-        }
-        return Ok(out);
+    if rows.len() > FILE_INDEX_MIN {
+        out.push_str(&file_index(&rows, matched));
     }
-    let separated = options.before > 0 || options.after > 0;
-    let mut previous: Option<(&str, usize)> = None;
-    for (file, list) in &rows {
-        let mut current: Option<&Def> = None;
-        for (index, hit) in list.iter().enumerate() {
-            if separated && previous.is_some_and(|(f, l)| f != hit.file || hit.line != l + 1) {
+    for (index, (file, list)) in rows.iter().enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        let stale = edited.contains(file);
+        let mark = if stale { EDITED_MARK } else { "" };
+        out.push_str(&format!("{file}{mark}\n"));
+        let code = is_code(file);
+        let mut scope = Scope::Start;
+        let mut previous: Option<usize> = None;
+        for hit in list {
+            let adjacent = previous.is_some_and(|line| hit.line == line + 1);
+            if previous.is_some_and(|line| hit.line > line + 1)
+                && (options.before > 0 || options.after > 0)
+            {
                 out.push_str("--\n");
             }
-            previous = Some((&hit.file, hit.line));
-            if index == 0 && edited.contains(&hit.file) {
-                out.push_str(&format!(
-                    "{file}-{}-{NOTE}edited since index; definitions not shown\n",
-                    hit.line
-                ));
+            previous = Some(hit.line);
+            let next = match (&hit.def, hit.imports.is_empty()) {
+                _ if stale => Scope::Stale,
+                (Some(def), _) => Scope::Def(def),
+                (None, false) => Scope::Imports(hit.line),
+                (None, true) if scope == Scope::Start && !code => Scope::Start,
+                (None, true) => Scope::Outside,
+            };
+            if next != scope {
+                match &next {
+                    Scope::Def(def) => {
+                        out.push_str(&format!("{}-{NOTE}{}\n", def.start, definition_note(def)))
+                    }
+                    Scope::Imports(_) => out.push_str(&format!(
+                        "{}-{NOTE}imports {}\n",
+                        hit.line,
+                        hit.imports.join(", ")
+                    )),
+                    Scope::Outside if !(matches!(scope, Scope::Imports(_)) && adjacent) => {
+                        out.push_str(&format!("{}-{NOTE}{OUTSIDE}\n", hit.line))
+                    }
+                    Scope::Stale => out.push_str(&format!("{}-{NOTE}{STALE}\n", hit.line)),
+                    _ => {}
+                }
             }
-            if let Some(def) = hit.def.as_ref().filter(|def| current != Some(*def)) {
-                out.push_str(&format!(
-                    "{file}-{}-{NOTE}{}\n",
-                    def.start,
-                    definition_note(def, connections)
-                ));
-            }
-            current = hit.def.as_ref();
+            scope = next;
             let text = match options.max_columns.is_some_and(|max| hit.text.len() > max) {
                 true => "[Omitted long line]",
                 false => hit.text.as_str(),
             };
             let sep = if hit.context { '-' } else { ':' };
-            out.push_str(&format!("{file}{sep}{}{sep}{text}\n", hit.line));
+            out.push_str(&format!("{}{sep}{text}\n", hit.line));
         }
     }
     Ok(out)
+}
+
+fn file_index(rows: &[(String, Vec<&Hit>)], matched: impl Fn(&[&Hit]) -> usize) -> String {
+    let mut dirs: Vec<(&str, Vec<(&str, usize)>)> = Vec::new();
+    for (file, list) in rows {
+        let (dir, name) = file.rsplit_once('/').unwrap_or(("", file.as_str()));
+        match dirs.iter_mut().find(|(d, _)| *d == dir) {
+            Some((_, names)) => names.push((name, matched(list))),
+            None => dirs.push((dir, vec![(name, matched(list))])),
+        }
+    }
+    let mut out = format!(
+        "{NOTE}{} files by directory, matching lines per file:\n",
+        rows.len()
+    );
+    let lines = index_lines(&dirs);
+    let more = lines.len().saturating_sub(FILE_INDEX_DIRECTORIES);
+    let rest: usize = lines
+        .iter()
+        .skip(FILE_INDEX_DIRECTORIES)
+        .map(|(_, files)| files)
+        .sum();
+    for (line, _) in lines.into_iter().take(FILE_INDEX_DIRECTORIES) {
+        out.push_str(&format!("{NOTE}  {line}\n"));
+    }
+    if more > 0 {
+        out.push_str(&format!(
+            "{NOTE}  +{more} more directories with {rest} files\n"
+        ));
+    }
+    out
+}
+
+const SIBLING_MIN: usize = 3;
+
+fn index_lines(dirs: &[(&str, Vec<(&str, usize)>)]) -> Vec<(String, usize)> {
+    let parent = |dir: &str| {
+        dir.rsplit_once('/')
+            .map_or("", |(parent, _)| parent)
+            .to_string()
+    };
+    let mut siblings: BTreeMap<(String, &str), Vec<usize>> = BTreeMap::new();
+    for (dir, names) in dirs {
+        if let [(name, count)] = names.as_slice() {
+            siblings
+                .entry((parent(dir), *name))
+                .or_default()
+                .push(*count);
+        }
+    }
+    let mut shared = BTreeSet::new();
+    let mut lines = Vec::new();
+    for (dir, names) in dirs {
+        if let [(name, _)] = names.as_slice() {
+            let key = (parent(dir), *name);
+            let counts = &siblings[&key];
+            if counts.len() >= SIBLING_MIN {
+                if shared.insert(key.clone()) {
+                    let dir = match key.0.is_empty() {
+                        true => "*/".to_string(),
+                        false => format!("{}/*/", key.0),
+                    };
+                    let total: usize = counts.iter().sum();
+                    lines.push((
+                        format!(
+                            "{dir} {name} in {} directories, {total} lines",
+                            counts.len()
+                        ),
+                        counts.len(),
+                    ));
+                }
+                continue;
+            }
+        }
+        let dir = match dir.is_empty() {
+            true => ".".to_string(),
+            false => format!("{dir}/"),
+        };
+        let files: Vec<String> = names
+            .iter()
+            .map(|(name, count)| format!("{name} {count}"))
+            .collect();
+        lines.push((format!("{dir} {}", files.join(", ")), names.len()));
+    }
+    lines
 }
 
 /// The source of the one definition a single plain query term names, as rg context lines
@@ -241,7 +277,6 @@ pub(super) fn lookup(
     repo: &Path,
     hits: &[Hit],
     alternatives: &[Term],
-    connections: &Connections,
     options: &Options,
 ) -> Option<String> {
     if options.invert || options.output != Output::Lines || options.before > 0 || options.after > 0
@@ -274,16 +309,9 @@ pub(super) fn lookup(
             n => format!(" (1 of {n}; the others are in the rows below)"),
         };
         let mut out = format!(
-            "{} {} — {}:{}-{}{others} {}",
-            def.kind,
-            def.name,
-            hit.file,
-            def.start,
-            def.end,
-            connection_label(def, connections)
-        )
-        .trim_end()
-        .to_string();
+            "{} {} — {}:{}-{}{others}",
+            def.kind, def.name, hit.file, def.start, def.end
+        );
         out.push('\n');
         for number in def.start..=end {
             out.push_str(&format!("  {number}|{}\n", lines.get(number - 1)?));
@@ -305,6 +333,18 @@ pub(super) fn lookup(
 mod tests {
     use super::*;
 
+    #[test]
+    fn sibling_directories_with_the_same_lone_file_share_a_line() {
+        let dirs: Vec<(&str, Vec<(&str, usize)>)> = ["a/x", "a/y", "a/z"]
+            .into_iter()
+            .map(|dir| (dir, vec![("c.ts", 1)]))
+            .collect();
+        assert_eq!(
+            index_lines(&dirs),
+            vec![("a/*/ c.ts in 3 directories, 3 lines".to_string(), 3)]
+        );
+    }
+
     fn hit(file: &str, line: usize, text: &str, def: Option<(&str, usize, usize)>) -> Hit {
         let def = def.map(|(name, start, end)| Def {
             name: name.into(),
@@ -319,48 +359,75 @@ mod tests {
             line,
             text,
             def,
+            imports: Vec::new(),
             context: false,
         }
     }
 
-    fn show(hits: &[Hit], terms: &[Term], output: Output, edited: &[&str]) -> String {
+    fn render_with(hits: &[Hit], terms: &[Term], options: &Options, edited: &[&str]) -> String {
         let edited = edited.iter().map(|f| f.to_string()).collect();
+        render("grep", hits, terms, &edited, options, None).unwrap()
+    }
+
+    fn show(hits: &[Hit], terms: &[Term], output: Output, edited: &[&str]) -> String {
         let options = Options {
             output,
             ..Options::default()
         };
-        render(
-            "grep",
-            hits,
-            terms,
-            &Connections::new(),
-            &edited,
-            &options,
-            None,
-        )
-        .unwrap()
+        render_with(hits, terms, &options, edited)
+    }
+
+    fn import(file: &str, line: usize, text: &str, label: &str) -> Hit {
+        let mut hit = hit(file, line, text, None);
+        hit.imports = vec![label.into()];
+        hit
     }
 
     #[test]
-    fn rows_group_lines_under_definitions_with_defining_files_first() {
+    fn matches_print_under_file_headings_with_graph_lines() {
         let hits = [
             hit("data.json", 1, "\"go\": 0,", None),
-            hit("src/a.rs", 3, "go();", Some(("run", 1, 9))),
-            hit("src/a.rs", 4, "go();", Some(("run", 1, 9))),
+            import("src/a.rs", 1, "use go::{", "go (go::go) → src/go.rs:4"),
+            hit("src/a.rs", 2, "    go,", None),
+            hit("src/a.rs", 3, "go();", Some(("run", 3, 9))),
+            hit("src/a.rs", 4, "go();", Some(("run", 3, 9))),
+            hit("src/a.rs", 12, "go();", Some(("walk", 11, 14))),
+            hit("src/a.rs", 20, "go();", None),
+            import("src/a.rs", 30, "use go::stop;", "stop (go::stop)"),
+            hit("src/a.rs", 40, "go();", None),
             hit("src/b.rs", 2, "fn go() {}", None),
         ];
         let terms = [Term::parse("go"), Term::parse("nope")];
         assert_eq!(
             show(&hits, &terms, Output::Lines, &["src/b.rs"]),
-            "grep: 4 lines in 3 files (go 4, nope 0)
-  src/a.rs │ Function run:1-9 :3 go(); │ :4 go();
-  src/b.rs (edited since index) │ :2 fn go() {}
-  data.json │ :1 \"go\": 0,
+            "grep: 10 lines in 3 files (go 10, nope 0)
+src/a.rs
+1-» imports go (go::go) → src/go.rs:4
+1:use go::{
+2:    go,
+3-» Function run:3-9
+3:go();
+4:go();
+11-» Function walk:11-14
+12:go();
+20-» outside indexed definitions
+20:go();
+30-» imports stop (go::stop)
+30:use go::stop;
+40-» outside indexed definitions
+40:go();
+
+src/b.rs (edited since index)
+2-» edited since index; definitions not shown
+2:fn go() {}
+
+data.json
+1:\"go\": 0,
 "
         );
         assert_eq!(
             show(&hits, &terms, Output::Count, &[]),
-            "src/a.rs:2\nsrc/b.rs:1\ndata.json:1\n"
+            "src/a.rs:8\nsrc/b.rs:1\ndata.json:1\n"
         );
     }
 }

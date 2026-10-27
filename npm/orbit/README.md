@@ -26,9 +26,9 @@ distributions.
 ## Usage
 
 ```shell
-orbit index /path/to/your/repo
+orbit workspace index /path/to/your/repo
 orbit help
 ```
 
-See the [Orbit Local documentation](https://docs.gitlab.com/orbit/local/getting-started/)
+See the [Orbit Local documentation](https://docs.gitlab.com/orbit/cli/)
 for access methods (direct CLI, `glab`, MCP) and query examples.

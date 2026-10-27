@@ -25,16 +25,16 @@ Read this when a command fails with "command not found", an auth error, or a fea
 3. Orbit Remote: the feature flag is on for your namespace:
 
    ```sh
-   glab orbit graph-status --full-path GROUP_NAMESPACE
+   glab orbit status --full-path GROUP_NAMESPACE
    ```
 
    Exit 0 means ready to query. Exit 2 means the flag is off; ask your GitLab admin.
 
-4. Orbit Local: no server needed:
+4. Orbit Local: no server needed. `grep` and `context` index the checkout on first use:
 
    ```sh
    glab orbit --install --yes
-   glab orbit index /path/to/your/repo
+   glab orbit grep "parse config"
    ```
 
    If `glab orbit` cannot find the managed binary, add `"$HOME/.config/glab-cli/bin/"` to `PATH`.

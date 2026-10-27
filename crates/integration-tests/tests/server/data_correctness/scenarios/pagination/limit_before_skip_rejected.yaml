@@ -1,8 +1,0 @@
-description: SKIP must precede LIMIT, as in openCypher
-
-query:
-  gql: |
-    MATCH (u:User) WHERE u.id >= 1 AND u.id <= 10000 RETURN u.username LIMIT 2 SKIP 2
-
-expect:
-  compile_error: "expected end of query or DEBUG"

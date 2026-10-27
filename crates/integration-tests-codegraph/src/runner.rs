@@ -83,7 +83,7 @@ pub fn run_yaml_suite(yaml: &str) {
     let ontology =
         std::sync::Arc::new(ontology::Ontology::load_embedded().expect("embedded ontology"));
     let converter: Arc<dyn code_graph::v2::GraphConverter> =
-        Arc::new(duckdb_client::DuckDbConverter {
+        Arc::new(crate::converter::DuckDbConverter {
             project_id: 1,
             branch: "main".to_string(),
             commit_sha: "test".to_string(),

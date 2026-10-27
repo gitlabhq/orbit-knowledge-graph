@@ -11,7 +11,7 @@ use rustc_hash::FxHashSet;
 use crate::database::GraphWriter;
 use crate::workspace::GitInfo;
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct FamilyOutput {
     family: String,
     files: usize,
@@ -31,7 +31,7 @@ impl FamilyOutput {
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 struct SlowFile {
     path: String,
     language: String,
@@ -72,35 +72,27 @@ impl<'a> Exporter<'a> {
         report: &Report,
         stats: bool,
     ) -> Result<FamilyOutput> {
-        let envelope = Envelope::new([
-            ("project_id", Scalar::Int(self.git.project_id)),
-            ("branch", Scalar::Str(&self.git.branch)),
-            ("commit_sha", Scalar::Str(&self.git.commit_sha)),
-        ]);
         let plan = ExportPlan::from_config(&env.export_config, self.ontology, &env.lang)?;
-        for (table, batch) in code_graph_incremental::export::export(
+        let tables = code_graph_incremental::export::export(
             &state.trees,
             &state.edges,
             &env.lang,
             &plan,
-            &envelope,
+            &envelope(self.git),
             true,
             &|_| true,
             &code_graph_incremental::Sentinel::disabled(),
-        )? {
+        )?;
+        self.insert(tables)?;
+        Ok(family_output(family, state.trees.len(), report, stats))
+    }
+
+    fn insert(&mut self, tables: Vec<(String, RecordBatch)>) -> Result<()> {
+        for (table, batch) in tables {
             let batch = self.unseen(&table, &batch)?;
             self.writer.insert_batch(&table, &batch)?;
         }
-        Ok(FamilyOutput {
-            family: family.family().to_string(),
-            files: state.trees.len(),
-            skipped_files: report.skipped.len(),
-            slowest_files: if stats {
-                slowest_files(report, 20)
-            } else {
-                Vec::new()
-            },
-        })
+        Ok(())
     }
 
     fn unseen(&mut self, table: &str, batch: &RecordBatch) -> Result<RecordBatch> {
@@ -142,6 +134,23 @@ impl<'a> Exporter<'a> {
     }
 }
 
+pub(super) fn family_output(
+    family: SupportLang,
+    files: usize,
+    report: &Report,
+    stats: bool,
+) -> FamilyOutput {
+    FamilyOutput {
+        family: family.family().to_string(),
+        files,
+        skipped_files: report.skipped.len(),
+        slowest_files: match stats {
+            true => slowest_files(report, 20),
+            false => Vec::new(),
+        },
+    }
+}
+
 fn slowest_files(report: &Report, count: usize) -> Vec<SlowFile> {
     let mut files: Vec<(&String, &FileStats)> = report.files.iter().collect();
     files.sort_by_key(|(_, timing)| std::cmp::Reverse(timing.parse + timing.resolve));
@@ -165,4 +174,150 @@ fn int_column<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a Int64Array> 
 fn string_column<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a StringArray> {
     ArrowUtils::get_column_by_name(batch, name)
         .ok_or_else(|| anyhow::anyhow!("export batch has no Utf8 column {name}"))
+}
+
+pub(super) struct Replacement {
+    edge_table: String,
+    files: Vec<String>,
+    rows: Vec<(String, RecordBatch)>,
+    edges: Vec<RecordBatch>,
+}
+
+pub(super) fn replacement(
+    git: &GitInfo,
+    ontology: &ontology::Ontology,
+    env: &Env,
+    state: &State,
+    files: &FxHashSet<String>,
+) -> Result<Replacement> {
+    let envelope = envelope(git);
+    let plan = ExportPlan::from_config(&env.export_config, ontology, &env.lang)?;
+    let edge_table = ontology
+        .local_edge_table_name()
+        .ok_or_else(|| anyhow::anyhow!("local_db.edge_table.name must be configured"))?;
+    let directories = ontology
+        .get_node("Directory")
+        .map(|node| node.destination_table.as_str());
+    let mut rows = Vec::new();
+    let mut edges = Vec::new();
+    let only: FxHashSet<u32> = state
+        .trees
+        .iter()
+        .enumerate()
+        .filter(|(_, tree)| files.contains(tree.label.as_str()))
+        .map(|(index, _)| index as u32)
+        .collect();
+    for (table, batch) in code_graph_incremental::export::export_trees(
+        &state.trees,
+        &state.edges,
+        &env.lang,
+        &plan,
+        &envelope,
+        false,
+        &|_| true,
+        Some(&only),
+        &code_graph_incremental::Sentinel::disabled(),
+    )? {
+        if table == edge_table {
+            edges.push(batch);
+            continue;
+        }
+        if Some(table.as_str()) == directories {
+            continue;
+        }
+        let Some(column) = ["file_path", "path"]
+            .into_iter()
+            .find(|name| batch.schema().column_with_name(name).is_some())
+        else {
+            continue;
+        };
+        let paths = string_column(&batch, column)?;
+        let keep: BooleanArray = (0..batch.num_rows())
+            .map(|row| Some(files.contains(paths.value(row))))
+            .collect();
+        rows.push((table, arrow::compute::filter_record_batch(&batch, &keep)?));
+    }
+    let mut ids = FxHashSet::default();
+    for (_, batch) in &rows {
+        ids.extend(int_column(batch, "id")?.values().iter().copied());
+    }
+    let edges = edges
+        .into_iter()
+        .map(|batch| {
+            let sources = int_column(&batch, "source_id")?;
+            let targets = int_column(&batch, "target_id")?;
+            let keep: BooleanArray = (0..batch.num_rows())
+                .map(|row| {
+                    Some(ids.contains(&sources.value(row)) || ids.contains(&targets.value(row)))
+                })
+                .collect();
+            Ok(arrow::compute::filter_record_batch(&batch, &keep)?)
+        })
+        .collect::<Result<_>>()?;
+    Ok(Replacement {
+        edge_table: edge_table.to_string(),
+        files: files.iter().cloned().collect(),
+        rows,
+        edges,
+    })
+}
+
+fn envelope(git: &GitInfo) -> Envelope<'_> {
+    Envelope::new([
+        ("project_id", Scalar::Int(git.project_id)),
+        ("branch", Scalar::Str(&git.branch)),
+        ("commit_sha", Scalar::Str(&git.commit_sha)),
+    ])
+}
+
+/// The directories that hold `paths`, and the edges between them.
+pub(super) fn directory_rows(
+    git: &GitInfo,
+    ontology: &ontology::Ontology,
+    paths: &[&str],
+) -> Result<Vec<(String, RecordBatch)>> {
+    Ok(code_graph_incremental::export::export_directories(
+        paths,
+        code_graph_incremental::export::ExportConfig::embedded(),
+        ontology,
+        &envelope(git),
+    )?)
+}
+
+/// Writes what a refresh read: each family's rows, then every directory
+/// again when files came or went.
+pub(super) fn apply_refresh(
+    writer: &GraphWriter,
+    ontology: &ontology::Ontology,
+    refresh: &super::state::Refresh,
+) -> Result<()> {
+    for replacement in refresh
+        .families
+        .iter()
+        .filter_map(|family| family.replacement.as_ref())
+    {
+        apply(writer, ontology, replacement)?;
+    }
+    if let Some(rows) = &refresh.directories {
+        writer.delete_directories(ontology)?;
+        for (table, batch) in rows {
+            writer.insert_batch(table, batch)?;
+        }
+    }
+    Ok(())
+}
+
+fn apply(
+    writer: &GraphWriter,
+    ontology: &ontology::Ontology,
+    replacement: &Replacement,
+) -> Result<()> {
+    writer.delete_files(ontology, &replacement.files)?;
+    for (table, batch) in &replacement.rows {
+        writer.insert_batch(table, batch)?;
+    }
+    for batch in &replacement.edges {
+        writer.insert_batch(&replacement.edge_table, batch)?;
+    }
+    Ok(())
 }

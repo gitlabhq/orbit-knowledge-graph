@@ -31,7 +31,7 @@ fn setup_outside_a_repository_succeeds_and_suggests_indexing_by_path() {
     assert!(output.status.success(), "{printed}");
     assert!(folder.path().join(".claude/CLAUDE.md").is_file());
     assert!(printed.contains("not a git repository"), "{printed}");
-    assert!(!printed.contains("orbit index ."), "{printed}");
+    assert!(!printed.contains("orbit workspace index ."), "{printed}");
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn index_outside_a_repository_names_the_resolved_folder_for_scripts() {
     let folder = tempfile::tempdir().unwrap();
     let resolved = dunce::canonicalize(folder.path()).unwrap();
 
-    let output = run_orbit_in(folder.path(), &["index", "."]);
+    let output = run_orbit_in(folder.path(), &["workspace", "index", "."]);
 
     let printed = all_output(&output);
     assert!(!output.status.success(), "{printed}");
@@ -97,7 +97,7 @@ fn index_from_a_repository_subdirectory_indexes_the_repository() {
     let home = tempfile::tempdir().unwrap();
     let (repository, subdirectory) = repository_with_subdirectory(home.path());
 
-    let output = run_orbit_with_home(&subdirectory, home.path(), &["index", "."]);
+    let output = run_orbit_with_home(&subdirectory, home.path(), &["workspace", "index", "."]);
 
     let printed = all_output(&output);
     assert!(output.status.success(), "{printed}");
@@ -118,11 +118,11 @@ fn setup_without_indexing_from_a_subdirectory_suggests_a_command_that_works() {
         home.path(),
         &["setup", "claude", "--yes", "--no-index"],
     );
-    let index = run_orbit_with_home(&subdirectory, home.path(), &["index", "."]);
+    let index = run_orbit_with_home(&subdirectory, home.path(), &["workspace", "index", "."]);
 
     let printed = all_output(&setup);
     assert!(setup.status.success(), "{printed}");
-    assert!(printed.contains("orbit index ."), "{printed}");
+    assert!(printed.contains("orbit workspace index ."), "{printed}");
     assert!(index.status.success(), "{}", all_output(&index));
 }
 
@@ -154,7 +154,7 @@ fn setup_with_dir_judges_the_project_root_not_the_working_folder() {
         .filter(|c| !c.is_whitespace() && *c != '│')
         .collect();
     assert!(
-        unwrapped.contains(&format!("orbitindex{}", project_root.display())),
+        unwrapped.contains(&format!("orbitworkspaceindex{}", project_root.display())),
         "{printed}"
     );
 }

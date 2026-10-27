@@ -5,6 +5,7 @@
 //! and template values live in `config/setup/setup.yaml`.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::LazyLock;
 
 use ontology::migrations::sha256_hex;
@@ -21,7 +22,10 @@ struct SetupAssets;
 struct SetupTexts {
     mcp_server: McpServerText,
     instructions: String,
+    #[serde(default)]
+    remote: BTreeMap<String, String>,
     nudge_search: String,
+    nudge_gitlab: String,
     #[serde(default)]
     template_vars: BTreeMap<String, String>,
 }
@@ -50,11 +54,44 @@ fn substitute_launcher(text: &str, launcher: &str) -> String {
     text.replace("{{orbit}}", launcher)
 }
 
-fn render_instructions(launcher: &str) -> String {
-    substitute_launcher(TEXTS.instructions.trim_end(), launcher)
+const QUERY_LINE: &str = "remote_query";
+
+fn render_instructions(launcher: &str, remote: bool, query_syntax: Option<&str>) -> String {
+    let mut text = TEXTS.instructions.trim_end().to_string();
+    for (name, value) in &TEXTS.remote {
+        let value = match (remote, query_syntax) {
+            (false, _) => "",
+            (true, None) if name == QUERY_LINE => "",
+            (true, _) => value.as_str(),
+        };
+        text = text.replace(&format!("{{{{{name}}}}}"), value);
+    }
+    let text = text.replace("{{query_syntax}}", query_syntax.unwrap_or_default());
+    substitute_launcher(&text, launcher)
 }
 
-static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| render_instructions(launcher()));
+fn query_syntax(served: Option<&str>) -> Option<&str> {
+    match served {
+        Some(description) if description.contains("MATCH") => Some(description),
+        Some(_) => None,
+        None => Some(crate::descriptions::gql_syntax()),
+    }
+}
+
+static REACHES_GITLAB: LazyLock<bool> =
+    LazyLock::new(|| crate::remote::client::gitlab_usable(Path::new(".")));
+
+static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| {
+    let remote = reaches_gitlab();
+    let served = remote
+        .then(|| crate::remote::client::query_graph_description(Path::new(".")))
+        .flatten();
+    render_instructions(launcher(), remote, query_syntax(served.as_deref()))
+});
+
+pub(crate) fn reaches_gitlab() -> bool {
+    *REACHES_GITLAB
+}
 
 static RENDERED_NUDGE_SEARCH: LazyLock<String> =
     LazyLock::new(|| substitute_launcher(TEXTS.nudge_search.trim_end(), launcher()));
@@ -65,6 +102,13 @@ pub(crate) fn instructions_text() -> &'static str {
 
 pub(crate) fn search_nudge_text() -> &'static str {
     &RENDERED_NUDGE_SEARCH
+}
+
+static RENDERED_NUDGE_GITLAB: LazyLock<String> =
+    LazyLock::new(|| substitute_launcher(TEXTS.nudge_gitlab.trim_end(), launcher()));
+
+pub(crate) fn gitlab_nudge_text() -> &'static str {
+    &RENDERED_NUDGE_GITLAB
 }
 
 #[derive(Debug, Deserialize)]
@@ -276,22 +320,59 @@ mod tests {
             (DIRECT_LAUNCHER, "`orbit grep"),
             (GLAB_LAUNCHER, "`glab orbit grep"),
         ] {
-            let rendered = render_instructions(launcher);
-            assert!(rendered.contains(expected), "{launcher}: {rendered}");
-            assert!(!rendered.contains("{{orbit}}"), "{launcher}");
-            for phrase in [
-                " grep` must be used for search",
-                "Ignores case, `_`, `-`",
-                "`a|b` OR",
-                "definitions you need in one call",
-            ] {
-                assert!(rendered.contains(phrase), "{launcher}: {phrase}");
+            for remote in [true, false] {
+                let rendered = render_instructions(launcher, remote, query_syntax(None));
+                assert!(rendered.contains(expected), "{launcher}: {rendered}");
+                assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
+                for phrase in [
+                    " grep` must be used for search",
+                    "Ignores case, `_`, `-`",
+                    "`a|b` OR",
+                    "Batch all reads and searches you can name",
+                ] {
+                    assert!(rendered.contains(phrase), "{launcher}: {phrase}");
+                }
+                assert_eq!(
+                    rendered.contains("GitLab"),
+                    remote,
+                    "{launcher}: {rendered}"
+                );
+                assert!(
+                    rendered.contains("instead of glab and glab api") == remote,
+                    "{launcher}"
+                );
+                assert_eq!(rendered.contains("CALL db.schema()"), remote, "{launcher}");
+                let budget = if remote { 250 } else { 75 };
+                assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
-            assert!(rendered.split_whitespace().count() <= 90, "{launcher}");
         }
+        let local = render_instructions(DIRECT_LAUNCHER, false, query_syntax(None));
+        assert_eq!(
+            local.lines().filter(|line| line.starts_with("- ")).count(),
+            2,
+            "{local}"
+        );
         assert!(search_nudge_text().contains("MANDATORY"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
+    }
+
+    #[test]
+    fn query_line_follows_the_served_query_language() {
+        let served_gql = "Read-only GQL. MATCH (n) RETURN n.";
+        assert_eq!(query_syntax(Some(served_gql)), Some(served_gql));
+        let gql = render_instructions(DIRECT_LAUNCHER, true, query_syntax(Some(served_gql)));
+        assert!(gql.contains("`orbit query` must be used"), "{gql}");
+        assert!(gql.contains(served_gql), "{gql}");
+
+        let json = render_instructions(
+            DIRECT_LAUNCHER,
+            true,
+            query_syntax(Some("Send a JSON query object.")),
+        );
+        assert!(!json.contains("orbit query"), "{json}");
+        assert!(json.contains("instead of glab and glab api"), "{json}");
+        assert!(!json.contains("{{"), "{json}");
     }
 
     #[test]

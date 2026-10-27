@@ -36,6 +36,7 @@ pub enum Predicate {
         text_indexed: bool,
         unique: bool,
         immutable: bool,
+        foreign_key: bool,
         null_as_epoch: NullAsEpoch,
     },
     Ids {
@@ -93,6 +94,23 @@ impl Predicate {
     /// A text match on a changing column finds rows through the text index but does not bound a keyed re-read, so that scan keeps FINAL.
     pub fn is_text_match(&self) -> bool {
         matches!(self, Self::Property { filter, .. } if filter.op.is_some_and(FilterOp::is_text))
+    }
+
+    pub fn narrows_keys(&self) -> bool {
+        match self {
+            Self::Ids { .. } | Self::IdRange { .. } | Self::Membership { .. } => true,
+            Self::Property {
+                in_sort_key,
+                foreign_key,
+                filter,
+                ..
+            } => {
+                (*in_sort_key || *foreign_key)
+                    && filter.rhs_column.is_none()
+                    && matches!(filter.op, None | Some(FilterOp::Eq | FilterOp::In))
+            }
+            _ => false,
+        }
     }
 
     pub fn is_point_lookup(&self) -> bool {

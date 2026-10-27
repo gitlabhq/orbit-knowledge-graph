@@ -1,6 +1,6 @@
 ---
 stage: Analytics
-group: Knowledge Graph
+group: Context Systems
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Prerequisites, installation order, and shared configuration values for GitLab Orbit on GitLab Self-Managed.
 title: Get started with GitLab Orbit on GitLab Self-Managed
@@ -10,159 +10,102 @@ title: Get started with GitLab Orbit on GitLab Self-Managed
 
 - Tier: Premium, Ultimate
 - Offering: GitLab Self-Managed
-- Status: Beta
 
 {{< /details >}}
 
-{{< history >}}
-
-- [Introduced](https://gitlab.com/groups/gitlab-org/-/epics/22739) in GitLab 19.2.2.
-
-{{< /history >}}
-
-> [!note]
-> GitLab Orbit on GitLab Self-Managed is in
-> [beta](https://docs.gitlab.com/policy/development_stages_support/#beta).
-> This feature is available for testing, but not ready for production use.
-
-GitLab Orbit depends on three systems that it does not install: ClickHouse, Kubernetes, and NATS.
-The remaining setup steps require all three systems to exist and be reachable.
+GitLab Orbit depends on Kubernetes, NATS, object storage, and ClickHouse, and installs none of them.
+Set up all four before you install GitLab Orbit.
 
 ## Prerequisites
 
-- GitLab 19.2.2 or later.
+- One of these GitLab versions, which accept GQL queries by default:
+  - 19.4.4
+  - 19.5.2
+  - 19.6.0 or later
 - Administrator access to the GitLab instance and to its PostgreSQL server.
 - A maintenance window for one PostgreSQL restart.
-- ClickHouse 26.4 or later, set up for GitLab.
-- Kubernetes 1.33 or later.
+- [ClickHouse](clickhouse.md), set up for GitLab.
+- Kubernetes 1.36 or later. For Kubernetes 1.33 to 1.35, see [Image volumes](#image-volumes).
 - NATS with JetStream turned on.
+- An S3-compatible or Google Cloud Storage bucket for Siphon.
+- The latest [GitLab Orbit release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases) and [Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/releases).
 
 ## Installation order
 
-Each step depends on the step before it. Install the components in this order:
+Each step depends on the step before it:
 
-1. Set up ClickHouse for GitLab and run the GitLab ClickHouse migrations.
+1. [Set up ClickHouse](clickhouse.md) and run the GitLab ClickHouse migrations.
 1. Install NATS on the cluster with JetStream turned on.
-1. [Set up data replication](data-replication.md): prepare PostgreSQL, then install Siphon. After this
-   step, GitLab rows arrive in the ClickHouse data lake.
-1. [Set up GitLab Orbit](orbit-setup.md): create the ClickHouse identities, install the chart, point
-   GitLab at GitLab Orbit, and turn on indexing for a top-level group.
+1. [Set up data replication](data-replication.md) to copy GitLab rows into the ClickHouse data lake.
+1. [Set up GitLab Orbit](orbit-setup.md) and turn on indexing for a top-level group.
 
-Steps 1 to 3 do not depend on GitLab Orbit. You can verify each one on its own.
+You can verify steps 1 to 3 before you install GitLab Orbit.
 
-## ClickHouse
+## Reference architectures
 
-GitLab Orbit requires ClickHouse 26.4 or later. GitLab supports any 25.x or 26.x release, so an older
-release serves the rest of GitLab but not GitLab Orbit. All other GitLab requirements for ClickHouse are
-unchanged.
+GitLab Dedicated sizes GitLab Orbit for these tiers.
+Pod cells give the pod count and the limits for one pod, and node cells give the node count and size.
+Repository count and push rate drive the indexer load more than user count.
 
-Set up ClickHouse for GitLab first. For more information, see
-[ClickHouse](https://docs.gitlab.com/integration/clickhouse/). Complete every step on that page, including
-[Run ClickHouse migrations](https://docs.gitlab.com/integration/clickhouse/#run-clickhouse-migrations) and
-[Enable ClickHouse for analytics](https://docs.gitlab.com/integration/clickhouse/#enable-clickhouse-for-analytics).
-Those migrations create the data lake tables that replication writes into. Without these tables, Siphon has
-no target to write to and replication fails.
+| GitLab users | Webserver | `sdlc` indexer | `code` indexer | NATS volume | Kubernetes nodes |
+|--------------|-----------|----------------|----------------|-------------|------------------|
+| 2,000 | 1, 2 CPU, 4 GiB | 1, 2 CPU, 16 GiB | 1, 4 CPU, 10 GiB, 30 GiB disk | 20 GiB | 1 to 3, 8 vCPU, 32 GiB |
+| 5,000 | 2, 2 CPU, 6 GiB | 2, 4 CPU, 24 GiB | 1 to 3, 8 CPU, 18 GiB, 60 GiB disk | 100 GiB | 2 to 5, 16 vCPU, 64 GiB |
+| 10,000 | 2, 2 CPU, 6 GiB | 2, 4 CPU, 24 GiB | 1 to 3, 12 CPU, 26 GiB, 60 GiB disk | 200 GiB | 2 to 6, 16 vCPU, 64 GiB |
+| 25,000 | 3, 4 CPU, 8 GiB | 3, 8 CPU, 32 GiB | 2 to 3, 12 CPU, 34 GiB, 65 GiB disk | 3 x 400 GiB | 3 to 8, 16 vCPU, 64 GiB |
+| 50,000 | 3, 4 CPU, 8 GiB | 3, 8 CPU, 32 GiB | 2 to 3, 16 CPU, 34 GiB, 65 GiB disk | 3 x 500 GiB | 3 to 10, 32 vCPU, 128 GiB |
 
-GitLab Orbit uses two databases:
+Each Siphon deployment runs one pod with up to 2 CPU and 2 to 10 GiB of memory.
+For ClickHouse, see [Memory and disk](clickhouse.md#memory-and-disk).
+For the chart defaults, see [`values.yaml`](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts/-/blob/main/chart/values.yaml).
 
-| Database | Written by | Read by |
-|----------|------------|---------|
-| `gitlab_clickhouse_main_production` | GitLab, Siphon | GitLab, the GitLab Orbit indexer and dispatcher |
-| `orbit` | The GitLab Orbit dispatcher (schema) and indexer (data) | All three GitLab Orbit components |
+## High availability
 
-The two databases can be on separate ClickHouse instances. If they are, give GitLab, Siphon, and
-GitLab Orbit credentials for the instance that holds the database each one uses.
+For ClickHouse high availability, see [High availability](clickhouse.md#high-availability).
 
-The `gitlab_clickhouse_main_production` database exists after ClickHouse setup is complete. You create the
-`orbit` database when you set up GitLab Orbit. GitLab Orbit does not create it at startup.
+## Image volumes
 
-### High availability
+Siphon mounts the `gitlab-siphon-tables` image as an [image volume](https://kubernetes.io/docs/tasks/configure-pod-container/image-volumes/).
+Image volumes need Kubernetes 1.35 or later, or the `ImageVolume` feature gate on Kubernetes 1.33 and 1.34, and a container runtime that supports them.
+Some managed services, such as Amazon EKS, do not let you turn on the gate.
+When the gate is off, Kubernetes drops the volume without an error, and the Siphon pods fail with `no such file` errors under `/etc/tables`.
 
-GitLab Orbit can run on a ClickHouse cluster with several replicas behind one load balancer.
-The cluster needs ClickHouse Keeper with a quorum of three nodes and at least two ClickHouse replicas.
-An HTTP load balancer sits in front of the replicas.
-For the ClickHouse side, see
-[HA ClickHouse for GitLab Self-Managed](https://docs.gitlab.com/integration/clickhouse/?tab=HA+ClickHouse+for+GitLab+Self-Managed).
+If your cluster cannot use image volumes, set `splitTables.volumeMode: initCopy` in `siphon-values.yaml`.
+For more information, see [Split mode without ImageVolume](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts#split-mode-without-imagevolume).
 
-Create both databases with the `Replicated` database engine, on the cluster:
+## Configure NATS
 
-```sql
-CREATE DATABASE orbit ON CLUSTER '{cluster}'
-ENGINE = Replicated('/clickhouse/databases/orbit', '{shard}', '{replica}');
+Siphon publishes every changed row to a NATS JetStream stream, and Siphon and GitLab Orbit read from it.
+NATS needs JetStream, a persistent volume, and a `max_payload` of 64 MB, because some GitLab rows are larger than the 1 MB default.
+
+To configure NATS, set these values in the [NATS Helm chart](https://github.com/nats-io/k8s/tree/main/helm/charts/nats):
+
+```yaml
+config:
+  jetstream:
+    enabled: true
+    fileStore:
+      pvc:
+        size: <volume_size>
+  merge:
+    max_payload: << 64MB >>
 ```
 
-Then tell each writer that the cluster is replicated:
+Replace the following values:
 
-| Component | Setting |
-|-----------|---------|
-| GitLab | None. GitLab detects the `Replicated` database engine and creates replicated tables. |
-| Siphon | `connection_settings` with `insert_quorum: "auto"`, `insert_quorum_parallel: "0"`, and `async_insert: "0"`. See [Install Siphon](data-replication.md#install-siphon). |
-| GitLab Orbit | `clickhouse.ha.enabled: true` in the Helm values. When only one database sits on the cluster, set `replicated: true` on that connection instead. |
+- `<volume_size>`: the size of the JetStream volume, from [Reference architectures](#reference-architectures).
 
-With the switch on, GitLab Orbit creates `Replicated*MergeTree` tables, writes with a majority quorum, reads
-with sequential consistency, and retries the transient quorum and Keeper errors.
-One replica can leave the cluster while indexing and queries continue.
-Leave the switch off on a single node and on ClickHouse Cloud.
+Keep the `<<` and `>>` marks around `64MB`, so the chart writes the value without quotes.
 
-ClickHouse 26.7 and later reject some GitLab migrations. Follow
-[ClickHouse 26.7 and later](https://docs.gitlab.com/integration/clickhouse/#clickhouse-267-and-later) in the
-GitLab ClickHouse documentation, which sets `compatibility` to `26.6`.
+## Object storage
 
-### Sizing and settings
-
-Provision at least 8 CPU and 32 GiB of memory for ClickHouse. ClickHouse saturates 8 cores while the graph
-builds.
-
-Provision at least as much ClickHouse storage as the size of the GitLab PostgreSQL database.
-
-A ClickHouse instance you run yourself sets `max_bytes_before_external_sort` and
-`max_bytes_before_external_group_by` to `0`, which turns off spilling to disk. ClickHouse Cloud sets both to
-half of available memory. Without spilling, a large sort holds the whole result in memory and the server
-runs out of memory. Set both in the `default` profile. The following values suit a 32 GiB instance, with
-8 GiB for each threshold and 20 GiB for the memory ceiling:
-
-```xml
-<profiles>
-  <default>
-    <max_bytes_before_external_sort>8589934592</max_bytes_before_external_sort>
-    <max_bytes_before_external_group_by>8589934592</max_bytes_before_external_group_by>
-    <max_memory_usage>21474836480</max_memory_usage>
-  </default>
-</profiles>
-```
-
-## Kubernetes
-
-GitLab Orbit requires Kubernetes 1.33 or later, with the `ImageVolume` feature gate turned on and supported
-by the container runtime.
-
-GitLab Orbit can run on a separate cluster from GitLab. That cluster must reach GitLab, PostgreSQL,
-ClickHouse, and NATS, and GitLab must reach that cluster.
-
-## NATS
-
-Siphon publishes every changed row to a NATS JetStream stream, and both Siphon and GitLab Orbit read from
-that stream. NATS requires JetStream turned on and a persistent volume.
-
-Set the NATS server `max_payload` to 64 MB. The default of 1 MB is smaller than some GitLab rows. Siphon
-reads the server value to decide when a row is too large to send.
-
-## Object storage (optional)
-
-Siphon stores snapshot events in an object store, along with any row that is still too large after you
-raise `max_payload`. By default, Siphon uses a NATS JetStream object store bucket, so no additional service
-is required. To keep that traffic off the JetStream volume, or to apply a separate retention policy,
-configure an S3-compatible or Google Cloud Storage bucket instead.
-
-GitLab Orbit uses no object storage. The graph is stored in ClickHouse and can be rebuilt by indexing
-again. The indexer requires node-local disk for repository checkouts. The chart sizes this disk with
-ephemeral storage requests.
+Siphon writes snapshots and oversize rows to an S3-compatible or Google Cloud Storage bucket.
+For the credentials, see [Object storage for large rows](data-replication.md#object-storage-for-large-rows).
 
 ## Shared configuration values
 
-Choose each of these values once, and use the same value in every component that reads it. No component
-validates these values against the others. If they do not match, the affected component starts but
-processes no data.
+Use the same value in every component that reads it.
+No component checks these values against the others, so a mismatch stops data without an error.
 
 | Value | Used by | Example |
 |-------|---------|---------|
@@ -173,10 +116,4 @@ processes no data.
 | GitLab URL reachable from the cluster | GitLab Orbit | `https://gitlab.example.com` |
 | GitLab Orbit gRPC endpoint reachable from GitLab | GitLab | `tls://orbit.example.com:50054` |
 
-GitLab Orbit expects the stream name `siphon_stream_main_db` by default. To use a different name, set
-`stream_name` in `siphon-values.yaml` and `schedule.tasks.siphon.events_stream_name` in
-`orbit-values.yaml`.
-
-## Next step
-
-- [Set up data replication](data-replication.md)
+To use a stream name other than `siphon_stream_main_db`, set both `stream_name` values in `siphon-values.yaml` and `schedule.tasks.siphon.events_stream_name` in `orbit-values.yaml`.

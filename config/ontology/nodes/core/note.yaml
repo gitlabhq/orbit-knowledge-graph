@@ -58,6 +58,7 @@ properties:
     source: noteable_id
     nullable: true
     mutable: false
+    high_fan_out: true
     description: "ID of the attached object. Null for commits."
 
   line_code:
