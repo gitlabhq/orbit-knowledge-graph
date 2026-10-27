@@ -85,6 +85,27 @@ GitLab checks who you are and which groups you can see, as
 [security](security.md) explains. The GitLab CLI passes your sign-in to the
 Orbit CLI in its environment. The Orbit CLI never stores the token.
 
+### Earlier command names
+
+The commands that manage the local graph sit under `glab orbit workspace`:
+`index`, `sql`, `schema`, `list`, and `mcp serve`. Earlier releases ran them
+at the top level. Those names keep working:
+
+- `index`, `sql`, and `list` run and print a deprecation notice.
+- `mcp serve` runs without a notice, so existing MCP configurations keep
+  working. `glab orbit setup` writes `workspace mcp serve`.
+- `schema` now shows the schema of Orbit's graph, so it needs a GitLab sign-in
+  and a network connection. `schema <table>` with a lowercase table name,
+  `--db`, or `--raw` still reads the local graph and prints a deprecation
+  notice.
+- `ontology` is an alias of `schema`.
+- `graph-status` is hidden but still works. Without a scope flag it inspects
+  the project behind `origin`, while `status` without a flag shows the health
+  of Orbit.
+
+The `dsl`, `tools`, and `repo-map` commands are gone. For the tool manifest,
+run `glab api orbit/tools`.
+
 ## Why use the Orbit CLI
 
 One tool covers all your context. An agent learns one set of commands. The

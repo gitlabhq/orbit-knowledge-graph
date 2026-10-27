@@ -65,7 +65,7 @@ To add the MCP server for the current project, run:
 {{< tab title="GitLab Orbit CLI (orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli -- orbit workspace mcp serve
+claude mcp add orbit-cli -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -73,7 +73,7 @@ claude mcp add orbit-cli -- orbit workspace mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli -- glab orbit workspace mcp serve
+claude mcp add orbit-cli -- glab orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -87,7 +87,7 @@ To add the server for all of your projects, run:
 {{< tab title="GitLab Orbit CLI (orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli --scope user -- orbit workspace mcp serve
+claude mcp add orbit-cli --scope user -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -95,7 +95,7 @@ claude mcp add orbit-cli --scope user -- orbit workspace mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli --scope user -- glab orbit workspace mcp serve
+claude mcp add orbit-cli --scope user -- glab orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -109,7 +109,7 @@ To add the server for everyone who checks out the repository, run:
 {{< tab title="GitLab Orbit CLI (orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli --scope project -- orbit workspace mcp serve
+claude mcp add orbit-cli --scope project -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -117,7 +117,7 @@ claude mcp add orbit-cli --scope project -- orbit workspace mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-claude mcp add orbit-cli --scope project -- glab orbit workspace mcp serve
+claude mcp add orbit-cli --scope project -- glab orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -135,7 +135,7 @@ You can also edit the `.mcp.json` file directly:
   "mcpServers": {
     "orbit-cli": {
       "command": "orbit",
-      "args": ["workspace", "mcp", "serve"]
+      "args": ["mcp", "serve"]
     }
   }
 }
@@ -150,7 +150,7 @@ You can also edit the `.mcp.json` file directly:
   "mcpServers": {
     "orbit-cli": {
       "command": "glab",
-      "args": ["orbit", "workspace", "mcp", "serve"]
+      "args": ["orbit", "mcp", "serve"]
     }
   }
 }
@@ -185,7 +185,7 @@ To connect to Codex, run:
 {{< tab title="GitLab Orbit CLI (orbit)" >}}
 
 ```shell
-codex mcp add orbit-cli -- orbit workspace mcp serve
+codex mcp add orbit-cli -- orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -193,7 +193,7 @@ codex mcp add orbit-cli -- orbit workspace mcp serve
 {{< tab title="GitLab CLI (glab orbit)" >}}
 
 ```shell
-codex mcp add orbit-cli -- glab orbit workspace mcp serve
+codex mcp add orbit-cli -- glab orbit mcp serve
 ```
 
 {{< /tab >}}
@@ -230,7 +230,7 @@ To connect to Cursor, create or edit the `mcp.json` file for the scope you want:
     "orbit-cli": {
       "type": "stdio",
       "command": "orbit",
-      "args": ["workspace", "mcp", "serve"]
+      "args": ["mcp", "serve"]
     }
   }
 }
@@ -246,7 +246,7 @@ To connect to Cursor, create or edit the `mcp.json` file for the scope you want:
     "orbit-cli": {
       "type": "stdio",
       "command": "glab",
-      "args": ["orbit", "workspace", "mcp", "serve"]
+      "args": ["orbit", "mcp", "serve"]
     }
   }
 }
@@ -277,7 +277,7 @@ Add the MCP server configuration to `opencode.json` in the repository root, or t
   "mcp": {
     "orbit-cli": {
       "type": "local",
-      "command": ["orbit", "workspace", "mcp", "serve"]
+      "command": ["orbit", "mcp", "serve"]
     }
   }
 }
@@ -293,7 +293,7 @@ Add the MCP server configuration to `opencode.json` in the repository root, or t
   "mcp": {
     "orbit-cli": {
       "type": "local",
-      "command": ["glab", "orbit", "workspace", "mcp", "serve"]
+      "command": ["glab", "orbit", "mcp", "serve"]
     }
   }
 }
@@ -328,7 +328,7 @@ edit your client's MCP configuration file:
   "mcpServers": {
     "orbit-cli": {
       "command": "orbit",
-      "args": ["workspace", "mcp", "serve"]
+      "args": ["mcp", "serve"]
     }
   }
 }
@@ -348,7 +348,7 @@ To connect using the GitLab CLI:
   "mcpServers": {
     "orbit-cli": {
       "command": "glab",
-      "args": ["orbit", "workspace", "mcp", "serve"]
+      "args": ["orbit", "mcp", "serve"]
     }
   }
 }
