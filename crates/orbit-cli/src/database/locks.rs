@@ -7,7 +7,7 @@ use anyhow::Result;
 
 pub const BRIEF_WAIT: Duration = Duration::from_secs(5);
 const DEFAULT_WAIT: Duration = Duration::from_secs(600);
-/// Exit code of a command that gave up waiting for a lock (`EX_TEMPFAIL`).
+/// sysexits.h EX_TEMPFAIL.
 pub const WAIT_TIMED_OUT_EXIT_CODE: i32 = 75;
 const FIRST_NOTICE_AFTER: Duration = Duration::from_secs(1);
 const NOTICE_EVERY: Duration = Duration::from_secs(15);

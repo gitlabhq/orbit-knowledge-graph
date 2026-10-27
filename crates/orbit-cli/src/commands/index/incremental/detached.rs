@@ -15,7 +15,6 @@ pub(crate) struct DetachedIndex {
     pub log: PathBuf,
 }
 
-/// The path is unique per invocation, so a leftover can't be mistaken for the child's signal.
 pub(super) struct ReadyFile(pub(super) PathBuf);
 
 impl ReadyFile {
@@ -30,8 +29,9 @@ impl Drop for ReadyFile {
     }
 }
 
-/// Returns once the child creates its ready file after taking its locks. Only the child can say
-/// so: a reader started after this returns must wait for it, not read the old graph.
+/// Returns once the child holds the first repository's locks, or at once when it is queued. Only
+/// the child can say so: a reader started after this returns must wait for it, not read the old
+/// graph.
 pub(crate) fn index_detached(path: &Path, options: &Options) -> Result<DetachedIndex> {
     let workspace = workspace::Workspace::open_default()?;
     let repos = workspace.resolve_repos(path)?;

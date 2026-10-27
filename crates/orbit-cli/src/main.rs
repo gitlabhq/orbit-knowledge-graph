@@ -68,6 +68,7 @@ struct IndexArgs {
 
     /// Index in the foreground, first waiting for a running index of the same repository
     /// (the default).
+    // Not read: blocking is already the default.
     #[arg(long)]
     wait: bool,
 
