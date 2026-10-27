@@ -11,6 +11,8 @@ Accepted
 
 Amended by [ADR 022](022_queries_in_rails.md): Rails now runs the query stream, and Workhorse only proxies the request.
 
+The query language command and the JSON Query DSL were later removed. The graph query command takes GQL text, and agents discover the graph with `CALL db.schema()`. See the [Orbit Query Engine](../architecture/querying/query-engine.md).
+
 ## Date
 
 2026-05-06
@@ -142,9 +144,8 @@ The check does not make a version unique, because concurrent changes can pick th
 
 The list method returns the name, version, description, and compatibility of each skill.
 The get method returns the versioned file tree, sorted by path with a hash of each file, or only the metadata.
-Both requests carry the query language of the caller.
-GQL callers get the GQL variant, whose version has a GQL suffix so caches differ by mode.
-A missing language selects JSON, and an unknown language is rejected.
+Both requests carry the query language of the caller, which must be GQL.
+A missing language selects the removed JSON Query DSL, so it is rejected, as are JSON and unknown languages.
 An unknown name returns a not-found error with the sorted known names.
 Both responses include the server version as provenance, outside skill identity.
 

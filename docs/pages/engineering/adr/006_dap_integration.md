@@ -184,7 +184,7 @@ The JWT carries the source claim, and namespace access checks and redaction work
 ### Prompt engineering
 
 Registering the Orbit tools is not enough, because agents also need prompt guidance.
-Each tool description embeds the full query language grammar, encoded as Token-Oriented Object Notation (TOON).
+Each tool description carries query language guidance.
 So each description is a few thousand tokens long and fills the context window.
 In a crowded tool list with no guidance, the agent cannot tell when to prefer them.
 The prompt must cover when to prefer Orbit, when to avoid it, and how to use it well.

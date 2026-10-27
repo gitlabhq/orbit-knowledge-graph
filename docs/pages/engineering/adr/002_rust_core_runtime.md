@@ -30,7 +30,7 @@ We then compared FFI with a standalone Rust service and chose the service, which
 
 Orbit builds a property graph from GitLab instance data and serves queries over gRPC.
 It runs as one binary in four modes: web server, indexer, dispatcher, and health check.
-It reads change data capture (CDC) events from NATS and compiles a JSON query language into ClickHouse SQL.
+It reads change data capture (CDC) events from NATS and compiles GQL queries into ClickHouse SQL.
 It uses bidirectional gRPC streams for the authorization exchange with Rails.
 One multi-tenant deployment serves all of GitLab.com, and a three-hop traversal must finish in less than 300 ms at p95.
 
