@@ -14,9 +14,19 @@ ${INDEXING_BUDGET_MULTIPLIER}       %{INDEXING_BUDGET_MULTIPLIER=1}
 
 *** Keywords ***
 Orbit Status Is Healthy
+    [Documentation]    Query.orbit.serviceStatus over GraphQL. GitLab images that predate the field
+    ...                still serve GET /orbit/status, so the keyword reads that route on them.
     ${headers}=    GitLab Auth Headers
-    ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/status    headers=${headers}    expected_status=200
-    Should Be Equal    ${resp.json()["system"]["status"]}    healthy
+    ${body}=    Create Dictionary    query={ orbit { serviceStatus { state } } }
+    ${resp}=    POST    ${GITLAB_URL}/api/graphql    headers=${headers}    json=${body}    expected_status=200
+    ${payload}=    Set Variable    ${resp.json()}
+    IF    "doesn't exist on type 'Orbit'" in str($payload.get("errors"))
+        ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/status    headers=${headers}    expected_status=200
+        Should Be Equal    ${resp.json()["system"]["status"]}    healthy
+        RETURN
+    END
+    Should Not Contain    ${payload}    errors    GraphQL error: ${payload}
+    Should Be Equal    ${payload["data"]["orbit"]["serviceStatus"]["state"]}    HEALTHY
 
 Orbit Query POST
     [Documentation]    POST /orbit/query expecting ${expected_status}, retrying once on 502: the
