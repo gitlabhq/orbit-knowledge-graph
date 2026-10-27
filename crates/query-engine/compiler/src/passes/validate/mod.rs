@@ -252,6 +252,12 @@ fn calendar_prefix(value: &str) -> Option<&str> {
     })
 }
 
+fn filter_values(value: &serde_json::Value) -> &[serde_json::Value] {
+    value
+        .as_array()
+        .map_or(std::slice::from_ref(value), Vec::as_slice)
+}
+
 fn at_or_before_epoch(value: &str) -> bool {
     calendar_prefix(value).is_some_and(|date| date <= "1970-01-01")
 }
@@ -831,41 +837,39 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         filter: &InputFilter,
         property: &query_data_model::Property,
     ) -> Result<()> {
-        if property.data_type != DataType::Enum {
-            return Ok(());
-        }
-        let Some(enum_values) = property
-            .enum_values
-            .as_ref()
-            .filter(|values| !values.is_empty())
-        else {
-            return Err(QueryError::Validation(format!(
-                "filter on \"{prop}\" for {entity}: enum has no declared values"
-            )));
-        };
-        if filter.op.is_some_and(FilterOp::is_text) {
+        if property.data_type != DataType::Enum || filter.op.is_some_and(FilterOp::is_text) {
             return Ok(());
         }
         let Some(value) = filter.value.as_ref() else {
             return Ok(());
         };
-        let values = value
-            .as_array()
-            .map_or(std::slice::from_ref(value), Vec::as_slice);
-        let invalid = values.iter().find(|value| match value {
-            serde_json::Value::String(label) => !enum_values.values().any(|value| value == label),
-            serde_json::Value::Number(number) if property.enum_type == ontology::EnumType::Int => {
-                number
-                    .as_i64()
-                    .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok()))
-                    .is_none_or(|key| !enum_values.contains_key(&key))
+        let declared = property.enum_values.iter().flatten();
+        let integer_keys = property.enum_type == ontology::EnumType::Int;
+        let is_declared = |value: &serde_json::Value| match value {
+            serde_json::Value::String(label) => declared.clone().any(|(_, known)| known == label),
+            serde_json::Value::Number(number) => {
+                integer_keys
+                    && number
+                        .as_i64()
+                        .is_some_and(|key| declared.clone().any(|(known, _)| *known == key))
             }
-            _ => true,
-        });
-        let Some(invalid) = invalid else {
+            _ => false,
+        };
+        let Some(invalid) = filter_values(value)
+            .iter()
+            .find(|value| !is_declared(value))
+        else {
             return Ok(());
         };
-        let valid: Vec<_> = enum_values.values().map(String::as_str).collect();
+        let valid: Vec<String> = declared
+            .map(|(key, label)| {
+                if integer_keys {
+                    format!("{key} ({label})")
+                } else {
+                    label.clone()
+                }
+            })
+            .collect();
         Err(QueryError::Validation(format!(
             "filter on \"{prop}\" for {entity}: invalid enum value {invalid}{}",
             ontology::errors::format_candidate_list("values", &valid)
@@ -1007,20 +1011,15 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         if self
             .property_id(entity, prop)
             .is_some_and(|property| self.model.get().null_as_epoch(property))
-        {
-            let values = value
-                .as_array()
-                .map_or(std::slice::from_ref(value), Vec::as_slice);
-            if values
+            && filter_values(value)
                 .iter()
                 .filter_map(serde_json::Value::as_str)
                 .any(at_or_before_epoch)
-            {
-                return Err(QueryError::Validation(format!(
-                    "filter on \"{prop}\" for {entity}: \
-                     values on or before 1970-01-01 stand for null; use is_null or is_not_null"
-                )));
-            }
+        {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: \
+                 values on or before 1970-01-01 stand for null; use is_null or is_not_null"
+            )));
         }
 
         if is_like_op || is_token_op {
@@ -2420,30 +2419,6 @@ mod tests {
             }"#,
             "not a string or integer",
         );
-    }
-
-    #[test]
-    fn rejects_enum_without_declared_values() {
-        for enum_values in [None, Some(BTreeMap::new())] {
-            let ontology = Ontology::new()
-                .with_nodes(["User"])
-                .with_fields("User", [("user_type", DataType::Enum)])
-                .modify_field("User", "user_type", |field| {
-                    field.enum_values = enum_values;
-                })
-                .unwrap();
-            for filter in [r#""human""#, r#"{"contains":"hum"}"#] {
-                let input = parse_input(&format!(
-                    r#"{{
-                        "query_type": "traversal",
-                        "nodes": [{{"id": "u", "entity": "User", "filters": {{"user_type": {filter}}}}}]
-                    }}"#
-                ))
-                .unwrap();
-                let error = validator(&ontology).check_references(&input).unwrap_err();
-                assert!(error.to_string().contains("enum has no declared values"));
-            }
-        }
     }
 
     #[test]

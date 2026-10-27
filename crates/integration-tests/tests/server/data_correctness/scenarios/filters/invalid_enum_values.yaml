@@ -29,6 +29,17 @@ cases:
     expect:
       compile_error_contains: [not_a_user_type, "Valid values", human, project_bot]
 
+  - name: negated_unknown_label
+    description: A negated filter rejects a label outside the property's declared enum values, and the error
+      lists each integer key with its label
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":{"ne":"not_a_user_type"}}}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT u.user_type IN ['not_a_user_type'] RETURN u LIMIT 10
+    expect:
+      compile_error_contains: [not_a_user_type, "Valid values", "0 (human)", "6 (project_bot)"]
+
   - name: declared_integer_key
     description: An integer-backed enum accepts a declared integer key and matches its label
     query:
