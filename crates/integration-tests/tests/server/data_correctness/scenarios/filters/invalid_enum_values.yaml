@@ -1,0 +1,131 @@
+cases:
+  - name: unknown_label
+    description: A filter rejects a label outside the property's declared enum values
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":"not_a_user_type"}}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1, user_type: 'not_a_user_type'}) RETURN u LIMIT 10
+    expect:
+      compile_error_contains: [not_a_user_type, "Valid values", human, project_bot]
+
+  - name: unknown_integer
+    description: A filter rejects an integer outside the property's declared enum values
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":999}}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.user_type = 999 RETURN u LIMIT 10
+    expect:
+      compile_error_contains: ["999", "Valid values", human, project_bot]
+
+  - name: unknown_in_value
+    description: An IN filter rejects one label outside the property's declared enum values
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":{"in":["human","not_a_user_type"]}}}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.user_type IN ['human', 'not_a_user_type'] RETURN u LIMIT 10
+    expect:
+      compile_error_contains: [not_a_user_type, "Valid values", human, project_bot]
+
+  - name: negated_unknown_label
+    description: A negated filter rejects a label outside the property's declared enum values, and the error
+      lists each integer key with its label
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":{"ne":"not_a_user_type"}}}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE NOT u.user_type IN ['not_a_user_type'] RETURN u LIMIT 10
+    expect:
+      compile_error_contains: [not_a_user_type, "Valid values", "0 (human)", "6 (project_bot)"]
+
+  - name: declared_integer_key
+    description: An integer-backed enum accepts a declared integer key and matches its label
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":0},"columns":["user_type"]}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.user_type = 0 RETURN u.user_type LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        User:
+          ids: [1]
+          filters: { user_type: human }
+
+  - name: declared_integer_keys_in_list
+    description: An integer-backed enum accepts declared integer keys in an IN filter
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":{"in":[0,6]}},"columns":["user_type"]}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.user_type IN [0, 6] RETURN u.user_type LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        User:
+          ids: [1]
+          filters: { user_type: human }
+
+  - name: declared_substring
+    description: A text operator on an enum keeps substring matching behavior
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":{"contains":"hum"}},"columns":["user_type"]}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.user_type CONTAINS 'hum' RETURN u.user_type LIMIT 10
+    expect:
+      node_count: 1
+      nodes:
+        User:
+          ids: [1]
+          filters: { user_type: human }
+
+  - name: string_backed_integer
+    description: A string-backed enum rejects integer keys because its stored values are labels
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"state":0}}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.state = 0 RETURN u LIMIT 10
+    expect:
+      compile_error_contains: ["0", "Valid values", active, blocked]
+
+  - name: string_backed_unknown_label
+    description: A string-backed enum rejects a label outside its declared values
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"state":"not_a_state"}}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.state = 'not_a_state' RETURN u LIMIT 10
+    expect:
+      compile_error_contains: [not_a_state, "Valid values", active, blocked]
+
+  - name: substring_matching_no_value
+    description: A text operator on an enum rejects a pattern that no declared value can match, ignoring case
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"filters":{"user_type":{"starts_with":"bot"}}}],"limit":10}
+      gql: |
+        MATCH (u:User {id: 1}) WHERE u.user_type STARTS WITH 'bot' RETURN u LIMIT 10
+    expect:
+      compile_error_contains: ["no enum value starts with", "bot", "6 (project_bot)"]
+
+  - name: comparison_within_one_domain
+    description: Two enum fields with the same declared values compare by value
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[:CONTAINS]->(p:Project) WHERE g.visibility_level = p.visibility_level RETURN p LIMIT 10
+    expect:
+      node_count: 2
+      nodes:
+        Group:
+          ids: [100]
+        Project:
+          ids: [1000]
+          absent: [1002]
+          filters:
+            visibility_level: { eq: public }
+      edges:
+        CONTAINS: [[100, 1000]]

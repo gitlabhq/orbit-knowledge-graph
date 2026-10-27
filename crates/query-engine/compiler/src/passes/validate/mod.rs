@@ -252,6 +252,21 @@ fn calendar_prefix(value: &str) -> Option<&str> {
     })
 }
 
+fn like_matches(op: FilterOp, text: &str, pattern: &str) -> bool {
+    match op {
+        FilterOp::Contains => text.contains(pattern),
+        FilterOp::StartsWith => text.starts_with(pattern),
+        FilterOp::EndsWith => text.ends_with(pattern),
+        _ => true,
+    }
+}
+
+fn filter_values(value: &serde_json::Value) -> &[serde_json::Value] {
+    value
+        .as_array()
+        .map_or(std::slice::from_ref(value), Vec::as_slice)
+}
+
 fn at_or_before_epoch(value: &str) -> bool {
     calendar_prefix(value).is_some_and(|date| date <= "1970-01-01")
 }
@@ -804,9 +819,10 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 }
             }
         }
-        let Some(data_type) = self.field_type(entity, prop) else {
+        let Some(property) = self.property(entity, prop) else {
             return Ok(());
         };
+        let data_type = property.data_type;
         for filter in filters {
             if let Some((rhs_node, rhs_prop)) = &filter.rhs_column {
                 self.check_property_comparison(
@@ -818,8 +834,144 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 continue;
             }
             self.check_one_filter(entity, prop, filter, data_type)?;
+            self.check_enum_filter(entity, prop, filter, property)?;
         }
         Ok(())
+    }
+
+    fn check_enum_filter(
+        &self,
+        entity: &str,
+        prop: &str,
+        filter: &InputFilter,
+        property: &query_data_model::Property,
+    ) -> Result<()> {
+        let op = filter.op.unwrap_or(FilterOp::Eq);
+        if property.data_type != DataType::Enum || op.is_token() {
+            return Ok(());
+        }
+        let Some(value) = filter.value.as_ref() else {
+            return Ok(());
+        };
+        let declared = property.enum_values.iter().flatten();
+        let integer_keys = property.enum_type == ontology::EnumType::Int;
+        let is_declared = |value: &serde_json::Value| match value {
+            serde_json::Value::String(text) if op.is_like() => declared
+                .clone()
+                .any(|(_, label)| like_matches(op, &label.to_lowercase(), &text.to_lowercase())),
+            serde_json::Value::String(text) => declared.clone().any(|(_, label)| label == text),
+            serde_json::Value::Number(number) => {
+                integer_keys
+                    && number
+                        .as_i64()
+                        .is_some_and(|key| declared.clone().any(|(known, _)| *known == key))
+            }
+            _ => false,
+        };
+        let Some(invalid) = filter_values(value)
+            .iter()
+            .find(|value| !is_declared(value))
+        else {
+            return Ok(());
+        };
+        let problem = if op.is_like() {
+            format!("no enum value {} {invalid}", op.as_ref().replace('_', " "))
+        } else {
+            format!("invalid enum value {invalid}")
+        };
+        let valid: Vec<String> = declared
+            .map(|(key, label)| {
+                if integer_keys {
+                    format!("{key} ({label})")
+                } else {
+                    label.clone()
+                }
+            })
+            .collect();
+        Err(QueryError::Validation(format!(
+            "filter on \"{prop}\" for {entity}: {problem}{}",
+            ontology::errors::format_candidate_list("values", &valid)
+        )))
+    }
+
+    fn check_edge_kind_filter(
+        &self,
+        input: &Input,
+        index: usize,
+        prop: &str,
+        filter: &InputFilter,
+    ) -> Result<()> {
+        let op = filter.op.unwrap_or(FilterOp::Eq);
+        if !matches!(op, FilterOp::Eq | FilterOp::Ne | FilterOp::In) {
+            return Ok(());
+        }
+        let Some(value) = filter.value.as_ref() else {
+            return Ok(());
+        };
+        let allowed = self.edge_kind_values(input, index, prop);
+        if allowed.is_empty() {
+            return Ok(());
+        }
+        if op == FilterOp::Ne && allowed.len() == 1 && value.as_str() == Some(&allowed[0]) {
+            return Err(QueryError::Validation(format!(
+                "relationship[{index}] filter on \"{prop}\": <> {value} excludes the only value this pattern allows; remove the filter"
+            )));
+        }
+        let Some(invalid) = filter_values(value).iter().find(|value| {
+            !value
+                .as_str()
+                .is_some_and(|name| allowed.iter().any(|kind| kind == name))
+        }) else {
+            return Ok(());
+        };
+        Err(QueryError::Validation(format!(
+            "relationship[{index}] filter on \"{prop}\": {invalid} cannot match this pattern{}",
+            ontology::errors::format_candidate_list("values", &allowed)
+        )))
+    }
+
+    fn edge_kind_values(&self, input: &Input, index: usize, prop: &str) -> Vec<String> {
+        use crate::input::Direction;
+        use ontology::constants::{
+            RELATIONSHIP_KIND_COLUMN, SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN,
+        };
+        let relationship = &input.relationships[index];
+        let graph = self.model.get().graph();
+        let every_entity = || graph.entities().map(|entity| entity.name.clone()).collect();
+        let untyped =
+            relationship.types.is_empty() || relationship.types.iter().any(|kind| kind == "*");
+        match prop {
+            RELATIONSHIP_KIND_COLUMN if untyped => graph.relationship_names(None, None),
+            RELATIONSHIP_KIND_COLUMN => relationship.types.clone(),
+            SOURCE_KIND_COLUMN | TARGET_KIND_COLUMN if relationship.hops.max > 1 => every_entity(),
+            SOURCE_KIND_COLUMN | TARGET_KIND_COLUMN => {
+                let (from, to) = (
+                    input.entity_of(&relationship.from),
+                    input.entity_of(&relationship.to),
+                );
+                let (near, far) = if prop == SOURCE_KIND_COLUMN {
+                    (from, to)
+                } else {
+                    (to, from)
+                };
+                let endpoints = match relationship.direction {
+                    Direction::Outgoing => vec![near],
+                    Direction::Incoming => vec![far],
+                    Direction::Both => vec![near, far],
+                };
+                if endpoints.contains(&None) {
+                    return every_entity();
+                }
+                let mut kinds: Vec<String> = endpoints
+                    .into_iter()
+                    .flatten()
+                    .map(str::to_string)
+                    .collect();
+                kinds.dedup();
+                kinds
+            }
+            _ => Vec::new(),
+        }
     }
 
     fn check_relationship_filters(
@@ -883,6 +1035,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 ));
             }
             self.check_one_filter(&format!("relationship[{index}]"), prop, filter, data_type)?;
+            self.check_edge_kind_filter(input, index, prop, filter)?;
         }
         Ok(())
     }
@@ -957,20 +1110,15 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
         if self
             .property_id(entity, prop)
             .is_some_and(|property| self.model.get().null_as_epoch(property))
-        {
-            let values = value
-                .as_array()
-                .map_or(std::slice::from_ref(value), Vec::as_slice);
-            if values
+            && filter_values(value)
                 .iter()
                 .filter_map(serde_json::Value::as_str)
                 .any(at_or_before_epoch)
-            {
-                return Err(QueryError::Validation(format!(
-                    "filter on \"{prop}\" for {entity}: \
-                     values on or before 1970-01-01 stand for null; use is_null or is_not_null"
-                )));
-            }
+        {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: \
+                 values on or before 1970-01-01 stand for null; use is_null or is_not_null"
+            )));
         }
 
         if is_like_op || is_token_op {
@@ -1567,6 +1715,7 @@ mod tests {
     }
     use crate::input::parse_input;
     use ontology::{DataType, FieldSource, VirtualSource};
+    use std::collections::BTreeMap;
 
     fn test_ontology() -> Ontology {
         Ontology::new()
@@ -1602,6 +1751,20 @@ mod tests {
                 ("target_id", DataType::Int),
                 ("target_kind", DataType::String),
             ])
+            .modify_field("User", "user_type", |field| {
+                field.enum_values = Some(BTreeMap::from([
+                    (0, "human".into()),
+                    (6, "project_bot".into()),
+                ]));
+            })
+            .unwrap()
+            .modify_field("Project", "visibility_level", |field| {
+                field.enum_values = Some(BTreeMap::from([
+                    (0, "private".into()),
+                    (20, "public".into()),
+                ]));
+            })
+            .unwrap()
     }
 
     fn assert_ok(json: &str) {
@@ -2982,7 +3145,11 @@ mod tests {
                     ("created_at", DataType::DateTime),
                     ("state", DataType::Enum),
                 ],
-            );
+            )
+            .modify_field("User", "state", |field| {
+                field.enum_values = Some(BTreeMap::from([(0, "active".into())]));
+            })
+            .unwrap();
         let validator = validator(&ont);
         let input = parse_input(
             r#"{
