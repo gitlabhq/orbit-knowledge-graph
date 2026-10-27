@@ -2437,7 +2437,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22%28sum%28rate%28container_cpu_usage_seconds_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20cpu%3D\\%22total\\%22%7D%5B5m%5D%29%29%29%20%2F%20%28sum%28kube_pod_container_resource_limits%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20namespace%3D\\%22gkg\\%22%2C%20resource%3D\\%22cpu\\%22%7D%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22%28sum%28rate%28container_cpu_usage_seconds_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20cpu%3D\\%22total\\%22%7D%5B5m%5D%29%29%29%20%2F%20%28sum%28kube_pod_container_resource_limits%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20resource%3D\\%22cpu\\%22%7D%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -2459,7 +2459,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "((sum(rate(container_cpu_usage_seconds_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", cpu=\"total\"}[5m]))) / (sum(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", namespace=\"gkg\", resource=\"cpu\"}) > 0)) or vector(0)",
+          "expr": "((sum(rate(container_cpu_usage_seconds_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", cpu=\"total\"}[5m]))) / (sum(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", resource=\"cpu\"}) > 0)) or vector(0)",
           "legendFormat": "CPU: usage / limit (5m)",
           "refId": "A"
         }
@@ -2490,7 +2490,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22%28sum%28container_memory_working_set_bytes%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%29%29%20%2F%20%28sum%28kube_pod_container_resource_limits%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20namespace%3D\\%22gkg\\%22%2C%20resource%3D\\%22memory\\%22%7D%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22%28sum%28container_memory_working_set_bytes%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%29%29%20%2F%20%28sum%28kube_pod_container_resource_limits%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20resource%3D\\%22memory\\%22%7D%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -2512,7 +2512,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "((sum(container_memory_working_set_bytes{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})) / (sum(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", namespace=\"gkg\", resource=\"memory\"}) > 0)) or vector(0)",
+          "expr": "((sum(container_memory_working_set_bytes{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"})) / (sum(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", resource=\"memory\"}) > 0)) or vector(0)",
           "legendFormat": "Memory: working set / limit",
           "refId": "A"
         }
@@ -2596,7 +2596,7 @@
         {
           "targetBlank": false,
           "title": "Open in Explore",
-          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28increase%28kube_pod_container_status_restarts_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20namespace%3D\\%22gkg\\%22%7D%5B1h%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+          "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28increase%28kube_pod_container_status_restarts_total%7Bcontainer%3D~\\%22%28gkg%7Corbit%29-webserver\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%5B1h%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
         }
       ],
       "options": {
@@ -2618,7 +2618,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "(sum(increase(kube_pod_container_status_restarts_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", namespace=\"gkg\"}[1h]))) or vector(0)",
+          "expr": "(sum(increase(kube_pod_container_status_restarts_total{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\"}[1h]))) or vector(0)",
           "legendFormat": "Restarts (1h)",
           "refId": "A"
         }
@@ -2678,7 +2678,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "avg(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", namespace=\"gkg\", resource=\"cpu\"})",
+          "expr": "avg(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", resource=\"cpu\"})",
           "legendFormat": "limit",
           "refId": "B"
         }
@@ -2789,7 +2789,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
           },
-          "expr": "avg(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", namespace=\"gkg\", resource=\"memory\"})",
+          "expr": "avg(kube_pod_container_resource_limits{container=~\"(gkg|orbit)-webserver\", cluster=~\"$cluster\", resource=\"memory\"})",
           "legendFormat": "limit",
           "refId": "B"
         }
