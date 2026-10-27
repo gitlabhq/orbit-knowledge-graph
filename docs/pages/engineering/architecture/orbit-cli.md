@@ -26,7 +26,7 @@ then on, it passes every `glab orbit` command to the Orbit CLI.
 
 The GitLab CLI checks for a new version at most once a day. It prints a notice
 when one exists. The `glab orbit update` command installs it.
-[Getting started](https://docs.gitlab.com/orbit/local/getting-started/) lists
+[Getting started](https://docs.gitlab.com/orbit/cli/#local-graph) lists
 the other ways to install the CLI.
 
 ### 2. Connect AI agents
@@ -47,7 +47,7 @@ The `glab orbit workspace index .` command walks the working tree of the checkou
 current folder. So uncommitted and untracked files are part of the graph. It
 skips what `.gitignore` excludes. It lists binary, minified, and very large
 files, but it doesn't parse them. Tree-sitter grammars parse each
-[supported language](https://docs.gitlab.com/orbit/compare-local-remote/#supported-languages)
+[supported language](https://docs.gitlab.com/orbit/schema/#supported-languages)
 into the code types that the [data model](data-model.md) page describes.
 
 Each checkout and commit gets its own file on your machine. The
