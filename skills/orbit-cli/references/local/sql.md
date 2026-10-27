@@ -1,6 +1,6 @@
 # Orbit local SQL reference
 
-`orbit sql "QUERY"` runs SQL against the local DuckDB graph. `orbit schema [TABLE…]` lists live columns.
+`orbit workspace sql "QUERY"` runs SQL against the local DuckDB graph. `orbit workspace schema [TABLE…]` lists live columns.
 
 ## Tables
 
@@ -20,20 +20,20 @@
 Definition-type histogram:
 
 ```shell
-orbit sql "SELECT definition_type, count(*) n FROM gl_definition GROUP BY 1 ORDER BY n DESC"
+orbit workspace sql "SELECT definition_type, count(*) n FROM gl_definition GROUP BY 1 ORDER BY n DESC"
 ```
 
 Definitions in one file:
 
 ```shell
-orbit sql "SELECT definition_type, name, start_line FROM gl_definition
+orbit workspace sql "SELECT definition_type, name, start_line FROM gl_definition
            WHERE file_path='crates/orbit-cli/src/main.rs' ORDER BY start_line"
 ```
 
 Callers of a function (`CALLS`):
 
 ```shell
-orbit sql "SELECT s.name AS caller, s.file_path, s.start_line
+orbit workspace sql "SELECT s.name AS caller, s.file_path, s.start_line
            FROM gl_edge e
            JOIN gl_definition s ON e.source_id = s.id
            JOIN gl_definition t ON e.target_id = t.id
@@ -43,7 +43,7 @@ orbit sql "SELECT s.name AS caller, s.file_path, s.start_line
 Callees of a function:
 
 ```shell
-orbit sql "SELECT DISTINCT t.name AS callee
+orbit workspace sql "SELECT DISTINCT t.name AS callee
            FROM gl_edge e
            JOIN gl_definition s ON e.source_id = s.id
            JOIN gl_definition t ON e.target_id = t.id
@@ -53,7 +53,7 @@ orbit sql "SELECT DISTINCT t.name AS callee
 Subtypes via `EXTENDS`:
 
 ```shell
-orbit sql "SELECT s.name AS subtype, s.file_path
+orbit workspace sql "SELECT s.name AS subtype, s.file_path
            FROM gl_edge e
            JOIN gl_definition s ON e.source_id = s.id
            JOIN gl_definition t ON e.target_id = t.id
@@ -63,14 +63,14 @@ orbit sql "SELECT s.name AS subtype, s.file_path
 Importers of a symbol:
 
 ```shell
-orbit sql "SELECT DISTINCT file_path FROM gl_imported_symbol
+orbit workspace sql "SELECT DISTINCT file_path FROM gl_imported_symbol
            WHERE identifier_name LIKE '%Workspace%' ORDER BY file_path"
 ```
 
 Cross-repository symbol lookup (`--all`):
 
 ```shell
-orbit sql --all "SELECT im.repo_path AS importing_repo, i.identifier_name AS symbol,
+orbit workspace sql --all "SELECT im.repo_path AS importing_repo, i.identifier_name AS symbol,
                  dm.repo_path AS defining_repo, d.file_path AS defining_file
                  FROM gl_imported_symbol i
                   JOIN _orbit_manifest im ON im.project_id = i.project_id AND im.commit_sha = i.commit_sha

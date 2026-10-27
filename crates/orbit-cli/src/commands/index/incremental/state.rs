@@ -369,7 +369,7 @@ impl Project<'_> {
         manifest::load_incremental_state(self.manifest_path, self.git.project_id)?.with_context(
             || {
                 format!(
-                    "no incremental state for {}; run `orbit index` first",
+                    "no incremental state for {}; run `orbit workspace index` first",
                     self.git.repo_path.display()
                 )
             },
@@ -394,4 +394,110 @@ fn save_snapshot(
         .open(snapshot)?
         .set_modified(read_at)?;
     Ok(())
+}
+
+pub(super) fn changed_since_snapshot(
+    repo: &std::path::Path,
+    state_dir: &std::path::Path,
+    files: &[&str],
+) -> Vec<String> {
+    let modified = |path: &std::path::Path| {
+        std::fs::metadata(path)
+            .and_then(|meta| meta.modified())
+            .ok()
+    };
+    files
+        .iter()
+        .filter(|file| {
+            let Some(language) =
+                SupportLang::from_path(file).filter(|language| language.has_rules())
+            else {
+                return false;
+            };
+            let snapshot = modified(&snapshot_file(state_dir, language));
+            let file = modified(&repo.join(file));
+            matches!((file, snapshot), (Some(file), Some(snapshot)) if file > snapshot)
+        })
+        .map(|file| file.to_string())
+        .collect()
+}
+
+/// A family's new rows, and its snapshot written beside the live one until the rows are applied.
+pub(super) struct Refreshed {
+    pub replacement: super::output::Replacement,
+    pending: PathBuf,
+    snapshot: PathBuf,
+}
+
+fn pending_file(snapshot: &std::path::Path) -> PathBuf {
+    let mut name = snapshot.as_os_str().to_owned();
+    name.push(".pending");
+    PathBuf::from(name)
+}
+
+/// Puts each pending snapshot in place. The rename keeps the read time that freshness compares against.
+pub(super) fn commit_snapshots(refreshed: &[Refreshed]) -> Result<()> {
+    for family in refreshed {
+        std::fs::rename(&family.pending, &family.snapshot)
+            .with_context(|| format!("failed to save {}", family.snapshot.display()))?;
+    }
+    Ok(())
+}
+
+/// Drops the pending snapshots, so the edited files still count as changed after a failed write.
+pub(super) fn discard_snapshots(refreshed: &[Refreshed]) {
+    for family in refreshed {
+        let _ = std::fs::remove_file(&family.pending);
+    }
+}
+
+pub(super) fn refresh_families(
+    git: &GitInfo,
+    ontology: &ontology::Ontology,
+    state_dir: &std::path::Path,
+    owner: Option<SupportLang>,
+    changed: Vec<String>,
+) -> Result<Vec<Refreshed>> {
+    let read_at = std::time::SystemTime::now();
+    let repository = input::paths(&git.repo_path, changed)?;
+    let mut replacements = Vec::new();
+    for (family, paths) in input::split(&repository, owner).into_values() {
+        let snapshot = snapshot_file(state_dir, family);
+        let (env, state) = State::load(&snapshot, family)
+            .with_context(|| format!("failed to load {}", snapshot.display()))?;
+        let resolved = templates::reindex(
+            Context::new(&env, input::paths(&git.repo_path, paths.clone())?),
+            state,
+            Vec::new(),
+        )?;
+        let revisited: Vec<u32> = resolved.value().resolved.clone();
+        let (_, displayed) = resolved.then(Display)?.finish();
+        let state = displayed.state;
+        let mut files: rustc_hash::FxHashSet<String> = paths.into_iter().collect();
+        files.extend(
+            revisited
+                .into_iter()
+                .filter_map(|index| state.trees.get(index as usize))
+                .map(|tree| tree.label.to_string()),
+        );
+        let pending = pending_file(&snapshot);
+        let replacement = super::output::replacement(git, ontology, &env, &state, &files);
+        let saved = replacement.and_then(|replacement| {
+            save_snapshot(&env, &state, &pending, read_at)?;
+            Ok(replacement)
+        });
+        match saved {
+            Ok(replacement) => replacements.push(Refreshed {
+                replacement,
+                pending,
+                snapshot,
+            }),
+            Err(error) => {
+                discard_snapshots(&replacements);
+                let _ = std::fs::remove_file(&pending);
+                return Err(error);
+            }
+        }
+    }
+    Ok(replacements)
 }

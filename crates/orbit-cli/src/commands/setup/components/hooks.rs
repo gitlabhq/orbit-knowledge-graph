@@ -144,7 +144,14 @@ fn remove_for_agent(agent: Agent, target: &Target, report: &mut Report) -> Resul
 
 fn substitute_tokens_in_json(value: &Value) -> Value {
     match value {
-        Value::String(s) => Value::String(s.replace("{{orbit}}", spec::launcher())),
+        Value::String(s) => Value::String(s.replace("{{orbit}}", spec::launcher()).replace(
+            "{{hook_gitlab}}",
+            if spec::reaches_gitlab() {
+                " --gitlab"
+            } else {
+                ""
+            },
+        )),
         Value::Array(items) => Value::Array(items.iter().map(substitute_tokens_in_json).collect()),
         Value::Object(map) => Value::Object(
             map.iter()

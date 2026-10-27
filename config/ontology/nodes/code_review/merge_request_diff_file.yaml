@@ -40,6 +40,7 @@ properties:
     source: merge_request_diff_id
     nullable: false
     mutable: false
+    high_fan_out: true
     description: "Parent merge request diff ID."
 
   project_id:

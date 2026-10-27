@@ -182,6 +182,10 @@
               "description": "At most one live row per value; an equality on it is recomputed inline.",
               "default": false
             },
+            "high_fan_out": {
+              "type": "boolean",
+              "description": "Parent key of many rows; pinned reads keep find then check."
+            },
             "mutable": {
               "type": "boolean",
               "description": "Whether this field can change after creation. False lets the planner filter on it before the latest-row pick.",
@@ -501,7 +505,7 @@
         },
         "statistics": {
           "type": "object",
-          "description": "Automated column statistics collection via AggregatingMergeTree MVs. All filterable properties on all entities are auto-tracked. Categorization is derived from property types: boolean/enum/selectivity:low \u2192 stats_table (value frequencies), string \u2192 token_table (token frequencies), int64/timestamp/date/float \u2192 histogram_table (equi-depth buckets), uuid \u2192 skipped.",
+          "description": "Column statistics via AggregatingMergeTree MVs over every filterable property, by type: boolean/enum/selectivity:low -> stats_table, string -> token_table, int64/timestamp/date/float -> histogram_table, uuid -> skipped.",
           "properties": {
             "stats_table": {
               "type": "string",

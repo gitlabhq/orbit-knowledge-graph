@@ -1,2 +1,22 @@
 updated: 2026-10-25
-themes: []
+themes:
+  - id: platform
+    title: Available everywhere
+    description: Orbit on GitLab.com, GitLab Self-Managed, and GitLab Dedicated. We aim for the same features on each.
+    icon: cloud-gear
+  - id: agents
+    title: Agents and queries
+    description: One query language and one CLI that agents and engineers use to ask the graph questions.
+    icon: tanuki-ai
+  - id: code
+    title: Code intelligence
+    description: A graph of your code in the languages you use, with active branches and recent commits next.
+    icon: code
+  - id: data
+    title: Your data, connected
+    description: Bring data from other tools into the same graph.
+    icon: connected
+  - id: trust
+    title: Trust and scale
+    description: Permissions, access tokens, reliability, and an architecture that scales.
+    icon: shield

@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import { dirname, join, posix } from "node:path";
 import { parseFrontmatter } from "@gitlab-org/orbit-markdown/author";
 import { parse as parseYaml } from "yaml";
-import { itemFields, postFields } from "../src/roadmap/schema";
+import { itemFields } from "../src/roadmap/schema";
 import { PAGES_DIR, SECTIONS } from "../src/sections";
 import { fetchTrackers, type Tracker } from "./trackers";
 
@@ -105,12 +105,12 @@ export async function syncTrackers() {
 
 const sectionData = (route: string, name: string) => parseYaml(readFileSync(join(dataDir, route, name), "utf8"));
 
-let roadmapSchema = { themes: [] as string[], authors: [] as string[] };
+let roadmapSchema = { themes: [] as string[] };
 
 export function syncContent() {
   const routes = sourceFiles();
   syncData();
-  roadmapSchema = { themes: sectionData("roadmap", "roadmap.yaml").themes.map((theme: { id: string }) => theme.id), authors: Object.keys(sectionData("content", "authors.yaml")) };
+  roadmapSchema = { themes: sectionData("roadmap", "roadmap.yaml").themes.map((theme: { id: string }) => theme.id) };
   rmSync(contentDir, { recursive: true, force: true });
   sourceOfRoute.clear();
   for (const [file, route] of routes) {
@@ -135,7 +135,6 @@ export function siteMeta(route: string, frontmatter: Record<string, unknown>, bo
 }
 
 function roadmapFields(route: string, frontmatter: Record<string, unknown>) {
-  if (route.startsWith("content/blog/")) return { post: postFields(frontmatter, roadmapSchema.authors) };
   if (route.startsWith("roadmap/")) return { item: itemFields(frontmatter, roadmapSchema.themes) };
   return {};
 }

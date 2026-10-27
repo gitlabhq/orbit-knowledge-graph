@@ -1,12 +1,13 @@
 use std::fs::File;
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use arrow::record_batch::RecordBatch;
 use duckdb_client::DuckDbClient;
 use ontology::Ontology;
 
-use super::{lock_database, schema};
+use super::{locks::lock_database_waiting, schema};
 use crate::workspace::GitInfo;
 
 const GRAPH_SCHEMA: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
@@ -17,8 +18,8 @@ pub struct GraphWriter {
 }
 
 impl GraphWriter {
-    pub fn open(path: &Path, git: &GitInfo) -> Result<Self> {
-        let lock = lock_database(path)?;
+    pub fn open_waiting(path: &Path, git: &GitInfo, wait: Duration) -> Result<Self> {
+        let lock = lock_database_waiting(path, wait)?;
         let revision = format!("{}:{}", git.project_id, git.commit_sha);
         if path.exists() {
             let client = DuckDbClient::open_read_only(path)?;
@@ -154,6 +155,53 @@ impl GraphWriter {
 
     pub fn count(&self, sql: &str) -> Result<usize> {
         Ok(duckdb_client::scalar_i64(&self.client.query_arrow(sql)?) as usize)
+    }
+
+    pub fn delete_files(
+        &self,
+        edge_table: &str,
+        tables: &[(&str, &str)],
+        files: &[&str],
+    ) -> Result<()> {
+        if files.is_empty() || tables.is_empty() {
+            return Ok(());
+        }
+        let list = files
+            .iter()
+            .map(|file| duckdb_client::sql_lit(file))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let ids = tables
+            .iter()
+            .map(|(table, column)| format!("SELECT id FROM {table} WHERE {column} IN ({list})"))
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ");
+        self.client.execute(
+            &format!("DELETE FROM {edge_table} WHERE source_id IN ({ids}) OR target_id IN ({ids})"),
+            &[],
+        )?;
+        for (table, column) in tables {
+            self.client.execute(
+                &format!("DELETE FROM {table} WHERE {column} IN ({list})"),
+                &[],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Runs `write` in one transaction, so a failure leaves the graph as it was.
+    pub fn in_transaction(&self, write: impl FnOnce() -> Result<()>) -> Result<()> {
+        self.client.execute("BEGIN TRANSACTION", &[])?;
+        match write() {
+            Ok(()) => {
+                self.client.execute("COMMIT", &[])?;
+                Ok(())
+            }
+            Err(error) => {
+                let _ = self.client.execute("ROLLBACK", &[]);
+                Err(error)
+            }
+        }
     }
 
     pub fn complete(&self, commit: &str) -> Result<()> {

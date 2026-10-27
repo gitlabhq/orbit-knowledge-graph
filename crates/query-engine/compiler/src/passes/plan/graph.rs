@@ -174,6 +174,24 @@ impl RelationNode {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum ReadScope {
+    Unscoped,
+    Scoped,
+    HighFanOut,
+    Edge,
+}
+
+impl ReadScope {
+    pub fn reads_final(self, predicates: &[Predicate]) -> bool {
+        match self {
+            Self::Unscoped | Self::Edge => false,
+            Self::Scoped => true,
+            Self::HighFanOut => !predicates.iter().any(Predicate::narrows_keys),
+        }
+    }
+}
+
 #[derive(PartialEq)]
 struct ReadKey {
     table: String,
@@ -181,16 +199,24 @@ struct ReadKey {
     owner: ReadOwner,
     key: Vec<String>,
     predicates: Vec<Predicate>,
-    selective_latest: bool,
+    scope: ReadScope,
 }
 
-#[derive(Default)]
 pub struct RelationGraph {
     nodes: Vec<RelationNode>,
     reads: Vec<(ReadKey, RelationId)>,
+    selective_latest: bool,
 }
 
 impl RelationGraph {
+    pub fn new(selective_latest: bool) -> Self {
+        Self {
+            nodes: Vec::new(),
+            reads: Vec::new(),
+            selective_latest,
+        }
+    }
+
     fn add(&mut self, node: RelationNode) -> RelationId {
         let id = RelationId(self.nodes.len());
         self.nodes.push(node);
@@ -262,7 +288,7 @@ impl RelationGraph {
         owner: ReadOwner,
         key: &[String],
         predicates: Vec<Predicate>,
-        selective_latest: bool,
+        scope: ReadScope,
     ) -> RelationId {
         let read = ReadKey {
             table: table.to_string(),
@@ -270,12 +296,12 @@ impl RelationGraph {
             owner: owner.clone(),
             key: key.to_vec(),
             predicates: predicates.clone(),
-            selective_latest,
+            scope,
         };
         if let Some((_, id)) = self.reads.iter().find(|(planned, _)| *planned == read) {
             return *id;
         }
-        let id = self.plan_current_rows(table, alias, owner, key, predicates, selective_latest);
+        let id = self.plan_current_rows(table, alias, owner, key, predicates, scope);
         self.reads.push((read, id));
         id
     }
@@ -287,13 +313,19 @@ impl RelationGraph {
         owner: ReadOwner,
         key: &[String],
         predicates: Vec<Predicate>,
-        selective_latest: bool,
+        scope: ReadScope,
     ) -> RelationId {
         let bounds_scan = |predicate: &Predicate| {
             predicate.is_selective()
                 && (!predicate.is_text_match() || predicate.filters_sort_key(key, true))
         };
-        if !selective_latest || !predicates.iter().any(bounds_scan) {
+        let bounded = self.selective_latest && predicates.iter().any(bounds_scan);
+        let read_once = bounded
+            && scope.reads_final(&predicates)
+            && predicates.iter().any(|predicate| {
+                predicate.is_selective() && !predicate.filters_sort_key(key, true)
+            });
+        if !bounded || read_once {
             let (keyed, rest): (Vec<_>, Vec<_>) = predicates
                 .into_iter()
                 .partition(|predicate| predicate.filters_sort_key(key, false));

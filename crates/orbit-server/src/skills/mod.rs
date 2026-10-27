@@ -217,7 +217,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(skill.version, frontmatter.version.to_string());
-        assert!(skill.description.starts_with("Use the `glab orbit` CLI"));
+        assert!(skill.description.starts_with("Use Orbit"));
         assert!(skill.compatibility.contains("Orbit CLI"));
     }
 
@@ -263,7 +263,6 @@ mod tests {
                 Frontend::JsonDsl,
                 &[
                     "SKILL.md",
-                    "references/local_repo_map.md",
                     "references/maintaining.md",
                     "references/query_language.md",
                     "references/recipes.md",
@@ -278,7 +277,6 @@ mod tests {
                 &[
                     "SKILL.md",
                     "references/gql.md",
-                    "references/local_repo_map.md",
                     "references/maintaining.md",
                     "references/reporting.md",
                     "references/troubleshooting.md",

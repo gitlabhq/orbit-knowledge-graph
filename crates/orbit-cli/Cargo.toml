@@ -55,6 +55,10 @@ uuid = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true }
 
+# musl's malloc serializes under contention and C deps (DuckDB, tree-sitter) call it directly.
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = { workspace = true, features = ["override"] }
+
 [build-dependencies]
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-validation"] }
 
