@@ -248,7 +248,7 @@ An hourly sweep picks up any data that indexing missed.
 ## Verify the installation
 
 Query the graph for the projects in the group that you turned on.
-GitLab 19.4.4 and later 19.4 releases, GitLab 19.5.2 and later 19.5 releases, and GitLab 19.6 and later accept GQL queries.
+The query uses GQL, which the [supported GitLab versions](getting-started.md#prerequisites) accept by default.
 
 To verify the installation:
 

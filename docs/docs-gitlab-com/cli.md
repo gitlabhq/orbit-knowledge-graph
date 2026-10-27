@@ -21,6 +21,7 @@ title: GitLab Orbit CLI
   - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
   - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
+- Remote queries [changed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/265010) to accept GQL by default in GitLab 19.4.4, 19.5.2, and 19.6.
 
 {{< /history >}}
 
@@ -160,8 +161,6 @@ glab orbit query "MATCH (p:Project) WHERE p.full_path STARTS WITH 'my-group/' RE
 ```
 
 To list the properties of node types, run `glab orbit ontology MergeRequest Project`.
-
-GitLab Orbit queries use GQL on GitLab 19.4.4 and later 19.4 releases, GitLab 19.5.2 and later 19.5 releases, and GitLab 19.6 and later.
 
 ### Check indexing progress
 
