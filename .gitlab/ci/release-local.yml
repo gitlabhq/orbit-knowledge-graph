@@ -24,6 +24,9 @@
         - scripts/ci/smoke-local-cli.sh
         - .gitlab/ci/release-local.yml
         - crates/duckdb-client/**/*
+        - crates/orbit-cli/Cargo.toml
+        - Cargo.toml
+        - Cargo.lock
         - rust-toolchain.toml
 
 .local-cli-build-linux:
