@@ -4,7 +4,6 @@ use self::error::{EXIT_GENERIC, RemoteError};
 
 pub(crate) mod client;
 pub(crate) mod code;
-pub(crate) mod compact_schema;
 pub(crate) mod context;
 pub(crate) mod dsl;
 pub(crate) mod error;

@@ -542,19 +542,14 @@ fn serve_routes_with_status(
 fn a_query_with_an_unknown_relationship_prints_the_schema() {
     let (base_url, handle) = serve_routes_with_status(vec![
         (
-            "POST /api/v4/orbit/query",
+            "WROTE",
             400,
             r#"{"code":"compile_error","message":"allowlist rejected: unknown relationship type \"WROTE\""}"#,
         ),
         (
-            "schema?expand=",
+            "CALL db.schema()",
             200,
-            r#"{"domains":[{"name":"core","node_names":["User"]},{"name":"code_review","node_names":["MergeRequest"]}],"nodes":[{"name":"User","properties":[{"name":"username","enum_values":[]}]},{"name":"MergeRequest","properties":[{"name":"state","enum_values":["opened","merged"]}]}],"edges":[{"name":"AUTHORED","variants":[{"source_type":"User","target_type":"MergeRequest"}]}]}"#,
-        ),
-        (
-            "GET /api/v4/orbit/schema",
-            200,
-            r#"{"domains":[{"name":"core","node_names":["User"]},{"name":"code_review","node_names":["MergeRequest"]}]}"#,
+            "domains[1]:\n  - name: core\nedges[1]: (User)-[:AUTHORED]->(MergeRequest)\n",
         ),
     ]);
     let output = run_orbit(
@@ -569,15 +564,29 @@ fn a_query_with_an_unknown_relationship_prints_the_schema() {
 
     assert!(!output.status.success());
     assert!(stderr.contains("unknown relationship type"), "{stderr}");
-    assert!(stderr.contains("  - User: username"), "{stderr}");
     assert!(
         stderr.contains("(User)-[:AUTHORED]->(MergeRequest)"),
         "{stderr}"
     );
-    assert_eq!(
-        requests[2].request_line,
-        "GET /api/v4/orbit/schema?expand=User%2CMergeRequest HTTP/1.1"
-    );
+    let sent: serde_json::Value = serde_json::from_str(&requests[1].body).expect("json body");
+    assert_eq!(sent["query"], "CALL db.schema()");
+    assert_eq!(sent["response_format"], "llm");
+}
+
+#[test]
+fn a_query_with_an_unknown_field_prints_only_the_error() {
+    let (base_url, handle) = serve_routes_with_status(vec![(
+        "body",
+        400,
+        r#"{"code":"compile_error","message":"allowlist rejected: field \"body\" does not exist on node type \"Note\". Valid fields: id, note"}"#,
+    )]);
+    let output = run_orbit(&base_url, &["query", "MATCH (n:Note) RETURN n.body"]);
+    let requests = handle.join().expect("join mock");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(stderr.contains("Valid fields: id, note"), "{stderr}");
+    assert_eq!(requests.len(), 1);
 }
 
 #[test]

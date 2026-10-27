@@ -45,8 +45,12 @@ async fn with_schema(client: &OrbitClient, mut error: RemoteError) -> RemoteErro
     {
         return error;
     }
-    if let Some(schema) = client.schema_summary().await {
-        error.message.push_str(&schema);
+    let Ok(request) = build_text_request("CALL db.schema()", Some(ResponseFormat::Llm)) else {
+        return error;
+    };
+    if let Some(schema) = client.schema_overview(request).await {
+        error.message.push_str("\n\n");
+        error.message.push_str(schema.trim_end());
     }
     error
 }

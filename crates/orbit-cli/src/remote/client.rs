@@ -423,19 +423,12 @@ pub(crate) fn query_graph_description(dir: &Path) -> Option<String> {
 }
 
 impl OrbitClient {
-    pub(crate) async fn schema_summary(&self) -> Option<String> {
-        let fetch = async {
-            let overview = self.get_schema(&[]).await.ok()?;
-            let names = super::compact_schema::node_names(&serde_json::from_slice(&overview).ok()?);
-            if names.is_empty() {
-                return None;
-            }
-            let body = self.get_schema(&[("expand", names.join(","))]).await.ok()?;
-            super::compact_schema::render(&serde_json::from_slice(&body).ok()?)
-        };
-        tokio::time::timeout(SHORT_REQUEST_TIMEOUT, fetch)
+    pub(crate) async fn schema_overview(&self, request: Vec<u8>) -> Option<String> {
+        let body = tokio::time::timeout(SHORT_REQUEST_TIMEOUT, self.query_raw(request))
             .await
             .ok()?
+            .ok()?;
+        String::from_utf8(body).ok()
     }
 }
 
