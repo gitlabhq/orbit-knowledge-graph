@@ -6,20 +6,8 @@ description: Give your agent a graph of your GitLab data and code, so the agent 
 title: GitLab Orbit
 ---
 
-<!-- The tagline sits directly under the page title, above the availability details, on purpose. -->
-<!-- gitlab-docs-review-disable lint.details-placement -->
-
 Software lifecycle context graph for AI agents
 {.product-hero-title}
-
-{{< details >}}
-
-- Tier: Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-
-{{< /details >}}
-
-<!-- gitlab-docs-review-enable -->
 
 {{< history >}}
 
