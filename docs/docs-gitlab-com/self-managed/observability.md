@@ -57,7 +57,7 @@ Keep these defaults, or the panels for that component show no data:
 ### Configure Prometheus
 
 By default, `kube-prometheus-stack` reads only the PodMonitors and rules of its own release.
-To read the PodMonitors and rules of GitLab Orbit and Siphon, add these values to your `kube-prometheus-stack` release:
+To read the PodMonitors and rules of GitLab Orbit, Siphon, and NATS, add these values to your `kube-prometheus-stack` release:
 
 ```yaml
 prometheus:
@@ -65,8 +65,6 @@ prometheus:
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
 ```
-
-If you use a custom selector instead, add its labels to the GitLab Orbit, Siphon, and NATS resources.
 
 ### GitLab Orbit
 
