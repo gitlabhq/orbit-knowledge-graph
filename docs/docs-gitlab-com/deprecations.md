@@ -34,6 +34,23 @@ To update the GitLab Orbit CLI, run `glab orbit --update`.
 
 Earlier versions of the GitLab Orbit CLI fail to show the indexing progress of a group or project.
 
+## GitLab Orbit Helm chart
+
+{{< details >}}
+
+- Offering: GitLab Self-Managed
+
+{{< /details >}}
+
+Chart 4.0.0 renamed the chart from `gkg` to `orbit`.
+The `gkg` chart gets no new releases.
+Change your chart reference to `oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit`.
+
+To upgrade from chart 3.x to 4.0.0, follow [Upgrading to 4.0](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts#upgrading-to-40) in the chart README.
+
+GitLab Orbit 0.143.0 removed the `/live` and `/ready` probe endpoints.
+Charts earlier than 3.0.0 do not work with GitLab Orbit 0.143.0 or later.
+
 ## GitLab CLI commands
 
 `glab` 1.115 removed the `glab orbit remote` and `glab orbit local` commands.
@@ -49,6 +66,56 @@ Earlier versions of the GitLab Orbit CLI fail to show the indexing progress of a
 | `glab orbit remote tools` | No replacement |
 | `glab orbit remote dsl` | No replacement |
 | `glab orbit local <command>` | `glab orbit workspace <command>` |
+
+## Agent skill
+
+GitLab Orbit CLI 0.144.0 renamed the `orbit-cli` skill to `orbit`.
+Skills from the beta use the removed `glab orbit remote` commands.
+
+To replace the skill in your agents, run `glab orbit setup`.
+Setup removes the old `orbit-cli` skill.
+
+## MCP endpoint tools
+
+GitLab 19.3 removed two tools from the MCP endpoint at `/api/v4/orbit/mcp`.
+A call to a removed tool returns an `Unknown tool` error.
+
+| Removed tool | Use instead |
+|--------------|-------------|
+| `query_graph` | `invoke_command` with `command_name` set to `query_graph` |
+| `get_graph_schema` | `invoke_command` with `command_name` set to `get_graph_schema` |
+
+For example, the arguments of `invoke_command` for a query are:
+
+```json
+{"command_name": "query_graph", "parameters": {"query": "MATCH (p:Project) RETURN p.name LIMIT 5"}}
+```
+
+## REST API endpoints
+
+GitLab 19.6 removed these REST API endpoints.
+GitLab.com removed them first.
+
+| Removed endpoint | Use instead |
+|------------------|-------------|
+| `GET /api/v4/orbit/graph_status` | The `orbit` field of a group or project in the GraphQL API |
+| `GET /api/v4/orbit/schema/dsl` | No replacement |
+
+## Query language
+
+The JSON query DSL is deprecated.
+Write new queries in [GQL](queries/query-language.md).
+
+| JSON query DSL | GQL |
+|----------------|-----|
+| `query_type` | Omit it. |
+| `node_ids: [123]` | `(n:Label {id: 123})` |
+| `filters.<property>: <value>` | `WHERE n.<property> = <value>` |
+| `relationships` with `from` and `to` | `(a)-[:TYPE]->(b)` |
+| `columns` | `RETURN n.<property>` |
+| `order_by: "-n.<property>"` | `ORDER BY n.<property> DESC` |
+| `limit` | `LIMIT <number>` |
+| `aggregations` and `group_by` | `RETURN n.<property>, count(m) AS <alias>` |
 
 ## GitLab Orbit CLI commands
 
@@ -113,73 +180,6 @@ The JSON output uses the GraphQL field names.
 | `nodes.style` | Removed |
 | `nodes.outgoing_edges` | Removed |
 | `nodes.incoming_edges` | Removed |
-
-## REST API endpoints
-
-GitLab 19.6 removed these REST API endpoints.
-GitLab.com removed them first.
-
-| Removed endpoint | Use instead |
-|------------------|-------------|
-| `GET /api/v4/orbit/graph_status` | The `orbit` field of a group or project in the GraphQL API |
-| `GET /api/v4/orbit/schema/dsl` | No replacement |
-
-## MCP endpoint tools
-
-GitLab 19.3 removed two tools from the MCP endpoint at `/api/v4/orbit/mcp`.
-A call to a removed tool returns an `Unknown tool` error.
-
-| Removed tool | Use instead |
-|--------------|-------------|
-| `query_graph` | `invoke_command` with `command_name` set to `query_graph` |
-| `get_graph_schema` | `invoke_command` with `command_name` set to `get_graph_schema` |
-
-For example, the arguments of `invoke_command` for a query are:
-
-```json
-{"command_name": "query_graph", "parameters": {"query": "MATCH (p:Project) RETURN p.name LIMIT 5"}}
-```
-
-## Query language
-
-The JSON query DSL is deprecated.
-Write new queries in [GQL](queries/query-language.md).
-
-| JSON query DSL | GQL |
-|----------------|-----|
-| `query_type` | Omit it. |
-| `node_ids: [123]` | `(n:Label {id: 123})` |
-| `filters.<property>: <value>` | `WHERE n.<property> = <value>` |
-| `relationships` with `from` and `to` | `(a)-[:TYPE]->(b)` |
-| `columns` | `RETURN n.<property>` |
-| `order_by: "-n.<property>"` | `ORDER BY n.<property> DESC` |
-| `limit` | `LIMIT <number>` |
-| `aggregations` and `group_by` | `RETURN n.<property>, count(m) AS <alias>` |
-
-## Agent skill
-
-GitLab Orbit CLI 0.144.0 renamed the `orbit-cli` skill to `orbit`.
-Skills from the beta use the removed `glab orbit remote` commands.
-
-To replace the skill in your agents, run `glab orbit setup`.
-Setup removes the old `orbit-cli` skill.
-
-## GitLab Orbit Helm chart
-
-{{< details >}}
-
-- Offering: GitLab Self-Managed
-
-{{< /details >}}
-
-Chart 4.0.0 renamed the chart from `gkg` to `orbit`.
-The `gkg` chart gets no new releases.
-Change your chart reference to `oci://registry.gitlab.com/gitlab-org/orbit/orbit-helm-charts/orbit`.
-
-To upgrade from chart 3.x to 4.0.0, follow [Upgrading to 4.0](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts#upgrading-to-40) in the chart README.
-
-GitLab Orbit 0.143.0 removed the `/live` and `/ready` probe endpoints.
-Charts earlier than 3.0.0 do not work with GitLab Orbit 0.143.0 or later.
 
 ## GitLab Orbit server configuration
 
