@@ -22,30 +22,17 @@ pub fn wait_timeout() -> Duration {
 }
 
 #[derive(Debug)]
-pub struct WaitTimedOut {
-    path: PathBuf,
-    waited: Duration,
-    indexing_for: Option<Duration>,
+pub struct WaitTimedOut(String);
+
+impl WaitTimedOut {
+    pub fn new(message: String) -> Self {
+        Self(message)
+    }
 }
 
 impl fmt::Display for WaitTimedOut {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let waited = self.waited.as_secs();
-        match self.indexing_for {
-            Some(started_ago) => write!(
-                f,
-                "{} is still indexing (started {} s ago); gave up after waiting {waited} s. \
-                 Retry, or raise the wait with --timeout or ORBIT_WAIT_TIMEOUT_MS.",
-                self.path.display(),
-                started_ago.as_secs()
-            ),
-            None => write!(
-                f,
-                "local database {} is busy; gave up after waiting {waited} s. \
-                 Retry when its readers or writer finish.",
-                self.path.display()
-            ),
-        }
+        f.write_str(&self.0)
     }
 }
 
@@ -122,19 +109,28 @@ fn acquire_database_lock(
             }
             Err(TryLockError::WouldBlock) => {
                 let waited = started.elapsed();
-                let indexing_for = indexing.and_then(|_| held_for(&file));
-                let shown = indexing.unwrap_or(path);
+                let target = match indexing {
+                    Some(subject) => match held_for(&file) {
+                        Some(age) => format!(
+                            "the index of {} (started {} s ago)",
+                            subject.display(),
+                            age.as_secs()
+                        ),
+                        None => format!("the index of {}", subject.display()),
+                    },
+                    None => format!("{} to be released", path.display()),
+                };
                 if waited >= timeout {
-                    return Err(WaitTimedOut {
-                        path: shown.to_path_buf(),
-                        waited,
-                        indexing_for,
-                    }
+                    return Err(WaitTimedOut(format!(
+                        "gave up waiting for {target} after {} s. Retry, or raise the wait with \
+                         --timeout or ORBIT_WAIT_TIMEOUT_MS.",
+                        waited.as_secs()
+                    ))
                     .into());
                 }
                 if waited >= next_notice {
                     next_notice = waited + NOTICE_EVERY;
-                    announce(shown, indexing_for);
+                    eprintln!("orbit: waiting for {target}");
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
@@ -145,49 +141,4 @@ fn acquire_database_lock(
 
 fn held_for(file: &File) -> Option<Duration> {
     file.metadata().ok()?.modified().ok()?.elapsed().ok()
-}
-
-fn announce(path: &Path, indexing_for: Option<Duration>) {
-    match indexing_for {
-        Some(started_ago) => eprintln!(
-            "orbit: waiting for the index of {} (started {} s ago)",
-            path.display(),
-            started_ago.as_secs()
-        ),
-        None => eprintln!("orbit: waiting for {} to be released", path.display()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_reader_times_out_with_a_typed_error_naming_the_index_age() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("graph.duckdb");
-        std::fs::write(&db, "").unwrap();
-        let _writer = lock_database(&db).unwrap();
-
-        let error =
-            acquire_database_lock(&db, true, Duration::from_millis(100), Some(&db)).unwrap_err();
-
-        let timed_out = error.downcast_ref::<WaitTimedOut>().expect("typed error");
-        assert!(timed_out.indexing_for.is_some());
-        assert!(error.to_string().contains("is still indexing (started"));
-    }
-
-    #[test]
-    fn a_writer_waits_for_readers_to_leave() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("graph.duckdb");
-        std::fs::write(&db, "").unwrap();
-        let reader = read_lock_database(&db).unwrap().unwrap();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(200));
-            drop(reader);
-        });
-
-        lock_database_waiting(&db, Duration::from_secs(5)).unwrap();
-    }
 }

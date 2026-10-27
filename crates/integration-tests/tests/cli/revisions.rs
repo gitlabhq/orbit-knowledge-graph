@@ -422,7 +422,10 @@ fn busy_revision_fails_the_whole_query_and_releases_prior_locks() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success());
     assert!(out.stdout.is_empty(), "must not return partial rows");
-    assert!(stderr.contains("is still indexing"), "{stderr}");
+    assert!(
+        stderr.contains("gave up waiting for the index of"),
+        "{stderr}"
+    );
     locks[0]
         .try_lock()
         .expect("failed reader releases earlier shared locks");

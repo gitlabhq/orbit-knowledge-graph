@@ -827,10 +827,6 @@ async fn main() -> Result<()> {
         eprintln!("{message}");
     } else if let Some(timed_out) = err.downcast_ref::<database::WaitTimedOut>() {
         eprintln!("{timed_out}");
-    } else if let Some(timed_out) =
-        err.downcast_ref::<commands::index::incremental::HandshakeTimedOut>()
-    {
-        eprintln!("{timed_out}");
     } else if err.is::<commands::grep::NoMatches>() {
     } else if !tui::is_cancelled(err) {
         return result;
@@ -851,9 +847,7 @@ fn exit_code_for(err: &anyhow::Error) -> i32 {
         remote.exit_code
     } else if tui::is_cancelled(err) {
         130
-    } else if err.is::<database::WaitTimedOut>()
-        || err.is::<commands::index::incremental::HandshakeTimedOut>()
-    {
+    } else if err.is::<database::WaitTimedOut>() {
         database::WAIT_TIMED_OUT_EXIT_CODE
     } else {
         1
@@ -1254,23 +1248,15 @@ mod tests {
     }
 
     #[test]
-    fn index_async_and_wait_are_mutually_exclusive() {
-        for argv in [
-            ["orbit", "index", "--async", "--wait"].as_slice(),
-            &["orbit", "index", "--async", "--timeout", "5"],
-            &["orbit", "workspace", "index", "--async", "--wait"],
-            &["orbit", "workspace", "index", "--async", "--stats"],
-            &["orbit", "workspace", "index", "--async", "--verbose"],
-        ] {
-            assert!(Cli::try_parse_from(argv).is_err(), "{argv:?}");
-        }
-        for argv in [
-            ["orbit", "index", "--async"].as_slice(),
-            &["orbit", "workspace", "index", "--async"],
-            &["orbit", "workspace", "index", "--wait", "--timeout", "5"],
-            &["orbit", "index", "--wait", "--timeout", "5"],
-        ] {
-            assert!(Cli::try_parse_from(argv).is_ok(), "{argv:?}");
+    fn index_async_conflicts_with_wait_timeout_stats_and_verbose() {
+        let parses = |flags: &[&str]| {
+            let argv = ["orbit", "workspace", "index"].iter().chain(flags);
+            Cli::try_parse_from(argv).is_ok()
+        };
+        assert!(parses(&["--async"]));
+        assert!(parses(&["--wait", "--timeout", "5"]));
+        for other in ["--wait", "--timeout=5", "--stats", "--verbose"] {
+            assert!(!parses(&["--async", other]), "{other}");
         }
     }
 

@@ -19,7 +19,7 @@ mod input;
 mod output;
 mod state;
 
-pub(crate) use detached::{DetachedStatus, HandshakeTimedOut, index_detached};
+pub(crate) use detached::index_detached;
 pub(crate) use output::FamilyOutput;
 use state::Project;
 
@@ -244,7 +244,7 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
     }
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
     let wait = options.wait.unwrap_or_else(wait_timeout);
-    let mut ready = options.ready_file.as_deref().map(detached::ReadyFile::new);
+    let ready = options.ready_file.clone().map(detached::ReadyFile);
     let mut outputs = Vec::new();
     for repo in repos {
         let started = std::time::Instant::now();
@@ -275,7 +275,7 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
             None,
             &db_path,
         )?;
-        if let Some(ready) = &mut ready {
+        if let Some(ready) = &ready {
             ready.signal()?;
         }
         let project = Project {

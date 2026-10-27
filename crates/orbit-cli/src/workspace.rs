@@ -150,32 +150,26 @@ pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Op
 }
 
 /// A reader over the local graph. Indexes the repository in the current directory first when
-/// it was never indexed, even if other repositories are, like `grep` does. A stale HEAD is not
-/// re-indexed here; refresh covers that. It also indexes when no complete revision is readable
-/// (the first index was killed), and outside a repository the reader's own error says what is
-/// missing.
+/// it was never indexed, even if other repositories are, like `grep` does; a stale HEAD is left
+/// to refresh. It also indexes when no complete revision is readable, as after a killed first
+/// index. Outside a repository the reader's own error says what is missing.
 pub fn open_graph_reader(db: Option<PathBuf>) -> Result<GraphReader> {
     let here = git_toplevel(Path::new("."))
         .ok()
         .filter(|top_level| git_info(top_level).is_ok());
-    let index_here = |top_level: PathBuf| -> Result<GraphReader> {
-        crate::commands::index::index_before_first_query(top_level, db.clone())
-            .context("failed to index the repository")?;
-        GraphReader::open(db.clone())
+    let Some(top_level) = here else {
+        return GraphReader::open(db);
     };
-    if let Some(top_level) = &here
-        && !already_indexed(&db, top_level)?
-    {
-        return index_here(top_level.clone());
-    }
-    match (GraphReader::open(db.clone()), here) {
-        (Ok(reader), Some(top_level)) if !reader.has_revisions() => {
-            drop(reader);
-            index_here(top_level)
+    if already_indexed(&db, &top_level)? {
+        match GraphReader::open(db.clone()) {
+            Ok(reader) if reader.has_revisions() => return Ok(reader),
+            Err(error) if !error.is::<IncompleteRevision>() => return Err(error),
+            _ => {}
         }
-        (Err(error), Some(top_level)) if error.is::<IncompleteRevision>() => index_here(top_level),
-        (opened, _) => opened,
     }
+    crate::commands::index::index_before_first_query(top_level, db.clone())
+        .context("failed to index the repository")?;
+    GraphReader::open(db)
 }
 
 fn already_indexed(db: &Option<PathBuf>, top_level: &Path) -> Result<bool> {

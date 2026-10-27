@@ -54,14 +54,10 @@ pub(crate) fn run(path: PathBuf, options: incremental::Options, detach: bool) ->
 
 fn start_in_background(path: &Path, options: &incremental::Options) -> Result<()> {
     let started = incremental::index_detached(path, options)?;
-    let status = match started.status {
-        incremental::DetachedStatus::Indexing => "indexing",
-        incremental::DetachedStatus::Indexed => "indexed",
-        incremental::DetachedStatus::Queued => "queued",
-    };
+    let (status, pid, log) = (started.status, started.pid, started.log);
     println!(
         "{}",
-        serde_json::json!({ "status": status, "pid": started.pid, "log": started.log })
+        serde_json::json!({ "status": status, "pid": pid, "log": log })
     );
     Ok(())
 }
