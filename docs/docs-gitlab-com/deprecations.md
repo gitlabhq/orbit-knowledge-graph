@@ -25,12 +25,10 @@ GitLab Orbit needs these versions or later:
 
 | Component | Minimum version |
 |-----------|-----------------|
-| GitLab CLI (`glab`) | 1.120 |
-| GitLab Orbit CLI (`orbit`) | 0.161.0 |
-| GitLab Orbit Helm chart | 4.0.0 |
-| GitLab Self-Managed | 19.4.4, 19.5.2, or 19.6.0 |
-
-On GitLab 19.4 and 19.5, use the listed patch release or a later patch release.
+| GitLab CLI (`glab`) | TBD |
+| GitLab Orbit CLI (`orbit`) | TBD |
+| GitLab Orbit Helm chart | TBD |
+| GitLab Self-Managed | TBD |
 
 To update the GitLab Orbit CLI, run `glab orbit --update`.
 
