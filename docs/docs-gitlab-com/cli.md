@@ -97,7 +97,7 @@ Local commands use the local graph on your machine. They need no GitLab account 
 |---------|-------|---------|
 | `query` | Remote | Run a query and stream the response. |
 | `status` | Remote | Show the health of the service, or the indexing progress of a group or project. |
-| `schema` | Remote | Show the node types, properties, and relationships. `ontology` is an alias. |
+| `schema` | Remote | Show the node types, properties, and relationships. |
 | `skills get` | Remote when a GitLab credential is available, otherwise the built-in copy of `orbit` | Print the agent skill files, such as `orbit` and `orbit-start`. Only `orbit` has a built-in copy. |
 | `grep` | Local and remote | Search every line of code, tests, configuration, and documentation, with the enclosing definitions, and the merge requests, issues, and comments of your GitLab group. |
 | `context` | Local and remote | Show the source of definitions with their callers and tests, and read merge requests, issues, pipelines, and jobs. |
