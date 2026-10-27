@@ -23,6 +23,9 @@ pub fn orbit_cmd() -> Command {
     cmd.env("LD_LIBRARY_PATH", &lib);
     // Keep a scratch folder from resolving to a checkout that encloses TMPDIR.
     cmd.env("GIT_CEILING_DIRECTORIES", std::env::temp_dir());
+    // Reads index the current directory's repository on first use, so a default cwd inside
+    // the checkout would index the checkout.
+    cmd.current_dir(std::env::temp_dir());
     cmd
 }
 
@@ -122,11 +125,16 @@ pub fn create_test_repo() -> gitalisk_core::repository::testing::local::LocalGit
 }
 
 pub fn mcp_roundtrip(data_dir: &Path, requests: &[Value]) -> Vec<Value> {
+    mcp_roundtrip_in(data_dir, data_dir, requests)
+}
+
+/// Like [`mcp_roundtrip`], with the server started in `cwd`.
+pub fn mcp_roundtrip_in(cwd: &Path, data_dir: &Path, requests: &[Value]) -> Vec<Value> {
     use std::io::{BufRead, BufReader, Write};
 
     let mut child = orbit_cmd()
         .args(["workspace", "mcp", "serve"])
-        .current_dir(data_dir)
+        .current_dir(cwd)
         .env("ORBIT_DATA_DIR", data_dir)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

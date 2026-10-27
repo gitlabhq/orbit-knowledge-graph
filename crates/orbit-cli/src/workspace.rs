@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
-use crate::database::{GraphReader, schema::graph_lacks_commit};
+use crate::database::{GraphReader, IncompleteRevision, schema::graph_lacks_commit};
 use anyhow::{Context, Result};
 use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
 use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
@@ -45,6 +45,18 @@ impl Workspace {
             .join("local/revisions")
             .join(git.project_id.to_string())
             .join(format!("{}.duckdb", git.commit_sha))
+    }
+
+    /// Where a detached index leaves its stderr, for whoever finds it failed.
+    pub fn detached_index_log_path(&self) -> PathBuf {
+        self.root.join("var/detached-index.log")
+    }
+
+    /// A file a detached index creates once it holds its locks, named for the starting process.
+    pub fn detached_index_ready_path(&self) -> PathBuf {
+        self.root
+            .join("var")
+            .join(format!("detached-index-ready-{}", std::process::id()))
     }
 
     pub fn var_dir(&self, project_id: i64) -> PathBuf {
@@ -149,26 +161,43 @@ pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Op
     Some(IndexedRepo { git, client })
 }
 
-/// A reader over the local graph. With no complete revision yet (never indexed, or the first
-/// index was killed), indexes the repository in the current directory first, like `grep` does.
-/// Outside a repository the reader's own error says what is missing.
+/// A reader over the local graph. Indexes the repository in the current directory first when
+/// it was never indexed, even if other repositories are, like `grep` does. A stale HEAD is not
+/// re-indexed here; refresh covers that. It also indexes when no complete revision is readable
+/// (the first index was killed), and outside a repository the reader's own error says what is
+/// missing.
 pub fn open_graph_reader(db: Option<PathBuf>) -> Result<GraphReader> {
-    let graph_exists = match &db {
-        Some(path) => path.try_exists()?,
-        None => Workspace::open_default()?.manifest_path().try_exists()?,
-    };
-    let reader = graph_exists
-        .then(|| GraphReader::open(db.clone()))
-        .transpose()?;
-    if reader.as_ref().is_some_and(GraphReader::has_revisions) {
-        return Ok(reader.expect("checked above"));
-    }
-    drop(reader);
-    if let Ok(top_level) = git_toplevel(Path::new(".")) {
+    let here = git_toplevel(Path::new("."))
+        .ok()
+        .filter(|top_level| git_info(top_level).is_ok());
+    let index_here = |top_level: PathBuf| -> Result<GraphReader> {
         crate::commands::index::index_before_first_query(top_level, db.clone())
             .context("failed to index the repository")?;
+        GraphReader::open(db.clone())
+    };
+    if let Some(top_level) = &here
+        && !already_indexed(&db, top_level)?
+    {
+        return index_here(top_level.clone());
     }
-    GraphReader::open(db)
+    match (GraphReader::open(db.clone()), here) {
+        (Ok(reader), Some(top_level)) if !reader.has_revisions() => {
+            drop(reader);
+            index_here(top_level)
+        }
+        (Err(error), Some(top_level)) if error.is::<IncompleteRevision>() => index_here(top_level),
+        (opened, _) => opened,
+    }
+}
+
+fn already_indexed(db: &Option<PathBuf>, top_level: &Path) -> Result<bool> {
+    match db {
+        Some(path) => Ok(path.try_exists()?),
+        None => {
+            let manifest = Workspace::open_default()?.manifest_path();
+            crate::database::manifest::has_indexed_repo(&manifest, top_level)
+        }
+    }
 }
 
 pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
@@ -517,10 +546,13 @@ fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
         );
         return vec![];
     }
-    ws.get_repositories()
+    let mut repos: Vec<PathBuf> = ws
+        .get_repositories()
         .into_iter()
         .map(|r| PathBuf::from(&r.path))
-        .collect()
+        .collect();
+    repos.sort();
+    repos
 }
 
 #[cfg(test)]

@@ -5,6 +5,23 @@ use anyhow::{Context, Result};
 use duckdb_client::{DuckDbClient, sql_lit, string_column};
 use std::path::{Path, PathBuf};
 
+/// An index began this revision database and never finished it, such as after a killed index.
+#[derive(Debug)]
+pub struct IncompleteRevision(PathBuf);
+
+impl std::fmt::Display for IncompleteRevision {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "revision at {} is not fully indexed; run `{} workspace index` again",
+            self.0.display(),
+            spec::launcher()
+        )
+    }
+}
+
+impl std::error::Error for IncompleteRevision {}
+
 pub struct GraphReader {
     client: DuckDbClient,
     _locks: Vec<std::fs::File>,
@@ -38,13 +55,10 @@ impl GraphReader {
         };
         let client = DuckDbClient::open_read_only(&db_path)
             .with_context(|| format!("failed to open {}", db_path.display()))?;
-        if schema::stored_meta(&client, "revision")?.is_some() {
-            anyhow::ensure!(
-                schema::stored_meta(&client, "indexed_commit")?.is_some(),
-                "revision at {} is not fully indexed; run `{} workspace index` again",
-                db_path.display(),
-                spec::launcher()
-            );
+        if schema::stored_meta(&client, "revision")?.is_some()
+            && schema::stored_meta(&client, "indexed_commit")?.is_none()
+        {
+            return Err(IncompleteRevision(db_path).into());
         }
         Ok(Self {
             client,

@@ -6,8 +6,8 @@ mod background_index;
 mod revisions;
 
 use integration_testkit::cli::{
-    create_test_repo, git, init_repo_at, mcp_roundtrip, mcp_tool_call, mcp_tool_text, orbit_cmd,
-    orbit_index, orbit_sql, rows, rows_where, sorted_ids,
+    create_test_repo, git, init_repo_at, mcp_roundtrip, mcp_roundtrip_in, mcp_tool_call,
+    mcp_tool_text, orbit_cmd, orbit_index, orbit_sql, rows, rows_where, sorted_ids,
 };
 use serde_json::{Value, json};
 
@@ -922,6 +922,36 @@ fn mcp_index_then_query() {
         .collect();
     assert_eq!(names, ["main.py", "utils.py"]);
     assert!(results[1][0]["n"].as_i64().unwrap() > 0);
+}
+
+#[test]
+fn mcp_query_tools_index_the_server_repository_on_first_use() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+
+    let resps = mcp_roundtrip_in(
+        &repo.path,
+        data_dir.path(),
+        &[
+            mcp_tool_call(1, "get_graph_schema", json!({})),
+            mcp_tool_call(
+                2,
+                "run_sql",
+                json!({"sql": ["SELECT COUNT(*) AS n FROM gl_file"]}),
+            ),
+        ],
+    );
+
+    assert_eq!(
+        resps[0]["result"]["isError"],
+        false,
+        "{}",
+        mcp_tool_text(&resps[0])
+    );
+    let schema: Value = serde_json::from_str(mcp_tool_text(&resps[0])).unwrap();
+    assert!(rows_where(&schema, "table_name", "gl_file").len() > 1);
+    let counts: Value = serde_json::from_str(mcp_tool_text(&resps[1])).unwrap();
+    assert_eq!(counts[0][0]["n"], 2);
 }
 
 #[test]

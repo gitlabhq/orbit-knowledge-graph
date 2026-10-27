@@ -62,8 +62,8 @@ struct IndexArgs {
     #[arg(long, value_name = "SECONDS")]
     budget: Option<u64>,
 
-    /// Start the index in the background and return once it holds its lock.
-    #[arg(long = "async", conflicts_with_all = ["wait", "timeout"])]
+    /// Start the index in the background and return once it holds its locks.
+    #[arg(long = "async", conflicts_with_all = ["wait", "timeout", "stats", "verbose"])]
     detach: bool,
 
     /// Index in the foreground, first waiting for a running index of the same repository
@@ -71,9 +71,13 @@ struct IndexArgs {
     #[arg(long)]
     wait: bool,
 
-    /// Seconds to wait for a running index before exiting with code 75 (default: 600).
+    /// Seconds to wait for a running index or open readers before exiting with code 75
+    /// (default: ORBIT_WAIT_TIMEOUT_MS, else 600).
     #[arg(long, value_name = "SECONDS")]
     timeout: Option<u64>,
+
+    #[arg(long, value_name = "PATH", hide = true, conflicts_with = "detach")]
+    ready_file: Option<PathBuf>,
 }
 
 impl IndexArgs {
@@ -84,6 +88,7 @@ impl IndexArgs {
             db: self.db,
             budget_seconds: self.budget,
             wait: self.timeout.map(Duration::from_secs),
+            ready_file: self.ready_file,
             ..Default::default()
         };
         (self.path, options, self.detach)
@@ -820,8 +825,8 @@ async fn main() -> Result<()> {
         eprintln!("{}", remote.message);
     } else if let Some(message) = workspace::describe_graph_lock_conflict(err) {
         eprintln!("{message}");
-    } else if err.is::<database::WaitTimedOut>() {
-        eprintln!("{err}");
+    } else if let Some(timed_out) = err.downcast_ref::<database::WaitTimedOut>() {
+        eprintln!("{timed_out}");
     } else if err.is::<commands::grep::NoMatches>() {
     } else if !tui::is_cancelled(err) {
         return result;
@@ -1247,11 +1252,16 @@ mod tests {
         for argv in [
             ["orbit", "index", "--async", "--wait"].as_slice(),
             &["orbit", "index", "--async", "--timeout", "5"],
+            &["orbit", "workspace", "index", "--async", "--wait"],
+            &["orbit", "workspace", "index", "--async", "--stats"],
+            &["orbit", "workspace", "index", "--async", "--verbose"],
         ] {
             assert!(Cli::try_parse_from(argv).is_err(), "{argv:?}");
         }
         for argv in [
             ["orbit", "index", "--async"].as_slice(),
+            &["orbit", "workspace", "index", "--async"],
+            &["orbit", "workspace", "index", "--wait", "--timeout", "5"],
             &["orbit", "index", "--wait", "--timeout", "5"],
         ] {
             assert!(Cli::try_parse_from(argv).is_ok(), "{argv:?}");
@@ -1359,6 +1369,7 @@ mod tests {
                 detach: false,
                 wait: false,
                 timeout: None,
+                ready_file: None,
             }
         );
 

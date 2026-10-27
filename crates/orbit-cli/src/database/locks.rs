@@ -56,24 +56,21 @@ pub fn lock_database(path: &Path) -> Result<File> {
 }
 
 pub fn lock_database_waiting(path: &Path, timeout: Duration) -> Result<File> {
-    acquire_database_lock(path, false, timeout)
+    acquire_database_lock(path, false, timeout, None)
+}
+
+/// Takes a repository's state lock, which an index holds for its whole run. A wait on it is a
+/// wait for that index, so the notice and the timeout name `repo` and the index's start time.
+pub fn lock_index_state(state_dir: &Path, repo: &Path, timeout: Duration) -> Result<File> {
+    acquire_database_lock(state_dir, false, timeout, Some(repo))
 }
 
 pub fn read_lock_database(path: &Path) -> Result<Option<File>> {
     if !path.try_exists()? {
         return Ok(None);
     }
-    let lock = acquire_database_lock(path, true, wait_timeout())?;
+    let lock = acquire_database_lock(path, true, wait_timeout(), Some(path))?;
     Ok(path.try_exists()?.then_some(lock))
-}
-
-pub fn index_is_running(state_dir: &Path) -> Result<bool> {
-    let file = open_lock_file(state_dir)?;
-    match file.try_lock_shared() {
-        Ok(()) => Ok(false),
-        Err(TryLockError::WouldBlock) => Ok(true),
-        Err(TryLockError::Error(error)) => Err(error.into()),
-    }
 }
 
 fn open_lock_file(path: &Path) -> Result<File> {
@@ -90,7 +87,14 @@ fn open_lock_file(path: &Path) -> Result<File> {
         .open(PathBuf::from(lock_path))?)
 }
 
-fn acquire_database_lock(path: &Path, shared: bool, timeout: Duration) -> Result<File> {
+/// `indexing` names what a waiter reports it is waiting to see indexed; the holder is then a
+/// writer, so the lock file's mtime is the index's start.
+fn acquire_database_lock(
+    path: &Path,
+    shared: bool,
+    timeout: Duration,
+    indexing: Option<&Path>,
+) -> Result<File> {
     let file = open_lock_file(path)?;
     let started = Instant::now();
     let mut next_notice = FIRST_NOTICE_AFTER;
@@ -103,18 +107,18 @@ fn acquire_database_lock(path: &Path, shared: bool, timeout: Duration) -> Result
         match result {
             Ok(()) => {
                 if !shared {
-                    // A blocked reader reads the holder's start time from the file's mtime.
+                    // A blocked waiter reads the holder's start time from the file's mtime.
                     let _ = file.set_modified(SystemTime::now());
                 }
                 return Ok(file);
             }
             Err(TryLockError::WouldBlock) => {
                 let waited = started.elapsed();
-                // Only a writer blocks a reader, so the mtime is the running index's start.
-                let indexing_for = shared.then(|| held_for(&file)).flatten();
+                let indexing_for = indexing.and_then(|_| held_for(&file));
+                let shown = indexing.unwrap_or(path);
                 if waited >= timeout {
                     return Err(WaitTimedOut {
-                        path: path.to_path_buf(),
+                        path: shown.to_path_buf(),
                         waited,
                         indexing_for,
                     }
@@ -122,7 +126,7 @@ fn acquire_database_lock(path: &Path, shared: bool, timeout: Duration) -> Result
                 }
                 if waited >= next_notice {
                     next_notice = waited + NOTICE_EVERY;
-                    announce(path, indexing_for);
+                    announce(shown, indexing_for);
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
@@ -157,7 +161,8 @@ mod tests {
         std::fs::write(&db, "").unwrap();
         let _writer = lock_database(&db).unwrap();
 
-        let error = acquire_database_lock(&db, true, Duration::from_millis(100)).unwrap_err();
+        let error =
+            acquire_database_lock(&db, true, Duration::from_millis(100), Some(&db)).unwrap_err();
 
         let timed_out = error.downcast_ref::<WaitTimedOut>().expect("typed error");
         assert!(timed_out.indexing_for.is_some());
@@ -176,14 +181,5 @@ mod tests {
         });
 
         lock_database_waiting(&db, Duration::from_secs(5)).unwrap();
-    }
-
-    #[test]
-    fn the_state_lock_reports_a_running_index() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = dir.path().join("var/1");
-        assert!(!index_is_running(&state).unwrap());
-        let _index = lock_database(&state).unwrap();
-        assert!(index_is_running(&state).unwrap());
     }
 }

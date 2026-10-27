@@ -11,7 +11,7 @@ use code_graph_incremental::treesitter::SupportLang;
 use ontology::Ontology;
 
 use crate::database::schema::graph_lacks_commit;
-use crate::database::{GraphWriter, lock_incremental_state, manifest, wait_timeout};
+use crate::database::{GraphWriter, lock_index_state, manifest, wait_timeout};
 use crate::{tui, workspace};
 
 mod input;
@@ -33,6 +33,8 @@ pub(crate) struct Options {
     pub wait: Option<Duration>,
     /// Skip a repository whose revision is already indexed, once any running index finished.
     pub skip_current: bool,
+    /// A file to create once this index holds a repository's state and revision locks.
+    pub ready_file: Option<PathBuf>,
 }
 
 #[derive(serde::Serialize)]
@@ -251,7 +253,7 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
             }
         };
         let state_dir = workspace.var_dir(git.project_id);
-        let _state_lock = lock_incremental_state(&state_dir, wait)?;
+        let _state_lock = lock_index_state(&state_dir, &git.repo_path, wait)?;
         let db_path = workspace::resolve_db_path(options.db.clone(), &git)?;
         if options.skip_current && !graph_lacks_commit(&db_path, &git.commit_sha)? {
             continue;
@@ -260,6 +262,10 @@ pub(crate) fn index(path: PathBuf, options: Options) -> Result<Vec<IndexOutput>>
             && db_path.exists()
             && manifest::load_incremental_state(&manifest_path, git.project_id)?.is_some();
         let writer = GraphWriter::open_waiting(&db_path, &git, wait)?;
+        if let Some(ready_file) = &options.ready_file {
+            std::fs::write(ready_file, std::process::id().to_string())
+                .context("failed to signal that the index holds its locks")?;
+        }
         let progress = options
             .progress
             .then(|| Arc::new(RepositoryBars::open(&git)));
@@ -393,26 +399,37 @@ fn spawn_refresh(repo: &Path, db: Option<&Path>, files: &[String]) -> Option<Chi
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
-pub(crate) enum DetachedIndex {
-    Running { pid: u32 },
-    Finished { pid: u32 },
+pub(crate) struct DetachedIndex {
+    pub pid: u32,
+    pub finished: bool,
+    pub log: PathBuf,
 }
 
-/// Starts `orbit workspace index --wait` detached and returns once the child holds the state
-/// lock, because that lock does not exist for the first moments after launch. A caller that
-/// probes it sooner would see no index running. Indexing a directory of repositories hands
-/// off after the first repository's lock.
+/// Starts `orbit workspace index --wait` detached and returns once that child reports, through
+/// a file it creates, that it holds a repository's state and revision locks. Only the child can
+/// say so: a lock held by another index or by a reader says nothing about it, and a reader
+/// started after this returns must wait for the child instead of reading the old graph. Waiting
+/// for open readers can delay the return, up to the handshake timeout. Indexing a directory of
+/// repositories signals on whichever repository the child locks first.
 pub(crate) fn index_detached(path: &Path, options: &Options) -> Result<DetachedIndex> {
     let workspace = workspace::Workspace::open_default()?;
-    let repos = workspace.resolve_repos(path)?;
-    let Some(first) = repos.first() else {
+    if workspace.resolve_repos(path)?.is_empty() {
         let folder = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         return Err(super::NoRepositoryFound(folder).into());
-    };
-    let state_dir = workspace.var_dir(workspace::git_info(first)?.project_id);
+    }
+    let log = workspace.detached_index_log_path();
+    let ready_file = workspace.detached_index_ready_path();
+    if let Some(parent) = log.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let _ = std::fs::remove_file(&ready_file);
 
     let mut command = detached_command().context("cannot locate the orbit executable")?;
-    command.args(["workspace", "index", "--wait"]).arg(path);
+    command
+        .args(["workspace", "index", "--wait", "--ready-file"])
+        .arg(&ready_file)
+        .arg(path)
+        .stderr(std::fs::File::create(&log).context("failed to open the detached index log")?);
     if let Some(db) = &options.db {
         command.arg("--db").arg(db);
     }
@@ -425,24 +442,33 @@ pub(crate) fn index_detached(path: &Path, options: &Options) -> Result<DetachedI
     let pid = child.id();
 
     let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
-    loop {
+    let outcome = loop {
         if let Some(status) = child.try_wait()? {
             anyhow::ensure!(
                 status.success(),
-                "the background index exited early ({status}); run it in the foreground to see why"
+                "the background index exited early ({status}); see {}",
+                log.display()
             );
-            return Ok(DetachedIndex::Finished { pid });
+            break true;
         }
-        if crate::database::index_is_running(&state_dir)? {
-            return Ok(DetachedIndex::Running { pid });
+        if ready_file.exists() {
+            break false;
         }
         anyhow::ensure!(
             Instant::now() < deadline,
-            "the background index (pid {pid}) did not take its lock within {} s",
-            HANDSHAKE_TIMEOUT.as_secs()
+            "the background index (pid {pid}) is still waiting for its locks after {} s, \
+             probably for readers or another index, and keeps waiting; see {}",
+            HANDSHAKE_TIMEOUT.as_secs(),
+            log.display()
         );
         std::thread::sleep(Duration::from_millis(10));
-    }
+    };
+    let _ = std::fs::remove_file(&ready_file);
+    Ok(DetachedIndex {
+        pid,
+        finished: outcome,
+        log,
+    })
 }
 
 fn finished_within(mut child: Child, wait: Duration) -> bool {
@@ -528,7 +554,7 @@ pub(crate) fn refresh_now(repo: PathBuf, db: Option<PathBuf>, files: Vec<String>
     if changed.is_empty() {
         return Ok(());
     }
-    let _state_lock = lock_incremental_state(&state_dir, crate::database::BRIEF_WAIT)?;
+    let _state_lock = lock_index_state(&state_dir, &git.repo_path, crate::database::BRIEF_WAIT)?;
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
     let owner = saved.owner.as_deref().and_then(SupportLang::from_family);
     let refreshed = state::refresh_families(&git, &ontology, &state_dir, owner, changed)?;

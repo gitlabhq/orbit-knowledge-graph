@@ -50,6 +50,23 @@ fn start_async(repo: &Path, data_dir: &Path) -> Value {
     serde_json::from_slice(&output.stdout).expect("one JSON document")
 }
 
+fn manifest_status(repo: &Path, data_dir: &Path) -> String {
+    let output = orbit(&["workspace", "list", "-F", "json"], repo, data_dir);
+    let rows: Value = serde_json::from_slice(&output.stdout).unwrap_or_default();
+    rows[0]["status"].as_str().unwrap_or_default().to_string()
+}
+
+fn wait_for_manifest_status(repo: &Path, data_dir: &Path, status: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while manifest_status(repo, data_dir) != status {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "never reached {status}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn file_count(repo: &Path, data_dir: &Path) -> (i64, String) {
     let output = orbit(
         &[
@@ -78,7 +95,8 @@ fn async_index_returns_while_the_index_runs_and_a_read_waits_for_it() {
 
     let (files, stderr) = file_count(&repo, data_dir.path());
     assert!(files >= 1500, "{files} files");
-    assert!(stderr.contains("waiting for"), "{stderr}");
+    assert!(stderr.contains("waiting for the index of"), "{stderr}");
+    assert!(stderr.contains("s ago)"), "{stderr}");
 }
 
 #[test]
@@ -115,14 +133,17 @@ fn a_killed_index_is_recovered_by_the_next_read() {
     let started = start_async(&repo, data_dir.path());
     assert_eq!(started["status"], "indexing", "{started}");
 
+    wait_for_manifest_status(&repo, data_dir.path(), "indexing");
     let killed = std::process::Command::new("kill")
         .args(["-9", &started["pid"].to_string()])
         .status()
         .unwrap();
     assert!(killed.success());
 
+    assert_eq!(manifest_status(&repo, data_dir.path()), "indexing");
     let (files, _) = file_count(&repo, data_dir.path());
     assert!(files >= 1500, "{files} files");
+    assert_eq!(manifest_status(&repo, data_dir.path()), "indexed");
 }
 
 #[test]
@@ -209,4 +230,170 @@ fn a_read_that_waits_too_long_exits_with_the_distinct_code() {
         "{}",
         stderr_of(&output)
     );
+}
+
+#[test]
+fn async_index_waits_for_open_readers_so_later_reads_see_the_new_graph() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let repo = scratch.path().join("repo");
+    init_repo_at(&repo, &[("a.py", "def a(): pass\n")]);
+    let lock = hold_revision_lock_shared(data_dir.path(), &repo);
+    std::fs::write(repo.join("b.py"), "def b(): pass\n").unwrap();
+    let releaser = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(1500));
+        lock.unlock().unwrap();
+    });
+
+    let began = std::time::Instant::now();
+    let started = start_async(&repo, data_dir.path());
+    let waited = began.elapsed();
+    let (files, _) = file_count(&repo, data_dir.path());
+
+    releaser.join().unwrap();
+    assert_eq!(started["status"], "indexing", "{started}");
+    assert!(
+        waited >= Duration::from_millis(1000),
+        "returned after {waited:?}"
+    );
+    assert_eq!(files, 2, "a read after --async must not see the old graph");
+}
+
+#[test]
+fn async_index_of_a_directory_of_repositories_returns_promptly() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let workspace = scratch.path().join("workspace");
+    let big = slow_repo(&workspace);
+    std::fs::rename(&big, workspace.join("big")).unwrap();
+    init_repo_at(&workspace.join("small"), &[("a.py", "def a(): pass\n")]);
+
+    let began = std::time::Instant::now();
+    let output = orbit(
+        &["workspace", "index", "--async", workspace.to_str().unwrap()],
+        scratch.path(),
+        data_dir.path(),
+    );
+
+    assert!(output.status.success(), "{}", stderr_of(&output));
+    assert!(began.elapsed() < Duration::from_secs(10));
+}
+
+#[test]
+fn a_failed_background_index_leaves_its_error_in_the_log() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let first = scratch.path().join("first");
+    let second = scratch.path().join("second");
+    init_repo_at(&first, &[("a.py", "def a(): pass\n")]);
+    init_repo_at(&second, &[("b.py", "def b(): pass\n")]);
+    let custom = scratch.path().join("custom.duckdb");
+    let custom = custom.to_str().unwrap();
+    let indexed = orbit(
+        &["workspace", "index", "--db", custom],
+        &first,
+        data_dir.path(),
+    );
+    assert!(indexed.status.success(), "{}", stderr_of(&indexed));
+
+    let output = orbit(
+        &["workspace", "index", "--async", "--db", custom],
+        &second,
+        data_dir.path(),
+    );
+
+    let log = data_dir.path().join("var/detached-index.log");
+    assert!(!output.status.success());
+    assert!(
+        stderr_of(&output).contains("detached-index.log"),
+        "{}",
+        stderr_of(&output)
+    );
+    assert!(
+        std::fs::read_to_string(log)
+            .unwrap()
+            .contains("belongs to another checkout revision")
+    );
+}
+
+#[test]
+fn an_incomplete_explicit_database_is_recovered_by_the_next_read() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let repo = slow_repo(scratch.path());
+    let custom = scratch.path().join("custom.duckdb");
+    let custom = custom.to_str().unwrap();
+    let output = orbit(
+        &["workspace", "index", "--async", "--db", custom],
+        &repo,
+        data_dir.path(),
+    );
+    assert!(output.status.success(), "{}", stderr_of(&output));
+    let started: Value = serde_json::from_slice(&output.stdout).unwrap();
+    wait_for_manifest_status(&repo, data_dir.path(), "indexing");
+    std::process::Command::new("kill")
+        .args(["-9", &started["pid"].to_string()])
+        .status()
+        .unwrap();
+
+    let output = orbit(
+        &[
+            "workspace",
+            "sql",
+            "-F",
+            "json",
+            "--db",
+            custom,
+            "SELECT count(*) AS n FROM gl_file",
+        ],
+        &repo,
+        data_dir.path(),
+    );
+
+    assert!(output.status.success(), "{}", stderr_of(&output));
+    let rows: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(rows[0]["n"].as_i64().unwrap() >= 1500);
+}
+
+#[test]
+fn sql_indexes_a_never_indexed_repository_even_when_others_are_indexed() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let indexed = scratch.path().join("indexed");
+    let fresh = scratch.path().join("fresh");
+    init_repo_at(&indexed, &[("a.py", "def a(): pass\n")]);
+    init_repo_at(
+        &fresh,
+        &[("b.py", "def b(): pass\n"), ("c.py", "def c(): pass\n")],
+    );
+    let output = orbit(&["workspace", "index"], &indexed, data_dir.path());
+    assert!(output.status.success(), "{}", stderr_of(&output));
+
+    let (files, _) = file_count(&fresh, data_dir.path());
+
+    assert_eq!(files, 3);
+}
+
+#[test]
+fn sql_leaves_a_stale_head_to_refresh() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let repo = scratch.path().join("repo");
+    init_repo_at(&repo, &[("a.py", "def a(): pass\n")]);
+    let output = orbit(&["workspace", "index"], &repo, data_dir.path());
+    assert!(output.status.success(), "{}", stderr_of(&output));
+    std::fs::write(repo.join("b.py"), "def b(): pass\n").unwrap();
+    integration_testkit::cli::git(&repo, &["add", "-A"]);
+    integration_testkit::cli::git(&repo, &["commit", "-m", "second"]);
+
+    let (files, _) = file_count(&repo, data_dir.path());
+
+    assert_eq!(files, 1, "a new commit alone must not trigger an index");
+}
+
+fn hold_revision_lock_shared(data_dir: &Path, repo: &Path) -> std::fs::File {
+    let lock = hold_revision_lock(data_dir, repo);
+    lock.unlock().unwrap();
+    lock.lock_shared().unwrap();
+    lock
 }
