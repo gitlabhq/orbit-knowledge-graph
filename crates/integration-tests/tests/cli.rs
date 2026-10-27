@@ -1,11 +1,13 @@
 use std::collections::BTreeSet;
 
+#[path = "cli/background_index.rs"]
+mod background_index;
 #[path = "cli/revisions.rs"]
 mod revisions;
 
 use integration_testkit::cli::{
-    create_test_repo, git, init_repo_at, mcp_roundtrip, mcp_tool_call, mcp_tool_text, orbit_cmd,
-    orbit_index, orbit_sql, rows, rows_where, sorted_ids,
+    create_test_repo, git, init_repo_at, mcp_roundtrip, mcp_roundtrip_in, mcp_tool_call,
+    mcp_tool_text, orbit_cmd, orbit_index, orbit_sql, rows, rows_where, sorted_ids,
 };
 use serde_json::{Value, json};
 
@@ -661,6 +663,7 @@ fn indexed_repo_paths(data_dir: &std::path::Path) -> Vec<String> {
 fn run_cmd(args: &[&str], data_dir: &std::path::Path) -> (String, String, bool) {
     let out = orbit_cmd()
         .args(args)
+        .current_dir(data_dir)
         .env("ORBIT_DATA_DIR", data_dir)
         .output()
         .expect("spawn orbit");
@@ -752,19 +755,21 @@ fn index_errors_when_repository_has_no_commits() {
     let empty_repo = tempfile::TempDir::new().unwrap();
     git(empty_repo.path(), &["init", "--quiet"]);
 
-    let (_, stderr, ok) = run_cmd(
-        &["workspace", "index", empty_repo.path().to_str().unwrap()],
-        data_dir.path(),
-    );
-    assert!(!ok, "index should fail when the repository has no commits");
-    assert!(
-        stderr.contains("has no commits yet"),
-        "expected no-commits error: {stderr}"
-    );
-    assert!(
-        !stderr.contains("ambiguous argument"),
-        "raw git error should not leak: {stderr}"
-    );
+    for mode in [None, Some("--async")] {
+        let mut args = vec!["workspace", "index"];
+        args.extend(mode);
+        args.push(empty_repo.path().to_str().unwrap());
+        let (_, stderr, ok) = run_cmd(&args, data_dir.path());
+        assert!(!ok, "index should fail when the repository has no commits");
+        assert!(
+            stderr.contains("has no commits yet"),
+            "expected no-commits error: {stderr}"
+        );
+        assert!(
+            !stderr.contains("ambiguous argument"),
+            "raw git error should not leak: {stderr}"
+        );
+    }
 }
 
 #[test]
@@ -919,6 +924,36 @@ fn mcp_index_then_query() {
         .collect();
     assert_eq!(names, ["main.py", "utils.py"]);
     assert!(results[1][0]["n"].as_i64().unwrap() > 0);
+}
+
+#[test]
+fn mcp_query_tools_index_the_server_repository_on_first_use() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+
+    let resps = mcp_roundtrip_in(
+        &repo.path,
+        data_dir.path(),
+        &[
+            mcp_tool_call(1, "get_graph_schema", json!({})),
+            mcp_tool_call(
+                2,
+                "run_sql",
+                json!({"sql": ["SELECT COUNT(*) AS n FROM gl_file"]}),
+            ),
+        ],
+    );
+
+    assert_eq!(
+        resps[0]["result"]["isError"],
+        false,
+        "{}",
+        mcp_tool_text(&resps[0])
+    );
+    let schema: Value = serde_json::from_str(mcp_tool_text(&resps[0])).unwrap();
+    assert!(rows_where(&schema, "table_name", "gl_file").len() > 1);
+    let counts: Value = serde_json::from_str(mcp_tool_text(&resps[1])).unwrap();
+    assert_eq!(counts[0][0]["n"], 2);
 }
 
 #[test]

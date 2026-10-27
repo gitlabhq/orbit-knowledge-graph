@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
-use crate::database::{GraphReader, schema::graph_lacks_commit};
+use crate::database::{GraphReader, IncompleteRevision, schema::graph_lacks_commit};
 use anyhow::{Context, Result};
 use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
 use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
@@ -147,6 +147,37 @@ pub fn open_indexed_if_present(repo: Option<PathBuf>, db: Option<PathBuf>) -> Op
     }
     let client = GraphReader::open(Some(db_path)).ok()?;
     Some(IndexedRepo { git, client })
+}
+
+/// Indexes the current repository first when it was never indexed (even if others are, like
+/// `grep`) or has no complete revision; a stale HEAD is left to refresh.
+pub fn open_graph_reader(db: Option<PathBuf>) -> Result<GraphReader> {
+    let here = git_toplevel(Path::new("."))
+        .ok()
+        .filter(|top_level| git_info(top_level).is_ok());
+    let Some(top_level) = here else {
+        return GraphReader::open(db);
+    };
+    if already_indexed(&db, &top_level)? {
+        match GraphReader::open(db.clone()) {
+            Ok(reader) if reader.has_revisions() => return Ok(reader),
+            Err(error) if !error.is::<IncompleteRevision>() => return Err(error),
+            _ => {}
+        }
+    }
+    crate::commands::index::index_before_first_query(top_level, db.clone())
+        .context("failed to index the repository")?;
+    GraphReader::open(db)
+}
+
+fn already_indexed(db: &Option<PathBuf>, top_level: &Path) -> Result<bool> {
+    match db {
+        Some(path) => Ok(path.try_exists()?),
+        None => {
+            let manifest = Workspace::open_default()?.manifest_path();
+            crate::database::manifest::has_indexed_repo(&manifest, top_level)
+        }
+    }
 }
 
 pub fn open_indexed(repo: Option<PathBuf>, db: Option<PathBuf>) -> Result<IndexedRepo> {
@@ -495,10 +526,13 @@ fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
         );
         return vec![];
     }
-    ws.get_repositories()
+    let mut repos: Vec<PathBuf> = ws
+        .get_repositories()
         .into_iter()
         .map(|r| PathBuf::from(&r.path))
-        .collect()
+        .collect();
+    repos.sort();
+    repos
 }
 
 #[cfg(test)]

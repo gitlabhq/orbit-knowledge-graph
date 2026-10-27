@@ -61,18 +61,38 @@ struct IndexArgs {
     /// Seconds a language family may take before the run stops (default: no limit).
     #[arg(long, value_name = "SECONDS")]
     budget: Option<u64>,
+
+    /// Start the index in the background and return once it holds its locks.
+    #[arg(long = "async", conflicts_with_all = ["wait", "timeout", "stats", "verbose"])]
+    detach: bool,
+
+    /// Index in the foreground, first waiting for a running index of the same repository
+    /// (the default).
+    // Not read: blocking is already the default.
+    #[arg(long)]
+    wait: bool,
+
+    /// Seconds to wait for a running index or open readers before exiting with code 75
+    /// (default: ORBIT_WAIT_TIMEOUT_MS, else 600).
+    #[arg(long, value_name = "SECONDS")]
+    timeout: Option<u64>,
+
+    #[arg(long, value_name = "PATH", hide = true, conflicts_with = "detach")]
+    ready_file: Option<PathBuf>,
 }
 
 impl IndexArgs {
-    fn into_parts(self) -> (PathBuf, commands::index::incremental::Options) {
+    fn into_parts(self) -> (PathBuf, commands::index::incremental::Options, bool) {
         let options = commands::index::incremental::Options {
             stats: self.stats,
             verbose: self.verbose,
             db: self.db,
             budget_seconds: self.budget,
+            wait: self.timeout.map(Duration::from_secs),
+            ready_file: self.ready_file,
             ..Default::default()
         };
-        (self.path, options)
+        (self.path, options, self.detach)
     }
 }
 
@@ -806,6 +826,8 @@ async fn main() -> Result<()> {
         eprintln!("{}", remote.message);
     } else if let Some(message) = workspace::describe_graph_lock_conflict(err) {
         eprintln!("{message}");
+    } else if let Some(timed_out) = err.downcast_ref::<database::WaitTimedOut>() {
+        eprintln!("{timed_out}");
     } else if err.is::<commands::grep::NoMatches>() {
     } else if !tui::is_cancelled(err) {
         return result;
@@ -826,6 +848,8 @@ fn exit_code_for(err: &anyhow::Error) -> i32 {
         remote.exit_code
     } else if tui::is_cancelled(err) {
         130
+    } else if err.is::<database::WaitTimedOut>() {
+        database::WAIT_TIMED_OUT_EXIT_CODE
     } else {
         1
     }
@@ -1001,8 +1025,8 @@ async fn run_workspace(
 ) -> Result<()> {
     match command {
         WorkspaceCommands::Index(args) => {
-            let (path, options) = args.into_parts();
-            commands::index::run(path, options)
+            let (path, options, detach) = args.into_parts();
+            commands::index::run(path, options, detach)
         }
         WorkspaceCommands::Sql(SqlArgs {
             query,
@@ -1042,7 +1066,7 @@ fn is_local_table_name(name: &str) -> bool {
 }
 
 fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()> {
-    let client = database::GraphReader::open(db)?;
+    let client = workspace::open_graph_reader(db)?;
 
     let batches = if tables.is_empty() {
         sql::query(&client, &sql::schema_introspection_sql())?
@@ -1225,6 +1249,19 @@ mod tests {
     }
 
     #[test]
+    fn index_async_conflicts_with_wait_timeout_stats_and_verbose() {
+        let parses = |flags: &[&str]| {
+            let argv = ["orbit", "workspace", "index"].iter().chain(flags);
+            Cli::try_parse_from(argv).is_ok()
+        };
+        assert!(parses(&["--async"]));
+        assert!(parses(&["--wait", "--timeout", "5"]));
+        for other in ["--wait", "--timeout=5", "--stats", "--verbose"] {
+            assert!(!parses(&["--async", other]), "{other}");
+        }
+    }
+
+    #[test]
     fn removed_commands_are_rejected() {
         for argv in [
             ["orbit", "repo-map", "overview"].as_slice(),
@@ -1322,6 +1359,10 @@ mod tests {
                 verbose: false,
                 db: None,
                 budget: Some(4),
+                detach: false,
+                wait: false,
+                timeout: None,
+                ready_file: None,
             }
         );
 
