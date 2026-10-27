@@ -143,7 +143,8 @@ pub fn bind_filter(
             .or_else(|| data_type.map(ontology::FieldSelectivity::from_data_type))
             .unwrap_or_default(),
         namespace_anchor: model.anchor_foreign_keys().contains_key(column),
-        foreign_key: property_id.is_some_and(|property| model.property_is_foreign_key(property)),
+        foreign_key: property_id
+            .is_some_and(|property| model.query_backend().property_is_foreign_key(property)),
         in_sort_key,
         text_indexed: property_id.is_some_and(|property| model.has_text_index(property)),
         unique: property_id.is_some_and(|property| model.property_unique(property)),

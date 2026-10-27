@@ -16,6 +16,7 @@ pub(super) struct PropertyBackendFacts {
     unique: bool,
     mutable: bool,
     null_as_epoch: bool,
+    foreign_key: bool,
 }
 
 #[derive(Debug)]
@@ -25,7 +26,6 @@ pub struct EntityFacts {
     pub global: bool,
     pub has_traversal_path: bool,
     pub high_fan_out: bool,
-    pub reference_properties: Vec<String>,
     pub default_properties: Vec<String>,
     pub(crate) properties: Vec<(String, PropertyBackendFacts)>,
 }
@@ -38,6 +38,7 @@ pub(crate) fn entity_facts(ontology: &ontology::Ontology, local: bool) -> Vec<En
                 .then(|| ontology.local_entity_fields(&node.name))
                 .flatten();
             let text_indexed = ontology.text_indexed_columns(&node.name);
+            let references: HashSet<&str> = node.reference_properties().collect();
             let non_nullable_storage: HashSet<&str> = node
                 .storage
                 .columns
@@ -50,8 +51,7 @@ pub(crate) fn entity_facts(ontology: &ontology::Ontology, local: bool) -> Vec<En
                 table: node.destination_table.clone(),
                 global: node.global,
                 has_traversal_path: node.has_traversal_path,
-                high_fan_out: node.high_fan_out,
-                reference_properties: node.reference_properties().map(String::from).collect(),
+                high_fan_out: node.fields.iter().any(|field| field.high_fan_out),
                 default_properties: node.default_columns.clone(),
                 properties: node
                     .fields
@@ -84,6 +84,7 @@ pub(crate) fn entity_facts(ontology: &ontology::Ontology, local: bool) -> Vec<En
                                     && text_indexed.contains(&field.name.as_str()),
                                 unique: field.unique,
                                 mutable: field.mutable,
+                                foreign_key: references.contains(field.name.as_str()),
                                 null_as_epoch: !local
                                     && field.nullable
                                     && matches!(
@@ -112,6 +113,7 @@ fn derive_property_backend_facts(
             unique: false,
             mutable: true,
             null_as_epoch: false,
+            foreign_key: false,
         };
         graph.properties().count()
     ];

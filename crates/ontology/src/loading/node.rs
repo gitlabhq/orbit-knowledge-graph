@@ -32,8 +32,6 @@ pub(crate) struct NodeYaml {
     #[serde(default)]
     global: bool,
     #[serde(default)]
-    high_fan_out: bool,
-    #[serde(default)]
     description: String,
     #[serde(default)]
     label: String,
@@ -198,6 +196,8 @@ struct PropertyYaml {
     selectivity: Option<FieldSelectivity>,
     #[serde(default)]
     unique: bool,
+    #[serde(default)]
+    high_fan_out: bool,
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]
@@ -392,6 +392,7 @@ impl NodeYaml {
                     hidden: prop_def.hidden,
                     selectivity,
                     unique: prop_def.unique,
+                    high_fan_out: prop_def.high_fan_out,
                     description: prop_def.description,
                     traversal_path_lookup: prop_def.traversal_path_lookup.map(|l| {
                         TraversalPathLookupSpec {
@@ -513,11 +514,6 @@ impl NodeYaml {
                 "node '{name}' is `global: true` but declares a `traversal_path` column; global hubs must be non-namespaced"
             )));
         }
-        if self.high_fan_out && !has_traversal_path {
-            return Err(OntologyError::Validation(format!(
-                "node '{name}' is `high_fan_out: true` but has no `traversal_path` column; only namespaced child tables fan out under a scope"
-            )));
-        }
 
         let storage = convert_node_storage(self.storage.unwrap_or_default(), &sort_key);
 
@@ -555,7 +551,6 @@ impl NodeYaml {
             style: self.style,
             has_traversal_path,
             global: self.global,
-            high_fan_out: self.high_fan_out,
             storage,
         })
     }
@@ -1136,22 +1131,6 @@ mod tests {
             err.contains("global") && err.contains("traversal_path"),
             "got: {err}"
         );
-    }
-
-    #[test]
-    fn high_fan_out_needs_a_traversal_path() {
-        let scoped = parse_test_node(
-            "node_type: entity\ndomain: test\nhigh_fan_out: true\ndestination_table: gl_test\nproperties:\n  id: {type: int64, source: id}\n  traversal_path: {type: string, source: traversal_path}\n",
-        )
-        .unwrap();
-        assert!(scoped.high_fan_out);
-
-        let err = parse_test_node(
-            "node_type: entity\ndomain: test\nhigh_fan_out: true\ndestination_table: gl_test\nproperties:\n  id: {type: int64, source: id}\n",
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(err.contains("high_fan_out"), "got: {err}");
     }
 
     #[test]

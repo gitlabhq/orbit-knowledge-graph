@@ -5,7 +5,6 @@ domain: code_review
 description: A snapshot of changes (commits and file diffs) associated with a merge request at a point in time
 label: id
 destination_table: gl_merge_request_diff
-high_fan_out: true
 default_columns: [id, merge_request_id, state]
 
 style:
@@ -34,6 +33,7 @@ properties:
     source: merge_request_id
     nullable: false
     mutable: false
+    high_fan_out: true
     description: "Parent merge request ID."
 
   state:

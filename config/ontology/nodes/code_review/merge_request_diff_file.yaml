@@ -5,7 +5,6 @@ domain: code_review
 description: A file changed in a merge request diff
 label: old_path
 destination_table: gl_merge_request_diff_file
-high_fan_out: true
 default_columns: [id, new_path, old_path, new_file, deleted_file]
 
 style:
@@ -41,6 +40,7 @@ properties:
     source: merge_request_diff_id
     nullable: false
     mutable: false
+    high_fan_out: true
     description: "Parent merge request diff ID."
 
   project_id:

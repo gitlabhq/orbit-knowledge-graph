@@ -5,7 +5,6 @@ domain: ci
 description: A stage within a CI/CD pipeline that groups related jobs (e.g., build, test, deploy)
 label: name
 destination_table: gl_stage
-high_fan_out: true
 default_columns: [id, name, status]
 
 style:
@@ -88,6 +87,7 @@ properties:
     source: pipeline_id
     nullable: true
     mutable: false
+    high_fan_out: true
     description: "Containing pipeline ID."
 
   traversal_path:

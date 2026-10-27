@@ -339,7 +339,6 @@ pub struct NodeEntity {
     pub has_traversal_path: bool,
     /// Non-namespaced global hub (e.g. User, Runner), declared `global: true`.
     pub global: bool,
-    pub high_fan_out: bool,
     pub storage: NodeStorage,
 }
 
@@ -362,7 +361,6 @@ impl Default for NodeEntity {
             style: NodeStyle::default(),
             has_traversal_path: false,
             global: false,
-            high_fan_out: false,
             storage: NodeStorage::default(),
         }
     }
@@ -597,6 +595,7 @@ pub struct Field {
     pub selectivity: FieldSelectivity,
     /// One live row per value within its namespace, so an equality on it is a point lookup.
     pub unique: bool,
+    pub high_fan_out: bool,
     pub description: Option<String>,
     pub traversal_path_lookup: Option<TraversalPathLookupSpec>,
     pub mutable: bool,
@@ -622,6 +621,7 @@ impl Default for Field {
             hidden: false,
             selectivity: FieldSelectivity::High,
             unique: false,
+            high_fan_out: false,
             description: None,
             traversal_path_lookup: None,
             mutable: true,

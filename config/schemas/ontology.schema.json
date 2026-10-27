@@ -182,6 +182,10 @@
               "description": "At most one live row per value; an equality on it is recomputed inline.",
               "default": false
             },
+            "high_fan_out": {
+              "type": "boolean",
+              "description": "Parent key of many rows; pinned reads keep find then check."
+            },
             "mutable": {
               "type": "boolean",
               "description": "Whether this field can change after creation. False lets the planner filter on it before the latest-row pick.",
@@ -1177,10 +1181,6 @@
         "global": {
           "type": "boolean",
           "description": "Non-namespaced global hub (e.g. User, Runner) reached only via FK. Defaults to false."
-        },
-        "high_fan_out": {
-          "type": "boolean",
-          "description": "Many rows per parent; reads pinned by id or parent key keep find then check."
         },
         "description": {
           "type": "string",

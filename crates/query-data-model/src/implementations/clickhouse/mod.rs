@@ -65,7 +65,6 @@ pub struct ClickHouseBindings {
     entities: Vec<Option<EntityLayout>>,
     relationships: Vec<Vec<String>>,
     variant_routes: Vec<Option<VariantRoute>>,
-    foreign_key_properties: HashSet<PropertyId>,
     materialized_joins: Vec<MaterializedJoin>,
     reordered_layouts: Vec<ReorderedCopy>,
     property_facts: Vec<PropertyBackendFacts>,
@@ -166,7 +165,9 @@ impl RelationalMapping for ClickHouseBindings {
     }
 
     fn property_is_foreign_key(&self, property: PropertyId) -> bool {
-        self.foreign_key_properties.contains(&property)
+        self.property_facts
+            .get(property.index())
+            .is_some_and(|facts| facts.foreign_key)
     }
 
     fn default_properties(&self, entity: EntityId) -> &[PropertyId] {

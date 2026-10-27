@@ -108,10 +108,6 @@ pub trait OrbitQueryModel {
             .is_some_and(|entity| self.query_backend().entity_is_global(entity))
     }
 
-    fn property_is_foreign_key(&self, property: PropertyId) -> bool {
-        self.query_backend().property_is_foreign_key(property)
-    }
-
     fn entity_high_fan_out(&self, entity: &str) -> bool {
         self.graph()
             .entity_id(entity)
