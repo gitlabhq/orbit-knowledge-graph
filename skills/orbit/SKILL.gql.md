@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.1+gql
+version: 0.35.2+gql
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
 metadata:
@@ -36,7 +36,7 @@ Queries use read-only openCypher 9-based syntax (`MATCH ... RETURN`).
 
 Run `CALL db.schema()` once per session, because the schema does not change mid-session. It lists every relationship as `(Source)-[:TYPE]->(Target)` and the properties of the common nodes, such as `User`, `Project`, `Group`, `MergeRequest`, and `WorkItem`. Run `CALL db.schema('Node')` only for a node it does not list properties for. Query syntax and paste-ready queries are in [`references/gql.md`](references/gql.md).
 
-The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in your mode. Do not reuse discovery results across users or mode changes. Entries contain only `name`, `description`, and `raw_query`; there is no client language selector. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
+The GraphQL field `Query.orbit.queryTemplates` lists the named queries, with `name`, `description`, and `query`. Run one with `POST /api/v4/orbit/query/:name`. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
 
 Each `glab orbit query` has fixed per-call overhead. Prefer one aggregate query, with `count(...)` in `RETURN`, over N lookups for "how many X grouped by Y", and batch related lookups.
 

@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.1
+version: 0.35.2
 license: MIT
 compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance for Orbit Remote commands.
 metadata:
@@ -36,10 +36,6 @@ If you must introspect, call `glab orbit schema <Entity...>` with explicit entit
 glab orbit schema Project |
   jq '.nodes[] | select(.name == "Project") | .properties'
 ```
-
-The default-off Rails `orbit_gql_queries` flag selects one mode per user: JSON objects when off, GQL strings when on. Follow only the active mode's discovery; a mismatched query rejects without parser fallback. GQL mode hides and rejects `get_query_dsl`; use `CALL db.schema()` instead. The JSON recipes below apply only when the flag is off.
-
-The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in that mode. Do not reuse discovery results across users or mode changes. Entries contain only `name`, `description`, and `raw_query`; there is no client language selector. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
 
 Each `glab orbit query` has fixed per-call overhead. Prefer one `aggregation` query over N traversal queries for "how many X grouped by Y", and batch related lookups.
 

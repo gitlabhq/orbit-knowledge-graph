@@ -81,7 +81,7 @@ Common causes: a malformed `--file` request envelope, an unreachable hostname (c
 
 ## Named-query catalog
 
-The catalog lists parameterless named queries rendered in the caller's active mode. `raw_query` is a JSON query object when the per-user `orbit_gql_queries` flag is off and GQL text when on. There is no language field. Rails supplies the explorer's mode directly; an empty catalog does not reset it to JSON. The catalog binds caller identity and mode, so do not reuse another caller's response or retain it across mode changes. JSON queries reject in GQL mode, and GQL strings reject in JSON mode. There is no client override or parser fallback. Missing entries can require client parameters or depend on entities unavailable in the active schema.
+The catalog lists parameterless named queries rendered for the caller, so do not reuse another caller's response. Missing entries can require client parameters or depend on entities unavailable in the active schema.
 
 ## Query errors
 
@@ -89,7 +89,7 @@ For empty results and validation errors, use the query troubleshooting reference
 
 ## Service unavailable
 
-`glab orbit status` reports service health. It prints the `system` health object and exits 2 when your user has no Orbit access (see [Exit 2](#exit-2-feature-flag-off-or-old-glab)). On GitLab 19.1 and later the API wraps the response as `{ "user": {...}, "system": {...} | null }` and always returns 200. The CLI unwraps it for you.
+`glab orbit status` reports service health. It prints the health of each component and exits 2 when your user has no Orbit access (see [Exit 2](#exit-2-feature-flag-off-or-old-glab)).
 
 If any component is unhealthy, retry with exponential backoff. If it persists, escalate in the team Slack channel.
 
