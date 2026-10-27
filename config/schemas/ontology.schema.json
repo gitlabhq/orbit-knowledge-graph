@@ -501,7 +501,7 @@
         },
         "statistics": {
           "type": "object",
-          "description": "Column statistics via AggregatingMergeTree MVs over every filterable property. Property type picks the table: boolean/enum/selectivity:low -> stats_table, string -> token_table, int64/timestamp/date/float -> histogram_table, uuid -> skipped.",
+          "description": "Column statistics via AggregatingMergeTree MVs over every filterable property, by type: boolean/enum/selectivity:low -> stats_table, string -> token_table, int64/timestamp/date/float -> histogram_table, uuid -> skipped.",
           "properties": {
             "stats_table": {
               "type": "string",
@@ -1180,7 +1180,7 @@
         },
         "high_fan_out": {
           "type": "boolean",
-          "description": "Many rows per parent; mutable filters keep find then check."
+          "description": "Many rows per parent; reads pinned by id or parent key keep find then check."
         },
         "description": {
           "type": "string",
