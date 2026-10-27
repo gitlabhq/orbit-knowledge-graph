@@ -7,8 +7,8 @@ import { type Horizon, horizonOf, type Status } from "./schema";
 
 export const HORIZONS: { id: Horizon; title: string; description: string }[] = [
   { id: "now", title: "Now", description: "In progress" },
-  { id: "next", title: "Next", description: "Planned soon" },
-  { id: "later", title: "Later", description: "Further out, or in exploration" },
+  { id: "next", title: "Next", description: "Planned for this quarter and next" },
+  { id: "later", title: "Later", description: "Further out or in exploration" },
 ];
 
 export type RoadmapTheme = { id: string; title: string; description: string; icon: string };
@@ -22,6 +22,7 @@ export type RoadmapItem = {
   status: Status;
   start: Quarter;
   end: Quarter;
+  rank?: number;
   link?: string;
   tracking?: string;
   tracker?: Tracker;
@@ -39,7 +40,7 @@ const STATUS_ORDER: Record<Status, number> = { "in-progress": 0, planned: 1, exp
 
 export const items: RoadmapItem[] = pages
   .flatMap((page) => (page.meta.item ? [{ page, ...page.meta.item }] : []))
-  .map(({ page, theme, status, start, end, link, tracking }) => ({
+  .map(({ page, theme, status, start, end, rank, link, tracking }) => ({
     slug: page.path.slice("roadmap/".length),
     page,
     title: page.meta.title,
@@ -48,12 +49,14 @@ export const items: RoadmapItem[] = pages
     status,
     start: parseQuarter(start),
     end: parseQuarter(end),
+    rank,
     link,
     tracking,
     tracker: tracking ? (trackers as Record<string, Tracker>)[tracking] : undefined,
   }))
   .sort(
     (a, b) =>
+      (a.rank ?? Infinity) - (b.rank ?? Infinity) ||
       quarterIndex(a.start) - quarterIndex(b.start) ||
       STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
       themes.indexOf(a.theme) - themes.indexOf(b.theme) ||

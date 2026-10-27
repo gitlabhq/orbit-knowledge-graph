@@ -103,14 +103,27 @@ expose data on its own.
 
 The signed token proves that GitLab sent the request and names the caller.
 TLS, when the deployment turns it on, proves to GitLab that it talks to the
-real Orbit server. The server uses only a FIPS 140-3 cryptographic module and
-won't start unless it runs in FIPS mode.
+real Orbit server. The server uses only a [FIPS](#fips) 140-3 cryptographic module.
 
 Setup creates a separate read-only user for the graph store, so a deployment
 can give the query service read access only.
 
 We sign every release image, block a release that has a fixable high or
 critical vulnerability, and don't run images as root.
+
+## FIPS
+
+All server binaries use the AWS-LC FIPS 140-3 module for TLS and JWT. There is no
+non-FIPS server build. The `orbit` CLI is out of scope, because the module does not
+build on Windows and macOS.
+
+- The server does not start unless FIPS mode is on. The `starting` log line shows the
+  AWS-LC version.
+- CI fails when a second cryptographic backend enters the server build or binary.
+- A unit test pins the module generation. CI fails when a dependency bump crosses a
+  generation, because that change is a compliance event.
+- To turn on TLS between pods, follow the
+  [internal TLS checklist](../development/server-configuration.md#turn-on-internal-tls).
 
 ## When things go wrong
 
@@ -124,5 +137,5 @@ never returns entities that GitLab didn't check.
 - [Orbit design document](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/orbit/)
 - [ADR 001: gRPC communication](../adr/001_grpc_communication.md)
 - [ADR 008: Workhorse query acceleration](../adr/008_workhorse_query_acceleration.md)
-- The [FIPS and TLS](../runbooks/fips_and_tls.md) and
-  [image signing](../runbooks/image_signing.md) runbooks
+- [Image signing](../development/image-signing.md)
+- [Server configuration](../development/server-configuration.md)

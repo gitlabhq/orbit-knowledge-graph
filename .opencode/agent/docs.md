@@ -39,7 +39,7 @@ Use `docs/pages/engineering/development/agents-reference-index.md` as your index
 - MR adds/changes public API surface or user-visible features → `skills/orbit/SKILL.md`, `skills/orbit/references/recipes.md`, `skills/orbit/references/troubleshooting.md` may need new content. CI only enforces byte-equal sync of `query_language.md`; the rest of the hand-written skill prose (discovery workflow, recipes, gotchas, agent guidelines) won't flag itself as stale. Example: indexing progress added in !1015.
 - MR modifies auth or redaction logic → `docs/pages/engineering/architecture/security.md` may be stale
 - MR adds a CI job or changes enforcement → `AGENTS.md` "What CI enforces" list is incomplete
-- MR changes Helm charts or infra → `README.md` Helm Charts table and `docs/pages/engineering/runbooks/server_configuration.md` may drift
+- MR changes Helm charts or infra → `README.md` Helm Charts table and `docs/pages/engineering/development/server-configuration.md` may drift
 - MR adds a new ontology node or edge → `docs/pages/engineering/architecture/data-model.md` may need a contract change
 - MR renames a config key, CLI flag, or file path → any doc referencing the old name is now broken
 

@@ -73,10 +73,8 @@ function TeamPage() {
             </h2>
             <ul className="m-0 mt-6 grid list-none gap-4 p-0 sm:grid-cols-2 lg:grid-cols-4">
               {principles.map((principle, index) => (
-                <li key={principle.title} className="rounded-[1rem] bg-surface-subtle p-5">
-                  <span className="flex size-9 items-center justify-center rounded-control bg-page text-default shadow-sm">
-                    <Icon name={PRINCIPLE_ICONS[index % PRINCIPLE_ICONS.length]} size={18} />
-                  </span>
+                <li key={principle.title} className="card p-4">
+                  <Icon name={PRINCIPLE_ICONS[index % PRINCIPLE_ICONS.length]} size={16} className="text-subtle" />
                   <h3 className="mt-4 mb-0 text-base font-semibold text-default">{principle.title}</h3>
                   <p className="mt-1 mb-0 text-sm text-subtle">{principle.text}</p>
                 </li>
@@ -87,17 +85,17 @@ function TeamPage() {
         <section className="card flex flex-col items-start justify-between gap-6 p-8 md:flex-row md:items-center">
           <div>
             <h2 className="m-0 text-xl font-semibold text-default">Build with us</h2>
-            <p className="mt-1 mb-0 max-w-xl text-subtle">The Orbit source code is public. You can read the code, open an issue, or follow the blog.</p>
+            <p className="mt-1 mb-0 max-w-xl text-subtle">The Orbit source code is public. You can read the code or open an issue.</p>
           </div>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-2">
             <SiteLink
               href="https://gitlab.com/gitlab-org/orbit/knowledge-graph"
-              className="inline-flex items-center gap-2 rounded-control bg-[var(--gl-button-confirm-primary-background-color-default)] px-5 py-2.5 text-sm font-semibold text-[var(--gl-button-confirm-primary-foreground-color-default)] no-underline hover:bg-[var(--gl-button-confirm-primary-background-color-hover)]"
+              className="gl-button btn-confirm no-underline"
             >
               View the source
               <Icon name="external-link" size={12} />
             </SiteLink>
-            <Link to="/content" className="rounded-control border border-border-strong bg-page px-5 py-2.5 text-sm font-semibold text-default no-underline hover:bg-hover">
+            <Link to="/content" className="gl-button no-underline">
               Read the content
             </Link>
           </div>
