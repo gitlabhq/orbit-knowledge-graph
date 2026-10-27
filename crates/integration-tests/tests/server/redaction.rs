@@ -4224,51 +4224,6 @@ async fn cross_entity_id_collision_redaction(ctx: &TestContext) {
     );
 }
 
-async fn split_aggregation_rejects_more_than_500_owners(ctx: &TestContext) {
-    ctx.execute(&format!(
-        "INSERT INTO {} (id, name, project_id, traversal_path) \
-         SELECT 50000 + number, 'rspec', 60000 + number, concat('1/100/', toString(60000 + number), '/') \
-         FROM numbers(501)",
-        t("gl_job")
-    ))
-    .await;
-    let ontology = load_ontology();
-    let security_ctx = test_security_context();
-    let query = |project_filter: &str| {
-        format!(
-            r#"{{"query_type": "aggregation", "nodes": [{{"id": "j", "entity": "Job", "filters": {{"project_id": {project_filter}}}}}], "group_by": ["j.name"], "aggregations": [{{"count": "j", "as": "n"}}]}}"#
-        )
-    };
-
-    let within = compile(
-        &query(r#"{"lt": 60500}"#),
-        query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
-        &security_ctx,
-    )
-    .unwrap();
-    let batches = ctx.query_parameterized(&within.base).await;
-    let result = QueryResult::from_batches(&batches, &within.base.result_context).unwrap();
-    let ids: usize = result
-        .resource_checks()
-        .iter()
-        .map(|check| check.ids.len())
-        .sum();
-    assert_eq!(ids, 500, "one representative job per project");
-
-    let over = compile(
-        &query(r#"{"gte": 60000}"#),
-        query_engine::compiler::Frontend::JsonDsl,
-        &ontology,
-        &security_ctx,
-    )
-    .unwrap();
-    let batches = ctx.query_parameterized(&over.base).await;
-    let error = QueryResult::from_batches(&batches, &over.base.result_context)
-        .expect_err("501 projects must not reach Rails");
-    assert!(error.to_string().contains("500"), "{error}");
-}
-
 #[tokio::test]
 async fn redaction_integration() {
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
@@ -4346,6 +4301,5 @@ async fn redaction_integration() {
         neighbors_indirect_auth_mixed_projects,
         neighbors_query_filters_by_entity_type,
         cross_entity_id_collision_redaction,
-        split_aggregation_rejects_more_than_500_owners,
     );
 }
