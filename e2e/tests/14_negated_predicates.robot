@@ -203,6 +203,7 @@ Seed Negated Predicate Fixture
     ...    label_field=title
     Wait For Node Indexed Within Budget    Vulnerability    ${NEG_VULNERABILITY_ID}
     ...    ${vulnerability["title"]}    label_field=title
+    Wait For Node Indexed Within Budget    User    ${NEG_REPORTER_ID}
     Within Budget    Work Item Is Closed    ${NEG_ISSUE_CLOSED}
 
 Within Budget
