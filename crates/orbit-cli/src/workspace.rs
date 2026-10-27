@@ -330,10 +330,10 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
 
 /// Resolve the working-tree root of the repo containing `path`.
 ///
-/// `orbit workspace index` walks and stores file paths relative to this root, so a
-/// command pointed at a subdirectory must anchor here too; otherwise `read_text`
-/// globs (resolved against CWD) miss the repo-root-relative paths the graph
-/// holds. This is the git
+/// Indexing stores file paths relative to this root and keys the manifest by it, so
+/// `grep`, `context`, `sql`, and `setup` run from a subdirectory must resolve here
+/// too: the checkout lookup finds the indexed revision, and `grep` scopes and scans
+/// with paths that match what the graph stored. This is the git
 /// working-tree root (`git rev-parse --show-toplevel`), not
 /// [`GitInfo::parent_repo_path`], which for a worktree points at the origin
 /// repo instead of this checkout's own root.
