@@ -7,12 +7,13 @@ inline, for example `glab orbit query "MATCH ... RETURN ..."`. See
 ## Discover the schema first
 
 ```shell
-glab orbit query "CALL db.schema('MergeRequest')"
+glab orbit query "CALL db.schema()"
 ```
 
-`CALL db.schema('Node')` returns one node's properties and its incoming and
-outgoing relationship types. `CALL db.schema()` lists every node and
-relationship type; call it at most once per session. Node names are case
+`CALL db.schema()` lists every relationship as `(Source)-[:TYPE]->(Target)`
+and the properties of the core, code review, and planning nodes; call it once
+per session. `CALL db.schema('Node')` adds property types for one node, or lists
+the properties of a node the overview does not. Node names are case
 sensitive. Issues, epics, tasks, and incidents are all the `WorkItem` node.
 
 ## Statement shape
