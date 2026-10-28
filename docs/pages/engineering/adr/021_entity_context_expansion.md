@@ -17,348 +17,258 @@ Amended by [ADR 022](022_queries_in_rails.md): Rails now runs the query stream, 
 
 ## Context
 
-An agent that holds a token such as `MergeRequest[123]` or a URL needs the
-entity and its neighborhood: reviewers, linked issues, labels, milestone. Today
-that takes one Rails lookup plus one graph query per related thing.
-[#1262](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1262)
-tracks a Rails `context` endpoint that resolves tokens and returns PostgreSQL
-summaries. The prototype,
-[`gitlab-org/gitlab!254189`](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/254189),
-is closed. It motivated this ADR, and the design now lives here.
+An agent often holds a token for an entity, as a typed ID or a URL.
+The agent needs the entity with its reviewers, linked issues, labels, and milestone.
+Today that takes one Rails lookup and one graph query for each related item.
+An issue tracks a Rails context endpoint that resolves tokens and returns PostgreSQL summaries.
+A closed prototype of that endpoint motivated this decision, and the design now lives here.
 
-The endpoint must optionally attach graph data, and Orbit bills per graph
-query. GKG emits one billing event for each finished `ExecuteQuery` stream.
-Rails and Workhorse emit none. The event has no field that groups several
-queries. `correlation_id` is on it, but Fulfillment said it is used for logging
-and tracing only ([ADR 007](007_monetization_engineering.md)). A `context`
-request that ran several graph queries would therefore bill as several queries,
-and the caller could not predict how many.
+The endpoint must optionally attach graph data, and Orbit bills for each graph query.
+Orbit emits one billing event for each finished query stream, and Rails and Workhorse emit none.
+The event has no field that groups several queries.
+The event has a correlation ID, but Fulfillment uses it for logging and tracing only ([ADR 007](007_monetization_engineering.md)).
+A context request that ran several graph queries would bill as several queries, and the caller could not predict the count.
 
-Two accepted ADRs shape where a graph query runs:
+Two accepted decisions shape where a graph query runs:
 
-- [ADR 008](008_workhorse_query_acceleration.md): Workhorse owns the gRPC
-  stream to GKG, so a graph query never holds a Puma worker for its whole
-  duration.
-- [ADR 011](011_agent_command_surface.md): moving query execution out of
-  Workhorse loses streaming, because Rails buffers large results.
+- [ADR 008](008_workhorse_query_acceleration.md) gives Workhorse the gRPC stream, so a graph query never holds a Puma worker for its full duration.
+- [ADR 011](011_agent_command_surface.md) says that query execution outside Workhorse loses streaming, because Rails buffers large results.
 
-Rails can now run the stream itself, behind the `orbit_query_in_rails` feature
-flag
-([#1381](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1381),
-rollout in
-[the GitLab rollout issue](https://gitlab.com/gitlab-org/gitlab/-/issues/633423)).
-Its runner marks the request as IO-bound. Once `max_io_threads` is configured,
-the request then does not hold a regular Puma thread. That setting defaults to
-0, and the deployment tasks in #1381 are open. The runner also redacts in
-process. The flag is a derisk flag and is off by default.
+Rails can now run the stream itself, behind a feature flag that is off by default.
+The Rails runner redacts in the same process and marks the request as I/O-bound.
+With I/O threads configured, the request does not hold a regular Puma thread, but that setting defaults to zero.
 
-This ADR does not amend or supersede ADR 008 or ADR 011. `expand` depends on
-the #1381 rollout, which replaces ADR 008's premise for the query path once it rolls out.
-Both ADRs should be revisited when #1381 removes the Workhorse query path. ADR
-011's buffering concern is acceptable here because the expansion is one bounded
-named query.
+This decision does not amend or supersede ADR 008 or ADR 011.
+Expansion depends on the Rails query rollout, which replaces the premise of ADR 008 for the query path.
+We must revisit both decisions when the Workhorse query path goes away.
+The buffering concern of ADR 011 is acceptable here, because the expansion is one bounded named query.
 
 ## Decision
 
-This ADR fixes the interface and the billing rule. It does not design the
-`expand_*` queries. The Orbit team iterates on those and owns their content.
+We fix the interface and the billing rule.
+We do not design the expansion queries.
+The Orbit team iterates on those queries and owns their content.
 
-**One token per request.** `POST /api/v4/orbit/context` takes `tokens`, an
-array that must hold exactly one string. The limit covers summaries-only
-requests too, so it deliberately deviates from #1262, which proposed several
-references. We keep an array so that lifting the limit later is not a breaking
-change. Top-level `expand` defaults to `false`. A wrong `tokens` length, a
-non-string element, or a non-boolean `expand` returns the usual 400 validation
-error.
+**A context request takes one token and runs at most one billable graph query.**
 
-**At most one billable query.** Without `expand`, the request runs only Rails
-summaries and no graph query. With `expand`, it runs at most one named query:
-exactly one for a found, readable token whose type has an expansion query.
-One `context` request is therefore at most one billed query. It counts once
-against the `orbit_query` rate limit (60 per minute per user). GKG bills a
-query that finishes without a GKG error, for any row count. That includes a
-fully redacted result and a result that Rails drops afterwards. Errors inside
-GKG are not billed. Summaries-only calls, expansions that fail before a query
-runs (including the scope pre-check below), and 403 responses use rate-limit
-budget but are not billed.
+### Request
 
-**Response.** The response is version 1.1.0. `entities` is an array, with one
-entry for the one token. Each entry carries the PostgreSQL summary and an
-`expansion` field. Because the expansion lives on the entity, several tokens
-later add entries and need no new field. `expansion` is `null` when expansion
-was not requested or the token was not found. Those two cases take precedence
-over every error. For a found token whose type has no expansion query,
-`expansion` is `{"error": {"code": "expansion_unsupported_type"}}`. Otherwise it
-is `{"result": ...}` with the deduplicated graph, or `{"error": {"code": ...}}`.
-An expansion failure never fails the summaries.
+The context endpoint takes a POST request with an array of tokens, and the array must hold exactly one string.
+The limit also applies to requests for summaries only, a deliberate change from the original proposal of several references.
+We keep an array, so a later change to allow more tokens is not a breaking change.
+An expand flag defaults to false.
+A wrong array length, an element that is not a string, or an expand flag that is not a boolean is a validation error.
+The response format is raw by default, or LLM, and the GQL format is a validation error.
+The endpoint declares the Orbit read permission, and fine-grained tokens list the route.
 
-**Query echo.** Whenever the type has an expansion query, `expansion` also
-carries `query: {name, parameters: {node_ids, limit}}`. It appears on a result.
-It also appears on every error where a query ran or would run:
-`expansion_unavailable`, `outside_graph_scope`, `billing_namespace_required`,
-`quota_exhausted`, `timeout` and `execution_error`.
-`expansion_unsupported_type` has no `query`. The
-value is the exact payload Rails sends to GKG, and `POST /api/v4/orbit/query/:name`
-accepts `name` and `parameters` unchanged. The caller can therefore see the one
-query that is billed, and can rerun it itself when `expansion_unavailable` says
-Rails will not. This replaces the `fallback` field that an earlier draft listed
-as future work. It is additive, so the response stays at version 1.1.0.
+A token is a typed ID, a global ID, an instance URL, or a short reference for a merge request, issue, or epic.
+The endpoint supports merge requests and work items, including group-level work items.
+Issue and epic are aliases for work item, because Orbit models epics as work items.
+An epic resolves to its work item, and the summary shows the epic work item type.
+An epic typed ID or global ID takes the epic ID, and not the work item ID.
+Epic URLs follow the URL rules for host, scheme, port, and relative root, and an epic URL inside a project is invalid.
+Other types return an unsupported type error.
 
-**Transport.** The expansion is an ordinary named query, so the contract does
-not depend on the transport. Rails resolves and authorizes the token, builds
-the summary, and adds the graph result to the body. We do not add Workhorse
-merge logic, so `expand` runs only on the Rails path, behind
-`orbit_query_in_rails` (checked per user). While the flag is off for a user,
-`expand: true` still returns the summaries, with
-`expansion: {"error": {"code": "expansion_unavailable"}}`. The client can call
-the named query itself through `/api/v4/orbit/query/:name`, which runs on
-Workhorse, using the echoed `query`. The trade-off is that `expand` rollout follows #1381.
-In return, the merge and the error mapping stay in Ruby, and no Go change is
-needed. If #1381 slips, the fallback is Workhorse merge logic for a single
-stream. The contract stays the same.
+Resolution applies the ability check for the resource and the fine-grained token boundary.
+A group-level work item uses its group as the boundary.
+A fine-grained token therefore needs Orbit read access and read access to the merge request or work item.
+Pipeline status also needs read access to pipelines.
+This rule is stricter than the security design, where token scopes gate endpoints and do not filter results, and we must reconcile the two later.
 
-**Expansion query.** Orbit owns one named query per entity type, and each type
-must map to exactly one named query, composite if needed. The per-type queries
-must ship in GKG before or with the Rails endpoint. The billing rule
-above depends on it. The query takes `node_ids` and returns a normal graph
-response. Rails keeps a static map from type to query name and sets `limit`
-as a constant, so clients cannot change it. Fresh typed facets, such as a head
-pipeline or diff files, go into that one query, and their content is the Orbit
-team's call. Once Orbit ships
-`expand_merge_request` and `expand_work_item`, clients can also call them
-directly through `/api/v4/orbit/query/:name`.
+### Billing
 
-**Leaks.** Rails never reveals an ID the caller cannot read. Every failure
-after a lookup starts returns the same `not_found`. Only a found, readable
-record is expanded. The details block below lists every rule.
+Without expansion, the request runs Rails summaries only and no graph query.
+With expansion, it runs one named query for a found, readable token whose type has an expansion query, and none otherwise.
+A context request therefore bills at most one query, and it counts once against the per-user Orbit query rate limit.
 
-**Graph scope.** GKG answers only inside the user's graph scope: Reporter+
-traversal paths with Orbit enabled. Rails can still read a record outside that
-scope. Examples are a Guest, a project-only member, a non-member on a public
-project, and a root group with Orbit off. Before it runs the expansion query, `context` checks the
-record's path against the scope. Outside scope, `expansion` is
-`{"error": {"code": "outside_graph_scope"}}`, no query runs, and nothing is
-billed.
+Orbit bills a query that finishes without an Orbit error, for any row count, and does not bill an Orbit error.
+That includes a result that redaction removes in full, and a result that Rails drops later.
+These requests use rate-limit budget but are not billed:
 
-**Truncation.** The `limit` constant applies to the whole graph, and redacted rows take up
-window slots. Inside graph scope, a center missing from the graph means "no
-readable neighbors" only when `pagination.truncated` is `false`. Otherwise the
-client must treat it as unknown. A record that is not indexed yet can still
-return an empty graph, so an empty result is not proof that no neighbors exist.
+- Requests for summaries only
+- Expansions that fail before a query runs, including the scope check
+- Requests that return a forbidden error
 
-**Later: several tokens.** We want N sub-queries of one `context` request to
-bill as one query. A candidate mechanism is a shared `billable_request_id`.
-Rails would put it in the signed claims, and GKG would set it on every
-sub-query's billing event so that billing can collapse them. This needs sign-off
-from the billing owners (the Orbit team for emission, Fulfillment for CDot
-mediation). It is not built. Until it is, the one-token limit stays. The
-explicit MCP tool and agent command are deferred.
+### Response
 
-<details>
-<summary>Request and response fields</summary>
+The response is version `1.1.0`.
+It holds an array of entities, with one entry for the one token.
+Each entry carries the token as sent, the type, the string ID, a found flag, and an expansion field.
+A found entry adds the resolved token and the PostgreSQL summary, and an entry that was not found adds an error.
+Several tokens later add entries and need no new field, because the expansion lives on the entity.
 
-- `tokens` is always an array of one string. There is no object keyed by token.
-- `response_format` is `raw` or `llm`, and defaults to `raw`. `gql` is out of
-  scope and returns a validation error.
-- Token forms: `Type[id]`, `gid://gitlab/<Type>/<id>`, instance URLs, `path!iid`,
-  `path#iid` and the epic forms below. Group-level work items are in scope.
-- Supported types are `MergeRequest` and `WorkItem`. `Issue` is an alias that
-  resolves, is reported, and expands as `WorkItem`. `Epic` is an alias in the
-  same way: an epic resolves to its work item, because GKG models epics as
-  `WorkItem`. The entity has `type: "WorkItem"`, the ID of the work item and
-  `work_item_type: "epic"` in the summary, and expands with `expand_work_item`.
-  Other types return `unsupported_type`.
-- Epic forms: `Epic[id]` and `gid://gitlab/Epic/<id>`, which take the epic ID
-  and not the work item ID. An epic URL (`/groups/<path>/-/epics/<iid>`) follows
-  the host, scheme, port and relative-root rules of other URLs. The short
-  reference is `group/path&iid`. Lookup uses the group-level work item path and the
-  same readability rules, so a missing, confidential, unlicensed, unreadable or
-  wrong-group epic returns the same `not_found`. Malformed text is rejected
-  before any lookup. A project-scoped `/-/epics/` URL is `invalid_token`.
-- Resolution applies both the per-resource ability (for example
-  `read_work_item`) and the fine-grained token boundary. Group-level work items
-  pass their group as the boundary. A fine-grained token therefore needs
-  `read_merge_request` or `read_work_item` (and `read_pipeline` for pipeline
-  status) in addition to `read_orbit`. This is stricter than the
-  [security design](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md) rule that token scopes gate endpoints and do not
-  filter results. Reconciling the two is a follow-up.
-- Each `entities[]` entry has `token` (as sent), `resolved_token` (only when
-  found), `type`, `id`, `found`, `summary` (when found), `error` (when not
-  found) and `expansion`. `summary` holds `namespace_path`, and `project_path`,
-  which is `null` for group-level work items. The remaining summary fields
-  are defined by the Rails implementation and may only grow. The #1262
-  proposal lists them: for a merge request, title, state, author, branches,
-  latest pipeline status, reviewers and linked issues. For a work item, title,
-  state, labels, assignees, milestone and linked merge requests.
-  `summary.truncated` lists the summary fields cut at their cap, for example
-  `["linked_issues"]`; the lists stay arrays. `linked_issues[]` and
-  `linked_merge_requests[]` entries carry `type`, `id`, `token` and `relation`
-  (`CLOSES`), so a later `related[]` list reuses the shape.
-- `id` on an entity is a string, like `nodes[].id` in the graph.
-- Edges in an expansion identify their endpoints by the pair (`from`,
-  `from_id`) or (`to`, `to_id`), because IDs are per type.
-- `expansion.error.code` is one of these:
-  - `expansion_unavailable`: expansion is not enabled for the user yet.
-  - `expansion_unsupported_type`: the type has no expand query. This is the only
-    code without an `expansion.query`.
-  - `outside_graph_scope`: the record is outside the user's graph scope.
-  - A code that the Rails handler maps from the query path:
-    `billing_namespace_required`, `quota_exhausted`, `timeout` or
-    `execution_error`. `billing_namespace_required` carries the candidate groups
-  and the preferences link, like `/orbit/query/:name`.
-- Version 1.1.0 is a deliberate choice. The closed prototype described 1.0.0
-  with `ref` and `invalid_ref`, which this contract renames to `token` and
-  `invalid_token`. The prototype never merged, so 1.1.0 lets clients built
-  against it detect the change.
+The summary holds the namespace path and the project path, which is null for a group-level work item.
+Rails defines the other summary fields, and the set can only grow.
+For a merge request, the original proposal lists title, state, author, branches, latest pipeline status, reviewers, and linked issues.
+For a work item, it lists title, state, labels, assignees, milestone, and linked merge requests.
+The summary names the fields that it cuts at their cap, and the lists stay arrays.
+Each linked item carries a type, an ID, a token, and a relation, so a later list of related items can reuse the shape.
 
-A found token:
+The expansion is null when the caller did not ask for it, or when the token was not found.
+These two cases take precedence over every error.
+Otherwise, the expansion holds a deduplicated graph result or an error, and an expansion failure never fails the summary.
+Edges name their endpoints by type and ID, because IDs are unique only inside a type.
 
-```json
-{"version": "1.1.0",
- "entities": [
-   {"token": "gitlab-org/gitlab#609451",
-    "resolved_token": "WorkItem[196910643]",
-    "type": "WorkItem", "id": "196910643", "found": true,
-    "summary": {"linked_merge_requests": [
-                  {"type": "MergeRequest", "id": "42", "token": "MergeRequest[42]",
-                   "relation": "CLOSES", "...": "..."}],
-                "truncated": [], "...": "..."},
-    "expansion": {"query": {"name": "expand_work_item",
-                            "parameters": {"node_ids": [196910643], "limit": 100}},
-                  "result": {"nodes": ["..."], "edges": ["..."]}}}]}
-```
+| Expansion error | When | Echoes the query |
+|---|---|---|
+| Expansion unavailable | Expansion is not enabled for the user yet | Yes |
+| Unsupported type | The type has no expansion query | No |
+| Outside graph scope | The record is outside the user's graph scope | Yes |
+| Billing namespace required | The query path needs a billing namespace, and the error lists the candidate groups and the preferences link | Yes |
+| Quota exhausted | The query path reports no quota | Yes |
+| Timeout | The query timed out | Yes |
+| Execution error | The query failed | Yes |
 
-An unfound token:
+When the type has an expansion query, the expansion echoes the query name and parameters.
+The parameters are the node IDs and the limit.
+The echo appears on a result, and on every error where a query ran or would run.
+The echo is the exact payload that Rails sends to Orbit, and the named query endpoint accepts it unchanged.
+The caller can see the billed query, and can run it when expansion is unavailable.
+The echo replaces a fallback field from an earlier draft, and it is additive, so the response version stays the same.
 
-```json
-{"version": "1.1.0",
- "entities": [
-   {"token": "gitlab-org/gitlab#999999999",
-    "type": null, "id": null, "found": false,
-    "error": {"code": "not_found"}, "expansion": null}]}
-```
+Version `1.1.0` is deliberate.
+The closed prototype described version 1.0.0 with reference fields, which this contract renames to token fields.
+The prototype never merged, and the new version lets clients built against it detect the change.
 
-With `response_format: llm`, the response is `text/plain`: the Rails summary
-text, then one labeled graph section in TOON, or a one-line `error <code>`.
-Raw results carry `format_version`. TOON output carries its own version
-(`toon_output_format` in `config/versions.yaml`).
+The LLM format returns plain text with the Rails summary, then one labeled graph section in TOON, or a one-line error.
+Raw results carry their format version, and TOON output carries its own version.
 
-</details>
+### Transport
 
-<details>
-<summary>Leak rules</summary>
+The expansion is an ordinary named query, so the contract does not depend on the transport.
+Rails resolves and authorizes the token, builds the summary, and adds the graph result to the body.
+We do not add merge logic to Workhorse.
+Expansion therefore runs only on the Rails query path, behind the feature flag, which Rails checks for each user.
+While the flag is off, the client gets the summary with an expansion unavailable error.
+The client can then run the echoed query through the named query endpoint, which runs on Workhorse.
 
-- Error codes are `invalid_token`, `unsupported_type`, and `not_found`.
-  `invalid_token` (unparseable token, other host) and `unsupported_type` are
-  decided from the token text alone, before any lookup.
-- Once a lookup starts, every failure returns the identical `not_found` with no
-  extra fields. This covers an unknown project or group, an unknown iid, and an
-  unreadable record. It also covers a namespace of the wrong kind, such as
-  `group!5` or a project path in a `/groups/` URL.
-- `resolved_token` appears only when `found` is `true`.
-- For every iid form (URL, `path!iid`, `path#iid`, `path&iid`), `id` is `null` when `found`
-  is `false`. For `Type[id]` and GID tokens, `id` only echoes what the caller
-  sent. `type` is `null` for every unfound token.
-- `linked_issues[]`, `linked_merge_requests[]`, and reviewers include readable
-  records only.
-- The expansion query and payload contain the ID of a found record only. This
-  saves work and avoids cross-tenant timing on centers. It is defense in depth,
-  not the leak control. Redaction is.
+The cost is that the expansion rollout follows the Rails query rollout.
+In return, the merge and the error mapping stay in Ruby, and no Go change is necessary.
+If the Rails query rollout slips, the fallback is Workhorse merge logic for a single stream, with the same contract.
 
-</details>
+### Expansion queries
+
+Orbit owns one named query for each entity type, and each type maps to exactly one named query, composite if necessary.
+The per-type queries must ship in Orbit before or with the Rails endpoint, because the billing rule depends on them.
+A query takes node IDs and returns a standard graph response.
+Rails keeps a static map from type to query name, and sets the limit as a constant that clients cannot change.
+New typed facets, such as a head pipeline or diff files, go into that one query, and the Orbit team decides their content.
+After the queries ship, clients can also call them directly through the named query endpoint.
+
+### Leaks and graph scope
+
+**Rails never reveals an ID that the caller cannot read.**
+
+Rails decides an invalid token, such as text it cannot parse or another host, from the token text alone, before any lookup.
+The same applies to an unsupported type.
+After a lookup starts, every failure returns the same not-found error with no extra fields.
+That covers an unknown project or group, an unknown internal ID, an unreadable record, and a namespace of the wrong kind.
+An epic that is missing, confidential, unlicensed, unreadable, or in the wrong group also returns not found.
+
+The resolved token appears only for a found record.
+For a token that was not found, the type is null.
+The ID is null too for an internal ID token.
+For a typed ID or global ID, the ID only echoes what the caller sent.
+Linked items and reviewers include readable records only.
+Rails expands only a found, readable record, so the expansion payload holds only the ID of a found record.
+That rule saves work and avoids cross-tenant timing on the center, but redaction is the leak control.
+
+Orbit answers only inside the user's graph scope.
+The scope is the traversal paths where the user has at least the Reporter role and Orbit is on.
+Rails can still read a record outside that scope.
+Examples are a Guest, a member of the project only, a non-member on a public project, and a top-level group with Orbit off.
+Before the expansion query runs, Rails checks the record path against the scope.
+Outside the scope, Rails returns an outside graph scope error, and no query runs.
+
+The limit applies to the whole graph, and redacted rows use slots in the window.
+Inside the scope, a missing center means "no readable neighbors" only when the result is not truncated, and is unknown otherwise.
+A record that is not indexed yet can return an empty graph, so an empty result does not prove that no neighbors exist.
+
+### Several tokens later
+
+We want the sub-queries of one context request to bill as one query.
+A candidate is a shared billable request ID that Rails puts in the signed claims.
+Orbit would set the ID on the billing event of each sub-query, and billing could collapse them.
+This needs sign-off from the billing owners, which are the Orbit team for emission and Fulfillment for billing mediation.
+We have not built it, and the one-token limit stays until we do.
+We also defer an explicit Model Context Protocol (MCP) tool and an agent command.
 
 ## Consequences
 
-- A `context` request bills at most one query and uses one rate-limit unit.
-  The billing owner should confirm that one `context` with `expand` is at most
-  one billed query. Errors inside GKG are not billed. Out-of-scope records
-  run no query.
-- An agent that holds several tokens makes several `context` calls, each rate
-  limited and billed on its own.
-- Both the `context` route and the named-query route check the rate limit
-  before the enabled-namespace check, so 403 responses also use budget. We
-  accept this for v1.
-- `expand` waits for `orbit_query_in_rails` to roll out, and until then it
-  returns `expansion_unavailable`. Rails owns the merge.
-  Version 1.1.0 covers the whole body, and no new GKG pin is needed. This ADR
-  moves neither the raw nor the TOON pin.
-- A confidential issue tracks authorization-safe pagination (`has_more`,
-  `truncated`, and cursors computed after redaction). It does not block this
-  ADR, because `expand` runs only named queries a caller can already run
-  through `/orbit/query/:name`. The fix must keep `truncated`, because the
-  truncation rule above relies on it.
-- The Rails implementation that replaces the closed prototype must:
-  - Use `POST` with `tokens` and the response in version 1.1.0.
-  - Declare the `read_orbit` permission on `context`. The prototype used
-    `read_knowledge_graph`.
-  - Add `POST /orbit/context` to the fine-grained token documentation and route
-    configuration.
-- Other follow-up work: the Rails resolver and group-level work items, and the
-  per-type named queries in Orbit. CLI remote routing for `context` (the closed
-  !2523 used `GET` with `refs[]`) must use `POST` with `tokens` and the 1.1.0
-  envelope.
-  Whether `Type:ID` is an accepted token form is open.
-- Future work, not decided here:
-  - More types (Note, Milestone, User, Project, Group) through the generic
-    `expand_neighbors` query.
-  - File and Definition tokens resolved from the graph, never Gitaly, from a
-    blob URL (project, path, commit SHA, line range) with `expand_file` and
-    `expand_definition` queries. The code token forms are reserved: the blob
-    URL, `File[id]` and `Definition[id]`.
-  - `as_of`, `limit`, `cursor` and `include` request fields.
+- A context request bills at most one query and uses one rate-limit unit.
+  The billing owner must confirm that an expanded context request is at most one billed query.
+- An agent with several tokens makes several context calls, and each has its own rate limit and bill.
+- The context route and the named query route check the rate limit before the enabled-namespace check.
+  Forbidden responses therefore use budget too, and we accept this for the first version.
+- Expansion waits for the Rails query rollout, and until then returns an expansion unavailable error.
+  Version `1.1.0` covers the whole body, so this decision needs no new Orbit version pin for raw or TOON output.
+- A confidential issue tracks authorization-safe pagination, with page flags and cursors computed after redaction.
+  That work does not block expansion, because expansion runs only named queries that the caller can already run.
+  The fix must keep the truncation flag, because the truncation rule above relies on it.
+- The CLI remote routing for context must use the POST request with tokens and the new response.
+  The closed CLI draft used a GET request with references.
+  Whether a type and ID pair with a colon is a valid token form is still open.
+- We do not decide these future items:
+  - More types, such as notes, milestones, users, projects, and groups, through a generic neighbors query.
+  - File and definition tokens that resolve from the graph and never from Gitaly, with their own expansion queries.
+    The reserved code token forms are typed file and definition IDs, and a blob URL.
+    The blob URL holds the project, path, commit SHA, and line range.
+  - Request fields for a point in time, a limit, a cursor, and included facets.
 
-## Alternatives considered
+## Why not the alternatives
 
-### N tokens, billed as one query
+### Several tokens, billed as one query
 
-A shared `billable_request_id` on every sub-query's billing event would let
-billing collapse them. It is the team's preference for the multi-token future.
-It is deferred because it needs GKG, Rails, and CDot changes and billing-owner
-sign-off. `correlation_id` cannot do this today.
+A shared billable request ID on the billing event of each sub-query would let billing collapse them.
+The team prefers this for the multi-token future.
+We defer it, because it needs changes in Orbit, Rails, and billing, and sign-off from the billing owners.
+The correlation ID cannot do this today.
 
 ### One cross-type query
 
-Not possible today. One `ExecuteQuery` carries one query string, and
-`neighbors` takes one node selector, so one entity type. A `traversal` joins up
-to five selectors but does not return independent neighborhoods. A true single
-query needs GKG batch or DSL work in the billing-scoped server paths. With one
-token it is not needed.
+This option is not possible today.
+A query stream carries one query, and a neighbors query takes one node selector, so one entity type.
+A traversal joins a few selectors, but does not return independent neighborhoods.
+A true single query needs batch or query language work in the billing-scoped server paths.
+With one token, we do not need it.
 
 ### Workhorse fan-out
 
-Rails hands Workhorse a list of named queries. Workhorse runs the streams in
-parallel and merges the results. It only pays off with several tokens, and it
-adds Go merge logic and typed transport errors. Revisit it together with the
-multi-token limit.
+Rails hands Workhorse a list of named queries, and Workhorse runs the streams in parallel and merges the results.
+This option pays off only with several tokens, and it adds Go merge logic and typed transport errors.
+We can revisit it together with the multi-token limit.
 
-### Puma or Rails execution for several tokens
+### Rails execution for several tokens
 
-Running several streams from Rails changes where redaction and merging run. It
-does not change the query count or billing, because GKG emits one event per
-stream. For one token it is the chosen transport.
+Several streams from Rails change where redaction and merging run.
+They do not change the query count or billing, because Orbit emits one event for each stream.
+For one token, Rails execution is the chosen transport.
 
-### GKG batch multiplexing
+### Orbit batch multiplexing
 
-One `named` request would carry several sub-queries and GKG would merge the
-results. It needs a GKG executor refactor and sends Rails summaries through
-GKG. It is also a way to the single-event billing above.
+One named request would carry several sub-queries, and Orbit would merge the results.
+It needs an Orbit executor refactor and sends Rails summaries through Orbit.
+It is also a path to the single-event billing above.
 
-### Client-side two-call composition
+### Two calls from the client
 
-The client calls `context`, then the `expand_*` query itself. That costs two
-round trips but gives the caller control of the query count. It stays available
-by calling the queries directly.
+The client calls the context endpoint, then runs the expansion query itself.
+That costs two round trips but gives the caller control of the query count.
+This option stays available, because clients can call the queries directly.
 
-### Object keyed by token
+### An object keyed by token
 
-`{"tokens": {"<token>": {...}}}` loses order in some clients and collapses
-duplicate tokens. Array-only `tokens` is unambiguous.
+An object keyed by token loses order in some clients and collapses duplicate tokens.
+An array of tokens has no ambiguity.
 
 ## References
 
-- [#1262: Orbit context endpoint](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1262)
-- [#1381: Rails query execution](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1381)
-- [`gitlab-org/gitlab!254189`](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/254189) (closed prototype)
+- [Add the Orbit context endpoint to describe a remote graph entity with type-specific detail](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1262)
+- [Run Orbit query streams in Rails instead of Workhorse](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/1381)
+- [Rollout of the feature flag to run Orbit queries in Rails](https://gitlab.com/gitlab-org/gitlab/-/issues/633423)
+- [Add Orbit entity context API (closed prototype)](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/254189)
+- [Security design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md)
 - [ADR 007: Monetization engineering](007_monetization_engineering.md)
 - [ADR 008: Workhorse query acceleration](008_workhorse_query_acceleration.md)
 - [ADR 011: Agent command surface](011_agent_command_surface.md)
+- [ADR 022: Run Orbit queries in Rails instead of Workhorse](022_queries_in_rails.md)

@@ -11,11 +11,16 @@ Proposed
 
 ## Context
 
-Agents write GQL patterns such as `MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)`. Results come back as raw JSON or as GOON ([ADR 012](012_goon_format.md)), so the agent has to join edge lines back to node bodies. See [#1263](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1263).
+Agents write graph patterns in GQL, for example a user who authored a merge request.
+Orbit returns the result as raw JSON or in the GOON format ([ADR 012](012_goon_format.md)).
+In both forms, the agent must join each edge back to the node bodies.
 
 ## Decision
 
-Add `RESPONSE_FORMAT_GQL` (`format=gql`). It prints the result rows as a cypher-shell style table: one column per node alias, and each cell holds the full node literal.
+**We add the `gql` response format, which prints result rows as a table of node literals.**
+
+The table looks like the output of OpenCypher-like shells.
+Each node alias in the query is one column, and each cell holds the full node literal.
 
 ```plaintext
 +------------------------------------------------------------------------------------+
@@ -28,19 +33,42 @@ Add `RESPONSE_FORMAT_GQL` (`format=gql`). It prints the result rows as a cypher-
 2 rows, more available
 ```
 
-- Traversal columns are the query's node aliases, in pattern order. Each row is one authorized result row.
-- Aggregation columns are the group and metric output names. Node groups print as node literals.
-- Neighbors and path finding print one `path` column, such as `(:User {id: 1})-[:MEMBER_OF]->(:Group {id: 22})`. Neighbor direction follows the stored edge.
-- Values use cypher-shell literals: quoted strings, `TRUE`, `FALSE`, and `NULL`. Long text uses the shared truncation limits and adds a `<key>_len` property with the original length.
-- Cells pad to the widest cell in their column. Padding stops at 120 characters, so one long value does not widen every row; longer cells overflow.
-- The footer reports the row count. A paginated page adds `more available` and the next cursor.
-- A duplicate path or neighbor prints once, as in the raw format. Traversal and aggregation keep every row.
+The columns depend on the query type:
 
-The formatter reads the authorized, hydrated `PipelineOutput` rows. It does not know the `RETURN` expressions, so a returned property prints inside its node. Only `ExecuteQuery` renders GQL results; it rejects unknown format values. Schema queries return TOON text for `gql`, as they do for `llm`.
+- A traversal prints one column for each node alias, in pattern order, and one row for each authorized result row.
+- An aggregation prints one column for each group and metric output name, and prints node groups as node literals.
+- A neighbors query or a path-finding query prints one path column, and neighbor direction follows the stored edge.
+
+Values use the literal forms of OpenCypher-like shells: quoted strings, true, false, and null.
+Long text uses the shared truncation limits and adds a length property with the original length.
+Cells pad to the widest cell in their column, up to a fixed width.
+Longer cells overflow, so one long value does not widen every row.
+The footer reports the row count.
+A paginated page also reports that more rows are available and gives the next cursor.
+A duplicate path or neighbor prints once, as in the raw format.
+Traversals and aggregations keep every row.
+
+The formatter reads the authorized, hydrated result rows.
+It does not know the return expressions, so a returned property prints inside its node.
+Only the query execution call renders GQL results, and it rejects unknown format values.
+Schema queries return TOON text for `gql`, as they do for the `llm` agent format.
 
 ## Consequences
 
-- REST and MCP support require a separate GitLab change. Rails must accept `gql` on query endpoints and preserve it in `CommandInterceptor#orbit_command_format`. The `query_graph` schema advertises it; other commands stay on `raw` and `llm`.
-- Deploy the GKG release containing this change before enabling GQL responses in GitLab. Older servers return raw JSON for enum value 2. Workhorse must inspect the returned content, not just the requested format, and handle a mismatch as an error or explicit fallback. Otherwise it can return an empty success response.
-- Query analytics need the selected response format, not just another version pin. Add that field in a separate Iglu schema change before measuring adoption through telemetry.
-- Rows repeat full node bodies, so output is larger than the `llm` format. Compare the formats in the evals harness before changing the default. `llm` query results use TOON since GOON was removed.
+- REST and Model Context Protocol (MCP) support needs a separate GitLab change.
+  Rails must accept the GQL format on the query endpoints and keep it when it forwards agent commands.
+  The graph query tool schema advertises the format, and other commands stay on the `raw` and `llm` formats.
+- We must deploy the Orbit release with this change before GitLab turns on GQL responses.
+  Older servers return raw JSON for the new format value.
+  Workhorse must inspect the format of the returned content, not only the requested format.
+  Workhorse must treat a mismatch as an error or as an explicit fallback, or it can return an empty success response.
+- Query analytics must record the selected response format, and a version pin is not enough.
+  A separate analytics schema change adds that field before we measure adoption.
+- Rows repeat full node bodies, so the output is larger than the TOON output of the agent format.
+  The agent format uses TOON for query results after the removal of GOON.
+  We compare the formats in the evaluation harness before we change the default.
+
+## References
+
+- [Add a Neo4j-style response format to the Orbit query API](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/1263)
+- [ADR 012: GOON format](012_goon_format.md)

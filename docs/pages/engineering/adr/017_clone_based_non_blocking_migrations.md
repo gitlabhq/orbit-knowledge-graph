@@ -15,151 +15,151 @@ Accepted
 
 ## Context
 
-Breaking schema changes write to a new set of `v<N>_`-prefixed tables. The old
-version keeps serving queries. The new set promotes once it is populated.
-That layout is described in [`schema_management.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md) and
-this ADR does not change it.
+A breaking schema change writes to a new set of tables with a version prefix.
+The old version keeps serving queries.
+The new set takes over when it is populated.
+The schema management design describes that layout, and this decision does not change it.
 
-The problem is cost. The original flow rebuilt *every* table on every
-`SCHEMA_VERSION` bump: create the full `v<N>_*` set empty, then re-index every
-namespace and repository into it. A one-column change to one SDLC entity cost a
-full re-pull of billions of Siphon rows and every code archive before it could
-promote. Most tables were byte-for-byte identical to the old version.
+The problem is cost.
+The original flow rebuilt every table on every schema version change.
+It created the full new set empty, then indexed every namespace and repository into it again.
+A one-column change to one SDLC entity pulled billions of Siphon rows and every code archive again before promotion.
+Most tables were identical, byte for byte, to the old version.
 
-Inferring the invalidation set at runtime (diff the ontology, guess which tables
-changed) is unsafe. A missed edge-key change silently leaves a stale row in a
-cloned table, uncatchable after the fact. The decision has to be declared and
-reviewable.
+The indexer could compare ontology versions at runtime and guess which tables changed.
+That guess is not safe.
+A missed change to an edge key leaves a stale row in a cloned table, and nothing can find the row later.
+The decision must be declared and reviewed.
 
 ## Decision
 
-On a forward migration, clone every table a version does not invalidate from the
-active set and re-index only the entities it does. The invalidated set is declared
-per version in a **migration ledger**, and defaults to a full rebuild whenever it
-is ambiguous.
+**On a forward migration, we clone each table that the version does not invalidate and index again only the invalidated entities.**
+
+A migration ledger declares the invalidated set for each version.
+When the scope is not clear, it defaults to a full rebuild.
 
 ### Ledger declares scope
 
-`config/schema-migrations.yaml` carries one entry per `SCHEMA_VERSION`, prepended
-by `mise schema:bump`:
+The ledger has one entry for each schema version.
+The tool that bumps the version adds the entry.
+An entry has one of these scopes:
 
-- `scope: "*"`: full rebuild; the fail-safe default for anything unmapped.
-- `scope: sdlc`: SDLC tables, with an optional `entities:` list to narrow further.
-- `scope: code`: the code-graph tables and their edge table.
+- Full: rebuild all tables. A version with no entry gets this scope.
+- SDLC: rebuild the SDLC tables, with an optional list of entities to narrow the scope.
+- Code: rebuild the code graph tables and their edge table.
 
-A human may widen an entry but never narrow it below the fingerprint-snapshot
-drift; `migration-ledger-check` (CI) and an `orbit-server` unit test enforce
-that floor. A migration across several versions unions their scopes via
-`MigrationLedger::resolve_migration_scope_between`, widening to `Full` on any gap
-or backward range.
+A person can widen an entry.
+A person cannot narrow it below the drift that the schema fingerprint snapshot detects.
+A CI check and a unit test enforce that floor.
+A migration across several versions uses the union of their scopes.
+A gap in the ledger or a backward range widens the scope to full.
 
 ### Runtime widening for shared tables
 
-A declared scope is a request. `get_migration_scope_for_table_writers`
-(`crates/indexer/src/schema/invalidation.rs`) widens it to `Full` when a clone
-would corrupt data:
+A declared scope is a request.
+The indexer widens it to full when a clone would corrupt data:
 
-- The scope touches the shared `gl_edge` table. Cloning it while rebuilding only
-  some of its writers would keep old-key rows the corrected writer no longer emits.
-- A rebuilt table has writers outside the scope, whose rows the clone would drop.
+- The scope touches the shared edge table. A clone that rebuilds only some of its writers keeps rows with old keys that the corrected writer no longer emits.
+- A rebuilt table has writers outside the scope. The clone would drop their rows.
 
-`code` is the exception: it clones `gl_edge` intact because the code stale sweep
-tombstones code's own edge rows as each namespace's re-index drains. So a code bump touches
-only code.
+The code scope is the exception.
+It clones the shared edge table intact.
+The code stale sweep marks old code edge rows as deleted after each namespace finishes its new index run.
+A code version change touches only code.
 
-`classify_tables_for_scope` then marks each table `CloneFromActive` or
-`RebuildEmpty`. A table is marked `RebuildEmpty` only when every writer is invalidated.
-`find_invalidated_pipelines` maps the invalidated entities to the pipelines that
-must rerun (`HAS_NOTE` → the `Note` pipeline).
+The indexer then marks each table as clone or rebuild.
+A table is rebuilt only when the version invalidates every writer of that table.
+The indexer maps the invalidated entities to the pipelines that must run again.
+For example, a change to the note edge reruns the note pipeline.
 
 ### Checkpoint seeding drives re-dispatch
 
-The re-index falls out of which checkpoints exist in the new set. The namespace
-sweep re-dispatches any pipeline with no completed checkpoint:
+The checkpoints in the new set decide what runs again.
+The namespace sweep dispatches each pipeline that has no completed checkpoint.
+Seeding differs by scope:
 
-- **Selective SDLC**: copy completed checkpoints for unchanged pipelines, drop the
-  invalidated ones plus the `dispatch.*` cursors (`seed_sdlc_checkpoint`).
-- **Code**: clone the checkpoint intact (keeping `dispatch.*`) and drop only
-  the per-namespace `maintenance.code_stale_sweep.*` gates (`seed_code_scope_checkpoint`).
-- **Full**: empty checkpoint table, so everything backfills.
+| Scope | Checkpoint seeding |
+| ----- | ------------------ |
+| SDLC | Copy completed checkpoints for unchanged pipelines. Drop the invalidated checkpoints and the dispatch cursors. |
+| Code | Clone the checkpoints intact, with the dispatch cursors. Drop only the stale sweep gate for each namespace. |
+| Full | Start with an empty checkpoint table, so everything backfills. |
 
-Control tables like `gkg_schema_version` are never prefixed, cloned, or dropped.
+Control tables, such as the table that records the schema version, have no prefix.
+A migration never clones or drops them.
 
 ### Promotion gates on the plan
 
-`MigrationCompletionChecker` (`crates/indexer/src/orchestrator/scheduled/migration_completion.rs`)
-promotes the `migrating` version under one condition. Every currently enabled namespace must have a
-completed checkpoint for every required namespaced pipeline, plus every required
-global pipeline. "Required" is exactly the plan the scope produced, so a selective
-migration gates only on what it re-dispatched.
+A scheduled check promotes the migrating version under one condition.
+Each enabled namespace must have a completed checkpoint for each required namespace pipeline.
+Each required global pipeline must also have a completed checkpoint.
+The required set is the plan that the scope produced, so a selective migration waits only for the work it dispatched.
 
-- A checkpoint from a since-disabled namespace does not count; the enabled set is
-  recomputed each check.
-- Code coverage is reported but does not block. A single slow or failing repo must
-  not hold a migration open.
+The check computes the enabled set each time.
+A checkpoint from a namespace that was disabled after the migration started does not count.
+The check reports code coverage, but code coverage does not block promotion.
+One slow or failing repository must not keep a migration open.
 
-The gate is checkpoint-based, not row-count-based; full correctness validation
-stays in staging E2E (see
-[`schema_management.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md#known-trade-off-checkpoint-based-validation)).
+The gate uses checkpoints, not row counts.
+Full correctness validation stays in the staging end-to-end tests.
+The schema management design describes this trade-off.
 
 ## Enabling blue-green deployment
 
-The prefix layout is already a blue-green split. The active version keeps serving
-queries and streaming updates from its `v<N>_` tables while the migrating version
-fills its own set. Promotion flips reads over in one step. The two run side by
-side down to their NATS streams and locks, which are version-segmented.
-`/-/readiness` holds the new pods out of rotation until their version is active (see
-[`schema_management.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md) and
-[`indexing/sdlc_indexing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md)).
+The prefix layout is already a blue-green split.
+The active version keeps serving queries and streaming updates from its tables.
+The migrating version fills its own set at the same time.
+Promotion moves reads to the new set in one step.
+The two versions also have separate NATS streams and locks.
+The readiness probe keeps the new pods out of rotation until their version is active.
 
-What clone-based migration buys is a green side that is cheap to stand up. A full
-rebuild has to re-index from epoch before it can promote. So for hours the blue
-side alone carries fresh data under heavy Siphon and Gitaly load. Cloning brings
-the green tables up near-complete at once and re-indexes only what changed. So the
-blue side is never disturbed and the window shrinks to the size of the delta.
-Promotion is the trigger. It gates on the plan the scope produced
-([Promotion gates on the plan](#promotion-gates-on-the-plan)). The switch
-happens the moment that delta is done.
+```mermaid
+flowchart LR
+    accTitle: Clone-based migration
+    accDescr: The active version keeps serving queries. The migrating version clones the tables that the scope does not invalidate, rebuilds the rest, and indexes again only the invalidated pipelines. Promotion moves reads to the migrating version when the planned pipelines finish.
+    A[Active version serves queries] --> C[Clone unaffected tables]
+    A --> R[Rebuild invalidated tables empty]
+    C --> I[Index invalidated pipelines again]
+    R --> I
+    I --> P{Planned pipelines complete?}
+    P -->|Yes| S[Promote: reads move to the new version]
+    P -->|No| I
+```
+
+Clone-based migration makes the green side cheap to stand up.
+A full rebuild must index from the start before it can promote.
+For hours, the blue side alone carries fresh data under heavy Siphon and Gitaly load.
+Cloning brings the green tables up almost complete at once and indexes only what changed.
+The blue side is never disturbed, and the window shrinks to the size of the change.
+Promotion happens when that change is indexed, as the gate in [Promotion gates on the plan](#promotion-gates-on-the-plan) describes.
 
 ## Consequences
 
-What improves:
+The benefits:
 
-- A narrow bump re-indexes only what it invalidates, cutting the migration window
-  and the Siphon/Gitaly load.
-- The invalidation set is a reviewed artifact with a CI-enforced floor, not a
-  runtime guess.
-- Fail-safe by construction: unmapped versions, ledger gaps, shared edge tables,
-  and cross-scope writers all widen to `Full`.
+- A narrow version change indexes only what it invalidates, so the migration window and the Siphon and Gitaly load are smaller.
+- The invalidation set is a reviewed file with a floor that CI enforces.
+- Unmapped versions, ledger gaps, shared edge tables, and writers outside the scope all widen to full.
 
-What gets harder:
+The costs:
 
-- Every breaking bump owns a ledger entry, and a too-narrow scope is a
-  data-correctness bug, not just wasted work.
-- The shared `gl_edge` table forces many SDLC scopes to `Full`; the savings are
-  real for table-local entities and code, less so for edge-heavy changes.
-- Two seeding paths (SDLC vs code) with different cursor handling.
+- Each breaking version change needs a ledger entry.
+- A scope that is too narrow is a data correctness bug, not only wasted work.
+- The shared edge table forces many SDLC scopes to full.
+- The savings are large for entities with their own tables and for code, and smaller for changes that touch edges.
+- SDLC and code use two seeding paths with different cursor handling.
 
-## Non-goals
+These items are out of scope:
 
-- **Changing the prefix layout or promotion mechanism.** Unchanged; see
-  [`schema_management.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md).
-- **Row-count validation at the gate.** Stays in staging E2E.
-- **Runtime ontology diffing.** Scope is declared, only ever widened at runtime.
-- **Per-row cleanup for shared SDLC edge tables.** Not built; those changes widen
-  to `Full` instead.
+- Changes to the prefix layout or the promotion mechanism.
+- Row-count validation at the gate, which stays in staging end-to-end tests.
+- Runtime comparison of ontology versions. The scope is declared, and the runtime can only widen it.
+- Cleanup of single rows in shared SDLC edge tables. Those changes widen to full instead.
 
 ## References
 
-- Schema management as-built: [`schema_management.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md)
-- SDLC migration section: [`indexing/sdlc_indexing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md)
-- Ledger and scope union: `crates/ontology/src/migrations/ledger.rs`, `scope.rs`;
-  `config/schema-migrations.yaml`
-- Clone/rebuild classification and widening:
-  `crates/indexer/src/schema/invalidation.rs`
-- Orchestration, seeding, rollback:
-  `crates/indexer/src/schema/migration.rs`, `version.rs`
-- Promotion gate: `crates/indexer/src/orchestrator/scheduled/migration_completion.rs`
-- Related: [ADR 014](014_entity_level_indexing.md),
-  [ADR 015](015_pluggable_entity_pipelines.md)
-- Blue-green deployment epic: [Non-blocking migrations and blue/green deployment](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/7)
+- [Schema management design](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md)
+- [Checkpoint-based validation trade-off](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/schema_management.md#known-trade-off-checkpoint-based-validation)
+- [SDLC indexing design](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/indexing/sdlc_indexing.md)
+- [ADR 014: Entity-level SDLC indexing](014_entity_level_indexing.md)
+- [ADR 015: Transforms over a shared SDLC pipeline](015_pluggable_entity_pipelines.md)
+- [Non-blocking migrations and blue/green deployment](https://gitlab.com/groups/gitlab-org/orbit/-/work_items/7)

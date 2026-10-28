@@ -15,280 +15,210 @@ Proposed
 
 ## Context
 
-The query compiler chooses join order using heuristic selectivity labels (`High`/`Low`)
-from the ontology. It also uses a fixed strategy per query type: edge-first for flat
-chains, node-first for FK-star. The heuristics are coarse. Consider a `High` selectivity
-string filter on a column with 50K distinct values. Consider the same filter on a column
-with 3 distinct values. Both receive identical treatment.
+The query compiler chooses join order from coarse high or low selectivity labels in the ontology.
+The compiler also uses a fixed strategy per query type.
+Flat chains start from the edge table, and foreign key (FK) star queries start from the center node.
 
-Profiling showed this matters. Replacing FilterOnly CTEs with JOINs (!1533) cut
-read_rows by 70% on code-graph queries. But the improvement was accidental -- the
-compiler happened to emit a better shape for that query. For a different filter
-combination the old shape might have been better. Without cardinality data, the
-compiler cannot make this choice systematically.
+The labels hide large differences.
+A high-selectivity string filter on a column with 50,000 distinct values gets the same treatment as one on a column with three.
 
-The compiler already supports multiple join strategies:
+Profiling showed that this matters.
+Replacing filter-only common table expressions (CTEs) with joins cut rows read by 70% on code-graph queries.
+That improvement was accidental, because the compiler happened to emit a better shape for that query.
+For a different filter combination, the old shape might have been better.
+Without cardinality data, the compiler cannot make this choice systematically.
+
+The compiler already supports several join strategies:
 
 | Strategy | Entry point | When used |
 |---|---|---|
-| FK-star | Center node | All hops FK to same center |
+| FK star | Center node | All hops use an FK to the same center |
 | Flat chain | Edge table | Default for edge-based queries |
 | Single node | Node table | No edges |
 
-The gap is not strategy support but strategy selection. The compiler needs per-column,
-per-namespace row counts and value distributions to estimate which entry point and
-join order minimizes intermediate result sizes.
+The gap is strategy selection.
+With row counts and value distributions per column and namespace, the compiler can pick the entry point and join order with the smallest intermediate results.
 
 ## Decision
 
+**The compiler orders joins by cost, with column statistics that ClickHouse maintains on insert.**
+
 ### Query types affected
 
-Join ordering applies to any query that joins two or more tables. In the current
-compiler, that is every query type except bare single-node searches:
+Join ordering applies to every query that joins two or more tables, so only bare single-node searches are out of scope.
 
 | Query type | Tables joined | Current join strategy |
 |---|---|---|
-| Traversal (single-hop) | 1 edge + 1-2 nodes | Edge-first, nodes JOINed |
-| Traversal (multi-hop) | N edges + N+1 nodes | Edge-first, each hop JOINed sequentially |
-| Aggregation | Same as traversal + GROUP BY | Same as traversal |
-| FK-star | Center node + N target nodes (no edges) | Center-first via FK columns |
-| Neighbors | 1 center node + 1 edge scan | Center-first |
-| PathFinding | 2 anchor nodes + recursive edge CTEs | Anchor CTEs, then edge expansion |
+| Traversal, single hop | One edge and one or two nodes | Edge first, then join the nodes |
+| Traversal, multiple hops | N edges and N+1 nodes | Edge first, then join each hop in sequence |
+| Aggregation | Same as traversal, with grouping | Same as traversal |
+| FK star | Center node and N target nodes, no edges | Center first through FK columns |
+| Neighbors | One center node and one edge scan | Center first |
+| Path finding | Two anchor nodes and recursive edge CTEs | Anchor CTEs, then edge expansion |
 
-For single-hop traversals, the choice is: start from the edge table or start from
-the more selective node and join to the edge. For multi-hop, the direction of each
-hop matters. For FK-star, the order of target JOINs matters (join the smallest
-target first to narrow the pipeline early). For neighbors, the choice between center
-scan vs edge scan depends on whether the center has selective filters beyond the
-pinned IDs.
+For a single-hop traversal, the planner starts from the edge table or from the more selective node.
+For multiple hops, the direction of each hop matters.
+For an FK star, the planner joins the smallest target first to narrow the result early.
+For neighbors, the planner scans the center or the edges, based on center filters beyond the pinned IDs.
+Path finding keeps its recursive structure.
+Its anchor selection is still a join ordering choice: which endpoint expands first, and how to split forward and backward depth.
 
-PathFinding is partially constrained by its recursive CTE structure. But the anchor
-selection is a join ordering decision. It picks which endpoint to expand from first
-and how to split forward vs backward depth.
+### Statistics
 
-### Stat types
+We keep three types of statistics, each in its own AggregatingMergeTree table:
 
-Three stat types, each in its own AggregatingMergeTree table:
+| Statistic | Covers | Key |
+|---|---|---|
+| Value frequency | Booleans, enums, and strings with few distinct values | Table, column, traversal path, and value |
+| Token frequency | Strings with more distinct values | Table, column, traversal path, and token |
+| Equi-depth histogram | Integers, timestamps, dates, and floats | Table, column, traversal path, and bucket |
 
-| Table | Stat type | Covers | Key columns |
-|---|---|---|---|
-| `gkg_column_stats` | Value frequency | Categorical (boolean, enum, low-NDV string) | (table, column, tp, value) |
-| `gkg_token_stats` | Token frequency | Text (medium/high-NDV string) | (table, column, tp, token) |
-| `gkg_histogram_stats` | Equi-depth histogram | Continuous (int64, timestamp, date, float) | (table, column, tp, bucket) |
+The ontology property types decide the category of each column at load time, so nobody lists columns by hand.
+UUID columns are skipped, because their selectivity is always one row.
+Virtual columns and columns that cannot be filtered are also skipped.
 
-UUIDs are skipped (selectivity is always 1/row_count). Virtual and non-filterable
-columns are skipped. The categorization is derived from ontology property types at
-load time, not manually listed.
+One materialized view per node table fires on insert and writes aggregate states to the stats tables.
+The view counts distinct entities per value or bucket with a HyperLogLog-based state.
+That state ignores duplicate values, so the row versions of replacing merge tree tables do not inflate counts.
 
-### Collection via materialized views
+Deleted rows still contribute to the statistics.
+We accept this error, because exact counts need a periodic batch job with a deduplicating scan.
+For join ordering, the error is negligible.
 
-One MV per node table fires on insert and writes aggregate states to the
-corresponding stats table. The MV uses `uniqState(id)` to count distinct entities per
-value/bucket. `uniqState` is based on HyperLogLog, which is idempotent for duplicate
-values -- ReplacingMergeTree row versions do not inflate counts.
+Statistics are partitioned by traversal path, so each namespace has its own rows.
+Entities without a traversal path, such as users and runners, use an empty partition key for global statistics.
+The total row count of an entity comes from the histogram of its ID column.
 
-Deleted rows (`_deleted = true`) contribute to stats. This is a known inaccuracy
-accepted because the alternative (querying with FINAL) requires a periodic batch job,
-which we want to avoid. For join ordering the error is negligible.
-
-### Namespace scoping
-
-Stats are partitioned by `traversal_path`. Each namespace gets its own stat rows.
-Entities without `traversal_path` (User, Runner) use an empty partition key for
-global stats. Total row count per entity comes from the histogram table's `id` column.
-
-### Dictionary for query-time lookups
-
-A ClickHouse dictionary (`gkg_column_stats_dict`) over the stats tables provides
-sub-millisecond lookups. It auto-refreshes every 2-5 minutes via `LIFETIME(MIN 120
-MAX 300)`. The server fetches stats for the user's traversal paths before compilation
-and passes them into `CompilerMetadata`.
+A ClickHouse dictionary over the stats tables refreshes every few minutes and gives lookups in less than a millisecond.
 
 ### Cardinality estimation
 
-The planner estimates rows after filtering:
+The planner estimates the rows that remain after filters:
 
 ```plaintext
-estimated_rows = total_row_count * product(selectivity_per_filter)
+estimated_rows = total_rows * product(selectivity of each filter)
 ```
 
-Where `total_row_count` comes from the histogram table's `id` column
-(`uniqMerge(row_count)` across all buckets for the entity's `id` field).
+Each filter type gets its selectivity from one statistic:
 
-**Selectivity per filter type:**
-
-| DSL filter op | Stat source | Selectivity formula |
+| Filter | Statistic | Selectivity |
 |---|---|---|
-| `eq` | Value frequency | `value_count / total_row_count` |
-| `in` | Value frequency | `sum(matching value_counts) / total_row_count` |
-| `gt`, `lt`, `gte`, `lte` | Histogram | `sum(buckets in range) / total_row_count` |
-| `contains` | Token frequency | `token_count / total_row_count`, fallback 0.05 |
-| `starts_with` | Token frequency | same as `contains` |
-| `ends_with` | Token frequency | same as `contains` |
-| `is_null` | Value frequency | `null_value_count / total_row_count`, fallback 0.01 |
-| (no filter) | -- | 1.0 |
-| (pinned IDs) | -- | `min(len(node_ids), total_row_count) / total_row_count` |
-| (ID_range) | Histogram | `sum(buckets in range) / total_row_count` |
+| Equality | Value frequency | Count of the value divided by total rows |
+| Set membership | Value frequency | Sum of the matching value counts divided by total rows |
+| Range comparison | Histogram | Sum of the buckets in range divided by total rows |
+| Substring, prefix, or suffix match | Token frequency | Count of the token divided by total rows, with a fixed default |
+| Null check | Value frequency | Count of null values divided by total rows, with a fixed default |
+| No filter | None | One |
+| Pinned IDs | None | Number of pinned IDs, capped at total rows, divided by total rows |
+| ID range | Histogram | Sum of the buckets in range divided by total rows |
 
-When multiple filters apply to the same node, their selectivities are multiplied
-(independence assumption). This is the standard approach in PostgreSQL, MySQL, and
-every other query planner. Correlated filters (e.g., `city = 'Paris' AND country =
-'France'`) produce overestimates, but in the GKG ontology most filter columns are
-genuinely independent.
+The planner multiplies the selectivity values of filters on the same node.
+This independence assumption is standard in PostgreSQL, MySQL, and other query planners.
+Correlated filters, such as a city of Paris and a country of France, give overestimates.
+Most filter columns in the Orbit ontology are independent.
 
-**Join output estimation** uses the FK-join formula:
+The planner estimates join output with the FK join formula:
 
 ```plaintext
-join_output = left_rows * right_rows / max(ndv_left_key, ndv_right_key)
+join_output = left_rows * right_rows / max(distinct_left_keys, distinct_right_keys)
 ```
 
-For edge-to-node joins, the join key is `id` on the node side and `source_id` or
-`target_id` on the edge side. The NDV of the join key comes from the histogram table.
+For an edge-to-node join, the key is the node ID on one side and the source or target ID on the edge.
+The histogram table gives the number of distinct key values.
 
-**Example:**
+In this example query, the user is pinned and the merge requests have a branch filter:
 
 ```plaintext
-Query: User(node_ids=[1]) --AUTHORED--> MR(source_branch="main") --IN_PROJECT--> Project
+MATCH (u:User)-[:AUTHORED]->(m:MergeRequest)-[:IN_PROJECT]->(p:Project)
+WHERE u.id = 1 AND m.source_branch = 'main'
+RETURN m, p
 
-Stats for namespace 1/9970/:
-  gl_merge_request: total=82K, source_branch NDV=4200
-  gl_edge (AUTHORED, source_kind=User): ~500K rows
-  gl_project: total=200
+Statistics for one namespace:
+  Merge requests: 82,000 rows, 4,200 distinct source branches
+  AUTHORED edges from users: about 500,000 rows
+  Projects: 200 rows
 
-Entry point estimates:
-  User:    1 row (pinned)
-  MR:      82K * (1/4200) = ~20 rows
-  Edge:    500K * (1/82K) = ~6 rows (narrowed by source_id=1)
+Ordering 1: User, edges, merge requests, edge, project
+  1 user, about 6 edges, about 6 merge requests, 1 project lookup
+  Total work: about 13 rows
 
-Ordering 1: User → edge → MR → edge → Project
-  Step 1: 1 user
-  Step 2: ~6 edges (source_id=1, rel=AUTHORED)
-  Step 3: ~6 MRs joined, ~1 passes source_branch filter
-  Step 4: 1 FK lookup to Project
-  Total work: ~13 rows processed
+Ordering 2: Merge requests, edges, user, edge, project
+  About 20 merge requests, about 20 edges, 1 user, 1 project lookup
+  Total work: about 42 rows
 
-Ordering 2: MR(source_branch=main) → edge → User → edge → Project
-  Step 1: ~20 MRs
-  Step 2: ~20 edges joined
-  Step 3: 1 user matches (pinned)
-  Step 4: ~1 FK lookup
-  Total work: ~42 rows processed
-
-Planner picks ordering 1.
+The planner picks ordering 1.
 ```
 
 ### Join order selection
 
-The planner enumerates valid join orderings constrained by the ontology's declared
-relationships. For each ordering it estimates the intermediate row count at each step
-using the cardinality model. It picks the ordering with the lowest estimated total.
+The planner lists the valid join orderings that the declared ontology relationships allow.
+The planner estimates the intermediate row count at each step and picks the ordering with the lowest estimated total.
 
-The search space is small: the DSL caps at 5 nodes and 4 relationships, producing
-10-20 valid orderings. Brute-force evaluation is sub-microsecond. No dynamic
-programming is needed.
+The query language caps the number of nodes and relationships, so the search space is small.
+Brute-force evaluation takes less than a microsecond, and no dynamic programming is necessary.
+The compiler lowering must be able to start a flat chain from either a node or an edge.
 
 ### Pipeline placement
 
-The server query pipeline currently runs these stages in order:
+The server query pipeline runs security, compilation, the ClickHouse query, extraction, authorization, redaction, hydration, and output.
+The stats fetch runs after security and before compilation.
+At that point, the server has these inputs:
 
-```plaintext
-Security → Compilation → ClickHouse → Extraction →
-Authorization → Redaction → Hydration → Output
-```
+- The traversal paths that the user can access
+- The parsed query, with its node entities and filters
+- The ontology, which loads at startup
 
-Stats fetching runs **after Security and before Compilation**. At that point
-the server has:
+The compiler needs the statistics during its plan pass, before it emits SQL.
+The fetch is one dictionary lookup, or a small batch, for the node tables of the query in the traversal paths of the user.
+An in-process cache keeps results for a few minutes, keyed by table, column, and traversal path.
+Most requests get their statistics from the cache with no ClickHouse round trip.
+The server passes the statistics to the compiler as a map from table and column to the statistics of that column.
 
-- The user's authorized traversal paths (from Security)
-- The parsed query input with node entities and filters (from Security/validation)
-- The ontology (loaded at startup)
-
-It does not yet have compiled SQL. This is the right moment because the compiler
-needs the stats to make join ordering decisions during the plan pass.
-
-The stats fetch is a single `dictGet` call (or a small batch) to the ClickHouse
-dictionary. It returns stats for the query's node tables scoped to the user's
-traversal paths. Results are cached in-process with a 2-5 minute TTL keyed by
-`(table, column, traversal_path)`. For most requests the stats come from the cache
-with zero ClickHouse round-trips.
-
-The stats are passed into `CompilerMetadata` as a `HashMap<(table, column), ColumnStats>`
-where `ColumnStats` holds value frequencies, token frequencies, or histogram buckets
-depending on column type. The compiler's plan pass reads this map during
-`optimize_join_order`.
-
-### Schema configuration
-
-The `statistics` section in `schema.yaml` declares table names, dictionary config,
-histogram bucket count, top-K token count, partition key, and exclusions. Column
-categorization is auto-derived from ontology property types. The config is 15 lines.
-
-```yaml
-statistics:
-  stats_table: gkg_column_stats
-  histogram_table: gkg_histogram_stats
-  token_table: gkg_token_stats
-  dictionary: gkg_column_stats_dict
-  lifetime: {min: 120, max: 300}
-  histogram_buckets: 16
-  top_k_tokens: 100
-  partition_key: traversal_path
-  exclude:
-    - {node: Note, columns: [st_diff]}
-```
-
-## Implementation plan
-
-1. Schema config and ontology types -- !1555 (done)
-2. DDL generation: stats tables, MVs, dictionary
-3. Server pipeline stage: fetch stats, cache with TTL, pass to compiler
-4. Compiler plan pass: `optimize_join_order` after `build_hops`
-5. Compiler lowering: generalize `emit_flat_chain` to start from node or edge
-
-## Why not the alternatives
-
-**system.parts metadata only.** Gives approximate global row counts with zero
-infrastructure. But no per-namespace scoping, no per-column NDV, no value
-distributions. Too coarse for join ordering where the decision depends on filter
-selectivity, not just table size.
-
-**Periodic batch job.** Would allow FINAL-based scans for exact stats. But adds
-operational complexity (scheduler, failure handling, staleness windows). The MV
-approach is simpler and self-maintaining.
-
-**Inline subquery at query time.** Compute stats on the fly before each query. Too
-slow -- a `SELECT uniqExact(state) FROM gl_merge_request FINAL` is itself a full
-table scan, which is what we're trying to avoid.
-
-**Single stat type (NDV + row_count only).** Covers equality and IN filters but
-cannot estimate range selectivity or text filter selectivity. Three types cover all
-DSL filter patterns with minimal additional complexity.
+A statistics section in the schema configuration declares the table names and dictionary settings.
+The same section sets the histogram bucket count, the top token count, the partition key, and the excluded columns.
 
 ## Consequences
 
-**What improves:**
+Queries with several filtered nodes get the cheapest estimated join order instead of a fixed strategy.
+The planner can skip narrowing CTEs when statistics show that a filter does not narrow much.
+Measured numbers replace the high and low selectivity labels.
+Code-graph queries over files, definitions, or imported symbols benefit most.
+Their tables are large, and their filter selectivity varies widely.
 
-- Queries with multiple filtered nodes get the optimal join order instead of the
-  fixed edge-first or node-first strategy.
-- The planner can skip narrowing CTEs when stats show the filter is non-selective,
-  replacing the current binary `High`/`Low` heuristic with actual numbers.
-- Code-graph queries (File, Definition, ImportedSymbol) benefit most due to large
-  table sizes and high variance in filter selectivity.
+The costs are these:
 
-**What gets harder:**
+- Schema migrations must create and drop the stats tables, views, and dictionary with the graph tables.
+- Each node table gets one materialized view, and each view fires on every insert, which adds write amplification.
+- Statistics for deleted entities stay slightly inflated until the HyperLogLog sketches are rebuilt.
 
-- Schema migrations must create/drop the stats tables, MVs, and dictionary alongside
-  graph tables.
-- The MV-per-table pattern generates ~25 MVs. Each fires on every insert to its
-  source table, adding write amplification.
-- Stats for deleted entities are slightly inflated until the HyperLogLog sketches
-  are rebuilt.
+## Why not the alternatives
+
+### Table part metadata only
+
+ClickHouse part metadata gives approximate global row counts with no new infrastructure.
+It has no namespace scope, no distinct counts per column, and no value distributions.
+Join ordering depends on filter selectivity as well as table size, so this is too coarse.
+
+### Periodic batch job
+
+A batch job could use deduplicating scans for exact statistics.
+It adds a scheduler, failure handling, and staleness windows.
+Materialized views are simpler and maintain themselves.
+
+### Inline subquery at query time
+
+Statistics computed before each query are too slow.
+An exact distinct count over a deduplicated node table is itself a full table scan, which is the cost we want to avoid.
+
+### One statistic type with distinct counts and row counts
+
+This covers equality and set membership filters.
+It cannot estimate range or text filter selectivity.
+Three types cover all query language filters with little additional complexity.
 
 ## References
 
-- Issue: #826
-- Schema config MR: !1555
-- FilterOnly-to-JOIN profiling (!1533): 70% read reduction on code-graph queries
-- ClickHouse AggregatingMergeTree docs: <https://clickhouse.com/docs/engines/table-engines/mergetree-family/aggregatingmergetree>
-- Prior art: `config/ontology/schema.yaml` `auxiliary_dictionaries` section
-- Prior art: `crates/ontology/src/loading/mod.rs` materialized view loading
+- [Cost-based join ordering using ClickHouse column statistics](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/826)
+- [Add statistics schema configuration for cost-based query planning](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1555)
+- [Replace filter-only CTE and IN with INNER JOIN for edge chains](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1533)
+- [ClickHouse AggregatingMergeTree](https://clickhouse.com/docs/engines/table-engines/mergetree-family/aggregatingmergetree)
