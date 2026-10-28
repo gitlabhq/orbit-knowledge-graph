@@ -3,9 +3,9 @@ title: Integration tests
 description: How Orbit tests real code paths with data files, with and without real infrastructure.
 order: 3
 authors:
-  - michaelangeloio
   - michaelusa
   - jgdoyon1
+  - michaelangeloio
 ---
 
 ## The test pattern

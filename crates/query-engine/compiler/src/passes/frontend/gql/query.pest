@@ -1,94 +1,217 @@
+// Orbit implements a bounded, read-only subset of openCypher with selected ISO GQL syntax.
+// The caller checks the 32 KiB query-size and 32-level delimiter-depth limits before this parser runs.
+// build.rs pins the bounded repetitions below to the shared limits in query_limits.rs.
+// A repeated rule can recognize one excess item when a later stage owns a more useful limit error.
+// The later stage rejects that sentinel, while further excess input stops here with bounded parser work.
+
+// One anchored root rejects prefixes, query composition, and text after the optional semicolon.
 Statement = { SOI ~ SP? ~ (Query | SchemaCall) ~ SP? ~ ";"? ~ SP? ~ EOI }
+
+// SKIP and LIMIT may appear in either order, and DEBUG must be last.
 Query = { Matches ~ SP? ~ Return ~ (SP ~ Order)? ~ (SP ~ Skip ~ SP ~ Limit | SP ~ Limit ~ SP ~ Skip | SP ~ Skip | SP ~ Limit)? ~ (SP ~ Debug)? }
+
+// Consecutive MATCH clauses are valid. Lowering combines their patterns and predicates.
 Matches = { Match ~ (SP? ~ Match)* }
+
+// CALL is case-insensitive, but db.schema is deliberately case-sensitive and takes zero or one string.
 SchemaCall = { ^"CALL" ~ SP ~ "db.schema" ~ SP? ~ "(" ~ SP? ~ (StringLiteral ~ SP?)? ~ ")" }
+
 Match = { ^"MATCH" ~ SP? ~ Pattern ~ (SP? ~ Where)? }
+
+// Comma-separated elements parse here, but lowering requires one connected, acyclic pattern.
 Pattern = { ShortestPattern | PatternElement ~ (SP? ~ "," ~ SP? ~ PatternElement)* }
+
 ShortestPattern = { Variable ~ SP? ~ "=" ~ SP? ~ (PathSearch ~ SP? ~ PatternElement | LegacyShortestPath) }
-PathSearch = { ^"ANY" ~ SP ~ ^"SHORTEST" | ^"SHORTEST" ~ SP ~ UnsignedInteger }
+
+// Orbit returns one path per endpoint pair. SHORTEST counts other than one are unsupported.
+PathSearch = { ^"ANY" ~ SP ~ ^"SHORTEST" | ^"SHORTEST" ~ SP ~ PathCount }
+
+// Parse the legacy spelling so syntax.rs can return the supported ISO GQL replacement.
 LegacyShortestPath = { ^"shortestPath" ~ SP? ~ "(" ~ SP? ~ PatternElement ~ SP? ~ ")" }
-PatternElement = { NodePattern ~ (SP? ~ PatternElementChain)* }
-NodePattern = { "(" ~ SP? ~ Variable ~ SP? ~ (NodeLabel ~ SP?)? ~ (MapLiteral ~ SP?)? ~ ")" }
+
+// Five relationship segments already include an overflow path because an acyclic chain then has six nodes.
+// Lowering rejects the sixth node against the five-node cap before shared relationship validation runs.
+PatternElement = { NodePattern ~ (SP? ~ PatternElementChain){0,5} }
+
+// Every node needs a variable. Lowering permits one unlabeled far endpoint only for neighbors.
+NodePattern = { "(" ~ SP? ~ Variable ~ SP? ~ (NodeLabel ~ SP?)? ~ (NodeMapLiteral ~ SP?)? ~ ")" }
 NodeLabel = { ":" ~ SP? ~ SchemaName }
 PatternElementChain = { RelationshipPattern ~ SP? ~ NodePattern }
+
+// Ordered alternatives distinguish <-, ->, and --. Unicode arrows are not accepted.
 RelationshipPattern = { Incoming | Outgoing | Undirected }
 Incoming = { "<" ~ SP? ~ "-" ~ SP? ~ (RelationshipDetail ~ SP?)? ~ "-" }
 Outgoing = { "-" ~ SP? ~ (RelationshipDetail ~ SP?)? ~ "-" ~ SP? ~ ">" }
 Undirected = { "-" ~ SP? ~ (RelationshipDetail ~ SP?)? ~ "-" }
-RelationshipDetail = { "[" ~ SP? ~ (Variable ~ SP?)? ~ (RelationshipTypes ~ SP?)? ~ (RangeLiteral ~ SP?)? ~ (MapLiteral ~ SP?)? ~ "]" }
-RelationshipTypes = { ":" ~ SP? ~ SchemaName ~ (SP? ~ "|" ~ ":"? ~ SP? ~ SchemaName)* }
+
+// In [r:TYPE*1..3 {p: 1}], each optional field has a fixed position.
+// A name without a colon is a relationship variable; a name after a colon is a type.
+RelationshipDetail = { "[" ~ SP? ~ (Variable ~ SP?)? ~ (RelationshipTypes ~ SP?)? ~ (RangeLiteral ~ SP?)? ~ (RelationshipMapLiteral ~ SP?)? ~ "]" }
+
+// Eleven types are recognized so shared validation can report the ten-type limit.
+// The colon after | is optional, so both :A|B and :A|:B mean the same thing.
+RelationshipTypes = { ":" ~ SP? ~ SchemaName ~ (SP? ~ "|" ~ ":"? ~ SP? ~ SchemaName){0,10} }
+
+// Bare *, *1.., and *.. parse so lowering can return its specific unbounded-path error.
 RangeLiteral = { "*" ~ SP? ~ RangeStart? ~ SP? ~ (RangeDots ~ SP? ~ RangeEnd?)? }
-RangeStart = { UnsignedInteger }
-RangeEnd = { UnsignedInteger }
+RangeStart = { HopCount }
+RangeEnd = { HopCount }
 RangeDots = { ".." }
+
 Where = { ^"WHERE" ~ SP ~ AndExpression }
-AndExpression = { NotExpression ~ (SP ~ (^"AND" | UnsupportedBooleanOperator) ~ SP ~ NotExpression)* }
+
+// The seventeenth condition is a sentinel for the shared 16-predicate query limit.
+AndExpression = { NotExpression ~ (SP ~ (^"AND" | UnsupportedBooleanOperator) ~ SP ~ NotExpression){0,16} }
+
+// OR and XOR are named tokens only so syntax.rs can explain the supported alternatives.
 UnsupportedBooleanOperator = @{ (^"XOR" | ^"OR") ~ !IdentifierPart }
-NotExpression = { Negation* ~ Predicate }
+
+// The thirty-third NOT is a sentinel that syntax.rs rejects with the shared depth wording.
+NotExpression = { Negation{0,33} ~ Predicate }
+
+// The identifier boundary keeps NOTIFY and similar names from splitting at the keyword prefix.
 Negation = { ^"NOT" ~ !IdentifierPart ~ SP? }
+
+// Specialized predicates precede the generic function fallback because their prefixes overlap.
 Predicate = _{ ParenthesizedExpression | TokenPredicate | ComparisonExpression | TypePredicate | FunctionPredicate }
 ParenthesizedExpression = { "(" ~ SP? ~ AndExpression ~ SP? ~ ")" }
 ComparisonExpression = { PropertyExpression ~ Comparison }
 TypePredicate = { RelationshipType ~ Comparison }
+
+// A bare or compared unknown function parses here so syntax.rs can list supported functions.
 FunctionPredicate = { FunctionCall ~ Comparison? }
-Comparison = _{ SP? ~ ComparisonOperator ~ SP? ~ (Value | FunctionCall | PropertyExpression) | SP ~ StringOperator ~ SP? ~ Value | SP ~ InOperator ~ SP? ~ ListLiteral | SP ~ NegatedInOperator ~ SP? ~ ListLiteral | SP ~ NullOperator }
+
+// Prefix NOT belongs to NotExpression. NOT IN and IS NOT NULL belong inside a comparison.
+Comparison = _{ SP? ~ ComparisonOperator ~ SP? ~ (Value | FunctionCall | PropertyExpression) | SP ~ StringOperator ~ SP? ~ Value | SP ~ InOperator ~ SP? ~ InListLiteral | SP ~ NegatedInOperator ~ SP? ~ InListLiteral | SP ~ NullOperator }
+
+// Arguments are intentionally broad. syntax.rs validates each supported function signature.
 FunctionCall = { FunctionName ~ "(" ~ SP? ~ (FunctionArgument ~ (SP? ~ "," ~ SP? ~ FunctionArgument)*)? ~ SP? ~ ")" }
 FunctionName = @{ !ReservedWord ~ UnescapedSymbolicName }
 FunctionArgument = _{ Star | FunctionCall | Value | PropertyExpression | Variable }
+
 ComparisonOperator = @{ "<=" | ">=" | "<>" | "!=" | "=" | "<" | ">" }
 StringOperator = { ^"STARTS" ~ SP ~ ^"WITH" | ^"ENDS" ~ SP ~ ^"WITH" | ^"CONTAINS" }
 InOperator = { ^"IN" }
 NegatedInOperator = { ^"NOT" ~ SP ~ ^"IN" }
 NullOperator = { ^"IS" ~ SP ~ Not? ~ ^"NULL" }
 Not = { ^"NOT" ~ SP }
+
 TokenPredicate = { TokenFunction ~ SP? ~ "(" ~ SP? ~ PropertyExpression ~ SP? ~ "," ~ SP? ~ Value ~ SP? ~ ")" }
 TokenFunction = @{ ^"token_match" | ^"all_tokens" | ^"any_tokens" }
+
 Return = { ^"RETURN" ~ SP ~ ProjectionItems }
+// RETURN * cannot be mixed with explicit items. Lowering owns query-type and duplicate checks.
 ProjectionItems = { Star | ProjectionItem ~ (SP? ~ "," ~ SP? ~ ProjectionItem)* }
 Star = { "*" }
 ProjectionItem = { ProjectionExpression ~ (SP ~ ^"AS" ~ SP ~ Variable)? }
+
+// Specific function and map forms precede properties and variables because their prefixes overlap.
 ProjectionExpression = { Aggregate | DateTrunc | AllProperties | RelationshipType | FunctionCall | NodeProjection | PropertyExpression | Variable }
-NodeProjection = { Variable ~ SP? ~ "{" ~ SP? ~ ProjectionProperty ~ (SP? ~ "," ~ SP? ~ ProjectionProperty)* ~ SP? ~ "}" }
+
+// Fifty-one properties are recognized so shared validation can report the fifty-column limit.
+NodeProjection = { Variable ~ SP? ~ "{" ~ SP? ~ ProjectionProperty ~ (SP? ~ "," ~ SP? ~ ProjectionProperty){0,50} ~ SP? ~ "}" }
 ProjectionProperty = { "." ~ SP? ~ SchemaName }
+
+// count(*) is intentionally absent. Every aggregate targets one node or node property.
 Aggregate = { AggregateFunction ~ SP? ~ "(" ~ SP? ~ (Distinct ~ SP)? ~ (PropertyExpression | Variable) ~ SP? ~ ")" }
 Distinct = @{ ^"DISTINCT" ~ !IdentifierPart }
 AggregateFunction = @{ ^"count" | ^"sum" | ^"avg" | ^"min" | ^"max" }
 DateTrunc = { ^"date_trunc" ~ SP? ~ "(" ~ SP? ~ StringLiteral ~ SP? ~ "," ~ SP? ~ PropertyExpression ~ SP? ~ ")" }
 AllProperties = { ^"properties" ~ SP? ~ "(" ~ SP? ~ Variable ~ SP? ~ ")" }
 RelationshipType = { ^"type" ~ SP? ~ "(" ~ SP? ~ Variable ~ SP? ~ ")" }
-Order = { ^"ORDER" ~ SP ~ ^"BY" ~ SP ~ SortItem ~ (SP? ~ "," ~ SP? ~ SortItem)* }
+
+// The optional second sort key is a sentinel. syntax.rs always rejects it with the one-key diagnostic.
+Order = { ^"ORDER" ~ SP ~ ^"BY" ~ SP ~ SortItem ~ (SP? ~ "," ~ SP? ~ SortItem)? }
 SortItem = { (RelationshipType | FunctionCall | PropertyExpression | Variable) ~ (SP ~ SortDirection)? }
 SortDirection = @{ ^"ASCENDING" | ^"DESCENDING" | ^"ASC" | ^"DESC" }
-Skip = { (^"SKIP" | ^"OFFSET") ~ SP ~ UnsignedInteger }
-Limit = { ^"LIMIT" ~ SP ~ UnsignedInteger }
+
+// OFFSET is an Orbit extension and is exactly synonymous with SKIP.
+Skip = { (^"SKIP" | ^"OFFSET") ~ SP ~ SkipCount }
+Limit = { ^"LIMIT" ~ SP ~ LimitCount }
+
+// DEBUG is an Orbit extension and is valid only as the final clause.
 Debug = { ^"DEBUG" }
+
 PropertyExpression = { Variable ~ SP? ~ "." ~ SP? ~ SchemaName }
-MapLiteral = { "{" ~ SP? ~ (MapEntry ~ (SP? ~ "," ~ SP? ~ MapEntry)*)? ~ SP? ~ "}" }
+
+// Eleven node properties and six relationship properties are recognized as one-item sentinels.
+// syntax.rs rejects duplicate keys before shared validation checks the ten-key and five-key limits.
+NodeMapLiteral = { "{" ~ SP? ~ (MapEntry ~ (SP? ~ "," ~ SP? ~ MapEntry){0,10})? ~ SP? ~ "}" }
+RelationshipMapLiteral = { "{" ~ SP? ~ (MapEntry ~ (SP? ~ "," ~ SP? ~ MapEntry){0,5})? ~ SP? ~ "}" }
 MapEntry = { SchemaName ~ SP? ~ ":" ~ SP? ~ Value }
+
+// Lists are values, so nesting is possible but remains protected by delimiter depth and query size.
 Value = _{ TemporalLiteral | BooleanLiteral | NumberLiteral | StringLiteral | ListLiteral }
 TemporalLiteral = { (^"datetime" | ^"date") ~ SP? ~ "(" ~ SP? ~ StringLiteral ~ SP? ~ ")" }
 BooleanLiteral = @{ (^"true" | ^"false") ~ !IdentifierPart }
+
+// The identifier boundary rejects a numeric prefix such as 1abc as one malformed token.
 NumberLiteral = @{ ("+" | "-")? ~ (DoubleLiteral | IntegerLiteral) ~ !IdentifierPart }
+
+// Decimal exponents accept an optional minus but not a plus. This matches the supported M23 subset.
 DoubleLiteral = _{ (ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? | "." ~ ASCII_DIGIT+) ~ (^"e" ~ "-"? ~ ASCII_DIGIT+) | ASCII_DIGIT* ~ "." ~ ASCII_DIGIT+ }
+
+// Hex and octal prefixes are lowercase. syntax.rs performs the full integer range check.
 IntegerLiteral = _{ "0x" ~ ASCII_HEX_DIGIT+ | "0o" ~ ASCII_OCT_DIGIT+ | UnsignedInteger }
 UnsignedInteger = @{ ("0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) ~ !IdentifierPart }
-StringLiteral = @{ "\"" ~ (! ("\"" | "\\") ~ ANY | EscapedChar)* ~ "\"" | "'" ~ (! ("'" | "\\") ~ ANY | EscapedChar)* ~ "'" }
+
+// Immediate boundary violations are sentinels for specific semantic errors. Larger violations stop in Pest.
+PathCount = @{ ("2" | "1" | "0") ~ !IdentifierPart }
+HopCount = @{ ("4" | "3" | "2" | "1" | "0") ~ !IdentifierPart }
+LimitCount = @{ ("1001" | "1000" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT{0,2} | "0") ~ !IdentifierPart }
+SkipCount = @{ ("10001" | "10000" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT{0,3} | "0") ~ !IdentifierPart }
+
+// Raw C0 controls and DEL are invalid. Explicit escapes remain valid and count after decoding.
+StringLiteral = @{ "\"" ~ DoubleQuotedCharacter* ~ "\"" | "'" ~ SingleQuotedCharacter* ~ "'" }
+DoubleQuotedCharacter = _{ EscapedChar | !("\"" | "\\" | ControlCharacter) ~ ANY }
+SingleQuotedCharacter = _{ EscapedChar | !("'" | "\\" | ControlCharacter) ~ ANY }
+ControlCharacter = _{ '\u{0000}'..'\u{001f}' | "\u{007f}" }
+
+// Escape letters b, f, n, r, and t are case-insensitive. Unicode has exactly four or eight hex digits.
 EscapedChar = _{ "\\" ~ ("\\" | "'" | "\"" | ^"b" | ^"f" | ^"n" | ^"r" | ^"t" | "u" ~ ASCII_HEX_DIGIT{4} | "U" ~ ASCII_HEX_DIGIT{8}) }
-ListLiteral = { "[" ~ SP? ~ (Value ~ (SP? ~ "," ~ SP? ~ Value)*)? ~ SP? ~ "]" }
+
+// An id IN list becomes node_ids, so IN stops at a 501st-value sentinel and validation caps other IN
+// lists at 100. Every other list, including one in a property map, is a filter value capped at 100.
+// ListOverflow takes the rest, so any longer list gets one clear error.
+InListLiteral = { "[" ~ SP? ~ (Value ~ (SP? ~ "," ~ SP? ~ Value){0,500} ~ ListOverflow?)? ~ SP? ~ "]" }
+ListLiteral = { "[" ~ SP? ~ (Value ~ (SP? ~ "," ~ SP? ~ Value){0,100} ~ ListOverflow?)? ~ SP? ~ "]" }
+ListOverflow = { (SP? ~ "," ~ SP? ~ Value)+ }
+
 Variable = { SymbolicName }
+
+// Quoting permits reserved words. It does not broaden the identifier character set.
 SchemaName = { EscapedSymbolicName | UnescapedSymbolicName }
 SymbolicName = _{ EscapedSymbolicName | !ReservedWord ~ UnescapedSymbolicName }
-UnescapedSymbolicName = @{ (ASCII_ALPHA | "_") ~ IdentifierPart* }
-EscapedSymbolicName = @{ "`" ~ ("``" | !"`" ~ ANY)* ~ "`" }
+
+// The 65th character is a sentinel for validate_identifier's 64-byte diagnostic.
+UnescapedSymbolicName = @{ IdentifierStart ~ IdentifierPart{0,64} }
+
+// Backticks permit reserved words. validate_identifier rejects any other character, so the error names the problem.
+EscapedSymbolicName = @{ "`" ~ (!"`" ~ ANY)+ ~ "`" }
+
+IdentifierStart = _{ ASCII_ALPHA | "_" }
 IdentifierPart = _{ ASCII_ALPHANUMERIC | "_" }
+
+// The broad reserved set prevents unsupported write and composition words from becoming variables.
+// The identifier boundary keeps a longer name such as matching from splitting at MATCH.
 ReservedWord = @{ (^"ALL" | ^"ANY" | ^"SHORTEST" | ^"ASCENDING" | ^"ASC" | ^"BY" | ^"CREATE" | ^"DELETE" | ^"DESCENDING" | ^"DESC" | ^"DETACH" | ^"EXISTS" | ^"LIMIT" | ^"OFFSET" | ^"DEBUG" | ^"MATCH" | ^"MERGE" | ^"ON" | ^"OPTIONAL" | ^"ORDER" | ^"REMOVE" | ^"RETURN" | ^"SET" | ^"SKIP" | ^"WHERE" | ^"WITH" | ^"UNION" | ^"UNWIND" | ^"AND" | ^"AS" | ^"CONTAINS" | ^"DISTINCT" | ^"ENDS" | ^"IN" | ^"IS" | ^"NOT" | ^"OR" | ^"STARTS" | ^"XOR" | ^"FALSE" | ^"TRUE" | ^"NULL" | ^"CONSTRAINT" | ^"DO" | ^"FOR" | ^"REQUIRE" | ^"UNIQUE" | ^"CASE" | ^"WHEN" | ^"THEN" | ^"ELSE" | ^"END" | ^"MANDATORY" | ^"SCALAR" | ^"OF" | ^"ADD" | ^"DROP") ~ !IdentifierPart }
+
+// Whitespace is explicit instead of Pest's implicit WHITESPACE rule, so required separators stay visible.
+// Comments count as whitespace but do not nest.
 SP = _{ (WhiteSpace | Comment)+ }
 WhiteSpace = _{ " " | "\t" | "\n" | "\r" | "\u{0b}" | "\u{0c}" | '\u{1c}'..'\u{1f}' | "\u{1680}" | "\u{180e}" | '\u{2000}'..'\u{200a}' | "\u{2028}" | "\u{2029}" | "\u{205f}" | "\u{3000}" | "\u{a0}" | "\u{202f}" }
+
 // A trailing line comment must not reference EOI, which would emit a second EOI pair under Query.
 Comment = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" | "//" ~ (!("\n" | "\r") ~ ANY)* ~ ("\r"? ~ "\n")? }
+
+// This flat scanner protects Pest's recursive expression rules before the real parse starts.
+// It ignores delimiters inside strings, quoted names, and comments, and accepts every other character.
 Nesting = { SOI ~ (SkipString | SkipEscaped | SkipComment | OpenDelimiter | CloseDelimiter | Ignored)* ~ EOI }
+
 // Unterminated tokens run to EOI instead of failing, so the scan never backtracks and stays linear.
 SkipString = _{ "\"" ~ ("\\" ~ ANY | !"\"" ~ ANY)* ~ ("\"" | EOI) | "'" ~ ("\\" ~ ANY | !"'" ~ ANY)* ~ ("'" | EOI) }
+
+// Doubled backticks are not escapes here or in EscapedSymbolicName.
 SkipEscaped = _{ "`" ~ (!"`" ~ ANY)* ~ ("`" | EOI) }
 SkipComment = _{ "/*" ~ (!"*/" ~ ANY)* ~ ("*/" | EOI) | "//" ~ (!("\n" | "\r") ~ ANY)* }
 OpenDelimiter = { "(" | "[" | "{" }

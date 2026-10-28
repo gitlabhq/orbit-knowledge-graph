@@ -31,15 +31,15 @@ every access check along the way.
 
 ```mermaid
 flowchart LR
-    Caller --> GitLab --> Workhorse --> Orbit
+    Caller --> GitLab --> Orbit
 ```
 
 GitLab authenticates the caller and works out which namespaces they can read,
-and with which role. It signs that list into a short-lived token and hands the
-request to Workhorse. Workhorse streams the request to Orbit over gRPC, so a
-long query never holds a GitLab web worker.
+and with which role. It signs that list into a short-lived token and opens a
+gRPC stream to Orbit. The same GitLab request answers the redaction checks and
+streams the result back to the caller.
 [Caller scope](../security/authorization.md#caller-scope) explains
-the token, and [ADR 008](../../adr/008_workhorse_query_acceleration.md)
+the token, and [ADR 022](../../adr/022_queries_in_rails.md)
 explains the stream.
 
 ### 2. Orbit compiles the query
@@ -177,7 +177,7 @@ bound, and secure every query, and LLMs can write it reliably.
 
 - [ADR 000: ClickHouse as graph storage](../../adr/000_clickhouse_graph_storage.md)
 - [ADR 004: Unified response schema](../../adr/004_unified_response_schema.md)
-- [ADR 008: Workhorse query acceleration](../../adr/008_workhorse_query_acceleration.md)
 - [ADR 011: Agent command surface](../../adr/011_agent_command_surface.md)
 - [ADR 019: GQL response format](../../adr/019_gql_response_format.md)
 - [ADR 021: Entity context expansion](../../adr/021_entity_context_expansion.md)
+- [ADR 022: Orbit queries in Rails](../../adr/022_queries_in_rails.md)

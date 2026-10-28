@@ -11,11 +11,17 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+# libduckdb-sys is used only by build.rs, which reads the download directory it publishes as
+# DEP_DUCKDB_INCLUDE. cargo-shear does not see build-script use of links metadata.
+[package.metadata.cargo-shear]
+ignored = ["libduckdb-sys"]
+
 [dependencies]
 mimalloc = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
 code-graph-incremental = { path = "../code-graph-incremental" }
 duckdb-client = { path = "../duckdb-client" }
+libduckdb-sys = { workspace = true }
 labkit-events = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics" }
 orbit-cli-graphql = { workspace = true }

@@ -3,8 +3,8 @@ title: Container tests
 description: How the integration tests run against a real ClickHouse, a real message broker, and mocks of GitLab.
 order: 3
 authors:
-  - michaelangeloio
   - michaelusa
+  - michaelangeloio
 ---
 
 ## One ClickHouse for the whole run
