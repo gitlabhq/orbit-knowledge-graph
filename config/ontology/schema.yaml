@@ -356,6 +356,7 @@ domains:
       Group: nodes/core/group.yaml
       Project: nodes/core/project.yaml
       Note: nodes/core/note.yaml
+      MemberRole: nodes/core/member_role.yaml
     derived:
       SystemNote: derived/core/system_note.yaml
   code_review:
@@ -382,12 +383,14 @@ domains:
       VulnerabilityScanner: nodes/security/scanner.yaml
       VulnerabilityIdentifier: nodes/security/identifier.yaml
       SecurityScan: nodes/security/security_scan.yaml
+      SbomOccurrence: nodes/security/sbom_occurrence.yaml
   plan:
     description: "Entities related to planning, tracking, and organizing work."
     nodes:
       WorkItem: nodes/plan/work_item.yaml
       Milestone: nodes/plan/milestone.yaml
       Label: nodes/plan/label.yaml
+      Todo: nodes/plan/todo.yaml
   source_code:
     description: "Entities related to source code structure, definitions, and imports."
     nodes:
@@ -411,6 +414,8 @@ domains:
     description: "Entities related to AI agent sessions."
     nodes:
       AgentSession: nodes/agents/agent_session.yaml
+      DuoWorkflow: nodes/agents/duo_workflow.yaml
+      DuoCatalogItem: nodes/agents/duo_catalog_item.yaml
 edges:
   CONTAINS: edges/contains.yaml
   HAS_DIFF: edges/has_diff.yaml
@@ -472,3 +477,6 @@ edges:
   MERGED_AT_COMMIT: edges/merged_at_commit.yaml
   DECLARES_DEPENDENCY: edges/declares_dependency.yaml
   HAS_VULNERABILITY: edges/has_vulnerability.yaml
+  HAS_TODO: edges/has_todo.yaml
+  HAS_WORKFLOW: edges/has_workflow.yaml
+  HAS_ROLE: edges/has_role.yaml

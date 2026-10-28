@@ -1,0 +1,26 @@
+description: Duo workflows in a project index with mapped status, IN_PROJECT edges, and HAS_WORKFLOW edges from their agent sessions; namespace-level workflows (project_id 0 or null), live or deleted, are not indexed
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_duo_workflows_workflows:
+    - { id: 1, user_id: 7, project_id: 1000, namespace_id: null, status: 3, goal: Fix the failing pipeline, title: Fix pipeline, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 11:00:00", traversal_path: "1/100/1000/" }
+    - { id: 2, user_id: 7, project_id: 1000, namespace_id: null, status: 6, goal: Write release notes, title: null, created_at: "2024-01-15 12:00:00", updated_at: "2024-01-15 12:00:00", traversal_path: "1/100/1000/" }
+    - { id: 3, user_id: 7, project_id: 0, namespace_id: 100, status: 1, goal: Chat in the group, title: Group chat, created_at: "2024-01-15 12:00:00", updated_at: "2024-01-15 12:00:00", traversal_path: "1/100/" }
+    - { id: 4, user_id: 7, project_id: null, namespace_id: 100, status: 3, goal: Old group chat, created_at: "2024-01-15 12:00:00", updated_at: "2024-01-15 12:00:00", traversal_path: "1/100/", _siphon_deleted: true }
+  siphon_ai_governance_sessions:
+    - { id: 11, namespace_id: 100, project_id: 1000, user_id: 7, workflow_id: 1, source: 0, flow_type: fix_pipeline, session_started_at: "2024-01-15 10:00:00", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 12, namespace_id: 100, project_id: 1000, user_id: 7, workflow_id: null, source: 0, flow_type: developer, session_started_at: "2024-01-15 12:00:00", created_at: "2024-01-15 12:00:00", updated_at: "2024-01-15 12:00:00", traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_duo_workflow:
+      rows:
+        - { id: 1, project_id: 1000, status: finished, goal: Fix the failing pipeline, title: Fix pipeline }
+        - { id: 2, project_id: 1000, status: input_required, title: null }
+  edges:
+    - { kind: IN_PROJECT, from: DuoWorkflow, to: Project, traversal_path: "1/100/1000/", count: 2 }
+    - { kind: HAS_WORKFLOW, from: AgentSession, to: DuoWorkflow, traversal_path: "1/100/1000/", count: 1, rows: [{ source_id: 11, target_id: 1 }] }

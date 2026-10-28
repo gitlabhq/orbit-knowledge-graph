@@ -130,6 +130,13 @@ pipelines:
             field: project_id
             kind: Project
           label: IN_PROJECT
+        - from:
+            field: id
+            kind: AgentSession
+          to:
+            field: workflow_id
+            kind: DuoWorkflow
+          label: HAS_WORKFLOW
 
 storage:
   primary_key: [traversal_path, id]

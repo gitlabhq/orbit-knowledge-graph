@@ -182,6 +182,7 @@ These properties have a text index:
 | `Dependency` | `name` |
 | `Deployment` | `ref` |
 | `Directory` | `name`, `path` |
+| `DuoCatalogItem` | `name` |
 | `Environment` | `environment_type`, `name` |
 | `File` | `name`, `path` |
 | `Finding` | `description`, `name` |
@@ -189,6 +190,7 @@ These properties have a text index:
 | `ImportedSymbol` | `file_path`, `import_path` |
 | `Job` | `name`, `ref` |
 | `Label` | `description`, `title` |
+| `MemberRole` | `name` |
 | `MergeRequest` | `description`, `source_branch`, `target_branch`, `title` |
 | `MergeRequestDiff` | `head_commit_sha` |
 | `MergeRequestDiffFile` | `new_path`, `old_path` |

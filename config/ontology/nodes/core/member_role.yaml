@@ -1,0 +1,112 @@
+node_type: MemberRole
+domain: core
+global: true
+description: A custom role with a base access level and extra permissions, defined for a group or for the instance. Admin roles are not indexed
+label: name
+destination_table: gl_member_role
+default_columns: [id, name, base_access_level, namespace_id]
+sort_key: [id]
+
+style:
+  size: 20
+  color: "#64748B"
+
+redaction:
+  resource_type: member_role
+  id_column: id
+  ability: read_member_role
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Name."
+
+  description:
+    type: string
+    source: description
+    nullable: true
+    description: "Description."
+
+  base_access_level:
+    type: enum
+    source: base_access_level
+    nullable: false
+    description: "Default role that the custom role extends."
+    values:
+      5: minimal_access
+      10: guest
+      15: planner
+      20: reporter
+      25: security_manager
+      30: developer
+      40: maintainer
+      50: owner
+
+  permissions:
+    type: string
+    source: permissions
+    nullable: false
+    description: "JSON object of the permissions the role enables (e.g. '{\"read_vulnerability\": true}')."
+
+  occupies_seat:
+    type: boolean
+    source: occupies_seat
+    nullable: false
+    description: "Whether a member with this role takes a billable seat."
+
+  namespace_id:
+    type: int64
+    source: namespace_id
+    nullable: true
+    mutable: false
+    description: "Top-level group that defines the role. Null for instance roles."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    mutable: false
+    description: "Creation timestamp."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "Last update timestamp."
+
+pipelines:
+  - name: MemberRole
+    extract:
+      type: clickhouse
+      tables: [siphon_member_roles]
+      order_by: [id]
+      filter: "isNotNull(base_access_level) OR {{deleted_column}}"
+      query: generated
+    transform:
+      type: datafusion
+storage:
+  primary_key: [id]
+  settings:
+    add_minmax_index_for_temporal_columns: "1"
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: description, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: base_access_level, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: permissions, type: "String", default: "'{}'", codec: ["ZSTD(1)"]}
+    - {name: occupies_seat, type: "Bool", default: "false"}
+    - {name: namespace_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+  indexes:
+    - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
+    - {name: idx_name, column: name, type: text, granularity: 1}

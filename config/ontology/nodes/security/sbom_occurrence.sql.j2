@@ -1,0 +1,33 @@
+WITH
+  _page AS MATERIALIZED (SELECT
+    *
+  FROM siphon_sbom_occurrences AS o
+  WHERE startsWith(o.traversal_path, {traversal_path:String}) {{filters}}
+  ORDER BY traversal_path, id
+  LIMIT {{batch_size}})
+SELECT
+  o.id AS id,
+  o.project_id AS project_id,
+  o.component_name AS component_name,
+  o.package_manager AS package_manager,
+  nullIf(cv.version, '') AS version,
+  o.highest_severity AS highest_severity,
+  o.reachability AS reachability,
+  o.vulnerability_count AS vulnerability_count,
+  o.input_file_path AS input_file_path,
+  o.archived AS archived,
+  o.created_at AS created_at,
+  o.updated_at AS updated_at,
+  o.traversal_path AS traversal_path,
+  o.{{version_column}} AS _version,
+  o.{{deleted_column}} AS _deleted
+FROM _page AS o
+LEFT JOIN (
+  SELECT
+    id AS _cv_id,
+    argMax(version, {{version_column}}) AS version
+  FROM siphon_sbom_component_versions
+  WHERE id IN (SELECT component_version_id FROM _page)
+  GROUP BY id ) AS cv ON o.component_version_id = cv._cv_id
+ORDER BY traversal_path, id
+SETTINGS enable_materialized_cte = 1

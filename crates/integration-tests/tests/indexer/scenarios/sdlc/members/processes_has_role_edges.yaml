@@ -1,0 +1,20 @@
+description: Memberships with a custom role produce HAS_ROLE edges on the membership path; memberships without one and pending access requests do not
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_users:
+    - { id: 1, email: user1@example.com, username: user1, name: User 1, state: active, organization_id: 1 }
+    - { id: 2, email: user2@example.com, username: user2, name: User 2, state: active, organization_id: 1 }
+  siphon_members:
+    - { id: 11000, access_level: 20, source_id: 100, source_type: Namespace, user_id: 1, state: 0, member_role_id: 5, traversal_path: "1/100/" }
+    - { id: 11001, access_level: 30, source_id: 1000, source_type: Project, user_id: 2, state: 0, member_role_id: null, traversal_path: "1/100/1000/" }
+    - { id: 11002, access_level: 20, source_id: 100, source_type: Namespace, user_id: 2, state: 0, member_role_id: 5, requested_at: "2024-01-10 00:00:00", traversal_path: "1/100/" }
+
+expect:
+  edges:
+    - { kind: HAS_ROLE, from: User, to: MemberRole, traversal_path: "1/100/", count: 1, rows: [{ source_id: 1, target_id: 5 }] }
+    - { kind: MEMBER_OF, from: User, to: Group, traversal_path: "1/100/", count: 1 }
