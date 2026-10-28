@@ -48,13 +48,13 @@ struct ReconciliationGroup {
     emitting_node_kind_column: &'static str,
     relationship_kinds: Vec<String>,
     edge_sort_key: String,
-    parent_key_columns: Option<Vec<String>>,
+    parent_keys: Option<Vec<(String, String)>>,
 }
 
 #[derive(Default)]
 struct GroupMappings {
     kinds: Vec<String>,
-    parent_key_columns: Vec<String>,
+    parent_keys: Vec<(String, String)>,
     has_unkeyed_parent: bool,
 }
 
@@ -256,7 +256,9 @@ fn group_fk_edges_by_emitting_node(ontology: &Ontology) -> Vec<ReconciliationGro
                         .or_default();
                     group.kinds.push(mapping.label.clone());
                     match &parent_key_column {
-                        Some(column) => group.parent_key_columns.push(column.clone()),
+                        Some(column) => group
+                            .parent_keys
+                            .push((mapping.label.clone(), column.clone())),
                         None => group.has_unkeyed_parent = true,
                     }
                 }
@@ -270,17 +272,17 @@ fn group_fk_edges_by_emitting_node(ontology: &Ontology) -> Vec<ReconciliationGro
             |((stale_when, emitting_node, edge_table, emitting_node_id_column), mappings)| {
                 let GroupMappings {
                     mut kinds,
-                    mut parent_key_columns,
+                    mut parent_keys,
                     has_unkeyed_parent,
                 } = mappings;
                 kinds.sort();
                 kinds.dedup();
-                parent_key_columns.sort();
-                parent_key_columns.dedup();
-                let parent_key_columns = (stale_when == StaleWhen::EmitterDeleted
+                parent_keys.sort();
+                parent_keys.dedup();
+                let parent_keys = (stale_when == StaleWhen::EmitterDeleted
                     && emitting_node_id_column == "target_id"
                     && !has_unkeyed_parent)
-                    .then_some(parent_key_columns);
+                    .then_some(parent_keys);
                 let edge_sort_key = ontology
                     .edge_table_config(&edge_table)
                     .map(|config| config.sort_key.join(", "))
@@ -298,7 +300,7 @@ fn group_fk_edges_by_emitting_node(ontology: &Ontology) -> Vec<ReconciliationGro
                     },
                     relationship_kinds: kinds,
                     edge_sort_key,
-                    parent_key_columns,
+                    parent_keys,
                 }
             },
         )
@@ -330,7 +332,7 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
         emitting_node,
         relationship_kinds,
         edge_sort_key,
-        parent_key_columns,
+        parent_keys,
     } = group;
 
     let emitter_state = match stale_when {
@@ -366,26 +368,34 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
         )
     };
 
-    let (prior, edge_rows) = match parent_key_columns {
+    let (prior, edge_rows) = match parent_keys {
         None => (
             String::new(),
             edge_read(&format!(
                 "{emitting_node_id_column} IN (SELECT id FROM emitter)"
             )),
         ),
-        Some(columns) => (
+        Some(keys) => (
             format!(
                 "prior AS MATERIALIZED ( \
-                   SELECT traversal_path, id, arrayJoin([{columns}]) AS foreign_key \
-                   FROM {emitting_node_table} \
+                   SELECT traversal_path, id, link.1 AS relationship_kind, link.2 AS foreign_key \
+                   FROM {emitting_node_table} ARRAY JOIN [{links}] AS link \
                    WHERE _deleted = false \
                      AND (traversal_path, id) IN (SELECT traversal_path, id FROM emitter) \
                  ), ",
-                columns = columns.join(", "),
+                links = keys
+                    .iter()
+                    .map(|(kind, column)| format!("('{kind}', {column})"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
             ),
             format!(
                 "SELECT * FROM ({} UNION ALL {})",
-                edge_read("source_id IN (SELECT foreign_key FROM prior)"),
+                edge_read(
+                    "(traversal_path, relationship_kind, source_id, target_id) IN \
+                     (SELECT traversal_path, relationship_kind, assumeNotNull(foreign_key), id \
+                     FROM prior WHERE foreign_key IS NOT NULL)"
+                ),
                 edge_read(
                     "target_id IN (SELECT id FROM emitter \
                      WHERE (traversal_path, id) NOT IN (SELECT traversal_path, id FROM prior))"
@@ -466,7 +476,7 @@ mod tests {
             emitting_node_kind_column: "target_kind",
             relationship_kinds: vec!["TRIGGERED".to_string(), "AUTO_CANCELED_BY".to_string()],
             edge_sort_key: EDGE_SORT_KEY_FIXTURE.to_string(),
-            parent_key_columns: None,
+            parent_keys: None,
         }
     }
 
