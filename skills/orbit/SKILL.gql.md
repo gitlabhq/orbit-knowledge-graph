@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.7+gql
+version: 0.35.8+gql
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
@@ -30,8 +30,6 @@ If they decline, note the discrepancy in one line and continue with the correcte
 
 Queries use read-only openCypher 9-based syntax (`MATCH ... RETURN`).
 
-If you find a legacy JSON query (an object with `query_type`, `nodes`, or `relationships`), run `glab orbit skills get orbit-gql-migration` and convert it to GQL. The JSON language is deprecated.
-
 ## Discovery
 
 `glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available skills. Run `glab orbit skills get orbit` to print the composed skill (`SKILL.md` by default), or append a path such as `references/local/cli.md` to print a file.
@@ -42,7 +40,7 @@ The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in yo
 
 Each `glab orbit query` has fixed per-call overhead. Prefer one aggregate query, with `count(...)` in `RETURN`, over N lookups for "how many X grouped by Y", and batch related lookups.
 
-When editing Orbit docs or skills, fence executable JSON queries as `json orbit-query` and GQL queries as `gql orbit-query` so docs smoke tests run them.
+When editing Orbit docs or skills, fence executable GQL queries as `gql orbit-query` so docs smoke tests run them.
 
 ## Running a query
 
@@ -56,7 +54,7 @@ glab orbit query "MATCH (p:Project {full_path: 'gitlab-org/gitlab'}) RETURN p.id
 
 With a standalone install, use `orbit query` instead of `glab orbit query`. Quote the whole query for the shell; single-quoted string literals then need double quotes around the query.
 
-`--file` reads a JSON request envelope whose `query` field holds the query text, not a bare query file. `--file -` reads that envelope from stdin. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
+`--file` reads a request envelope whose `query` field holds the query text, not a bare query file. `--file -` reads that envelope from stdin. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
 
 ## Common pitfalls
 

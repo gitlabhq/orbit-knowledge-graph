@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.7
+version: 0.35.8
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
@@ -26,88 +26,55 @@ If guidance is wrong or outdated (command, flag, or behavior), tell the user.
 With their confirmation, open a focused MR against `metadata.source-project` fixing `metadata.source-path` (one fix per MR, Conventional Commits).
 If they decline, note the discrepancy in one line and continue with the corrected command.
 
+## Query language
+
+Queries use read-only openCypher 9-based syntax (`MATCH ... RETURN`).
+
 ## Discovery
 
-`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available skills. Run `glab orbit skills get orbit` to print the composed skill (`SKILL.md` by default), or append a path such as `references/local/cli.md` to print a file. For entity properties, prefer the recipes in [`references/recipes.md`](references/recipes.md) over schema introspection. They already encode the columns and filters known to work.
+`glab orbit help` and `glab orbit <command> --help` are the authoritative usage references. Run `glab orbit skills` to list available skills. Run `glab orbit skills get orbit` to print the composed skill (`SKILL.md` by default), or append a path such as `references/local/cli.md` to print a file.
 
-If you must introspect, call `glab orbit schema <Entity...>` with explicit entity names. The unscoped form returns about 40 KB of output. Call it at most once per session, because the schema does not change mid-session. In JSON mode, the DSL is documented in [`references/query_language.md`](references/query_language.md). In GQL mode, run `CALL db.schema()` instead. The schema command returns an object with `nodes` and `edges` arrays and does not accept `--jq`, so pipe into `jq`. Only named nodes have `properties`. Edges list `endpoints` with a `source` and a `target`:
+Run `CALL db.schema()` once per session, because the schema does not change mid-session. It lists every relationship as `(Source)-[:TYPE]->(Target)` and the properties of the common nodes, such as `User`, `Project`, `Group`, `MergeRequest`, and `WorkItem`. Run `CALL db.schema('Node')` only for a node it does not list properties for. Query syntax and paste-ready queries are in [`references/gql.md`](references/gql.md).
 
-```shell
-glab orbit schema Project |
-  jq '.nodes[] | select(.name == "Project") | .properties.nodes'
-```
+The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in your mode. Do not reuse discovery results across users or mode changes. Entries contain only `name`, `description`, and `raw_query`; there is no client language selector. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
 
-The default-off Rails `orbit_gql_queries` flag selects one mode per user: JSON objects when off, GQL strings when on. Follow only the active mode's discovery; a mismatched query rejects without parser fallback. GQL mode hides and rejects `get_query_dsl`; use `CALL db.schema()` instead. The JSON recipes below apply only when the flag is off.
+Each `glab orbit query` has fixed per-call overhead. Prefer one aggregate query, with `count(...)` in `RETURN`, over N lookups for "how many X grouped by Y", and batch related lookups.
 
-The named-query catalog at `GET /api/v4/orbit/query/templates` is rendered in that mode. Do not reuse discovery results across users or mode changes. Entries contain only `name`, `description`, and `raw_query`; there is no client language selector. See [catalog troubleshooting](references/troubleshooting.md#named-query-catalog).
-
-Each `glab orbit query` has fixed per-call overhead. Prefer one `aggregation` query over N traversal queries for "how many X grouped by Y", and batch related lookups.
-
-When editing Orbit docs or skills, fence executable query JSON as `json orbit-query` so docs smoke tests run it.
+When editing Orbit docs or skills, fence executable GQL queries as `gql orbit-query` so docs smoke tests run them.
 
 ## Running a query
 
-Queries accept at most 16 predicates total. Each node or relationship filter
-operator counts once, including repeated entries. A nonempty `node_ids` list
-counts as one predicate; `id_range` counts as two. An `IN` list counts once,
-with its existing value limit. If rejected, remove redundant conditions or
-simplify the query.
-
-Write the request body to a file and pass it to `glab orbit query --file`. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
-
-Many filters need a numeric project ID. For the repository you are in, let `glab` resolve it from the Git remote.
+Pass query text inline. The CLI builds the request envelope, so a short query needs no temporary file:
 
 ```shell
-PROJECT_ID=$(glab api projects/:fullpath | jq -r '.id')
+glab orbit query 'CALL db.schema()'
+glab orbit query "CALL db.schema('Project')"
+glab orbit query "MATCH (p:Project {full_path: 'gitlab-org/gitlab'}) RETURN p.id, p.full_path LIMIT 1"
 ```
 
-Put the request body in `/tmp/q.json`.
+With a standalone install, use `orbit query` instead of `glab orbit query`. Quote the whole query for the shell; single-quoted string literals then need double quotes around the query.
 
-```json orbit-query
-{
-  "query": {
-    "query_type": "traversal",
-    "nodes": [
-      {"id": "p",  "entity": "Project",
-       "filters": {"id": {"eq": 278964}}},
-      {"id": "mr", "entity": "MergeRequest",
-       "columns": ["iid", "title", "state"]}
-    ],
-    "relationships": [
-      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-    ],
-    "order_by": "-mr.created_at",
-    "limit": 5
-  }
-}
-```
-
-```shell
-glab orbit query --file /tmp/q.json
-```
-
-`filters` is an object keyed by property name, not an array. Every query declares its node selectors in the `nodes` array. Filter operators, multi-hop `hops`, and `path_finding` limits are in [`references/query_language.md`](references/query_language.md). Paste-ready shapes for each `query_type` are in [`references/recipes.md`](references/recipes.md).
+`--file` reads a request envelope whose `query` field holds the query text, not a bare query file. `--file -` reads that envelope from stdin. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
 
 ## Common pitfalls
 
-Read the recipes before you construct a query. The same question often has one canonical shape and several wrong shapes that look correct. Four traps recur:
+Read [`references/gql.md`](references/gql.md) before you construct a query. These traps recur:
 
-- Pipelines for a merge request need the `source = "merge_request_event"` filter. See [the recipe](references/recipes.md#pipelines-that-ran-for-one-merge-request).
-- Prefer a single-node query when you can bound the target entity directly. Extra anchor nodes can change the row shape and skew `aggregation` counts.
-- File history needs `HAS_DIFF`, not `HAS_LATEST_DIFF`. See [the recipe](references/recipes.md#mrs-that-touched-a-file-historical-coverage).
-- Issues, epics, tasks, and incidents are the `WorkItem` entity. There is no `Issue` node. See [the recipe](references/recipes.md#work-items-in-a-project).
+- At least one node needs an ID or a property filter. `LIMIT` does not bound the scan, so `MATCH (p:Project) RETURN p LIMIT 5` rejects.
+- Write relationship types after a colon: `-[:AUTHORED]->`. `-[AUTHORED]->` declares a variable and rejects.
+- Pipelines for a merge request need the `source: 'merge_request_event'` filter.
+- Prefer a single anchored node when you can bound the target directly. Extra anchor nodes can change the row shape and skew aggregate counts.
+- To find MRs that ever touched a file, use `HAS_DIFF`; see [file history](references/gql.md#merge-requests-that-touched-a-file). Use `HAS_LATEST_DIFF` for one MR's current revision.
+- Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
+- There is no `OR`, `XOR`, `RETURN DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`. `DISTINCT` works only inside `count()`: `count(DISTINCT pl)`.
 
 ## Iteration budget
 
-Resolve a user question in at most 5 query attempts, validation errors included. Changing only `limit` or `columns` is not progress. Full rules: [`references/troubleshooting.md`](references/troubleshooting.md#iteration-budget-rules).
+Resolve a user question in at most 5 query attempts, validation errors included. Changing only the row limit or the returned properties is not progress. Full rules: [`references/troubleshooting.md`](references/troubleshooting.md#iteration-budget-rules).
 
 ## Reporting results
 
 Orbit answers come from graph queries, not an authoritative source. Show the query body and its coverage gaps with every result. Full guidance: [`references/reporting.md`](references/reporting.md).
-
-## Repository map helper
-
-For code-structure orientation on a project already indexed by GitLab Orbit, use the bundled remote helper script. The script path is relative to this skill root, not the user's repository. See the repository-map row in [References](#references).
 
 <!-- orbit:include local:quick-start -->
 
@@ -129,9 +96,7 @@ Skip the confirmation prompts for good with `glab config set orbit_cli_auto_run 
 | Topic | Location |
 |---|---|
 | First-run setup, exit codes, service health, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
-| Empty results and query validation errors | [`references/recipes.md`](references/recipes.md#troubleshooting) |
-| Full DSL reference | [`references/query_language.md`](references/query_language.md) |
-| Paste-ready bodies per `query_type` | [`references/recipes.md`](references/recipes.md) |
+| openCypher 9-based syntax and paste-ready queries | [`references/gql.md`](references/gql.md) |
+| Empty results and query validation errors | [`references/gql.md`](references/gql.md#troubleshooting) |
 | Reporting results and coverage caveats | [`references/reporting.md`](references/reporting.md) |
-| Remote repository map helper | [`references/remote_repo_map.md`](references/remote_repo_map.md) |
 | Maintaining this skill (contributing, doc sync) | [`references/maintaining.md`](references/maintaining.md) |
