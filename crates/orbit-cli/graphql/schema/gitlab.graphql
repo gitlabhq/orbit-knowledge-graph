@@ -4756,7 +4756,7 @@ input AiCatalogAgentCreateInput {
   description: String!
 
   """
-  MCP servers to associate with the agent. Introduced in GitLab 18.10: Status: Experiment.
+  MCP servers to associate with the agent. At most 20. Introduced in GitLab 18.10: Status: Experiment.
   """
   mcpServers: [AiCatalogMcpServerID!] @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.10.")
 
@@ -4886,7 +4886,7 @@ input AiCatalogAgentUpdateInput {
   id: AiCatalogItemID!
 
   """
-  MCP servers to associate with the agent. Introduced in GitLab 18.10: Status: Experiment.
+  MCP servers to associate with the agent. At most 20. Introduced in GitLab 18.10: Status: Experiment.
   """
   mcpServers: [AiCatalogMcpServerID!] @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.10.")
 
@@ -9296,24 +9296,23 @@ input AiFlowTriggerCreateInput {
   """
   Indicates whether merge requests created by a session that a work item event
   of the AI flow trigger started are marked as ready when the session finishes.
-  Applies only when the `ai_flow_trigger_status_on_finish` and
-  `ai_flow_trigger_chaining` feature flags are enabled, and only to work items
-  in a project. Requires the `work_item` event type. The work item filter must
-  match all its rules, and have one top-level `action` rule `in`
-  `["status_changed"]` and one top-level `status.name` rule `in` a list of
-  status names. Introduced in GitLab 19.6: Status: Experiment.
+  Applies only when the `dap_software_factory` and `ai_flow_trigger_chaining`
+  feature flags are enabled, and only to work items in a project. Requires the
+  `work_item` event type. The work item filter must match all its rules, and
+  have one top-level `action` rule `in` `["status_changed"]` and one top-level
+  `status.name` rule `in` a list of status names. Introduced in GitLab 19.6:
+  Status: Experiment.
   """
   readyMergeRequestsOnFinish: Boolean @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
 
   """
   Name of the work item status to set when a session that a work item event of
   the AI flow trigger started finishes. Applies only when the
-  `ai_flow_trigger_status_on_finish` and `ai_flow_trigger_chaining` feature
-  flags are enabled, and only to work items in a project. Requires the
-  `work_item` event type. The work item filter must match all its rules, and
-  have one top-level `action` rule `in` `["status_changed"]` and one top-level
-  `status.name` rule `in` a list of status names. Introduced in GitLab 19.6:
-  Status: Experiment.
+  `dap_software_factory` and `ai_flow_trigger_chaining` feature flags are
+  enabled, and only to work items in a project. Requires the `work_item` event
+  type. The work item filter must match all its rules, and have one top-level
+  `action` rule `in` `["status_changed"]` and one top-level `status.name` rule
+  `in` a list of status names. Introduced in GitLab 19.6: Status: Experiment.
   """
   statusOnFinish: String @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
 
@@ -9759,12 +9758,12 @@ type AiFlowTriggerType {
   """
   Indicates whether merge requests created by a session that a work item event
   of the AI flow trigger started are marked as ready when the session finishes.
-  Applies only when the `ai_flow_trigger_status_on_finish` and
-  `ai_flow_trigger_chaining` feature flags are enabled, and only to work items
-  in a project. Requires the `work_item` event type. The work item filter must
-  match all its rules, and have one top-level `action` rule `in`
-  `["status_changed"]` and one top-level `status.name` rule `in` a list of
-  status names. Introduced in GitLab 19.6: Status: Experiment.
+  Applies only when the `dap_software_factory` and `ai_flow_trigger_chaining`
+  feature flags are enabled, and only to work items in a project. Requires the
+  `work_item` event type. The work item filter must match all its rules, and
+  have one top-level `action` rule `in` `["status_changed"]` and one top-level
+  `status.name` rule `in` a list of status names. Introduced in GitLab 19.6:
+  Status: Experiment.
   """
   readyMergeRequestsOnFinish: Boolean! @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
 
@@ -9807,12 +9806,11 @@ type AiFlowTriggerType {
   """
   Name of the work item status to set when a session that a work item event of
   the AI flow trigger started finishes. Applies only when the
-  `ai_flow_trigger_status_on_finish` and `ai_flow_trigger_chaining` feature
-  flags are enabled, and only to work items in a project. Requires the
-  `work_item` event type. The work item filter must match all its rules, and
-  have one top-level `action` rule `in` `["status_changed"]` and one top-level
-  `status.name` rule `in` a list of status names. Introduced in GitLab 19.6:
-  Status: Experiment.
+  `dap_software_factory` and `ai_flow_trigger_chaining` feature flags are
+  enabled, and only to work items in a project. Requires the `work_item` event
+  type. The work item filter must match all its rules, and have one top-level
+  `action` rule `in` `["status_changed"]` and one top-level `status.name` rule
+  `in` a list of status names. Introduced in GitLab 19.6: Status: Experiment.
   """
   statusOnFinish: String @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
 
@@ -9931,24 +9929,23 @@ input AiFlowTriggerUpdateInput {
   """
   Indicates whether merge requests created by a session that a work item event
   of the AI flow trigger started are marked as ready when the session finishes.
-  Applies only when the `ai_flow_trigger_status_on_finish` and
-  `ai_flow_trigger_chaining` feature flags are enabled, and only to work items
-  in a project. Requires the `work_item` event type. The work item filter must
-  match all its rules, and have one top-level `action` rule `in`
-  `["status_changed"]` and one top-level `status.name` rule `in` a list of
-  status names. Introduced in GitLab 19.6: Status: Experiment.
+  Applies only when the `dap_software_factory` and `ai_flow_trigger_chaining`
+  feature flags are enabled, and only to work items in a project. Requires the
+  `work_item` event type. The work item filter must match all its rules, and
+  have one top-level `action` rule `in` `["status_changed"]` and one top-level
+  `status.name` rule `in` a list of status names. Introduced in GitLab 19.6:
+  Status: Experiment.
   """
   readyMergeRequestsOnFinish: Boolean @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
 
   """
   Name of the work item status to set when a session that a work item event of
   the AI flow trigger started finishes. Applies only when the
-  `ai_flow_trigger_status_on_finish` and `ai_flow_trigger_chaining` feature
-  flags are enabled, and only to work items in a project. Requires the
-  `work_item` event type. The work item filter must match all its rules, and
-  have one top-level `action` rule `in` `["status_changed"]` and one top-level
-  `status.name` rule `in` a list of status names. Introduced in GitLab 19.6:
-  Status: Experiment.
+  `dap_software_factory` and `ai_flow_trigger_chaining` feature flags are
+  enabled, and only to work items in a project. Requires the `work_item` event
+  type. The work item filter must match all its rules, and have one top-level
+  `action` rule `in` `["status_changed"]` and one top-level `status.name` rule
+  `in` a list of status names. Introduced in GitLab 19.6: Status: Experiment.
   """
   statusOnFinish: String @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
 
@@ -16080,6 +16077,126 @@ type AncestorType {
 }
 
 """
+Anthropic Compliance integration of a top-level group.
+"""
+type AnthropicComplianceIntegration @granularScope(permissions: ["read_anthropic_compliance_integration"], boundaryType: GROUP, boundary: "namespace") {
+  """
+  Reason GitLab disabled the integration. Null when the integration is enabled or an owner disabled it.
+  """
+  disabledReason: AnthropicComplianceIntegrationDisabledReason
+
+  """
+  Indicates whether GitLab ingests Claude Code sessions with the integration.
+  """
+  enabled: Boolean!
+
+  """
+  Timestamp of the last successful ingestion.
+  """
+  lastSuccessfulSyncAt: Time
+
+  """
+  Timestamp of when the integration was last updated.
+  """
+  updatedAt: Time!
+}
+
+"""
+Autogenerated input type of AnthropicComplianceIntegrationCreate
+"""
+input AnthropicComplianceIntegrationCreateInput {
+  """
+  Anthropic Compliance Access Key with the `read:compliance_user_data` scope. Write-only: GitLab never returns it.
+  """
+  apiKey: String!
+
+  """
+  A unique identifier for the client performing the mutation.
+  """
+  clientMutationId: String
+
+  """
+  Full path of the top-level group.
+  """
+  groupPath: ID!
+}
+
+"""
+Autogenerated return type of AnthropicComplianceIntegrationCreate.
+"""
+type AnthropicComplianceIntegrationCreatePayload {
+  """
+  Integration after the mutation.
+  """
+  anthropicComplianceIntegration: AnthropicComplianceIntegration
+
+  """
+  A unique identifier for the client performing the mutation.
+  """
+  clientMutationId: String
+
+  """
+  Machine-readable reason for the mutation error.
+  """
+  errorReason: AnthropicComplianceIntegrationErrorReason
+
+  """
+  Errors encountered during the mutation.
+  """
+  errors: [String!]!
+}
+
+"""
+Reason GitLab disabled an Anthropic Compliance integration.
+"""
+enum AnthropicComplianceIntegrationDisabledReason {
+  """
+  Anthropic rejected the Compliance Access Key.
+  """
+  INVALID_KEY
+
+  """
+  Local sessions are turned off for the Claude organization.
+  """
+  LOCAL_SESSIONS_UNAVAILABLE
+
+  """
+  Ingestion failed too many times in a row.
+  """
+  REPEATED_FAILURES
+}
+
+"""
+Reason an Anthropic Compliance integration mutation failed.
+"""
+enum AnthropicComplianceIntegrationErrorReason {
+  """
+  Compliance Access Key is blank.
+  """
+  BLANK_KEY
+
+  """
+  Integration failed validation, for example because one already exists.
+  """
+  INVALID_INTEGRATION
+
+  """
+  Anthropic rejected the Compliance Access Key.
+  """
+  INVALID_KEY
+
+  """
+  GitLab or Anthropic rate limited the request. Try again later.
+  """
+  RATE_LIMITED
+
+  """
+  GitLab could not reach Anthropic to verify the Compliance Access Key.
+  """
+  VERIFICATION_FAILED
+}
+
+"""
 Data associated with configuring API fuzzing scans in GitLab CI
 """
 type ApiFuzzingCiConfiguration {
@@ -16634,6 +16751,14 @@ type ApprovalRule @granularScope(permissions: ["read_approval_rule"], boundaryTy
   ): UserCoreConnection
 
   """
+  Reason why the rule blocks the merge request. Returns null when the rule does
+  not block the merge request. Only supported for the Coverage-Check rule.
+  Returns null when the `coverage_minimum_threshold` feature flag is disabled.
+  Introduced in GitLab 19.5: Status: Experiment.
+  """
+  blockageReason: ApprovalRuleBlockageReason @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.5.")
+
+  """
   List of users, defined in the rule, who commented on the merge request.
   """
   commentedBy(
@@ -16763,6 +16888,51 @@ type ApprovalRule @granularScope(permissions: ["read_approval_rule"], boundaryTy
     """
     last: Int
   ): UserCoreConnection
+}
+
+"""
+Reason why an approval rule blocks a merge request.
+"""
+type ApprovalRuleBlockageReason @granularScope(skipReason: "parent_authorizes") {
+  """
+  Coverage of the base pipeline, in percent. Set only when `reason` is `DECREASED`.
+  """
+  baseCoverage: Float
+
+  """
+  Coverage of the head pipeline, in percent.
+  """
+  coverage: Float
+
+  """
+  Kind of the reason.
+  """
+  reason: ApprovalRuleBlockageReasonKind!
+
+  """
+  Minimum coverage threshold of the rule, in percent. Set only when `reason` is `BELOW_THRESHOLD`.
+  """
+  threshold: Float
+}
+
+"""
+Kind of reason why an approval rule blocks a merge request.
+"""
+enum ApprovalRuleBlockageReasonKind {
+  """
+  Coverage is below the minimum coverage threshold of the rule.
+  """
+  BELOW_THRESHOLD
+
+  """
+  Coverage decreased compared to the base pipeline.
+  """
+  DECREASED
+
+  """
+  Base pipeline has no coverage to compare against.
+  """
+  MISSING_BASE_COVERAGE
 }
 
 """
@@ -19195,6 +19365,12 @@ type ArtifactRegistryRoleAssignment {
   Time the assignment was created.
   """
   createdAt: Time
+
+  """
+  User who granted the role. Null when unknown, for example for grants made
+  before this field existed or by a user who was deleted.
+  """
+  grantedBy: UserCore
 
   """
   UUID of the Artifact Registry resource the role is assigned on.
@@ -50405,14 +50581,9 @@ input CustomDashboardPanelInput {
   tooltip: CustomDashboardTooltipInput
 
   """
-  ID of an existing visualization to render.
-  """
-  visualization: String
-
-  """
   Inline visualization config object to render.
   """
-  visualizationConfig: JSON
+  visualizationConfig: JSON!
 }
 
 """
@@ -50994,6 +51165,11 @@ type CustomSystemDashboard implements CustomDashboardInterface {
   Optional summary or purpose of the dashboard.
   """
   description: String
+
+  """
+  Schema validation errors in the dashboard configuration, if any.
+  """
+  errors: [String!]
 
   """
   Global ID of the dashboard.
@@ -54615,9 +54791,9 @@ type DependencyFirewallActivitySummary {
   totalTriggers: Int!
 
   """
-  Number of distinct package versions blocked by vulnerability or risk-severity
-  rules. Counts from `from` up to now; `to` does not apply. Null when not
-  available, including for groups. Introduced in GitLab 19.5: Status: Experiment.
+  Number of distinct package versions blocked by risk-severity rules. Counts
+  from `from` up to now; `to` does not apply. Null when not available, including
+  for groups. Introduced in GitLab 19.5: Status: Experiment.
   """
   vulnerabilitiesPrevented: Int @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.5.")
 
@@ -54752,11 +54928,6 @@ enum DependencyFirewallRuleType {
   Rule matching on vulnerability counts per severity level.
   """
   RISK_SEVERITY
-
-  """
-  Rule matching on package vulnerabilities.
-  """
-  VULNERABILITY
 }
 
 """
@@ -60154,6 +60325,41 @@ type DuoMessage @granularScope(skipReason: "parent_authorizes") {
 }
 
 """
+The connection type for DuoMessage.
+"""
+type DuoMessageConnection {
+  """
+  A list of edges.
+  """
+  edges: [DuoMessageEdge]
+
+  """
+  A list of nodes.
+  """
+  nodes: [DuoMessage]
+
+  """
+  Information to aid in pagination.
+  """
+  pageInfo: PageInfo!
+}
+
+"""
+An edge in a connection.
+"""
+type DuoMessageEdge {
+  """
+  A cursor for use in pagination.
+  """
+  cursor: String!
+
+  """
+  The item at the end of the edge.
+  """
+  node: DuoMessage
+}
+
+"""
 GitLab Duo settings
 """
 type DuoSettings {
@@ -61327,7 +61533,8 @@ type DuoWorkflowEvent @granularScope(permissions: ["read_duo_workflow"], boundar
   currentThread: Int! @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
-  Messages from the ui_chat_log for the checkpoint.
+  Messages from the ui_chat_log for the checkpoint. Returns only the newest 100
+  when the `duo_workflow_cap_duo_messages` feature flag is enabled.
   """
   duoMessages: [DuoMessage!]
 
@@ -61347,6 +61554,32 @@ type DuoWorkflowEvent @granularScope(permissions: ["read_duo_workflow"], boundar
   full chat log. Introduced in GitLab 19.3: Status: Experiment.
   """
   lastDuoMessage: DuoMessage @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.3.")
+
+  """
+  Messages from the ui_chat_log for the checkpoint, oldest first. Pass `last` to
+  read the newest messages, then `before` with `startCursor` to page back to older ones.
+  """
+  messages(
+    """
+    Returns the elements in the list that come after the specified cursor.
+    """
+    after: String
+
+    """
+    Returns the elements in the list that come before the specified cursor.
+    """
+    before: String
+
+    """
+    Returns the first _n_ elements from the list.
+    """
+    first: Int
+
+    """
+    Returns the last _n_ elements from the list.
+    """
+    last: Int
+  ): DuoMessageConnection
 
   """
   Metadata associated with the event.
@@ -61709,10 +61942,9 @@ type DuoWorkflowSessionArtifact {
   """
   Total GitLab Credits consumed by the session. Readable with
   `read_agent_artifacts` on the parent group or project. Requires ClickHouse to
-  be configured for analytics; ingestion is gated by the
-  `duo_workflow_session_credits_ingestion` feature flag. Null until credit data
-  has been ingested for the session, including sessions that failed before
-  ingestion. Introduced in GitLab 19.4: Status: Experiment.
+  be configured for analytics. Null until credit data has been ingested for the
+  session, including sessions that failed before ingestion. Introduced in GitLab
+  19.4: Status: Experiment.
   """
   creditsUsed: Float @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
@@ -73722,6 +73954,14 @@ type Group implements GroupInterface & Todoable @granularScope(permissions: ["re
   analyzerStatuses: [AnalyzerGroupStatusType!]
 
   """
+  Anthropic Compliance integration of the top-level group. Returns null when no
+  Compliance Access Key is configured, for subgroups, or when the
+  `claude_code_compliance_api_ingestion` feature flag is disabled. Introduced in
+  GitLab 19.6: Status: Experiment.
+  """
+  anthropicComplianceIntegration: AnthropicComplianceIntegration @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+
+  """
   Approval Policies of the project
   """
   approvalPolicies(
@@ -76319,6 +76559,7 @@ type Group implements GroupInterface & Todoable @granularScope(permissions: ["re
 
   """
   Compliance violations reported on merge requests merged within the group.
+  Deprecated in GitLab 19.6: Use `projectComplianceViolations` instead.
   """
   mergeRequestViolations(
     """
@@ -76350,7 +76591,7 @@ type Group implements GroupInterface & Todoable @granularScope(permissions: ["re
     List compliance violations by sort order.
     """
     sort: ComplianceViolationSort = SEVERITY_LEVEL_DESC
-  ): ComplianceViolationConnection
+  ): ComplianceViolationConnection @deprecated(reason: "Use `projectComplianceViolations` instead. Deprecated in GitLab 19.6.")
 
   """
   Merge requests for projects in this group.
@@ -77143,7 +77384,7 @@ type Group implements GroupInterface & Todoable @granularScope(permissions: ["re
   ): ComplianceStandardsAdherenceConnection
 
   """
-  Compliance violations for the projects in a group and its subgroups. Introduced in GitLab 18.1: Status: Experiment.
+  Compliance violations for the projects in a group and its subgroups.
   """
   projectComplianceViolations(
     """
@@ -77170,7 +77411,7 @@ type Group implements GroupInterface & Todoable @granularScope(permissions: ["re
     Returns the last _n_ elements from the list.
     """
     last: Int
-  ): ProjectComplianceViolationConnection @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.1.")
+  ): ProjectComplianceViolationConnection
 
   """
   Permission level required to create projects in the group.
@@ -77981,7 +78222,7 @@ type Group implements GroupInterface & Todoable @granularScope(permissions: ["re
     Returns the last _n_ elements from the list.
     """
     last: Int
-  ): WorkItemStatusConnection @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.1.")
+  ): WorkItemStatusConnection @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.1.") @granularScope(permissions: ["read_work_item"], boundaryType: GROUP, boundary: "itself")
 
   """
   The storage limit (in bytes) included with the root namespace plan. This limit
@@ -79300,7 +79541,7 @@ type Group implements GroupInterface & Todoable @granularScope(permissions: ["re
     in GitLab 18.6: Status: Experiment.
     """
     onlyAvailable: Boolean @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.6.")
-  ): WorkItemTypeConnection
+  ): WorkItemTypeConnection @granularScope(permissions: ["read_work_item"], boundaryType: GROUP, boundary: "itself")
 
   """
   Work items that belong to the namespace.
@@ -81047,14 +81288,20 @@ type GroupPermissions {
   readDora4Analytics: Boolean! @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.5.")
 
   """
+  If `true`, the user can perform `read_enterprise_ai_analytics` on this
+  resource Introduced in GitLab 19.6: Status: Experiment.
+  """
+  readEnterpriseAiAnalytics: Boolean! @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+
+  """
   If `true`, the user can perform `read_group` on this resource
   """
   readGroup: Boolean!
 
   """
-  If `true`, the user can perform `read_orbit_setting` on this resource Introduced in GitLab 19.6: Status: Experiment.
+  If `true`, the user can perform `read_orbit_setting` on this resource Introduced in GitLab 19.4: Status: Experiment.
   """
-  readOrbitSetting: Boolean! @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  readOrbitSetting: Boolean! @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
   If `true`, the user can perform `read_orbit_trial` on this resource Introduced in GitLab 19.5: Status: Experiment.
@@ -81097,9 +81344,9 @@ type GroupPermissions {
 
   """
   If `true`, the user can perform `update_knowledge_graph_setting` on this
-  resource Introduced in GitLab 19.6: Status: Experiment.
+  resource Introduced in GitLab 19.4: Status: Experiment.
   """
-  updateKnowledgeGraphSetting: Boolean! @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  updateKnowledgeGraphSetting: Boolean! @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
   If `true`, the user can perform `update_security_scan_profiles` on the
@@ -108677,6 +108924,18 @@ type Mutation {
     """
     input: AlertTodoCreateInput!
   ): AlertTodoCreatePayload @granularScope(permissions: ["create_todo"], boundaryType: PROJECT, boundaryArgument: "project_path")
+
+  """
+  Verifies a Compliance Access Key with Anthropic, then stores it as the
+  Anthropic Compliance integration of a top-level group. Introduced in GitLab
+  19.6: Status: Experiment.
+  """
+  anthropicComplianceIntegrationCreate(
+    """
+    Parameters for AnthropicComplianceIntegrationCreate
+    """
+    input: AnthropicComplianceIntegrationCreateInput!
+  ): AnthropicComplianceIntegrationCreatePayload @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.") @granularScope(permissions: ["create_anthropic_compliance_integration"], boundaryType: GROUP, boundaryArgument: "group_path")
   approvalProjectRuleDelete(
     """
     Parameters for approvalProjectRuleDelete
@@ -111081,7 +111340,7 @@ type Mutation {
     Parameters for LinkProjectComplianceViolationIssue
     """
     input: LinkProjectComplianceViolationIssueInput!
-  ): LinkProjectComplianceViolationIssuePayload @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.3.") @granularScope(permissions: ["update_compliance_violations_report"], boundaryType: PROJECT, boundary: "project", boundaryArgument: "violation_id")
+  ): LinkProjectComplianceViolationIssuePayload @granularScope(permissions: ["update_compliance_violations_report"], boundaryType: PROJECT, boundary: "project", boundaryArgument: "violation_id")
   markAsSpamSnippet(
     """
     Parameters for MarkAsSpamSnippet
@@ -111530,19 +111789,19 @@ type Mutation {
     Parameters for OrbitExcludedGroupCreate
     """
     input: OrbitExcludedGroupCreateInput!
-  ): OrbitExcludedGroupCreatePayload @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.") @granularScope(permissions: ["update_knowledge_graph_setting"], boundaryType: INSTANCE, boundary: "instance", assignableWhen: ["admin", "self_managed"])
+  ): OrbitExcludedGroupCreatePayload @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.") @granularScope(permissions: ["update_knowledge_graph_setting"], boundaryType: INSTANCE, boundary: "instance", assignableWhen: ["admin", "self_managed"])
   orbitExcludedGroupDestroy(
     """
     Parameters for OrbitExcludedGroupDestroy
     """
     input: OrbitExcludedGroupDestroyInput!
-  ): OrbitExcludedGroupDestroyPayload @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.") @granularScope(permissions: ["update_knowledge_graph_setting"], boundaryType: INSTANCE, boundary: "instance", assignableWhen: ["admin", "self_managed"])
+  ): OrbitExcludedGroupDestroyPayload @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.") @granularScope(permissions: ["update_knowledge_graph_setting"], boundaryType: INSTANCE, boundary: "instance", assignableWhen: ["admin", "self_managed"])
   orbitInstanceStartTrial(
     """
     Parameters for OrbitInstanceStartTrial
     """
     input: OrbitInstanceStartTrialInput!
-  ): OrbitInstanceStartTrialPayload @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.") @granularScope(permissions: ["start_orbit_trial"], boundaryType: INSTANCE, boundary: "instance", assignableWhen: ["admin", "self_managed"])
+  ): OrbitInstanceStartTrialPayload @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.") @granularScope(permissions: ["start_orbit_trial"], boundaryType: INSTANCE, boundary: "instance", assignableWhen: ["admin", "self_managed"])
   orbitStartTrial(
     """
     Parameters for OrbitStartTrial
@@ -112331,6 +112590,12 @@ type Mutation {
     """
     input: SecurityRefsUntrackInput!
   ): SecurityRefsUntrackPayload @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.10.")
+
+  """
+  Attaches a security scan profile to projects and groups. All projects and
+  groups must belong to the same top-level group. Maximum of 100 project and
+  group IDs combined. Introduced in GitLab 18.9: Status: Experiment.
+  """
   securityScanProfileAttach(
     """
     Parameters for SecurityScanProfileAttach
@@ -112349,6 +112614,12 @@ type Mutation {
     """
     input: SecurityScanProfileDeleteInput!
   ): SecurityScanProfileDeletePayload @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.3.") @granularScope(permissions: ["delete_security_scan_profiles"], boundaryType: GROUP, boundary: "namespace", boundaryArgument: "id")
+
+  """
+  Detaches a security scan profile from projects and groups. All projects and
+  groups must belong to the same top-level group. Maximum of 100 project and
+  group IDs combined. Introduced in GitLab 18.9: Status: Experiment.
+  """
   securityScanProfileDetach(
     """
     Parameters for SecurityScanProfileDetach
@@ -112683,7 +112954,7 @@ type Mutation {
     Parameters for UnlinkProjectComplianceViolationIssue
     """
     input: UnlinkProjectComplianceViolationIssueInput!
-  ): UnlinkProjectComplianceViolationIssuePayload @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.3.") @granularScope(permissions: ["update_compliance_violations_report"], boundaryType: PROJECT, boundary: "project", boundaryArgument: "violation_id")
+  ): UnlinkProjectComplianceViolationIssuePayload @granularScope(permissions: ["update_compliance_violations_report"], boundaryType: PROJECT, boundary: "project", boundaryArgument: "violation_id")
 
   """
   Updates the permission settings for an AI tool rule. Introduced in GitLab 19.1: Status: Experiment.
@@ -112905,7 +113176,7 @@ type Mutation {
     Parameters for UpdateProjectComplianceViolation
     """
     input: UpdateProjectComplianceViolationInput!
-  ): UpdateProjectComplianceViolationPayload @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.2.") @granularScope(permissions: ["update_compliance_violations_report"], boundaryType: PROJECT, boundary: "project", boundaryArgument: "id")
+  ): UpdateProjectComplianceViolationPayload @granularScope(permissions: ["update_compliance_violations_report"], boundaryType: PROJECT, boundary: "project", boundaryArgument: "id")
   updateRequirement(
     """
     Parameters for UpdateRequirement
@@ -114593,7 +114864,7 @@ type Namespace implements Todoable {
     Returns the last _n_ elements from the list.
     """
     last: Int
-  ): WorkItemStatusConnection @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.1.")
+  ): WorkItemStatusConnection @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.1.") @granularScope(permissions: ["read_work_item"], boundaryType: GROUP, boundary: "itself")
 
   """
   The storage limit (in bytes) included with the root namespace plan. This limit
@@ -115464,7 +115735,7 @@ type Namespace implements Todoable {
   ): ClusterAgentConnection @deprecated(reason: "Status: Experiment. Introduced in GitLab 17.8.")
 }
 
-type NamespaceAvailableFeatures {
+type NamespaceAvailableFeatures @granularScope(skipReason: "parent_authorizes") {
   """
   Whether blocked issues are enabled for the namespace. Introduced in GitLab 18.3: Status: Experiment.
   """
@@ -118224,9 +118495,9 @@ type Orbit @granularScope(skipReason: "child_authorizes") {
   """
   Orbit access state of the instance on GitLab Self-Managed and GitLab
   Dedicated. Null on GitLab.com, where access is per top-level group, and for
-  users who are not administrators. Introduced in GitLab 19.6: Status: Experiment.
+  users who are not administrators. Introduced in GitLab 19.4: Status: Experiment.
   """
-  access: OrbitAccess @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  access: OrbitAccess @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
   Top-level groups excluded from automatic Orbit indexing. Administrators only.
@@ -118396,11 +118667,23 @@ type Orbit @granularScope(skipReason: "child_authorizes") {
   ): GroupConnection
 
   """
+  Named queries that Orbit defines, rendered for the current user. Returns null
+  when the user cannot use Orbit. Introduced in GitLab 19.4: Status: Experiment.
+  """
+  queryTemplates: [OrbitQueryTemplate!] @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
+
+  """
   Node kinds and edge kinds that the current user can query in Orbit. Returns
   null when the user cannot use Orbit or Orbit returns no schema. Introduced in
-  GitLab 19.6: Status: Experiment.
+  GitLab 19.4: Status: Experiment.
   """
-  schema: OrbitSchema @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  schema: OrbitSchema @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
+
+  """
+  Health of the Orbit service. Returns null when Orbit is not available on the
+  instance or for the user. Introduced in GitLab 19.4: Status: Experiment.
+  """
+  serviceStatus: OrbitServiceStatus @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 }
 
 """
@@ -118602,9 +118885,9 @@ type OrbitIndexing @granularScope(skipReason: "parent_authorizes") {
   """
   Timestamp when Orbit last completed indexing of the group or project. Null
   until the first indexing run completes, and when Orbit is not available to the
-  current user. Introduced in GitLab 19.6: Status: Experiment.
+  current user. Introduced in GitLab 19.4: Status: Experiment.
   """
-  lastCompletedAt: Time @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  lastCompletedAt: Time @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
   Indexing progress of the projects in the group or project.
@@ -118692,14 +118975,14 @@ type OrbitIndexingProjects @granularScope(skipReason: "parent_authorizes") {
   indexed: Int
 
   """
-  Number of projects that are not indexed. Introduced in GitLab 19.6: Status: Experiment.
+  Number of projects that are not indexed. Introduced in GitLab 19.4: Status: Experiment.
   """
-  notIndexed: Int @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  notIndexed: Int @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
-  Number of projects known to Orbit. Introduced in GitLab 19.6: Status: Experiment.
+  Number of projects known to Orbit. Introduced in GitLab 19.4: Status: Experiment.
   """
-  total: Int @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  total: Int @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
   Number of projects known to Orbit.
@@ -118837,9 +119120,9 @@ Number of indexed items of a group or project in Orbit.
 """
 type OrbitItemCounts @granularScope(skipReason: "parent_authorizes") {
   """
-  Number of indexed items in each area. Introduced in GitLab 19.6: Status: Experiment.
+  Number of indexed items in each area. Introduced in GitLab 19.4: Status: Experiment.
   """
-  areas: [OrbitItemCountArea!] @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  areas: [OrbitItemCountArea!] @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
   Number of indexed items in each domain.
@@ -118870,15 +119153,15 @@ type OrbitNamespace @granularScope(skipReason: "parent_authorizes") {
   Orbit access state of the top-level group. Null for subgroups, projects, and
   when the user cannot read the Orbit setting of the group. This field can be
   resolved for at most 10 groups in any single request. Introduced in GitLab
-  19.6: Status: Experiment.
+  19.4: Status: Experiment.
   """
-  access: OrbitAccess @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  access: OrbitAccess @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
   Indicates whether Orbit is turned on for the top-level group of the group.
-  Null for projects. Introduced in GitLab 19.6: Status: Experiment.
+  Null for projects. Introduced in GitLab 19.4: Status: Experiment.
   """
-  enabled: Boolean @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  enabled: Boolean @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
   Timestamp when Orbit was turned on for the top-level group of the group. Null
@@ -118889,9 +119172,9 @@ type OrbitNamespace @granularScope(skipReason: "parent_authorizes") {
 
   """
   Indexing state of the group or project. Null when Orbit is not available to
-  the current user. Introduced in GitLab 19.6: Status: Experiment.
+  the current user. Introduced in GitLab 19.4: Status: Experiment.
   """
-  indexing: OrbitIndexing @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  indexing: OrbitIndexing @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
   Indexing status of the group or project. Null when Orbit is not available to the current user.
@@ -118909,10 +119192,30 @@ type OrbitNamespace @granularScope(skipReason: "parent_authorizes") {
   Orbit trial of the top-level group, or of the instance on GitLab Self-Managed
   and GitLab Dedicated. Null for subgroups, projects, when the user cannot read
   the trial, and when the CustomersDot request fails. This field can be resolved
-  for at most 10 groups in any single request. Introduced in GitLab 19.6:
+  for at most 10 groups in any single request. Introduced in GitLab 19.4:
   Status: Experiment.
   """
-  trial: OrbitTrial @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  trial: OrbitTrial @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
+}
+
+"""
+Named query that Orbit defines, rendered for the current user.
+"""
+type OrbitQueryTemplate @granularScope(skipReason: "parent_authorizes") {
+  """
+  Description of the query.
+  """
+  description: String
+
+  """
+  Name of the query. Run it with `POST /api/v4/orbit/query/:name`.
+  """
+  name: String!
+
+  """
+  GQL query text.
+  """
+  query: String!
 }
 
 """
@@ -119276,6 +119579,71 @@ type OrbitSchemaPropertyEdge {
 }
 
 """
+Health of one component of the Orbit service.
+"""
+type OrbitServiceComponent @granularScope(skipReason: "parent_authorizes") {
+  """
+  Name of the component, for example `clickhouse`.
+  """
+  name: String!
+
+  """
+  Health state of the component.
+  """
+  state: OrbitServiceState!
+}
+
+"""
+Health state of the Orbit service or of one of its components.
+"""
+enum OrbitServiceState {
+  """
+  Works with reduced capacity.
+  """
+  DEGRADED
+
+  """
+  Works as expected.
+  """
+  HEALTHY
+
+  """
+  Schema migration is in progress.
+  """
+  MIGRATING
+
+  """
+  Does not work.
+  """
+  UNHEALTHY
+
+  """
+  Health is unknown, for example because Orbit is unreachable.
+  """
+  UNKNOWN
+}
+
+"""
+Health of the Orbit service.
+"""
+type OrbitServiceStatus @granularScope(skipReason: "parent_authorizes") {
+  """
+  Health of each component of the Orbit service.
+  """
+  components: [OrbitServiceComponent!]!
+
+  """
+  Overall health state of the Orbit service.
+  """
+  state: OrbitServiceState!
+
+  """
+  Version of the Orbit service.
+  """
+  version: String
+}
+
+"""
 Autogenerated input type of OrbitStartTrial
 """
 input OrbitStartTrialInput {
@@ -119327,9 +119695,9 @@ type OrbitTrial @granularScope(skipReason: "parent_authorizes") {
 
   """
   Terms of a new trial. Null unless the current user can start the trial and
-  CustomersDot sends valid terms. Introduced in GitLab 19.6: Status: Experiment.
+  CustomersDot sends valid terms. Introduced in GitLab 19.4: Status: Experiment.
   """
-  offer: OrbitTrialOffer @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  offer: OrbitTrialOffer @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
   State of the trial. Introduced in GitLab 19.5: Status: Experiment.
@@ -119347,7 +119715,7 @@ type OrbitTrialCredits @granularScope(skipReason: "parent_authorizes") {
   remaining: Float @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.5.")
 
   """
-  Number of credits the trial started with. Introduced in GitLab 19.5: Status: Experiment.
+  Total number of credits granted to the trial. Introduced in GitLab 19.5: Status: Experiment.
   """
   total: Float @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.5.")
 }
@@ -119357,14 +119725,14 @@ Terms of a new Orbit trial, as offered by CustomersDot.
 """
 type OrbitTrialOffer @granularScope(skipReason: "parent_authorizes") {
   """
-  Number of days a new trial lasts. Introduced in GitLab 19.6: Status: Experiment.
+  Number of days a new trial lasts. Introduced in GitLab 19.4: Status: Experiment.
   """
-  durationDays: Int @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  durationDays: Int @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
-  Number of free credits a new trial starts with. Introduced in GitLab 19.6: Status: Experiment.
+  Number of free credits a new trial starts with. Introduced in GitLab 19.4: Status: Experiment.
   """
-  initialCredits: Float @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  initialCredits: Float @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 }
 
 """
@@ -119403,9 +119771,9 @@ enum OrbitTurnOnDenialReason {
 
   """
   Group must purchase Orbit before it can be turned on, because no trial can
-  start. Introduced in GitLab 19.6: Status: Experiment.
+  start. Introduced in GitLab 19.4: Status: Experiment.
   """
-  PURCHASE_REQUIRED @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+  PURCHASE_REQUIRED @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.")
 
   """
   Trial has ended, so Orbit can no longer be turned on. Introduced in GitLab 19.5: Status: Experiment.
@@ -119881,6 +120249,14 @@ type Organization @granularScope(permissions: ["read_organization"], boundaryTyp
     visibilityLevel: VisibilityLevelsEnum
 
     """
+    Return only groups whose top-level group has Duo Agent Platform turned on.
+    On GitLab Self-Managed and GitLab Dedicated, returns no groups when Duo
+    Agent Platform is turned off for the instance. Introduced in GitLab 19.6:
+    Status: Experiment.
+    """
+    withDuoAgentPlatformEnabled: Boolean = false @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+
+    """
     Return only groups with Knowledge Graph enabled. Introduced in GitLab 18.10: Status: Experiment.
     """
     withKnowledgeGraphEnabled: Boolean = false @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.10.")
@@ -120197,7 +120573,7 @@ type Organization @granularScope(permissions: ["read_organization"], boundaryTyp
     in GitLab 18.6: Status: Experiment.
     """
     onlyAvailable: Boolean @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.6.")
-  ): WorkItemTypeConnection @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.10.")
+  ): WorkItemTypeConnection @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.10.") @granularScope(permissions: ["read_work_item"], boundaryType: USER, boundary: "user")
 
   """
   Cluster agents in the organization with workspaces capabilities Introduced in GitLab 17.10: Status: Experiment.
@@ -122783,6 +123159,18 @@ type PackageSettings {
   Indicates whether PyPI package forwarding settings are locked by a parent namespace.
   """
   pypiPackageRequestsForwardingLocked: Boolean!
+
+  """
+  When rubygems_duplicates_allowed is false, you can publish duplicate packages
+  with names or versions that match this regex. When rubygems_duplicates_allowed
+  is true, duplicate packages with names or versions that match this regex are rejected.
+  """
+  rubygemsDuplicateExceptionRegex: UntrustedRegexp
+
+  """
+  Indicates whether duplicate RubyGems packages are allowed for the namespace.
+  """
+  rubygemsDuplicatesAllowed: Boolean!
 
   """
   Indicates whether RubyGems package forwarding is allowed for the namespace.
@@ -133372,6 +133760,8 @@ type Project implements ProjectInterface & Todoable @granularScope(permissions: 
 
   """
   Compliance violations reported on merge requests merged within the project.
+  Deprecated in GitLab 19.6: Use `Group.projectComplianceViolations` with the
+  `projectId` filter instead.
   """
   mergeRequestViolations(
     """
@@ -133403,7 +133793,7 @@ type Project implements ProjectInterface & Todoable @granularScope(permissions: 
     List compliance violations by sort order.
     """
     sort: ComplianceViolationSort = SEVERITY_LEVEL_DESC
-  ): ComplianceViolationConnection
+  ): ComplianceViolationConnection @deprecated(reason: "Use `Group.projectComplianceViolations` with the `projectId` filter instead. Deprecated in GitLab 19.6.")
 
   """
   Merge requests of the project.
@@ -136934,7 +137324,7 @@ type Project implements ProjectInterface & Todoable @granularScope(permissions: 
     in GitLab 18.6: Status: Experiment.
     """
     onlyAvailable: Boolean @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.6.")
-  ): WorkItemTypeConnection
+  ): WorkItemTypeConnection @granularScope(permissions: ["read_work_item"], boundaryType: PROJECT, boundary: "itself")
 
   """
   Work items of the project. Introduced in GitLab 15.1: Status: Experiment.
@@ -145359,6 +145749,14 @@ type Query {
     visibilityLevel: VisibilityLevelsEnum
 
     """
+    Return only groups whose top-level group has Duo Agent Platform turned on.
+    On GitLab Self-Managed and GitLab Dedicated, returns no groups when Duo
+    Agent Platform is turned off for the instance. Introduced in GitLab 19.6:
+    Status: Experiment.
+    """
+    withDuoAgentPlatformEnabled: Boolean = false @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+
+    """
     Return only groups with Knowledge Graph enabled. Introduced in GitLab 18.10: Status: Experiment.
     """
     withKnowledgeGraphEnabled: Boolean = false @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.10.")
@@ -146350,9 +146748,9 @@ type Query {
 
   """
   Orbit data of the instance and of the groups of the current user. Returns null
-  when the user is not signed in. Introduced in GitLab 19.6: Status: Experiment.
+  when the user is not signed in. Introduced in GitLab 19.4: Status: Experiment.
   """
-  orbit: Orbit @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.") @granularScope(permissions: ["read_orbit"], boundaryType: USER, boundary: "user")
+  orbit: Orbit @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.4.") @granularScope(permissions: ["read_orbit"], boundaryType: USER, boundary: "user")
 
   """
   Find an organization. Introduced in GitLab 16.4: Status: Experiment.
@@ -147914,7 +148312,7 @@ type Query {
     Filter statuses by name.
     """
     name: String
-  ): WorkItemStatusConnection @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.4.")
+  ): WorkItemStatusConnection @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.4.") @granularScope(permissions: ["read_work_item"], boundaryType: USER, boundary: "user")
 
   """
   Find a work item description template. Introduced in GitLab 17.9: Status: Experiment.
@@ -154863,11 +155261,18 @@ type SecurityMetrics {
   ): [MttrOverTimeBucket!] @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.5.")
 
   """
-  Total risk score information.
+  Total risk score information. By default, excludes vulnerabilities that are no longer detected on the default branch.
   This feature is currently under development and not yet available for general
-  use Introduced in GitLab 18.4: Status: Experiment.
+  use. Introduced in GitLab 18.4: Status: Experiment.
   """
-  riskScore: RiskScore @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.4.")
+  riskScore(
+    """
+    Filters vulnerabilities by whether they are no longer detected on the
+    default branch. If true, includes only those vulnerabilities. If false
+    (default), excludes them.
+    """
+    hasResolution: Boolean = false
+  ): RiskScore @deprecated(reason: "Status: Experiment. Introduced in GitLab 18.4.")
 
   """
   Vulnerability age statistics based on predefined age bands.
@@ -155761,12 +156166,13 @@ input SecurityScanProfileAttachInput {
   clientMutationId: String
 
   """
-  Group IDs to attach the profile to.
+  Group IDs to attach the profile to. Applies the profile to all subgroups and
+  projects in the specified group. Errors for these projects are not returned.
   """
   groupIds: [GroupID!] = []
 
   """
-  How to attach the profile relative to existing profiles of the same scan type.
+  How to attach the profile relative to existing profiles of the same scan type. Defaults to `REPLACE`.
   """
   mode: SecurityScanProfileAttachMode = REPLACE
 
@@ -155776,7 +156182,8 @@ input SecurityScanProfileAttachInput {
   projectIds: [ProjectID!] = []
 
   """
-  Security scan profile ID to attach.
+  Security scan profile ID to attach. For a default profile, use its identifier.
+  For example, `gid://gitlab/Security::ScanProfile/sast`.
   """
   securityScanProfileId: SecurityScanProfileID!
 }
@@ -156150,7 +156557,8 @@ input SecurityScanProfileDetachInput {
   clientMutationId: String
 
   """
-  Group IDs to detach the profile from.
+  Group IDs to detach the profile from. Detaches the profile from all subgroups
+  and projects in the specified group. Errors for these projects are not returned.
   """
   groupIds: [GroupID!] = []
 
@@ -156160,7 +156568,7 @@ input SecurityScanProfileDetachInput {
   projectIds: [ProjectID!] = []
 
   """
-  Security scan profile ID to detach.
+  Security scan profile ID to detach. Must be the ID of a profile.
   """
   securityScanProfileId: SecurityScanProfileID!
 }
@@ -165786,6 +166194,18 @@ input UpdateNamespacePackageSettingsInput {
   pypiPackageRequestsForwarding: Boolean
 
   """
+  When rubygems_duplicates_allowed is false, you can publish duplicate packages
+  with names or versions that match this regex. When rubygems_duplicates_allowed
+  is true, duplicate packages with names or versions that match this regex are rejected.
+  """
+  rubygemsDuplicateExceptionRegex: UntrustedRegexp
+
+  """
+  Indicates whether duplicate RubyGems packages are allowed for the namespace.
+  """
+  rubygemsDuplicatesAllowed: Boolean
+
+  """
   Indicates whether RubyGems package forwarding is allowed for the namespace.
   """
   rubygemsPackageRequestsForwarding: Boolean
@@ -169242,6 +169662,16 @@ enum UserCalloutFeatureNameEnum {
   TABS_POSITION_HIGHLIGHT
 
   """
+  Callout feature name for tailored_navigation_default_pins_merged.
+  """
+  TAILORED_NAVIGATION_DEFAULT_PINS_MERGED
+
+  """
+  Callout feature name for tailored_navigation_onboarding.
+  """
+  TAILORED_NAVIGATION_ONBOARDING
+
+  """
   Callout feature name for threat_monitoring_info.
   """
   THREAT_MONITORING_INFO
@@ -169275,6 +169705,11 @@ enum UserCalloutFeatureNameEnum {
   Callout feature name for user_reached_limit_free_plan_alert.
   """
   USER_REACHED_LIMIT_FREE_PLAN_ALERT
+
+  """
+  Callout feature name for use_gitlab_locally_homepage_widget.
+  """
+  USE_GITLAB_LOCALLY_HOMEPAGE_WIDGET
 
   """
   Callout feature name for verification_reminder.
@@ -180423,6 +180858,11 @@ input WorkItemCreateInput {
   projectPath: ID @deprecated(reason: "Please use namespacePath instead. That will cover for both projects and groups. Deprecated in GitLab 15.10.")
 
   """
+  Input for severity widget. Introduced in GitLab 19.6: Status: Experiment.
+  """
+  severityWidget: WorkItemWidgetSeverityInput @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
+
+  """
   Input for start and due date widget.
   """
   startAndDueDateWidget: WorkItemWidgetStartAndDueDateUpdateInput
@@ -181500,7 +181940,7 @@ type WorkItemExportPayload {
   message: String
 }
 
-type WorkItemFeatures {
+type WorkItemFeatures @granularScope(skipReason: "parent_authorizes") {
   """
   Agent plan widget of the work item. Returns `null` if the widget is not available for the work item.
   """
@@ -183381,7 +183821,7 @@ enum WorkItemStateEvent {
 """
 Represents status
 """
-type WorkItemStatus {
+type WorkItemStatus @granularScope(skipReason: "parent_authorizes") {
   """
   Category of the status. Introduced in GitLab 18.1: Status: Experiment.
   """
@@ -183694,7 +184134,7 @@ enum WorkItemTodoUpdateAction {
   MARK_AS_DONE
 }
 
-type WorkItemType {
+type WorkItemType @granularScope(skipReason: "parent_authorizes") {
   """
   Indicates whether the work item type is archived. Introduced in GitLab 18.8: Status: Experiment.
   """
@@ -184131,6 +184571,11 @@ input WorkItemUpdateInput {
   Input for progress widget.
   """
   progressWidget: WorkItemWidgetProgressInput
+
+  """
+  Input for severity widget. Introduced in GitLab 19.6: Status: Experiment.
+  """
+  severityWidget: WorkItemWidgetSeverityInput @deprecated(reason: "Status: Experiment. Introduced in GitLab 19.6.")
 
   """
   Input for start and due date widget.
@@ -185896,6 +186341,13 @@ type WorkItemWidgetSeverity implements WorkItemWidget @granularScope(skipReason:
   Widget type.
   """
   type: WorkItemWidgetType
+}
+
+input WorkItemWidgetSeverityInput {
+  """
+  Severity of the work item.
+  """
+  severity: IssuableSeverity!
 }
 
 """
