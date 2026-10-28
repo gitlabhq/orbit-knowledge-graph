@@ -188,7 +188,7 @@ MATCH (f:File {path: 'app/models/ci/build.rb', project_id: 278964, branch: 'mast
   -[:DEFINES]->(d:Definition)
   -[:CALLS]->(callee:Definition)
   <-[:DEFINES]-(cf:File)
-WHERE cf.branch = 'master'
+WHERE cf.branch = 'master' AND cf.project_id = 278964
 RETURN cf.path, count(callee) AS calls
 ORDER BY calls DESC
 LIMIT 20
