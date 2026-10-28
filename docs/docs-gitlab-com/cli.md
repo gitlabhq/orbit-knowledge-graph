@@ -217,6 +217,28 @@ The parser and [supported languages](schema.md#supported-languages) are the same
 - After you switch branches or commit, `grep` and `context` index the new commit for you.
 - To list the indexed repositories, run `glab orbit workspace list`.
 
+`sql`, `schema`, and the MCP server index the current repository the first time you use them in it,
+even when you indexed other repositories.
+A new commit alone does not trigger an index.
+
+#### Index in the background
+
+By default, `workspace index` runs in the foreground.
+If another index of the same repository is running, it waits for that index first.
+To index without blocking a shell command that has a short timeout, use these options:
+
+| Option | Behavior |
+|--------|----------|
+| `--async` | Start the index in the background and return when it holds its locks. Prints JSON with a `status` of `indexing`, `indexed`, or `queued`, a `pid`, and the `log` file path. `queued` means that another index of the repository is already running. Cannot be combined with `--wait`, `--timeout`, `--stats`, or `--verbose`. |
+| `--wait` | Wait for a running index, then index in the foreground. This is the default. |
+| `--timeout <seconds>` | How long to wait for a running index or open readers before the command exits with code `75`. Default: 600 seconds, or `ORBIT_WAIT_TIMEOUT_MS`. |
+
+With `--async`, if open readers hold the locks for 30 seconds, the command exits with code `75`.
+The background index keeps waiting.
+
+Commands that read the local graph also wait for a running index, up to 10 minutes, then exit with code `75`.
+To change the wait, set `ORBIT_WAIT_TIMEOUT_MS`.
+
 ### Search and read code
 
 `grep` searches every line of every file in the working tree, like `rg`, and adds the enclosing definitions from the graph:
@@ -292,6 +314,7 @@ The CLI reads these environment variables:
 |----------|---------|
 | `GITLAB_TOKEN`, `GITLAB_URL` | Token and instance for the GitLab Orbit API when you run the CLI without `glab`. Default URL: `https://gitlab.com`. Without `GITLAB_TOKEN`, the CLI gets the token and instance of your `glab` sign-in from `glab auth credential-helper`. |
 | `ORBIT_DATA_DIR` | A directory for the settings and the local graph, instead of `~/.gitlab/orbit/`. |
+| `ORBIT_WAIT_TIMEOUT_MS` | How long, in milliseconds, a command waits for a running index before it exits with code `75`. Default: `600000` (10 minutes). |
 | `ORBIT_TELEMETRY_ENABLED` | `false` or `true`. Overrides the saved telemetry setting, for example in a CI/CD job. |
 
 ## Exit codes
@@ -304,6 +327,7 @@ The CLI reads these environment variables:
 | `3` | HTTP `401`. The token is missing or expired. |
 | `4` | HTTP `403`. No group with GitLab Orbit turned on is available to you. |
 | `5` | HTTP `429`. Rate limited. Wait for `Retry-After`. |
+| `75` | A running index did not finish within the wait time. Try again later, or raise the wait. |
 | `130` | You canceled a prompt or indexing. |
 
 ## Related topics
