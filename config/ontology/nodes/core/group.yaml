@@ -82,6 +82,22 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
+  owner_id:
+    type: int64
+    source: owner_id
+    filterable: false
+    hidden: true
+    nullable: true
+    description: "Owner user ID; read back to retire the OWNER edge."
+
+  parent_id:
+    type: int64
+    source: parent_id
+    filterable: false
+    hidden: true
+    nullable: true
+    description: "Parent group ID; read back to retire the CONTAINS edge."
+
 indexer:
   reindex:
     - table: siphon_namespaces
@@ -133,6 +149,8 @@ storage:
     - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+    - {name: owner_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: parent_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}

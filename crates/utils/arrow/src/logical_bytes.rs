@@ -4,7 +4,7 @@ use arrow::array::types::{
 };
 use arrow::array::{
     Array, ByteView, GenericByteArray, GenericByteViewArray, GenericListArray, OffsetSizeTrait,
-    StringArray, new_empty_array,
+    StringArray, StructArray, new_empty_array,
 };
 use arrow::datatypes::{ArrowNativeType, DataType};
 use arrow::downcast_dictionary_array;
@@ -70,6 +70,20 @@ fn array_logical_byte_size(
         }
         DataType::List(inner) => list_logical_bytes::<i32>(column, inner.data_type(), array),
         DataType::LargeList(inner) => list_logical_bytes::<i64>(column, inner.data_type(), array),
+        DataType::Struct(fields) => {
+            let children = array
+                .as_any()
+                .downcast_ref::<StructArray>()
+                .expect("DataType::Struct guarantees a StructArray")
+                .columns();
+            fields
+                .iter()
+                .zip(children)
+                .map(|(field, child)| {
+                    array_logical_byte_size(column, field.data_type(), child.as_ref())
+                })
+                .sum()
+        }
         _ => Err(UnsupportedTypeError {
             column: column.to_string(),
             data_type: data_type.clone(),
@@ -396,14 +410,28 @@ mod tests {
     }
 
     #[test]
-    fn unknown_arrow_type_errors_with_column_name_and_type() {
-        let struct_fields = Fields::from(vec![Field::new("x", DataType::Int64, false)]);
+    fn struct_counts_the_bytes_of_its_children() {
+        let fields = Fields::from(vec![
+            Field::new("user_id", DataType::UInt64, false),
+            Field::new("state", DataType::Int16, false),
+        ]);
         let array = StructArray::new(
-            struct_fields.clone(),
-            vec![Arc::new(Int64Array::from(vec![1i64, 2]))],
+            fields.clone(),
+            vec![
+                Arc::new(UInt64Array::from(vec![1u64, 2])),
+                Arc::new(Int16Array::from(vec![0i16, 1])),
+            ],
             None,
         );
-        let data_type = DataType::Struct(struct_fields);
+        let batch = single_col_batch("reviewers", DataType::Struct(fields), Arc::new(array));
+        assert_eq!(logical_byte_size(&batch).unwrap(), 2 * 8 + 2 * 2);
+    }
+
+    #[test]
+    fn unknown_arrow_type_errors_with_column_name_and_type() {
+        let data_type = DataType::FixedSizeBinary(2);
+        let array = arrow::array::FixedSizeBinaryArray::try_from_iter([b"ab", b"cd"].into_iter())
+            .expect("fixed-size binary builds");
         let batch = single_col_batch("nested", data_type.clone(), Arc::new(array));
         let err = logical_byte_size(&batch).unwrap_err();
         assert_eq!(err.column, "nested");
@@ -421,7 +449,14 @@ mod tests {
             DataType::Struct(Fields::empty()),
             true,
         )));
-        assert!(!has_logical_byte_size(&struct_list));
+        assert!(has_logical_byte_size(&struct_list));
+
+        let binary_list = DataType::List(Arc::new(Field::new(
+            "item",
+            DataType::FixedSizeBinary(2),
+            true,
+        )));
+        assert!(!has_logical_byte_size(&binary_list));
 
         let utf8_dict = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
         assert!(has_logical_byte_size(&utf8_dict));

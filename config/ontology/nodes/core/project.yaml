@@ -104,6 +104,22 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
+  creator_id:
+    type: int64
+    source: creator_id
+    filterable: false
+    hidden: true
+    nullable: true
+    description: "Creator user ID; read back to retire the CREATOR edge."
+
+  namespace_id:
+    type: int64
+    source: namespace_id
+    filterable: false
+    hidden: true
+    nullable: true
+    description: "Parent namespace ID; read back to retire the CONTAINS edge."
+
 indexer:
   reindex:
     - table: siphon_projects
@@ -154,6 +170,8 @@ storage:
     - {name: star_count, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: last_activity_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+    - {name: creator_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: namespace_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_archived, column: archived, type: "minmax", granularity: 1}

@@ -302,6 +302,22 @@ properties:
     nullable: false
     description: "Namespace path for authz."
 
+  reviewers:
+    type: string
+    source: reviewers
+    filterable: false
+    hidden: true
+    nullable: false
+    description: "Reviewer tuples; read back to retire REVIEWER edges."
+
+  approvals:
+    type: string
+    source: approvals
+    filterable: false
+    hidden: true
+    nullable: false
+    description: "Approval tuples; read back to retire APPROVED edges."
+
   diff:
     type: string
     nullable: true
@@ -465,6 +481,8 @@ storage:
     - {name: latest_merge_request_diff_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: merged_commit_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+    - {name: reviewers, type: "Array(Tuple(user_id UInt64, state Int16, created_at DateTime64(6, 'UTC')))", codec: ["ZSTD(1)"]}
+    - {name: approvals, type: "Array(Tuple(user_id UInt64, created_at DateTime64(6, 'UTC')))", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_state, column: state, type: "set(6)", granularity: 2}

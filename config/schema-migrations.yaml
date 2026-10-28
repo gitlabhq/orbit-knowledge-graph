@@ -17,8 +17,15 @@
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
 - version: 117
-  scope: none
-  note: "Removes the edge-mapping mutable flag: FK edges are now retired at write time from the stored node row, so nothing reads the flag. No table, DDL or compiled query changes."
+  scope: sdlc
+  entities:
+  - Group
+  - MergeRequest
+  - Project
+  note: >-
+    Stores the FK keys and reviewer and approval tuples that Group, Project and
+    MergeRequest edges are built from, so the write-time edge diff can retire edges a
+    row stops emitting; removes the edge-mapping mutable flag, which nothing reads.
 - version: 116
   scope: none
   note: high_fan_out query hint; no table change

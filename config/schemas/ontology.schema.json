@@ -1481,7 +1481,7 @@
         },
         "type": {
           "type": "string",
-          "pattern": "^(Int64|UInt64|Bool|String|Date32|DateTime64\\(|Nullable\\(|LowCardinality\\().*$",
+          "pattern": "^(Int64|UInt64|Bool|String|Date32|DateTime64\\(|Nullable\\(|LowCardinality\\(|Array\\().*$",
           "not": { "pattern": "^Nullable\\(Date" },
           "description": "Exact ClickHouse type. Must start with a known type name."
         },
