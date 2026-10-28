@@ -236,7 +236,7 @@ SETTINGS index_granularity = 1024, allow_experimental_replacing_merge_with_clean
 
 CREATE TABLE IF NOT EXISTS gl_duo_workflow (
     id Int64 CODEC(T64, ZSTD(1)),
-    project_id Int64 CODEC(T64, ZSTD(1)),
+    project_id Nullable(Int64) CODEC(Delta(8), LZ4),
     status LowCardinality(String) DEFAULT 'created' CODEC(LZ4),
     goal String DEFAULT '' CODEC(ZSTD(3)),
     title Nullable(String) CODEC(ZSTD(1)),

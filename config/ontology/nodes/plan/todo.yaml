@@ -1,6 +1,6 @@
 node_type: Todo
 domain: plan
-description: A to-do item for one user, raised by an action on a work item, merge request, commit, or other target
+description: A to-do item for one user, raised by an action on a work item, merge request, or other target. To-do items on commits are not indexed
 label: action
 destination_table: gl_todo
 default_columns: [id, action, state, target_type, created_at]
@@ -83,7 +83,7 @@ properties:
     source: target_type
     nullable: false
     mutable: false
-    description: "Class of the target (e.g. 'Issue', 'MergeRequest', 'Commit')."
+    description: "Class of the target (e.g. 'Issue', 'MergeRequest', 'Epic')."
     selectivity: low
 
   target_id:
@@ -91,7 +91,7 @@ properties:
     source: target_id
     nullable: true
     mutable: false
-    description: "ID of the target. Null for commit targets."
+    description: "ID of the target."
 
   project_id:
     type: int64
@@ -136,7 +136,7 @@ pipelines:
       type: clickhouse
       tables: [siphon_todos]
       order_by: [traversal_path, user_id, id]
-      filter: "target_type NOT IN ('User', 'Key')"
+      filter: "target_type NOT IN ('User', 'Key', 'Commit')"
       query: generated
     transform:
       type: datafusion
