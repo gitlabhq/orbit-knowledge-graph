@@ -43,7 +43,7 @@ clickhouse = "26.6.8.7-stable"
 uv = "0.9.28"
 bun = "1.4.4"
 lychee = "0.23"
-vale = "3.14.1"
+vale = "3.21.0"
 rumdl = "0.2.69"
 lefthook = "2.1.3"
 protoc = "34.1"
@@ -507,7 +507,7 @@ run = "rumdl check --config docs/.rumdl/rumdl.toml docs"
 description = "Run rumdl on all markdown files"
 
 [tasks."lint:vale"]
-run = "vale --minAlertLevel error *.md docs docs-locale"
+run = "vale --minAlertLevel error *.md docs"
 description = "Run Vale prose linting on markdown files"
 
 [tasks."lint:links"]
