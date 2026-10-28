@@ -59,7 +59,7 @@ To set up an agent on your machine:
 
 <!-- vale orbit.StandaloneProductName = NO -->
 
-1. Install the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) 1.120 or later.
+1. Install the [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) 1.126 or later.
    To check your version, run `glab version`.
 1. Sign in to GitLab:
 

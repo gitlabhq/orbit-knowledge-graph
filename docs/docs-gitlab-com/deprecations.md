@@ -22,11 +22,12 @@ GitLab Orbit needs these versions or later:
 
 | Component | Minimum version |
 |-----------|-----------------|
-| GitLab CLI (`glab`) | TBD |
-| GitLab Orbit CLI (`orbit`) | 0.161.0 |
+| GitLab CLI (`glab`) | 1.126.0 |
+| GitLab Orbit CLI (`orbit`) | 0.163.0 |
 | GitLab Orbit Helm chart | 6.2.0 |
 | GitLab Self-Managed | TBD |
 
+If `glab` installed a GitLab Orbit CLI earlier than 0.163.0, `glab` 1.126.0 and later install the latest version.
 To update the GitLab Orbit CLI, run `glab orbit --update`.
 
 On GitLab.com and GitLab 19.6, `orbit schema` and `orbit status` fail in GitLab Orbit CLI 0.160.0 and earlier.

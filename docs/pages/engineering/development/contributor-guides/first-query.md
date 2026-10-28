@@ -7,7 +7,7 @@ GitLab account.
 
 You need:
 
-- `glab` 1.117 or later.
+- `glab` 1.126 or later.
 - Any local Git repository with source files.
 
 The examples use `orbit` directly after installation. If you prefer to stay
