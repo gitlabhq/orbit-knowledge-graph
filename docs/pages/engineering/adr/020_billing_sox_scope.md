@@ -16,119 +16,151 @@ Accepted
 
 ## Context
 
-[MR !937](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/937) added Snowplow billing event emission to Orbit's `ExecuteQuery` path. Eligible successful graph queries enqueue an `orbit_workflow_completion` event conforming to the `iglu:com.gitlab/billable_usage/jsonschema/1-0-2` schema when tracking is enabled and the required attribution is valid. Schema responses do not emit billing events. Missing or unrecognized realm values, or missing SaaS namespace attribution, prevent event construction. Delivery through the Data Insights Platform to CustomersDot is asynchronous; successful execution does not guarantee delivery.
+Orbit emits its own billable usage events, so the work falls under Sarbanes-Oxley (SOX) IT general controls.
+We had to decide which part of the repository those controls cover.
+The compliance team told us that two scopes are possible:
 
-Orbit also issues quota pre-checks against CustomersDot before query execution. The gate supports admin-token and license-checksum authentication. Requests without a license checksum in license-checksum mode, and SaaS requests without namespace attribution, skip the check. Other quota-check failures deny the request.
+- The whole repository, as AI Gateway does, so that every change is a SOX-controlled change
+- A limited scope at the folder or component level
 
-Builds compiled with `ORBIT_BILLING_ENFORCED=true` validate configuration at startup. They refuse to start unless billing and quota checks are enabled, endpoints match an approved environment pair, and authentication modes are compatible. Builds without this flag can disable billing and quota checks through configuration.
+For each eligible graph query that succeeds, Orbit sends a billable usage event in the shared GitLab billable usage schema through Snowplow.
+It sends the event only when tracking is on and the request carries valid attribution, and schema responses never send one.
+A missing or unknown realm, the claim that names the deployment type, prevents the event.
+On GitLab.com, missing namespace attribution also prevents it.
+The Data Insights Platform delivers events to CustomersDot, the GitLab billing system, later.
+A successful query therefore does not guarantee delivery.
 
-Because Orbit emits its own billable usage events, the work falls under SOX IT General Controls (ITGC). The compliance team's guidance is that two scoping approaches are possible:
+Before Orbit runs a query, it asks CustomersDot whether the caller has quota left.
+The quota gate supports two authentication modes, an admin token and a license checksum.
+The gate skips the check in two cases:
 
-- **Whole-repo scope.** The path taken by AI Gateway. Every change to the repository becomes a SOX-controlled change.
-- **Limited scope (folder / crate level).** Restrict SOX controls to a specific code surface.
+- A license-checksum request that has no license checksum
+- A GitLab.com request that has no namespace attribution
 
-### Current state (post-MR !937 cleanup)
+Any other quota-check failure denies the request.
 
-The original server-local billing module has since been refactored into an isolated crate. The crate and its host server were later renamed from `gkg-billing` / `gkg-server` to `orbit-billing` / `orbit-server`. As of this ADR:
+We can build Orbit with billing enforcement turned on.
+An enforced build checks its configuration at startup.
+It refuses to start unless billing and quota checks are on, the endpoints match an approved environment pair, and the authentication modes are compatible.
+A build without enforcement can turn off billing and quota checks through configuration.
 
-- Billing event construction, delivery integration, and quota logic live in `orbit-billing`.
-- Production conversion of `auth::Claims` into `BillingInputs` and `QuotaCheckInputs` is centralized in the claims-conversion adapter in `orbit-server`.
-- Configuration, delivery credentials, and pipeline observer callbacks also cross the crate boundary. They do not pass through the claims-conversion adapter.
+The billing code started as a module inside the Orbit server.
+We then moved event construction, delivery integration, and quota logic into an isolated billing component.
+One claims-conversion adapter in the server turns the authenticated request claims into billing and quota inputs.
+Configuration, delivery credentials, and pipeline observer callbacks also reach the billing component, but they do not pass through the adapter.
 
-This makes a *crate-level* (folder-level) limited scope feasible, provided the supporting hook points are also controlled. The adapter centralizes claim mapping; it does not isolate every dependency that can influence billing correctness.
+A limited scope at the component level is therefore possible, but only if we also control the hook points around it.
+A hook point is code outside the component that can change billing correctness.
+The adapter puts claim mapping in one place, but it does not isolate every such dependency.
 
 ## Decision
 
-**Adopt crate-level SOX scope with explicitly enumerated extended hook points.** The auditable SOX surface for Orbit billing comprises:
+**We scope SOX to the billing component, the claims-conversion adapter, and a list of extended hook points.**
 
-1. The entire `orbit-billing` crate.
-2. The claims-conversion adapter in `orbit-server`.
-3. A short list of files outside `orbit-billing` whose behavior can impact billing (the "extended hook points" below).
+The SOX-scoped section of the code owners file is the list of in-scope files.
+Each file in that section has a required-reviewer rule.
 
-Every path in scope is locked down with required-reviewer `CODEOWNERS` rules.
-
-## In-scope surface
+A file outside the billing component belongs on the list when a change to it can change billing correctness without a change to billing code.
 
 ### Primary scope
 
-- **Billing crate:** event construction and tracking, quota checks and caching, delivery authentication integration, startup enforcement, constants, metrics, and tests.
-- **Claims-conversion adapter:** the single declared conversion point between `auth::Claims` and the billing crate's input structs.
+The billing component is in scope as a whole.
+It covers event construction and tracking, quota checks and their cache, delivery authentication, and startup enforcement.
+It also covers its constants, metrics, and tests.
+
+The claims-conversion adapter is in scope.
+It is the one declared conversion point from authenticated request claims to billing inputs.
 
 ### Extended hook points
 
-These components live outside `orbit-billing` but can change billing correctness without touching billing code. Each is in scope for SOX review. The exact file paths are maintained in `.gitlab/CODEOWNERS`. Update those paths when a hook point is added or moved, and update this table when a new category is introduced.
+These parts live outside the billing component.
+Each can change billing correctness without a change to billing code, so each is in scope.
+A change that adds or moves a hook point must update the file list in the SOX-scoped section of the code owners file.
+A change that adds a new kind of hook point must also add a row to this table.
 
-| Hook point | Why in scope |
+| Hook point | Why it is in scope |
 |---|---|
-| **Pipeline observer interface** | Defines `finish()` / `record_error()` semantics and `MultiObserver` dispatch order. Changes here determine whether billing events fire at all for a given query outcome. |
-| **JWT claims struct** | Source of billing identity and attribution fields, including realm, root namespace, and instance identity. Changes can alter attribution, prevent emission, or reject a request. |
-| **JWT validation gate** | Determines whether claims are constructed at all for a request, and therefore whether a billable call can reach the pipeline. |
-| **Authorization gate** | Controls whether a query is allowed to complete. Rejection before successful completion prevents billing emission. |
-| **Billing observer construction** | Instantiates the observer with inputs supplied by the claims-conversion adapter and attaches it to the pipeline. |
-| **Pipeline billing wiring** | Where the billing tracker is wired into the query pipeline. Removing or reordering this silently stops emission. |
-| **Tracker and quota startup** | Validates configuration, constructs the tracker and quota service, wires them into the service, and drains queued events at shutdown. Changes can disable emission or quota enforcement, prevent startup, or lose queued events. |
-| **Pipeline security gate** | Controls whether the pipeline proceeds far enough to reach `finish()`. |
-| **Billing configuration and defaults** | Define emission and quota enablement, endpoint selection, authentication modes, and other settings that affect billing delivery and quota enforcement. |
-| **Billing delivery token cache** | Controls caching and refresh of the Cloud Connector token used to authenticate billing-event delivery. Changes can prevent delivery without modifying the billing crate. |
+| Pipeline observer interface | It defines how the pipeline reports success and errors, and the order in which observers run. A change decides whether billing events fire for a query outcome. |
+| Request claims | They carry billing identity and attribution, including realm, root namespace, and instance identity. A change can alter attribution, stop emission, or reject a request. |
+| Token validation gate | It decides whether a request gets claims at all, and so whether a billable call can reach the pipeline. |
+| Authorization gate | It decides whether a query can complete. A rejection before completion prevents emission. |
+| Billing observer construction | It builds the billing observer from the adapter inputs and attaches it to the pipeline. |
+| Pipeline billing wiring | It connects the billing tracker to the query pipeline. A removal or a new order silently stops emission. |
+| Tracker and quota startup | It validates configuration, builds the tracker and the quota service, wires them into the service, and drains queued events at shutdown. A change can turn off emission or quota enforcement, prevent startup, or lose queued events. |
+| Pipeline security gate | It decides whether the pipeline gets far enough to report success. |
+| Billing configuration and defaults | They set emission and quota enablement, endpoint selection, and authentication modes. They also hold other settings that affect delivery or quota enforcement. |
+| Delivery token cache | It caches and refreshes the Cloud Connector token for event delivery. A change can prevent delivery without a change to the billing component. |
 
-### Out of scope (intentionally)
+### Out of scope
 
-Paths not covered by the SOX section in CODEOWNERS are outside this declared scope. This is a maintained review boundary, not proof that other code cannot affect billing. Changes that introduce or move a billing hook point must update the scoped paths. Changes that introduce a new hook-point category must also update this table. The controls below reduce, but do not eliminate, the risk of an unrecognized dependency expanding the surface.
+Files outside the SOX-scoped section of the code owners file are outside this declared scope.
+The section is a maintained review boundary.
+It does not prove that other code cannot affect billing.
+The controls below reduce the risk that an unknown dependency expands the surface, but they do not remove it.
 
-## Implementation
+### Controls
 
-### CODEOWNERS
+The SOX-scoped code owners section belongs to the Orbit team.
+A change to any file in it needs code-owner approval on the protected default branch.
+The repository has no default ownership rule for other files.
+The code owners file and the dependency boundary test are in the same section, so a change to these controls needs the same approval.
+Ownership is per file, so an unrelated change inside a scoped file also needs approval.
 
-The CODEOWNERS file defines a `[SOX Billing]` section owned by `@gitlab-org/orbit/team`. It covers the billing crate, claims-conversion adapter, and extended hook points. Changes to these paths require code-owner approval on the protected `main` branch. There is no repository-wide default ownership rule.
+The adapter has a header comment that names it the one claims-conversion seam between the server and the billing component.
+The comment links to this ADR and refers to the extended hook points.
+It does not claim that configuration, credentials, or observer callbacks pass through claim conversion.
 
-The CODEOWNERS file and billing dependency-boundary test are also included in this section, so changes to these controls require the same approval. Because ownership is file-based, unrelated changes within a scoped file also require approval.
+The agent instruction files link to this ADR, so agents and contributors who change billing emission or quota-check code see the policy first.
 
-### Adapter header comment
+A continuous integration (CI) job checks the package dependency declarations in the workspace.
+It fails if any package other than the server declares a direct dependency on the billing component.
+A passing run shows that this direct dependency surface did not grow.
+It does not check new imports inside the server, re-exports, or changes to existing dependencies.
 
-The adapter declares itself the single claims-conversion seam between `orbit-server` and `orbit-billing`. Its header references this ADR and acknowledges the extended hook points. It does not claim that configuration, credentials, or observer callbacks pass through claim conversion.
+GitLab Duo review instructions flag new billing importers, re-exports, claim-mapping bypasses, and event emission outside the billing component.
+These checks are advisory and do not gate a merge.
+Human reviewers stay responsible for new hook points and for updates to the code owners file.
 
-### Cross-references in agent-facing docs
+A new member of the SOX approver group needs recorded manager approval.
+A formal maintainer nomination is optional, as the compliance discussion clarified.
+The operational process and the retention of approval evidence are still follow-up work.
+The code owners rules and CI checks do not show that this access process is in place.
 
-`AGENTS.md` and `CLAUDE.md` point at this ADR under "Where to find things". This nudges agents and contributors touching the in-scope paths toward the policy before they change billing emission or quota-check code.
+## Benefits of this approach
 
-### Architecture test
-
-[MR !1372](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1372) added the `billing-boundary-check` CI job. It checks workspace package dependency declarations and fails if any crate outside the permitted list (`orbit-server`) declares a direct dependency on `orbit-billing`. A passing run is evidence that this direct dependency surface has not expanded. It does not check new imports within the permitted crate, re-exports, or changes to existing supporting dependencies.
-
-### Automated review guidance
-
-[MR !1468](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1468) added Duo review instructions that flag new billing importers, re-exports, claim-mapping bypasses, and direct event emission outside the billing crate. These are advisory checks, not a merge gate. Human reviewers remain responsible for recognizing new hook points and updating CODEOWNERS.
-
-### Access approval
-
-Adding members to the SOX approver group requires recorded manager approval. A formal maintainer nomination is optional, as clarified in the [compliance discussion](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1358#note_3413138557). Confirming the operational process and retaining approval evidence remain follow-up work. CODEOWNERS and CI checks do not establish that this access process is in place.
-
-## Why not the alternatives
-
-**Whole-repo SOX scope.** Matches the AI Gateway precedent and removes any ambiguity about the surface. Rejected because this impacts the engineering velocity across any changes across the whole repo even when they have no influence on billing correctness. Subjecting entire repo to SOX compliance would slow non-billing work without any compliance benefit.
+Compliance can audit one declared SOX surface without a review of every file in the repository.
+Work outside the billing surface has no SOX merge requirements.
+The ADR, the adapter header, and the code owners rules point at the same files, so contributors and agents can find the boundary from each.
 
 ## Consequences
 
-What improves:
+The hook-point list needs upkeep.
+A future change can add a new path that silently affects billing correctness.
+The author must add that path to the code owners section, and update this ADR only for a new kind of hook point.
+Reviewers of in-scope code must notice when a refactor expands the hook-point surface.
 
-- A single, declared SOX surface (one crate + one adapter + a short hook-point list) that compliance can audit without reading every file in the repo.
-- Engineering velocity outside the billing surface is unaffected by SOX merge requirements.
-- The boundary is named and discoverable by humans and AI agents: ADR + adapter header comment + CODEOWNERS rules all point at the same set of files.
+A cross-component refactor of the pipeline observer interface needs SOX-reviewer approval, even when its intent has no relation to billing.
+The dependency boundary test adds a small CI step.
 
-What gets harder:
+## Why not the alternatives
 
-- The hook-point list is a maintenance liability. A future code change can introduce a *new* path through which billing correctness is silently affected. Add the path to CODEOWNERS, and update this ADR only if it introduces a new hook-point category. Reviewers of in-scope code need to recognize when a refactor expands the hook-point surface.
-- Cross-crate refactors that touch the pipeline observer trait now require SOX-reviewer approval, even if the refactor's intent is unrelated to billing.
-- The architecture test adds a CI step. Cost is small but non-zero.
+### Whole-repository SOX scope
+
+This scope matches AI Gateway and leaves no doubt about the surface.
+We rejected it because every change in the repository would carry SOX requirements, even when it cannot affect billing correctness.
+That slows non-billing work and gives no compliance benefit.
 
 ## References
 
-- Issue: [#507](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/507)
-- Implementing MR: [!937](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/937)
-- SOX scoping discussion on !937: [review thread](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/937#note_3268652539)
-- Quota check MR: [CustomersDot usage quota checks for mcp/rest queries](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1304)
-- Rails JWT claim additions: [GitLab !232123](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/232123)
-- AI Gateway billing events reference: [`ai-assist/lib/billing_events/`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/tree/main/lib/billing_events)
-- AI Gateway billing events docs: [`ai-assist/docs/billing_events.md`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/docs/billing_events.md)
-- Billing schema (Iglu): [`com.gitlab/billable_usage/jsonschema/1-0-2`](https://gitlab.com/gitlab-org/iglu/-/blob/master/public/schemas/com.gitlab/billable_usage/jsonschema/1-0-2)
-- Related Orbit work item: [#488](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/488)
+- [Determine SOX compliance scope and controls for Orbit billing event emission](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/507)
+- [Emit Snowplow billing events on successful queries](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/937)
+- [SOX scoping discussion on the billing events MR](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/937#note_3268652539)
+- [Add a CustomersDot usage quota gate for MCP and REST queries](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1304)
+- [Add a SOX boundary check for billing dependents](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1372)
+- [Add SOX billing-boundary review instructions for GitLab Duo](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1468)
+- [Compliance discussion on SOX approver access](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1358#note_3413138557)
+- [Add instance and deployment claims to the Orbit JSON Web Token](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/232123)
+- [AI Gateway billing events code](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/tree/main/lib/billing_events)
+- [AI Gateway billing events documentation](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/docs/billing_events.md)
+- [Billable usage schema version 1-0-2](https://gitlab.com/gitlab-org/iglu/-/blob/master/public/schemas/com.gitlab/billable_usage/jsonschema/1-0-2)
+- [Add metrics, tracing, and alerting for the billing event pipeline](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/488)

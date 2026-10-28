@@ -17,247 +17,223 @@ Amended by [ADR 022](022_queries_in_rails.md): Rails now runs the query stream, 
 
 ## Context
 
-GKG already exposes an agent-facing surface in three places:
+Orbit exposed agent tools through its gRPC service, through Rails REST endpoints, and through Model Context Protocol (MCP) tools in Rails.
+Each tool had a hand-written description and a JSON Schema.
+That worked for GitLab Duo and Agentic Chat, but it failed when external coding agents such as Claude Code, OpenCode, and Codex used it.
 
-- gRPC: `KnowledgeGraphService` on the GKG server (`crates/orbit-server/proto/orbit.proto`).
-- REST: `GET /api/v4/orbit/*` endpoints owned by Rails (proxy to GKG).
-- MCP: `tools/list` and `tools/call` handled by Rails, fanning out to GKG.
+Claude Code truncates long tool descriptions.
+The query tool description embedded the full query grammar, so the grammar was cut off mid-token and agents wrote invalid queries.
+The schema tool returned no property descriptions.
+Agents could not tell that a property held a coarse category, and they guessed filter values that did not exist.
+No endpoint returned the response JSON Schema or its version, which coding agents need to process query results.
 
-The existing agent tools and structured endpoints were each exposed with hand-written descriptions and JSON Schema. This worked for the first agent integrations, GitLab Duo and Agentic Chat. It broke down when external coding agents (Claude Code, OpenCode, Codex) tried to use the same surface:
+Every new tool needed changes in Orbit, Rails, and the agent prompts, with three review queues.
+We added one tool every few months, and we wanted to ship changes several times a week.
 
-- **Tool descriptions are truncated.** Claude Code truncates anything over ~2000 characters. The `query_graph` description embeds the full query DSL (`config/schemas/graph_query.schema.json`). The LLM needs it to write a valid query, but it pushes us well over the limit. The grammar gets cut off mid-token and the agent immediately produces invalid queries.
-- **Schema discovery is incomplete.** `get_graph_schema` returns node and edge metadata. It omits property descriptions. So the LLM cannot tell that `definition_type` is a coarse category. The language-specific fine-grained labels (e.g. `decorated_async_function`) live somewhere else. Agents hallucinate filter values like `definition_type = "function"` that do not exist.
-- **No way to discover the response shape.** Coding agents that compose Python or shell pipelines on top of `query_graph` need the response JSON Schema and its semver to write iteration code. Today that schema lives in `config/schemas/query_response.json` and is not exposed by any RPC or REST endpoint.
-- **Every new capability requires a Rails MR.** Rails owns the MCP tool catalog, the REST routes, and the gRPC client. Adding a new tool means changes in three repositories with three review queues. We move at one tool every few months. We want to move several times per week as agents surface new usability bugs.
-- **`query_graph` cannot move into the GKG executor.** `query_graph` goes through GitLab Workhorse for streaming and JWT-scoped redaction. It relies on Rails-only context that the GKG executor does not have.
+The query tool could not move into the Orbit executor, because it needed context that only Rails had.
+It ran through Workhorse to stream results and to redact them, which means to remove the results that the caller cannot see.
 
-The team converged on the [lazy-mcp pattern](https://gitlab.com/gitlab-org/ai/lazy-mcp). It is a discovery and invocation tool pair. A single MCP entry point can then expose a catalog of typed sub-commands. We already use lazy-mcp internally and trust the pattern. The decision is to apply the same pattern to GKG's agent surface, with one wrinkle. Rails must still intercept commands that need Rails context before they reach the GKG executor.
+We already used the lazy-mcp pattern internally.
+It puts a catalog of typed commands behind two tools, one for discovery and one for invocation.
+We applied the same pattern to Orbit, with one change: Rails must handle the commands that need Rails context.
 
 ## Decision
 
-Adopt a two-tool MCP surface (`list_commands`, `invoke_command`) backed by a typed command registry in GKG. Rails intercepts the commands that depend on Rails-only behavior; everything else dispatches directly to GKG.
+**Agents see two MCP tools, one to list commands and one to invoke a command, backed by a typed command registry in Orbit.**
+
+Rails intercepts the commands that depend on Rails-only behavior.
+Every other command goes directly to Orbit.
 
 ### Surface in each layer
 
-The agent-facing surface collapses to two MCP tools and two REST endpoints. The structured query and schema tools become commands behind that surface. The structured REST endpoints (`/api/v4/orbit/query`, `/schema`, `/graph_status`, `/tools`) stay in place so the GitLab UI and existing programmatic consumers do not break.
-
 | Layer | Surface |
 |---|---|
-| MCP `tools/list` | Returns only `list_commands` and `invoke_command` |
-| MCP `tools/call` | Routes through `invoke_command` |
-| REST (agent) | `GET /api/v4/orbit/agent/commands`, `POST /api/v4/orbit/agent/commands/:name` |
-| REST (UI / programmatic) | `GET /api/v4/orbit/{query,schema,graph_status,tools,status}` (unchanged) |
-| GKG gRPC | `ListAgentCommands`, `InvokeAgentCommand`, `GetQueryDsl`, `GetResponseFormat`, `ListSkills`, and `GetSkill`; plus the existing `ExecuteQuery`, `GetGraphSchema`, `GetGraphStatus`, `ListTools`, and `GetClusterHealth` |
+| MCP tool list | The two command tools only |
+| MCP tool call | Routed through the invoke tool |
+| Agent REST | One endpoint to list commands and one to invoke a command by name |
+| UI and programmatic REST | The structured query, schema, status, and tool endpoints, unchanged |
+| Orbit gRPC | New methods to list and invoke commands, return the query grammar and response format, and serve skills, next to the existing methods |
 
-The new agent REST endpoints sit under `/orbit/agent/*` and are marked `hidden: true` in Grape. That namespace is the agent-only contract. GKG can change the command catalog at any time. This does not break dashboards or hand-written API clients. Those dashboards use the structured `/orbit/{query,schema,...}` endpoints.
+The agent REST endpoints sit in a hidden, agent-only namespace.
+Orbit can change the command catalog at any time without breaking dashboards or hand-written clients, which use the structured endpoints.
 
 ### Command catalog
 
-The command registry lives in the GKG server at `crates/orbit-server/src/tools/registry.rs` (`CommandRegistry`). Each command has a name, a short description, and a JSON Schema for its parameters. This is the same `ToolDefinition` shape we already use for MCP tools.
+Each command has a name, a short description, and a JSON Schema for its parameters.
+Orbit already used the same shape for MCP tools.
+The first catalog had four commands:
 
-Initial commands:
-
-| Command | Where it executes | Why |
+| Command | Runs in | Reason |
 |---|---|---|
-| `query_graph` | Rails interceptor builds `workhorse_send_data`; Workhorse calls GKG `ExecuteQuery` | Needs Workhorse streaming and the bidirectional redaction exchange |
-| `get_graph_schema` | GKG executor (`InvokeAgentCommand`) | Pure ontology lookup, no Rails context required |
-| `get_query_dsl` | GKG executor (`InvokeAgentCommand`) | Returns `config/schemas/graph_query.schema.json` and `config/QUERY_DSL_VERSION` (RAW) or a versioned TOON-condensed grammar (LLM) |
-| `get_response_format` | GKG executor (`InvokeAgentCommand`) | Returns the response JSON Schema and its semver from `RAW_OUTPUT_FORMAT_VERSION` |
+| Graph query | Rails hands off to Workhorse, which calls Orbit | Needs Workhorse streaming and the two-way redaction exchange |
+| Graph schema | Orbit executor | Ontology lookup with no Rails context |
+| Query language | Orbit executor | Returns the grammar and its version |
+| Response format | Orbit executor | Returns the response JSON Schema and its semantic version |
 
-The schema-discovery commands (`get_query_dsl`, `get_response_format`) directly answer the discovery problems that motivated this ADR:
+The query language and response format commands answer the discovery problems above.
+Direct API consumers can call the matching gRPC method or a REST endpoint.
+Like the schema command, both accept a raw format, which returns the JSON Schema as stored.
+They also accept a large language model (LLM) format, which returns a condensed Token-Oriented Object Notation (TOON) form to save tokens.
 
-- `get_query_dsl` decouples the DSL grammar from the `query_graph` tool description. Agents that hit truncation can still fetch the full grammar on demand, along with `QUERY_DSL_VERSION`. Direct API consumers can use the `GetQueryDsl` RPC or a REST endpoint such as `GET /api/v4/orbit/dsl`; MCP agents use the command catalog and `InvokeAgentCommand`.
-- `get_response_format` returns the JSON Schema for the formatter output plus the matching `RAW_OUTPUT_FORMAT_VERSION`. Coding agents that build Python iteration on top of `query_graph` get an authoritative shape they can pin against.
-
-Both schema-discovery commands accept a `format: raw | llm` parameter, mirroring `get_graph_schema`. RAW returns the verbatim JSON Schema; LLM returns a TOON-condensed form to save tokens.
-
-GQL has no `get_query_dsl` command. Its `query_graph` description includes brief openCypher 9-based syntax rules, capped below 512 bytes, in the response to `list_commands`. Other descriptions keep the 400-byte cap, except `list_commands`, which includes command summaries. Both query modes keep large schemas out of descriptions.
-
-### Skills are not commands
-
-Skills are a CLI delivery channel, not an agent capability. The typed `ListSkills`
-and `GetSkill` gRPC methods serve the deployed Orbit Remote skill to Rails, whose
-typed `/orbit/skills` endpoints are the only consumer. The methods deliberately
-sit outside `CommandRegistry`, so MCP agents can neither list nor invoke skills.
-
-The server embeds `skills/orbit` and `skills/orbit-start`, a guided first
-session. Orbit Local continues to own `skills/orbit-cli`. A skill is identified
-by its frontmatter `name` and
-top-level `version`. The merge request check requires a version bump for changes
-under the corresponding `skills/<name>/` tree. It is not a content-identity
-guarantee: concurrent changes can choose the same next version, and an explicit
-`[skip skill-version-bump-check]` bypass exists. Both manifests include
-`compatibility` for environment discovery.
-
-`ListSkills` returns each skill's name, version, description, and compatibility.
-`GetSkill` returns the versioned tree, or no files when `metadata_only` is true.
-Both requests carry the caller's `language`. GQL callers get `SKILL.gql.md` as
-`SKILL.md`, whose version carries `+gql` so ETags and caches differ by mode. A
-missing language selects JSON; an unknown one rejects with `INVALID_ARGUMENT`.
-Full-tree responses sort normalized relative paths and include each UTF-8 file's
-SHA-256 for integrity verification. Both responses include `server_version` as
-deployment provenance; it is not part of skill identity.
-
-Rails uses `"<version>"` as the item ETag. The collection ETag is a digest over
-sorted `(name, version)` pairs. Clients validate every per-file
-SHA-256 before publishing a downloaded tree and key their caches by the skill
-version. Unknown names return `NOT_FOUND` with sorted known names.
-
-This artifact envelope is separate from the query formatter response. Adding or
-changing it does not require a `raw_output_format` pin bump.
+The GQL query mode, which uses an OpenCypher-like syntax, has no query language command.
+Instead, the GQL query command description holds brief OpenCypher-like syntax rules under a small size cap.
+Other descriptions keep a smaller cap, except the list tool, which also holds the command summaries.
+Both query modes keep large schemas out of descriptions.
 
 ### Command flow
 
 ```mermaid
 sequenceDiagram
-    participant Agent
-    participant Rails as Rails (MCP / REST)
-    participant Interceptor as CommandInterceptor
-    participant GKG as GKG (gRPC)
-    participant Workhorse
-
-    Agent->>Rails: tools/call invoke_command(name, params)
-    Rails->>Interceptor: intercept_orbit_command(name, args)
-    alt name == query_graph
-        Interceptor-->>Rails: workhorse_send_data
-        Rails-->>Agent: 200 (Workhorse handles streaming)
-        Note right of Workhorse: ExecuteQuery + redaction
-    else other command
-        Interceptor-->>Rails: not handled
-        Rails->>GKG: InvokeAgentCommand(name, params)
-        GKG-->>Rails: result_json or formatted_text
-        Rails-->>Agent: 200 JSON
+    accTitle: Agent command dispatch
+    accDescr: An agent invokes a command through Rails. Rails checks whether it must handle the command. Rails hands the graph query to Workhorse, and sends every other command to the Orbit executor.
+    participant A as Agent
+    participant R as Rails
+    participant O as Orbit
+    participant W as Workhorse
+    A->>R: Invoke a command (name, parameters)
+    R->>R: Check for interception
+    alt Graph query
+        R-->>A: Hand off to Workhorse
+        Note right of W: Query and redaction
+    else Other command
+        R->>O: Invoke the command
+        O-->>R: Result
+        R-->>A: JSON result
     end
 ```
 
-Two control points keep this safe:
+A Rails interceptor runs before the Orbit dispatch, reports whether it handled the command, and builds the Workhorse hand-off for the graph query.
+The Orbit executor also refuses an intercepted command with an error.
+So if a misconfigured Rails forwards the graph query, Orbit does not run it without the Rails context.
 
-1. **Rails interceptor (`Analytics::Orbit::CommandInterceptor`).** Sits in front of the GKG dispatch. For `query_graph` it builds the Workhorse send-data. It returns an `InterceptResult { handled, result, workhorse_send_data }` so the caller can tell whether the command was consumed.
-2. **GKG executor guard (`ExecutorError::InterceptedCommand`).** `ToolService::resolve_command` matches on `query_graph` and returns `InterceptedCommand`, which the gRPC handler maps to `FAILED_PRECONDITION`. If a misconfigured Rails ever forwards an intercepted command, GKG refuses rather than executing without the Rails context.
+### Discovery and invocation
 
-### `list_commands` and `invoke_command` shape
+The list tool accepts an optional set of command names and returns that part of the catalog.
+The invoke tool takes a command name and a generic parameters object.
+Orbit validates the parameters against the schema of the command.
 
-`list_commands` accepts an optional `command_names` array and returns a slice of the catalog. `invoke_command` requires `command_name` and accepts a generic `parameters` object that GKG validates against the registered invocation schema.
+When the caller token identifies GitLab Duo Agent Platform, Orbit puts the catalog in the list tool description.
+Each command appears with its description and input schema as compact JSON.
+One line for each source node and edge type then gives the relationship patterns of the active ontology.
+These agents need no discovery turn and no schema call for node and edge names.
+Other callers keep the short description.
 
-The MCP wrapper (`API::Orbit::McpHandlers::CallTool`) advertises either the legacy tool set or the new `list_commands`/`invoke_command` pair, controlled by a feature flag (see [Feature flag rollout](#feature-flag-rollout)). Agents discover the command catalog by calling `list_commands` once at the start of a session.
+The Orbit agent prompt in GitLab Duo Agent Platform encodes the contract for agents:
 
-GKG inlines the catalog in the `list_commands` description when the caller's JWT `source_type` is `dws`. Each command appears with its description and input schema as compact JSON. The active ontology's relationship patterns follow, one `(Source)-[:TYPE]->(Target|Target)` line per source node and edge type, so node and edge names need no schema call. Duo Agent Platform agents then call `invoke_command` without a discovery turn. Other callers keep the short description.
+1. List the commands once for each session.
+   Agent Platform callers can skip this step.
+1. Before the first query, fetch the query language and the graph schema.
+   Do not guess names from GitLab API terms.
+1. Invoke the graph query command for queries.
+1. On a schema violation, fetch the schema again with the relevant node expanded, then retry.
 
-### Discovery and invocation contract for agents
+Agents keep one model of the surface, whether a command runs in Orbit, Rails, or Workhorse.
 
-The ai-assist Orbit agent prompt encodes the contract that agents are expected to follow ([!5446](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/5446)):
+### Skills are not commands
 
-1. Call `orbit_list_commands` once per session. DWS callers already receive the catalog in the tool description, so this step is redundant for them.
-2. Before the first query, call `orbit_invoke_command` with `command_name=get_query_dsl` and `command_name=get_graph_schema`. Do not guess node, edge, or property names from GitLab API terminology.
-3. Call `orbit_invoke_command` with `command_name=query_graph` for queries.
-4. On a schema-violation error, re-fetch `get_graph_schema` with the relevant node expanded before retrying.
+Skills are a delivery channel for the command-line interface (CLI), not an agent capability.
+Separate gRPC methods serve the deployed skills to Rails, and the Rails skill endpoints are their only consumer.
+These methods sit outside the command registry, so MCP agents cannot list or invoke skills.
 
-This is the same shape as lazy-mcp: a single discovery call followed by typed `invoke_command` calls. Agents keep one mental model regardless of whether the underlying command runs in GKG, Rails, or Workhorse.
+The server embeds the main Orbit skill and a skill for a guided first session, and the Orbit CLI owns its own skill.
+The name and version in the manifest identify a skill, and the manifest also lists compatibility for environment discovery.
+A merge request check requires a version bump when the skill files change.
+The check does not make a version unique, because concurrent changes can pick the same version and an explicit bypass exists.
 
-### Why two tools, not one
+The list method returns the name, version, description, and compatibility of each skill.
+The get method returns the versioned file tree, sorted by path with a hash of each file, or only the metadata.
+Both requests carry the query language of the caller.
+GQL callers get the GQL variant, whose version has a GQL suffix so caches differ by mode.
+A missing language selects JSON, and an unknown language is rejected.
+An unknown name returns a not-found error with the sorted known names.
+Both responses include the server version as provenance, outside skill identity.
 
-A single "exploration" tool with an array of capability flags was considered. The team rejected it because:
+Rails uses the skill version as the HTTP cache tag (ETag) of one skill.
+The tag of the list is a digest of all skill names and versions.
+Clients check every file hash before they publish a tree, and they key their caches by skill version.
+This envelope is separate from the query response format, so a change to it needs no response format version bump.
 
-- An array of opaque keys ("schema", "dsl", "status") does not type-check the parameters for each capability. Smaller models cannot reliably reason about which fields go with which key.
-- `list_commands` plus `invoke_command` matches an existing pattern (lazy-mcp) the team already trusts and external agents already know how to consume.
+### Switchover
 
-### Why Rails still owns `query_graph`
+A Rails feature flag selects the MCP tool list.
+When it is off, agents see the legacy query and schema tools, and when it is on, they see the two command tools.
+**An agent session sees one surface or the other, never both.**
 
-A radical version of this proposal would push `query_graph` into `InvokeAgentCommand` as well, removing the interceptor entirely. We did not take that step because:
+With both, agents would see the graph query as a tool and as a command, and tool selection would become unpredictable.
+The flag does not affect the REST endpoints.
+Older GitLab Duo and Agentic Chat clients keep using the same MCP endpoint and see a different tool list.
+After the full rollout, we can remove the legacy MCP tools.
 
-- `query_graph` runs through Workhorse for streaming and for the bidirectional redaction exchange with Rails. Moving it into the GKG executor would lose streaming, because Rails would buffer large result sets. The alternative is a parallel Workhorse path that duplicates the existing one.
-The two-layer dispatch preserves this contract. Rails interceptor runs first, and the GKG executor is the fallback. Every other command still moves at GKG's pace.
+## Benefits of this approach
 
-### REST mirroring
-
-We considered three options for the REST surface:
-
-1. **Keep REST fully structured.** Stable but every new command requires a new Rails endpoint and Rails MR.
-2. **Make the structured REST endpoints dynamic.** Single entry point, fully driven by the GKG registry. Rejected because the GitLab UI and any community dashboards rely on stable schemas at `/orbit/{query,schema,graph_status}`.
-3. **Mirror the MCP surface under `/orbit/agent/*` and keep the structured endpoints stable.** Chosen.
-
-`/orbit/agent/commands` and `/orbit/agent/commands/:name` give agents the same dynamic catalog as the MCP surface. The `hidden: true` flag documents that this namespace is agent-only and free to evolve. The structured endpoints remain the contract for the UI and for hand-written clients.
-
-### Three-MR coordination
-
-The agent command surface ships as three coordinated MRs:
-
-| Repository | MR | Scope |
-|---|---|---|
-| `gitlab-org/orbit/knowledge-graph` | [!1252](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1252) | `ListAgentCommands`, `InvokeAgentCommand`, `GetQueryDsl`, `GetResponseFormat` RPCs; `CommandRegistry`; `ExecutorError::InterceptedCommand`; `ToolService::resolve_command` |
-| `gitlab-org/gitlab` | [!234925](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/234925) | MCP `list_commands` / `invoke_command` handlers; query command interception; `GET /orbit/agent/commands`, `POST /orbit/agent/commands/:name`; gRPC client methods |
-| `gitlab-org/modelops/.../ai-assist` | [!5446](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/5446) | Orbit agent toolset switches to `orbit_list_commands` / `orbit_invoke_command`; prompt rewritten around discovery-first flow |
-
-Order of merge:
-
-1. GKG first, so the gRPC contract exists.
-2. Rails second, so the MCP and REST surface go live.
-3. ai-assist last, so the agent prompt switches to the new surface only after Rails is shipping it.
-
-The new MCP tool list (`list_commands`, `invoke_command`) lands in Rails atomically with the new gRPC client methods. Older Duo and Agentic Chat clients that talk to MCP keep working through the same `tools/call` endpoint. They just see a different tool list.
-
-### Feature flag rollout
-
-Rails gates the MCP tool list behind a feature flag (`orbit_mcp_command_tools`). The flag controls which tools `tools/list` returns:
-
-| Flag state | MCP `tools/list` returns |
-|---|---|
-| Off (default) | Legacy tools: `query_graph`, `get_graph_schema` |
-| On | New surface: `list_commands`, `invoke_command` |
-
-The switch is atomic. An agent session sees one surface or the other, never both. Mixing legacy tools with the new command surface in one session would confuse agents. They would see `query_graph` both as a top-level tool and as a command inside `invoke_command`. Tool selection then becomes unpredictable.
-
-The structured REST endpoints (`/orbit/query`, `/schema`, `/graph_status`, `/tools`) and the new agent REST endpoints (`/orbit/agent/commands`, `/orbit/agent/commands/:name`) are always available regardless of flag state. The flag only affects MCP tool discovery.
-
-The flag then rolls out fully and the new surface becomes stable. A follow-up cleanup MR can then remove the legacy MCP tool registrations.
+A new command that needs no Rails context ships with one Orbit change, with no Rails or prompt change.
+Agents with a description limit can still fetch the full grammar and response shape.
+External agents can pin against the response format version and write code that survives schema changes.
 
 ## Consequences
 
-### What this enables
+- The first rollout changed Orbit, Rails, and the agent prompts together.
+  After that, the catalog grows in Orbit alone.
+- Orbit validates command parameters against the command schema before it runs a command.
+  Validation moves from the Rails API layer, which validated each structured endpoint, into the Orbit executor.
+- The legacy and new MCP paths coexist until the flag is fully rolled out.
+- Two registries exist during the transition.
+  The MCP tool registry keeps the two command tools and the structured tools that the UI still uses.
+  We can merge the two registries after we remove the legacy MCP tools, which is out of scope here.
+- The agent REST surface is dynamic.
+  A hand-written client of those endpoints gets schema changes without a Rails deprecation cycle.
+  We accept this because the structured endpoints stay stable, and the hidden agent namespace signals the contract.
+- Orbit does not see the result of an intercepted command, because Workhorse handles the response.
+  Command-level metrics for those commands must come from Rails.
+- Agents pay one discovery call for each session before they can write queries.
+  The lazy-mcp pattern accepts this cost to fit under MCP description limits.
 
-- **GKG-paced iteration.** New commands land with a single GKG MR. No Rails or ai-assist change is required as long as the command does not need Rails-side context.
-- **Discovery for token-constrained agents.** Coding agents that truncate tool descriptions can still discover the full DSL and response shape via `get_query_dsl` and `get_response_format`.
-- **Authoritative response shape.** External agents can pin against `RAW_OUTPUT_FORMAT_VERSION` and write iteration code that survives schema bumps.
-- **One mental model.** Agents see the same `list_commands` / `invoke_command` flow regardless of whether the command runs in GKG, Rails, or Workhorse.
+## Why not the alternatives
 
-### What this requires
+### One discovery tool with capability flags
 
-- **Three-repo coordination for the initial change.** The first rollout touches GKG, Rails, and ai-assist together. After that, the registry can grow in GKG alone.
-- **GKG validates command parameters.** Because `invoke_command` accepts a generic JSON object, GKG must JSON-Schema-validate `parameters` against the registered command schema before executing. This shifts validation responsibility from Grape (which would have validated structured parameters per endpoint) into the GKG command executor.
-- **Feature flag for clean switchover.** Rails uses `orbit_mcp_command_tools` to swap the MCP tool list atomically between the legacy tools and the new `list_commands`/`invoke_command` pair. Both code paths must coexist until the flag is fully rolled out.
-- **Two registries during transition.** The MR keeps `ToolRegistry` (the MCP `tools/list` source) and adds `CommandRegistry` (the lazy-mcp catalog). `ToolRegistry` is now restricted to `list_commands` and `invoke_command` plus the structured tools the existing UI still uses. We can collapse them in a follow-up once the legacy MCP tools are removed, but that is out of scope for this ADR.
+One MCP tool would take a list of capabilities, such as schema, grammar, and response format, and return one object keyed by capability.
+A list of opaque keys does not type-check the parameters of each capability.
+Smaller models cannot map those parameters onto a flat union, and per-command schemas type-check better.
+The graph query still needs its own parameter shape, so we would still have more than one top-level tool.
+The command pair also matches a pattern that we trust and that external agents already know.
 
-### Trade-offs
+### Move the graph query into the Orbit executor
 
-- **REST agent surface is dynamic.** Hand-written clients that hit `/orbit/agent/commands/:name` are subject to schema changes without a Rails-side deprecation cycle. We accept this because the structured endpoints stay stable for non-agent consumers, and the `hidden: true` flag plus the `/agent/` prefix signal the contract.
-- **Rails-intercepted commands stay opaque to GKG.** GKG cannot tell from the executor that `query_graph` ran successfully, because Workhorse handles the response. Cross-cutting metrics (e.g. command-level latency histograms) need to be instrumented in Rails separately from the GKG-side metrics for the rest.
-- **One extra round-trip for first-time discovery.** Agents pay one `list_commands` call per session before they can compose queries. The lazy-mcp pattern accepts this cost in exchange for fitting under MCP description budgets.
+This would remove the Rails interceptor.
+The query runs through Workhorse for streaming and for the two-way redaction exchange with Rails.
+In the executor, Rails would buffer large results and lose streaming, unless we duplicated the Workhorse path.
+With the interceptor first and the executor as the fallback, every other command still moves at the pace of Orbit.
 
-## Alternatives considered
+### Keep the REST surface fully structured
 
-### Single graph discovery tool with capability flags
+Each new command would need a new Rails endpoint and a Rails merge request.
 
-A single MCP tool that takes `{ include: ["schema", "dsl", "response_format"] }` and returns a top-level JSON object keyed by the requested capabilities. Considered and rejected during the design sync because:
+### Make the structured REST endpoints dynamic
 
-- Smaller models cannot reliably map per-capability parameters (e.g. `expand_nodes` for schema, `format` for DSL) onto a flat union. Per-command JSON Schemas type-check far better.
-- It does not handle `query_graph`, which needs its own parameter shape anyway. We would still end up with multiple top-level tools.
+The GitLab UI and community dashboards depend on stable schemas at the structured endpoints.
 
-### Auto-expose every command as `/api/v4/orbit/<name>`
+### One REST endpoint for each command
 
-Auto-generate a REST endpoint per command, so REST and MCP stay one-to-one. Rejected because every new endpoint would need a fresh Rails route, Grape declaration, and would touch the API team's review queue. That defeats the goal of decoupling release cadence from Rails.
+Generated endpoints would keep REST and MCP one-to-one.
+Each one would need a new Rails route and declaration and a review from the API team.
+That defeats the goal of a release cadence independent of Rails.
 
-### Hypermedia / single self-describing entry point
+### A self-describing hypermedia API
 
-A pure hypermedia-style API, where every response embeds links to next actions. Conceptually elegant but harder for current LLM agents to navigate compared to a flat command list with typed parameter schemas. We may revisit this as agent capabilities improve.
+Every response would embed links to the next actions.
+Current LLM agents find a flat command list with typed parameter schemas simpler to navigate.
+We may revisit this as agents improve.
 
 ## References
 
-- [GKG Tool Design Sync 2026-05-06 transcript](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts/-/blob/49763c824a0aebd5f390af3fb08fdf0df322fb2b/meetings/Other/GKG%20Tool%20Design%20Sync%202026-05-06.transcript.vtt)
-- [GKG MR !1252: agent command RPCs and registry](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1252)
-- [Rails MR !234925: MCP/REST surface and command interceptor](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/234925)
-- [ai-assist MR !5446: agent prompt and command discovery](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/5446)
+- [Tool design sync, May 6, 2026, transcript](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts/-/blob/49763c824a0aebd5f390af3fb08fdf0df322fb2b/meetings/Other/GKG%20Tool%20Design%20Sync%202026-05-06.transcript.vtt)
+- [Agent command RPCs and registry in Orbit](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1252)
+- [MCP and REST command surface and interceptor in Rails](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/234925)
+- [Agent prompt and command discovery in GitLab Duo Agent Platform](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/5446)
 - [lazy-mcp project](https://gitlab.com/gitlab-org/ai/lazy-mcp)
-- [ADR 003: API design](003_api_design.md)
-- [ADR 004: Unified response schema](004_unified_response_schema.md)
+- [Duo and Orbit prompt routing architecture](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/duo_orbit_prompt_routing.md)
+- [ADR 003: Orbit API design (unified REST and GraphQL)](003_api_design.md)
+- [ADR 004: Unified query response schema](004_unified_response_schema.md)
 - [ADR 010: Graph status endpoint](010_graph_status_endpoint.md)
-- [Duo / Orbit prompt routing architecture](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/duo_orbit_prompt_routing.md): when Duo agents are routed through Rails to the MCP surface defined here
+- [ADR 022: Run Orbit queries in Rails instead of Workhorse](022_queries_in_rails.md)
