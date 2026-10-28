@@ -717,7 +717,7 @@ fn list(input: Node) -> Result<Value> {
             Rule::InListLiteral => format!(
                 "IN takes at most {MAX_NODE_IDS} values on id and {MAX_IN_VALUES} on other properties"
             ),
-            _ => format!("a list takes at most {MAX_NODE_IDS} values"),
+            _ => format!("a list takes at most {MAX_IN_VALUES} values"),
         };
         return Err(error_at(input.as_span(), &message));
     }

@@ -170,10 +170,11 @@ ControlCharacter = _{ '\u{0000}'..'\u{001f}' | "\u{007f}" }
 // Escape letters b, f, n, r, and t are case-insensitive. Unicode has exactly four or eight hex digits.
 EscapedChar = _{ "\\" ~ ("\\" | "'" | "\"" | ^"b" | ^"f" | ^"n" | ^"r" | ^"t" | "u" ~ ASCII_HEX_DIGIT{4} | "U" ~ ASCII_HEX_DIGIT{8}) }
 
-// The 501st value is a sentinel for the node_ids diagnostic, because an id IN list becomes node_ids.
-// Validation caps other IN lists at 100. ListOverflow takes the rest, so any longer list gets one clear error.
+// An id IN list becomes node_ids, so IN stops at a 501st-value sentinel and validation caps other IN
+// lists at 100. Every other list, including one in a property map, is a filter value capped at 100.
+// ListOverflow takes the rest, so any longer list gets one clear error.
 InListLiteral = { "[" ~ SP? ~ (Value ~ (SP? ~ "," ~ SP? ~ Value){0,500} ~ ListOverflow?)? ~ SP? ~ "]" }
-ListLiteral = { "[" ~ SP? ~ (Value ~ (SP? ~ "," ~ SP? ~ Value){0,500} ~ ListOverflow?)? ~ SP? ~ "]" }
+ListLiteral = { "[" ~ SP? ~ (Value ~ (SP? ~ "," ~ SP? ~ Value){0,100} ~ ListOverflow?)? ~ SP? ~ "]" }
 ListOverflow = { (SP? ~ "," ~ SP? ~ Value)+ }
 
 Variable = { SymbolicName }
