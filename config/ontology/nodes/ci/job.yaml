@@ -198,7 +198,7 @@ properties:
     type: int64
     source: queued_duration
     nullable: true
-    description: "Time spent queued in seconds: queued_at to started_at, or to finished_at when the job finished without starting. Null while it is still waiting."
+    description: "Queue time in seconds, up to started_at or, if never started, finished_at. Null while waiting, or when queued_at is after started_at (re-queued job; wait unknown)."
 
   type:
     type: string

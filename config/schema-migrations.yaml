@@ -20,9 +20,9 @@ migrations:
   scope: "*"
   note: >-
     Job gains duration and queued_duration (seconds, computed in the extract from
-    started_at, finished_at and queued_at). The new nodes/ci/job.sql.j2 extract is
-    unmapped in derive_scope, which forces a full rebuild; the output change itself is
-    Job-only.
+    started_at, finished_at and queued_at; a negative queue time is NULL). The new
+    nodes/ci/job.sql.j2 extract is unmapped in derive_scope, which forces a full
+    rebuild; the output change itself is Job-only.
 - version: 116
   scope: none
   note: high_fan_out query hint; no table change

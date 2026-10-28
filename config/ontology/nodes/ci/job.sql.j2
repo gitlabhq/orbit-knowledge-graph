@@ -18,9 +18,13 @@ SELECT
     toUnixTimestamp64Micro(finished_at) - toUnixTimestamp64Micro(started_at),
     1000000
   ) AS duration,
-  intDiv(
-    toUnixTimestamp64Micro(coalesce(started_at, finished_at)) - toUnixTimestamp64Micro(queued_at),
-    1000000
+  if(
+    toUnixTimestamp64Micro(coalesce(started_at, finished_at)) < toUnixTimestamp64Micro(queued_at),
+    NULL,
+    intDiv(
+      toUnixTimestamp64Micro(coalesce(started_at, finished_at)) - toUnixTimestamp64Micro(queued_at),
+      1000000
+    )
   ) AS queued_duration,
   type,
   runner_id,
