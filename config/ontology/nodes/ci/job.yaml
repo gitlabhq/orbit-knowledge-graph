@@ -188,6 +188,18 @@ properties:
     nullable: true
     description: "Queue timestamp."
 
+  duration:
+    type: int64
+    source: duration
+    nullable: true
+    description: "Execution time in seconds (finished_at - started_at). Null until the job has started and finished. Trigger (bridge) jobs cover downstream pipeline time, not runner time."
+
+  queued_duration:
+    type: int64
+    source: queued_duration
+    nullable: true
+    description: "Queue time in seconds, up to started_at or, if never started, finished_at. Null while waiting, or when queued_at is after started_at (re-queued job; wait unknown)."
+
   type:
     type: string
     source: type
@@ -293,7 +305,7 @@ pipelines:
       type: clickhouse
       tables: [siphon_p_ci_builds]
       order_by: [traversal_path, id, partition_id]
-      query: generated
+      query: job.sql.j2
       partition_count: 5
     transform:
       type: datafusion
@@ -374,6 +386,8 @@ storage:
     - {name: started_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: queued_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: duration, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: queued_duration, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: runner_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: timeout, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
