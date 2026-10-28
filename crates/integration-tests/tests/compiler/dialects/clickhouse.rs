@@ -101,6 +101,25 @@ fn gql_count_distinct_renders_distinct_aggregates() {
 }
 
 #[test]
+fn json_distinct_count_matches_gql_count_distinct() {
+    let orbit_query = "MATCH (n:Note {id: 1})<-[:AUTHORED]-(u:User) RETURN u{.id}, count(DISTINCT n.confidential) AS flags LIMIT 10";
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "n", "entity": "Note", "node_ids": [1]},
+            {"id": "u", "entity": "User", "columns": ["id"]}
+        ],
+        "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+        "group_by": ["u"],
+        "aggregations": [{"count": "n.confidential", "distinct": true, "as": "flags"}],
+        "limit": 10
+    }"#;
+
+    let result = compile_pair(json, orbit_query, &test_ontology(), &test_ctx()).unwrap();
+    assert_eq!(result.base.render().matches("countDistinct").count(), 1);
+}
+
+#[test]
 fn group_by_property_truncate_month_wraps_column() {
     let orbit_query = "MATCH (u:Note {confidential: false}) RETURN date_trunc('month', u.created_at), count(u) AS n LIMIT 50";
     let json = r#"{

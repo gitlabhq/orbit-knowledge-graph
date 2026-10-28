@@ -1322,6 +1322,12 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
                 )));
             }
 
+            if agg.distinct && function != AggFunction::Count {
+                return Err(QueryError::Validation(format!(
+                    "aggregation \"{alias}\": \"distinct\" works only with \"count\""
+                )));
+            }
+
             let target = agg.expr.node();
             if !node_ids.contains(&target) {
                 return Err(QueryError::ReferenceError(format!(
@@ -2233,6 +2239,25 @@ mod tests {
                 }]
             }"#,
             "\"collect\" is not supported",
+        );
+    }
+
+    #[test]
+    fn accepts_distinct_count_and_rejects_it_on_other_functions() {
+        assert_ok(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+                "aggregations": [{"count": "u.username", "distinct": true, "as": "n"}]
+            }"#,
+        );
+        assert_rejects(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+                "aggregations": [{"sum": "u.id", "distinct": true, "as": "n"}]
+            }"#,
+            "\"distinct\" works only with \"count\"",
         );
     }
 

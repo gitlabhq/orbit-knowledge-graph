@@ -479,8 +479,13 @@ output column name: `{"avg": "mr.merge_duration", "as": "avg_dur"}`.
 | `min` | `"node.property"` | Numeric, boolean, enum, `Date`, or `DateTime` |
 | `max` | `"node.property"` | Numeric, boolean, enum, `Date`, or `DateTime` |
 
+Add `"distinct": true` to a `count` aggregation to count distinct values:
+`{"count": "pl", "distinct": true, "as": "pipelines"}`. Other functions reject it.
+
 Without `as`, the output column name is derived as `<function>_<node>`
-(`count_mr`) or `<function>_<node>_<property>` (`avg_mr_merge_duration`).
+(`count_mr`) or `<function>_<node>_<property>` (`avg_mr_merge_duration`);
+a distinct count is named `count_distinct_<node>` or
+`count_distinct_<node>_<property>`.
 Reference these names in `aggregation_sort`.
 
 `sum` and `avg` reject `DateTime` properties with a validation error. To
