@@ -1,6 +1,6 @@
 # `glab orbit` reference
 
-`glab orbit <command>` runs the Orbit CLI binary. glab downloads, caches, and
+`glab orbit <command>` runs the GitLab Orbit CLI binary. glab downloads, caches, and
 updates it, and passes your GitLab credential on each call. It runs on macOS,
 Linux, and Windows.
 
