@@ -50,5 +50,38 @@ test('the status line counts finished Orbit queries and passes every call throug
   expect(await ui.find({ type: 'Text', text: '1' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' query' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' nodes' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' edges' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: '  ◎ GitLab Orbit' })).toBeDefined()
+})
+
+test('the status line shows the nodes out of the project graph total once graph-status answers', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\n' } }))
+  const graph = { itemCounts: { domains: [{ entities: [{ name: 'Job', count: '1675399' }, { name: 'Project', count: '1' }] }] } }
+  on('process.run', () => ({
+    value: { exitCode: 0, stdout: JSON.stringify(graph), stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+  }))
+  await $.tool.call({ tool: 'Bash', command: QUERY })
+  // graph-status runs in the background; let its stubbed answer settle
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+
+  const ui = await $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
+  expect(await ui.find({ type: 'Text', text: '3 / 1,675,400' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' nodes total' })).toBeDefined()
+})
+
+test('a cypher block in a reply draws highlighted, and the prose before it stays Claude Code', async ($, on) => {
+  on('ui.render', (_$, e) => ({ type: 'Text', props: {}, children: ['drawn by Claude Code: ' + (e.props as { text: string }).text] }))
+  const text = 'Here is the query.\n\n```cypher\n-- count by state\nMATCH (mr:MergeRequest {project_id: 1})\nRETURN mr.state, count(mr) AS n\n```'
+  const ui = await $.ui.mount({ ...SITE, component: 'AssistantMessage', props: { text, isFirstOfReply: true } })
+  expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code: Here is the query.' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'MATCH' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'MergeRequest' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '-- count by state' })).toBeDefined()
+})
+
+test('a reply without cypher stays Claude Code', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
+  const ui = await $.ui.mount({ ...SITE, component: 'AssistantMessage', props: { text: '```bash\nls\n```', isFirstOfReply: true } })
+  expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeDefined()
 })

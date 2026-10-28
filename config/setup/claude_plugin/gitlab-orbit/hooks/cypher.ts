@@ -10,6 +10,7 @@ export type TokenKind =
   | 'property'
   | 'variable'
   | 'punctuation'
+  | 'comment'
   | 'space'
 
 export type Token = { text: string; kind: TokenKind }
@@ -34,10 +35,11 @@ export const TOKEN_STYLE: Readonly<Record<TokenKind, TokenStyle>> = {
   property: {},
   variable: {},
   punctuation: { dimColor: true },
+  comment: { dimColor: true, italic: true },
   space: {},
 }
 
-const TOKEN = /\s+|'(?:[^'\\]|\\.)*'?|"(?:[^"\\]|\\.)*"?|-?\d+(?:\.\d+)?|[A-Za-z_][\w]*|\*\d*(?:\.\.\d+)?|<-|->|<>|!=|<=|>=|[^\s\w]/g
+const TOKEN = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|\s+|'(?:[^'\\]|\\.)*'?|"(?:[^"\\]|\\.)*"?|-?\d+(?:\.\d+)?|[A-Za-z_][\w]*|\*\d*(?:\.\.\d+)?|<-|->|<>|!=|<=|>=|[^\s\w]/g
 
 export function tokenize(query: string): Token[] {
   const raw = query.match(TOKEN) ?? []
@@ -47,7 +49,8 @@ export function tokenize(query: string): Token[] {
     const prev = out[out.length - 1]?.text ?? ''
     const next = raw[i + 1] ?? ''
     let kind: TokenKind = 'variable'
-    if (/^\s+$/.test(text)) kind = 'space'
+    if (/^\/[/*]/.test(text)) kind = 'comment'
+    else if (/^\s+$/.test(text)) kind = 'space'
     else if (/^['"]/.test(text)) kind = 'string'
     else if (/^-?\d/.test(text)) kind = 'number'
     else if (/^[A-Za-z_]/.test(text)) {
@@ -108,4 +111,33 @@ export function queryOf(command: string): string {
   const m = command.match(/\bglab\s+orbit\s+query\s+(?:--[\w-]+(?:[ =][^\s'"]+)?\s+)*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')/)
   if (!m) return ''
   return m[1] !== undefined ? m[1].replace(/\\(["\\$`])/g, '$1') : (m[2] ?? '')
+}
+
+/**
+ * Code as the author laid it out, one token list per line, for a code block in a reply. A line
+ * that starts with `-- ` is a comment too: agents write SQL-style comments in Cypher.
+ */
+export function codeLines(code: string): Token[][] {
+  return code.replace(/\s+$/, '').split('\n').map((line) =>
+    /^\s*--(\s|$)/.test(line) ? [{ text: line, kind: 'comment' as const }] : tokenize(line),
+  )
+}
+
+export type Segment = { kind: 'prose' | 'code'; text: string }
+
+const CYPHER_FENCE = /^```[ \t]*(?:cypher|opencypher|gql)[ \t]*\n([\s\S]*?)^```[ \t]*$/gim
+
+/** A reply's markdown split around its closed ```cypher, ```opencypher, and ```gql blocks. */
+export function cypherSegments(markdown: string): Segment[] {
+  const out: Segment[] = []
+  let at = 0
+  for (const m of markdown.matchAll(CYPHER_FENCE)) {
+    const prose = markdown.slice(at, m.index).trim()
+    if (prose) out.push({ kind: 'prose', text: prose })
+    out.push({ kind: 'code', text: m[1] ?? '' })
+    at = (m.index ?? 0) + m[0].length
+  }
+  const rest = markdown.slice(at).trim()
+  if (rest) out.push({ kind: 'prose', text: rest })
+  return out
 }

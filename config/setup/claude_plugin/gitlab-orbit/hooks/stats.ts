@@ -58,6 +58,28 @@ function tryJson(text: string): Record<string, unknown> | null {
   }
 }
 
+/**
+ * The project's whole graph as `glab orbit graph-status --response-format raw` reports it: the
+ * node counts of every entity in every domain, summed. Null when the output has none.
+ */
+export function graphNodes(json: string): number | null {
+  try {
+    const domains = (JSON.parse(json) as { itemCounts?: { domains?: { entities?: { count?: unknown }[] }[] } })
+      .itemCounts?.domains
+    if (!Array.isArray(domains)) return null
+    let total = 0
+    for (const domain of domains) for (const entity of domain.entities ?? []) total += Number(entity.count) || 0
+    return total
+  } catch {
+    return null
+  }
+}
+
+/** A count in full with thousands separators, as 1,675,400. */
+export function grouped(n: number): string {
+  return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
 /** A count for the status line, as 950, 1.2k, 12k, or 1.2M. */
 export function compact(n: number): string {
   if (n < 1000) return String(n)
