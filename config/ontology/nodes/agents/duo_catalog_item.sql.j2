@@ -1,0 +1,18 @@
+SELECT
+  i.id AS id,
+  i.name AS name,
+  i.description AS description,
+  i.item_type AS item_type,
+  i.visibility AS visibility,
+  i.verification_level AS verification_level,
+  i.project_id AS project_id,
+  i.star_count AS star_count,
+  i.last_30_day_usage_count AS last_30_day_usage_count,
+  i.created_at AS created_at,
+  i.updated_at AS updated_at,
+  i.{{version_column}} AS _version,
+  (i.{{deleted_column}} OR i.deleted_at IS NOT NULL) AS _deleted
+FROM siphon_ai_catalog_items AS i
+WHERE 1 = 1 {{filters}}
+ORDER BY id
+LIMIT {{batch_size}}

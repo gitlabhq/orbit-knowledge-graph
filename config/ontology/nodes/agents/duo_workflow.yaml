@@ -1,0 +1,127 @@
+node_type: DuoWorkflow
+domain: agents
+description: A GitLab Duo Agent Platform workflow in a project and its run status. Namespace-level workflows are not indexed
+label: status
+destination_table: gl_duo_workflow
+default_columns: [id, status, created_at]
+
+style:
+  size: 22
+  color: "#8B5CF6"
+
+redaction:
+  resource_type: duo_workflow
+  id_column: id
+  ability: read_duo_workflow
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_duo_workflow
+      key_column: id
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID."
+
+  status:
+    type: enum
+    source: status
+    nullable: false
+    description: "Run status."
+    values:
+      0: created
+      1: running
+      2: paused
+      3: finished
+      4: failed
+      5: stopped
+      6: input_required
+      7: plan_approval_required
+      8: tool_call_approval_required
+      9: idle
+
+  goal:
+    type: string
+    source: goal
+    nullable: false
+    admin_only: true
+    like_allowed: false
+    description: "Goal or prompt that started the workflow. Admins only."
+
+  title:
+    type: string
+    source: title
+    nullable: true
+    admin_only: true
+    like_allowed: false
+    description: "Title. Admins only."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    mutable: false
+    description: "Creation timestamp."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "Last update timestamp."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    hidden: true
+    nullable: false
+    description: "Namespace path for authz."
+
+indexer:
+  reindex: [siphon_duo_workflows_workflows]
+pipelines:
+  - name: DuoWorkflow
+    extract:
+      type: clickhouse
+      tables: [siphon_duo_workflows_workflows]
+      order_by: [traversal_path, id]
+      filter: "project_id != 0"
+      query: generated
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: id
+            kind: DuoWorkflow
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
+storage:
+  primary_key: [traversal_path, id]
+  settings:
+    add_minmax_index_for_temporal_columns: "1"
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: status, type: "LowCardinality(String)", default: "'created'", codec: ["LZ4"]}
+    - {name: goal, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: title, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_status, column: status, type: "set(16)", granularity: 2}

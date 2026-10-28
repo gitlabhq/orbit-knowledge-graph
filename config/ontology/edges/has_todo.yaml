@@ -1,0 +1,7 @@
+description: A user owns a to-do item
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Todo, id: id }
+    scope: prune_to_target
+    description: "User owns the to-do item."

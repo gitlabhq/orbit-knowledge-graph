@@ -1,0 +1,25 @@
+description: SBOM occurrences index with the component version from siphon_sbom_component_versions, mapped severity and reachability, and IN_PROJECT edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_sbom_component_versions:
+    - { id: 501, component_id: 50, version: "2.14.1", source_package_name: log4j-core, organization_id: 1, created_at: "2024-01-01 00:00:00", updated_at: "2024-01-01 00:00:00", traversal_path: "1/" }
+    - { id: 502, component_id: 51, version: "4.17.21", source_package_name: lodash, organization_id: 1, created_at: "2024-01-01 00:00:00", updated_at: "2024-01-01 00:00:00", traversal_path: "1/" }
+  siphon_sbom_occurrences:
+    - { id: 1, project_id: 1000, component_id: 50, component_version_id: 501, uuid: "00000000-0000-0000-0000-000000000001", commit_sha: abc123, component_name: log4j-core, package_manager: maven, input_file_path: pom.xml, highest_severity: 7, vulnerability_count: 3, reachability: 1, archived: false, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 2, project_id: 1000, component_id: 51, component_version_id: 502, uuid: "00000000-0000-0000-0000-000000000002", commit_sha: abc123, component_name: lodash, package_manager: npm, input_file_path: package-lock.json, highest_severity: null, vulnerability_count: 0, reachability: 0, archived: false, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 3, project_id: 1000, component_id: 52, component_version_id: null, uuid: "00000000-0000-0000-0000-000000000003", commit_sha: abc123, component_name: rack, package_manager: bundler, input_file_path: Gemfile.lock, highest_severity: 4, vulnerability_count: 1, reachability: 2, archived: false, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_sbom_occurrence:
+      rows:
+        - { id: 1, project_id: 1000, component_name: log4j-core, package_manager: maven, version: "2.14.1", highest_severity: critical, reachability: in_use, vulnerability_count: 3 }
+        - { id: 2, project_id: 1000, component_name: lodash, version: "4.17.21", highest_severity: null, reachability: unknown, vulnerability_count: 0 }
+        - { id: 3, project_id: 1000, component_name: rack, version: null, highest_severity: low, reachability: not_found }
+  edges:
+    - { kind: IN_PROJECT, from: SbomOccurrence, to: Project, traversal_path: "1/100/1000/", count: 3 }

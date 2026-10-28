@@ -160,3 +160,15 @@ variants:
     fk_column: project_id
     scope: namespace_anchor
     description: "Agent session belongs to project."
+
+  - from_node: { type: DuoWorkflow, id: id }
+    to_node: { type: Project, id: id }
+    fk_column: project_id
+    scope: namespace_anchor
+    description: "Duo workflow belongs to project."
+
+  - from_node: { type: SbomOccurrence, id: id }
+    to_node: { type: Project, id: id }
+    fk_column: project_id
+    scope: namespace_anchor
+    description: "SBOM component occurrence belongs to project."

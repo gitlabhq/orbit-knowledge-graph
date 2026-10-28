@@ -1,0 +1,26 @@
+description: A member holds a custom role in a group or project
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: MemberRole, id: id }
+    description: "User holds the custom role through a group or project membership. Aggregations need a Group or Project node in the pattern."
+
+indexer:
+  reindex: [siphon_members]
+pipelines:
+  - name: HAS_ROLE_siphon_members
+    extract:
+      type: clickhouse
+      tables: [siphon_members]
+      fields: [user_id, member_role_id]
+      order_by: [traversal_path, id]
+      filter: "isNull(requested_at) OR {{deleted_column}}"
+      query: generated
+      lookups:
+        - { node: User, id: user_id }
+    transform:
+      type: datafusion
+      edges:
+        - from: { field: user_id, kind: User, enrich: true }
+          to: { field: member_role_id, kind: MemberRole }
+          label: HAS_ROLE

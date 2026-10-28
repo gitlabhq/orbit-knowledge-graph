@@ -1,0 +1,160 @@
+node_type: SbomOccurrence
+domain: security
+description: One software component at one version in one project, from the project's dependency list (SBOM)
+label: component_name
+destination_table: gl_sbom_occurrence
+default_columns: [id, component_name, version, package_manager, highest_severity]
+
+style:
+  size: 20
+  color: "#F97316"
+
+redaction:
+  resource_type: sbom_occurrence
+  id_column: id
+  ability: read_dependency
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+    traversal_path_lookup:
+      kind: id
+      source_table: gl_sbom_occurrence
+      key_column: id
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID."
+
+  component_name:
+    type: string
+    source: component_name
+    nullable: true
+    description: "Component name (e.g. 'log4j-core', 'lodash')."
+
+  package_manager:
+    type: string
+    source: package_manager
+    nullable: true
+    description: "Package manager (e.g. 'npm', 'maven', 'bundler')."
+    selectivity: low
+
+  version:
+    type: string
+    source: version
+    nullable: true
+    description: "Component version."
+
+  highest_severity:
+    type: enum
+    source: highest_severity
+    nullable: true
+    description: "Highest severity of the vulnerabilities that affect this component. Null when none."
+    values:
+      1: info
+      2: unknown
+      4: low
+      5: medium
+      6: high
+      7: critical
+
+  reachability:
+    type: enum
+    source: reachability
+    nullable: true
+    description: "Whether the component is in use, from reachability analysis."
+    values:
+      0: unknown
+      1: in_use
+      2: not_found
+
+  vulnerability_count:
+    type: int64
+    source: vulnerability_count
+    nullable: false
+    description: "Number of vulnerabilities that affect this component."
+
+  input_file_path:
+    type: string
+    source: input_file_path
+    nullable: true
+    description: "Path of the manifest or lock file the component came from."
+
+  archived:
+    type: boolean
+    source: archived
+    nullable: false
+    description: "Whether the project is archived."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    mutable: false
+    description: "Creation timestamp."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "Last update timestamp."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    hidden: true
+    nullable: false
+    description: "Namespace path for authz."
+
+indexer:
+  reindex: [siphon_sbom_occurrences]
+pipelines:
+  - name: SbomOccurrence
+    extract:
+      type: clickhouse
+      tables: [siphon_sbom_occurrences, siphon_sbom_component_versions]
+      order_by: [traversal_path, id]
+      query: sbom_occurrence.sql.j2
+    transform:
+      type: datafusion
+      edges:
+        - from:
+            field: id
+            kind: SbomOccurrence
+          to:
+            field: project_id
+            kind: Project
+          label: IN_PROJECT
+storage:
+  primary_key: [traversal_path, id]
+  settings:
+    add_minmax_index_for_temporal_columns: "1"
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: component_name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: package_manager, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: version, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: highest_severity, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: reachability, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: vulnerability_count, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
+    - {name: input_file_path, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: archived, type: "Bool", default: "false"}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_component_name, column: component_name, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_highest_severity, column: highest_severity, type: "set(8)", granularity: 2}
+    - {name: idx_reachability, column: reachability, type: "set(4)", granularity: 2}

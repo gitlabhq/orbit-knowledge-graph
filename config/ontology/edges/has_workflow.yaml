@@ -1,0 +1,7 @@
+description: An agent session runs a Duo workflow
+
+variants:
+  - from_node: { type: AgentSession, id: id }
+    to_node: { type: DuoWorkflow, id: id }
+    scope: prune_to_source
+    description: "Agent session runs the Duo workflow."

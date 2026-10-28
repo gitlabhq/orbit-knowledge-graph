@@ -1,0 +1,134 @@
+node_type: DuoCatalogItem
+domain: agents
+global: true
+description: An agent, flow, or skill in the GitLab Duo AI Catalog. Soft-deleted items are not indexed
+label: name
+destination_table: gl_duo_catalog_item
+default_columns: [id, name, item_type, visibility]
+sort_key: [id]
+
+style:
+  size: 20
+  color: "#C084FC"
+
+redaction:
+  resource_type: ai_catalog_item
+  id_column: id
+  ability: read_ai_catalog_item
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Unique ID."
+
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Name."
+
+  description:
+    type: string
+    source: description
+    nullable: false
+    description: "Description."
+
+  item_type:
+    type: enum
+    source: item_type
+    nullable: false
+    description: "Kind of catalog item."
+    values:
+      1: agent
+      2: flow
+      3: third_party_flow
+      4: foundational_agent
+      5: skill
+
+  visibility:
+    type: enum
+    source: visibility
+    nullable: false
+    description: "Visibility."
+    values:
+      0: private
+      1: restricted
+      2: public
+
+  verification_level:
+    type: enum
+    source: verification_level
+    nullable: false
+    description: "Verification level of the namespace that maintains the item."
+    values:
+      0: unverified
+      1: verified_creator_self_managed
+      10: verified_creator_maintained
+      50: gitlab_partner_maintained
+      100: gitlab_maintained
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: true
+    mutable: false
+    description: "Project that maintains the item, if any."
+
+  star_count:
+    type: int64
+    source: star_count
+    nullable: false
+    description: "Number of stars."
+
+  last_30_day_usage_count:
+    type: int64
+    source: last_30_day_usage_count
+    nullable: false
+    description: "Number of uses in the last 30 days."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    mutable: false
+    description: "Creation timestamp."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "Last update timestamp."
+
+pipelines:
+  - name: DuoCatalogItem
+    extract:
+      type: clickhouse
+      tables: [siphon_ai_catalog_items]
+      order_by: [id]
+      query: duo_catalog_item.sql.j2
+    transform:
+      type: datafusion
+storage:
+  primary_key: [id]
+  settings:
+    add_minmax_index_for_temporal_columns: "1"
+  columns:
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: item_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: visibility, type: "LowCardinality(String)", default: "'private'", codec: ["LZ4"]}
+    - {name: verification_level, type: "LowCardinality(String)", default: "'unverified'", codec: ["LZ4"]}
+    - {name: project_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: star_count, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
+    - {name: last_30_day_usage_count, type: "Int64", default: "0", codec: ["T64", "ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(0, 'UTC')", codec: ["Delta(8)", "ZSTD(1)"]}
+  indexes:
+    - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
+    - {name: idx_name, column: name, type: text, granularity: 1}
+    - {name: idx_item_type, column: item_type, type: "set(8)", granularity: 2}
+    - {name: idx_visibility, column: visibility, type: "set(4)", granularity: 2}
