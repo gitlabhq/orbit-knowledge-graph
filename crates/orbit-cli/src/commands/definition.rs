@@ -53,7 +53,7 @@ mod tests {
             .execute(
                 "CREATE TABLE gl_definition (
                     id BIGINT, project_id BIGINT, commit_sha VARCHAR, fqn VARCHAR, name VARCHAR,
-                    definition_type VARCHAR, file_path VARCHAR, start_line BIGINT, end_line BIGINT
+                    kind VARCHAR, file_path VARCHAR, start_line BIGINT, end_line BIGINT
                 )",
                 &[],
             )

@@ -1,0 +1,7 @@
+description: A file imports something from another file
+
+variants:
+  - from_node: { type: File, id: id }
+    to_node: { type: File, id: id }
+    scope: same_namespace
+    description: "Source file imports a name or a module from the target file."

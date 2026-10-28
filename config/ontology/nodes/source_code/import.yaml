@@ -1,11 +1,9 @@
-# config/ontology/nodes/source_code/imported_symbol.yaml
-
-node_type: ImportedSymbol
+node_type: Import
 domain: source_code
-description: An imported symbol or module reference within a source file
-label: identifier_name
-destination_table: gl_imported_symbol
-default_columns: [id, identifier_name, import_path, import_type, file_path, commit_sha, start_line, end_line]
+description: One imported name in one file, such as import numpy as np
+label: name
+destination_table: gl_import
+default_columns: [id, name, alias, import_kind, import_path, fqn, is_external, branch, file_path, start_line]
 sort_key: [traversal_path, project_id, branch, id]
 
 style:
@@ -26,7 +24,7 @@ properties:
     description: "Unique ID."
     traversal_path_lookup:
       kind: id
-      source_table: gl_imported_symbol
+      source_table: gl_import
       key_column: id
 
   traversal_path:
@@ -62,36 +60,96 @@ properties:
     source: file_path
     nullable: false
     mutable: false
-    description: "Containing file path."
+    description: "Path of the file that holds the import."
 
-  import_type:
-    type: string
-    source: import_type
+  import_kind:
+    type: enum
+    enum_type: string
+    source: import_kind
     nullable: false
     mutable: false
-    description: "Import kind (e.g., module, symbol, wildcard)."
-    selectivity: low
+    description: "What the import brings in: one symbol, a whole module, a wildcard, or only side effects."
+    values:
+      0: symbol
+      1: module
+      2: wildcard
+      3: side_effect
+
+  language_kind:
+    type: enum
+    enum_type: string
+    source: language_kind
+    nullable: false
+    mutable: false
+    description: "The import construct as the language writes it, such as CjsRequire or StaticImport."
+    values:
+      0: Alias
+      1: AliasedExternCrate
+      2: AliasedImport
+      3: AliasedUse
+      4: Autoload
+      5: CjsRequire
+      6: DefaultImport
+      7: Extend
+      8: ExternCrate
+      9: FromImport
+      10: FutureImport
+      11: GlobUse
+      12: GroupedImport
+      13: Import
+      14: Include
+      15: ModDeclaration
+      16: Module
+      17: NamedImport
+      18: NamespaceImport
+      19: Prepend
+      20: PubUse
+      21: PubUseGroup
+      22: ReExport
+      23: ReExportAliased
+      24: ReExportGlob
+      25: Require
+      26: RequireRelative
+      27: Source
+      28: StaticImport
+      29: Use
+      30: UseGroup
+      31: WildcardImport
 
   import_path:
     type: string
     source: import_path
     nullable: false
     mutable: false
-    description: "Source module or path of the import."
+    description: "Module or path as written, such as numpy or ./utils."
 
-  identifier_name:
+  name:
     type: string
-    source: identifier_name
+    source: name
     nullable: false
     mutable: false
-    description: "Imported symbol name."
+    description: "Imported name, such as get in from requests import get."
 
-  identifier_alias:
+  alias:
     type: string
-    source: identifier_alias
+    source: alias
     nullable: false
     mutable: false
-    description: "Import alias (e.g., 'import numpy as np')."
+    description: "Local alias of the import, such as np in import numpy as np; empty when there is none."
+
+  fqn:
+    type: string
+    source: fqn
+    nullable: true
+    mutable: false
+    description: "Full name of the imported target, such as requests.get; null when the engine cannot tell."
+
+  is_external:
+    type: boolean
+    source: is_external
+    nullable: false
+    mutable: false
+    description: "True when the import resolves to nothing in the index, such as a third-party library."
 
   start_line:
     type: int64
@@ -145,10 +203,13 @@ storage:
     - {name: branch, type: "String", codec: ["ZSTD(1)"]}
     - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: file_path, type: "String", codec: ["ZSTD(9)"]}
-    - {name: import_type, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: import_kind, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: language_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
     - {name: import_path, type: "String", codec: ["ZSTD(9)"]}
-    - {name: identifier_name, type: "String", default: "''", codec: ["ZSTD(9)"]}
-    - {name: identifier_alias, type: "String", default: "''", codec: ["ZSTD(9)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(9)"]}
+    - {name: alias, type: "String", default: "''", codec: ["ZSTD(9)"]}
+    - {name: fqn, type: "Nullable(String)", codec: ["ZSTD(9)"]}
+    - {name: is_external, type: "Bool", default: "false"}
     - {name: start_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: end_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: start_byte, type: "Int64", codec: ["T64", "ZSTD(1)"]}
@@ -159,7 +220,9 @@ storage:
     - {name: idx_deleted, column: _deleted, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
-    - {name: idx_identifier_name, column: identifier_name, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_name, column: name, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_fqn, column: fqn, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_file_path, column: file_path, type: text, granularity: 1}
     - {name: idx_import_path, column: import_path, type: text, granularity: 1}
-    - {name: idx_import_type, column: import_type, type: "set(10)", granularity: 2}
+    - {name: idx_import_kind, column: import_kind, type: "set(8)", granularity: 2}
+    - {name: idx_language_kind, column: language_kind, type: "set(64)", granularity: 2}

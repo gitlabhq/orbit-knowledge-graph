@@ -7,12 +7,31 @@ use orbit_migrations::version::{SCHEMA_VERSION, prefixed_table_name};
 
 const CODE_DOMAIN: &str = "source_code";
 
+fn code_only_edge_columns(ontology: &Ontology) -> Vec<String> {
+    let shared: HashSet<&str> = ontology
+        .edge_table_config(ontology.edge_table())
+        .into_iter()
+        .flat_map(|config| &config.columns)
+        .map(|column| column.name.as_str())
+        .collect();
+    ontology
+        .edge_tables()
+        .into_iter()
+        .filter_map(|table| ontology.edge_table_config(table))
+        .filter(|config| config.domains.contains(CODE_DOMAIN))
+        .flat_map(|config| &config.columns)
+        .filter(|column| !shared.contains(column.name.as_str()))
+        .map(|column| column.name.clone())
+        .collect()
+}
+
 pub struct CodeTableNames {
     pub branch: String,
     pub directory: String,
     pub file: String,
     pub definition: String,
     pub imported_symbol: String,
+    pub code_only_edge_columns: Vec<String>,
     edge_tables: HashMap<String, Vec<(String, String, String)>>,
     edge_columns: HashMap<String, HashSet<String>>,
     node_columns: HashMap<String, Vec<String>>,
@@ -82,10 +101,8 @@ impl CodeTableNames {
             directory: prefixed_table_name(ontology.table_name("Directory")?, *SCHEMA_VERSION),
             file: prefixed_table_name(ontology.table_name("File")?, *SCHEMA_VERSION),
             definition: prefixed_table_name(ontology.table_name("Definition")?, *SCHEMA_VERSION),
-            imported_symbol: prefixed_table_name(
-                ontology.table_name("ImportedSymbol")?,
-                *SCHEMA_VERSION,
-            ),
+            imported_symbol: prefixed_table_name(ontology.table_name("Import")?, *SCHEMA_VERSION),
+            code_only_edge_columns: code_only_edge_columns(ontology),
             edge_tables,
             edge_columns,
             node_columns,
@@ -147,13 +164,8 @@ impl CodeTableNames {
     }
 
     /// Code-origin source kinds used to clean shared edge tables.
-    pub const NODE_KINDS: [&'static str; 5] = [
-        "Branch",
-        "Directory",
-        "File",
-        "Definition",
-        "ImportedSymbol",
-    ];
+    pub const NODE_KINDS: [&'static str; 5] =
+        ["Branch", "Directory", "File", "Definition", "Import"];
 
     /// `NODE_KINDS` as a quoted SQL list for a `source_kind IN (...)` predicate.
     pub fn node_kinds_sql_list() -> String {

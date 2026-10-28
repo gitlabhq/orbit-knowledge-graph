@@ -1,24 +1,42 @@
-# config/ontology/edges/calls.yaml
+description: A call from code to a callable
 
-description: Call relationships in source code representing function/method invocations
+properties:
+  lines:
+    type: int64[]
+    source: lines
+    nullable: false
+    description: "Sorted 1-based lines of each use between the two nodes; at most 64 entries."
+
+  resolution:
+    type: enum
+    enum_type: string
+    source: resolution
+    nullable: false
+    description: "How the engine found the target, from the strongest rule to the weakest."
+    values:
+      0: local
+      1: import
+      2: declared_type
+      3: inferred_type
+      4: wildcard_import
 
 variants:
   - from_node: { type: Definition, id: id }
     to_node: { type: Definition, id: id }
     scope: same_namespace
-    description: "Definition calls another definition (method/function invocation)."
+    description: "Definition calls another definition."
+
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Import, id: id }
+    scope: same_namespace
+    description: "Definition calls an imported name whose target is outside the index or not resolved."
 
   - from_node: { type: File, id: id }
     to_node: { type: Definition, id: id }
     scope: same_namespace
-    description: "File contains a top-level call to a definition (call site outside any enclosing definition)."
-
-  - from_node: { type: Definition, id: id }
-    to_node: { type: ImportedSymbol, id: id }
-    scope: same_namespace
-    description: "Definition calls an imported symbol whose target is not yet resolved to a concrete definition."
+    description: "Top-level code of the file calls a definition."
 
   - from_node: { type: File, id: id }
-    to_node: { type: ImportedSymbol, id: id }
+    to_node: { type: Import, id: id }
     scope: same_namespace
-    description: "File contains a top-level call to an imported symbol whose target is not yet resolved to a concrete definition."
+    description: "Top-level code of the file calls an imported name."

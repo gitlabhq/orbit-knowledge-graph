@@ -1,7 +1,7 @@
 use super::fqn::Fqn;
 use super::range::Range;
 use crate::v2::config::Language;
-use strum::{AsRefStr, Display, EnumIter, EnumString};
+use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 
 /// Canonical definition categories used by the linker for
 /// language-agnostic relationship determination.
@@ -40,6 +40,61 @@ impl DefKind {
     /// FQN as a type name for member lookup.
     pub const fn is_type_container(&self) -> bool {
         matches!(self, Self::Class | Self::Interface | Self::Module)
+    }
+
+    pub const fn ontology_kind(&self) -> Kind {
+        match self {
+            Self::Class => Kind::Class,
+            Self::Interface => Kind::Interface,
+            Self::Module => Kind::Module,
+            Self::Function | Self::Lambda => Kind::Function,
+            Self::Method => Kind::Method,
+            Self::Constructor => Kind::Constructor,
+            Self::Property => Kind::Field,
+            Self::EnumEntry => Kind::EnumMember,
+            Self::Other => Kind::Variable,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumString, IntoStaticStr)]
+pub enum Kind {
+    Class,
+    Struct,
+    Interface,
+    Trait,
+    Enum,
+    TypeAlias,
+    Function,
+    Method,
+    Constructor,
+    Test,
+    Field,
+    Constant,
+    Variable,
+    EnumMember,
+    Module,
+    Macro,
+}
+
+impl Kind {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+
+    pub const fn category(&self) -> &'static str {
+        match self {
+            Self::Class
+            | Self::Struct
+            | Self::Interface
+            | Self::Trait
+            | Self::Enum
+            | Self::TypeAlias => "Type",
+            Self::Function | Self::Method | Self::Constructor | Self::Test => "Callable",
+            Self::Field | Self::Constant | Self::Variable | Self::EnumMember => "Value",
+            Self::Module => "Module",
+            Self::Macro => "Macro",
+        }
     }
 }
 

@@ -144,7 +144,7 @@ fn definitions(
     params.extend(extra);
     let batches = client.query_arrow_json(
         &format!(
-            "SELECT CAST(id AS BIGINT) AS id, file_path, name, fqn, definition_type,
+            "SELECT CAST(id AS BIGINT) AS id, file_path, name, fqn, kind,
        CAST(start_line AS BIGINT) AS start_line, CAST(end_line AS BIGINT) AS end_line
 FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2 AND fqn NOT LIKE '%@%' AND {sql}"
         ),
@@ -153,7 +153,7 @@ FROM gl_definition WHERE project_id = ?1 AND commit_sha = ?2 AND fqn NOT LIKE '%
     let ids = duckdb_client::i64_column(&batches, "id");
     let paths = duckdb_client::string_column(&batches, "file_path");
     let fqns = duckdb_client::string_column(&batches, "fqn");
-    let kinds = duckdb_client::string_column(&batches, "definition_type");
+    let kinds = duckdb_client::string_column(&batches, "kind");
     let starts = duckdb_client::i64_column(&batches, "start_line");
     let ends = duckdb_client::i64_column(&batches, "end_line");
     Ok((0..ids.len())

@@ -1,9 +1,26 @@
-# config/ontology/edges/extends.yaml
+description: A type inherits members from a supertype that is not an interface or a trait
 
-description: Supertype relationships in source code (inheritance, interface implementation, struct embedding, mixin composition)
+properties:
+  resolution:
+    type: enum
+    enum_type: string
+    source: resolution
+    nullable: false
+    description: "How the engine found the target, from the strongest rule to the weakest."
+    values:
+      0: local
+      1: import
+      2: declared_type
+      3: inferred_type
+      4: wildcard_import
 
 variants:
   - from_node: { type: Definition, id: id }
     to_node: { type: Definition, id: id }
     scope: same_namespace
-    description: "Definition declares a supertype relationship to another definition. Covers class extension, interface implementation, struct embedding, and mixin composition."
+    description: "Type extends a class, a module, or an embedded struct."
+
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Import, id: id }
+    scope: same_namespace
+    description: "Type extends an imported or unresolved supertype."

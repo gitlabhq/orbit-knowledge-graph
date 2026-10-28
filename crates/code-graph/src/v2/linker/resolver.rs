@@ -223,7 +223,7 @@ impl<'a> FileResolver<'a> {
         let rel = Relationship {
             edge_kind: EdgeKind::Calls,
             source_node: source_node_kind,
-            target_node: NodeKind::ImportedSymbol,
+            target_node: NodeKind::Import,
             source_def_kind,
             target_def_kind: None,
         };

@@ -177,6 +177,8 @@ fn column_type_for(
         OntDataType::Int => ColumnType::Int,
         OntDataType::Bool => ColumnType::Bool,
         OntDataType::DateTime => ColumnType::TimestampMicros,
+        OntDataType::StringList => ColumnType::StrList,
+        OntDataType::IntList => ColumnType::IntList,
         _ if dict_fields.contains(name) || ENVELOPE_CONSTANT_COLUMNS.contains(&name) => {
             ColumnType::DictStr
         }
@@ -359,6 +361,9 @@ impl AsRecordBatch for BranchRow<'_> {
         b.col("project_id")?.push_int(self.env.project_id)?;
         b.col("name")?.push_str(&self.env.branch)?;
         b.col("is_default")?.push_bool(true)?;
+        b.col("commit_sha")?.push_str(&self.env.commit_sha)?;
+        b.col("indexed_at")?
+            .push_timestamp_micros(self.env.version_micros)?;
         b.col("_version")?
             .push_timestamp_micros(self.env.version_micros)?;
         b.col("_deleted")?.push_bool(false)?;
@@ -436,14 +441,6 @@ fn convert_repository_edges(
         &branch_tags,
         &tag_cache,
     ));
-    edge_rows.extend(repository_on_branch_rows(
-        graph,
-        ids,
-        env,
-        branch_id,
-        &branch_tags,
-        &tag_cache,
-    ));
 
     let mut builder = BatchBuilder::new(&specs.edge, edge_rows.len() + graph.graph.edge_count())?;
     for row in &edge_rows {
@@ -498,6 +495,10 @@ impl AsRecordBatch for IndexerEdgeRow<'_> {
         b.col("source_tags")?.push_str_list(&src)?;
         let tgt: Vec<&str> = self.target_tags.iter().map(|s| s.as_str()).collect();
         b.col("target_tags")?.push_str_list(&tgt)?;
+        b.col("lines")?.push_int_list(&[])?;
+        b.col("resolution")?.push_str("")?;
+        b.col("access")?.push_str("")?;
+        b.col("usage")?.push_str("")?;
         b.col("_version")?
             .push_timestamp_micros(self.env.version_micros)?;
         b.col("_deleted")?.push_bool(false)?;
@@ -550,40 +551,6 @@ fn branch_contains_file_rows<'a>(
             target_tags: tag_cache.get(idx),
         })
         .collect()
-}
-
-fn repository_on_branch_rows<'a>(
-    graph: &'a code_graph::v2::linker::CodeGraph,
-    ids: &'a [i64],
-    env: &'a IndexerEnvelope,
-    branch_id: i64,
-    branch_tags: &'a [String],
-    tag_cache: &'a code_graph::v2::linker::graph::NodeTags,
-) -> Vec<IndexerEdgeRow<'a>> {
-    let mut rows = Vec::new();
-
-    rows.extend(graph.directories().map(|(idx, _)| IndexerEdgeRow {
-        env,
-        source_id: ids[idx.index()],
-        target_id: branch_id,
-        edge_kind: "ON_BRANCH",
-        source_node_kind: "Directory",
-        target_node_kind: "Branch",
-        source_tags: &[],
-        target_tags: branch_tags,
-    }));
-    rows.extend(graph.files().map(|(idx, _)| IndexerEdgeRow {
-        env,
-        source_id: ids[idx.index()],
-        target_id: branch_id,
-        edge_kind: "ON_BRANCH",
-        source_node_kind: "File",
-        target_node_kind: "Branch",
-        source_tags: tag_cache.get(idx),
-        target_tags: branch_tags,
-    }));
-
-    rows
 }
 
 #[expect(
@@ -656,7 +623,7 @@ impl ConverterSpecs {
             directory: entity_specs(ontology, "Directory"),
             file: entity_specs(ontology, "File"),
             definition: entity_specs(ontology, "Definition"),
-            imported_symbol: entity_specs(ontology, "ImportedSymbol"),
+            imported_symbol: entity_specs(ontology, "Import"),
             edge: edge_specs(ontology),
             tag_properties: build_tag_properties(ontology),
         }

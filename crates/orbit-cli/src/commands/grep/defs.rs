@@ -52,7 +52,7 @@ FROM {table}
 WHERE {project} = ?1 AND {commit} = ?2 AND {fqn} NOT LIKE '%@%' AND {file} IN ({list})",
                 file = node.column("file_path")?,
                 name = node.column("name")?,
-                kind = node.column("definition_type")?,
+                kind = node.column("kind")?,
                 id = node.column("id")?,
                 start = node.column("start_line")?,
                 end = node.column("end_line")?,
@@ -150,13 +150,13 @@ fn imports_by_line(client: &DuckDbClient, git: &GitInfo, files: &[&str]) -> Resu
         let batches = client.query_arrow_json(
             &format!(
                 "SELECT i.file_path AS file_path, CAST(i.start_line AS BIGINT) AS line,
-       COALESCE(NULLIF(i.identifier_alias, ''), NULLIF(i.identifier_name, ''), i.import_path, '') AS name,
+       COALESCE(NULLIF(i.alias, ''), NULLIF(i.name, ''), i.import_path, '') AS name,
        COALESCE(i.import_path, '') AS path,
        COALESCE(any_value(d.file_path), '') AS target_file,
        CAST(COALESCE(any_value(d.start_line), 0) AS BIGINT) AS target_line
-FROM gl_imported_symbol i
-LEFT JOIN gl_edge e ON e.source_id = i.id AND e.source_kind = 'ImportedSymbol'
-  AND e.relationship_kind = 'IMPORTS' AND e.target_kind = 'Definition'
+FROM gl_import i
+LEFT JOIN gl_edge e ON e.source_id = i.id AND e.source_kind = 'Import'
+  AND e.relationship_kind = 'RESOLVES_TO' AND e.target_kind = 'Definition'
 LEFT JOIN gl_definition d ON d.id = e.target_id
 WHERE i.project_id = ?1 AND i.commit_sha = ?2 AND i.file_path IN ({list})
 GROUP BY ALL

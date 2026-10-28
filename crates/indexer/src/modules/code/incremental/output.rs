@@ -64,7 +64,7 @@ impl<'a> Output<'a> {
         let mut tags: HashMap<i64, Vec<String>> = HashMap::new();
         let mut structure = Vec::new();
         let mut entities = Vec::new();
-        for kind in ["Directory", "File", "Definition", "ImportedSymbol"] {
+        for kind in ["Directory", "File", "Definition", "Import"] {
             let table = self
                 .ontology
                 .table_name(kind)
@@ -138,7 +138,6 @@ impl<'a> Output<'a> {
             convert_branch_row(self.envelope, &entity_specs(self.ontology, "Branch"))?
         };
         for (id, kind, path) in structure {
-            edge(id, branch_id, "ON_BRANCH", kind, "Branch")?;
             if path != "." && !path.contains('/') {
                 edge(branch_id, id, "CONTAINS", "Branch", kind)?;
             }

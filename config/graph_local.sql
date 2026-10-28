@@ -16,9 +16,21 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     branch VARCHAR NOT NULL,
     commit_sha VARCHAR NOT NULL DEFAULT '',
     file_path VARCHAR NOT NULL,
+    language VARCHAR NOT NULL DEFAULT '',
     fqn VARCHAR NOT NULL,
     name VARCHAR NOT NULL,
-    definition_type VARCHAR NOT NULL,
+    signature VARCHAR NOT NULL DEFAULT '',
+    parameters VARCHAR[] NOT NULL DEFAULT [],
+    return_type VARCHAR,
+    declared_type VARCHAR,
+    doc_comment VARCHAR NOT NULL DEFAULT '',
+    category VARCHAR NOT NULL DEFAULT '',
+    kind VARCHAR NOT NULL,
+    language_kind VARCHAR NOT NULL DEFAULT '',
+    scope VARCHAR NOT NULL DEFAULT '',
+    modifiers VARCHAR[] NOT NULL DEFAULT [],
+    visibility VARCHAR,
+    generated_by VARCHAR,
     start_line BIGINT NOT NULL,
     end_line BIGINT NOT NULL,
     start_byte BIGINT NOT NULL,
@@ -48,20 +60,26 @@ CREATE TABLE IF NOT EXISTS gl_file (
     extension VARCHAR NOT NULL,
     language VARCHAR NOT NULL,
     size_bytes BIGINT NOT NULL DEFAULT 0,
-    reason VARCHAR NOT NULL DEFAULT ''
+    skip_reason VARCHAR NOT NULL DEFAULT '',
+    is_test BOOLEAN NOT NULL DEFAULT false,
+    is_generated BOOLEAN NOT NULL DEFAULT false,
+    is_vendored BOOLEAN NOT NULL DEFAULT false
 );
 
-CREATE TABLE IF NOT EXISTS gl_imported_symbol (
+CREATE TABLE IF NOT EXISTS gl_import (
     id BIGINT NOT NULL,
     traversal_path VARCHAR NOT NULL,
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     commit_sha VARCHAR NOT NULL DEFAULT '',
     file_path VARCHAR NOT NULL,
-    import_type VARCHAR NOT NULL,
+    import_kind VARCHAR NOT NULL DEFAULT '',
+    language_kind VARCHAR NOT NULL,
     import_path VARCHAR NOT NULL,
-    identifier_name VARCHAR NOT NULL DEFAULT '',
-    identifier_alias VARCHAR NOT NULL DEFAULT '',
+    name VARCHAR NOT NULL DEFAULT '',
+    alias VARCHAR NOT NULL DEFAULT '',
+    fqn VARCHAR,
+    is_external BOOLEAN NOT NULL DEFAULT false,
     start_line BIGINT NOT NULL,
     end_line BIGINT NOT NULL,
     start_byte BIGINT NOT NULL,
@@ -76,7 +94,11 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     relationship_kind VARCHAR NOT NULL,
     target_id BIGINT NOT NULL,
     target_kind VARCHAR NOT NULL,
-    traversal_path VARCHAR NOT NULL
+    traversal_path VARCHAR NOT NULL,
+    lines BIGINT[] NOT NULL,
+    resolution VARCHAR NOT NULL,
+    access VARCHAR NOT NULL,
+    usage VARCHAR NOT NULL
 );
 
 

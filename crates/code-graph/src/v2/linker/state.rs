@@ -314,6 +314,12 @@ pub struct GraphImport {
 }
 
 impl GraphDef {
+    pub fn ontology_kind(&self) -> crate::v2::types::Kind {
+        self.definition_type
+            .parse()
+            .unwrap_or_else(|_| self.kind.ontology_kind())
+    }
+
     pub fn from_canonical(
         def: &crate::v2::types::CanonicalDefinition,
         pool: &mut StringPool,

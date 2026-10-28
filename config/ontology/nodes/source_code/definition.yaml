@@ -1,11 +1,9 @@
-# config/ontology/nodes/source_code/definition.yaml
-
 node_type: Definition
 domain: source_code
-description: A code definition such as a class, function, method, or module
+description: A named declaration in source code, such as a class, a function, a field, or a test
 label: name
 destination_table: gl_definition
-default_columns: [id, name, fqn, definition_type, file_path, commit_sha, start_line, end_line]
+default_columns: [id, name, fqn, signature, kind, language_kind, category, branch, file_path, start_line, end_line]
 sort_key: [traversal_path, project_id, branch, id]
 
 style:
@@ -62,29 +60,239 @@ properties:
     source: file_path
     nullable: false
     mutable: false
-    description: "Containing file path."
+    description: "Path of the file that declares the definition."
+
+  language:
+    type: string
+    source: language
+    nullable: false
+    mutable: false
+    description: "Programming language of the file, such as ruby or python."
+    selectivity: low
 
   fqn:
     type: string
     source: fqn
     nullable: false
     mutable: false
-    description: "Fully qualified name (e.g., MyModule::MyClass#my_method)."
+    description: "Fully qualified name, such as Billing::Order::total; cut at 1 KiB with a trailing ellipsis."
 
   name:
     type: string
     source: name
     nullable: false
     mutable: false
-    description: "Short name."
+    description: "Short name, such as total; cut at 512 bytes with a trailing ellipsis."
 
-  definition_type:
+  signature:
     type: string
-    source: definition_type
+    source: signature
     nullable: false
     mutable: false
-    description: "Definition kind (e.g., Class, Module, Method, Function, Struct, Enum, Trait, Lambda)."
-    selectivity: low
+    description: "Declaration text without the body on one line; cut at 2 KiB with a trailing ellipsis."
+
+  parameters:
+    type: string[]
+    source: parameters
+    nullable: false
+    mutable: false
+    description: "Each parameter as written, such as city: String; at most 64 entries of 512 bytes."
+
+  return_type:
+    type: string
+    source: return_type
+    nullable: true
+    mutable: false
+    description: "Declared return type as written; null when the source declares none."
+
+  declared_type:
+    type: string
+    source: declared_type
+    nullable: true
+    mutable: false
+    description: "Declared type of a Value definition as written; null when the source declares none."
+
+  doc_comment:
+    type: string
+    source: doc_comment
+    nullable: false
+    mutable: false
+    description: "First paragraph of the doc comment or docstring without comment markers; cut at 1 KiB."
+
+  category:
+    type: enum
+    enum_type: string
+    source: category
+    nullable: false
+    mutable: false
+    description: "Broad group of the kind: Type, Callable, Value, Module, or Macro."
+    values:
+      0: Type
+      1: Callable
+      2: Value
+      3: Module
+      4: Macro
+
+  kind:
+    type: enum
+    enum_type: string
+    source: kind
+    nullable: false
+    mutable: false
+    description: "What the definition is, with the same words for every language, such as Class or Method."
+    values:
+      0: Class
+      1: Struct
+      2: Interface
+      3: Trait
+      4: Enum
+      5: TypeAlias
+      6: Function
+      7: Method
+      8: Constructor
+      9: Test
+      10: Field
+      11: Constant
+      12: Variable
+      13: EnumMember
+      14: Module
+      15: Macro
+
+  language_kind:
+    type: enum
+    enum_type: string
+    source: language_kind
+    nullable: false
+    mutable: false
+    description: "What the language calls the definition, such as Record or SingletonMethod; equal to kind when the language has no own word."
+    values:
+      0: Class
+      1: Struct
+      2: Interface
+      3: Trait
+      4: Enum
+      5: TypeAlias
+      6: Function
+      7: Method
+      8: Constructor
+      9: Test
+      10: Field
+      11: Constant
+      12: Variable
+      13: EnumMember
+      14: Module
+      15: Macro
+      16: AnnotationClass
+      17: AnnotationDeclaration
+      18: ArrowFunction
+      19: AssociatedFunction
+      20: AsyncFunction
+      21: AsyncMethod
+      22: Attribute
+      23: CaseClass
+      24: Companion
+      25: ComputedProperty
+      26: Const
+      27: DataClass
+      28: DataSource
+      29: DecoratedAsyncFunction
+      30: DecoratedAsyncMethod
+      31: DecoratedClass
+      32: DecoratedFunction
+      33: DecoratedMethod
+      34: DefinedType
+      35: Dynamic
+      36: EnumCase
+      37: EnumConstant
+      38: EnumEntry
+      39: EnumVariant
+      40: Example
+      41: ExampleGroup
+      42: Extension
+      43: ExtensionFunction
+      44: ExtensionProperty
+      45: FlatMethod
+      46: HelmValue
+      47: Initializer
+      48: Lambda
+      49: LifecycleHook
+      50: Local
+      51: ModuleExport
+      52: Namespace
+      53: Object
+      54: Opaque
+      55: Output
+      56: Property
+      57: Protocol
+      58: Provider
+      59: Record
+      60: Resource
+      61: SingletonClass
+      62: SingletonMethod
+      63: Static
+      64: StaticMethod
+      65: Terraform
+      66: Typedef
+      67: Union
+      68: Val
+      69: ValueClass
+      70: Var
+      71: Variant
+
+  scope:
+    type: enum
+    enum_type: string
+    source: scope
+    nullable: false
+    mutable: false
+    description: "Where the definition lives: top_level, member of a type or module, or local inside a function body."
+    values:
+      0: top_level
+      1: member
+      2: local
+
+  modifiers:
+    type: string[]
+    enum_type: string
+    source: modifiers
+    nullable: false
+    mutable: false
+    description: "Declaration modifiers such as static or async, sorted and unique; at most 16 entries."
+    values:
+      0: static
+      1: abstract
+      2: async
+      3: generator
+      4: final
+      5: readonly
+      6: override
+      7: virtual
+      8: sealed
+      9: unsafe
+      10: extern
+      11: inline
+
+  visibility:
+    type: enum
+    enum_type: string
+    source: visibility
+    nullable: true
+    mutable: false
+    description: "Access level of the definition; null when the language has no visibility rule."
+    values:
+      0: public
+      1: protected
+      2: private
+      3: internal
+      4: package
+      5: file
+
+  generated_by:
+    type: string
+    source: generated_by
+    nullable: true
+    mutable: false
+    description: "Macro or DSL call that made the definition, such as attr_accessor; null for written definitions."
 
   start_line:
     type: int64
@@ -147,9 +355,21 @@ storage:
     - {name: branch, type: "String", codec: ["ZSTD(1)"]}
     - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: file_path, type: "String", codec: ["ZSTD(9)"]}
+    - {name: language, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: fqn, type: "String", codec: ["ZSTD(9)"]}
     - {name: name, type: "String", codec: ["ZSTD(9)"]}
-    - {name: definition_type, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: signature, type: "String", default: "''", codec: ["ZSTD(9)"]}
+    - {name: parameters, type: "Array(String)", default: "[]", codec: ["ZSTD(9)"]}
+    - {name: return_type, type: "Nullable(String)", codec: ["ZSTD(9)"]}
+    - {name: declared_type, type: "Nullable(String)", codec: ["ZSTD(9)"]}
+    - {name: doc_comment, type: "String", default: "''", codec: ["ZSTD(9)"]}
+    - {name: category, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: language_kind, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: scope, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: modifiers, type: "Array(LowCardinality(String))", default: "[]", codec: ["ZSTD(1)"]}
+    - {name: visibility, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: generated_by, type: "Nullable(String)", codec: ["ZSTD(3)"]}
     - {name: start_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: end_line, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: start_byte, type: "Int64", codec: ["T64", "ZSTD(1)"]}
@@ -163,4 +383,9 @@ storage:
     - {name: idx_name, column: name, type: text, granularity: 1}
     - {name: idx_fqn, column: fqn, type: text, granularity: 1}
     - {name: idx_file_path, column: file_path, type: text, granularity: 1}
-    - {name: idx_definition_type, column: definition_type, type: "set(20)", granularity: 2}
+    - {name: idx_signature, column: signature, type: text, granularity: 1, ngram: false}
+    - {name: idx_doc_comment, column: doc_comment, type: text, granularity: 1, ngram: false}
+    - {name: idx_kind, column: kind, type: "set(20)", granularity: 2}
+    - {name: idx_category, column: category, type: "set(8)", granularity: 2}
+    - {name: idx_language_kind, column: language_kind, type: "set(128)", granularity: 2}
+    - {name: idx_scope, column: scope, type: "set(4)", granularity: 2}

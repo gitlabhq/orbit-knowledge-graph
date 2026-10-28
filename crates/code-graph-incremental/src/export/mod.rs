@@ -53,6 +53,12 @@ impl Scalar<'_> {
             }
             (Self::Int(value), ColumnType::Int) => builder.col(name)?.push_int(value),
             (Self::Bool(value), ColumnType::Bool) => builder.col(name)?.push_bool(value),
+            (Self::Str(value @ ("true" | "false")), ColumnType::Bool) => {
+                builder.col(name)?.push_bool(value == "true")
+            }
+            (Self::Str(""), ColumnType::StrList) => builder.col(name)?.push_str_list(&[]),
+            (Self::Str(value), ColumnType::StrList) => builder.col(name)?.push_str_list(&[value]),
+            (Self::Str(""), ColumnType::IntList) => builder.col(name)?.push_int_list(&[]),
             (Self::Str(value), ColumnType::Str | ColumnType::DictStr) => {
                 builder.col(name)?.push_str(value)
             }

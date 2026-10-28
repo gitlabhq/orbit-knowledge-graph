@@ -328,7 +328,7 @@ async fn js_tsconfig_alias_resolves_through_archive_endpoint() {
         "JS resolver missed utils::helper"
     );
     assert!(
-        edge_count(&run.graphs, EdgeKind::Imports) > 0,
-        "no Imports edges emitted; tsconfig alias likely failed to resolve"
+        edge_count(&run.graphs, EdgeKind::ResolvesTo) > 0,
+        "no RESOLVES_TO edges emitted; tsconfig alias likely failed to resolve"
     );
 }

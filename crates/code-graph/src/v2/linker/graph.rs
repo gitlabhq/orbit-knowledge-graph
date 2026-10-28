@@ -448,7 +448,7 @@ impl CodeGraph {
             self.graph.add_edge(
                 file_node,
                 imp_node,
-                GraphEdge::structural(EdgeKind::Imports, NodeKind::File, NodeKind::ImportedSymbol),
+                GraphEdge::structural(EdgeKind::Defines, NodeKind::File, NodeKind::Import),
             );
         }
         self.imports.extend(graph_imports);
@@ -889,17 +889,16 @@ impl CodeGraph {
             GraphNode::File(f) => match property {
                 "extension" => Some(Cow::Borrowed(f.extension.as_str())),
                 "language" => Some(Cow::Borrowed(f.language_name())),
-                "reason" => Some(Cow::Owned(f.reason.to_string())),
+                "skip_reason" => Some(Cow::Owned(f.reason.to_string())),
                 _ => None,
             },
             GraphNode::Definition { id, .. } => match property {
-                "definition_type" => Some(Cow::Borrowed(self.defs[id.0 as usize].definition_type)),
+                "kind" => Some(Cow::Borrowed(
+                    self.defs[id.0 as usize].ontology_kind().as_str(),
+                )),
                 _ => None,
             },
-            GraphNode::Import { id, .. } => match property {
-                "import_type" => Some(Cow::Borrowed(self.imports[id.0 as usize].import_type)),
-                _ => None,
-            },
+            GraphNode::Import { .. } => None,
             GraphNode::Directory(_) => None,
         };
         value.filter(|v| !v.is_empty())
@@ -926,7 +925,7 @@ impl CodeGraph {
             let node_kind = match &self.graph[idx] {
                 GraphNode::File(_) => Some("File"),
                 GraphNode::Definition { .. } => Some("Definition"),
-                GraphNode::Import { .. } => Some("ImportedSymbol"),
+                GraphNode::Import { .. } => Some("Import"),
                 GraphNode::Directory(_) => None,
             };
             let props = node_kind.and_then(|kind| tag_properties.get(kind));
@@ -1296,7 +1295,11 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
         b.col("extension")?.push_str(&self.file.extension)?;
         b.col("language")?.push_str(self.file.language_name())?;
         b.col("size_bytes")?.push_int(self.file.size as i64)?;
-        b.col("reason")?.push_str(self.file.reason.to_string())?;
+        b.col("skip_reason")?
+            .push_str(self.file.reason.to_string())?;
+        b.col("is_test")?.push_bool(false)?;
+        b.col("is_generated")?.push_bool(false)?;
+        b.col("is_vendored")?.push_bool(false)?;
         Ok(())
     }
 }
@@ -1309,12 +1312,24 @@ pub struct DefinitionRow<'a> {
 }
 impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
+        let kind = self.def.ontology_kind();
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
+        b.col("language")?.push_str("")?;
         b.col("fqn")?.push_str(self.pool.get(self.def.fqn))?;
         b.col("name")?.push_str(self.pool.get(self.def.name))?;
-        b.col("definition_type")?
-            .push_str(self.def.definition_type)?;
+        b.col("signature")?.push_str("")?;
+        b.col("parameters")?.push_str_list(&[])?;
+        b.col("return_type")?.push_opt_str(None::<&str>)?;
+        b.col("declared_type")?.push_opt_str(None::<&str>)?;
+        b.col("doc_comment")?.push_str("")?;
+        b.col("category")?.push_str(kind.category())?;
+        b.col("kind")?.push_str(kind.as_str())?;
+        b.col("language_kind")?.push_str(self.def.definition_type)?;
+        b.col("scope")?.push_str("")?;
+        b.col("modifiers")?.push_str_list(&[])?;
+        b.col("visibility")?.push_opt_str(None::<&str>)?;
+        b.col("generated_by")?.push_opt_str(None::<&str>)?;
         write_range(b, &self.def.range)?;
         Ok(())
     }
@@ -1330,13 +1345,16 @@ impl<C: orbit_arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
-        b.col("import_type")?.push_str(self.import.import_type)?;
+        b.col("import_kind")?.push_str("")?;
+        b.col("language_kind")?.push_str(self.import.import_type)?;
         b.col("import_path")?
             .push_str(self.pool.get(self.import.path))?;
-        b.col("identifier_name")?
+        b.col("name")?
             .push_str(self.import.name.map(|id| self.pool.get(id)).unwrap_or(""))?;
-        b.col("identifier_alias")?
+        b.col("alias")?
             .push_str(self.import.alias.map(|id| self.pool.get(id)).unwrap_or(""))?;
+        b.col("fqn")?.push_opt_str(None::<&str>)?;
+        b.col("is_external")?.push_bool(false)?;
         write_range(b, &self.import.range)?;
         Ok(())
     }
@@ -1358,6 +1376,10 @@ impl AsRecordBatch for EdgeRow<'_> {
         b.col("target_id")?.push_int(self.target_id)?;
         b.col("target_kind")?.push_str(self.target_node_kind)?;
         b.col("traversal_path")?.push_str("")?;
+        b.col("lines")?.push_int_list(&[])?;
+        b.col("resolution")?.push_str("")?;
+        b.col("access")?.push_str("")?;
+        b.col("usage")?.push_str("")?;
         Ok(())
     }
 }

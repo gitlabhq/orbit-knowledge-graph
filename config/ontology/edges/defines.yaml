@@ -1,14 +1,17 @@
-# config/ontology/edges/defines.yaml
-
-description: Definition relationships in source code
+description: A file or a type declares a definition or an import, or owns it as a member
 
 variants:
   - from_node: { type: File, id: id }
     to_node: { type: Definition, id: id }
     scope: same_namespace
-    description: "File defines a code definition (class, function, etc.)."
+    description: "File declares a definition."
 
   - from_node: { type: Definition, id: id }
     to_node: { type: Definition, id: id }
     scope: same_namespace
-    description: "Outer definition lexically contains a nested definition (e.g. a class contains its methods, a module contains its classes). Inheritance is modeled as EXTENDS and call sites as CALLS."
+    description: "Definition declares or owns a member, such as a class and its methods."
+
+  - from_node: { type: File, id: id }
+    to_node: { type: Import, id: id }
+    scope: same_namespace
+    description: "File holds an import statement for the name."

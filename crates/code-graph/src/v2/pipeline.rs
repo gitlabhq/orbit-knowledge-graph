@@ -163,7 +163,7 @@ struct FailedChain {
 fn dedupe_edge_triples(edges: &mut Vec<EdgeTriple>) {
     let mut seen = FxHashSet::default();
     edges.retain(|(source, target, edge)| {
-        edge.relationship.target_node != crate::v2::types::NodeKind::ImportedSymbol
+        edge.relationship.target_node != crate::v2::types::NodeKind::Import
             || seen.insert((source.index(), target.index(), edge.relationship.edge_kind))
     });
 }
@@ -186,7 +186,7 @@ fn add_edge_if_missing(
     target: NodeIndex,
     edge: GraphEdge,
 ) {
-    if edge.relationship.target_node != crate::v2::types::NodeKind::ImportedSymbol
+    if edge.relationship.target_node != crate::v2::types::NodeKind::Import
         || !graph_has_edge_kind(graph, source, target, &edge)
     {
         graph.graph.add_edge(source, target, edge);

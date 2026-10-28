@@ -321,6 +321,8 @@ fn yaml_column_type(name: &str) -> Result<ColumnType, LoadError> {
         "Utf8" => Ok(ColumnType::Str),
         "DictionaryUtf8" => Ok(ColumnType::DictStr),
         "Boolean" => Ok(ColumnType::Bool),
+        "ListUtf8" => Ok(ColumnType::StrList),
+        "ListInt64" => Ok(ColumnType::IntList),
         "TimestampMicros" => Ok(ColumnType::TimestampMicros),
         _ => Err(LoadError::new(format!(
             "unsupported export column type '{name}'"
@@ -377,6 +379,8 @@ fn compile_specs(
                 DataType::Int => ColumnType::Int,
                 DataType::Bool => ColumnType::Bool,
                 DataType::DateTime => ColumnType::TimestampMicros,
+                DataType::StringList => ColumnType::StrList,
+                DataType::IntList => ColumnType::IntList,
                 _ => ColumnType::Str,
             },
             nullable: *nullable,

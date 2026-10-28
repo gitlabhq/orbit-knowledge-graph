@@ -764,7 +764,7 @@ fn add_unresolved_imported_call_edges(graph: &mut CodeGraph, parsed: &[ParsedRus
                     relationship: Relationship {
                         edge_kind: EdgeKind::Calls,
                         source_node: NodeKind::Definition,
-                        target_node: NodeKind::ImportedSymbol,
+                        target_node: NodeKind::Import,
                         source_def_kind: Some(graph.def(source_node).kind),
                         target_def_kind: None,
                     },

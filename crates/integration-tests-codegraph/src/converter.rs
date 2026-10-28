@@ -17,10 +17,7 @@ fn entity_specs(ontology: &Ontology, entity: &str) -> Vec<ColumnSpec> {
         .iter()
         .map(|f| ColumnSpec {
             name: f.name.clone(),
-            col_type: match f.data_type {
-                OntDataType::Int => ColumnType::Int,
-                _ => ColumnType::Str,
-            },
+            col_type: local_column_type(f.data_type),
             nullable: f.nullable,
         })
         .collect()
@@ -32,13 +29,20 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
         .iter()
         .map(|c| ColumnSpec {
             name: c.name.clone(),
-            col_type: match c.data_type {
-                OntDataType::Int => ColumnType::Int,
-                _ => ColumnType::Str,
-            },
+            col_type: local_column_type(c.data_type),
             nullable: false,
         })
         .collect()
+}
+
+fn local_column_type(data_type: OntDataType) -> ColumnType {
+    match data_type {
+        OntDataType::Int => ColumnType::Int,
+        OntDataType::Bool => ColumnType::Bool,
+        OntDataType::StringList => ColumnType::StrList,
+        OntDataType::IntList => ColumnType::IntList,
+        _ => ColumnType::Str,
+    }
 }
 
 pub fn convert_v2_graph(
