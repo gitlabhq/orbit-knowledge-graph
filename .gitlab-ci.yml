@@ -744,7 +744,7 @@ check_docs_markdown:
   script:
     # Lint prose
     - vale --minAlertLevel error docs/docs-gitlab-com
-    - markdownlint-cli2 '*.md' 'docs/docs-gitlab-com/**/*.md' 'docs/pages/**/*.md'
+    - markdownlint-cli2 '*.md' 'docs/**/*.md'
     - rumdl check --config docs/.rumdl/rumdl.toml docs
     # Check links
     - lychee --offline --include-fragments '*.md' 'docs/docs-gitlab-com/**/*.md' 'docs/pages/**/*.md'
