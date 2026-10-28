@@ -80,7 +80,7 @@ cases:
           reject:
             - (Scan Table(gl_edge) ...)
 
-  - name: A note reached through an earlier hop drives the work item hop through issue note keys
+  - name: A note reached through an earlier hop reads the work item hop from the edge table
     query:
       json: |
         {
@@ -97,6 +97,37 @@ cases:
         }
       gql: |
         MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(n:Note)<-[:HAS_NOTE]-(w:WorkItem)
+        RETURN p.id, n.id, w.id
+    logical:
+      expect:
+        - (EdgeScan HAS_NOTE w->n AS e1)
+    physical:
+      clickhouse:
+        planned:
+          expect:
+            - (Filter _orbit_edge_1.relationship_kind = 'HAS_NOTE', ... (_))
+            - (Scan Table(gl_edge) AS _orbit_edge_1)
+          reject:
+            - (Filter ..., n.noteable_type IN ['Issue'] (_))
+
+  - name: A selectively filtered note joined through an earlier hop reads the work item hop through issue note keys
+    query:
+      json: |
+        {
+          "query_type": "traversal",
+          "nodes": [
+            {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["id"]},
+            {"id": "n", "entity": "Note", "filters": {"note": {"contains": "pipeline"}}, "columns": ["id"]},
+            {"id": "w", "entity": "WorkItem", "columns": ["id"]}
+          ],
+          "relationships": [
+            {"type": "IN_PROJECT", "from": "n", "to": "p"},
+            {"type": "HAS_NOTE", "from": "w", "to": "n"}
+          ]
+        }
+      gql: |
+        MATCH (p:Project {id: 1000})<-[:IN_PROJECT]-(n:Note)<-[:HAS_NOTE]-(w:WorkItem)
+        WHERE n.note CONTAINS 'pipeline'
         RETURN p.id, n.id, w.id
     logical:
       expect:

@@ -117,7 +117,7 @@ impl<'a, M: OrbitQueryModel + ?Sized> Pattern<'a, M> {
             denormalized: super::filters::denormalized_facts(input, model),
             scans: Vec::new(),
         };
-        relations::route_typed_keys(&mut pattern.relations, &pattern.nodes)?;
+        relations::route_typed_keys(&mut pattern.relations, &pattern.nodes);
         for key in pattern
             .relations
             .iter()

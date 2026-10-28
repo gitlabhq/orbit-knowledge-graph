@@ -270,35 +270,18 @@ pub(super) fn linearize_relations(
     Ok(())
 }
 
-pub(super) fn route_typed_keys(
-    relations: &mut [EdgeRelation],
-    nodes: &HashMap<String, NodePlan>,
-) -> Result<()> {
-    let mut order = relations.to_vec();
-    linearize_relations(&mut order, nodes)?;
-    let mut reached = HashSet::new();
-    let mut edge_routed = HashSet::new();
-    for relation in &order {
-        if let Some(key) = relation.fk.as_ref().filter(|key| key.type_filter.is_some()) {
-            let other = relation.other_end(&key.node);
-            let holder_drives = nodes
-                .get(&key.node)
-                .is_some_and(|holder| endpoint_selectivity(holder) > 0)
-                || reached.contains(&key.node) && !reached.contains(other);
-            if !holder_drives {
-                edge_routed.insert(relation.input_index);
-            }
+pub(super) fn route_typed_keys(relations: &mut [EdgeRelation], nodes: &HashMap<String, NodePlan>) {
+    for relation in relations {
+        let parent_driven = relation.fk.as_ref().is_some_and(|key| {
+            key.type_filter.is_some()
+                && !nodes
+                    .get(&key.node)
+                    .is_some_and(|holder| endpoint_selectivity(holder) > 0)
+        });
+        if parent_driven {
+            relation.fk = None;
         }
-        reached.insert(relation.from_node.clone());
-        reached.insert(relation.to_node.clone());
     }
-    for relation in relations
-        .iter_mut()
-        .filter(|relation| edge_routed.contains(&relation.input_index))
-    {
-        relation.fk = None;
-    }
-    Ok(())
 }
 
 fn endpoint_selectivity(node: &NodePlan) -> u8 {
