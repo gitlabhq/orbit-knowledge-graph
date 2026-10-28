@@ -96,8 +96,8 @@ other FK mapping retires its edges only when the owner's latest row is deleted. 
 `AUTHORED` and `REVIEWER` edges on `(MergeRequest, gl_edge, target_id)` run as two statements. Each statement reads
 the owners whose latest row is within the lookback (`_version >= cursor`) once, as a materialized
 CTE. A dual `IN` on the edge PK prunes the edge read to that set. When a deleted owner is the edge
-target, the delete rule takes parent keys from the owner's surviving live rows. It then reads edges
-by `source_id`. It falls back to `target_id` only for owners with no live row left. The tombstone is stamped one
+target, the delete rule takes each kind's parent key from the owner's surviving live rows. It then reads
+edges by their exact `(traversal_path, relationship_kind, source_id, target_id)`. It falls back to `target_id` only for owners with no live row left. The tombstone is stamped one
 microsecond below the owner's version, so an edge the indexer writes at that version always wins.
 The groups and their metadata are ontology-derived. It runs directly in the dispatcher (not dispatched to indexer workers):
 one cheap global sweep, off the insert hot path. See

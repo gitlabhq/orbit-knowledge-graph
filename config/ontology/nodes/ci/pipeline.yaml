@@ -245,7 +245,6 @@ pipelines:
             field: id
             kind: Pipeline
           label: TRIGGERED
-          mutable: true
         - from:
             field: merge_request_id
             kind: MergeRequest
