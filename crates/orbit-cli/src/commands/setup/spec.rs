@@ -422,7 +422,13 @@ mod tests {
     }
 
     /// Plugin label tables keyed by orbit command path, such as `grep` or `workspace sql`.
-    const LABEL_TABLES: &[(&str, &str)] = &[("opencode_plugin.js", "const LABELS = {")];
+    const LABEL_TABLES: &[(&str, &str)] = &[
+        ("opencode_plugin.js", "const LABELS = {"),
+        (
+            "claude_plugin/gitlab-orbit/hooks/orbit.ts",
+            "export const SUBCOMMANDS: Readonly<Record<string, Labels>> = {",
+        ),
+    ];
 
     /// Commands an agent has no reason to run, so plugins give them no label.
     const UNLABELED: &[&str] = &[
