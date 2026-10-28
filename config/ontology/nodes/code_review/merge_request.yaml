@@ -337,7 +337,6 @@ pipelines:
             field: source_project_id
             kind: Project
           label: SOURCE_PROJECT
-          mutable: true
         - from:
             field: id
             kind: MergeRequest
@@ -345,7 +344,6 @@ pipelines:
             field: head_pipeline_id
             kind: Pipeline
           label: HAS_HEAD_PIPELINE
-          mutable: true
         - from:
             field: id
             kind: MergeRequest
@@ -353,7 +351,6 @@ pipelines:
             field: latest_merge_request_diff_id
             kind: MergeRequestDiff
           label: HAS_LATEST_DIFF
-          mutable: true
         - from:
             field: author_id
             kind: User
@@ -361,7 +358,6 @@ pipelines:
             field: id
             kind: MergeRequest
           label: AUTHORED
-          mutable: true
         - from:
             field: merge_user_id
             kind: User
@@ -369,7 +365,6 @@ pipelines:
             field: id
             kind: MergeRequest
           label: MERGED
-          mutable: true
         - from:
             field: updated_by_id
             kind: User
@@ -377,7 +372,6 @@ pipelines:
             field: id
             kind: MergeRequest
           label: UPDATED_BY
-          mutable: true
         - from:
             field: last_edited_by_id
             kind: User
@@ -385,7 +379,6 @@ pipelines:
             field: id
             kind: MergeRequest
           label: LAST_EDITED_BY
-          mutable: true
         - from:
             field: metric_latest_closed_by_id
             kind: User
@@ -393,7 +386,6 @@ pipelines:
             field: id
             kind: MergeRequest
           label: CLOSED
-          mutable: true
         - from:
             field: id
             kind: MergeRequest
@@ -401,7 +393,6 @@ pipelines:
             field: milestone_id
             kind: Milestone
           label: IN_MILESTONE
-          mutable: true
         - from:
             field: reviewers
             kind: User

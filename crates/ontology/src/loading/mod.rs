@@ -2026,7 +2026,6 @@ mod tests {
             source,
             target,
             array_field: None,
-            mutable: false,
         }
     }
 

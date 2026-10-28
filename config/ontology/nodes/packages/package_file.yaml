@@ -114,7 +114,6 @@ pipelines:
             field: id
             kind: PackageFile
           label: HAS_PACKAGE_FILE
-          mutable: true
 
 storage:
   primary_key: [traversal_path, id]

@@ -131,7 +131,6 @@ pipelines:
             field: id
             kind: Project
           label: CREATOR
-          mutable: true
         - from:
             field: namespace_id
             kind: Group
@@ -139,7 +138,6 @@ pipelines:
             field: id
             kind: Project
           label: CONTAINS
-          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:

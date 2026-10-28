@@ -1699,11 +1699,6 @@
         "array_field": {
           "type": "string",
           "description": "Tuple field to extract from an array-valued endpoint column."
-        },
-        "mutable": {
-          "type": "boolean",
-          "default": false,
-          "description": "Whether the edge can change and needs stale-edge reconciliation."
         }
       },
       "required": [

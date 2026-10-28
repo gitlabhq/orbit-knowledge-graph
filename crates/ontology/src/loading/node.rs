@@ -143,8 +143,6 @@ struct EdgeMappingYaml {
     label: String,
     #[serde(default)]
     array_field: Option<String>,
-    #[serde(default)]
-    mutable: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -926,7 +924,6 @@ impl EdgeMappingYaml {
             source: self.from.into_node_ref()?,
             target: self.to.into_node_ref()?,
             array_field: self.array_field,
-            mutable: self.mutable,
         })
     }
 }

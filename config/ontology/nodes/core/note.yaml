@@ -160,7 +160,6 @@ pipelines:
             field: id
             kind: Note
           label: AUTHORED
-          mutable: true
         - from:
             field: id
             kind: Note
@@ -179,7 +178,6 @@ pipelines:
             field: id
             kind: Note
           label: HAS_NOTE
-          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:

@@ -18,10 +18,7 @@
 migrations:
 - version: 117
   scope: none
-  note: >-
-    Marks FK edge mappings whose keys change at runtime as mutable so the
-    stale-edge sweep retires their old edges; the flag is read only by the sweep, so no table,
-    DDL or compiled query changes.
+  note: "Removes the edge-mapping mutable flag: FK edges are now retired at write time from the stored node row, so nothing reads the flag. No table, DDL or compiled query changes."
 - version: 116
   scope: none
   note: high_fan_out query hint; no table change

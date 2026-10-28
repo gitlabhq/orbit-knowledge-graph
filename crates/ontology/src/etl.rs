@@ -106,7 +106,6 @@ pub struct EdgeMapping {
     pub source: NodeRef,
     pub target: NodeRef,
     pub array_field: Option<String>,
-    pub mutable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

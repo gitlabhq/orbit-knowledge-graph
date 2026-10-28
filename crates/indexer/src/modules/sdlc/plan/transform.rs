@@ -825,7 +825,6 @@ mod tests {
             },
             label: "HAS_NOTE".to_string(),
             array_field: None,
-            mutable: false,
         };
 
         let sql = fk_edge_transform(&edge, "Note", true, &test_ontology())
@@ -857,7 +856,6 @@ mod tests {
             },
             label: "ASSIGNED".to_string(),
             array_field: Some("user_id".to_string()),
-            mutable: false,
         };
         let sql = fk_edge_transform(&edge, "MergeRequest", true, &test_ontology())
             .unwrap()
@@ -890,7 +888,6 @@ mod tests {
             },
             label: label.to_string(),
             array_field: None,
-            mutable: false,
         }
     }
 }

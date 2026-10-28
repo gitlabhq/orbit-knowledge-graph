@@ -175,7 +175,6 @@ pipelines:
             field: id
             kind: WorkItem
           label: AUTHORED
-          mutable: true
         - from:
             field: id
             kind: WorkItem
@@ -183,7 +182,6 @@ pipelines:
             field: milestone_id
             kind: Milestone
           label: IN_MILESTONE
-          mutable: true
         - from:
             field: id
             kind: WorkItem
@@ -191,7 +189,6 @@ pipelines:
             field: namespace_id
             kind: Group
           label: IN_GROUP
-          mutable: true
         - from:
             field: id
             kind: WorkItem
@@ -206,7 +203,6 @@ pipelines:
             field: id
             kind: WorkItem
           label: CLOSED
-          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:
