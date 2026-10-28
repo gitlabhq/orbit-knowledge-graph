@@ -30,8 +30,8 @@ GQL supports:
 
 - `MATCH` with one connected pattern, and more than one `MATCH` clause in a query
 - `WHERE` with `AND`, `NOT`, comparisons, `IN`, `STARTS WITH`, `ENDS WITH`, `CONTAINS`, `IS NULL`, and `IS NOT NULL`
-- `RETURN` with properties, nodes, `properties(n)`, `n{.property}`, and `AS` aliases
-- The aggregate functions `count`, `sum`, `avg`, `min`, and `max`, `count(DISTINCT x)`, and `date_trunc` for time periods
+- `RETURN` with properties, nodes, `*`, `properties(n)`, `n{.property}`, and `AS` aliases
+- The aggregate functions `count`, `count(DISTINCT x)`, `sum`, `avg`, `min`, and `max`, and `date_trunc` for time periods
 - `ORDER BY` with one sort key, `SKIP` (or `OFFSET`), and `LIMIT`
 - Variable-length relationships up to three hops, and shortest paths with `ANY SHORTEST` or `SHORTEST 1`
 - `type(r)`, and the text search functions `token_match`, `all_tokens`, and `any_tokens`
@@ -75,13 +75,15 @@ RETURN projections
 
 - Each node needs a variable. Declare the label of each node, and any inline properties, where the node first appears:
   `(mr:MergeRequest {iid: 235291})`. Later parts of the query can reuse the bare variable.
+  Only the far node of a [neighbors query](#find-the-neighbors-of-a-node) has no label.
 - Write a relationship type after a colon: `-[:IN_PROJECT]->`.
   A lowercase name without a colon, such as `-[r]->`, is a variable that matches any relationship type.
   GitLab Orbit rejects an uppercase name without a colon, such as `-[IN_PROJECT]->`.
 - To match one of several relationship types, separate them with `|`, for example `-[:AUTHORED|ASSIGNED]->`.
-  You can name up to 10 types.
+  Relationship type names are case-sensitive.
 - Use `->` or `<-` between labeled nodes. Use undirected `--` only to find the neighbors of a node.
 - All parts of the pattern must form one connected tree, with no cycles.
+  Each later part of the pattern must start from a node that an earlier part declares.
 
 ## Bounded nodes
 
@@ -118,11 +120,14 @@ RETURN n
 LIMIT 20
 ```
 
+The far node, `n`, takes no filters.
+
 ### Find the shortest path between two nodes
 
 To find the shortest path between two [bounded nodes](#bounded-nodes), use `ANY SHORTEST`.
-Name the relationship type and keep the hop range small.
-A pattern with no relationship type, such as `-[*1..3]->`, follows every relationship and might time out.
+Name the relationship type, such as `-[:CONTAINS*1..2]->`, and keep the hop range small.
+A shortest path with no relationship type, such as `-[*1..3]->`, fails.
+The path uses `->`, starts at one hop, and is the only `MATCH` clause. `RETURN` takes only the path variable.
 If the filter on an endpoint matches more than 500 nodes, the search starts from the 500 nodes with the lowest IDs.
 
 ```gql orbit-query
@@ -136,29 +141,39 @@ RETURN path
 To exclude values, write `NOT x.state IN [...]`, not `x.state NOT IN [...]`.
 These forms are supported:
 
-- Comparisons: `=`, `<>` or `!=`, `<`, `<=`, `>`, `>=`. You can compare a property with a literal or with another property.
-- Lists: `x.state IN ['opened', 'merged']`, with up to 100 values, or up to 500 values on `id`.
+- Comparisons: `=`, `<>` or `!=`, `<`, `<=`, `>`, `>=`. You can compare a property with a literal.
+  In a query without aggregation, you can also compare two node properties of the same type.
+  A comparison between two properties does not [bound a node](#bounded-nodes).
+- Lists: `x.state IN ['opened', 'merged']`, with up to 100 values, or up to 500 values in `x.id IN [...]`.
 - Strings: `STARTS WITH`, `ENDS WITH`, and `CONTAINS`. The pattern needs at least three characters.
   Matching ignores ASCII case, except on the `branch` property of code nodes, such as `File` and `Definition`.
+  `=` and `IN` are case-sensitive.
 - Nulls: `IS NULL` and `IS NOT NULL`.
 
 Values are literals.
-A string is in single or double quotes, and has at most 1024 characters.
-Write a newline, a tab, or another control character as an escape, such as `\n` or `\t`.
-A string that contains a raw newline or tab fails.
+A string is in single or double quotes.
+Write a control character as an escape: `\n`, `\t`, `\r`, `\b`, `\f`, or `\uXXXX`. Also escape `\\`, `\'`, and `\"`.
+A string that contains a raw control character, such as a newline or a tab, fails.
 
 For a timestamp property, such as `mr.created_at`, use a string in the format `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SS`,
 with optional fractional seconds and a trailing `Z`, such as `'2026-01-31'` or `'2026-01-31T12:00:00Z'`.
+A space can replace the `T`.
 A date property, such as `WorkItem.due_date`, takes only `YYYY-MM-DD`.
 A value with a time zone offset, such as `+02:00`, fails.
-You can wrap the string in `date()` or `datetime()`, but the result is the same.
+On a date or timestamp property, you can wrap the string in `date()` or `datetime()`, and the result is the same.
+On other properties, the wrapper fails.
 When you compare a date property with a timestamp property, the date counts as midnight.
+Some timestamp properties, such as `mr.merged_at`, reject dates on or before `1970-01-01`.
+To find rows without a value, use `IS NULL`.
 
 An enum property, such as `mr.state`, accepts only its declared values with `=`, `<>`, and `IN`.
 Enum values have no order, so `<`, `<=`, `>`, and `>=` fail.
 An unknown value fails, and the error lists the valid values.
-On a relationship, `source_kind`, `target_kind`, and `relationship_kind` must name a kind that the pattern can match.
-For example, `-[r:IN_PROJECT]->` rejects `r.target_kind = 'Group'`.
+
+On a relationship, `source_kind` and `target_kind` must name the label of the matching endpoint node,
+and `relationship_kind` must name a type in the pattern.
+For example, `(mr:MergeRequest)-[r:IN_PROJECT]->(p:Project)` rejects `r.target_kind = 'Group'`.
+
 Group predicates with parentheses.
 Queries do not take parameters, so do not insert untrusted text into a query.
 
@@ -175,6 +190,7 @@ Words are runs of letters and digits, so `token_match(d.file_path, 'main')` matc
 - `any_tokens(property, 'first second')` requires at least one of the words.
 
 Properties without a text index reject the token functions.
+The value needs at least three characters, and matching ignores ASCII case.
 This query finds merge requests with both words in the title, in any order:
 
 ```gql orbit-query
@@ -232,16 +248,21 @@ These properties have a text index:
   `source_branch`, and `target_branch` for `MergeRequest`. `properties(mr)` returns all properties of the node.
   `mr{.iid, .title}` returns the listed properties.
 - `RETURN mr` and `properties(mr)` do not include properties for administrators, such as `User.is_admin`.
-  To get one, name it, as in `RETURN u.is_admin`. Only administrators can.
+  To get one, name it, as in `RETURN u.is_admin`.
+  For users who are not administrators, a query that names one fails.
 - The response always includes the identity of each node and the metadata of each relationship.
 - `type(r)` returns the type of a one-hop relationship variable in `WHERE`, `RETURN`, and `ORDER BY`,
   but not as an aggregation group key.
-- `ORDER BY` sorts by a node property, an alias, or `type(r)`. A relationship property fails.
+- `ORDER BY` sorts by a node property, a property alias, or `type(r)`. A relationship property fails.
+  In an aggregation, `ORDER BY` sorts by an aggregate alias or a returned group key.
+  Neighbors and shortest path queries do not accept `ORDER BY`.
 
 ### Aggregate results
 
 - The aggregate functions are `count`, `sum`, `avg`, `min`, and `max`.
   The other items in `RETURN` become group keys.
+  For users who are not administrators, an aggregation needs a node that belongs to a group or project,
+  such as `Project` or `MergeRequest`. Neighbors and shortest path queries cannot aggregate.
   To sort by an aggregate, give it an alias: `RETURN mr.state, count(mr) AS mrs ORDER BY mrs DESC`.
   `sum` and `avg` need a numeric property. `min` and `max` need a number, boolean, date, or timestamp property.
   `DISTINCT` works only in `count()`, as in `count(DISTINCT mr.author_id)`.
@@ -251,9 +272,10 @@ These properties have a text index:
   Otherwise, the query fails with `text matching and ordering require grouping by "mr"`.
   `Project`, `Group`, `AgentSession`, `Branch`, `Commit`, and the code nodes
   `Definition`, `Directory`, `File`, and `ImportedSymbol` are exempt.
-- To group by a time period, use `date_trunc('<unit>', <property>)` as a group key on a date property.
+- To group by a time period, use `date_trunc('<unit>', <property>)` as a group key on a date or timestamp property.
   The units are `minute`, `hour`, `day`, `week`, `month`, `quarter`, and `year`.
-  `minute` and `hour` also need a filter on the same property, or on the `id` of the node. Weeks start on Sunday.
+  `minute` and `hour` also need a filter on the same property, or an `id =` or `id IN` filter on the same node.
+  Weeks start on Sunday.
 
 ```gql orbit-query
 MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'gitlab-org/gitlab'})
@@ -265,7 +287,7 @@ LIMIT 12
 
 ## Pagination
 
-To get results page by page, put `SKIP` before `LIMIT`, and add the page size to `SKIP` for each next page:
+To get results page by page, use `SKIP` and `LIMIT`, and add the page size to `SKIP` for each next page:
 `SKIP 0 LIMIT 20`, then `SKIP 20 LIMIT 20`, then `SKIP 40 LIMIT 20`.
 Write `SKIP` on every page, including `SKIP 0` on the first page, so that all pages use the same sort order.
 Do not change other parts of the query between pages.
@@ -283,7 +305,7 @@ In the `raw` response format (`--response-format raw` in the CLI), `pagination.h
 Stop when `pagination.has_more` is `false`.
 A page can return fewer rows than `LIMIT`, or no rows, because GitLab removes the rows that you cannot access.
 `SKIP` also counts these rows, so pages do not overlap.
-When `pagination.truncated` is `true`, the result is incomplete.
+`pagination.truncated` has the same value as `pagination.has_more`.
 
 `SKIP` accepts up to 10,000 rows.
 To go deeper, sort by a unique property, such as `id`, and filter past the last value of the previous page:
@@ -309,13 +331,15 @@ the later pages move by one row, so a row can repeat or be missing.
 - A relationship names at most 10 types.
 - A query has at most 16 conditions. Inline properties, such as `{project_id: 278964}`, count as conditions.
 - Each node filters on at most 10 properties, and each relationship on at most 5.
-- Conditions nest at most 32 levels deep.
+  Each property takes at most 10 conditions.
+- Parentheses, brackets, and braces nest at most 32 levels deep, and a condition has at most 32 `NOT`s.
 - An aggregation has at most 10 aggregate functions and 4 group keys.
 - `ORDER BY` takes one sort key.
 - `LIMIT` accepts 1 to 1000 rows. The default is 30.
 - `SKIP` accepts 0 to 10,000 rows.
 - Each node returns at most 50 properties and filters on at most 500 IDs.
-- Variables and aliases have at most 64 characters. Strings have at most 1024 characters.
+- Names, such as variables, aliases, labels, and properties, have at most 64 characters.
+- Strings have at most 1024 characters.
 - The query text is at most 32 KiB.
 
 ## Debug a query
