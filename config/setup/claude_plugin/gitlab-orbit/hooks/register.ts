@@ -168,7 +168,7 @@ export const register: Register = (on) => {
     const words: [string, string][] = [
       [compact(stats.calls), stats.calls === 1 ? ' query' : ' queries'],
       graphTotal
-        ? [compact(stats.nodes) + ' / ' + grouped(graphTotal), ' nodes total']
+        ? [compact(stats.nodes) + ' / ' + grouped(graphTotal), ' nodes']
         : [compact(stats.nodes), stats.nodes === 1 ? ' node' : ' nodes'],
       [compact(stats.edges), stats.edges === 1 ? ' edge' : ' edges'],
     ]

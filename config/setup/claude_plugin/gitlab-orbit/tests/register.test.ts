@@ -67,7 +67,7 @@ test('the status line shows the nodes out of the project graph total once graph-
 
   const ui = await $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
   expect(await ui.find({ type: 'Text', text: '3 / 1,675,400' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: ' nodes total' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' nodes' })).toBeDefined()
 })
 
 test('a cypher block in a reply draws highlighted, and the prose before it stays Claude Code', async ($, on) => {
