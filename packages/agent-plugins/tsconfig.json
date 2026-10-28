@@ -13,5 +13,5 @@
     "skipLibCheck": true,
     "types": ["bun"]
   },
-  "include": ["core", "hooks", "opencode", "tests", "types", "vendor"]
+  "include": ["core", "hooks", "opencode", "scripts", "tests", "types", "vendor"]
 }

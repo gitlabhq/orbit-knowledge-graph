@@ -21,11 +21,11 @@ test('a query lays out one clause per line', () => {
   ])
 })
 
-test('Shiki scopes keywords, relationship types, literals, and functions', () => {
+test('keywords, labels, relationship types, literals, and functions are told apart', () => {
   const kinds = Object.fromEntries(
-    layout('MATCH (a)-[:IN_PROJECT]->(p {id: 1}) WHERE a.x = "y" RETURN count(a)').flat().map((t) => [t.text.trim(), t.kind]),
+    layout('MATCH (a:User)-[:IN_PROJECT]->(p {id: 1}) WHERE a.x = "y" RETURN count(a)').flat().map((t) => [t.text, t.kind]),
   )
-  expect(kinds).toMatchObject({ MATCH: 'keyword', IN_PROJECT: 'relationship', '1': 'number', y: 'string', count: 'function' })
+  expect(kinds).toMatchObject({ MATCH: 'keyword', User: 'label', IN_PROJECT: 'relationship', '1': 'number', '"y"': 'string', count: 'function' })
 })
 
 test('operators and sort directions read as keywords, and a property named like one stays a property', () => {
@@ -33,7 +33,7 @@ test('operators and sort directions read as keywords, and a property named like 
     .flat()
     .filter((t) => t.kind === 'keyword')
     .map((t) => t.text.trim())
-  expect(words).toEqual(['MATCH', 'WHERE', 'NOT', 'IS NULL', 'AND', 'IN', 'AND', 'STARTS', 'WITH', 'RETURN', 'ORDER BY', 'ASC'])
+  expect(words).toEqual(['MATCH', 'WHERE', 'NOT', 'IS', 'NULL', 'AND', 'IN', 'AND', 'STARTS', 'WITH', 'RETURN', 'ORDER', 'BY', 'ASC'])
 })
 
 test('comments are their own tokens, including a line that starts with --', () => {

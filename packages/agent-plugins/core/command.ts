@@ -1,8 +1,8 @@
 export type Subcommand = { key: string; args: string[] }
 
-const HELPERS = new Set(['cd', 'head', 'tail', 'true'])
-const SHELL_ONLY = new Set(['<', '>', '#'])
-const HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?![\w/.-])/
+const PIPE_TARGETS = new Set(['head', 'tail'])
+const SHELL_ONLY = new Set(['<', '>', '#', '$(', '`'])
+const HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/
 
 export function simpleCommands(command: string): string[][] {
   const commands: string[][] = []
@@ -10,6 +10,7 @@ export function simpleCommands(command: string): string[][] {
   let word = ''
   let inWord = false
   let quote = ''
+  let piped = false
   const endWord = () => {
     if (inWord) words.push(word)
     word = ''
@@ -17,11 +18,13 @@ export function simpleCommands(command: string): string[][] {
   }
   const endCommand = () => {
     endWord()
-    if (words.length) commands.push(words)
+    if (words.length) commands.push(piped ? ['|', ...words] : words)
     words = []
+    piped = false
   }
   for (let i = 0; i < command.length; i++) {
     const c = command[i] ?? ''
+    if (quote !== "'" && (c === '`' || (c === '$' && command[i + 1] === '('))) words.push(c === '`' ? '`' : '$(')
     if (quote) {
       if (c === quote) quote = ''
       else if (c === '\\' && quote === '"' && i + 1 < command.length) word += command[++i]
@@ -41,8 +44,13 @@ export function simpleCommands(command: string): string[][] {
         inWord = false
       } else endWord()
       i += (command.slice(i).match(HARMLESS_REDIRECT)?.[0].length ?? 1) - 1
+    } else if (c === '|' && command[i + 1] !== '|') {
+      endCommand()
+      piped = true
+      if (command[i + 1] === '&') i++
     } else if (c === '\n' || ';&|()'.includes(c)) {
       endCommand()
+      if ('&|'.includes(c) && command[i + 1] === c) i++
     } else if ('<>'.includes(c) || (c === '#' && !inWord)) {
       endWord()
       words.push(c)
@@ -59,7 +67,7 @@ export function simpleCommands(command: string): string[][] {
 
 function orbitWords(words: readonly string[]): string[] | null {
   let i = 0
-  while (/^[A-Za-z_]\w*=/.test(words[i] ?? '')) i++
+  while (/^(?:ORBIT|GLAB)_\w*=/.test(words[i] ?? '')) i++
   if (words[i] === 'glab' && words[i + 1] === 'orbit') i += 2
   else if (words[i]?.split('/').pop() === 'orbit') i += 1
   else return null
@@ -70,9 +78,9 @@ function orbitWords(words: readonly string[]): string[] | null {
 export function orbitInvocations(command: string): string[][] {
   const commands = simpleCommands(command)
   const calls = commands.map(orbitWords)
-  const plain = commands.every(
-    (words, i) => !words.some((w) => SHELL_ONLY.has(w)) && (calls[i] || HELPERS.has(words[0] ?? '')),
-  )
+  const helper = (words: string[]) =>
+    words[0] === 'cd' || (words[0] === '|' && PIPE_TARGETS.has(words[1] ?? '')) || words.join(' ') === 'true'
+  const plain = commands.every((words, i) => !words.some((w) => SHELL_ONLY.has(w)) && (calls[i] || helper(words)))
   return plain ? calls.filter((words) => words !== null) : []
 }
 

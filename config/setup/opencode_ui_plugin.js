@@ -1,12 +1,14 @@
-var HELPERS = new Set(["cd", "head", "tail", "true"]);
-var SHELL_ONLY = new Set(["<", ">", "#"]);
-var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?![\w/.-])/;
+/*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
+var PIPE_TARGETS = new Set(["head", "tail"]);
+var SHELL_ONLY = new Set(["<", ">", "#", "$(", "`"]);
+var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?=[\s;&|)]|$)/;
 function simpleCommands(command) {
   const commands = [];
   let words = [];
   let word = "";
   let inWord = false;
   let quote = "";
+  let piped = false;
   const endWord = () => {
     if (inWord)
       words.push(word);
@@ -16,11 +18,14 @@ function simpleCommands(command) {
   const endCommand = () => {
     endWord();
     if (words.length)
-      commands.push(words);
+      commands.push(piped ? ["|", ...words] : words);
     words = [];
+    piped = false;
   };
   for (let i = 0;i < command.length; i++) {
     const c = command[i] ?? "";
+    if (quote !== "'" && (c === "`" || c === "$" && command[i + 1] === "("))
+      words.push(c === "`" ? "`" : "$(");
     if (quote) {
       if (c === quote)
         quote = "";
@@ -45,9 +50,16 @@ function simpleCommands(command) {
       } else
         endWord();
       i += (command.slice(i).match(HARMLESS_REDIRECT)?.[0].length ?? 1) - 1;
+    } else if (c === "|" && command[i + 1] !== "|") {
+      endCommand();
+      piped = true;
+      if (command[i + 1] === "&")
+        i++;
     } else if (c === `
 ` || ";&|()".includes(c)) {
       endCommand();
+      if ("&|".includes(c) && command[i + 1] === c)
+        i++;
     } else if ("<>".includes(c) || c === "#" && !inWord) {
       endWord();
       words.push(c);
@@ -63,7 +75,7 @@ function simpleCommands(command) {
 }
 function orbitWords(words) {
   let i = 0;
-  while (/^[A-Za-z_]\w*=/.test(words[i] ?? ""))
+  while (/^(?:ORBIT|GLAB)_\w*=/.test(words[i] ?? ""))
     i++;
   if (words[i] === "glab" && words[i + 1] === "orbit")
     i += 2;
@@ -78,7 +90,8 @@ function orbitWords(words) {
 function orbitInvocations(command) {
   const commands = simpleCommands(command);
   const calls = commands.map(orbitWords);
-  const plain = commands.every((words, i) => !words.some((w) => SHELL_ONLY.has(w)) && (calls[i] || HELPERS.has(words[0] ?? "")));
+  const helper = (words) => words[0] === "cd" || words[0] === "|" && PIPE_TARGETS.has(words[1] ?? "") || words.join(" ") === "true";
+  const plain = commands.every((words, i) => !words.some((w) => SHELL_ONLY.has(w)) && (calls[i] || helper(words)));
   return plain ? calls.filter((words) => words !== null) : [];
 }
 function subcommandOf(words, known) {
@@ -91,6 +104,7 @@ function subcommandOf(words, known) {
   return known(sub) ? { key: sub, args: rest } : null;
 }
 
+/*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
 function e(o, t) {
   let m = new Map;
   for (let r = 0;r < o.length; r++) {
@@ -345,11 +359,13 @@ function describeOrbitCall(tool, input, known = NO_ENTITIES) {
 
 var OrbitUiPlugin = async ({ client }) => ({
   "tool.execute.before": async (input, output) => {
-    const call = describeOrbitCall(input.tool, output.args);
-    if (!call)
-      return;
-    const message = MARK + " " + call.active + (call.detail ? "  " + call.detail : "");
-    Promise.resolve().then(() => client.tui.showToast({ body: { message, variant: "info", duration: 2000 } })).catch(() => {});
+    try {
+      const call = describeOrbitCall(input.tool, output.args);
+      if (!call)
+        return;
+      const message = MARK + " " + call.active + (call.detail ? "  " + call.detail : "");
+      client.tui.showToast({ body: { message, variant: "info", duration: 2000 } }).catch(() => {});
+    } catch {}
   }
 });
 export {

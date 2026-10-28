@@ -107,7 +107,7 @@ pub(crate) async fn install(
         && !ui_agents.is_empty()
         && !tui::confirm(
             &format!(
-                "Show Orbit calls in {} (Orbit UI)?",
+                "Install the agent plugins for {}? They show each Orbit call.",
                 ui_agents.join(" and ")
             ),
             true,
@@ -1586,6 +1586,46 @@ mod tests {
             json!({"source": "directory", "path": marketplace.display().to_string()})
         );
         assert!(!dir.path().join(".codex/orbit").exists());
+    }
+
+    #[test]
+    fn the_claude_plugin_registers_its_marketplace_and_removes_only_its_own_record() {
+        let dir = tempfile::tempdir().unwrap();
+        components::agent_plugins::TEST_RUNS.with(|runs| runs.borrow_mut().clear());
+        install_default(&["claude"], dir.path());
+        uninstall_named(&["claude"], dir.path());
+        let runs = components::agent_plugins::TEST_RUNS.with(|runs| runs.borrow().clone());
+        let name = runs[1][4].clone();
+        assert!(name.starts_with("gitlab-orbit-"), "{name}");
+        assert_eq!(runs[0][3], "add");
+        assert_eq!(runs[0][5..], ["--scope", "local"]);
+        assert_eq!(
+            runs[1],
+            ["claude", "plugin", "marketplace", "remove", name.as_str()]
+        );
+    }
+
+    #[test]
+    fn a_plugin_file_a_newer_release_drops_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        install_default(&["claude"], dir.path());
+        let root = dir.path().join(".claude/orbit/claude_plugin");
+        let old = root.join("gitlab-orbit/core/old.ts");
+        std::fs::write(&old, "export {}\n").unwrap();
+        let manifest = root.join(".orbit-setup.json");
+        let mut recorded = read_json(&manifest);
+        recorded["gitlab-orbit/core/old.ts"] = json!(sha2_hex(b"export {}\n"));
+        std::fs::write(&manifest, recorded.to_string()).unwrap();
+        install_default(&["claude"], dir.path());
+        assert!(!old.exists());
+    }
+
+    fn sha2_hex(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
     }
 
     #[test]

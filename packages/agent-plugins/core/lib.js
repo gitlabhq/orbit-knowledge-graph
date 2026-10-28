@@ -1,1 +1,2 @@
+/*! es-toolkit, MIT License, https://github.com/toss/es-toolkit/blob/main/LICENSE */
 function f(o,t){let m={};for(let r=0;r<o.length;r++){let p=o[r],i=t(p,r,o);m[i]=(m[i]??0)+1}return m}function e(o,t){let m=new Map;for(let r=0;r<o.length;r++){let p=o[r],i=t(p,r,o);if(!m.has(i))m.set(i,p)}return Array.from(m.values())}function s(o,t){let m=0;for(let r=0;r<o.length;r++)m+=t(o[r],r);return m}export{f as countBy,s as sumBy,e as uniqBy};

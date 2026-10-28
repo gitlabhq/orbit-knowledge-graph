@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use ontology::migrations::sha256_hex;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use super::{
     Installer, Report, backup_once, file_mentions, remove_file_and_empty_parents, write_file,
@@ -83,7 +83,9 @@ fn install_plugin(
     report: &mut Report,
 ) -> Result<()> {
     let (dir, dir_label) = target.resolve(&plugin.dir)?;
-    let found = installed_version(&plugin.version_command);
+    let found = run(&plugin.version_command, target)
+        .ok()
+        .and_then(|stdout| stdout.split_whitespace().next().map(str::to_string));
     if !found
         .as_deref()
         .is_some_and(|version| at_least(version, &plugin.min_version))
@@ -119,6 +121,20 @@ fn install_plugin(
         }
         manifest.insert(relative, hash(&contents));
     }
+    for (relative, expected) in &previous {
+        let path = dir.join(relative);
+        if manifest.contains_key(relative) || !path.exists() {
+            continue;
+        }
+        if std::fs::read(&path).is_ok_and(|current| hash(&current) == *expected) {
+            remove_file_and_empty_parents(&path, target)?;
+        } else {
+            report.note(
+                &format!("{dir_label}/{relative}"),
+                "kept (edited, no longer shipped; delete it by hand)",
+            );
+        }
+    }
     write_file(&dir.join(MANIFEST), json::render(&json!(manifest))?)?;
     report.note(
         &dir_label,
@@ -149,23 +165,19 @@ fn install_plugin(
     } else {
         report.note(&settings_label, "unchanged");
     }
-    let scope = match target {
-        Target::Global => "user",
-        Target::Project(_) => "local",
-    };
     let add = [
-        &plugin.version_command[0],
+        program(plugin),
         "plugin",
         "marketplace",
         "add",
         &dir.display().to_string(),
         "--scope",
-        scope,
+        scope(target),
     ];
-    if !run(&add.map(str::to_string), target) {
+    if let Err(error) = run(&add.map(str::to_string), target) {
         report.note(
             &settings_label,
-            "restart Claude Code once to load the plugin",
+            format!("restart Claude Code once to load the plugin ({error})"),
         );
     }
     Ok(())
@@ -197,22 +209,16 @@ fn remove_plugin(plugin: &PluginSpec, target: &Target, report: &mut Report) -> R
 
     let (settings, settings_label) = target.resolve(&plugin.settings)?;
     if settings.exists() {
-        let mut root = json::read_object(&settings)?;
         let name = plugin.marketplace_for(target);
+        let mut root = json::read_object(&settings)?;
         let unregistered =
             json::remove_key_if(&mut root, &marketplace_path(&name), &marketplace(&dir));
         let disabled =
             json::remove_key_if(&mut root, &enabled_path(&plugin.id(&name)), &json!(true));
         if unregistered || disabled {
             json::write_or_delete_when_empty(&settings, &root, target, &settings_label, report)?;
-            let remove = [
-                &plugin.version_command[0],
-                "plugin",
-                "marketplace",
-                "remove",
-                &name,
-            ];
-            run(&remove.map(str::to_string), target);
+            let remove = [program(plugin), "plugin", "marketplace", "remove", &name];
+            let _ = run(&remove.map(str::to_string), target);
         }
     }
     Ok(())
@@ -241,56 +247,84 @@ fn read_manifest(dir: &Path) -> Result<BTreeMap<String, String>> {
 }
 
 fn hash(contents: &[u8]) -> String {
-    sha256_hex(&String::from_utf8_lossy(contents))
+    Sha256::digest(contents)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn program(plugin: &PluginSpec) -> &str {
+    plugin
+        .version_command
+        .first()
+        .map_or("claude", String::as_str)
+}
+
+fn scope(target: &Target) -> &'static str {
+    match target {
+        Target::Global => "user",
+        Target::Project(_) => "local",
+    }
 }
 
 #[cfg(test)]
 thread_local! {
     pub(in crate::commands::setup) static TEST_VERSION: std::cell::RefCell<Option<String>> =
         std::cell::RefCell::new(Some("2.1.308".to_string()));
+    pub(in crate::commands::setup) static TEST_RUNS: std::cell::RefCell<Vec<Vec<String>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 #[cfg(test)]
-fn run(_command: &[String], _target: &Target) -> bool {
-    true
+fn run(command: &[String], _target: &Target) -> Result<String, String> {
+    if command.last().is_some_and(|arg| arg == "--version") {
+        return TEST_VERSION
+            .with(|version| version.borrow().clone())
+            .ok_or_else(|| "not found".to_string());
+    }
+    TEST_RUNS.with(|runs| runs.borrow_mut().push(command.to_vec()));
+    Ok(String::new())
 }
 
 #[cfg(not(test))]
-fn run(command: &[String], target: &Target) -> bool {
-    let Some((program, args)) = command.split_first() else {
-        return false;
+fn run(command: &[String], target: &Target) -> Result<String, String> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    let (program, args) = command.split_first().ok_or("no command")?;
+    let cwd = match target {
+        Target::Project(root) => root.clone(),
+        Target::Global => std::env::temp_dir().join("orbit-setup"),
     };
-    let mut process = std::process::Command::new(program);
-    if let Target::Project(root) = target {
-        process.current_dir(root);
-    }
-    process
+    std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
+    let mut process = Command::new(program);
+    process.current_dir(cwd);
+    let mut child = process
         .args(args)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
-#[cfg(test)]
-fn installed_version(_command: &[String]) -> Option<String> {
-    TEST_VERSION.with(|version| version.borrow().clone())
-}
-
-#[cfg(not(test))]
-fn installed_version(command: &[String]) -> Option<String> {
-    let (program, args) = command.split_first()?;
-    let output = std::process::Command::new(program)
-        .args(args)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    let started = Instant::now();
+    while child
+        .try_wait()
+        .map_err(|error| error.to_string())?
+        .is_none()
+    {
+        if started.elapsed() > Duration::from_secs(30) {
+            let _ = child.kill();
+            return Err(format!("{program} timed out"));
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
-    String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
-        .next()
-        .map(str::to_string)
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(stderr.lines().next().unwrap_or("failed").to_string())
 }
 
 fn at_least(found: &str, minimum: &str) -> bool {

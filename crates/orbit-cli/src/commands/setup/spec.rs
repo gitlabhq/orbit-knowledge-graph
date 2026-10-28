@@ -19,7 +19,7 @@ struct SetupAssets;
 
 #[derive(Embed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../packages/agent-plugins"]
-#[include = ".claude-plugin/*"]
+#[include = ".claude-plugin/plugin.json"]
 #[include = "hooks/*"]
 #[include = "core/*"]
 #[exclude = "*.test.ts"]
@@ -207,12 +207,14 @@ impl PluginSpec {
             }
             (format!("{}/{path}", self.name), data)
         });
-        std::iter::once((
-            ".claude-plugin/marketplace.json".to_string(),
-            serde_json::to_vec_pretty(&marketplace).unwrap(),
-        ))
-        .chain(plugin)
-        .collect()
+        [(".gitignore".to_string(), b"*\n".to_vec())]
+            .into_iter()
+            .chain(std::iter::once((
+                ".claude-plugin/marketplace.json".to_string(),
+                serde_json::to_vec_pretty(&marketplace).unwrap(),
+            )))
+            .chain(plugin)
+            .collect()
     }
 }
 
@@ -584,11 +586,11 @@ mod tests {
             "hooks/orbit-mark.ts",
             "hooks/register.ts",
             "hooks/rows.ts",
-            "hooks/shiki.js",
             "hooks/theme.ts",
         ];
         let mut expected = vec![
             ".claude-plugin/marketplace.json".to_string(),
+            ".gitignore".to_string(),
             "gitlab-orbit/.claude-plugin/plugin.json".to_string(),
         ];
         expected.extend(shipped.iter().map(|path| format!("gitlab-orbit/{path}")));

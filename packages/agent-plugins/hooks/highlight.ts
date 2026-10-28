@@ -1,65 +1,92 @@
-import { cypherPieces } from './shiki.js'
-
-export type TokenKind = 'keyword' | 'relationship' | 'string' | 'number' | 'function' | 'variable' | 'punctuation' | 'comment' | 'space'
+export type TokenKind =
+  | 'keyword'
+  | 'label'
+  | 'relationship'
+  | 'string'
+  | 'number'
+  | 'function'
+  | 'property'
+  | 'variable'
+  | 'punctuation'
+  | 'comment'
+  | 'space'
 
 export type Token = { text: string; kind: TokenKind }
 
-const KINDS: readonly [RegExp, TokenKind][] = [
-  [/^comment/, 'comment'],
-  [/^string/, 'string'],
-  [/^constant\.numeric/, 'number'],
-  [/^entity\.name\.class\.relationship\.type/, 'relationship'],
-  [/^keyword\.(control\.clause|control\.function\.boolean|operator\.(logical|in)|other\.order)/, 'keyword'],
-  [/^support\.function\.(?!relationship)/, 'function'],
-  [/^(keyword|support)\./, 'punctuation'],
-]
-
+const KEYWORDS = new Set([
+  'MATCH', 'WHERE', 'RETURN', 'ORDER', 'BY', 'SKIP', 'OFFSET', 'LIMIT', 'CALL', 'AS', 'AND', 'NOT',
+  'IN', 'IS', 'NULL', 'TRUE', 'FALSE', 'ASC', 'DESC', 'STARTS', 'ENDS', 'WITH', 'CONTAINS', 'ANY',
+  'SHORTEST', 'ALL', 'DISTINCT', 'OPTIONAL', 'UNION', 'UNWIND', 'OR', 'XOR',
+])
 const CLAUSES = new Set(['MATCH', 'OPTIONAL', 'WHERE', 'RETURN', 'ORDER', 'SKIP', 'OFFSET', 'LIMIT', 'CALL', 'UNION'])
-const OPERATOR_WORDS = new Set(['NOT', 'OR', 'XOR', 'STARTS', 'ENDS', 'CONTAINS', 'DISTINCT'])
 
-function kindOf(text: string, scope: string): TokenKind {
-  if (!text.trim()) return 'space'
-  return KINDS.find(([pattern]) => pattern.test(scope))?.[1] ?? 'variable'
+const TOKEN = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|\s+|'(?:[^'\\]|\\.)*'?|"(?:[^"\\]|\\.)*"?|-?\d+(?:\.\d+)?|[A-Za-z_][\w]*|\*\d*(?:\.\.\d+)?|<-|->|<>|!=|<=|>=|[^\s\w]/g
+
+export function tokenize(query: string): Token[] {
+  const raw = query.match(TOKEN) ?? []
+  const out: Token[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const text = raw[i] ?? ''
+    const prev = out[out.length - 1]?.text ?? ''
+    const next = raw[i + 1] ?? ''
+    let kind: TokenKind = 'variable'
+    if (/^\/[/*]/.test(text)) kind = 'comment'
+    else if (/^\s+$/.test(text)) kind = 'space'
+    else if (/^['"]/.test(text)) kind = 'string'
+    else if (/^-?\d/.test(text)) kind = 'number'
+    else if (/^[A-Za-z_]/.test(text)) {
+      const opener = lastOpener(out)
+      if (prev === ':' && opener === '[') kind = 'relationship'
+      else if (prev === ':' && opener === '(') kind = 'label'
+      else if (next === '(') kind = 'function'
+      else if (prev === '.') kind = 'property'
+      else if (KEYWORDS.has(text.toUpperCase())) kind = 'keyword'
+    } else kind = 'punctuation'
+    out.push({ text, kind })
+  }
+  return out
 }
 
-function tokens(code: string): Token[][] {
-  try {
-    return cypherPieces(code).map((line) =>
-      line.map(({ text, scope }, i) => {
-        const kind = kindOf(text, scope)
-        const isOperator = kind === 'variable' && OPERATOR_WORDS.has(text.trim().toUpperCase()) && !line[i - 1]?.text.endsWith('.')
-        return { text, kind: isOperator ? 'keyword' : kind }
-      }),
-    )
-  } catch {
-    return code.split('\n').map((line) => [{ text: line, kind: 'variable' }])
+function lastOpener(tokens: readonly Token[]): '(' | '[' | '' {
+  const depth = { '(': 0, '[': 0 }
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const t = tokens[i]?.text
+    if (t === ')') depth['(']++
+    else if (t === ']') depth['[']++
+    else if (t === '(' || t === '[') {
+      if (depth[t] === 0) return t
+      depth[t]--
+    }
   }
+  return ''
 }
 
 export function layout(query: string): Token[][] {
+  const tokens = tokenize(query.replace(/\s+/g, ' ').trim())
   const lines: Token[][] = [[]]
-  let depth = 0
-  let previous = ''
-  for (const token of tokens(query.replace(/\s+/g, ' ').trim()).flat()) {
-    const word = token.text.toUpperCase()
-    const line = lines[lines.length - 1] ?? []
-    if (token.kind === 'keyword' && depth === 0 && CLAUSES.has(word.trim().split(/\s+/)[0] ?? '') && previous !== 'OPTIONAL' && line.length) lines.push([])
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]
+    if (!t) continue
+    const word = t.text.toUpperCase()
+    const afterOptional = word === 'MATCH' && tokens[i - 2]?.text.toUpperCase() === 'OPTIONAL'
+    const startsClause = t.kind === 'keyword' && CLAUSES.has(word) && !afterOptional && lastOpener(tokens.slice(0, i)) === ''
     const current = lines[lines.length - 1] ?? []
-    const text = current.length ? token.text : token.text.trimStart()
-    if (text) current.push({ ...token, text })
-    depth += (token.text.match(/[([{]/g)?.length ?? 0) - (token.text.match(/[)\]}]/g)?.length ?? 0)
-    if (token.kind !== 'space') previous = word
+    if (startsClause && current.some((x) => x.kind !== 'space')) lines.push([])
+    const line = lines[lines.length - 1] ?? []
+    if (t.kind === 'space' && line.every((x) => x.kind === 'space')) continue
+    line.push(t)
   }
-  return lines.map((line) => {
-    const last = line[line.length - 1]
-    if (last) last.text = last.text.trimEnd()
-    return line.filter((token) => token.text)
-  })
+  return lines.map(trimEnd)
+}
+
+function trimEnd(line: Token[]): Token[] {
+  while (line[line.length - 1]?.kind === 'space') line.pop()
+  return line
 }
 
 export function codeLines(code: string): Token[][] {
   return code
     .replace(/\s+$/, '')
     .split('\n')
-    .map((line) => (/^\s*--(\s|$)/.test(line) ? [{ text: line, kind: 'comment' as const }] : (tokens(line)[0] ?? [])))
+    .map((line) => (/^\s*--(\s|$)/.test(line) ? [{ text: line, kind: 'comment' as const }] : tokenize(line)))
 }
