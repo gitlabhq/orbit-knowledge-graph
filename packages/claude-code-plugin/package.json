@@ -1,0 +1,18 @@
+{
+  "name": "@orbit/claude-code-plugin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test:claude": "bun run build && ${CLAUDE_BIN:-claude} plugin validate --strict dist && ${CLAUDE_BIN:-claude} plugin test dist",
+    "build": "bun scripts/build.ts",
+    "types": "bun scripts/types.ts"
+  },
+  "dependencies": {
+    "@orbit/agent-plugin-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
+  }
+}

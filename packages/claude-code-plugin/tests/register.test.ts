@@ -52,6 +52,7 @@ test('the status line counts finished Orbit queries and passes every call throug
   expect(await ui.find({ type: 'Text', text: ' nodes' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' edges' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '  ◎ GitLab Orbit' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' API call replaced' })).toBeDefined()
 })
 
 test('the status line shows the nodes out of the project graph total once graph-status answers', async ($, on) => {
@@ -67,7 +68,7 @@ test('the status line shows the nodes out of the project graph total once graph-
 
   const ui = await $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
   expect(await ui.find({ type: 'Text', text: '3 / 1,675,400' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: ' nodes total' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' nodes' })).toBeDefined()
 })
 
 test('a cypher block in a reply draws highlighted, and the prose before it stays Claude Code', async ($, on) => {
@@ -95,4 +96,17 @@ test('a count query adds the edges its counted rows walked', async ($, on) => {
   const ui = await $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
   expect(await ui.find({ type: 'Text', text: '80' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' edges' })).toBeDefined()
+})
+
+test('graph-status runs through the launcher the Orbit call used', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[1]{id}:\n    1\n' } }))
+  let argv: readonly string[] = []
+  on('process.run', (_$, e) => {
+    argv = e.argv
+    return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await $.tool.call({ tool: 'Bash', command: '/opt/orbit/bin/orbit query "MATCH (u:User {id: 1}) RETURN u"' })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+  expect(argv).toEqual(['/opt/orbit/bin/orbit', 'graph-status', '--response-format', 'raw'])
 })

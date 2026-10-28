@@ -145,10 +145,6 @@ description = "Run local integration tests — compiler + querying pipeline (no 
 run = "for t in scripts/dev/tests/*_test.sh scripts/fuzz/*_test.sh; do bash \"$t\" || exit 1; done"
 description = "Run the shell tests for the local development scripts (no cluster needed)"
 
-[tasks."test:setup-plugins"]
-run = "bun test ./config/setup/opencode_plugin.test.js"
-description = "Run the tests for the agent plugins that orbit setup installs"
-
 [tasks."test:plan-shape"]
 run = "cargo test -p integration-tests --test local compiler::plan_shape -- --nocapture"
 description = "Check logical input and selected physical plans against YAML fixtures"
@@ -161,14 +157,18 @@ description = "Run code-graph and code-graph-incremental YAML suites with OpenCy
 run = "cargo build -p orbit-cli && cargo nextest run --test cli --test outside_repository --no-fail-fast"
 description = "Run CLI integration tests — concurrency, worktrees (no Docker)"
 
-[tasks."test:claude-plugin"]
-dir = "config/setup/claude_plugin/gitlab-orbit"
+[tasks."build:agent-plugins"]
+run = "bun run --filter '@orbit/claude-code-plugin' --filter '@orbit/opencode-plugin' build"
+description = "Build the Claude Code and OpenCode plugins in packages/ into config/setup, where orbit setup installs them from"
+
+[tasks."test:agent-plugins"]
+depends = ["build:agent-plugins"]
 run = [
-  "claude plugin validate --strict .",
-  "bun x tsc -p . --noEmit",
-  "claude plugin test .",
+  "bun run --filter '@orbit/agent-plugin-core' --filter '@orbit/claude-code-plugin' --filter '@orbit/opencode-plugin' typecheck",
+  "bun run --filter '@orbit/agent-plugin-core' --filter '@orbit/opencode-plugin' test",
+  "bun run --filter '@orbit/claude-code-plugin' test:claude",
 ]
-description = "Validate, typecheck, and test the gitlab-orbit Claude Code plugin (needs Claude Code 2.1.287+, which writes .claude-plugin/types on first --plugin-dir load)"
+description = "Typecheck and test the agent plugins; the Claude Code tests need Claude Code 2.1.287+"
 
 [tasks."test:integration"]
 run = "./scripts/dev/run-container-tests.sh --all-features --test server_containers --test indexer_containers --no-fail-fast --retries 0"

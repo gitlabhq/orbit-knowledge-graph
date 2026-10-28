@@ -1,5 +1,4 @@
 import { orbitInvocations } from './command.ts'
-import { BLUE, FADE_STOPS } from './orbit.ts'
 
 export type TokenKind =
   | 'keyword'
@@ -16,8 +15,6 @@ export type TokenKind =
 
 export type Token = { text: string; kind: TokenKind }
 
-type TokenStyle = { color?: string; bold?: boolean; italic?: boolean; dimColor?: boolean }
-
 const KEYWORDS = new Set([
   'MATCH', 'WHERE', 'RETURN', 'ORDER', 'BY', 'SKIP', 'OFFSET', 'LIMIT', 'CALL', 'AS', 'AND', 'NOT',
   'IN', 'IS', 'NULL', 'TRUE', 'FALSE', 'ASC', 'DESC', 'STARTS', 'ENDS', 'WITH', 'CONTAINS', 'ANY',
@@ -25,20 +22,6 @@ const KEYWORDS = new Set([
 ])
 // The keywords a new line starts at; ORDER starts one too, as ORDER BY
 const CLAUSES = new Set(['MATCH', 'OPTIONAL', 'WHERE', 'RETURN', 'ORDER', 'SKIP', 'OFFSET', 'LIMIT', 'CALL', 'UNION'])
-
-export const TOKEN_STYLE: Readonly<Record<TokenKind, TokenStyle>> = {
-  keyword: { color: BLUE, bold: true },
-  label: { color: FADE_STOPS[0] },
-  relationship: { color: FADE_STOPS[0], italic: true },
-  string: { color: 'success' },
-  number: { color: 'warning' },
-  function: { bold: true },
-  property: {},
-  variable: {},
-  punctuation: { dimColor: true },
-  comment: { dimColor: true, italic: true },
-  space: {},
-}
 
 const TOKEN = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|\s+|'(?:[^'\\]|\\.)*'?|"(?:[^"\\]|\\.)*"?|-?\d+(?:\.\d+)?|[A-Za-z_][\w]*|\*\d*(?:\.\.\d+)?|<-|->|<>|!=|<=|>=|[^\s\w]/g
 
@@ -163,4 +146,77 @@ export function hopsOf(query: string): number {
     }
   }
   return hops
+}
+
+type Hop = 'left' | 'right' | 'none'
+
+/** A path as its nodes and the text it reads as. */
+type Path = { nodes: string[]; text: string }
+
+// The data a graph query explores, one path per MATCH pattern, read from source to target, as
+// `User → MergeRequest → Project`. Repeated node types collapse into one, so a call graph reads
+// `Definition`. A pattern written right to left reads reversed; one with arrows both ways splits
+// into its left-to-right pieces. `—` is an undirected hop. For the older JSON DSL, the entity
+// names in order.
+export function entitiesOf(text: string): string {
+  const labels: Record<string, string> = {}
+  for (const m of text.matchAll(/\(\s*(\w+)\s*:\s*(\w+)/g)) {
+    if (m[1] && m[2]) labels[m[1]] ??= m[2]
+  }
+  const paths: Path[] = []
+  for (const segment of text.split(/\bMATCH\b/i).slice(1)) {
+    const pattern = segment.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0] ?? ''
+    for (const part of splitTopLevel(pattern)) {
+      const nodes: string[] = []
+      const hops: Hop[] = []
+      for (const m of part.matchAll(/\(([^)]*)\)|(<)?-(?:\[[^\]]*\])?-(>)?/g)) {
+        if (m[1] !== undefined) {
+          const [, name = '', label] = m[1].match(/^\s*(\w*)\s*(?::\s*(\w+))?/) ?? []
+          nodes.push(label || labels[name] || 'any')
+        } else hops.push(m[2] ? 'left' : m[3] ? 'right' : 'none')
+      }
+      for (const path of readForward(nodes, hops)) {
+        if (!paths.some((p) => p.text === path.text)) paths.push(path)
+      }
+    }
+  }
+  // A lone node that a longer path already walks adds nothing
+  const walks = paths.filter((p) => p.nodes.length > 1)
+  const kept = paths.filter((p) => p.nodes.length > 1 || !walks.some((w) => w.nodes.includes(p.text)))
+  if (kept.length) return kept.map((p) => p.text).join(', ')
+  const names: string[] = []
+  for (const m of text.matchAll(/\\?"entity\\?"\s*:\s*\\?"(\w+)/g)) {
+    if (m[1] && !names.includes(m[1])) names.push(m[1])
+  }
+  return names.join(' → ')
+}
+
+// One pattern's nodes and hops as paths that read left to right: a run of hops pointing the same
+// way is one path, and a run pointing left is turned around
+function readForward(nodes: string[], hops: Hop[]): Path[] {
+  if (hops.length === 0) return nodes[0] ? [{ nodes: [nodes[0]], text: nodes[0] }] : []
+  const paths: Path[] = []
+  let start = 0
+  for (let i = 1; i <= hops.length; i++) {
+    if (i < hops.length && hops[i] === hops[start]) continue
+    const run = nodes.slice(start, i + 1)
+    if (hops[start] === 'left') run.reverse()
+    const distinct = run.filter((node, k) => node !== run[k - 1])
+    paths.push({ nodes: distinct, text: distinct.join(hops[start] === 'none' ? ' — ' : ' → ') })
+    start = i
+  }
+  return paths
+}
+
+// A MATCH clause's comma-separated patterns, split only outside (), [], and {}
+function splitTopLevel(text: string): string[] {
+  const parts = ['']
+  let depth = 0
+  for (const ch of text) {
+    if ('([{'.includes(ch)) depth++
+    else if (')]}'.includes(ch)) depth--
+    if (ch === ',' && depth === 0) parts.push('')
+    else parts[parts.length - 1] += ch
+  }
+  return parts.map((p) => p.trim()).filter(Boolean)
 }

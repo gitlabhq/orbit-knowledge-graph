@@ -1,0 +1,86 @@
+import { QUERY_LABEL, isOrbitPrefix, type OrbitCall } from '@orbit/agent-plugin-core'
+
+/** One Orbit call in a tool group: Claude Code's props for it, its index, and what it read. */
+export type GroupCall<P extends { isRunning: boolean }> = { props: P; i: number; call: OrbitCall }
+
+/** One row a group draws: its latest call, the label and detail it shows, and whether it runs. */
+export type Row<P extends { isRunning: boolean }> = GroupCall<P> & { isRunning: boolean }
+
+/**
+ * Query paths (`A → B`, comma-separated per pattern) joined into chains. A path that starts at a
+ * chain's end extends it, one that ends at its start is prepended, and one the chain already
+ * holds is skipped, so `MergeRequest → Project` and `User → MergeRequest` read
+ * `User → MergeRequest → Project`.
+ */
+export function joinPaths(details: readonly string[]): string {
+  const chains: string[][] = []
+  const holds = (chain: string[], nodes: string[]) =>
+    chain.some((_, i) => nodes.every((node, k) => chain[i + k] === node))
+  for (const detail of details) {
+    for (const path of detail.split(', ').filter(Boolean)) {
+      const nodes = path.split(' → ')
+      if (chains.some((chain) => holds(chain, nodes))) continue
+      const after = chains.find((chain) => chain[chain.length - 1] === nodes[0])
+      if (after) {
+        after.push(...nodes.slice(1))
+        continue
+      }
+      const before = chains.find((chain) => chain[0] === nodes[nodes.length - 1])
+      if (before) {
+        before.unshift(...nodes.slice(0, -1))
+        continue
+      }
+      chains.push([...nodes])
+    }
+  }
+  return chains.map((chain) => chain.join(' → ')).join(', ')
+}
+
+function queryDetails<P extends { isRunning: boolean }>(calls: readonly GroupCall<P>[]): string[] {
+  return calls.filter((x) => x.call.label === QUERY_LABEL).map((x) => x.call.detail)
+}
+
+// A query that doesn't connect to the row's earlier queries starts a row of its own; guide and
+// schema calls stay with the row they follow
+function startsNewPath<P extends { isRunning: boolean }>(row: readonly GroupCall<P>[], x: GroupCall<P>): boolean {
+  if (x.call.label !== QUERY_LABEL || !x.call.detail) return false
+  const details = queryDetails(row)
+  if (details.length === 0) return false
+  const chains = (list: string[]) => joinPaths(list).split(', ').filter(Boolean).length
+  return chains([...details, x.call.detail]) > chains(details)
+}
+
+/**
+ * Back-to-back Orbit calls as rows. While a call runs, its row shows it, with the path walked so
+ * far for a query. Once done, a row with queries reads `Explored Orbit` and the joined path, and
+ * any other row shows its last call.
+ */
+export function mergeRuns<P extends { isRunning: boolean }>(calls: readonly GroupCall<P>[]): Row<P>[] {
+  const runs: GroupCall<P>[][] = []
+  for (const x of calls) {
+    const last = runs[runs.length - 1]
+    const follows = last !== undefined && x.i === (last[last.length - 1]?.i ?? -2) + 1
+    if (last && follows && !startsNewPath(last, x)) last.push(x)
+    else runs.push([x])
+  }
+  return runs.flatMap((run): Row<P>[] => {
+    const latest = run[run.length - 1]
+    if (!latest) return []
+    const running = [...run].reverse().find((x) => x.props.isRunning)
+    const walked = joinPaths(queryDetails(run))
+    if (running) {
+      const detail = running.call.label === QUERY_LABEL ? walked : running.call.detail
+      return [{ ...running, isRunning: true, call: { ...running.call, detail } }]
+    }
+    if (!walked) return [{ ...latest, isRunning: false }]
+    return [{ ...latest, isRunning: false, call: { ...latest.call, label: QUERY_LABEL, detail: walked } }]
+  })
+}
+
+// A shell call the model is still writing: no command yet, or only the start of an orbit launcher.
+// It joins an Orbit group's row once its command is known, so it must not break the group first.
+export function isPendingCall(props: { tool: string; input: unknown; output?: unknown }): boolean {
+  if (props.tool !== 'Bash' || props.output !== undefined) return false
+  const input = props.input as { command?: unknown } | undefined
+  return isOrbitPrefix(typeof input?.command === 'string' ? input.command : '')
+}

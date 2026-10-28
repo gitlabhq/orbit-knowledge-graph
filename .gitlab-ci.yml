@@ -397,7 +397,7 @@ setup-schema-validate:
     - find config/setup/agents -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/setup_agent.schema.json
     - uvx check-jsonschema --verbose --schemafile config/schemas/setup.schema.json config/setup/setup.yaml
 
-setup-plugin-test:
+agent-plugins:
   stage: lint
   image: oven/bun:1.4.4-alpine
   tags:
@@ -405,8 +405,19 @@ setup-plugin-test:
   extends:
     - .mr-and-main-rules
   needs: []
+  before_script:
+    - apk add --no-cache git
+    - bun install --frozen-lockfile --ignore-scripts
   script:
-    - bun test ./config/setup/opencode_plugin.test.js
+    - bun run --filter '@orbit/agent-plugin-core' --filter '@orbit/claude-code-plugin' --filter '@orbit/opencode-plugin' typecheck
+    - bun run --filter '@orbit/agent-plugin-core' --filter '@orbit/opencode-plugin' test
+    - bun run --filter '@orbit/claude-code-plugin' --filter '@orbit/opencode-plugin' build
+    - |
+      if [ -n "$(git status --porcelain -- config/setup)" ]; then
+        git status --short -- config/setup
+        echo "The agent plugins in config/setup are out of date. Run 'mise run build:agent-plugins' and commit."
+        exit 1
+      fi
 
 generate-config-schema:
   stage: lint

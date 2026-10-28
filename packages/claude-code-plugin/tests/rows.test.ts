@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { QUERY_LABEL, describeOrbitCall } from '../hooks/orbit.ts'
+import { QUERY_LABEL, describeOrbitCall } from '@orbit/agent-plugin-core'
 import { isPendingCall, joinPaths, mergeRuns } from '../hooks/rows.ts'
 
 function calls(...commands: string[]) {
