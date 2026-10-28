@@ -22,7 +22,6 @@ const GRAPHQL_PATH: &str = "/api/graphql";
 const SKILLS_PATH: &str = "/api/v4/orbit/skills";
 const GREP_PATH: &str = "/api/v4/orbit/grep";
 const CONTEXT_PATH: &str = "/api/v4/orbit/context";
-const COMMANDS_PATH: &str = "/api/v4/orbit/agent/commands";
 const SHORT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const GREP_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -404,24 +403,6 @@ pub(crate) fn gitlab_usable(dir: &Path) -> bool {
         }
     })
     .is_some()
-}
-
-pub(crate) fn query_graph_description(dir: &Path) -> Option<String> {
-    let client = OrbitClient::from_env_in(dir).ok()?;
-    let body = block_on_short(async move {
-        client
-            .get_bytes(
-                COMMANDS_PATH,
-                &[("command_names", "query_graph".to_string())],
-            )
-            .await
-    })?;
-    let commands: Vec<serde_json::Value> = serde_json::from_slice(&body).ok()?;
-    commands
-        .iter()
-        .find(|command| command["name"] == "query_graph")
-        .and_then(|command| command["description"].as_str())
-        .map(str::to_string)
 }
 
 impl OrbitClient {

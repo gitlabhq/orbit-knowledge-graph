@@ -54,40 +54,21 @@ fn substitute_launcher(text: &str, launcher: &str) -> String {
     text.replace("{{orbit}}", launcher)
 }
 
-const QUERY_LINE: &str = "remote_query";
-
-fn render_instructions(launcher: &str, remote: bool, query_syntax: Option<&str>) -> String {
+fn render_instructions(launcher: &str, remote: bool) -> String {
     let mut text = TEXTS.instructions.trim_end().to_string();
     for (name, value) in &TEXTS.remote {
-        let value = match (remote, query_syntax) {
-            (false, _) => "",
-            (true, None) if name == QUERY_LINE => "",
-            (true, _) => value.as_str(),
-        };
+        let value = if remote { value.as_str() } else { "" };
         text = text.replace(&format!("{{{{{name}}}}}"), value);
     }
-    let text = text.replace("{{query_syntax}}", query_syntax.unwrap_or_default());
+    let text = text.replace("{{query_syntax}}", crate::descriptions::gql_syntax());
     substitute_launcher(&text, launcher)
-}
-
-fn query_syntax(served: Option<&str>) -> Option<&str> {
-    match served {
-        Some(description) if description.contains("MATCH") => Some(description),
-        Some(_) => None,
-        None => Some(crate::descriptions::gql_syntax()),
-    }
 }
 
 static REACHES_GITLAB: LazyLock<bool> =
     LazyLock::new(|| crate::remote::client::gitlab_usable(Path::new(".")));
 
-static RENDERED_INSTRUCTIONS: LazyLock<String> = LazyLock::new(|| {
-    let remote = reaches_gitlab();
-    let served = remote
-        .then(|| crate::remote::client::query_graph_description(Path::new(".")))
-        .flatten();
-    render_instructions(launcher(), remote, query_syntax(served.as_deref()))
-});
+static RENDERED_INSTRUCTIONS: LazyLock<String> =
+    LazyLock::new(|| render_instructions(launcher(), reaches_gitlab()));
 
 pub(crate) fn reaches_gitlab() -> bool {
     *REACHES_GITLAB
@@ -321,7 +302,7 @@ mod tests {
             (GLAB_LAUNCHER, "`glab orbit grep"),
         ] {
             for remote in [true, false] {
-                let rendered = render_instructions(launcher, remote, query_syntax(None));
+                let rendered = render_instructions(launcher, remote);
                 assert!(rendered.contains(expected), "{launcher}: {rendered}");
                 assert!(!rendered.contains("{{"), "{launcher}: {rendered}");
                 for phrase in [
@@ -346,7 +327,7 @@ mod tests {
                 assert!(rendered.split_whitespace().count() <= budget, "{launcher}");
             }
         }
-        let local = render_instructions(DIRECT_LAUNCHER, false, query_syntax(None));
+        let local = render_instructions(DIRECT_LAUNCHER, false);
         assert_eq!(
             local.lines().filter(|line| line.starts_with("- ")).count(),
             2,
@@ -355,24 +336,6 @@ mod tests {
         assert!(search_nudge_text().contains("MANDATORY"));
         let glab = agent_named("claude").unwrap().json_merges[0].entries[0].to_string();
         assert!(glab.contains("{{orbit}} hook-guard"), "{glab}");
-    }
-
-    #[test]
-    fn query_line_follows_the_served_query_language() {
-        let served_gql = "Read-only GQL. MATCH (n) RETURN n.";
-        assert_eq!(query_syntax(Some(served_gql)), Some(served_gql));
-        let gql = render_instructions(DIRECT_LAUNCHER, true, query_syntax(Some(served_gql)));
-        assert!(gql.contains("`orbit query` must be used"), "{gql}");
-        assert!(gql.contains(served_gql), "{gql}");
-
-        let json = render_instructions(
-            DIRECT_LAUNCHER,
-            true,
-            query_syntax(Some("Send a JSON query object.")),
-        );
-        assert!(!json.contains("orbit query"), "{json}");
-        assert!(json.contains("instead of glab and glab api"), "{json}");
-        assert!(!json.contains("{{"), "{json}");
     }
 
     #[test]
