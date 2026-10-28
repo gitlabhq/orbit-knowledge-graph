@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { codeLines, cypherSegments, hopsOf, layout, queryOf, tokenize } from '../hooks/cypher.ts'
-import { compact, graphNodes, grouped, parseResponse } from '../hooks/stats.ts'
+import { apiCallsFor, compact, graphNodes, grouped, parseResponse } from '../hooks/stats.ts'
 
 test('the llm format counts nodes by entity and edges', () => {
   const text = [
@@ -109,4 +109,20 @@ test('hops count each relationship in the MATCH patterns, a variable-length one 
   expect(hopsOf('MATCH (mr:MergeRequest {id: 1})--(n) RETURN n')).toBe(1)
   expect(hopsOf('MATCH (p:Project {id: 1}) RETURN count(p) AS n')).toBe(0)
   expect(hopsOf("CALL db.schema('Project')")).toBe(0)
+})
+
+test('API calls replaced follow the GraphQL minimum: pages of 100, joins nested', () => {
+  const traversal = (n: number) => parseResponse(`query_type: traversal\nnodes:\n  MergeRequest[${n}]{id}:\n  Project[1]{id}:\nedges[${n}]{from}:\n`)
+  expect(apiCallsFor(traversal(5))).toBe(1)
+  expect(apiCallsFor(traversal(250))).toBe(3)
+  const counts = (grouping: string, rows: string) =>
+    parseResponse(`query_type: aggregation\ncolumns[1]{name,function,target}:\n  n,count,mr\n${grouping}rows[3]{mr_state,n}:\n${rows}pagination:\n  has_more: false\n`)
+  const byState = counts('group_columns[1]{name,kind,node,property,entity}:\n  mr_state,property,mr,state,MergeRequest\n', '  merged,2416\n  closed,682\n  opened,67\n')
+  expect(byState).toMatchObject({ kind: 'aggregation', grouped: true, aggregated: 3165 })
+  expect(apiCallsFor(byState)).toBe(32)
+  const total = parseResponse('query_type: aggregation\ncolumns[1]{name,function,target}:\n  n,count,mr\nrows[1]{n}:\n  3165\npagination:\n  has_more: false\n')
+  expect(total).toMatchObject({ kind: 'aggregation', grouped: false })
+  expect(apiCallsFor(total)).toBe(1)
+  expect(apiCallsFor(parseResponse('domains[1]:\n  - name: code_review'))).toBe(0)
+  expect(apiCallsFor(parseResponse(JSON.stringify({ result: { nodes: [{ type: 'User' }], edges: [] } })))).toBe(1)
 })

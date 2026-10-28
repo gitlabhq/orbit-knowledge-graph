@@ -5,7 +5,7 @@ import { TOKEN_STYLE, codeLines, cypherSegments, hopsOf, layout, queryOf, type T
 import type { MarkProps } from './orbit-mark.ts'
 import { BLUE, MARK, QUERY_LABEL, describeOrbitCall, type OrbitCall } from './orbit.ts'
 import { isPendingCall, mergeRuns } from './rows.ts'
-import { compact, graphNodes, grouped, parseResponse } from './stats.ts'
+import { apiCallsFor, compact, graphNodes, grouped, parseResponse } from './stats.ts'
 
 type Ui = Pick<Elements['terminal'], 'Box' | 'Text'>
 type Resolved = Elements[keyof Elements]
@@ -16,7 +16,7 @@ function clientOf(ui: Resolved): Elements['terminal']['Client'] | undefined {
 }
 type RowState = { isErrored?: boolean; isInterrupted?: boolean }
 
-const stats = { calls: 0, nodes: 0, edges: 0 }
+const stats = { calls: 0, nodes: 0, edges: 0, apiCalls: 0 }
 // Asked on the first Orbit call, so a session that never uses Orbit never runs graph-status
 let graphTotal: number | null = null
 let graphTotalAsked = false
@@ -42,6 +42,7 @@ async function record(read: (path: string) => Promise<unknown>, call: OrbitCall,
   const text = typeof saved === 'string' ? String(await read(saved)) : outputText(result)
   const parsed = parseResponse(text)
   stats.nodes += parsed.nodes + parsed.aggregated
+  stats.apiCalls += apiCallsFor(parsed)
   // A count answers with totals and no edges, yet every counted row matched the whole pattern
   stats.edges += parsed.edges + parsed.aggregated * hopsOf(queryOf(command))
 }
@@ -167,6 +168,7 @@ export const register: Register = (on) => {
     const dim = (text: string) => Text({ dimColor: true, children: [text] })
     const words: [string, string][] = [
       [compact(stats.calls), stats.calls === 1 ? ' query' : ' queries'],
+      [compact(stats.apiCalls), stats.apiCalls === 1 ? ' API call replaced' : ' API calls replaced'],
       graphTotal
         ? [compact(stats.nodes) + ' / ' + grouped(graphTotal), ' nodes']
         : [compact(stats.nodes), stats.nodes === 1 ? ' node' : ' nodes'],

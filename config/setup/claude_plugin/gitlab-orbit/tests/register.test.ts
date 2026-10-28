@@ -52,6 +52,7 @@ test('the status line counts finished Orbit queries and passes every call throug
   expect(await ui.find({ type: 'Text', text: ' nodes' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' edges' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '  ◎ GitLab Orbit' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' API call replaced' })).toBeDefined()
 })
 
 test('the status line shows the nodes out of the project graph total once graph-status answers', async ($, on) => {
