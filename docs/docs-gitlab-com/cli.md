@@ -17,17 +17,21 @@ title: GitLab Orbit CLI
 
 - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 19.0.
 - [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) from experiment to beta in GitLab 19.1.
-- Commands that call the GitLab server:
+- Commands that call the GitLab Orbit API:
   - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
   - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Remote queries [changed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/265010) to accept GQL by default in GitLab 19.4.4, 19.5.2, and 19.6.
+- GitLab Orbit queries [changed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/265010) to accept GQL by default in GitLab 19.4.4, 19.5.2, and 19.6.
 
 {{< /history >}}
 
-The GitLab Orbit CLI (`orbit`) queries GitLab Orbit on your GitLab instance from the terminal.
+The GitLab Orbit CLI (`orbit`) queries GitLab Orbit from the terminal.
 Your agent runs the same commands for you.
-The CLI also indexes the code on your machine into a [local graph](#local-graph).
+
+The CLI reads two sources:
+
+- GitLab Orbit on your GitLab instance holds your GitLab data and the code on the default branch of each project.
+- The [local graph](#local-graph) on your machine holds the code in your checkout, including commits that you have not pushed.
 
 ## Install the CLI
 
@@ -88,31 +92,30 @@ In the commands on this page, replace `glab orbit` with `orbit`, for example `or
 
 ## Command catalog
 
-Remote commands query the remote graph on your GitLab instance.
-They need a GitLab credential and GitLab Orbit turned on for your group.
-Local commands use the local graph on your machine. They need no GitLab account and no network.
-`grep` and `context` use the local graph, and also GitLab when a GitLab credential is available.
+Commands that use the GitLab Orbit API need a GitLab credential and GitLab Orbit turned on for your group.
+Commands that use only the local graph need no GitLab account and no network.
+`grep` and `context` use the local graph, and also the GitLab Orbit API when a GitLab credential is available.
 
-| Command | Graph | Purpose |
-|---------|-------|---------|
-| `query` | Remote | Run a query and stream the response. |
-| `status` | Remote | Show the health of the service, or the indexing progress of a group or project. |
-| `schema` | Remote | Show the node types, properties, and relationships. |
-| `skills get` | Remote when a GitLab credential is available, otherwise the built-in copy of `orbit` | Print the agent skill files, such as `orbit` and `orbit-start`. Only `orbit` has a built-in copy. |
-| `grep` | Local and remote | Search every line of code, tests, configuration, and documentation, with the enclosing definitions, and the merge requests, issues, and comments of your GitLab group. |
-| `context` | Local and remote | Show the source of definitions with their callers and tests, and read merge requests, issues, pipelines, and jobs. |
-| `workspace index` | Local | Index a repository, or a directory of repositories. |
-| `workspace sql` | Local | Run read-only SQL. |
-| `workspace schema` | Local | List the tables and columns. |
-| `workspace list` | Local | List the indexed repositories. |
-| `workspace mcp serve` | Local | Serve the local graph to agents over the Model Context Protocol (MCP). |
+| Command | Uses | Purpose |
+|---------|------|---------|
+| `query` | GitLab Orbit API | Run a query and stream the response. |
+| `status` | GitLab Orbit API | Show the health of the service, or the indexing progress of a group or project. |
+| `schema` | GitLab Orbit API | Show the node types, properties, and relationships. |
+| `skills get` | GitLab Orbit API when a GitLab credential is available, otherwise the built-in copy of `orbit` | Print the agent skill files, such as `orbit` and `orbit-start`. Only `orbit` has a built-in copy. |
+| `grep` | Local graph and GitLab Orbit API | Search every line of code, tests, configuration, and documentation, with the enclosing definitions, and the merge requests, issues, and comments of your GitLab group. |
+| `context` | Local graph and GitLab Orbit API | Show the source of definitions with their callers and tests, and read merge requests, issues, pipelines, and jobs. |
+| `workspace index` | Local graph | Index a repository, or a directory of repositories. |
+| `workspace sql` | Local graph | Run read-only SQL. |
+| `workspace schema` | Local graph | List the tables and columns. |
+| `workspace list` | Local graph | List the indexed repositories. |
+| `workspace mcp serve` | Local graph | Serve the local graph to agents over the Model Context Protocol (MCP). |
 | `setup`, `uninstall` | None | Add or remove the agent configuration. |
 | `config` | None | Read and write saved settings. |
 | `version` | None | Print the version. |
 
 For all flags, run `glab orbit <command> --help`.
 
-## Query the remote graph
+## Query GitLab Orbit
 
 {{< details >}}
 
@@ -184,18 +187,20 @@ Use only one of `--full-path`, `--namespace-id`, and `--project-id`.
 
 ## Local graph
 
-The local graph holds the code on your machine, so your agent can find definitions, callers, and imports
-in code that you committed but have not pushed. It works offline and needs no GitLab account.
-For merge requests, pipelines, work items, and vulnerabilities, use the [remote graph](#query-the-remote-graph).
+The local graph is part of the GitLab Orbit CLI.
+The local graph covers the code on your machine, which GitLab Orbit does not have.
+Your agent can find definitions, callers, and imports in code that you committed but have not pushed.
+The local graph works offline and needs no GitLab account.
+For merge requests, pipelines, work items, and vulnerabilities, [query GitLab Orbit](#query-gitlab-orbit).
 
-| Attribute | Local graph | Remote graph |
+| Attribute | Local graph | GitLab Orbit |
 |-----------|-------------|--------------|
 | Data | Code only | GitLab data and code |
 | Code version | The checkout on your machine, including commits that you have not pushed | The default branch of each project |
 | Refresh | `grep` and `context` index new commits and edited files, or you run `glab orbit workspace index` | Automatic |
 | Query with | `grep`, `context`, and `workspace sql` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
 
-Your agent can use both graphs in the same conversation.
+Your agent can use the local graph and GitLab Orbit in the same conversation.
 
 ### Index a repository
 
@@ -207,7 +212,7 @@ glab orbit workspace index .
 
 The CLI parses the files in the working tree, skips the files that `.gitignore` excludes,
 and writes definitions, imports, and cross-file references to the graph.
-The parser and [supported languages](schema.md#supported-languages) are the same as for the remote graph.
+The parser and [supported languages](schema.md#supported-languages) are the same as for GitLab Orbit.
 
 - When you pass the path of a directory, the CLI indexes each repository in the directory.
 - Each indexed commit keeps its own graph. When you index the same commit again, the CLI reindexes only the files that changed since the last run.
@@ -286,7 +291,7 @@ The CLI keeps its settings and the local graph in `~/.gitlab/orbit/`.
 The local graph is one DuckDB file for each indexed commit under `local/revisions/`,
 and a `local/manifest.duckdb` file that lists them.
 
-- Local commands accept `--db <path>` for a different graph file.
+- Commands that use the local graph accept `--db <path>` for a different graph file.
 - When an update of the CLI changes the format of the local graph, the next `workspace index` rebuilds the graph file.
   Index your other repositories again after you update.
 
@@ -302,7 +307,7 @@ The CLI reads these environment variables:
 
 | Variable | Purpose |
 |----------|---------|
-| `GITLAB_TOKEN`, `GITLAB_URL` | Token and instance for remote commands when you run the CLI without `glab`. Default URL: `https://gitlab.com`. Without `GITLAB_TOKEN`, the CLI gets the token and instance of your `glab` sign-in from `glab auth credential-helper`. |
+| `GITLAB_TOKEN`, `GITLAB_URL` | Token and instance for the GitLab Orbit API when you run the CLI without `glab`. Default URL: `https://gitlab.com`. Without `GITLAB_TOKEN`, the CLI gets the token and instance of your `glab` sign-in from `glab auth credential-helper`. |
 | `ORBIT_DATA_DIR` | A directory for the settings and the local graph, instead of `~/.gitlab/orbit/`. |
 | `ORBIT_TELEMETRY_ENABLED` | `false` or `true`. Overrides the saved telemetry setting, for example in a CI/CD job. |
 
