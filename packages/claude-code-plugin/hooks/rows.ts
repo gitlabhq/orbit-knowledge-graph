@@ -10,7 +10,7 @@ export type Row<P extends { isRunning: boolean }> = GroupCall<P> & { isRunning: 
  * Query paths (`A → B`, comma-separated per pattern) joined into chains. A path that starts at a
  * chain's end extends it, one that ends at its start is prepended, and one the chain already
  * holds is skipped, so `MergeRequest → Project` and `User → MergeRequest` read
- * `User → MergeRequest → Project`.
+ * `User → MergeRequest → Project`. A path that holds a whole chain replaces it.
  */
 export function joinPaths(details: readonly string[]): string {
   const chains: string[][] = []
@@ -20,6 +20,11 @@ export function joinPaths(details: readonly string[]): string {
     for (const path of detail.split(', ').filter(Boolean)) {
       const nodes = path.split(' → ')
       if (chains.some((chain) => holds(chain, nodes))) continue
+      const within = chains.findIndex((chain) => holds(nodes, chain))
+      if (within >= 0) {
+        chains[within] = [...nodes]
+        continue
+      }
       const after = chains.find((chain) => chain[chain.length - 1] === nodes[0])
       if (after) {
         after.push(...nodes.slice(1))

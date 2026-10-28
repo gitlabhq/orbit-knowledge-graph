@@ -65,3 +65,8 @@ test('a shell call still being written does not break an Orbit group', () => {
   expect(isPendingCall({ tool: 'Bash', input: { command: 'ls' } })).toBe(false)
   expect(isPendingCall({ tool: 'Bash', input: {}, output: 'done' })).toBe(false)
 })
+
+test('a longer path that walks a whole chain replaces it', () => {
+  expect(joinPaths(['Project → MergeRequest', 'Project → MergeRequest → User'])).toBe('Project → MergeRequest → User')
+  expect(joinPaths(['Project → MergeRequest → User', 'Project → MergeRequest'])).toBe('Project → MergeRequest → User')
+})

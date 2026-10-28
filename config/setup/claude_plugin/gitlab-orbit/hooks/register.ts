@@ -7,6 +7,7 @@ import {
   compact,
   cypherSegments,
   describeOrbitCall,
+  graphEntities,
   graphNodes,
   grouped,
   layout,
@@ -33,6 +34,8 @@ const stats = new Tally()
 // Asked on the first Orbit call, so a session that never uses Orbit never runs graph-status
 let graphTotal: number | null = null
 let graphTotalAsked = false
+// The graph's entity types, from the same graph-status call, so a `project_id` filter can name Project
+let knownEntities: ReadonlySet<string> = new Set()
 
 function outputText(result: unknown): string {
   if (typeof result === 'string') return result
@@ -110,6 +113,7 @@ export const register: Register = (on) => {
         const argv = [...launcher, 'graph-status', '--response-format', 'raw']
         void $.process.run(argv, { timeoutMs: 30000 }).then((run) => {
           graphTotal = run.exitCode === 0 ? graphNodes(run.stdout) : null
+          if (run.exitCode === 0) knownEntities = new Set(graphEntities(run.stdout))
           $.ui.invalidate('ui.render')
         }, () => {})
       }
@@ -118,7 +122,7 @@ export const register: Register = (on) => {
   }).catch((_$, e, next) => next(e)) // A failure here must never block the tool call
 
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
-    const call = describeOrbitCall(e.props.tool, e.props.input)
+    const call = describeOrbitCall(e.props.tool, e.props.input, knownEntities)
     if (!call) return next(e)
     const ui = $.ui.resolve(e)
     const { Box, Text } = ui
@@ -147,7 +151,7 @@ export const register: Register = (on) => {
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
     if (e.props.isExpanded) return next(e)
     const orbitCalls = e.props.calls.flatMap((props, i) => {
-      const call = describeOrbitCall(props.tool, props.input)
+      const call = describeOrbitCall(props.tool, props.input, knownEntities)
       return call ? [{ props, i, call }] : []
     })
     if (orbitCalls.length === 0) return next(e)

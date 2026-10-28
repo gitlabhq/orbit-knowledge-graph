@@ -3,7 +3,8 @@ import { expect, test } from 'bun:test'
 import { COMMAND_LABELS, describeOrbitCall } from '../src/calls.ts'
 import { entitiesOf } from '../src/cypher.ts'
 
-const query = (cypher: string) => describeOrbitCall('Bash', { command: `glab orbit query "${cypher}"` })
+const query = (cypher: string, known?: ReadonlySet<string>) =>
+  describeOrbitCall('Bash', { command: `glab orbit query "${cypher}"` }, known)
 
 test('every subcommand has a short finished and running label', () => {
   for (const [sub, { done: label, running: active }] of Object.entries(COMMAND_LABELS)) {
@@ -119,4 +120,30 @@ test('a reused variable keeps its label across MATCH clauses', () => {
 
 test('the older JSON DSL falls back to entity names in order', () => {
   expect(entitiesOf('{"nodes":[{"entity":"Project"},{"entity":"MergeRequest"}]}')).toBe('Project → MergeRequest')
+})
+
+test('a path starts from the node the query pins and reads outward', () => {
+  const mrs = 'Project → MergeRequest'
+  expect(query("MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'g/p'}) RETURN mr.iid")?.detail).toBe(mrs)
+  expect(query("MATCH (p:Project {full_path: 'g/p'})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN mr.iid")?.detail).toBe(mrs)
+  expect(query("MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.full_path = 'g/p' RETURN mr.iid")?.detail).toBe(mrs)
+  expect(query("MATCH (u:User {username: 'a'})-[:AUTHORED]->(mr:MergeRequest {id: 5}) RETURN u")?.detail).toBe('MergeRequest → User')
+})
+
+test('with no single pinned node, a path reads source to target', () => {
+  expect(query("MATCH (u:User {username: 'a'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'}) RETURN mr")?.detail).toBe(
+    'User → MergeRequest',
+  )
+})
+
+test('an entity id filter puts that entity first, once graph-status has listed it', () => {
+  const fk = 'MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid'
+  expect(query(fk)?.detail).toBe('MergeRequest')
+  const known = new Set(['Project', 'MergeRequest', 'MergeRequestDiff', 'User', 'Definition'])
+  expect(query(fk, known)?.detail).toBe('Project → MergeRequest')
+  expect(query('MATCH (c:Definition)-[:CALLS]->(d:Definition {project_id: 1}) RETURN d.name', known)?.detail).toBe('Project → Definition')
+  expect(query('MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {project_id: 1})-[:HAS_DIFF]->(d:MergeRequestDiff) RETURN d', known)?.detail).toBe(
+    'Project → MergeRequest → MergeRequestDiff, Project → MergeRequest → User',
+  )
+  expect(query('MATCH (mr:MergeRequest {pipeline_id: 1}) RETURN mr', known)?.detail).toBe('MergeRequest')
 })

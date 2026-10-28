@@ -242,26 +242,52 @@ var KEYWORDS = new Set([
   "XOR"
 ]);
 var CLAUSES = new Set(["MATCH", "OPTIONAL", "WHERE", "RETURN", "ORDER", "SKIP", "OFFSET", "LIMIT", "CALL", "UNION"]);
-function entitiesOf(text) {
+var NO_ENTITIES = new Set;
+function entityOfKey(key, known) {
+  const m = key.match(/^(\w+)_id$/);
+  if (!m?.[1])
+    return;
+  const name = m[1].split("_").map((w) => (w[0]?.toUpperCase() ?? "") + w.slice(1)).join("");
+  return known.has(name) ? name : undefined;
+}
+function pinOf(keys, label, known) {
+  if (keys.length === 0)
+    return { score: 0 };
+  const implied = keys.map((key) => entityOfKey(key, known)).find((name) => name && name !== label);
+  return { score: keys.includes("id") ? 2 : 1, ...implied ? { implied } : {} };
+}
+function entitiesOf(text, known = NO_ENTITIES) {
   const labels = {};
   for (const m of text.matchAll(/\(\s*(\w+)\s*:\s*(\w+)/g)) {
     if (m[1] && m[2])
       labels[m[1]] ??= m[2];
+  }
+  const whereKeys = {};
+  for (const clause of text.split(/\bWHERE\b/i).slice(1)) {
+    const where = clause.split(/\b(?:MATCH|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT)\b/i)[0] ?? "";
+    for (const m of where.matchAll(/\b(\w+)\.(\w+)\s*(?:=|<>|!=|<=|>=|<|>|\bIN\b|\bSTARTS\b|\bENDS\b|\bCONTAINS\b)/gi)) {
+      if (m[1] && m[2])
+        (whereKeys[m[1]] ??= []).push(m[2]);
+    }
   }
   const paths = [];
   for (const segment of text.split(/\bMATCH\b/i).slice(1)) {
     const pattern = segment.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0] ?? "";
     for (const part of splitTopLevel(pattern)) {
       const nodes = [];
+      const pins = [];
       const hops = [];
       for (const m of part.matchAll(/\(([^)]*)\)|(<)?-(?:\[[^\]]*\])?-(>)?/g)) {
         if (m[1] !== undefined) {
           const [, name = "", label] = m[1].match(/^\s*(\w*)\s*(?::\s*(\w+))?/) ?? [];
-          nodes.push(label || labels[name] || "any");
+          const node = label || labels[name] || "any";
+          const inline = [...(m[1].match(/\{([^}]*)\}/)?.[1] ?? "").matchAll(/(\w+)\s*:/g)].map((k) => k[1] ?? "");
+          nodes.push(node);
+          pins.push(pinOf([...inline, ...name ? whereKeys[name] ?? [] : []], node, known));
         } else
           hops.push(m[2] ? "left" : m[3] ? "right" : "none");
       }
-      for (const path of readForward(nodes, hops)) {
+      for (const path of readFromPin(nodes, pins) ?? readForward(nodes, hops)) {
         if (!paths.some((p) => p.text === path.text))
           paths.push(path);
       }
@@ -277,6 +303,25 @@ function entitiesOf(text) {
       names.push(m[1]);
   }
   return names.join(" \u2192 ");
+}
+function readFromPin(nodes, pins) {
+  const best = Math.max(0, ...pins.map((p) => p.score));
+  const at = pins.findIndex((p) => p.score === best);
+  if (best === 0 || pins.filter((p) => p.score === best).length > 1)
+    return null;
+  const implied = pins[at]?.implied;
+  const sides = [];
+  if (at < nodes.length - 1)
+    sides.push(nodes.slice(at));
+  if (at > 0)
+    sides.push(nodes.slice(0, at + 1).reverse());
+  if (sides.length === 0)
+    sides.push(nodes.slice(at, at + 1));
+  return sides.map((side) => {
+    const run = implied ? [implied, ...side] : [...side];
+    const distinct = run.filter((node, k) => node !== run[k - 1]);
+    return { nodes: distinct, text: distinct.join(" \u2192 ") };
+  });
 }
 function readForward(nodes, hops) {
   if (hops.length === 0)
@@ -354,13 +399,13 @@ function firstArg(args) {
   return "";
 }
 var SHOWS_ARGUMENT = new Set(["grep", "context", "workspace sql", "sql", "schema", "ontology", "graph-status", "skills", "skill"]);
-function detailFor(key, args) {
+function detailFor(key, args, known) {
   if (key === "query") {
     const text = args.join(" ");
     const schema = text.match(/CALL\s+db\.schema\(\s*'?(\w*)/i);
     if (schema)
       return schema[1] ?? "";
-    const entities = entitiesOf(text);
+    const entities = entitiesOf(text, known);
     if (entities)
       return entities;
     const file = args.indexOf("--file");
@@ -377,20 +422,20 @@ function stringField(input, key) {
   const value = input[key];
   return typeof value === "string" ? value : undefined;
 }
-function describeCommand(command) {
+function describeCommand(command, known = NO_ENTITIES) {
   for (const { words } of orbitInvocations(command)) {
     const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined);
     if (!sub)
       continue;
     const isSchemaQuery = sub.key === "query" && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg));
-    return callOf(isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY, detailFor(sub.key, sub.args));
+    return callOf(isSchemaQuery ? SCHEMA : labelFor(COMMAND_LABELS, sub.key) ?? QUERY, detailFor(sub.key, sub.args, known));
   }
   return null;
 }
-function describeOrbitCall(tool, input) {
+function describeOrbitCall(tool, input, known = NO_ENTITIES) {
   const command = stringField(input, "command");
   if (tool.toLowerCase() === "bash")
-    return command === undefined ? null : describeCommand(command);
+    return command === undefined ? null : describeCommand(command, known);
   const mcp = tool.match(/^mcp__(.+?)__(.+)$/);
   const server = mcp?.[1] ?? "";
   const name = mcp?.[2] ?? tool;
@@ -399,7 +444,7 @@ function describeOrbitCall(tool, input) {
     return null;
   const invoked = stringField(input, "command_name") ?? command ?? name;
   const key = Object.keys(TOOL_LABELS).find((k) => invoked.endsWith(k));
-  const detail = input === undefined ? "" : entitiesOf(JSON.stringify(input));
+  const detail = input === undefined ? "" : entitiesOf(JSON.stringify(input), known);
   return callOf(key && labelFor(TOOL_LABELS, key) || QUERY, detail);
 }
 // src/index.ts

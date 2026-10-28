@@ -1,7 +1,7 @@
 import labelFile from '../../../config/setup/call_labels.yaml'
 
 import { orbitInvocations, subcommandOf } from './command.ts'
-import { entitiesOf } from './cypher.ts'
+import { NO_ENTITIES, entitiesOf } from './cypher.ts'
 
 /** The GitLab Orbit mark, shown before every Orbit call. */
 export const MARK = '◎'
@@ -63,12 +63,12 @@ function firstArg(args: readonly string[]): string {
 
 const SHOWS_ARGUMENT = new Set(['grep', 'context', 'workspace sql', 'sql', 'schema', 'ontology', 'graph-status', 'skills', 'skill'])
 
-function detailFor(key: string, args: readonly string[]): string {
+function detailFor(key: string, args: readonly string[], known: ReadonlySet<string>): string {
   if (key === 'query') {
     const text = args.join(' ')
     const schema = text.match(/CALL\s+db\.schema\(\s*'?(\w*)/i)
     if (schema) return schema[1] ?? ''
-    const entities = entitiesOf(text)
+    const entities = entitiesOf(text, known)
     if (entities) return entities
     const file = args.indexOf('--file')
     return file >= 0 ? (args[file + 1] ?? '') : ''
@@ -85,12 +85,12 @@ function stringField(input: unknown, key: string): string | undefined {
 }
 
 /** The Orbit call a shell command makes, or null when it makes none with a known subcommand. */
-export function describeCommand(command: string): OrbitCall | null {
+export function describeCommand(command: string, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {
   for (const { words } of orbitInvocations(command)) {
     const sub = subcommandOf(words, (key) => labelFor(COMMAND_LABELS, key) !== undefined)
     if (!sub) continue
     const isSchemaQuery = sub.key === 'query' && sub.args.some((arg) => /^\s*CALL\s+db\.schema\(/i.test(arg))
-    return callOf(isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY), detailFor(sub.key, sub.args))
+    return callOf(isSchemaQuery ? SCHEMA : (labelFor(COMMAND_LABELS, sub.key) ?? QUERY), detailFor(sub.key, sub.args, known))
   }
   return null
 }
@@ -99,9 +99,9 @@ export function describeCommand(command: string): OrbitCall | null {
  * The Orbit call a tool call makes, or null when it isn't one. A shell tool (`Bash` in Claude Code,
  * `bash` in OpenCode) is read by its command; an MCP tool is Orbit's when its server or name says so.
  */
-export function describeOrbitCall(tool: string, input: unknown): OrbitCall | null {
+export function describeOrbitCall(tool: string, input: unknown, known: ReadonlySet<string> = NO_ENTITIES): OrbitCall | null {
   const command = stringField(input, 'command')
-  if (tool.toLowerCase() === 'bash') return command === undefined ? null : describeCommand(command)
+  if (tool.toLowerCase() === 'bash') return command === undefined ? null : describeCommand(command, known)
   const mcp = tool.match(/^mcp__(.+?)__(.+)$/)
   const server = mcp?.[1] ?? ''
   const name = mcp?.[2] ?? tool
@@ -109,6 +109,6 @@ export function describeOrbitCall(tool: string, input: unknown): OrbitCall | nul
   if (!isOrbit) return null
   const invoked = stringField(input, 'command_name') ?? command ?? name
   const key = Object.keys(TOOL_LABELS).find((k) => invoked.endsWith(k))
-  const detail = input === undefined ? '' : entitiesOf(JSON.stringify(input))
+  const detail = input === undefined ? '' : entitiesOf(JSON.stringify(input), known)
   return callOf((key && labelFor(TOOL_LABELS, key)) || QUERY, detail)
 }

@@ -96,6 +96,18 @@ export function graphNodes(json: string): number | null {
   }
 }
 
+/** The entity types graph-status lists, in every domain, as `MergeRequest` and `Project`. */
+export function graphEntities(json: string): string[] {
+  try {
+    const domains = (JSON.parse(json) as { itemCounts?: { domains?: { entities?: { name?: unknown }[] }[] } })
+      .itemCounts?.domains
+    if (!Array.isArray(domains)) return []
+    return domains.flatMap((domain) => (domain.entities ?? []).map((entity) => String(entity.name ?? ''))).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 /** A count in full with thousands separators, as 1,675,400. */
 export function grouped(n: number): string {
   return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
