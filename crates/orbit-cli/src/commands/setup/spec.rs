@@ -169,12 +169,16 @@ impl PluginSpec {
         format!("{}@{}", self.name, self.marketplace)
     }
 
-    /// Every embedded file under `config/setup/<source>/`, as (path relative to it, bytes).
+    /// Every embedded file under `config/setup/<source>/`, as (path relative to it, bytes),
+    /// without the plugin's tests and development files.
     pub(super) fn files(&self) -> Vec<(String, Vec<u8>)> {
         let prefix = format!("{}/", self.source);
         SetupAssets::iter()
             .filter_map(|path| {
                 let relative = path.strip_prefix(&prefix)?.to_string();
+                if is_development_file(&relative) {
+                    return None;
+                }
                 let file = SetupAssets::get(&path).expect("embedded file must be readable");
                 Some((relative, file.data.into_owned()))
             })
@@ -287,6 +291,16 @@ pub(super) fn agent_named(name: &str) -> Option<Agent> {
 
 pub(crate) fn agent_names() -> Vec<&'static str> {
     AGENT_SPECS.iter().map(|spec| spec.name.as_str()).collect()
+}
+
+// Tests, the editor's TypeScript config, and the type declarations Claude Code generates for a
+// development checkout stay in the repository; users get only what the plugin loads.
+fn is_development_file(relative: &str) -> bool {
+    let name = relative.rsplit('/').next().unwrap_or(relative);
+    relative.split('/').any(|segment| segment == "tests")
+        || relative.contains(".claude-plugin/types/")
+        || matches!(name, "tsconfig.json" | ".gitignore")
+        || name.ends_with(".test.ts")
 }
 
 const TEMPLATE_CHECKSUM_PREFIX: &str = "// orbit setup checksum: ";
@@ -415,12 +429,15 @@ mod tests {
             ".claude-plugin/marketplace.json",
             "gitlab-orbit/.claude-plugin/plugin.json",
             "gitlab-orbit/hooks/hooks.json",
-            "gitlab-orbit/hooks/register.js",
+            "gitlab-orbit/hooks/register.ts",
         ] {
             assert!(
                 files.iter().any(|path| path == expected),
                 "{expected}: {files:?}"
             );
+        }
+        for path in &files {
+            assert!(!is_development_file(path), "{path} must not ship to users");
         }
         let marketplace: Value = serde_json::from_slice(
             &plugin

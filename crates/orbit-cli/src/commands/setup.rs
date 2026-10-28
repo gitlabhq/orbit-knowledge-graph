@@ -1529,7 +1529,9 @@ mod tests {
                 .join(".claude-plugin/marketplace.json")
                 .is_file()
         );
-        assert!(marketplace.join("gitlab-orbit/hooks/register.js").is_file());
+        assert!(marketplace.join("gitlab-orbit/hooks/register.ts").is_file());
+        assert!(!marketplace.join("gitlab-orbit/tests").exists());
+        assert!(!marketplace.join("gitlab-orbit/tsconfig.json").exists());
         let settings = read_json(&dir.path().join(".claude/settings.local.json"));
         assert_eq!(
             settings["enabledPlugins"]["gitlab-orbit@gitlab-orbit"],
@@ -1586,7 +1588,7 @@ mod tests {
         install_with_plugin(&["claude"], dir.path());
         let register = dir
             .path()
-            .join(".claude/orbit/claude_plugin/gitlab-orbit/hooks/register.js");
+            .join(".claude/orbit/claude_plugin/gitlab-orbit/hooks/register.ts");
         let edited = format!(
             "{}\n// my tweak\n",
             std::fs::read_to_string(&register).unwrap()
