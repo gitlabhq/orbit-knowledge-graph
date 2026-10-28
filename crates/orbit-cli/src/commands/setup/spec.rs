@@ -15,7 +15,6 @@ use serde_json::Value;
 
 #[derive(Embed)]
 #[folder = "$CONFIG_DIR/setup"]
-#[exclude = "*.test.js"]
 struct SetupAssets;
 
 #[derive(Debug, Deserialize)]
@@ -376,9 +375,6 @@ mod tests {
         assert!(!json.contains("{{"), "{json}");
     }
 
-    /// Plugin label tables keyed by orbit command path, such as `grep` or `workspace sql`.
-    const LABEL_TABLES: &[(&str, &str)] = &[("opencode_plugin.js", "const LABELS = {")];
-
     /// Commands an agent has no reason to run, so plugins give them no label.
     const UNLABELED: &[&str] = &[
         "hook-guard",
@@ -387,6 +383,29 @@ mod tests {
         "mcp serve",
         "workspace mcp serve",
     ];
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct CallLabel {
+        #[allow(dead_code)]
+        done: String,
+        #[allow(dead_code)]
+        running: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct CallLabels {
+        commands: BTreeMap<String, CallLabel>,
+        tools: BTreeMap<String, CallLabel>,
+    }
+
+    fn call_labels() -> CallLabels {
+        let file = SetupAssets::get("call_labels.yaml")
+            .expect("config/setup/call_labels.yaml is embedded");
+        orbit_utils::yaml::from_slice(&file.data)
+            .unwrap_or_else(|e| panic!("config/setup/call_labels.yaml is invalid: {e}"))
+    }
 
     struct CliCommand {
         path: String,
@@ -417,27 +436,10 @@ mod tests {
         }
     }
 
-    fn label_keys(file: &str, start: &str) -> Vec<String> {
-        let source = read_embedded_text(file);
-        let (_, table) = source
-            .split_once(start)
-            .unwrap_or_else(|| panic!("{file} has no `{start}`"));
-        let (table, _) = table
-            .split_once("\n}")
-            .unwrap_or_else(|| panic!("{file}: `{start}` is not closed"));
-        table
-            .lines()
-            .filter_map(|line| {
-                let line = line.trim();
-                let quote = line.chars().next().filter(|c| matches!(c, '"' | '\''))?;
-                line[1..].split_once(quote).map(|(key, _)| key.to_owned())
-            })
-            .collect()
-    }
-
     #[test]
-    fn plugin_labels_name_real_commands_and_cover_every_command() {
+    fn call_labels_name_real_commands_and_cover_every_command() {
         use clap::CommandFactory;
+        let labels = call_labels().commands;
         let mut commands = Vec::new();
         cli_commands(&crate::Cli::command(), &[], &mut commands);
         let known: Vec<&str> = commands
@@ -446,49 +448,54 @@ mod tests {
             .map(String::as_str)
             .collect();
 
-        for (file, start) in LABEL_TABLES {
-            let keys = label_keys(file, start);
-            assert!(!keys.is_empty(), "{file}: no labels found");
-            for key in &keys {
-                assert!(
-                    known.contains(&key.as_str()),
-                    "{file}: `{key}` is not an orbit command"
-                );
-            }
-            for command in &commands {
-                let labeled = keys.contains(&command.path)
-                    || command.ancestors.iter().any(|a| keys.contains(a));
-                if keys.contains(&command.path) {
-                    for alias in &command.aliases {
-                        assert!(
-                            keys.contains(alias),
-                            "{file}: label `{alias}` like `{}`",
-                            command.path
-                        );
-                    }
+        for key in labels.keys() {
+            assert!(
+                known.contains(&key.as_str()),
+                "call_labels.yaml: `{key}` is not an orbit command"
+            );
+        }
+        for command in &commands {
+            if labels.contains_key(&command.path) {
+                for alias in &command.aliases {
+                    assert!(
+                        labels.contains_key(alias),
+                        "call_labels.yaml: label `{alias}` like `{}`",
+                        command.path
+                    );
                 }
-                assert!(
-                    labeled
-                        || command.has_subcommands
-                        || UNLABELED.contains(&command.path.as_str()),
-                    "{file}: label `{}`, or add it to UNLABELED",
-                    command.path
-                );
             }
+            let labeled = labels.contains_key(&command.path)
+                || command.ancestors.iter().any(|a| labels.contains_key(a));
+            assert!(
+                labeled || command.has_subcommands || UNLABELED.contains(&command.path.as_str()),
+                "call_labels.yaml: label `{}`, or add it to UNLABELED",
+                command.path
+            );
         }
     }
 
     #[test]
-    fn plugin_tests_are_not_embedded() {
-        assert!(SetupAssets::get("opencode_plugin.js").is_some());
-        assert!(SetupAssets::get("opencode_plugin.test.js").is_none());
+    fn call_labels_name_real_orbit_tools() {
+        let prompts = orbit_prompts::Prompts::load_embedded("remote").unwrap();
+        let tools: Vec<&str> = prompts.iter().map(|(_, prompt)| prompt.name()).collect();
+        for tool in call_labels().tools.keys() {
+            assert!(
+                tools.contains(&tool.as_str()),
+                "call_labels.yaml: `{tool}` is not an Orbit tool"
+            );
+        }
     }
 
     #[test]
     fn opencode_plugins_are_shell_safe() {
-        let contents = agent_named("opencode").unwrap().template_files[0].render();
-        assert!(!contents.contains('`'));
-        assert!(!contents.contains("$("));
+        // The reminder lands inside a double-quoted string, so a template var must not close it
+        let template = read_embedded_text("opencode_plugin.js");
+        assert_eq!(
+            template.matches("{{").count(),
+            1,
+            "the reminder is the only placeholder"
+        );
+        assert!(template.contains(r#""{{reminder}}""#));
 
         for (name, text) in &TEXTS.template_vars {
             assert!(

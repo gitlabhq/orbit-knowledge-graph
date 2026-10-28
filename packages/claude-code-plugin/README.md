@@ -1,4 +1,4 @@
-# gitlab-orbit Claude Code plugin
+# GitLab Orbit plugin for Claude Code
 
 A Claude Code [mod](https://code.claude.com/docs/en/plugins/mods/overview) that shows GitLab Orbit calls in the transcript, like the Orbit tool rows in GitLab Duo Chat.
 
@@ -14,7 +14,7 @@ The plugin only changes what Claude Code draws. Its `tool.call` hook counts Orbi
 
 ## What counts as an Orbit call
 
-- `Bash` calls that run `glab orbit <subcommand>`. The label follows the subcommand, for example `query` shows Explored Orbit, `grep` shows Searched code, `context` shows Read code, and `skills get` shows Read Orbit guide.
+- Shell calls that run `glab orbit <subcommand>` or the standalone `orbit <subcommand>`, at the start of a command or after `&&`, `;`, `|`, or a newline. Orbit named inside a quoted argument doesn't count. The labels come from [`config/setup/call_labels.yaml`](../../config/setup/call_labels.yaml). A subcommand without a label there isn't an Orbit row.
 - MCP tools whose server or name mentions Orbit, such as `list_commands`, `invoke_command`, `query_graph`, and `get_graph_schema`.
 
 ## Requirements
@@ -24,21 +24,23 @@ The plugin only changes what Claude Code draws. Its `tool.call` hook counts Orbi
 
 ## Develop
 
-The hooks are TypeScript, which Claude Code loads directly, with no build step.
+The plugin source lives here, and the logic it shares with the OpenCode plugin lives in [`@orbit/agent-plugin-core`](../agent-plugin-core). A hooks module can import only its own files and `claude-code`, so `bun run build` copies the plugin and the core sources into `dist/` with relative imports, and copies it without tests to `config/setup/claude_plugin/gitlab-orbit`, where `orbit setup --claude-ui` installs from.
 
 ```shell
-claude --plugin-dir config/setup/claude_plugin/gitlab-orbit
-mise run test:claude-plugin
+bun run build
+claude --plugin-dir packages/claude-code-plugin/dist
+mise run test:agent-plugins
 ```
 
-The first command loads the plugin for one session and reloads it when you save. It also writes the type declarations for your Claude Code version to `.claude-plugin/types/`, which `tsconfig.json` extends and git ignores. Run it once before the second command, which validates the plugin, typechecks it, and runs the tests in `tests/` with `claude plugin test`.
+The second command loads the built plugin for one session. The last one typechecks every agent plugin, runs the core and OpenCode tests, and runs the tests in `tests/` against `dist/` with `claude plugin test`. CI runs everything except `claude plugin test`, and fails when `config/setup` differs from a fresh build.
+
+`types/` holds the Claude Code declarations the typecheck uses. After a Claude Code update, load the plugin once with `claude --plugin-dir .` from this directory, then run `bun run types` to copy the new declarations into `types/`.
 
 ## Files
 
-- `hooks/register.ts`: the hooks. `tool.call` counts Orbit calls, and `ui.render` draws `ToolUse`, `ToolGroup`, and `PromptHint`.
-- `hooks/orbit.ts`: the colors, the mark, and how a tool call maps to a label and an entity path.
+- `hooks/register.ts`: the hooks. `tool.call` counts Orbit calls, and `ui.render` draws `ToolUse`, `ToolGroup`, `PromptHint`, and `AssistantMessage`.
+- `hooks/theme.ts`: the colors, the fade, and the Cypher token styles.
 - `hooks/rows.ts`: how back-to-back calls in a tool group become rows, and how their paths join.
 - `hooks/orbit-mark.ts`: the animated row for a running call.
-- `hooks/cypher.ts`: the openCypher tokenizer, the clause layout for the ctrl+o view, and code blocks in replies.
-- `hooks/stats.ts`: parses Orbit responses for the status line.
-- `tests/`: unit tests for the pure modules, and render tests that mount the plugin's `ToolUse` and `PromptHint` sites.
+- `scripts/build.ts`: writes `dist/` and `config/setup/claude_plugin/gitlab-orbit`.
+- `tests/`: render tests that mount the plugin's sites, and tests for rows and the theme.

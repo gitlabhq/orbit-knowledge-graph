@@ -74,8 +74,8 @@ export function subcommandOf(words: readonly string[], known: (key: string) => b
   const [sub, ...rest] = words
   if (sub === undefined) return null
   // A nested subcommand can follow its parent's flags, as in `workspace --db x sql`
-  const nested = rest.findIndex((word) => known(`${sub} ${word}`))
-  if (nested >= 0) return { key: `${sub} ${rest[nested]}`, args: rest.slice(nested + 1) }
+  const nested = rest.findIndex((word) => known(sub + ' ' + word))
+  if (nested >= 0) return { key: sub + ' ' + rest[nested], args: rest.slice(nested + 1) }
   return known(sub) ? { key: sub, args: rest } : null
 }
 

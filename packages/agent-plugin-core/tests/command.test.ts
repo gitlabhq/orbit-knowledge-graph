@@ -1,6 +1,6 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, test } from 'bun:test'
 
-import { isOrbitPrefix, orbitInvocations, simpleCommands, subcommandOf } from '../hooks/command.ts'
+import { isOrbitPrefix, orbitInvocations, simpleCommands, subcommandOf } from '../src/command.ts'
 
 const known = (key: string) => ['grep', 'query', 'workspace sql', 'config set'].includes(key)
 

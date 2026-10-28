@@ -1,11 +1,12 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, test } from 'bun:test'
 
-import { SUBCOMMANDS, describeOrbitCall, entitiesOf, fade } from '../hooks/orbit.ts'
+import { COMMAND_LABELS, describeOrbitCall } from '../src/calls.ts'
+import { entitiesOf } from '../src/cypher.ts'
 
 const query = (cypher: string) => describeOrbitCall('Bash', { command: `glab orbit query "${cypher}"` })
 
 test('every subcommand has a short finished and running label', () => {
-  for (const [sub, [label, active]] of Object.entries(SUBCOMMANDS)) {
+  for (const [sub, { done: label, running: active }] of Object.entries(COMMAND_LABELS)) {
     expect(label.split(' ').length <= 3).toBe(true)
     expect(active.split(' ').length <= 3).toBe(true)
     expect(describeOrbitCall('Bash', { command: `glab orbit ${sub}` })?.label).toBe(label)
@@ -118,10 +119,4 @@ test('a reused variable keeps its label across MATCH clauses', () => {
 
 test('the older JSON DSL falls back to entity names in order', () => {
   expect(entitiesOf('{"nodes":[{"entity":"Project"},{"entity":"MergeRequest"}]}')).toBe('Project → MergeRequest')
-})
-
-test('the fade runs from the light stop to the dark stop', () => {
-  expect(fade(0)).toBe('#b5dedc')
-  expect(fade(0.5)).toBe('#949dcb')
-  expect(fade(1)).toBe('#6851ac')
 })

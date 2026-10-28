@@ -1,7 +1,7 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, test } from 'bun:test'
 
-import { codeLines, cypherSegments, hopsOf, layout, queryOf, tokenize } from '../hooks/cypher.ts'
-import { apiCallsFor, compact, graphNodes, grouped, parseResponse } from '../hooks/stats.ts'
+import { codeLines, cypherSegments, hopsOf, layout, queryOf, tokenize } from '../src/cypher.ts'
+import { apiCallsFor, compact, graphNodes, grouped, parseResponse } from '../src/stats.ts'
 
 test('the llm format counts nodes by entity and edges', () => {
   const text = [

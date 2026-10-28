@@ -11,6 +11,7 @@
     "catalog": {
       "@gitlab-org/orbit-markdown": "0.11.0",
       "@gitlab-org/orbit-site": "0.11.0",
+      "@opencode-ai/plugin": "1.19.5",
       "@tanstack/react-router": "1.170.17",
       "@types/bun": "1.4.4",
       "@types/react": "19.2.17",

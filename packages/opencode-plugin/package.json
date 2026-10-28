@@ -1,0 +1,18 @@
+{
+  "name": "@orbit/opencode-plugin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "bun scripts/build.ts"
+  },
+  "dependencies": {
+    "@orbit/agent-plugin-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
+  }
+}
