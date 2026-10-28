@@ -1,0 +1,32 @@
+description: Code creates an instance of a type, a module, or an enum member
+
+properties:
+  lines:
+    type: int64[]
+    source: lines
+    nullable: false
+    description: "Sorted 1-based lines of each use between the two nodes; at most 64 entries."
+
+  resolution:
+    type: enum
+    enum_type: string
+    source: resolution
+    nullable: false
+    description: "How the engine found the target, from the strongest rule to the weakest."
+    values:
+      0: local
+      1: import
+      2: declared_type
+      3: inferred_type
+      4: wildcard_import
+
+variants:
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Definition, id: id }
+    scope: same_namespace
+    description: "Definition creates an instance of a Type, Module, or EnumMember definition."
+
+  - from_node: { type: File, id: id }
+    to_node: { type: Definition, id: id }
+    scope: same_namespace
+    description: "Top-level code of the file creates an instance of a Type, Module, or EnumMember definition."

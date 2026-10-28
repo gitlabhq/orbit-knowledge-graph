@@ -84,7 +84,7 @@ fn summary(
             directories: rows("gl_directory")?,
             files: rows("gl_file")?,
             definitions: rows("gl_definition")?,
-            imported_symbols: rows("gl_imported_symbol")?,
+            imported_symbols: rows("gl_import")?,
             relationships: rows("gl_edge")?,
         },
         processing: ProcessingStats {

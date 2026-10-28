@@ -1,0 +1,32 @@
+description: A declaration names a type
+
+properties:
+  lines:
+    type: int64[]
+    source: lines
+    nullable: false
+    description: "Sorted 1-based lines of each use between the two nodes; at most 64 entries."
+
+  usage:
+    type: enum
+    enum_type: string
+    source: usage
+    nullable: false
+    description: "Where the source names the type: a parameter, a return type, a field, a generic argument, or a cast."
+    values:
+      0: parameter
+      1: return
+      2: field
+      3: generic
+      4: cast
+
+variants:
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Definition, id: id }
+    scope: same_namespace
+    description: "Definition names a Type definition in its declaration."
+
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Import, id: id }
+    scope: same_namespace
+    description: "Definition names an imported type in its declaration."

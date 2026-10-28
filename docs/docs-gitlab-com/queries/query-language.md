@@ -210,7 +210,7 @@ These properties have a text index:
 |--------|------------------------|
 | `Branch` | `name` |
 | `ContainerRepository` | `name` |
-| `Definition` | `file_path`, `fqn`, `name` |
+| `Definition` | `doc_comment`, `file_path`, `fqn`, `name`, `signature` |
 | `Dependency` | `name` |
 | `Deployment` | `ref` |
 | `Directory` | `name`, `path` |
@@ -218,7 +218,7 @@ These properties have a text index:
 | `File` | `name`, `path` |
 | `Finding` | `description`, `name` |
 | `Group` | `description`, `name` |
-| `ImportedSymbol` | `file_path`, `import_path` |
+| `Import` | `file_path`, `import_path` |
 | `Job` | `name`, `ref` |
 | `Label` | `description`, `title` |
 | `MergeRequest` | `description`, `source_branch`, `target_branch`, `title` |

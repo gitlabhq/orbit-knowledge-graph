@@ -23,16 +23,16 @@ fn labels_cte(definition: &NodeHydrator) -> Result<String> {
   UNION ALL
   SELECT id, path, '', path, '', '' FROM gl_directory WHERE project_id = ?1 AND commit_sha = ?2
   UNION ALL
-  SELECT i.id, concat_ws(' from ', NULLIF(i.identifier_name, ''), NULLIF(i.import_path, '')),
+  SELECT i.id, concat_ws(' from ', NULLIF(i.name, ''), NULLIF(i.import_path, '')),
          COALESCE(d.{file} || ':' || CAST(d.{start} AS VARCHAR), ''),
          COALESCE(d.{file}, i.file_path),
          COALESCE('Definition:' || CAST(d.{id} AS VARCHAR), 'external/unresolved'), ''
-  FROM gl_imported_symbol i
-  LEFT JOIN gl_edge e ON e.source_id = i.id AND e.relationship_kind = 'IMPORTS'
+  FROM gl_import i
+  LEFT JOIN gl_edge e ON e.source_id = i.id AND e.relationship_kind = 'RESOLVES_TO'
   LEFT JOIN {table} d ON d.{id} = e.target_id AND d.{project} = ?1 AND d.{commit} = ?2
   WHERE i.project_id = ?1 AND i.commit_sha = ?2
 ), import_files AS (
-  SELECT i.id, f.id AS file_id FROM gl_imported_symbol i
+  SELECT i.id, f.id AS file_id FROM gl_import i
   JOIN gl_file f ON f.path = i.file_path AND f.project_id = ?1 AND f.commit_sha = ?2
   WHERE i.project_id = ?1 AND i.commit_sha = ?2
 )",
@@ -40,7 +40,7 @@ fn labels_cte(definition: &NodeHydrator) -> Result<String> {
         fqn = definition.column("fqn")?,
         file = definition.column("file_path")?,
         start = definition.column("start_line")?,
-        kind = definition.column("definition_type")?,
+        kind = definition.column("kind")?,
         table = definition.table(),
         project = definition.column("project_id")?,
         commit = definition.column("commit_sha")?,
@@ -189,7 +189,7 @@ ORDER BY members.ord, kind, dir DESC, l.path, l.label, l.loc, l.reference"
                 node.properties["language"].as_str().unwrap_or(""),
                 members.len()
             )?;
-            if let Some(reason) = node.properties["reason"]
+            if let Some(reason) = node.properties["skip_reason"]
                 .as_str()
                 .filter(|reason| !reason.is_empty())
             {

@@ -585,10 +585,8 @@ mod tests {
 
         assert!(!file.2.is_empty(), "File should have props");
         assert!(
-            file.0
-                .iter()
-                .any(|e| e.starts_with("DEFINES") || e.starts_with("IMPORTS")),
-            "File should have outgoing DEFINES or IMPORTS: {:?}",
+            file.0.iter().any(|e| e.starts_with("DEFINES")),
+            "File should have outgoing DEFINES: {:?}",
             file.0
         );
         assert!(

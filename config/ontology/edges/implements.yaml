@@ -1,0 +1,26 @@
+description: A type implements an interface or a trait
+
+properties:
+  resolution:
+    type: enum
+    enum_type: string
+    source: resolution
+    nullable: false
+    description: "How the engine found the target, from the strongest rule to the weakest."
+    values:
+      0: local
+      1: import
+      2: declared_type
+      3: inferred_type
+      4: wildcard_import
+
+variants:
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Definition, id: id }
+    scope: same_namespace
+    description: "Type implements an Interface or Trait definition."
+
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Import, id: id }
+    scope: same_namespace
+    description: "Type implements an imported interface or trait."

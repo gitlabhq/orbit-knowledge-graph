@@ -36,7 +36,7 @@ pub(crate) fn source_range(node: &NodeValue) -> Result<SourceRange> {
     Ok(SourceRange {
         id: node.id,
         fqn: string("fqn")?,
-        kind: string("definition_type")?,
+        kind: string("kind")?,
         file: string("file_path")?,
         start: line("start_line")?,
         end: line("end_line")?,
@@ -990,15 +990,15 @@ fn callers(
             "WITH defs AS (
   SELECT id, name, start_line FROM gl_definition
   WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
-    AND definition_type NOT IN ('Variable', 'Field', 'Property')
+    AND kind NOT IN ('Variable', 'Field')
     AND ((start_line >= ?4 AND end_line <= ?5)
       OR (start_line = (SELECT max(start_line) FROM gl_definition
                         WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
-                          AND definition_type NOT IN ('Variable', 'Field', 'Property')
+                          AND kind NOT IN ('Variable', 'Field')
                           AND start_line <= ?4 AND end_line >= ?5)
           AND NOT EXISTS (SELECT 1 FROM gl_definition
                           WHERE project_id = ?1 AND commit_sha = ?2 AND file_path = ?3
-                            AND definition_type NOT IN ('Variable', 'Field', 'Property')
+                            AND kind NOT IN ('Variable', 'Field')
                             AND start_line >= ?4 AND end_line <= ?5)
           AND start_line <= ?4 AND end_line >= ?5))
 )
@@ -1200,11 +1200,11 @@ fn resolve_files(
     let hydrator = NodeHydrator::embedded("File")?;
     let selected = client.query_arrow_json(
         &format!(
-            "SELECT {id} AS id, {reason} AS reason FROM {table}
+            "SELECT {id} AS id, {reason} AS skip_reason FROM {table}
              WHERE {project} = ?1 AND {commit} = ?2
                AND ({id} IN (SELECT unnest(?3::BIGINT[])) OR {path} IN (SELECT unnest(?4::VARCHAR[])))",
             id = hydrator.column("id")?,
-            reason = hydrator.column("reason")?,
+            reason = hydrator.column("skip_reason")?,
             table = hydrator.table(),
             project = hydrator.column("project_id")?,
             commit = hydrator.column("commit_sha")?,
@@ -1216,7 +1216,7 @@ fn resolve_files(
     let reasons: BTreeMap<_, _> = selected_ids
         .iter()
         .copied()
-        .zip(string_column(&selected, "reason"))
+        .zip(string_column(&selected, "skip_reason"))
         .collect();
     let mut nodes = hydrator.query(
         client,
@@ -1242,7 +1242,7 @@ fn resolve_files(
     }
     for node in &mut nodes {
         node.properties
-            .insert("reason".into(), reasons[&node.id].clone().into());
+            .insert("skip_reason".into(), reasons[&node.id].clone().into());
     }
     nodes.sort_by(|a, b| {
         a.properties["path"]
@@ -1281,7 +1281,7 @@ fn definitions_in_files(
     )?;
     let mut nodes = definition::resolve_ids(client, git, hydrator, &i64_column(&selected, "id"))?;
     nodes.retain(|node| {
-        node.properties["definition_type"] != "Variable"
+        node.properties["kind"] != "Variable"
             || !node.properties["fqn"]
                 .as_str()
                 .is_some_and(|fqn| fqn.contains('@'))
