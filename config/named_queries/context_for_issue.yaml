@@ -1,5 +1,5 @@
 name: context_for_issue
-description: "Work item context: expand_work_item neighbors plus the MRs and work items it mentions or that mention it. Cut at limit in no set order; check pagination.truncated."
+description: "Work item context the Orbit context summary lacks: author, related, parent, and child work items, and the MRs and work items it mentions or that mention it. Cut at limit in no set order; check pagination.truncated."
 parameters:
   node_ids:
     schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }
@@ -16,10 +16,10 @@ query:
         node_ids: { $param: node_ids }
     neighbors:
       direction: both
-      rel_types: [AUTHORED, ASSIGNED, HAS_LABEL, IN_MILESTONE, IN_PROJECT, IN_GROUP, CLOSES, RELATED_TO, CONTAINS, MENTIONS]
+      rel_types: [AUTHORED, RELATED_TO, CONTAINS, MENTIONS]
     limit: { $param: limit }
   gql: |
-    MATCH (center:WorkItem)-[:AUTHORED|ASSIGNED|HAS_LABEL|IN_MILESTONE|IN_PROJECT|IN_GROUP|CLOSES|RELATED_TO|CONTAINS|MENTIONS]-(neighbor)
+    MATCH (center:WorkItem)-[:AUTHORED|RELATED_TO|CONTAINS|MENTIONS]-(neighbor)
     WHERE center.id IN {{ param("node_ids") }}
     RETURN center, neighbor
     LIMIT {{ param("limit") }}
