@@ -229,7 +229,7 @@ async fn send_with_one_retry(
     request: &CdotRequest,
 ) -> Result<Response, Outage> {
     let retry = builder.try_clone();
-    let first = classify_outage(builder.send().await);
+    let first = send(builder).await;
     let (Some(retry), Err(outage)) = (retry, &first) else {
         return first;
     };
@@ -250,11 +250,11 @@ async fn send_with_one_retry(
         "quota check failed transiently; retrying once"
     );
     tokio::time::sleep(RETRY_BACKOFF).await;
-    classify_outage(retry.send().await)
+    send(retry).await
 }
 
-fn classify_outage(result: reqwest::Result<Response>) -> Result<Response, Outage> {
-    match result {
+async fn send(builder: RequestBuilder) -> Result<Response, Outage> {
+    match builder.send().await {
         Ok(response) if response.status().is_server_error() => {
             Err(Outage::ServerError(Box::new(response)))
         }
