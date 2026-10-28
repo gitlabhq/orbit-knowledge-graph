@@ -50,9 +50,10 @@ function clip(text, max = 60) {
   return flat.length > max ? flat.slice(0, max - 1) + '…' : flat
 }
 
-// The paths a graph query walks, one per MATCH pattern, as `Definition → Definition` or
-// `Project ← MergeRequest`, arrows pointing the way the relationship does. Reads Cypher patterns,
-// and for the older JSON DSL the entity names in order.
+// The paths a graph query walks, one per MATCH pattern, always read source to target, as
+// `Definition → Definition` or `MergeRequest → Project`. A pattern written right to left reads
+// reversed; one with arrows both ways splits into its left-to-right pieces. `—` is an
+// undirected hop. For the older JSON DSL, the entity names in order.
 function entitiesOf(text) {
   const query = String(text)
   const labels = {}
@@ -61,14 +62,15 @@ function entitiesOf(text) {
   for (const segment of query.split(/\bMATCH\b/i).slice(1)) {
     const pattern = segment.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0]
     for (const part of splitTopLevel(pattern)) {
-      let path = ''
+      const nodes = []
+      const hops = []
       for (const m of part.matchAll(/\(([^)]*)\)|(<)?-(?:\[[^\]]*\])?-(>)?/g)) {
         if (m[1] !== undefined) {
           const [, name, label] = m[1].match(/^\s*(\w*)\s*(?::\s*(\w+))?/) ?? []
-          path += label || labels[name] || 'any'
-        } else path += m[2] ? ' ← ' : m[3] ? ' → ' : ' — '
+          nodes.push(label || labels[name] || 'any')
+        } else hops.push(m[2] ? 'left' : m[3] ? 'right' : 'none')
       }
-      if (path && !paths.includes(path)) paths.push(path)
+      for (const path of readForward(nodes, hops)) if (!paths.includes(path)) paths.push(path)
     }
   }
   // A lone node that a longer path already walks adds nothing
@@ -78,6 +80,22 @@ function entitiesOf(text) {
   const names = []
   for (const m of query.matchAll(/\\?"entity\\?"\s*:\s*\\?"(\w+)/g)) if (!names.includes(m[1])) names.push(m[1])
   return names.join(' → ')
+}
+
+// One pattern's nodes and hops as paths that read left to right: a run of hops pointing the same
+// way is one path, and a run pointing left is turned around
+function readForward(nodes, hops) {
+  if (hops.length === 0) return nodes.length ? [nodes[0]] : []
+  const paths = []
+  let start = 0
+  for (let i = 1; i <= hops.length; i++) {
+    if (i < hops.length && hops[i] === hops[start]) continue
+    const run = nodes.slice(start, i + 1)
+    const way = hops[start]
+    paths.push((way === 'left' ? run.reverse() : run).join(way === 'none' ? ' — ' : ' → '))
+    start = i
+  }
+  return paths
 }
 
 // A MATCH clause's comma-separated patterns, split only outside (), [], and {}

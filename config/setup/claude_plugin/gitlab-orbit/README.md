@@ -3,7 +3,7 @@
 A Claude Code [mod](https://code.claude.com/docs/en/plugins/mods/overview) that shows GitLab Orbit calls in the transcript, like the Orbit tool rows in GitLab Duo Chat.
 
 - **Finished calls**: `◎ Explored Orbit  User → MergeRequest → Project`. The mark and the label are Orbit blue, `#949dcb`, and the entity path is grey. A failed call shows a red mark and `· failed`.
-- **Entity paths**: one path per `MATCH` pattern, with repeats and direction kept, such as `Definition → Definition` or `Project ← MergeRequest`. `—` marks an undirected relationship, and distinct paths are joined with commas.
+- **Entity paths**: one path per `MATCH` pattern, always read from source to target, such as `Definition → Definition` or `MergeRequest → Project`. A pattern with arrows both ways splits into separate paths, `—` marks an undirected relationship, and distinct paths are joined with commas.
 - **Running calls**: the mark and the label fade through `#b5dedc`, `#949dcb`, and `#6851ac` and back every 2 seconds. The entity path stays grey. The spinner stays Claude Code's own.
 - **One row per run**: back-to-back Orbit calls share one row that shows the current call. When the run finishes, a run with queries reads `Explored Orbit` with every entity path it walked; any other run shows its last call.
 - **ctrl+o**: an expanded Orbit query shows one clause per line with openCypher highlighting, above Claude Code's own row.
