@@ -86,10 +86,12 @@ GitLab reaches the webserver over gRPC.
 |------|-------------|
 | [Version requirements](version-requirements.md) | GitLab, Helm chart, and ClickHouse versions for each GitLab Orbit release |
 | [Get started](getting-started.md) | Prerequisites, installation order, Kubernetes, NATS, object storage, and shared values |
+| [Sizing](sizing.md) | Pod, node, ClickHouse, NATS, and Siphon sizes for each GitLab reference architecture size |
 | [ClickHouse](clickhouse.md) | Versions, databases, high availability, memory, log retention, and users |
 | [Set up data replication](data-replication.md) | PostgreSQL logical replication and Siphon |
 | [Set up GitLab Orbit](orbit-setup.md) | The GitLab connection, the Secrets, the chart, indexing, verification, and upgrades |
 | [Networking](networking.md) | TLS, certificates, and the connections that GitLab Orbit uses |
+| [Monitor GitLab Orbit](observability.md) | Prometheus metrics, Grafana dashboards, and alerts |
 | [Troubleshooting](troubleshooting.md) | Common errors and recovery after the loss of the graph database |
 
 ## Cryptographic module

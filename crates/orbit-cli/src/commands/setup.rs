@@ -120,6 +120,16 @@ pub(crate) async fn install(
         components::install(&selection, &target, report)
     })?;
     tui::card("Configured", summary::format_components_per_agent(&plan))?;
+    if selection.components.contains(&Component::Instructions) && !spec::reaches_gitlab() {
+        tui::card(
+            "GitLab",
+            format!(
+                "Not signed in, so agent instructions cover local code only. Run `glab auth \
+                 login`, then `{} setup` again to add GitLab search.",
+                spec::launcher()
+            ),
+        )?;
+    }
 
     let index_outcome = match index_repo::repository_root(&target) {
         None => IndexOutcome::OutsideRepository,
@@ -562,14 +572,17 @@ mod tests {
             read_json(&dir.path().join("opencode.json"))["mcp"]["orbit"],
             json!({
                 "type": "local",
-                "command": ["orbit", "mcp", "serve"],
+                "command": ["orbit", "workspace", "mcp", "serve"],
                 "enabled": true,
                 "environment": {"AI_AGENT": "opencode"}
             })
         );
         let codex = std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap();
         assert!(codex.contains("[mcp_servers.orbit]"), "{codex}");
-        assert!(codex.contains(r#"args = ["mcp", "serve"]"#), "{codex}");
+        assert!(
+            codex.contains(r#"args = ["workspace", "mcp", "serve"]"#),
+            "{codex}"
+        );
         assert!(codex.contains(r#"env = { AI_AGENT = "codex" }"#), "{codex}");
         assert!(dir.path().join(".agents/skills/orbit/SKILL.md").is_file());
 
@@ -622,7 +635,7 @@ mod tests {
             json!({
                 "type": "stdio",
                 "command": "orbit",
-                "args": ["mcp", "serve"],
+                "args": ["workspace", "mcp", "serve"],
                 "env": {"AI_AGENT": "claude-code"}
             })
         );
@@ -1486,7 +1499,8 @@ mod tests {
 
         let settings = std::fs::read_to_string(dir.path().join(".claude/settings.json")).unwrap();
         assert!(
-            settings.contains("\"orbit hook-guard search\""),
+            settings.contains("\"orbit hook-guard search\"")
+                || settings.contains("\"orbit hook-guard search --gitlab\""),
             "{settings}"
         );
         assert!(!settings.contains("--mode"));

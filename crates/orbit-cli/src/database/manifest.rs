@@ -84,6 +84,14 @@ pub fn record_status(
     )
 }
 
+pub fn has_indexed_repo(path: &Path, repo: &Path) -> Result<bool> {
+    let query = format!(
+        "SELECT 1 FROM _orbit_manifest WHERE repo_path = {} AND status = 'indexed' LIMIT 1",
+        duckdb_client::sql_lit(&repo.to_string_lossy())
+    );
+    Ok(read(path, &query)?.iter().any(|batch| batch.num_rows() > 0))
+}
+
 pub fn read(path: &Path, query: &str) -> Result<Vec<arrow::record_batch::RecordBatch>> {
     if !path
         .try_exists()

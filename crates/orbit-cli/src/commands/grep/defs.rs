@@ -4,7 +4,6 @@ use anyhow::Result;
 use duckdb_client::search::NodeHydrator;
 use duckdb_client::{DuckDbClient, i64_column, sql_lit, string_column};
 
-use super::rank::is_test;
 use super::scan::Hit;
 use super::term::Term;
 use crate::workspace::GitInfo;
@@ -18,10 +17,8 @@ pub(super) struct Def {
     pub(super) kind: String,
 }
 
-/// Callers and callees of each listed definition, by definition id.
-pub(super) type Connections = HashMap<i64, (Vec<String>, Vec<String>)>;
+type ImportsByLine = HashMap<(String, usize), Vec<(String, String)>>;
 
-const CONNECTION_NAMES: usize = 8;
 const DEF_FILES_PER_QUERY: usize = 500;
 
 struct Candidate {
@@ -98,6 +95,7 @@ WHERE {project} = ?1 AND {commit} = ?2 AND {fqn} NOT LIKE '%@%' AND {file} IN ({
                 });
         }
     }
+    let imports = imports_by_line(client, git, &files)?;
     let wanted: Vec<String> = kinds.iter().map(|k| k.to_lowercase()).collect();
     hits.retain_mut(|hit| {
         let best = by_file.get(&hit.file).and_then(|defs| {
@@ -117,6 +115,19 @@ WHERE {project} = ?1 AND {commit} = ?2 AND {fqn} NOT LIKE '%@%' AND {file} IN ({
         let keep =
             hit.context || wanted.is_empty() || best.is_some_and(|c| wanted.contains(&c.kind));
         hit.def = best.map(|c| c.def.clone());
+        if hit.def.is_none()
+            && let Some(symbols) = imports.get(&(hit.file.clone(), hit.line))
+        {
+            let named: Vec<String> = symbols
+                .iter()
+                .filter(|(name, _)| alternatives.iter().any(|a| a.mentions(name)))
+                .map(|(_, label)| label.clone())
+                .collect();
+            hit.imports = match named.is_empty() {
+                true => symbols.iter().map(|(_, label)| label.clone()).collect(),
+                false => named,
+            };
+        }
         keep
     });
     let matched: std::collections::HashSet<String> = hits
@@ -128,94 +139,54 @@ WHERE {project} = ?1 AND {commit} = ?2 AND {fqn} NOT LIKE '%@%' AND {file} IN ({
     Ok(())
 }
 
-pub(super) fn connections(client: &DuckDbClient, hits: &[Hit]) -> Result<Connections> {
-    let mut ids: Vec<i64> = hits
-        .iter()
-        .filter_map(|h| h.def.as_ref().map(|d| d.id))
-        .collect();
-    ids.sort_unstable();
-    ids.dedup();
-    type Named = Vec<(bool, String)>;
-    let mut raw: HashMap<i64, (Named, Named)> = HashMap::new();
-    if ids.is_empty() {
-        return Ok(Connections::new());
-    }
-    let list = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
-    client.execute(
-        &format!(
-            "CREATE OR REPLACE TEMP TABLE grep_defs AS SELECT unnest([{list}]::BIGINT[]) AS id"
-        ),
-        &[],
-    )?;
-    {
-        let callers = client.query_arrow_json(
-            "SELECT DISTINCT e.target_id AS def, d.name AS name, d.file_path AS file
-FROM gl_edge e JOIN gl_definition d ON d.id = e.source_id
-WHERE e.relationship_kind = 'CALLS' AND e.source_kind = 'Definition'
-  AND e.target_kind = 'Definition' AND e.target_id IN (SELECT id FROM grep_defs)
-  AND e.source_id <> e.target_id",
-            &[],
+fn imports_by_line(client: &DuckDbClient, git: &GitInfo, files: &[&str]) -> Result<ImportsByLine> {
+    let mut by_line = ImportsByLine::new();
+    for chunk in files.chunks(DEF_FILES_PER_QUERY) {
+        let list = chunk
+            .iter()
+            .map(|f| sql_lit(f))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let batches = client.query_arrow_json(
+            &format!(
+                "SELECT i.file_path AS file_path, CAST(i.start_line AS BIGINT) AS line,
+       COALESCE(NULLIF(i.identifier_alias, ''), NULLIF(i.identifier_name, ''), i.import_path, '') AS name,
+       COALESCE(i.import_path, '') AS path,
+       COALESCE(any_value(d.file_path), '') AS target_file,
+       CAST(COALESCE(any_value(d.start_line), 0) AS BIGINT) AS target_line
+FROM gl_imported_symbol i
+LEFT JOIN gl_edge e ON e.source_id = i.id AND e.source_kind = 'ImportedSymbol'
+  AND e.relationship_kind = 'IMPORTS' AND e.target_kind = 'Definition'
+LEFT JOIN gl_definition d ON d.id = e.target_id
+WHERE i.project_id = ?1 AND i.commit_sha = ?2 AND i.file_path IN ({list})
+GROUP BY ALL
+ORDER BY 1, 2, min(i.start_byte)"
+            ),
+            &[git.project_id.into(), git.commit_sha.clone().into()],
         )?;
-        let callees = client.query_arrow_json(
-            "WITH calls AS (
-  SELECT e.source_id, e.target_id, e.target_kind FROM gl_edge e
-  JOIN grep_defs g ON g.id = e.source_id
-  WHERE e.relationship_kind = 'CALLS' AND e.source_id <> e.target_id
-)
-SELECT DISTINCT c.source_id AS def, d.name AS name, d.file_path AS file
-FROM calls c JOIN gl_definition d ON d.id = c.target_id
-WHERE c.target_kind = 'Definition'
-UNION
-SELECT DISTINCT c.source_id AS def,
-       COALESCE(NULLIF(i.identifier_alias, ''), NULLIF(i.identifier_name, ''), i.import_path) AS name,
-       i.file_path AS file
-FROM calls c JOIN gl_imported_symbol i ON i.id = c.target_id
-WHERE c.target_kind = 'ImportedSymbol'",
-            &[],
-        )?;
-        for (batches, callers_side) in [(callers, true), (callees, false)] {
-            let (defs, names, files) = (
-                i64_column(&batches, "def"),
-                string_column(&batches, "name"),
-                string_column(&batches, "file"),
-            );
-            for ((def, name), file) in defs.into_iter().zip(names).zip(files) {
-                if name.is_empty() {
-                    continue;
-                }
-                let entry = raw.entry(def).or_default();
-                match callers_side {
-                    true => entry.0.push((is_test(&file), name)),
-                    false => entry.1.push((is_test(&file), name)),
-                }
+        let (paths, lines, names, imported, targets, target_lines) = (
+            string_column(&batches, "file_path"),
+            i64_column(&batches, "line"),
+            string_column(&batches, "name"),
+            string_column(&batches, "path"),
+            string_column(&batches, "target_file"),
+            i64_column(&batches, "target_line"),
+        );
+        for i in 0..paths.len() {
+            let mut label = match names[i] == imported[i] {
+                true => names[i].clone(),
+                false => format!("{} ({})", names[i], imported[i]),
+            };
+            if !targets[i].is_empty() {
+                label.push_str(&format!(" → {}:{}", targets[i], target_lines[i]));
+            }
+            let entry = by_line
+                .entry((paths[i].clone(), lines[i] as usize))
+                .or_default();
+            if !entry.iter().any(|(_, existing)| *existing == label) {
+                entry.push((names[i].clone(), label));
             }
         }
     }
-    let names = |mut list: Named| {
-        list.sort();
-        let mut seen = std::collections::HashSet::new();
-        list.into_iter()
-            .filter_map(|(_, name)| seen.insert(name.clone()).then_some(name))
-            .collect::<Vec<_>>()
-    };
-    Ok(raw
-        .into_iter()
-        .map(|(def, (callers, callees))| (def, (names(callers), names(callees))))
-        .collect())
-}
-
-pub(super) fn connection_label(def: &Def, connections: &Connections) -> String {
-    let Some((callers, callees)) = connections.get(&def.id) else {
-        return String::new();
-    };
-    let side = |arrow: &str, names: &[String], noun: &str| match names.len() {
-        0 => String::new(),
-        n if n > CONNECTION_NAMES => format!("{arrow}{n} {noun} "),
-        _ => format!("{arrow}{} ", names.join(",")),
-    };
-    format!(
-        "{}{}",
-        side("←", callers, "callers"),
-        side("→", callees, "callees")
-    )
+    Ok(by_line)
 }

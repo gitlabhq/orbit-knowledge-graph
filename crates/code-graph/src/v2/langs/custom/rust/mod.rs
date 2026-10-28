@@ -13,17 +13,15 @@ use globset::{Glob, GlobMatcher};
 use ignore::WalkBuilder;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use petgraph::graph::NodeIndex;
-use ra_ap_cfg::CfgAtom;
 use ra_ap_hir::{
-    CallableKind, ChangeWithProcMacros, HasSource, InFile, ModuleDef, PathResolution, Semantics,
-    attach_db,
+    CallableKind, CfgAtom, ChangeWithProcMacros, HasSource, InFile, ModuleDef, PathResolution,
+    Semantics, Symbol, attach_db,
 };
 use ra_ap_ide::{AnalysisHost, CrateGraphBuilder, FileId, RootDatabase, SourceRoot};
 use ra_ap_ide_db::base_db::{
     CrateOrigin, CrateWorkspaceData, Env, FileSet, VfsPath,
     target::{Arch, TargetData},
 };
-use ra_ap_intern::Symbol;
 use ra_ap_load_cargo::{ProcMacroServerChoice, ProjectFolders};
 use ra_ap_paths::{AbsPath, AbsPathBuf, Utf8PathBuf};
 use ra_ap_project_model::{

@@ -560,6 +560,10 @@
         "min": { "$ref": "#/$defs/NodePropertyRef" },
         "max": { "$ref": "#/$defs/NodePropertyRef" },
         "collect": { "$ref": "#/$defs/NodePropertyRef" },
+        "distinct": {
+          "type": "boolean",
+          "description": "With count only: count distinct values instead of rows. Output column without \"as\": count_distinct_node or count_distinct_node_property."
+        },
         "as": {
           "$ref": "#/$defs/Identifier",
           "description": "Custom output column name; referenced by aggregation_sort."
@@ -573,7 +577,7 @@
         { "required": ["max"] },
         { "required": ["collect"] }
       ],
-      "maxProperties": 2,
+      "maxProperties": 3,
       "additionalProperties": false
     },
     "GroupByKey": {

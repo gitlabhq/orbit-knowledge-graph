@@ -1,8 +1,10 @@
+use cynic::GraphQlError;
+
 pub(crate) const EXIT_GENERIC: i32 = 1;
 pub(crate) const EXIT_UNAVAILABLE: i32 = 2;
 const EXIT_UNAUTHENTICATED: i32 = 3;
-const EXIT_FORBIDDEN: i32 = 4;
-const EXIT_RATE_LIMITED: i32 = 5;
+pub(crate) const EXIT_FORBIDDEN: i32 = 4;
+pub(crate) const EXIT_RATE_LIMITED: i32 = 5;
 
 #[derive(Debug)]
 pub(crate) struct RemoteError {
@@ -36,15 +38,7 @@ impl From<anyhow::Error> for RemoteError {
 pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
     match status {
         404 => match parse_missing_resource(body) {
-            Some(resource) => RemoteError::new(
-                EXIT_UNAVAILABLE,
-                format!(
-                    "{resource} not found\n\n\
-                     The Orbit API found no {resource_lower} with this path or ID, or you\n\
-                     are not a member of it.",
-                    resource_lower = resource.to_lowercase()
-                ),
-            ),
+            Some(resource) => build_not_found_error(&resource),
             None => RemoteError::new(
                 EXIT_UNAVAILABLE,
                 "Orbit endpoint not available\n\n\
@@ -58,6 +52,12 @@ pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
             "not authenticated\n\n\
              The Orbit API rejected the request with HTTP 401. Run `glab auth status`\n\
              to check your token, then `glab auth login` if it has expired.",
+        ),
+        403 if body.contains("No Orbit enabled namespaces") => RemoteError::new(
+            EXIT_FORBIDDEN,
+            "Orbit isn't enabled for any of your groups\n\n\
+             GitLab context, search, and graph queries need Orbit turned on for a top-level\n\
+             group you belong to. An Owner of the group can enable it in Orbit > Configuration.",
         ),
         403 => RemoteError::new(
             EXIT_FORBIDDEN,
@@ -89,6 +89,33 @@ pub(crate) fn map_http_error(status: u16, body: &str) -> RemoteError {
     }
 }
 
+pub(crate) fn build_not_found_error(resource: &str) -> RemoteError {
+    RemoteError::new(
+        EXIT_UNAVAILABLE,
+        format!(
+            "{resource} not found\n\n\
+             The Orbit API found no {resource_lower} with this path or ID, or you\n\
+             are not a member of it.",
+            resource_lower = resource.to_lowercase()
+        ),
+    )
+}
+
+pub(crate) fn build_graphql_error<E>(context: &str, errors: &[GraphQlError<E>]) -> RemoteError {
+    RemoteError::new(
+        EXIT_GENERIC,
+        format!("{context}: {}", join_messages(errors)),
+    )
+}
+
+fn join_messages<E>(errors: &[GraphQlError<E>]) -> String {
+    errors
+        .iter()
+        .map(|error| error.message.as_str())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 fn parse_missing_resource(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     let message = value.get("message")?.as_str()?;
@@ -116,6 +143,20 @@ mod tests {
         assert_eq!(map_http_error(429, "").exit_code, EXIT_RATE_LIMITED);
         assert_eq!(map_http_error(503, "").exit_code, EXIT_GENERIC);
         assert_eq!(map_http_error(500, "").exit_code, EXIT_GENERIC);
+    }
+
+    #[test]
+    fn a_user_without_orbit_groups_is_told_so() {
+        let error = map_http_error(
+            403,
+            r#"{"message":"403 Forbidden - No Orbit enabled namespaces available"}"#,
+        );
+
+        assert_eq!(error.exit_code, EXIT_FORBIDDEN);
+        assert_eq!(
+            error.message.lines().next(),
+            Some("Orbit isn't enabled for any of your groups")
+        );
     }
 
     #[test]

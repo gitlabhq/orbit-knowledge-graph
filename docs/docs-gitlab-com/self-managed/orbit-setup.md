@@ -219,7 +219,7 @@ Adjust the values for your environment:
 
 For TLS, private certificate authorities, NATS TLS, and plaintext connections, see [Networking for GitLab Orbit](networking.md).
 For every value and its default, see the [GitLab Orbit Helm chart](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts).
-For pod sizes, see [Reference architectures](getting-started.md#reference-architectures).
+For pod sizes, see [GitLab Orbit sizing](sizing.md).
 
 ## Turn on indexing for a group
 
@@ -248,16 +248,9 @@ An hourly sweep picks up any data that indexing missed.
 ## Verify the installation
 
 Query the graph for the projects in the group that you turned on.
-If your GitLab version has the `orbit_gql_queries` feature flag, the API accepts GQL queries only from users that have the flag on.
-For these users, the API parses every query as GQL, so JSON query objects fail.
+The query uses GQL, which the [supported GitLab versions](getting-started.md#prerequisites) accept by default.
 
 To verify the installation:
-
-1. If your GitLab version has the `orbit_gql_queries` feature flag, turn it on for your user in the [Rails console](https://docs.gitlab.com/administration/operations/rails_console/):
-
-   ```ruby
-   Feature.enable(:orbit_gql_queries, User.find_by_username('<your_username>'))
-   ```
 
 1. Save the query as `query.gql`:
 
@@ -278,12 +271,6 @@ To verify the installation:
    ```
 
    Replace `<your_access_token>` with your personal access token.
-
-1. Optional. To send JSON queries again as this user, turn off the feature flag:
-
-   ```ruby
-   Feature.disable(:orbit_gql_queries, User.find_by_username('<your_username>'))
-   ```
 
 The query returns rows after the first index finishes.
 Pod status and the `/-/readiness` endpoint pass before that point, so they do not confirm indexing.
@@ -324,8 +311,7 @@ To upgrade GitLab:
 
 ## Related topics
 
-- [What GitLab Orbit indexes](../indexed-data.md)
-- [Schema reference](../remote/schema.md)
-- [Query language](../remote/queries/_index.md)
+- [GitLab Orbit indexed data](../schema.md)
+- [Query language](../queries/_index.md)
 - [Networking for GitLab Orbit](networking.md)
 - [Troubleshooting GitLab Orbit on GitLab Self-Managed](troubleshooting.md)

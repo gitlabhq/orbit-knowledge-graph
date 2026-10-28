@@ -1,0 +1,23 @@
+description: Admin wildcard columns leave out admin-only fields, which appear only when named
+
+config:
+  security: admin
+
+query:
+  json: |
+    {
+      "query_type": "traversal",
+      "nodes": [{"id": "u", "entity": "User", "columns": "*", "node_ids": [1]}],
+      "limit": 10
+    }
+  gql: |
+    MATCH (u:User {id: 1}) RETURN properties(u) LIMIT 10
+
+expect:
+  node_count: 1
+  nodes:
+    User:
+      ids: [1]
+      rows:
+        - { id: 1, username: alice }
+      prop_absent: [is_admin, is_auditor]

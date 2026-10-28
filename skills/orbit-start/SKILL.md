@@ -1,9 +1,9 @@
 ---
 name: orbit-start
 description: Walk a user through their first GitLab Orbit session. Check the setup, then answer a simple first question and a workflow from the prompt examples with Orbit. Offer to run a prompt again without Orbit, and to show how Orbit works. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
-version: 0.1.0
+version: 0.2.2
 license: MIT
-compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance.
+compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance.
 metadata:
   audience: developers
   keywords: orbit, knowledge-graph, onboarding, getting-started, glab
@@ -50,7 +50,7 @@ The user sees only your text, not command output, your thinking, or this skill.
 ## Step 1: Check the setup
 
 1. Run `glab orbit status`.
-   If it fails, follow the entry for its exit code in <https://docs.gitlab.com/orbit/remote/troubleshooting/>,
+   If it fails, follow the entry for its exit code in <https://docs.gitlab.com/orbit/troubleshooting/>,
    and run `glab orbit status` again. If it still fails, tell the user what failed and stop.
 1. Ask the user for the scope with your question tool. Offer these options:
    - **This project**: the `path_with_namespace` from `glab repo view -F json`, when you are in a clone. Recommended.
@@ -60,14 +60,14 @@ The user sees only your text, not command output, your thinking, or this skill.
 
    Outside a clone, ask for the full path of a group or project that has GitLab Orbit turned on.
 1. Load the Orbit skill with `glab orbit skills get orbit`, and follow its query rules for the rest of the session.
-1. Run this once, and keep the output for the rest of the session. Do not run `glab orbit ontology` again:
+1. Run this once, and keep the output for the rest of the session. Do not run `glab orbit schema` again:
 
    ```shell
-   glab orbit ontology Project MergeRequest MergeRequestDiffFile Pipeline Job Vulnerability File Definition User
+   glab orbit schema Project MergeRequest MergeRequestDiffFile Pipeline Job Vulnerability File Definition User
    ```
 
    It lists the properties and edges of the node types that most questions use, so later queries need no schema lookups.
-1. Run `glab orbit graph-status --full-path <scope>`.
+1. Run `glab orbit status --full-path <scope>`.
    If no project in the scope is indexed yet, tell the user, and ask for another scope.
 
 ## Step 2: Ask a simple first question
@@ -289,7 +289,7 @@ EOF
 
 Walk the user through the five parts below, one part for each reply.
 
-1. Use the `graph-status` and `ontology` output from step 1. Do not run any commands in this step, so that each part shows at once.
+1. Use the `status` and `schema` output from step 1. Do not run any commands in this step, so that each part shows at once.
 1. For each part, write it in your reply: a heading, its diagram in a `text` code block, its explanation, and its **Read more** link.
    Keep to the points that the part lists, and do not add other figures or ratios.
 1. End each reply with these numbered options:
@@ -317,16 +317,16 @@ Then explain, in a short list:
 
 - A new merge request, work item, or pipeline is in the graph within minutes.
 - Code comes from the default branch. Orbit indexes it again when the default branch changes.
-  For code you have not merged, the local graph indexes a clone on your machine with `glab orbit index`.
-  See <https://docs.gitlab.com/orbit/local/>.
+  For code you have not merged, `glab orbit grep` and `glab orbit context` index a clone on your machine and search it locally.
+  See <https://docs.gitlab.com/orbit/cli/#local-graph>.
 - One query can follow many edges, for example from a merge request to the changed code, and on to its callers.
   Without Orbit, each of those hops is at least one REST API call.
 
-Read more: <https://docs.gitlab.com/orbit/remote/how-it-works/>
+Read more: <https://docs.gitlab.com/orbit/how-it-works/>
 
 ### Part 2: What is in your graph
 
-Use the `graph-status` output. Draw the node counts as a bar chart.
+Use the `status` output. Draw the node counts as a bar chart.
 Show the eight largest node types. Scale the bars to 24 characters for the largest count, and align the columns. For example:
 
 ```text
@@ -337,7 +337,7 @@ Pipeline              #                          25,000
 
 Then say how many projects in the scope are indexed, and name any domain with no data.
 
-Read more: <https://docs.gitlab.com/orbit/remote/schema/>
+Read more: <https://docs.gitlab.com/orbit/schema/>
 
 ### Part 3: How the graph connects
 
@@ -356,10 +356,10 @@ Code
   (Definition)    --CALLS-->       (Definition)
 ```
 
-From the `ontology` output, say how many edges one of these node types has, and name a few.
-Then say that `glab orbit ontology` lists every node type and edge.
+From the `schema` output, say how many edges one of these node types has, and name a few.
+Then say that `glab orbit schema` lists every node type and edge.
 
-Read more: <https://docs.gitlab.com/orbit/remote/schema/>
+Read more: <https://docs.gitlab.com/orbit/schema/>
 
 ### Part 4: How your last query walked the graph
 
@@ -381,7 +381,7 @@ Result   count of merge requests for each User.username
 Then say how many hops the query took, and that each hop without Orbit is at least one REST API call.
 If the user has not asked a question yet, use the first question in step 2 as the example.
 
-Read more: <https://docs.gitlab.com/orbit/remote/queries/query-language/>
+Read more: <https://docs.gitlab.com/orbit/queries/query-language/>
 
 ### Part 5: Who can see what
 
@@ -393,7 +393,7 @@ Explain, in a short list:
 - A role for a top-level group applies to each subgroup and project in it.
   A role for a project alone does not give access to that project.
 
-Read more: <https://docs.gitlab.com/orbit/remote/security/>
+Read more: <https://docs.gitlab.com/orbit/security/>
 
 ## Step 6: Offer next steps
 

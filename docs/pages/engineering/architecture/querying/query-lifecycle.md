@@ -24,22 +24,22 @@ query to Orbit with the caller's namespaces. Orbit compiles the query into SQL
 that can only read those namespaces, and runs it on the relational store. For
 rows that need a per-resource check, Orbit asks GitLab, and drops every row
 that GitLab denies. Last, Orbit fills in the properties that live in other
-sources and returns one response. The [Security](../security.md) page covers
+sources and returns one response. The [Security](../security/README.md) page covers
 every access check along the way.
 
 ### 1. GitLab checks the caller
 
 ```mermaid
 flowchart LR
-    Caller --> GitLab --> Workhorse --> Orbit
+    Caller --> GitLab --> Orbit
 ```
 
 GitLab authenticates the caller and works out which namespaces they can read,
-and with which role. It signs that list into a short-lived token and hands the
-request to Workhorse. Workhorse streams the request to Orbit over gRPC, so a
-long query never holds a GitLab web worker.
-[How a request is checked](../security.md#how-a-request-is-checked) explains
-the token, and [ADR 008](../../adr/008_workhorse_query_acceleration.md)
+and with which role. It signs that list into a short-lived token and opens a
+gRPC stream to Orbit. The same GitLab request answers the redaction checks and
+streams the result back to the caller.
+[Caller scope](../security/authorization.md#caller-scope) explains
+the token, and [ADR 022](../../adr/022_queries_in_rails.md)
 explains the stream.
 
 ### 2. Orbit compiles the query
@@ -54,7 +54,7 @@ Orbit compiles the query against the data model of the active schema version.
 The compiler checks every name, plans the reads, and adds a namespace filter
 to every read that the caller's roles allow. It rejects the query if any read
 lacks its filter, which is the second of the
-[three layers](../security.md#the-three-layers). The
+[three tiers](../security/README.md#authorization-tiers). The
 [Orbit Query Engine](query-engine.md) page walks through each step.
 
 ### 3. The relational store runs it
@@ -81,8 +81,8 @@ flowchart LR
 Some rules exist only in GitLab, like who can see a confidential work item.
 For those, Orbit sends the IDs of the returned resources back through the
 stream. GitLab checks each one with its normal permission rules, and Orbit
-drops every row that GitLab denies. This is the third layer on the
-[Security](../security.md#the-three-layers) page, and aggregation counts skip
+drops every row that GitLab denies. This is the third tier, and the
+[Redaction](../security/redaction.md) page covers it. Aggregation counts skip
 it.
 
 ### 5. Orbit hydrates the result and formats it
@@ -135,7 +135,7 @@ and each next page is a new query.
 - **A new schema version is rolling out.** Orbit keeps serving the active
   graph until the new one is complete.
 
-The [Security](../security.md#when-things-go-wrong) page covers what happens
+The [Security](../security/README.md#service-boundary) page covers what happens
 when the token is missing or expired.
 
 ## Why we built it this way
@@ -149,7 +149,7 @@ We check access in two places. Namespace filters in SQL cover almost every
 row, at the speed of an index. GitLab redaction covers the rules that only
 GitLab knows. Some results pay for one extra round trip, but no query depends
 on filtering after the fact to keep tenants apart. The
-[Security](../security.md#what-this-guarantees) page lists every guarantee
+[Security](../security/README.md#security-guarantees) page lists every guarantee
 that follows.
 
 Virtual properties stay where they live. Copying file content or diffs into
@@ -177,7 +177,7 @@ bound, and secure every query, and LLMs can write it reliably.
 
 - [ADR 000: ClickHouse as graph storage](../../adr/000_clickhouse_graph_storage.md)
 - [ADR 004: Unified response schema](../../adr/004_unified_response_schema.md)
-- [ADR 008: Workhorse query acceleration](../../adr/008_workhorse_query_acceleration.md)
 - [ADR 011: Agent command surface](../../adr/011_agent_command_surface.md)
 - [ADR 019: GQL response format](../../adr/019_gql_response_format.md)
 - [ADR 021: Entity context expansion](../../adr/021_entity_context_expansion.md)
+- [ADR 022: Orbit queries in Rails](../../adr/022_queries_in_rails.md)

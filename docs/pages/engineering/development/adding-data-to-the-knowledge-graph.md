@@ -269,8 +269,8 @@ mise schema:bump              # bumps the `schema:` pin in config/versions.yaml,
 mise run schema:generate:ddl  # regenerates the DDL (do NOT hand-edit graph.sql)
 ```
 
-This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql`
-(local/DuckDB). Expect:
+This rewrites `config/graph.sql` (ClickHouse) and `config/graph_local.sql`
+(DuckDB, for the local graph). Expect:
 
 - `config/graph.sql`: a new `CREATE TABLE … gl_<node>` block + the version stamp.
 - **Edges have no per-edge table**. They're rows in the shared `gl_edge` table, so a new edge produces *no* new `CREATE TABLE`. That's correct.
@@ -304,7 +304,7 @@ This rewrites `config/graph.sql` (remote/ClickHouse) and `config/graph_local.sql
 
 After the code MR merges, open a separate docs MR. Add the node to the user
 schema reference,
-[`docs/docs-gitlab-com/remote/schema.md`](../../../docs-gitlab-com/remote/schema.md), in the table for
+[`docs/docs-gitlab-com/schema.md`](../../../docs-gitlab-com/schema.md), in the table for
 its domain. Update the node count in the page description and the intro.
 
 ### 5.7 Validate (toolchain matters)

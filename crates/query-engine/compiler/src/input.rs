@@ -543,13 +543,20 @@ pub struct InputAggregationMetric {
     pub expr: AggExpr,
     #[serde(rename = "as", default)]
     pub alias: Option<String>,
+    #[serde(default)]
+    pub distinct: bool,
 }
 
 impl InputAggregationMetric {
     pub fn output_name(&self) -> String {
-        self.alias
-            .clone()
-            .unwrap_or_else(|| self.expr.derived_name())
+        self.alias.clone().unwrap_or_else(|| {
+            let name = self.expr.derived_name();
+            if self.distinct {
+                name.replacen('_', "_distinct_", 1)
+            } else {
+                name
+            }
+        })
     }
 }
 

@@ -91,6 +91,9 @@ impl AnalyticsObserver {
         let Some(tracker) = self.tracker.as_ref() else {
             return;
         };
+        if self.claims.host_name.as_deref().is_some_and(is_test_host) {
+            return;
+        }
 
         let common = match build_common(&self.config, &self.claims, &self.schema_version) {
             Ok(c) => c,
@@ -139,6 +142,11 @@ impl AnalyticsObserver {
             ),
         }
     }
+}
+
+// RFC 6761 reserves .test for testing, so no real GitLab instance lives there.
+fn is_test_host(host: &str) -> bool {
+    host.to_ascii_lowercase().ends_with(".test")
 }
 
 #[cfg(test)]
@@ -200,6 +208,26 @@ mod tests {
         assert_eq!(data["status"], "ok");
         assert_eq!(data["outcome"], "success");
         assert!(data["failure_reason"].is_null());
+    }
+
+    #[test]
+    fn emits_nothing_for_a_test_host_in_any_case() {
+        for host in ["gitlab.caproni.test", "GitLab.Caproni.Test"] {
+            let tracker = Arc::new(InMemoryAnalyticsTracker::new());
+            let obs = AnalyticsObserver::new(
+                Some(tracker.clone()),
+                Arc::new(orbit_server_config::AppConfig::embedded_defaults().analytics),
+                Claims {
+                    host_name: Some(host.into()),
+                    ..test_claims()
+                },
+                "query_graph",
+                UserAgent::default(),
+                "33".to_string(),
+            );
+            obs.finish(10, 0);
+            assert!(tracker.drain().is_empty(), "{host}");
+        }
     }
 
     #[test]
@@ -322,6 +350,14 @@ mod tests {
                 "execution_error",
                 "server_error",
                 "memory_limit",
+            ),
+            (
+                PipelineError::Execution(
+                    "Code: 36. DB::Exception: Query tree is too big. Maximum: 500000.".into(),
+                ),
+                "execution_error",
+                "caller_error",
+                "too_complex",
             ),
             (
                 PipelineError::Execution("x".into()),

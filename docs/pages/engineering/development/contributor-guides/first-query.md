@@ -1,25 +1,25 @@
 # Write your first Orbit query
 
-This tutorial takes you from a clean checkout to your first useful Orbit Local
-queries. Orbit Local runs entirely on your machine and stores its graph in
-DuckDB. It does not need Orbit Remote, Rails, ClickHouse, NATS, Docker, or a
-GitLab account.
+This tutorial takes you from a clean checkout to your first useful queries on
+the local graph of the GitLab Orbit CLI. The local graph lives entirely on your machine,
+in DuckDB. It does not need Rails, ClickHouse, NATS,
+Docker, or a GitLab account.
 
 You need:
 
-- `glab` 1.117 or later.
+- `glab` 1.126 or later.
 - Any local Git repository with source files.
 
 The examples use `orbit` directly after installation. If you prefer to stay
 inside `glab`, replace `orbit` with `glab orbit` in each command.
 
-The current Orbit Local command queries the local DuckDB graph with SQL. The
-Orbit Remote Query DSL is linked at the end after the local graph concepts are
-familiar.
+The `workspace sql` command queries the local DuckDB graph with SQL. The
+GitLab Orbit query language is linked at the end after the local graph concepts
+are familiar.
 
-## Install Orbit Local
+## Install the GitLab Orbit CLI
 
-Install the managed Orbit Local binary:
+Install the managed GitLab Orbit CLI binary:
 
 ```shell
 glab orbit --install --yes
@@ -40,7 +40,7 @@ Move into any Git repository, then index it:
 
 ```shell
 cd /path/to/any/git/repo
-orbit index .
+orbit workspace index .
 ```
 
 Orbit parses the repository and writes its revision graph under `~/.gitlab/orbit/local/revisions/`.
@@ -70,10 +70,10 @@ The exact counts depend on the repository and supported languages in it.
 Before writing a query, inspect the graph tables:
 
 ```shell
-orbit schema
+orbit workspace schema
 ```
 
-Orbit Local indexes four code graph node types:
+The local graph indexes four code graph node types:
 
 | Node type | Table | What it represents |
 |---|---|---|
@@ -96,7 +96,7 @@ row has a source node, a relationship kind, and a target node:
 Start with a small query that lists files from the indexed repository:
 
 ```shell
-orbit sql 'SELECT path, language FROM gl_file ORDER BY path LIMIT 5'
+orbit workspace sql 'SELECT path, language FROM gl_file ORDER BY path LIMIT 5'
 ```
 
 Example output:
@@ -120,7 +120,7 @@ table.
 Now filter definitions by name:
 
 ```shell
-orbit sql "SELECT file_path, name, definition_type, start_line FROM gl_definition WHERE lower(name) LIKE '%parse%' ORDER BY file_path, start_line LIMIT 10"
+orbit workspace sql "SELECT file_path, name, definition_type, start_line FROM gl_definition WHERE lower(name) LIKE '%parse%' ORDER BY file_path, start_line LIMIT 10"
 ```
 
 This looks for definitions whose name contains `parse`, then returns where each
@@ -145,7 +145,7 @@ Relationships let you move from one node type to another. This query starts at
 definitions declared in each file:
 
 ```shell
-orbit sql "SELECT f.path, d.name, d.definition_type, d.start_line FROM gl_file f JOIN gl_edge e ON e.source_kind = 'File' AND e.relationship_kind = 'DEFINES' AND e.target_kind = 'Definition' AND e.source_id = f.id JOIN gl_definition d ON d.id = e.target_id ORDER BY f.path, d.start_line LIMIT 5"
+orbit workspace sql "SELECT f.path, d.name, d.definition_type, d.start_line FROM gl_file f JOIN gl_edge e ON e.source_kind = 'File' AND e.relationship_kind = 'DEFINES' AND e.target_kind = 'Definition' AND e.source_id = f.id JOIN gl_definition d ON d.id = e.target_id ORDER BY f.path, d.start_line LIMIT 5"
 ```
 
 Example output:
@@ -167,11 +167,11 @@ The graph part is the join through `gl_edge`:
 
 ## Change the output format
 
-The default `orbit sql` output is a table. Use `-F json` when you want a shape
+The default `orbit workspace sql` output is a table. Use `-F json` when you want a shape
 that is easier to pipe into another tool:
 
 ```shell
-orbit sql -F json 'SELECT path, language FROM gl_file ORDER BY path LIMIT 2'
+orbit workspace sql -F json 'SELECT path, language FROM gl_file ORDER BY path LIMIT 2'
 ```
 
 Example output:
@@ -192,8 +192,8 @@ Example output:
 Other formats are available:
 
 ```shell
-orbit sql -F ndjson 'SELECT path FROM gl_file LIMIT 2'
-orbit sql -F csv 'SELECT path, language FROM gl_file LIMIT 2'
+orbit workspace sql -F ndjson 'SELECT path FROM gl_file LIMIT 2'
+orbit workspace sql -F csv 'SELECT path, language FROM gl_file LIMIT 2'
 ```
 
 ## Try one more repository
@@ -203,8 +203,8 @@ repository-specific and which parts come from the Orbit graph model:
 
 ```shell
 cd /path/to/another/git/repo
-orbit index .
-orbit sql 'SELECT language, count(*) AS files FROM gl_file GROUP BY language ORDER BY files DESC LIMIT 10'
+orbit workspace index .
+orbit workspace sql 'SELECT language, count(*) AS files FROM gl_file GROUP BY language ORDER BY files DESC LIMIT 10'
 ```
 
 The local graph can contain multiple indexed repositories. Rows include
@@ -213,12 +213,12 @@ between them.
 
 ## Where to go next
 
-- [Orbit Local schema reference](../../../../docs-gitlab-com/local/schema.md) for the four
+- [Local graph schema reference](../../../../docs-gitlab-com/cli.md#local-graph) for the four
   local node types and their properties.
-- [Orbit Local access methods](../../../../docs-gitlab-com/local/getting-started.md) for
+- [GitLab Orbit CLI access methods](../../../../docs-gitlab-com/cli.md) for
   direct `orbit`, `glab orbit`, and MCP usage.
-- [Orbit query language reference](../../../../docs-gitlab-com/remote/queries/query-language.md)
-  for the Query DSL used by Orbit Remote and agent-facing graph queries.
-- [Cookbook](../../../../docs-gitlab-com/remote/cookbook.md) for copy-paste query ideas.
+- [Orbit query language reference](../../../../docs-gitlab-com/queries/query-language.md)
+  for the query language of GitLab Orbit and agent-facing graph queries.
+- [Cookbook](../../../../docs-gitlab-com/prompt-examples.md) for copy-paste query ideas.
 - [Add a language to the code indexer](../adding-a-language.md) if you want to
   contribute parser coverage for more source languages.

@@ -1,0 +1,51 @@
+cases:
+  - name: matching_kind
+    description: A relationship filter on target_kind runs when the value is the kind the pattern's endpoint has
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE r.target_kind = 'Project' RETURN p LIMIT 10
+    expect:
+      node_count: 3
+      nodes:
+        Group:
+          ids: [100]
+        Project:
+          ids: [1000, 1002]
+      edges:
+        CONTAINS: [[100, 1000], [100, 1002]]
+
+  - name: endpoint_contradiction
+    description: A target_kind that the pattern's labeled endpoint cannot have rejects instead of returning nothing
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[100]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","filters":{"target_kind":"Group"}}],"limit":10}
+      gql: |
+        MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE r.target_kind = 'Group' RETURN p LIMIT 10
+    expect:
+      compile_error_contains: ['"Group" cannot match this pattern', "Valid values: Project"]
+
+  - name: unknown_relationship_kind
+    description: A relationship_kind that the schema does not have rejects, like type(r) does
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[r]->(p:Project) WHERE r.relationship_kind IN ['CONTAINS', 'NOT_A_KIND'] RETURN p LIMIT 10
+    expect:
+      compile_error_contains: ['"NOT_A_KIND" cannot match this pattern', CONTAINS]
+
+  - name: relationship_kind_outside_pattern
+    description: A relationship_kind outside the pattern's declared types rejects instead of returning nothing
+    query:
+      json: |
+        {"query_type":"traversal","nodes":[{"id":"g","entity":"Group","node_ids":[100]},{"id":"p","entity":"Project"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p","filters":{"relationship_kind":"AUTHORED"}}],"limit":10}
+      gql: |
+        MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE r.relationship_kind = 'AUTHORED' RETURN p LIMIT 10
+    expect:
+      compile_error_contains: ['"AUTHORED" cannot match this pattern', "Valid values: CONTAINS"]
+
+  - name: excluding_the_only_kind
+    description: Excluding the only relationship_kind the pattern allows rejects instead of returning nothing
+    query:
+      gql: |
+        MATCH (g:Group {id: 100})-[r:CONTAINS]->(p:Project) WHERE r.relationship_kind <> 'CONTAINS' RETURN p LIMIT 10
+    expect:
+      compile_error_contains: ['<> "CONTAINS" excludes the only value this pattern allows; remove the filter']

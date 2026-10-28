@@ -87,9 +87,7 @@ fn byte_array_logical_bytes<T: ByteArrayType>(array: &dyn Array) -> u64 {
         .downcast_ref::<GenericByteArray<T>>()
         .expect("a string/binary DataType guarantees a GenericByteArray");
     let offsets = arr.offsets();
-    let start = offsets.first().expect("OffsetBuffer is never empty");
-    let end = offsets.last().expect("OffsetBuffer is never empty");
-    (end.as_usize() - start.as_usize()) as u64
+    (offsets.last().as_usize() - offsets.first().as_usize()) as u64
 }
 
 fn byte_view_logical_bytes<T: ByteViewType>(array: &dyn Array) -> u64 {
@@ -136,14 +134,8 @@ fn list_logical_bytes<O: OffsetSizeTrait>(
         .downcast_ref::<GenericListArray<O>>()
         .expect("DataType::List/LargeList guarantees a GenericListArray");
     let offsets = list.offsets();
-    let start = offsets
-        .first()
-        .expect("OffsetBuffer is never empty")
-        .as_usize();
-    let end = offsets
-        .last()
-        .expect("OffsetBuffer is never empty")
-        .as_usize();
+    let start = offsets.first().as_usize();
+    let end = offsets.last().as_usize();
     let values = list.values().slice(start, end - start);
     array_logical_byte_size(column, element_type, values.as_ref())
 }

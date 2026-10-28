@@ -18,4 +18,10 @@ describe("roadmap tracking", () => {
     expect(itemFields({ ...item, tracking: "https://gitlab.com/groups/gitlab-org/orbit/-/epics/17" }, ["agents"]).tracking).toBe("https://gitlab.com/groups/gitlab-org/orbit/-/epics/17");
     expect(() => itemFields({ ...item, tracking: "https://example.com/1" }, ["agents"])).toThrow("tracking must be a https://gitlab.com/ URL");
   });
+
+  test("accepts only positive integer ranks", () => {
+    expect(itemFields({ ...item, rank: 2 }, ["agents"]).rank).toBe(2);
+    expect(() => itemFields({ ...item, rank: 0 }, ["agents"])).toThrow("rank must be a positive integer");
+    expect(() => itemFields({ ...item, rank: "1" }, ["agents"])).toThrow("rank must be a positive integer");
+  });
 });

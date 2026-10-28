@@ -87,6 +87,7 @@ properties:
     source: pipeline_id
     nullable: true
     mutable: false
+    high_fan_out: true
     description: "Containing pipeline ID."
 
   traversal_path:

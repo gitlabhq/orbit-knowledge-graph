@@ -1,9 +1,14 @@
+use std::collections::HashMap;
 use std::fmt::Write;
-use std::sync::OnceLock;
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
-use serde::Deserialize;
+use cynic::{GraphQlResponse, Operation};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
+use super::api::{Api, ErrorExtensions};
 use super::error::{EXIT_GENERIC, RemoteError, map_http_error};
 
 const DEFAULT_GITLAB_BASE_URL: &str = "https://gitlab.com";
@@ -12,13 +17,13 @@ const READ_TIMEOUT: Duration = Duration::from_secs(120);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 const SKILL_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
-const STATUS_PATH: &str = "/api/v4/orbit/status";
-const SCHEMA_PATH: &str = "/api/v4/orbit/schema";
-const DSL_PATH: &str = "/api/v4/orbit/schema/dsl";
-const TOOLS_PATH: &str = "/api/v4/orbit/tools";
 const QUERY_PATH: &str = "/api/v4/orbit/query";
-const GRAPH_STATUS_PATH: &str = "/api/v4/orbit/graph_status";
+const GRAPHQL_PATH: &str = "/api/graphql";
 const SKILLS_PATH: &str = "/api/v4/orbit/skills";
+const GREP_PATH: &str = "/api/v4/orbit/grep";
+const CONTEXT_PATH: &str = "/api/v4/orbit/context";
+const SHORT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const GREP_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) struct SkillHttpResponse {
     pub(crate) status: u16,
@@ -26,6 +31,7 @@ pub(crate) struct SkillHttpResponse {
     pub(crate) body: Vec<u8>,
 }
 
+#[derive(Clone)]
 pub(crate) struct OrbitClient {
     endpoint: ResolvedEndpoint,
     http: reqwest::Client,
@@ -40,8 +46,14 @@ struct ResolvedEndpoint {
 
 impl OrbitClient {
     pub(crate) fn from_env() -> Result<Self, RemoteError> {
-        let endpoint =
-            resolve_endpoint(|key| std::env::var(key).ok(), resolve_via_credential_helper)?;
+        Self::from_env_in(Path::new("."))
+    }
+
+    pub(crate) fn from_env_in(dir: &Path) -> Result<Self, RemoteError> {
+        let endpoint = resolve_endpoint(
+            |key| std::env::var(key).ok(),
+            || resolve_via_credential_helper(dir),
+        )?;
         Self::new(endpoint)
     }
 
@@ -49,7 +61,10 @@ impl OrbitClient {
     /// error: it returns `None` so callers serve the embedded local skill. An
     /// invalid base URL is still an error so callers can say why they fall back.
     pub(crate) fn from_skill_env() -> Result<Option<Self>, RemoteError> {
-        match resolve_endpoint(|key| std::env::var(key).ok(), resolve_via_credential_helper) {
+        match resolve_endpoint(
+            |key| std::env::var(key).ok(),
+            || resolve_via_credential_helper(Path::new(".")),
+        ) {
             Ok(endpoint) => Self::new(endpoint).map(Some),
             Err(error) if error.is::<MissingCredential>() => Ok(None),
             Err(error) => Err(error.into()),
@@ -128,37 +143,60 @@ impl OrbitClient {
         Ok(SkillHttpResponse { status, etag, body })
     }
 
-    pub(crate) async fn get_status(&self) -> Result<Vec<u8>, RemoteError> {
-        self.get_bytes(STATUS_PATH, &[]).await
-    }
-
-    pub(crate) async fn get_schema(
-        &self,
-        params: &[(&str, String)],
-    ) -> Result<Vec<u8>, RemoteError> {
-        self.get_bytes(SCHEMA_PATH, params).await
-    }
-
-    pub(crate) async fn get_dsl(&self) -> Result<Vec<u8>, RemoteError> {
-        self.get_bytes(DSL_PATH, &[]).await
-    }
-
-    pub(crate) async fn get_tools(&self) -> Result<Vec<u8>, RemoteError> {
-        self.get_bytes(TOOLS_PATH, &[]).await
-    }
-
-    pub(crate) async fn get_graph_status(
-        &self,
-        params: &[(&str, String)],
-    ) -> Result<Vec<u8>, RemoteError> {
-        self.get_bytes(GRAPH_STATUS_PATH, params).await
-    }
-
-    pub(crate) async fn query_raw(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+    pub(crate) async fn get_grep(&self, params: &[(&str, String)]) -> Result<Vec<u8>, RemoteError> {
         let response = self
             .send(
                 self.http
-                    .post(self.url(QUERY_PATH))
+                    .get(self.url(GREP_PATH))
+                    .query(params)
+                    .timeout(GREP_REQUEST_TIMEOUT),
+            )
+            .await?;
+        read_body(response).await
+    }
+
+    pub(crate) async fn post_context(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+        self.post_json(CONTEXT_PATH, body).await
+    }
+
+    pub(crate) async fn query_raw(&self, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+        self.post_json(QUERY_PATH, body).await
+    }
+
+    pub(crate) async fn graphql<Q, V>(
+        &self,
+        operation: &Operation<Q, V>,
+    ) -> Result<Option<GraphQlResponse<Q, ErrorExtensions>>, RemoteError>
+    where
+        Q: DeserializeOwned,
+        V: Serialize,
+    {
+        if Api::selected() == Some(Api::Rest) {
+            return Ok(None);
+        }
+        let request = serde_json::to_vec(operation).map_err(|error| {
+            RemoteError::new(
+                EXIT_GENERIC,
+                format!("could not encode GraphQL query: {error}"),
+            )
+        })?;
+        let body = self.post_json(GRAPHQL_PATH, request).await?;
+        let response: GraphQlResponse<Q, ErrorExtensions> =
+            serde_json::from_slice(&body).map_err(|error| {
+                RemoteError::new(
+                    EXIT_GENERIC,
+                    format!("unexpected GraphQL response: {error}"),
+                )
+            })?;
+        let api = Api::remember_from(response.errors.as_deref().unwrap_or_default());
+        Ok((api == Api::Graphql).then_some(response))
+    }
+
+    async fn post_json(&self, path: &str, body: Vec<u8>) -> Result<Vec<u8>, RemoteError> {
+        let response = self
+            .send(
+                self.http
+                    .post(self.url(path))
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
                     .body(body),
             )
@@ -166,7 +204,7 @@ impl OrbitClient {
         read_body(response).await
     }
 
-    async fn get_bytes(
+    pub(crate) async fn get_bytes(
         &self,
         path: &str,
         params: &[(&str, String)],
@@ -181,11 +219,30 @@ impl OrbitClient {
         format!("{}{path}", self.endpoint.base_url.trim_end_matches('/'))
     }
 
+    /// Retries once only when the connection failed, so the server never saw the request. A timeout or a
+    /// server error is not retried: the server may have run the query, and a graph query is billed.
     async fn send(
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, RemoteError> {
-        let response = self.send_authenticated(request).await?;
+        let mut pending = Some(request);
+        let mut attempt = 0_u8;
+        let response = loop {
+            attempt += 1;
+            let current = pending.take().expect("a request remains");
+            pending = current.try_clone().filter(|_| attempt == 1);
+            match self.send_raw(current).await {
+                Ok(response) => break response,
+                Err(error) if pending.is_some() && error.is_connect() => {}
+                Err(error) => {
+                    return Err(RemoteError::new(
+                        EXIT_GENERIC,
+                        request_failure_message("Orbit request", &error),
+                    ));
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        };
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
@@ -198,6 +255,15 @@ impl OrbitClient {
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response, RemoteError> {
+        self.send_raw(request).await.map_err(|e| {
+            RemoteError::new(EXIT_GENERIC, request_failure_message("Orbit request", &e))
+        })
+    }
+
+    async fn send_raw(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> reqwest::Result<reqwest::Response> {
         let request_id = crate::telemetry::invocation_id();
         let session_id = agent_session_id();
         let mut builder = request
@@ -210,9 +276,7 @@ impl OrbitClient {
         if let Some(session_id) = &session_id {
             builder = builder.header("X-Orbit-Session-Id", session_id);
         }
-        builder.send().await.map_err(|e| {
-            RemoteError::new(EXIT_GENERIC, request_failure_message("Orbit request", &e))
-        })
+        builder.send().await
     }
 }
 
@@ -242,6 +306,17 @@ struct CredentialHelperToken {
     token: String,
 }
 
+fn is_local_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    host == "localhost"
+        || [".localhost", ".test", ".local", ".internal"]
+            .iter()
+            .any(|suffix| host.ends_with(suffix))
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
 fn resolve_endpoint(
     get_env: impl Fn(&str) -> Option<String>,
     credential_helper: impl FnOnce() -> Option<ResolvedEndpoint>,
@@ -265,7 +340,7 @@ fn resolve_endpoint(
         let base_url =
             non_empty("GITLAB_URL").unwrap_or_else(|| DEFAULT_GITLAB_BASE_URL.to_string());
         let url = validate_base_url("GITLAB_URL", &base_url)?;
-        if url.scheme() == "http" {
+        if url.scheme() == "http" && !url.host_str().is_some_and(is_local_host) {
             eprintln!(
                 "warning: GITLAB_URL is not https ({base_url}); the token will be sent in plaintext"
             );
@@ -311,26 +386,77 @@ impl std::fmt::Display for MissingCredential {
 
 impl std::error::Error for MissingCredential {}
 
-fn resolve_via_credential_helper() -> Option<ResolvedEndpoint> {
-    static CACHED: OnceLock<Option<ResolvedEndpoint>> = OnceLock::new();
+pub(crate) fn gitlab_usable(dir: &Path) -> bool {
+    let Ok(client) = OrbitClient::from_env_in(dir) else {
+        return false;
+    };
+    let Ok(host) = client.get_host() else {
+        return false;
+    };
+    let origin = super::origin::project(dir)
+        .filter(|(origin_host, _)| *origin_host == host)
+        .map(|(_, path)| path);
+    block_on_short(async move {
+        match origin {
+            Some(path) => client.check_graph_status(path).await,
+            None => client.check_status().await,
+        }
+    })
+    .is_some()
+}
 
-    CACHED
-        .get_or_init(|| {
-            let output = std::process::Command::new("glab")
-                .args(["auth", "credential-helper"])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null())
-                .output()
-                .ok()?;
+impl OrbitClient {
+    pub(crate) async fn schema_overview(&self, request: Vec<u8>) -> Option<String> {
+        let body = tokio::time::timeout(SHORT_REQUEST_TIMEOUT, self.query_raw(request))
+            .await
+            .ok()?
+            .ok()?;
+        String::from_utf8(body).ok()
+    }
+}
 
-            if !output.status.success() {
-                return None;
-            }
-
-            parse_credential_helper_response(&output.stdout)
+fn block_on_short<T, F>(future: F) -> Option<T>
+where
+    T: Send + 'static,
+    F: std::future::Future<Output = Result<T, RemoteError>> + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
+        runtime.block_on(async {
+            tokio::time::timeout(SHORT_REQUEST_TIMEOUT, future)
+                .await
+                .ok()?
+                .ok()
         })
-        .clone()
+    })
+    .join()
+    .ok()
+    .flatten()
+}
+
+fn resolve_via_credential_helper(dir: &Path) -> Option<ResolvedEndpoint> {
+    static CACHED: LazyLock<Mutex<HashMap<PathBuf, Option<ResolvedEndpoint>>>> =
+        LazyLock::new(Default::default);
+
+    let key = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    if let Some(cached) = CACHED.lock().ok()?.get(&key) {
+        return cached.clone();
+    }
+    let resolved = std::process::Command::new("glab")
+        .args(["auth", "credential-helper"])
+        .current_dir(&key)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| parse_credential_helper_response(&output.stdout));
+    CACHED.lock().ok()?.insert(key, resolved.clone());
+    resolved
 }
 
 fn parse_credential_helper_response(json: &[u8]) -> Option<ResolvedEndpoint> {
@@ -390,6 +516,7 @@ async fn read_body(response: reqwest::Response) -> Result<Vec<u8>, RemoteError> 
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use std::collections::HashMap;
 

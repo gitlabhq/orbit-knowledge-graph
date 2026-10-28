@@ -1,0 +1,70 @@
+name: "Ruby: a file that depends on a changed file keeps its edges once"
+
+fixtures:
+  - path: config/application.rb
+    content: |
+      require "rails"
+      require_relative "../lib/settings"
+
+      module Gitlab
+        class Application
+          def boot
+            config.eager_load = true
+          end
+        end
+      end
+
+  - path: lib/settings.rb
+    content: |
+      class Settings
+      end
+
+tests:
+  - name: boot calls each required file once
+    query: |
+      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      WHERE caller.name = 'boot'
+      RETURN sym.import_path AS path
+    assert:
+      - { row_count: 2 }
+      - { row: { path: rails } }
+      - { row: { path: ../lib/settings } }
+
+steps:
+  - name: edit the required file
+    snapshot: true
+    modify:
+      - path: lib/settings.rb
+        content: |
+          class Settings
+          end
+          # edited
+    tests:
+      - name: boot still calls each required file once
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          WHERE caller.name = 'boot'
+          RETURN sym.import_path AS path
+        assert:
+          - { row_count: 2 }
+          - { row: { path: rails } }
+          - { row: { path: ../lib/settings } }
+
+  - name: edit the required file again
+    snapshot: true
+    modify:
+      - path: lib/settings.rb
+        content: |
+          class Settings
+          end
+          # edited twice
+    tests:
+      - name: boot calls each required file once after two edits
+        query: |
+          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          WHERE caller.name = 'boot'
+          RETURN sym.import_path AS path
+        assert:
+          - { row_count: 2 }
+          - { row: { path: rails } }
+          - { row: { path: ../lib/settings } }

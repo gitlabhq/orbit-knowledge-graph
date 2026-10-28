@@ -16,6 +16,16 @@
 # note-gated `scope: none` entry, the certified output-neutral escape hatch. A
 # version with no entry is treated as "*", which also makes pruning old entries safe.
 migrations:
+- version: 117
+  scope: "*"
+  note: >-
+    Job gains duration and queued_duration (seconds, computed in the extract from
+    started_at, finished_at and queued_at; a negative queue time is NULL). The new
+    nodes/ci/job.sql.j2 extract is unmapped in derive_scope, which forces a full
+    rebuild; the output change itself is Job-only.
+- version: 116
+  scope: none
+  note: high_fan_out query hint; no table change
 - version: 115
   scope: "*"
   note: >-
