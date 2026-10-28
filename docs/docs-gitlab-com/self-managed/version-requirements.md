@@ -17,7 +17,7 @@ Each GitLab Orbit release works with a range of GitLab, Helm chart, and ClickHou
 Before you install or upgrade GitLab Orbit or GitLab, find your GitLab Orbit version in each table.
 
 The tables show the newest release first.
-A GitLab Orbit version such as 1.0 includes all of its patch releases, unless a row names a patch release.
+A GitLab Orbit version such as 1.0.0 includes its later patch releases, unless a newer row names a patch release.
 A range that ends with **and later** has no known upper limit.
 
 ## GitLab
@@ -26,7 +26,7 @@ A range that ends with **and later** has no known upper limit.
 
 | GitLab Orbit version | GitLab version |
 |----------------------|----------------|
-| 1.0 | 19.4.4 and later 19.4 patch releases, 19.5.2 and later 19.5 patch releases, or 19.6 and later |
+| 1.0.0 | 19.4.4, 19.5.2, or 19.6.0 and later |
 
 When you upgrade GitLab, confirm that your GitLab Orbit version supports the new GitLab version.
 If it does not, upgrade GitLab Orbit first.
@@ -37,7 +37,7 @@ If it does not, upgrade GitLab Orbit first.
 
 | GitLab Orbit version | Helm chart version |
 |----------------------|--------------------|
-| 1.0 | 6.2.0 and later |
+| 1.0.0 | 7.0.0 and later |
 
 Each chart release installs a default GitLab Orbit version.
 To install a different supported version, set `image.tag` in `orbit-values.yaml`.
@@ -51,7 +51,7 @@ For all chart releases, see [GitLab Orbit Helm chart releases](https://gitlab.co
 
 | GitLab Orbit version | ClickHouse version |
 |----------------------|--------------------|
-| 1.0 | 26.6 and later |
+| 1.0.0 | 26.6 and later |
 
 GitLab also writes to the data lake, so the data lake must use a ClickHouse version that GitLab supports too.
 For the versions that GitLab supports, see [Supported ClickHouse versions](https://docs.gitlab.com/integration/clickhouse/#supported-clickhouse-versions).

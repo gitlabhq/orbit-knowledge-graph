@@ -248,7 +248,7 @@ An hourly sweep picks up any data that indexing missed.
 ## Verify the installation
 
 Query the graph for the projects in the group that you turned on.
-The query uses GQL, which the [supported GitLab versions](getting-started.md#prerequisites) accept by default.
+The query uses GQL, which the [supported GitLab versions](version-requirements.md#gitlab) accept by default.
 
 To verify the installation:
 
