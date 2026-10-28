@@ -125,6 +125,25 @@ fn install_plugin(
     } else {
         report.note(&settings_label, "unchanged");
     }
+    let scope = match target {
+        Target::Global => "user",
+        Target::Project(_) => "local",
+    };
+    let add = [
+        &plugin.version_command[0],
+        "plugin",
+        "marketplace",
+        "add",
+        &dir.display().to_string(),
+        "--scope",
+        scope,
+    ];
+    if !run(&add.map(str::to_string), target) {
+        report.note(
+            &settings_label,
+            "restart Claude Code once to load the plugin",
+        );
+    }
     Ok(())
 }
 
@@ -162,6 +181,14 @@ fn remove_plugin(plugin: &PluginSpec, target: &Target, report: &mut Report) -> R
             json::remove_key_if(&mut root, &enabled_path(&plugin.id(&name)), &json!(true));
         if unregistered || disabled {
             json::write_or_delete_when_empty(&settings, &root, target, &settings_label, report)?;
+            let remove = [
+                &plugin.version_command[0],
+                "plugin",
+                "marketplace",
+                "remove",
+                &name,
+            ];
+            run(&remove.map(str::to_string), target);
         }
     }
     Ok(())
@@ -197,6 +224,28 @@ fn hash(contents: &[u8]) -> String {
 thread_local! {
     pub(in crate::commands::setup) static TEST_VERSION: std::cell::RefCell<Option<String>> =
         std::cell::RefCell::new(Some("2.1.308".to_string()));
+}
+
+#[cfg(test)]
+fn run(_command: &[String], _target: &Target) -> bool {
+    true
+}
+
+#[cfg(not(test))]
+fn run(command: &[String], target: &Target) -> bool {
+    let Some((program, args)) = command.split_first() else {
+        return false;
+    };
+    let mut process = std::process::Command::new(program);
+    if let Target::Project(root) = target {
+        process.current_dir(root);
+    }
+    process
+        .args(args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 #[cfg(test)]
