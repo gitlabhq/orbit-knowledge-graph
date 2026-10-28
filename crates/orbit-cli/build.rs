@@ -96,8 +96,14 @@ fn link_downloaded_duckdb() {
         return;
     };
     let target = std::env::var("TARGET").expect("Cargo sets TARGET");
-    let lib_dir = target_root.join("duckdb-download").join(target).join(release);
-    println!("cargo:rustc-link-arg-bin=orbit=-Wl,-rpath,{}", lib_dir.display());
+    let lib_dir = target_root
+        .join("duckdb-download")
+        .join(target)
+        .join(release);
+    println!(
+        "cargo:rustc-link-arg-bin=orbit=-Wl,-rpath,{}",
+        lib_dir.display()
+    );
 }
 
 /// The DuckDB release libduckdb-sys downloads, decoded from its `1.MAJOR_MINOR_PATCH.x` version.
