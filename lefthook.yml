@@ -106,6 +106,5 @@ pre-commit:
         - "crates/xtask/src/query_docs.rs"
         - "crates/ontology/src/lib.rs"
         - "docs/docs-gitlab-com/queries/query-language.md"
-        - "skills/orbit/references/query_language.md"
     - name: secrets-detection
       run: .lefthook/gitleaks.sh pre-commit
