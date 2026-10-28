@@ -1,0 +1,40 @@
+description: A job deleted with a key-only tombstone keeps no live HAS_JOB, IN_PIPELINE or IN_PROJECT edge after the sweep
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      projects:
+        - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+      siphon_p_ci_builds:
+        - { id: 7001, partition_id: 1, stage_id: 6001, commit_id: 5001, project_id: 1000, user_id: 1, name: compile, status: success, ref: main, allow_failure: false, traversal_path: "1/100/1000/" }
+        - { id: 7002, partition_id: 1, stage_id: 6001, commit_id: 5001, project_id: 1000, user_id: 1, name: lint, status: success, ref: main, allow_failure: false, traversal_path: "1/100/1000/" }
+    expect:
+      edges:
+        - { kind: HAS_JOB, from: Stage, to: Job, count: 2 }
+        - { kind: HAS_JOB, from: Pipeline, to: Job, count: 2 }
+        - { kind: IN_PIPELINE, from: Job, to: Pipeline, count: 2 }
+        - { kind: IN_PROJECT, from: Job, to: Project, count: 2 }
+        - { kind: TRIGGERED, from: User, to: Job, count: 2 }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.Job, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      siphon_p_ci_builds:
+        - { id: 7001, partition_id: 1, traversal_path: "1/100/1000/", _siphon_deleted: true, _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      nodes:
+        gl_job:
+          count: 1
+          rows:
+            - { id: 7002 }
+
+  - run: stale_edge_reconciliation
+    expect:
+      edges:
+        - { kind: HAS_JOB, from: Stage, to: Job, count: 1, rows: [{ source_id: 6001, target_id: 7002 }] }
+        - { kind: HAS_JOB, from: Pipeline, to: Job, count: 1, rows: [{ source_id: 5001, target_id: 7002 }] }
+        - { kind: IN_PIPELINE, from: Job, to: Pipeline, count: 1, rows: [{ source_id: 7002, target_id: 5001 }] }
+        - { kind: IN_PROJECT, from: Job, to: Project, count: 1, rows: [{ source_id: 7002, target_id: 1000 }] }
+        - { kind: TRIGGERED, from: User, to: Job, count: 1, rows: [{ source_id: 1, target_id: 7002 }] }

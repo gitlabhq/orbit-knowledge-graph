@@ -1,0 +1,29 @@
+description: A merge request whose source fork is deleted and whose author moves to the ghost user keeps only its current SOURCE_PROJECT and AUTHORED edges after the sweep
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      projects:
+        - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+        - { id: 1001, namespace_id: 100, traversal_path: "1/100/1001/" }
+      merge_requests:
+        - { id: 10, iid: 1, title: From fork, source_branch: a, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1001, author_id: 1, traversal_path: "1/100/1000/" }
+    expect:
+      edges:
+        - { kind: SOURCE_PROJECT, from: MergeRequest, to: Project, count: 1, rows: [{ source_id: 10, target_id: 1001 }] }
+        - { kind: AUTHORED, from: User, to: MergeRequest, count: 1, rows: [{ source_id: 1, target_id: 10 }] }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.MergeRequest, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      merge_requests:
+        - { id: 10, iid: 1, title: From fork, source_branch: a, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, source_project_id: null, author_id: 99, traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-20 18:00:00" }
+
+  - run: stale_edge_reconciliation
+    expect:
+      edges:
+        - { kind: SOURCE_PROJECT, from: MergeRequest, to: Project, count: 0 }
+        - { kind: AUTHORED, from: User, to: MergeRequest, count: 1, rows: [{ source_id: 99, target_id: 10 }] }
+        - { kind: IN_PROJECT, from: MergeRequest, to: Project, count: 1, rows: [{ source_id: 10, target_id: 1000 }] }

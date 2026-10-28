@@ -196,16 +196,26 @@ pub fn stale_edge_task(
     let checkpoint_store = Arc::new(indexer::checkpoint::ClickHouseCheckpointStore::new(
         Arc::new(ctx.config.build_client("graph")),
     ));
+    let mut config = orbit_server_config::AppConfig::embedded_defaults()
+        .schedule
+        .tasks
+        .stale_edge_reconciliation;
+    config.lookback_secs = (Utc::now() - stale_edge_lookback_floor())
+        .num_seconds()
+        .unsigned_abs();
     indexer::orchestrator::scheduled::StaleEdgeReconciliation::new(
         ctx.config.build_client("graph"),
         &ontology,
         checkpoint_store,
         indexer::orchestrator::scheduled::ScheduledTaskMetrics::new(),
-        orbit_server_config::AppConfig::embedded_defaults()
-            .schedule
-            .tasks
-            .stale_edge_reconciliation,
+        config,
     )
+}
+
+fn stale_edge_lookback_floor() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc)
 }
 
 pub fn global_envelope() -> Envelope {

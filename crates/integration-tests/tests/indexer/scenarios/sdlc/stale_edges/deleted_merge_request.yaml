@@ -1,0 +1,39 @@
+description: A merge request deleted with a key-only tombstone keeps no live FK edge after the sweep
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      projects:
+        - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+        - { id: 1001, namespace_id: 100, traversal_path: "1/100/1001/" }
+      merge_requests:
+        - { id: 10, iid: 1, title: Doomed, source_branch: a, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1001, latest_merge_request_diff_id: 700, author_id: 1, traversal_path: "1/100/1000/" }
+        - { id: 20, iid: 2, title: Kept, source_branch: b, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, source_project_id: 1000, latest_merge_request_diff_id: 800, author_id: 1, traversal_path: "1/100/1000/" }
+    expect:
+      edges:
+        - { kind: IN_PROJECT, from: MergeRequest, to: Project, count: 2 }
+        - { kind: SOURCE_PROJECT, from: MergeRequest, to: Project, count: 2 }
+        - { kind: AUTHORED, from: User, to: MergeRequest, count: 2 }
+        - { kind: HAS_LATEST_DIFF, from: MergeRequest, to: MergeRequestDiff, count: 2 }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.MergeRequest, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      merge_requests:
+        - { id: 10, traversal_path: "1/100/1000/", _siphon_deleted: true, _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      nodes:
+        gl_merge_request:
+          count: 1
+          rows:
+            - { id: 20 }
+
+  - run: stale_edge_reconciliation
+    expect:
+      edges:
+        - { kind: IN_PROJECT, from: MergeRequest, to: Project, count: 1, rows: [{ source_id: 20, target_id: 1000 }] }
+        - { kind: SOURCE_PROJECT, from: MergeRequest, to: Project, count: 1, rows: [{ source_id: 20, target_id: 1000 }] }
+        - { kind: AUTHORED, from: User, to: MergeRequest, count: 1, rows: [{ source_id: 1, target_id: 20 }] }
+        - { kind: HAS_LATEST_DIFF, from: MergeRequest, to: MergeRequestDiff, count: 1, rows: [{ source_id: 20, target_id: 800 }] }
