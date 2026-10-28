@@ -1,4 +1,4 @@
-# Orbit Local development quickstart
+# Orbit CLI development quickstart
 
 Build and test the `orbit` CLI and related crates without a Caproni cluster, NATS, Siphon,
 ClickHouse, or PostgreSQL. Many contributions only need the tools on this
@@ -46,15 +46,15 @@ faster.
 
 `orbit skills` (or `orbit skills list`) lists the agent skills deployed by the
 selected GitLab instance.
-`orbit skills get orbit [path]` validates and caches the instance's whole remote
-tree, composes it with local CLI guidance, and prints `SKILL.md` when `path` is
+`orbit skills get orbit [path]` validates and caches the whole skill tree that the
+instance serves, composes it with local CLI guidance, and prints `SKILL.md` when `path` is
 omitted. `orbit skills get <name> [path]` fetches any other skill the instance
 lists as the server serves it, with no local composition. Only `orbit` has an
 embedded copy, so another skill needs a credential and fails when the fetch
 does. The cache uses the operating system's user cache directory and keeps
 instance origins isolated.
 
-The command finds credentials like the other remote commands: the Orbit API
+The command finds credentials like the other Orbit API commands: the Orbit API
 variables from glab, then `GITLAB_TOKEN` with an optional `GITLAB_URL`, then
 `glab auth credential-helper`. Without a credential, it prints a warning on
 stderr and serves the embedded local tree. The local guidance therefore stays
@@ -85,8 +85,8 @@ resulting DuckDB graph with SQL:
 ```
 
 Revision graphs and a separate manifest are written under `~/.gitlab/orbit/local/`. `orbit workspace schema` lists every
-table and column in it. Orbit Local is queried with DuckDB SQL only; the JSON
-query DSL documented under `docs/docs-gitlab-com/queries/` applies to Orbit Remote.
+table and column in it. The local graph is queried with DuckDB SQL only; the
+query language documented under `docs/docs-gitlab-com/queries/` applies to the Orbit API.
 
 ## Run tests without infrastructure
 

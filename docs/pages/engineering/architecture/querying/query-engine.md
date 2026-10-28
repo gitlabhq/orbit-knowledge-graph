@@ -97,8 +97,9 @@ Every statement that the engine emits has these guarantees:
 
 ## Walkthrough: GQL query to secure SQL
 
-The steps below follow one GQL query through the remote ClickHouse pipeline,
-from the data model it compiles against to the statement that ClickHouse runs.
+The steps below follow one GQL query through the ClickHouse pipeline of the
+Orbit API. They start at the data model the query compiles against and end at
+the statement that ClickHouse runs.
 
 Each step's diagram traces this query through that step, and the italic text
 in each box shows what happens to it. The colors mean the same thing in every
@@ -392,8 +393,8 @@ for one backend, with every value as a bound parameter.
 
 We put every rule for turning a query into SQL in one compiler, so there's one
 place to review and test them. Each step declares what it reads and writes,
-which lets us reuse steps. Hydration and local queries run the same steps as
-remote queries. Security always runs last, so verification sees the finished
+which lets us reuse steps. Hydration and local graph queries run the same steps
+as Orbit API queries. Security always runs last, so verification sees the finished
 statement. We read a project's path inside the same statement instead of
 looking it up first. So there's no cache that can go stale when a project
 moves.

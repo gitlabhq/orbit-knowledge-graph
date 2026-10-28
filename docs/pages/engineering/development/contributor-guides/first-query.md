@@ -1,9 +1,9 @@
 # Write your first Orbit query
 
-This tutorial takes you from a clean checkout to your first useful Orbit Local
-queries. Orbit Local runs entirely on your machine and stores its graph in
-DuckDB. It does not need Orbit Remote, Rails, ClickHouse, NATS, Docker, or a
-GitLab account.
+This tutorial takes you from a clean checkout to your first useful queries on
+the local graph of the Orbit CLI. The local graph lives entirely on your machine,
+in DuckDB. It does not need the Orbit API, Rails,
+ClickHouse, NATS, Docker, or a GitLab account.
 
 You need:
 
@@ -13,13 +13,13 @@ You need:
 The examples use `orbit` directly after installation. If you prefer to stay
 inside `glab`, replace `orbit` with `glab orbit` in each command.
 
-The current Orbit Local command queries the local DuckDB graph with SQL. The
-Orbit Remote Query DSL is linked at the end after the local graph concepts are
-familiar.
+The `workspace sql` command queries the local DuckDB graph with SQL. The
+Orbit API query language is linked at the end after the local graph concepts
+are familiar.
 
-## Install Orbit Local
+## Install the Orbit CLI
 
-Install the managed Orbit Local binary:
+Install the managed Orbit CLI binary:
 
 ```shell
 glab orbit --install --yes
@@ -73,7 +73,7 @@ Before writing a query, inspect the graph tables:
 orbit workspace schema
 ```
 
-Orbit Local indexes four code graph node types:
+The local graph indexes four code graph node types:
 
 | Node type | Table | What it represents |
 |---|---|---|
@@ -213,12 +213,12 @@ between them.
 
 ## Where to go next
 
-- [Orbit Local schema reference](../../../../docs-gitlab-com/cli.md#local-graph) for the four
+- [Local graph schema reference](../../../../docs-gitlab-com/cli.md#local-graph) for the four
   local node types and their properties.
-- [Orbit Local access methods](../../../../docs-gitlab-com/cli.md) for
+- [Orbit CLI access methods](../../../../docs-gitlab-com/cli.md) for
   direct `orbit`, `glab orbit`, and MCP usage.
 - [Orbit query language reference](../../../../docs-gitlab-com/queries/query-language.md)
-  for the Query DSL used by Orbit Remote and agent-facing graph queries.
+  for the query language used by the Orbit API and agent-facing graph queries.
 - [Cookbook](../../../../docs-gitlab-com/prompt-examples.md) for copy-paste query ideas.
 - [Add a language to the code indexer](../adding-a-language.md) if you want to
   contribute parser coverage for more source languages.
