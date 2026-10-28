@@ -982,6 +982,20 @@ cli-integration-test:
         - target/nextest/ci/junit-cli.xml
         - target/nextest/ci/junit.xml
 
+skills-unit-test:
+  stage: test
+  extends:
+    - .test-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - cargo nextest run --profile ci -p orbit-server --lib skills --no-fail-fast
+    - sccache --show-stats || true
+  artifacts:
+    reports:
+      junit:
+        - target/nextest/ci/junit.xml
+
 .integration-test-template:
   stage: test
   extends:
