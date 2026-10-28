@@ -73,3 +73,8 @@ To rebuild the graph database:
    The dispatcher creates the graph tables in the empty database.
    The indexers then index every group with GitLab Orbit turned on.
 1. After the first index finishes, run the query from [Verify the installation](orbit-setup.md#verify-the-installation).
+
+## Related topics
+
+- [Troubleshooting GitLab Orbit](../troubleshooting.md)
+- [Monitor GitLab Orbit](observability.md)
