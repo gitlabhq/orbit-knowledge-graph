@@ -167,11 +167,13 @@ impl From<&SetupRun> for orbit_cli_setup::OrbitCliSetup {
             components: run
                 .components
                 .iter()
-                .map(|component| match component {
-                    Component::Instructions => Item::Instructions,
-                    Component::Hooks => Item::Hooks,
-                    Component::Skill => Item::Skill,
-                    Component::Mcp => Item::Mcp,
+                // orbit_cli_setup 1-0-0 has no value for the plugin; add one with the next version
+                .filter_map(|component| match component {
+                    Component::Instructions => Some(Item::Instructions),
+                    Component::Hooks => Some(Item::Hooks),
+                    Component::Skill => Some(Item::Skill),
+                    Component::Mcp => Some(Item::Mcp),
+                    Component::Plugin => None,
                 })
                 .collect(),
             scope: match run.global {
@@ -451,7 +453,7 @@ mod tests {
         SetupRun {
             detected_agents: vec!["claude".into(), "codex".into()],
             selected_agents: vec!["claude".into()],
-            components: Component::from_flags(true, &[]),
+            components: Component::from_flags(true, false, &[]),
             global: true,
             interactive: false,
             graph_first: Some(false),

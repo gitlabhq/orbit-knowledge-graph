@@ -623,6 +623,11 @@ enum Commands {
         #[arg(long)]
         mcp: bool,
 
+        /// Also install the Orbit plugin for Claude Code, which marks Orbit calls in the
+        /// transcript. Needs Claude Code 2.1.287 or later. Off by default.
+        #[arg(long)]
+        claude_ui: bool,
+
         /// Leave a component out (repeatable).
         #[arg(long, value_enum, value_name = "COMPONENT")]
         skip: Vec<commands::setup::Component>,
@@ -934,12 +939,13 @@ async fn dispatch(
             agents,
             all,
             mcp,
+            claude_ui,
             skip,
             no_index,
             skill,
             flags,
         } => {
-            let components = commands::setup::Component::from_flags(mcp, &skip);
+            let components = commands::setup::Component::from_flags(mcp, claude_ui, &skip);
             let machine = commands::setup::detect::Machine::current()?;
             let target = flags.target()?;
             let options = flags.to_options(

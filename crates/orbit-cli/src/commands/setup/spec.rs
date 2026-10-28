@@ -149,6 +149,37 @@ pub(super) struct AgentSpec {
     pub(super) registrations: Vec<Registration>,
     pub(super) mcp: Option<McpEntry>,
     pub(super) skills: Option<SkillDirs>,
+    pub(super) plugin: Option<PluginSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PluginSpec {
+    pub(super) source: String,
+    pub(super) dir: ScopedPath,
+    pub(super) settings: ScopedPath,
+    pub(super) marketplace: String,
+    pub(super) name: String,
+    pub(super) min_version: String,
+    pub(super) version_command: Vec<String>,
+}
+
+impl PluginSpec {
+    pub(super) fn id(&self) -> String {
+        format!("{}@{}", self.name, self.marketplace)
+    }
+
+    /// Every embedded file under `config/setup/<source>/`, as (path relative to it, bytes).
+    pub(super) fn files(&self) -> Vec<(String, Vec<u8>)> {
+        let prefix = format!("{}/", self.source);
+        SetupAssets::iter()
+            .filter_map(|path| {
+                let relative = path.strip_prefix(&prefix)?.to_string();
+                let file = SetupAssets::get(&path).expect("embedded file must be readable");
+                Some((relative, file.data.into_owned()))
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -376,6 +407,41 @@ mod tests {
     }
 
     #[test]
+    fn the_claude_plugin_embeds_its_marketplace_and_plugin() {
+        let claude = agent_named("claude").unwrap();
+        let plugin = claude.plugin.as_ref().unwrap();
+        let files: Vec<String> = plugin.files().into_iter().map(|(path, _)| path).collect();
+        for expected in [
+            ".claude-plugin/marketplace.json",
+            "gitlab-orbit/.claude-plugin/plugin.json",
+            "gitlab-orbit/hooks/hooks.json",
+            "gitlab-orbit/hooks/register.js",
+        ] {
+            assert!(
+                files.iter().any(|path| path == expected),
+                "{expected}: {files:?}"
+            );
+        }
+        let marketplace: Value = serde_json::from_slice(
+            &plugin
+                .files()
+                .into_iter()
+                .find(|(path, _)| path == ".claude-plugin/marketplace.json")
+                .unwrap()
+                .1,
+        )
+        .unwrap();
+        assert_eq!(marketplace["name"], plugin.marketplace.as_str());
+        assert_eq!(marketplace["plugins"][0]["name"], plugin.name.as_str());
+        assert!(
+            marketplace["plugins"][0]["source"]
+                .as_str()
+                .is_some_and(|source| source.starts_with("./")),
+            "the plugin needs a relative source so it loads without an install step"
+        );
+    }
+
+    #[test]
     fn opencode_plugins_are_shell_safe() {
         let contents = agent_named("opencode").unwrap().template_files[0].render();
         assert!(!contents.contains('`'));
@@ -407,6 +473,11 @@ mod tests {
                         .flat_map(|r| [&r.file.global, &r.value.global]),
                 )
                 .chain(spec.mcp.iter().map(|entry| &entry.file.global))
+                .chain(
+                    spec.plugin
+                        .iter()
+                        .flat_map(|plugin| [&plugin.dir.global, &plugin.settings.global]),
+                )
                 .chain(spec.skills.iter().flat_map(|dirs| {
                     std::iter::once(&dirs.dir.global).chain(dirs.link.iter().map(|l| &l.global))
                 }))

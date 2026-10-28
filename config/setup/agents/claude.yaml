@@ -39,3 +39,18 @@ skills:
     rules:
       - "Bash({{orbit}} skills get orbit)"
       - "Bash({{orbit}} skills get orbit *)"
+# The Orbit UI plugin is opt-in (`--claude-ui`). Its marketplace entry uses a relative source,
+# so Claude Code loads it straight from the directory marketplace with no install step.
+# Project scope registers it in settings.local.json because the marketplace path is absolute.
+plugin:
+  source: claude_plugin
+  dir:
+    project: .claude/orbit/claude_plugin
+    global: "~/.claude/orbit/claude_plugin"
+  settings:
+    project: .claude/settings.local.json
+    global: "~/.claude/settings.json"
+  marketplace: gitlab-orbit
+  name: gitlab-orbit
+  min_version: "2.1.287"
+  version_command: [claude, --version]

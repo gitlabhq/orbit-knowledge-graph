@@ -249,20 +249,23 @@ pub(crate) enum Component {
     Hooks,
     Skill,
     Mcp,
+    Plugin,
 }
 
 impl Component {
-    pub(super) const ALL: [Component; 4] = [
+    pub(super) const ALL: [Component; 5] = [
         Component::Instructions,
         Component::Hooks,
         Component::Skill,
         Component::Mcp,
+        Component::Plugin,
     ];
 
-    pub(crate) fn from_flags(mcp: bool, skip: &[Component]) -> BTreeSet<Component> {
+    pub(crate) fn from_flags(mcp: bool, plugin: bool, skip: &[Component]) -> BTreeSet<Component> {
         Component::ALL
             .into_iter()
             .filter(|component| *component != Component::Mcp || mcp)
+            .filter(|component| *component != Component::Plugin || plugin)
             .filter(|component| !skip.contains(component))
             .collect()
     }
@@ -273,6 +276,7 @@ impl Component {
             Component::Hooks => "hooks",
             Component::Skill => "skill",
             Component::Mcp => "mcp server",
+            Component::Plugin => "plugin",
         }
     }
 }
@@ -425,16 +429,27 @@ mod tests {
             dry_run: false,
             verbose: false,
             index: false,
-            components: Component::from_flags(false, &[]),
+            components: Component::from_flags(false, false, &[]),
             skill: SkillRequest::default(),
         }
     }
 
     fn options_with_mcp(names: &[&str]) -> Options {
         Options {
-            components: Component::from_flags(true, &[]),
+            components: Component::from_flags(true, false, &[]),
             ..options_for(names)
         }
+    }
+
+    fn options_with_plugin(names: &[&str]) -> Options {
+        Options {
+            components: Component::from_flags(false, true, &[]),
+            ..options_for(names)
+        }
+    }
+
+    fn install_with_plugin(names: &[&str], dir: &Path) {
+        install(options_with_plugin(names), project(dir), &bare_machine()).unwrap();
     }
 
     fn bare_machine() -> Machine {
@@ -523,7 +538,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut only_instructions = options_for(&["claude", "opencode"]);
         only_instructions.components =
-            Component::from_flags(false, &[Component::Hooks, Component::Skill]);
+            Component::from_flags(false, false, &[Component::Hooks, Component::Skill]);
         install(only_instructions, project(dir.path()), &bare_machine()).unwrap();
 
         assert!(dir.path().join("CLAUDE.md").is_file());
@@ -1490,6 +1505,103 @@ mod tests {
         );
         assert!(!dir.path().join("CLAUDE.md").exists());
         assert!(!dir.path().join(".mcp.json").exists());
+    }
+
+    #[test]
+    fn the_claude_plugin_installs_only_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        install(
+            options_for(&["claude"]),
+            project(dir.path()),
+            &bare_machine(),
+        )
+        .unwrap();
+        assert!(!dir.path().join(".claude/orbit").exists());
+        assert!(!dir.path().join(".claude/settings.local.json").exists());
+
+        install_with_plugin(&["claude", "codex"], dir.path());
+
+        let marketplace = dunce::canonicalize(dir.path())
+            .unwrap()
+            .join(".claude/orbit/claude_plugin");
+        assert!(
+            marketplace
+                .join(".claude-plugin/marketplace.json")
+                .is_file()
+        );
+        assert!(marketplace.join("gitlab-orbit/hooks/register.js").is_file());
+        let settings = read_json(&dir.path().join(".claude/settings.local.json"));
+        assert_eq!(
+            settings["enabledPlugins"]["gitlab-orbit@gitlab-orbit"],
+            true
+        );
+        assert_eq!(
+            settings["extraKnownMarketplaces"]["gitlab-orbit"]["source"],
+            json!({"source": "directory", "path": marketplace.display().to_string()})
+        );
+        assert!(!dir.path().join(".codex/orbit").exists());
+    }
+
+    #[test]
+    fn the_claude_plugin_is_skipped_on_an_old_or_missing_claude() {
+        for version in [Some("2.1.286"), None] {
+            components::plugin::TEST_VERSION
+                .with(|fake| *fake.borrow_mut() = version.map(str::to_string));
+            let dir = tempfile::tempdir().unwrap();
+            install_with_plugin(&["claude"], dir.path());
+            assert!(!dir.path().join(".claude/orbit").exists(), "{version:?}");
+            assert!(
+                !dir.path().join(".claude/settings.local.json").exists(),
+                "{version:?}"
+            );
+        }
+        components::plugin::TEST_VERSION
+            .with(|fake| *fake.borrow_mut() = Some("2.1.308".to_string()));
+    }
+
+    #[test]
+    fn uninstall_removes_the_claude_plugin_and_keeps_foreign_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".claude")).unwrap();
+        std::fs::write(
+            dir.path().join(".claude/settings.local.json"),
+            r#"{"enabledPlugins": {"other@team": true}}"#,
+        )
+        .unwrap();
+
+        install_with_plugin(&["claude"], dir.path());
+        install_with_plugin(&["claude"], dir.path());
+        uninstall_named(&["claude"], dir.path());
+
+        assert_eq!(
+            read_json(&dir.path().join(".claude/settings.local.json")),
+            json!({"enabledPlugins": {"other@team": true}})
+        );
+        assert!(!dir.path().join(".claude/orbit").exists());
+    }
+
+    #[test]
+    fn uninstall_keeps_a_claude_plugin_file_the_user_edited() {
+        let dir = tempfile::tempdir().unwrap();
+        install_with_plugin(&["claude"], dir.path());
+        let register = dir
+            .path()
+            .join(".claude/orbit/claude_plugin/gitlab-orbit/hooks/register.js");
+        let edited = format!(
+            "{}\n// my tweak\n",
+            std::fs::read_to_string(&register).unwrap()
+        );
+        std::fs::write(&register, &edited).unwrap();
+
+        uninstall_named(&["claude"], dir.path());
+
+        assert_eq!(std::fs::read_to_string(&register).unwrap(), edited);
+        assert!(
+            !dir.path()
+                .join(".claude/orbit/claude_plugin/.claude-plugin/marketplace.json")
+                .exists()
+        );
+        assert!(!dir.path().join(".claude/settings.local.json").exists());
     }
 
     #[test]
