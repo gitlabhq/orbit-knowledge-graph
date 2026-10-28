@@ -203,27 +203,27 @@ fixtures:
 tests:
   - name: jh_else_ce default import targets the CE default export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/root_entry.js'
-      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+      RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", path: "jh_else_ce/gitlab_version_check/index.js", name: "default", target: "mountVersionCheck" } }
+      - { row: { language_kind: "DefaultImport", path: "jh_else_ce/gitlab_version_check/index.js", name: "default", target: "mountVersionCheck" } }
 
   - name: default imported CE entry preserves aliased helper target
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/gitlab_version_check/index.js'
-      RETURN i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+      RETURN i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { path: "~/lib/utils/common_utils", name: "parseBoolean", target: "parseBoolean" } }
 
   - name: aliased import from star barrel preserves identity
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/feature_flags/store/actions.ts'
-      RETURN i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
+      RETURN i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 2 }
       - { row: { name: "buildFlagName", alias: "normalizeFlag", target: "buildFlagName" } }
@@ -251,12 +251,12 @@ tests:
 
   - name: CommonJS require through alias targets the primary export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/legacy_entry.js'
-      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+      RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "CjsRequire", path: "~/feature_flags/store/legacy_adapter", name: "default", target: "legacyAdapter" } }
+      - { row: { language_kind: "CjsRequire", path: "~/feature_flags/store/legacy_adapter", name: "default", target: "legacyAdapter" } }
 
   - name: CommonJS files define the exported function once
     query: |
@@ -269,20 +269,20 @@ tests:
 
   - name: explicit default reexports target the original definition
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
-        AND i.identifier_name = 'ProjectsApp'
-      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+        AND i.name = 'ProjectsApp'
+      RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "~/projects/your_work/components", name: "ProjectsApp", target: "renderProjects" } }
+      - { row: { language_kind: "NamedImport", path: "~/projects/your_work/components", name: "ProjectsApp", target: "renderProjects" } }
 
   - name: project barrel imports preserve explicit, star, and constant targets
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
-        AND i.import_type = 'NamedImport'
-      RETURN i.identifier_name AS name, d.fqn AS target, d.file_path AS file
+        AND i.language_kind = 'NamedImport'
+      RETURN i.name AS name, d.fqn AS target, d.file_path AS file
     assert:
       - { row_count: 4 }
       - { row: { name: "ProjectsApp", target: "renderProjects", file: "app/assets/javascripts/projects/your_work/components/app.ts" } }
@@ -292,10 +292,10 @@ tests:
 
   - name: namespace imports over alias barrels retain their binding
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'app/assets/javascripts/projects/your_work/consumer.ts'
-        AND i.import_type = 'NamespaceImport'
-      RETURN i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias
+        AND i.language_kind = 'NamespaceImport'
+      RETURN i.import_path AS path, i.name AS name, i.alias AS alias
     assert:
       - { row_count: 1 }
       - { row: { path: "~/projects/your_work/components", name: "*", alias: "ProjectComponents" } }
@@ -323,9 +323,9 @@ tests:
 
   - name: ee alias helper imports target enterprise utility definitions
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/security_inventory/index.ts'
-      RETURN i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+      RETURN i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { path: "ee/security_inventory/utils", name: "buildSeverityPath", target: "buildSeverityPath" } }
@@ -334,9 +334,9 @@ tests:
     # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/direct_form_spec.ts'
-      RETURN i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+      RETURN i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { path: "ee/oncall_schedules/components/add_edit_schedule_form.vue", name: "default", target: "AddEditScheduleForm" } }
@@ -356,7 +356,7 @@ tests:
 
   - name: external Vue package imports remain unresolved inside monolith SFCs
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue'
         AND i.import_path = '@gitlab/ui'
       RETURN d.fqn AS target
@@ -367,9 +367,9 @@ tests:
     # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/spec/frontend/oncall_schedule/index_spec.ts'
-      RETURN i.identifier_name AS name, d.fqn AS target
+      RETURN i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { name: "AddEditScheduleForm", target: "ee/app/assets/javascripts/oncall_schedules/index.ts::AddEditScheduleForm" } }

@@ -140,7 +140,7 @@ tests:
                       'App\Service\Base\tag',
                       'App\Service\Base\describe',
                       'App\Service\Child\announce']
-      RETURN d.fqn AS fqn, d.definition_type AS t
+      RETURN d.fqn AS fqn, d.kind AS t
     assert:
       - { row_count: 4 }
       - { unique: fqn }
@@ -152,7 +152,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.fqn IN ['App\Query\Builder', 'App\Logging\Logger',
                       'App\Repo\UserRepo']
-        AND d.definition_type = 'Class'
+        AND d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }

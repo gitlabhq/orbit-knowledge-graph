@@ -111,7 +111,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.fqn IN ['App\Concerns\Loggable', 'App\Models\Entity',
                       'App\Models\Product', 'App\Enums\Status']
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 4 }
       - { unique: fqn }
@@ -124,14 +124,14 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Contracts\Identifiable'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row: { type: Interface } }
 
   - name: "Enum cases indexed under the enum"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumVariant'
+      WHERE d.kind = 'EnumVariant'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\Enums\Status\Active' } }
@@ -140,7 +140,7 @@ tests:
   - name: "Class constant indexed"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Constant'
+      WHERE d.kind = 'Constant'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: 'App\Models\Entity\KIND' } }
@@ -149,7 +149,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Enums\Status\label'
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

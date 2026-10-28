@@ -23,7 +23,7 @@ tests:
   - name: "Plain and storage-qualifier-prefixed functions keep the bare name"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.name IN ['plain', 'qualprefixed']
+      WHERE d.kind = 'Function' AND d.name IN ['plain', 'qualprefixed']
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -33,7 +33,7 @@ tests:
   - name: "Pointer-return function extracts bare identifier (not the whole declarator)"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::ptr_return'
+      WHERE d.kind = 'Function' AND d.fqn = 'funcs::ptr_return'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -42,7 +42,7 @@ tests:
   - name: "Double-pointer-return function extracts bare identifier"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::dbl_ptr_return'
+      WHERE d.kind = 'Function' AND d.fqn = 'funcs::dbl_ptr_return'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -51,7 +51,7 @@ tests:
   - name: "Parenthesized declarator extracts bare identifier"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::paren_decl'
+      WHERE d.kind = 'Function' AND d.fqn = 'funcs::paren_decl'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -60,7 +60,7 @@ tests:
   - name: "Function-pointer-return extracts bare identifier"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::fnptr_return'
+      WHERE d.kind = 'Function' AND d.fqn = 'funcs::fnptr_return'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -69,7 +69,7 @@ tests:
   - name: "Comment before the declarator is skipped, not captured as the name"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::commented'
+      WHERE d.kind = 'Function' AND d.fqn = 'funcs::commented'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -78,7 +78,7 @@ tests:
   - name: "Postfix attribute is unwrapped, not captured as the name"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::attributed'
+      WHERE d.kind = 'Function' AND d.fqn = 'funcs::attributed'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -87,7 +87,7 @@ tests:
   - name: "MSVC call modifier before the declarator is skipped, not captured as the name"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::mscall'
+      WHERE d.kind = 'Function' AND d.fqn = 'funcs::mscall'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -96,7 +96,7 @@ tests:
   - name: "Pointer / function-pointer / array typedefs extract the bare name"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'TypeAlias'
+      WHERE d.kind = 'TypeAlias'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 3 }

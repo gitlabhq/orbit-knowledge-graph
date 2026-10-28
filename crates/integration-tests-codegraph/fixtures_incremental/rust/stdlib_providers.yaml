@@ -16,7 +16,7 @@ fixtures:
 tests:
   - name: Imported standard function avoids wildcard fallback
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name = 'standard'
       RETURN target.import_path
     assert:
@@ -33,7 +33,7 @@ tests:
 
   - name: Unlisted symbols retain fallback
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name = 'unknown'
       RETURN target.import_path AS path
     assert:

@@ -80,7 +80,7 @@ tests:
   - name: "All structs and interfaces defined with correct FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['Struct', 'Interface']
+      WHERE d.kind IN ['Struct', 'Interface']
       RETURN d.name AS name, d.fqn AS fqn
       ORDER BY name
     assert:
@@ -92,7 +92,7 @@ tests:
   - name: "All methods defined with correct FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method'
+      WHERE d.kind = 'Method'
       RETURN d.name AS name, d.fqn AS fqn
       ORDER BY fqn
     assert:
@@ -107,7 +107,7 @@ tests:
   - name: "Constructor functions defined"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
+      WHERE d.kind = 'Function'
         AND d.name IN ['NewDatabase', 'NewUserService', 'main']
       RETURN d.name AS name, d.fqn AS fqn
       ORDER BY name

@@ -121,14 +121,14 @@ fixtures:
 tests:
   - name: ee_else_ce alias named import targets EE export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/sidebar/components/sidebar_dropdown_widget.vue'
         AND i.import_path = 'ee_else_ce/sidebar/constants'
-        AND i.identifier_name = 'dropdowni18nText'
-      RETURN i.import_type AS import_type, d.fqn AS target
+        AND i.name = 'dropdowni18nText'
+      RETURN i.language_kind AS language_kind, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", target: "dropdowni18nText" } }
+      - { row: { language_kind: "NamedImport", target: "dropdowni18nText" } }
 
   - name: Vue computed property resolves ee_else_ce helper call
     query: |
@@ -142,33 +142,33 @@ tests:
 
   - name: Vue default import of CE component targets primary export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
         AND i.import_path = '~/repository/components/header_area/blob_overflow_menu.vue'
-      RETURN i.import_type AS import_type, d.fqn AS target
+      RETURN i.language_kind AS language_kind, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", target: "CeBlobOverflowMenu" } }
+      - { row: { language_kind: "DefaultImport", target: "CeBlobOverflowMenu" } }
 
   - name: GraphQL import through ee_else_ce targets primary export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
         AND i.import_path = 'ee_else_ce/repository/queries/project_info.query.graphql'
-      RETURN i.import_type AS import_type, d.fqn AS target
+      RETURN i.language_kind AS language_kind, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", target: "ee/app/assets/javascripts/repository/queries/project_info.query.graphql::default" } }
+      - { row: { language_kind: "DefaultImport", target: "ee/app/assets/javascripts/repository/queries/project_info.query.graphql::default" } }
 
   - name: Asset alias import targets JS helper module
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue'
         AND i.import_path = '@gitlab/svgs/dist/icons.svg'
-      RETURN i.import_type AS import_type, d.fqn AS target
+      RETURN i.language_kind AS language_kind, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/lib/utils/icons_path.js::default" } }
+      - { row: { language_kind: "DefaultImport", target: "app/assets/javascripts/lib/utils/icons_path.js::default" } }
 
   - name: Vue monolith helper import from tilde alias resolves to concrete definition
     query: |

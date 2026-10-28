@@ -44,7 +44,7 @@ fixtures:
 tests:
   - name: "Undefined calls use the wildcard visible at their call site"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name IN ['straight', 'in_loop', 'inner_import']
       RETURN caller.name AS caller, target.import_path AS path
     assert:
@@ -55,7 +55,7 @@ tests:
 
   - name: "Opaque locals and builtins block wildcard fallback in loops"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name IN ['shadowed', 'builtin', 'known']
       RETURN caller.name
     assert:

@@ -1,6 +1,6 @@
 name: "Java enums — constants, constructor, fields, methods, interface implementation"
 
-# Coverage note: java.rs maps enum_declaration to definition_type "Enum"
+# Coverage note: java.rs maps enum_declaration to kind "Enum"
 # (scope("enum_declaration", "Enum")) and enum_constant to "EnumConstant"
 # (scope("enum_constant", "EnumConstant").no_scope()). Before this fixture only
 # e2e_weather_app.yaml touched an enum incidentally; there was no focused
@@ -49,11 +49,11 @@ fixtures:
       }
 
 tests:
-  - name: "Enum Planet is extracted as definition_type Enum"
+  - name: "Enum Planet is extracted as kind Enum"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.enums.Planet'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { name: "Planet", type: "Enum" } }
@@ -62,7 +62,7 @@ tests:
     query: |
       MATCH (e:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
-        AND c.definition_type = 'EnumConstant'
+        AND c.kind = 'EnumConstant'
       RETURN c.name AS name
       ORDER BY c.name
     assert:
@@ -75,7 +75,7 @@ tests:
     query: |
       MATCH (e:Definition)-[:CALLS|DEFINES|EXTENDS]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
-        AND c.definition_type = 'Constructor'
+        AND c.kind = 'Constructor'
       RETURN c.name AS name
     assert:
       - { row_count: 1 }
@@ -85,7 +85,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.enums.Planet.surfaceGravity'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Method" } }
@@ -94,7 +94,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.enums.Planet.describe'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Method" } }
@@ -112,7 +112,7 @@ tests:
     query: |
       MATCH (e:Definition)-[edge:DEFINES]->(c:Definition)
       WHERE e.fqn = 'com.example.enums.Planet'
-        AND c.definition_type = 'EnumConstant'
+        AND c.kind = 'EnumConstant'
       RETURN c.name AS name
       ORDER BY c.name
     assert:

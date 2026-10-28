@@ -83,9 +83,9 @@ fixtures:
 tests:
   - name: Escaping alias import is still recorded
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'app/assets/javascripts/consumer.js'
-      RETURN i.import_path AS path, i.identifier_name AS name
+      RETURN i.import_path AS path, i.name AS name
     assert:
       - { row_count: 1 }
       - { row: { path: "escaped", name: "steal" } }

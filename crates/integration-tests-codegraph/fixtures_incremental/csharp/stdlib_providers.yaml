@@ -11,7 +11,7 @@ fixtures:
 tests:
   - name: Static standard symbol is not a speculative wildcard call
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name = 'Run'
       RETURN target.import_path
     assert:

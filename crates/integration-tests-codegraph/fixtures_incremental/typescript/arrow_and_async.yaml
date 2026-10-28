@@ -27,7 +27,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.ts'
-        AND d.definition_type = 'Function'
+        AND d.kind = 'Function'
       RETURN d.name AS name
       ORDER BY name
     assert:

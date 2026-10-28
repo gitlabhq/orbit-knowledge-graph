@@ -14,7 +14,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/user.rb' AND d.name = 'User'
-        AND d.definition_type = 'Class'
+        AND d.kind = 'Class'
       RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
     assert:
       - { row_count: 1 }

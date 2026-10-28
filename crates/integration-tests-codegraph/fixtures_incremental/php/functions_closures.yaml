@@ -129,7 +129,7 @@ tests:
   - name: "Top-level functions are indexed with namespace-qualified FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
+      WHERE d.kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { no_nulls: fqn }
@@ -153,7 +153,7 @@ tests:
   - name: "Closures and arrow functions are NOT indexed as standalone definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
+      WHERE d.kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 16 }
@@ -269,7 +269,7 @@ tests:
   - name: "Util class is indexed with FQN under its namespace"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'App\Fcc\Util' AND d.definition_type = 'Class'
+      WHERE d.fqn = 'App\Fcc\Util' AND d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

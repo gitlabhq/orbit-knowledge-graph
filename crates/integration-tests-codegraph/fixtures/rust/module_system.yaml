@@ -28,7 +28,7 @@ tests:
   - name: All definitions across modules
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['Struct', 'Function']
+      WHERE d.kind IN ['Struct', 'Function']
       RETURN d.name AS name, d.file_path AS file
       ORDER BY name
     assert:
@@ -39,9 +39,9 @@ tests:
 
   - name: Import from crate::models extracted
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'main.rs'
-      RETURN i.identifier_name AS name
+      RETURN i.name AS name
     assert:
       - { row_count: 1 }
       - { row: { name: "create_user" } }

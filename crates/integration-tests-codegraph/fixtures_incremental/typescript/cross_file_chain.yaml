@@ -38,8 +38,8 @@ tests:
 
   - name: "the import resolves to the definition"
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
-      WHERE i.file_path = 'src/c.ts' AND i.identifier_name = 'helper'
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'src/c.ts' AND i.name = 'helper'
       RETURN d.file_path AS target
     assert:
       - { row_count: 1 }

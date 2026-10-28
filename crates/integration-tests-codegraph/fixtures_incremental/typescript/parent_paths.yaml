@@ -51,9 +51,9 @@ tests:
 
   - name: "type-only imports use the same parent-path rules"
     query: |
-      MATCH (symbol:ImportedSymbol)-[:IMPORTS]->(target:Definition)
-      WHERE symbol.identifier_name = 'Client'
-      RETURN target.file_path AS file, target.name AS name, target.definition_type AS type
+      MATCH (symbol:Import)-[:IMPORTS]->(target:Definition)
+      WHERE symbol.name = 'Client'
+      RETURN target.file_path AS file, target.name AS name, target.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { file: "lib/target.ts", name: Client, type: Class } }

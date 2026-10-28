@@ -298,7 +298,7 @@ fn graph_tables(data: &std::path::Path) -> Vec<Value> {
         "gl_directory",
         "gl_file",
         "gl_definition",
-        "gl_imported_symbol",
+        "gl_import",
         "gl_edge",
     ]
     .iter()
@@ -864,7 +864,7 @@ fn schema_lists_duckdb_tables_and_columns() {
         "gl_directory",
         "gl_file",
         "gl_definition",
-        "gl_imported_symbol",
+        "gl_import",
         "gl_edge",
     ] {
         assert!(stdout.contains(want), "missing table {want}: {stdout}");

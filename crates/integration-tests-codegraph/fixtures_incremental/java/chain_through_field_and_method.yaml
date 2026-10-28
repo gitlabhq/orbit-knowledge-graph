@@ -56,7 +56,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'chained' AND t.name IN ['reflection', 'registerType']
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { column_values: { field: callee, values: ["hint.RuntimeHints.reflection", "hint.ReflectionHints.registerType"] } }
       - { column_values: { field: kind, values: ["Method"] } }
@@ -73,7 +73,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'passed' AND t.name = 'reflection'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "hint.RuntimeHints.reflection", kind: "Method" } }

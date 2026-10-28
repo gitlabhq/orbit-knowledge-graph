@@ -393,19 +393,19 @@ tests:
   - name: Files are not definitions
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Module'
+      WHERE d.kind = 'Module'
       RETURN d.fqn AS fqn
     assert:
       - { empty: true }
 
   - name: Named import targets the exported definition
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'named/main.ts'
-      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+      RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "./util", name: "helper", target: "helper" } }
+      - { row: { language_kind: "NamedImport", path: "./util", name: "helper", target: "helper" } }
 
   - name: Named import call resolves to concrete definition
     query: |
@@ -419,12 +419,12 @@ tests:
 
   - name: Default import targets the default export
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'default/main.ts'
-      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+      RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", path: "./util", name: "default", target: "helper" } }
+      - { row: { language_kind: "DefaultImport", path: "./util", name: "default", target: "helper" } }
 
   - name: Default import call resolves to concrete definition
     query: |
@@ -457,12 +457,12 @@ tests:
 
   - name: Explicit reexport resolves through the barrel to the definition
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'explicit/main.ts'
-      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+      RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "helper" } }
+      - { row: { language_kind: "NamedImport", path: "./index", name: "helper", target: "helper" } }
 
   - name: Explicit reexport call resolves to source definition
     query: |
@@ -476,12 +476,12 @@ tests:
 
   - name: Star reexport resolves back to source export
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'star/main.ts'
-      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+      RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "helper" } }
+      - { row: { language_kind: "NamedImport", path: "./index", name: "helper", target: "helper" } }
 
   - name: Star reexport call resolves to source definition
     query: |
@@ -495,12 +495,12 @@ tests:
 
   - name: Aliased named imports keep source identity
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'alias/main.ts'
-      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
+      RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "./constants", name: "formatPrecision", alias: "fmt", target: "formatPrecision" } }
+      - { row: { language_kind: "NamedImport", path: "./constants", name: "formatPrecision", alias: "fmt", target: "formatPrecision" } }
 
   - name: Aliased named import call resolves to local definition
     query: |
@@ -514,9 +514,9 @@ tests:
 
   - name: Multiple imports from one statement keep distinct symbol identities
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'identity/consumer.ts'
-      RETURN i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
+      RETURN i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 3 }
       - { row: { name: "dateFormats", alias: null, target: "dateFormats" } }
@@ -633,15 +633,15 @@ tests:
     skip: false
     queries:
       - query: |
-          MATCH (i:ImportedSymbol)
+          MATCH (i:Import)
           WHERE i.file_path = 'unresolved/main.ts'
-          RETURN i.import_type AS import_type, i.identifier_name AS name
+          RETURN i.language_kind AS language_kind, i.name AS name
         assert:
           - { row_count: 2 }
-          - { row: { import_type: "DefaultImport", name: "default" } }
-          - { row: { import_type: "NamedImport", name: "missingNamed" } }
+          - { row: { language_kind: "DefaultImport", name: "default" } }
+          - { row: { language_kind: "NamedImport", name: "missingNamed" } }
       - query: |
-          MATCH (i:ImportedSymbol)-[:IMPORTS]->(target:Definition)
+          MATCH (i:Import)-[:IMPORTS]->(target:Definition)
           WHERE i.file_path = 'unresolved/main.ts'
           RETURN target.fqn
         assert:
@@ -649,20 +649,20 @@ tests:
 
   - name: Missing default and named export calls point at imported symbols
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path = 'unresolved/main.ts'
-      RETURN caller.fqn AS caller, sym.import_type AS import_type, sym.identifier_name AS name
-      ORDER BY import_type, name
+      RETURN caller.fqn AS caller, sym.language_kind AS language_kind, sym.name AS name
+      ORDER BY language_kind, name
     assert:
       - { row_count: 2 }
-      - { row: { caller: "inspectImports", import_type: "DefaultImport", name: "default" } }
-      - { row: { caller: "inspectImports", import_type: "NamedImport", name: "missingNamed" } }
+      - { row: { caller: "inspectImports", language_kind: "DefaultImport", name: "default" } }
+      - { row: { caller: "inspectImports", language_kind: "NamedImport", name: "missingNamed" } }
 
   - name: External aliases preserve exact imported symbols
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'inspectExternalAliases'
-      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.identifier_alias AS alias
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.alias AS alias
       ORDER BY path, alias
     assert:
       - { row_count: 3 }
@@ -672,18 +672,18 @@ tests:
 
   - name: Saved namespace members follow aliases but not overwritten values
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(sym:Import)
       WHERE caller.fqn IN ['savedMemberAlias', 'overwrittenMember', 'unusedMember']
-      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_alias AS alias
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.alias AS alias
     assert:
       - { row_count: 1 }
       - { row: { caller: "savedMemberAlias", path: "@external/tracking", alias: "Tracking" } }
 
   - name: Named external aliases have distinct identities and exactly one call each
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(sym:Import)
       WHERE caller.fqn = 'inspectExternalAliases' AND sym.import_path = '@external/analytics'
-      RETURN sym.identifier_name AS name, sym.identifier_alias AS alias
+      RETURN sym.name AS name, sym.alias AS alias
     assert:
       - { row_count: 2 }
       - { row: { name: "track", alias: "firstTrack" } }
@@ -693,15 +693,15 @@ tests:
     # Deferred: suppressing fallback requires proof that the module's exports are complete.
     skip: true
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path = 'namespace_missing/main.ts'
-      RETURN sym.import_path AS path, sym.identifier_name AS name
+      RETURN sym.import_path AS path, sym.name AS name
     assert:
       - { empty: true }
 
   - name: Resolved local ESM imports do not also emit imported-symbol fallbacks
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path IN [
         'named/main.ts',
         'default/main.ts',
@@ -713,20 +713,20 @@ tests:
         'namespace_chain/consumer.ts',
         'combo/consumer.ts'
       ]
-      RETURN caller.file_path AS file, sym.import_path AS path, sym.identifier_name AS name
+      RETURN caller.file_path AS file, sym.import_path AS path, sym.name AS name
     assert:
       - { empty: true }
 
   - name: Type-only side-effect shadowed and global calls avoid imported-symbol fallbacks
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path IN [
         'unresolved/type_only_call.ts',
         'unresolved/side_effect_call.ts',
         'unresolved/shadowed_external.ts',
         'unresolved/global_calls.ts'
       ]
-      RETURN caller.file_path AS file, sym.import_path AS path, sym.identifier_name AS name
+      RETURN caller.file_path AS file, sym.import_path AS path, sym.name AS name
     assert:
       - { empty: true }
 
@@ -734,15 +734,15 @@ tests:
     skip: false
     queries:
       - query: |
-          MATCH (i:ImportedSymbol)
-          WHERE i.file_path = 'ambiguous/main.ts' AND i.identifier_name = 'shared'
-          RETURN i.identifier_name AS name
+          MATCH (i:Import)
+          WHERE i.file_path = 'ambiguous/main.ts' AND i.name = 'shared'
+          RETURN i.name AS name
         assert:
           - { row_count: 1 }
           - { row: { name: "shared" } }
       - query: |
-          MATCH (i:ImportedSymbol)-[:IMPORTS]->(target:Definition)
-          WHERE i.file_path = 'ambiguous/main.ts' AND i.identifier_name = 'shared'
+          MATCH (i:Import)-[:IMPORTS]->(target:Definition)
+          WHERE i.file_path = 'ambiguous/main.ts' AND i.name = 'shared'
           RETURN target.fqn
         assert:
           - { empty: true }

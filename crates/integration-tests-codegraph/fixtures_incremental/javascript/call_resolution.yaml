@@ -41,7 +41,7 @@ tests:
 
   - name: "an object containing an imported callback is not itself a call to the import"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(sym:Import)
       WHERE caller.name IN ['objectIsNotCallable', 'copiedObjectIsNotCallable']
       RETURN sym.import_path
     assert:
@@ -49,7 +49,7 @@ tests:
 
   - name: "calls inside object initializers still reach the import"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(sym:Import)
       WHERE caller.name = 'objectInitializer'
       RETURN sym.import_path AS path
     assert:
@@ -58,7 +58,7 @@ tests:
 
   - name: "a resolved call does not hide an unrelated external call"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(sym:Import)
       WHERE caller.name = 'run'
       RETURN sym.import_path AS path
     assert:
@@ -71,7 +71,7 @@ steps:
     tests:
       - name: "only the external call needs fallback"
         query: |
-          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[:CALLS]->(sym:Import)
           WHERE caller.name = 'run'
           RETURN sym.import_path AS path
         assert:
@@ -79,7 +79,7 @@ steps:
           - { row: { path: "external-sdk" } }
       - name: "snapshot does not turn object values into imported calls"
         query: |
-          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[:CALLS]->(sym:Import)
           WHERE caller.name IN ['objectIsNotCallable', 'copiedObjectIsNotCallable']
           RETURN sym.import_path
         assert:
@@ -121,9 +121,9 @@ steps:
           - { row: { name: helper, file: "util.js" } }
       - name: "fallback returns for the unknown value only"
         query: |
-          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[:CALLS]->(sym:Import)
           WHERE caller.name = 'run'
-          RETURN sym.import_path AS path, sym.identifier_name AS name
+          RETURN sym.import_path AS path, sym.name AS name
         assert:
           - { row_count: 2 }
           - { row: { path: "./util", name: "value" } }
@@ -147,7 +147,7 @@ steps:
           - { row: { name: helper, file: "util.js" } }
       - name: "numeric calls are rejected again without losing external calls"
         query: |
-          MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[:CALLS]->(sym:Import)
           WHERE caller.name = 'run'
           RETURN sym.import_path AS path
         assert:

@@ -61,42 +61,42 @@ tests:
   # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "gem requires target side-effect imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'ApiRunner::fetch'
-      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { caller: "ApiRunner::fetch", path: "Faraday", name: "Faraday", import_type: "Autoload" } }
+      - { row: { caller: "ApiRunner::fetch", path: "Faraday", name: "Faraday", language_kind: "Autoload" } }
 
   # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "underscored requires target side-effect imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'ApiRunner::connect'
-      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { caller: "ApiRunner::connect", path: "ExternalClient", name: "ExternalClient", import_type: "Autoload" } }
+      - { row: { caller: "ApiRunner::connect", path: "ExternalClient", name: "ExternalClient", language_kind: "Autoload" } }
 
   # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "observed acronym constants match require paths without path-derived names"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'ApiRunner::parse'
-      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { caller: "ApiRunner::parse", path: "JSON", name: "JSON", import_type: "Autoload" } }
+      - { row: { caller: "ApiRunner::parse", path: "JSON", name: "JSON", language_kind: "Autoload" } }
 
   # corrected: a constant reference is an autoload import of the constant, not a require attribution
   - name: "require_relative target imported symbols"
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'RelativeRunner::connect'
-      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name, sym.import_type AS import_type
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name, sym.language_kind AS language_kind
     assert:
       - { row_count: 1 }
-      - { row: { caller: "RelativeRunner::connect", path: "ExternalClient", name: "ExternalClient", import_type: "Autoload" } }
+      - { row: { caller: "RelativeRunner::connect", path: "ExternalClient", name: "ExternalClient", language_kind: "Autoload" } }
 
   - name: "locally resolved require constants do not emit imported-symbol fallback"
     queries:
@@ -108,7 +108,7 @@ tests:
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
           WHERE caller.fqn = 'ShadowRunner::connect'
           RETURN sym.import_path AS path
         assert:
@@ -124,7 +124,7 @@ tests:
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
           WHERE caller.fqn = 'LocalRunner::run'
           RETURN sym.import_path AS path
         assert:

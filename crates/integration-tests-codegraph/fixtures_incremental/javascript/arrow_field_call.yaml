@@ -37,7 +37,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.fqn = 'Widget::run'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Widget::handler", kind: "Property" } }
@@ -48,7 +48,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'run' AND c.fqn = 'Pair::run'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Pair::x", kind: "Property" } }

@@ -2042,7 +2042,7 @@ mod tests {
         }
         assert!(ontology.edge_projects_column("HAS_NOTE", "Note", Target, "confidential"));
         assert!(ontology.edge_projects_column("CREATOR", "Project", Target, "archived"));
-        assert!(ontology.edge_projects_column("CALLS", "Definition", Source, "definition_type"));
+        assert!(ontology.edge_projects_column("CALLS", "Definition", Source, "kind"));
     }
 
     #[test]
@@ -2723,7 +2723,7 @@ style:
                 "id",
                 "name",
                 "fqn",
-                "definition_type",
+                "kind",
                 "file_path",
                 "commit_sha",
                 "start_line",

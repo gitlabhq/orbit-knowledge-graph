@@ -46,7 +46,7 @@ tests:
   - name: Exactly 4 definitions with correct types
     query: |
       MATCH (d:Definition)
-      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file
+      RETURN d.name AS name, d.fqn AS fqn, d.kind AS type, d.file_path AS file
     assert:
       - { row_count: 4 }
       - { unique: fqn }

@@ -19,32 +19,32 @@ fixtures:
 tests:
   - name: "C1: regular imports exist"
     query: |
-      MATCH (i:ImportedSymbol)
-      WHERE i.import_type = 'Import'
+      MATCH (i:Import)
+      WHERE i.language_kind = 'Import'
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 2 } }
 
   - name: "C2: aliased imports exist"
     query: |
-      MATCH (i:ImportedSymbol)
-      WHERE i.import_type = 'AliasedImport'
+      MATCH (i:Import)
+      WHERE i.language_kind = 'AliasedImport'
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 2 } }
 
   - name: "C3: from imports exist"
     query: |
-      MATCH (i:ImportedSymbol)
-      WHERE i.import_type = 'NamedImport'
+      MATCH (i:Import)
+      WHERE i.language_kind = 'NamedImport'
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 3 } }
 
   - name: "C5: from import has correct path for os.path"
     query: |
-      MATCH (i:ImportedSymbol)
-      WHERE i.identifier_name = 'join'
+      MATCH (i:Import)
+      WHERE i.name = 'join'
       RETURN i.import_path AS path
     assert:
       - { row_count: 1 }
@@ -52,15 +52,15 @@ tests:
 
   - name: "C6: wildcard import exists"
     query: |
-      MATCH (i:ImportedSymbol)
-      WHERE i.identifier_name = '*'
+      MATCH (i:Import)
+      WHERE i.name = '*'
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 1 } }
 
   - name: "C10: future imports exist"
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.import_path = '__future__'
       RETURN count(i) AS n
     assert:
@@ -68,15 +68,15 @@ tests:
 
   - name: "numpy alias is np"
     query: |
-      MATCH (i:ImportedSymbol)
-      WHERE i.identifier_alias = 'np'
+      MATCH (i:Import)
+      WHERE i.alias = 'np'
       RETURN i.import_path AS path
     assert:
       - { row_count: 1 }
 
   - name: "Total imports at least 15"
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       RETURN count(i) AS n
     assert:
       - { count_gte: { field: n, value: 15 } }

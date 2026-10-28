@@ -84,7 +84,7 @@ tests:
   - name: "cyclic aliases are still definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.file_path = 'src/aliases.rs' AND d.definition_type = 'TypeAlias'
+      WHERE d.file_path = 'src/aliases.rs' AND d.kind = 'TypeAlias'
       RETURN d.name AS name
     assert:
       - { row_count: 3 }

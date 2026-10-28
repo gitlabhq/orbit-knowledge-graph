@@ -212,7 +212,7 @@ tests:
   - name: "Class definitions — exact count"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Class'
+      WHERE d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { unique: fqn }
@@ -224,7 +224,7 @@ tests:
   - name: "Namespace definitions found"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Namespace'
+      WHERE d.kind = 'Namespace'
       RETURN d.fqn AS fqn
     assert:
       - { no_nulls: fqn }
@@ -238,7 +238,7 @@ tests:
   - name: "Enum constants scoped"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumConstant'
+      WHERE d.kind = 'EnumConstant'
         AND d.fqn STARTS WITH 'types::core::ErrorCode::'
       RETURN d.fqn AS fqn
     assert:
@@ -334,7 +334,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'nested::outer::inner::Widget'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "nested::outer::inner::Widget", type: Class } }
@@ -367,7 +367,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'templates::tmpl::Container'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "templates::tmpl::Container", type: Class } }
@@ -376,7 +376,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'templates::tmpl::swap'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "templates::tmpl::swap", type: Function } }
@@ -389,7 +389,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'io/reader.cpp'
-        AND d.definition_type = 'Function'
+        AND d.kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }
@@ -404,7 +404,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'unrelated.cpp'
-        AND d.definition_type = 'Function'
+        AND d.kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -416,7 +416,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'app.cpp'
-        AND d.definition_type = 'Function'
+        AND d.kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -432,7 +432,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'unions::extra::Variant'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "unions::extra::Variant", type: Union } }
@@ -441,7 +441,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'unions::extra::read_int'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "unions::extra::read_int", type: Function } }
@@ -454,7 +454,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'loops::extra::sum_range'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "loops::extra::sum_range", type: Function } }
@@ -463,7 +463,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'loops::extra::sum_array'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "loops::extra::sum_array", type: Function } }
@@ -476,7 +476,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'tmpl_usage::extra::use_templates'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "tmpl_usage::extra::use_templates", type: Function } }

@@ -70,7 +70,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'x' AND t.name IN ['x', 'b']
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Other.b", kind: "Function" } }
@@ -79,7 +79,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'go'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Other.b", kind: "Function" } }
@@ -96,7 +96,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'callOnly'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { column_values: { field: kind, values: ["Function"] } }
 
@@ -114,7 +114,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'other'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Box.cb", kind: "Property" } }
@@ -123,7 +123,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'local' AND t.name = 'cb'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Box.local.cb", kind: "Function" } }
@@ -140,7 +140,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'zip'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Box.numbers", kind: "Function" } }
@@ -149,7 +149,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'viaCompanion' AND t.name = 'size'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Box.Companion.size", kind: "Property" } }

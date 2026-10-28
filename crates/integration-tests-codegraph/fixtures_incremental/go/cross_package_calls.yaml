@@ -87,7 +87,7 @@ tests:
 
   - name: "resolved package calls emit no imported-symbol fallback"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(sym:Import)
       WHERE caller.name = 'main'
       RETURN sym.import_path AS path
     assert:

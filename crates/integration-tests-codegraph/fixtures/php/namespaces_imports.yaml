@@ -210,7 +210,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Vendor\Pkg\Deep\Inner\Thing'
-        AND d.definition_type = 'Class'
+        AND d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -218,7 +218,7 @@ tests:
   - name: "Methods inside a deep namespace inherit the full prefix"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method'
+      WHERE d.kind = 'Method'
         AND d.fqn IN ['Vendor\Pkg\Deep\Inner\Thing\ping',
                       'Vendor\Pkg\Deep\Inner\Thing\make']
       RETURN d.fqn AS fqn
@@ -229,7 +229,7 @@ tests:
   - name: "Top-level functions in a namespace get the namespace prefix"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
+      WHERE d.kind = 'Function'
         AND d.fqn IN ['Vendor\Util\format', 'Vendor\Util\helper']
       RETURN d.fqn AS fqn
     assert:
@@ -238,7 +238,7 @@ tests:
   - name: "Namespaced constants get the namespace prefix"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Constant'
+      WHERE d.kind = 'Constant'
         AND d.fqn IN ['Vendor\Util\MAX_VALUE', 'Vendor\Util\MIN_VALUE']
       RETURN d.fqn AS fqn
     assert:

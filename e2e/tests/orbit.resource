@@ -296,21 +296,21 @@ Assert Entity Count At Least For Project
     ...    ${entity} count for project ${project_id} = ${count} (need >= ${minimum})
 
 Definition Exists In Project
-    [Documentation]    Assert that a Definition with ${fqn} (and optional ${definition_type}) exists under ${project_id}.
+    [Documentation]    Assert that a Definition with ${fqn} (and optional ${kind}) exists under ${project_id}.
     ...                Returns the matched node dict.
-    [Arguments]    ${project_id}    ${fqn}    ${definition_type}=${None}    ${timeout}=180s    ${interval}=3s
+    [Arguments]    ${project_id}    ${fqn}    ${kind}=${None}    ${timeout}=180s    ${interval}=3s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     ${node}=    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
-    ...    Lookup Definition By Fqn    ${project_id}    ${fqn}    ${definition_type}
+    ...    Lookup Definition By Fqn    ${project_id}    ${fqn}    ${kind}
     RETURN    ${node}
 
 Lookup Definition By Fqn
-    [Arguments]    ${project_id}    ${fqn}    ${definition_type}=${None}
-    ${type}=    Set Variable If    $definition_type is None    ${EMPTY}    , definition_type: '${definition_type}'
+    [Arguments]    ${project_id}    ${fqn}    ${kind}=${None}
+    ${type}=    Set Variable If    $kind is None    ${EMPTY}    , kind: '${kind}'
     ${resp}=    Orbit Query
     ...    MATCH (n:Definition {project_id: ${project_id}, fqn: '${fqn}'${type}}) RETURN n LIMIT 5
     Should Be True    ${resp["row_count"]} >= 1
-    ...    Definition fqn=${fqn} type=${definition_type} not found in project ${project_id}
+    ...    Definition fqn=${fqn} type=${kind} not found in project ${project_id}
     RETURN    ${resp["result"]["nodes"][0]}
 
 Defines Edge Exists Between Definitions
@@ -344,19 +344,19 @@ Assert Defines Edge Between File And Definition
     ...    No DEFINES edge from File ${file_path} to Definition ${def_fqn} in project ${project_id}
 
 Imports Edge Exists Between File And Imported Symbol
-    [Documentation]    Assert an IMPORTS edge from File path=${file_path} to ImportedSymbol matching
-    ...                (import_path=${import_path}, identifier_name=${identifier_name}) under ${project_id}.
-    [Arguments]    ${project_id}    ${file_path}    ${import_path}    ${identifier_name}
+    [Documentation]    Assert an IMPORTS edge from File path=${file_path} to Import matching
+    ...                (import_path=${import_path}, name=${name}) under ${project_id}.
+    [Arguments]    ${project_id}    ${file_path}    ${import_path}    ${name}
     ...    ${timeout}=180s    ${interval}=3s
     ${scaled_timeout}=    Scaled Timeout    ${timeout}
     Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Assert Imports Edge Between File And Imported Symbol
-    ...    ${project_id}    ${file_path}    ${import_path}    ${identifier_name}
+    ...    ${project_id}    ${file_path}    ${import_path}    ${name}
 
 Assert Imports Edge Between File And Imported Symbol
-    [Arguments]    ${project_id}    ${file_path}    ${import_path}    ${identifier_name}
+    [Arguments]    ${project_id}    ${file_path}    ${import_path}    ${name}
     ${count}=    Orbit Edge Count    File {project_id: ${project_id}, path: '${file_path}'}
     ...    IMPORTS
-    ...    ImportedSymbol {project_id: ${project_id}, import_path: '${import_path}', identifier_name: '${identifier_name}'}
+    ...    Import {project_id: ${project_id}, import_path: '${import_path}', name: '${name}'}
     Should Be True    ${count} >= 1
-    ...    No IMPORTS edge from File ${file_path} to ${import_path}.${identifier_name} in project ${project_id}
+    ...    No IMPORTS edge from File ${file_path} to ${import_path}.${name} in project ${project_id}

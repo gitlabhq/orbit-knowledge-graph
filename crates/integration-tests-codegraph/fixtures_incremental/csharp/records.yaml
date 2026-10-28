@@ -5,7 +5,7 @@ name: "C# 9+ records — positional records, record structs, inheritance, nestin
 #   - Implicit positional-parameter properties and the compiler-synthesised
 #     copy/Deconstruct/Equals members are not present in the source AST → not
 #     indexed. Only members written in source are extracted.
-#   - The `record` keyword is mapped by csharp.rs to definition_type "Record"
+#   - The `record` keyword is mapped by csharp.rs to kind "Record"
 #     (scope("record_declaration", "Record")); `record struct` uses the same
 #     record_declaration node and so is also reported as "Record".
 
@@ -58,11 +58,11 @@ fixtures:
       }
 
 tests:
-  - name: "Positional record Point is extracted as definition_type Record"
+  - name: "Positional record Point is extracted as kind Record"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Point'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { name: "Point", type: "Class" } }
@@ -71,7 +71,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Circle'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Class" } }
@@ -81,7 +81,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Range'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Struct" } }
@@ -90,7 +90,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Circle.Area'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Method" } }
@@ -99,7 +99,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Range.Length'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Method" } }
@@ -117,7 +117,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Outer'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Class" } }
@@ -126,7 +126,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Shapes.Outer.Inner'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Class" } }

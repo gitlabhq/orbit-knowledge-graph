@@ -114,7 +114,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'use_lambda' AND callee.name = 'square'
-      RETURN callee.definition_type AS dt
+      RETURN callee.kind AS dt
     assert:
       - { row_count: 1 }
       - { row: { dt: "Lambda" } }

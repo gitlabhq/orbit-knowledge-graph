@@ -49,7 +49,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Animal'
-      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.name AS name, d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { name: "Animal", fqn: "Animal", type: "Class" } }
@@ -58,7 +58,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Dog'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Class" } }
@@ -67,7 +67,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Point'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Struct" } }
@@ -76,7 +76,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Rectangle'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Struct" } }
@@ -85,7 +85,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Direction'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Enum" } }
@@ -94,7 +94,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Drawable'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Interface" } }
@@ -103,7 +103,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Identifiable'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Interface" } }
@@ -128,7 +128,7 @@ tests:
   - name: Direction enum entries are indexed
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumEntry'
+      WHERE d.kind = 'EnumEntry'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 6 }
@@ -154,7 +154,7 @@ tests:
   - name: All top-level types are in the same file
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['Class', 'Struct', 'Enum', 'Interface']
+      WHERE d.kind IN ['Class', 'Struct', 'Enum', 'Interface']
       RETURN d.name AS name, d.file_path AS file
     assert:
       - { no_nulls: file }

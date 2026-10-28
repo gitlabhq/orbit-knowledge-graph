@@ -13,7 +13,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'square'
-      RETURN d.definition_type AS dt
+      RETURN d.kind AS dt
     assert:
       - { row_count: 1 }
       - { row: { dt: "Lambda" } }

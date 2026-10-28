@@ -23,7 +23,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Numeric'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row: { name: "Numeric", type: "Concept" } }
 

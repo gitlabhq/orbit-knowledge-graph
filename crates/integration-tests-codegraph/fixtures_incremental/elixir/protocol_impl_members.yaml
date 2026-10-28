@@ -22,7 +22,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Size'
-      RETURN d.fqn AS fqn, d.definition_type AS kind
+      RETURN d.fqn AS fqn, d.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { fqn: "Size", kind: "Trait" } }
@@ -31,7 +31,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Box'
-      RETURN d.definition_type AS kind
+      RETURN d.kind AS kind
     assert:
       - { row_count: 2 }
       - { row: { kind: "Class" } }

@@ -23,16 +23,16 @@ fixtures:
 tests:
   - name: Exactly 1 import extracted
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'main.js'
-      RETURN i.identifier_name AS name, i.import_path AS path
+      RETURN i.name AS name, i.import_path AS path
     assert:
       - { row_count: 1 }
       - { row: { name: "helper", path: "./utils" } }
 
   - name: No imports from utils.js
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'utils.js'
       RETURN count(i) AS n
     assert:
@@ -60,7 +60,7 @@ tests:
   - name: Exactly 3 definitions across both files
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
+      WHERE d.kind = 'Function'
       RETURN d.name AS name, d.file_path AS file
       ORDER BY name
     assert:
