@@ -8,6 +8,7 @@ toc_hide: true
 ## Status
 
 Accepted. This ADR supersedes [ADR 008](008_workhorse_query_acceleration.md).
+It amends [ADR 006](006_dap_integration.md), [ADR 011](011_agent_command_surface.md), and [ADR 021](021_entity_context_expansion.md), which assumed that Workhorse runs the query stream.
 
 ## Date
 
@@ -58,9 +59,10 @@ sequenceDiagram
     W-->>C: Stream the chunks
 ```
 
-Rails reuses the user and authorization context that it loaded for the request, so a redaction batch costs only the permission checks.
+Rails reuses the user and authorization context that it loaded for the request, so a redaction batch costs only loading and checking the resources.
 Orbit sends a large result in chunks, and Rails streams each chunk to the client.
-The result never sits in memory as one object.
+The query and MCP endpoints never hold the result in memory as one object.
+The context endpoint joins the chunks, because its result is small and bounded.
 
 We removed the Workhorse query code and the internal redaction endpoint.
 
@@ -72,7 +74,7 @@ Orbit-specific work runs in two processes, Rails and Orbit, instead of three.
 The context endpoint and the Orbit tools in the GitLab MCP server use the same Rails code.
 
 Redaction is faster because it no longer pays for a second request.
-In a controlled test before the rollout, the p50 redaction round trip went from 154 ms to 61 ms.
+At the one-user step of the rollout, the p50 redaction round trip went from 154 ms to 61 ms.
 
 We then compared 18 hours at 100% of GitLab.com users with the same hours one week before, when Workhorse served most of the traffic.
 
@@ -83,7 +85,7 @@ We then compared 18 hours at 100% of GitLab.com users with the same hours one we
 | Redaction time mean / p99 | 325 / 6,599 ms | 181 / 949 ms |
 | Puma threads held by Orbit, fleet mean | n/a | 0.04 |
 
-**Latency stayed the same at p50 and p95, and p99 dropped from 1,045 ms to 757 ms.**
+**Latency was about the same at p50 and p95, and p99 dropped from 1,045 ms to 757 ms.**
 
 ## Consequences
 
@@ -94,9 +96,11 @@ We then compared 18 hours at 100% of GitLab.com users with the same hours one we
   A benchmark showed a saving, but production did not.
 - Slow queries now count against the Rails apdex.
   Requests over the apdex target went up after the rollout.
-- The Rails request timeout caps a query, and that cap is lower than the old Workhorse deadline.
+- A query must finish inside one Rails request.
+  The default query timeout did not change, but a deployment can no longer raise it past the Rails request timeout.
 - There is no fallback to Workhorse.
-  GitLab Self-Managed and GitLab Dedicated run the Rails path from the release that removed the flag.
+  GitLab 19.6 removed the `orbit_query_in_rails` feature flag, so every instance on 19.6 or later runs the Rails path.
+  GitLab Self-Managed and GitLab Dedicated on 19.4 and 19.5 still use the Workhorse path from ADR 008.
 
 ## Why not the alternatives
 
