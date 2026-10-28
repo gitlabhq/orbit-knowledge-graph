@@ -23,6 +23,7 @@ struct SetupAssets;
 #[include = "hooks/*"]
 #[include = "core/*"]
 #[exclude = "*.test.ts"]
+#[exclude = "*.d.ts"]
 struct AgentPluginAssets;
 
 #[derive(Debug, Deserialize)]
@@ -197,7 +198,14 @@ impl PluginSpec {
         });
         let plugin = AgentPluginAssets::iter().map(|path| {
             let file = AgentPluginAssets::get(&path).expect("embedded file must be readable");
-            (format!("{}/{path}", self.name), file.data.into_owned())
+            let mut data = file.data.into_owned();
+            if path == ".claude-plugin/plugin.json" {
+                let mut manifest: Value =
+                    serde_json::from_slice(&data).expect("plugin.json is JSON");
+                manifest["version"] = Value::String(env!("ORBIT_VERSION").to_string());
+                data = serde_json::to_vec_pretty(&manifest).unwrap();
+            }
+            (format!("{}/{path}", self.name), data)
         });
         std::iter::once((
             ".claude-plugin/marketplace.json".to_string(),
@@ -546,10 +554,12 @@ mod tests {
             "core/cypher.ts",
             "core/labels.ts",
             "core/stats.ts",
+            "hooks/highlight.ts",
             "hooks/hooks.json",
             "hooks/orbit-mark.ts",
             "hooks/register.ts",
             "hooks/rows.ts",
+            "hooks/shiki.js",
             "hooks/theme.ts",
         ];
         let mut expected = vec![
@@ -558,6 +568,14 @@ mod tests {
         ];
         expected.extend(shipped.iter().map(|path| format!("gitlab-orbit/{path}")));
         assert_eq!(files, expected);
+        let manifest = plugin
+            .files(&plugin.marketplace)
+            .into_iter()
+            .find(|(path, _)| path.ends_with("plugin.json"))
+            .unwrap()
+            .1;
+        let manifest: Value = serde_json::from_slice(&manifest).unwrap();
+        assert_eq!(manifest["version"], env!("ORBIT_VERSION"));
         let marketplace: Value = serde_json::from_slice(
             &plugin
                 .files(&plugin.marketplace)

@@ -88,41 +88,6 @@ function subcommandOf(words, known) {
   return known(sub) ? { key: sub, args: rest } : null;
 }
 
-var KEYWORDS = new Set([
-  "MATCH",
-  "WHERE",
-  "RETURN",
-  "ORDER",
-  "BY",
-  "SKIP",
-  "OFFSET",
-  "LIMIT",
-  "CALL",
-  "AS",
-  "AND",
-  "NOT",
-  "IN",
-  "IS",
-  "NULL",
-  "TRUE",
-  "FALSE",
-  "ASC",
-  "DESC",
-  "STARTS",
-  "ENDS",
-  "WITH",
-  "CONTAINS",
-  "ANY",
-  "SHORTEST",
-  "ALL",
-  "DISTINCT",
-  "OPTIONAL",
-  "UNION",
-  "UNWIND",
-  "OR",
-  "XOR"
-]);
-var CLAUSES = new Set(["MATCH", "OPTIONAL", "WHERE", "RETURN", "ORDER", "SKIP", "OFFSET", "LIMIT", "CALL", "UNION"]);
 var NO_ENTITIES = new Set;
 var UNIQUE_KEYS = new Set(["id", "full_path", "username"]);
 function entityOfKey(key, known) {

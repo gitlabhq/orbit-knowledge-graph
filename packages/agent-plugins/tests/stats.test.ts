@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { codeLines, cypherSegments, hopsOf, layout, queryOf, tokenize } from '../core/cypher.ts'
+import { cypherSegments, hopsOf, queryOf } from '../core/cypher.ts'
 import { apiCallsFor, compact, graphStatus, grouped, parseResponse } from '../core/stats.ts'
 
 test('the llm format counts nodes by entity and edges', () => {
@@ -42,22 +42,6 @@ test('counts compact for the status line', () => {
   expect([950, 1200, 12000, 1_200_000].map(compact)).toEqual(['950', '1.2k', '12k', '1.2M'])
 })
 
-test('a query lays out one clause per line', () => {
-  const lines = layout('MATCH (mr:MergeRequest) WHERE mr.state = "opened" RETURN mr.iid LIMIT 10')
-  expect(lines.map((line) => line.map((t) => t.text).join(''))).toEqual([
-    'MATCH (mr:MergeRequest)',
-    'WHERE mr.state = "opened"',
-    'RETURN mr.iid',
-    'LIMIT 10',
-  ])
-})
-
-test('labels and relationship types are told apart', () => {
-  const kinds = Object.fromEntries(tokenize('(mr:MergeRequest)-[:IN_PROJECT]->(p)').map((t) => [t.text, t.kind]))
-  expect(kinds['MergeRequest']).toBe('label')
-  expect(kinds['IN_PROJECT']).toBe('relationship')
-})
-
 test('the query is read from the command, quotes undone', () => {
   expect(queryOf('glab orbit query "MATCH (n) WHERE n.x = \\"a\\" RETURN n"')).toBe('MATCH (n) WHERE n.x = "a" RETURN n')
   expect(queryOf("glab orbit query 'MATCH (n) RETURN n' | head -3")).toBe('MATCH (n) RETURN n')
@@ -80,15 +64,6 @@ test('the graph total sums every entity in every domain of graph-status', () => 
 test('a graph total is written in full with thousands separators', () => {
   expect(grouped(1675400)).toBe('1,675,400')
   expect(grouped(950)).toBe('950')
-})
-
-test('comments are their own tokens: //, /* */, and a line that starts with --', () => {
-  expect(tokenize('MATCH (n) // trailing').at(-1)).toEqual({ text: '// trailing', kind: 'comment' })
-  expect(tokenize('/* note */ RETURN n')[0]).toEqual({ text: '/* note */', kind: 'comment' })
-  const lines = codeLines('-- 1. Check the schema\nCALL db.schema(\'Vulnerability\')\n')
-  expect(lines[0]).toEqual([{ text: '-- 1. Check the schema', kind: 'comment' }])
-  expect(lines[1]?.map((t) => t.kind)).toEqual(['keyword', 'space', 'variable', 'punctuation', 'function', 'punctuation', 'string', 'punctuation'])
-  expect(lines).toHaveLength(2)
 })
 
 test('a reply splits around its cypher blocks and leaves other code alone', () => {

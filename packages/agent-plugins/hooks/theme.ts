@@ -1,4 +1,4 @@
-import type { TokenKind } from '../core/cypher.ts'
+import type { TokenKind } from './highlight.ts'
 
 export { MARK } from '../core/calls.ts'
 
@@ -23,12 +23,10 @@ type TokenStyle = { color?: string; bold?: boolean; italic?: boolean; dimColor?:
 
 export const TOKEN_STYLE: Readonly<Record<TokenKind, TokenStyle>> = {
   keyword: { color: BLUE, bold: true },
-  label: { color: FADE_STOPS[0] },
   relationship: { color: FADE_STOPS[0], italic: true },
   string: { color: 'success' },
   number: { color: 'warning' },
   function: { bold: true },
-  property: {},
   variable: {},
   punctuation: { dimColor: true },
   comment: { dimColor: true, italic: true },

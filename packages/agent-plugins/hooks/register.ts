@@ -1,8 +1,9 @@
 import type { Elements, Register, RenderElement } from 'claude-code'
 
 import { QUERY_LABEL, describeOrbitCall, type OrbitCall } from '../core/calls.ts'
-import { codeLines, cypherSegments, hopsOf, layout, queryOf, type Token } from '../core/cypher.ts'
+import { cypherSegments, hopsOf, queryOf } from '../core/cypher.ts'
 import { apiCallsFor, compact, graphStatus, grouped, parseResponse } from '../core/stats.ts'
+import { codeLines, layout, type Token } from './highlight.ts'
 import type { MarkProps } from './orbit-mark.ts'
 import { isPendingCall, mergeRuns } from './rows.ts'
 import { BLUE, MARK, TOKEN_STYLE } from './theme.ts'
