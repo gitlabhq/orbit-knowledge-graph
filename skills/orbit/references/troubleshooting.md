@@ -6,7 +6,7 @@ First-run setup and the common `glab orbit` errors, organised by exit code. See 
 
 Read this when a command fails with "command not found", an auth error, or a feature-flag exit code. A working setup does not need these checks on every call.
 
-1. glab v1.117.0 or later, with the Orbit commands:
+1. glab v1.126.0 or later, with the Orbit commands:
 
    ```sh
    glab --version
