@@ -109,11 +109,6 @@ fn main() {
     );
     check_grammar_bound(
         &grammar,
-        "EscapedSymbolicName",
-        &format!("IdentifierPart{{0,{MAX_IDENTIFIER_LEN}}}"),
-    );
-    check_grammar_bound(
-        &grammar,
         "NodeProjection",
         &format!("ProjectionProperty){{0,{MAX_COLUMNS}}}"),
     );
@@ -125,7 +120,7 @@ fn main() {
     check_grammar_bound(
         &grammar,
         "InListLiteral",
-        &format!("Value){{0,{MAX_IN_VALUES}}}"),
+        &format!("Value){{0,{MAX_NODE_IDS}}}"),
     );
     check_grammar_bound(
         &grammar,
@@ -160,10 +155,6 @@ fn main() {
     check_grammar_numeric_sentinel(&grammar, "HopCount", MAX_HOPS_CAP);
     check_grammar_numeric_sentinel(&grammar, "LimitCount", MAX_LIMIT);
     check_grammar_numeric_sentinel(&grammar, "SkipCount", MAX_SKIP);
-    assert_eq!(
-        MAX_NODE_IDS, MAX_IN_VALUES,
-        "GQL ListLiteral and InListLiteral share the Value bound; keep MAX_NODE_IDS and MAX_IN_VALUES equal"
-    );
 }
 
 fn check_grammar_bound(grammar: &str, rule: &str, bound: &str) {

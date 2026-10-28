@@ -186,10 +186,13 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
 /// Ranges wider than this are effectively unfiltered full-table scans.
 pub(crate) const MAX_ID_RANGE_SPAN: i64 = 100_000;
 
-/// Tighter id_range cap for path_finding endpoints because frontier BFS is O(anchors × E^depth).
+/// Tighter id_range cap for path_finding endpoints. The frontier BFS is
+/// O(anchors × E^depth), so we bound anchor cardinality to match
+/// MAX_NODE_IDS (500).
 const MAX_PATH_ANCHOR_RANGE: i64 = 500;
 
-/// Maximum rows resolved from a filtered path_finding endpoint CTE.
+/// Maximum number of rows the lowerer will resolve from a filtered
+/// path_finding endpoint CTE. Matches the node_ids cap (500).
 pub(crate) const MAX_PATH_ANCHOR_LIMIT: i64 = 500;
 
 const CONDITION_COLUMN_RULE: &str = "every condition must compare a property of a matched node or relationship with a value or another property";
@@ -1190,6 +1193,10 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             return Ok(());
         }
         match input.query_type {
+            // Path-finding endpoints seed BFS frontiers, so each endpoint
+            // must have bounded selectivity: node_ids (already capped at 500
+            // by check_depth), filters (lowerer caps CTE at MAX_PATH_ANCHOR_LIMIT),
+            // or id_range with span ≤ MAX_PATH_ANCHOR_RANGE.
             QueryType::PathFinding => {
                 if let Some(ref path) = input.path {
                     for endpoint in [&path.from, &path.to] {

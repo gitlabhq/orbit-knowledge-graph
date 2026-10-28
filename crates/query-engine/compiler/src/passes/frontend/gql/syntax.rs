@@ -8,7 +8,7 @@ use serde_json::{Number, Value};
 use super::ast::*;
 use super::{QueryParser, Rule};
 use crate::input::{BooleanExpression, Direction, FilterOp, OrderDirection, TruncateUnit};
-use crate::query_limits::MAX_FILTER_STRING_LEN;
+use crate::query_limits::{MAX_FILTER_STRING_LEN, MAX_IN_VALUES, MAX_NODE_IDS};
 
 pub(super) type Node<'i> = pest_consume::Node<'i, Rule, ()>;
 pub(super) type Result<T> = std::result::Result<T, Error<Rule>>;
@@ -579,10 +579,7 @@ impl QueryParser {
     fn Skip(input: Node) -> Result<u32> {
         let span = input.as_span();
         Ok(match_nodes!(input.into_children();
-            [SkipCount(value)] => value
-                .as_u64()
-                .and_then(|n| u32::try_from(n).ok())
-                .ok_or_else(|| error_at(span, "SKIP must be a non-negative integer"))?,
+            [SkipCount(value)] => row_count(&value, span, "SKIP")?,
         ))
     }
 
@@ -712,6 +709,17 @@ fn leaf(comparison: Comparison<'_>) -> BooleanExpression<Predicate<'_>> {
 }
 
 fn list(input: Node) -> Result<Value> {
+    if input
+        .children()
+        .any(|child| child.as_rule() == Rule::ListOverflow)
+    {
+        return Err(error_at(
+            input.as_span(),
+            &format!(
+                "a list takes at most {MAX_NODE_IDS} values, and IN takes at most {MAX_IN_VALUES} values except on id"
+            ),
+        ));
+    }
     Ok(match_nodes!(<QueryParser>; input.into_children();
         [value(values)..] => Value::Array(values.collect()),
     ))

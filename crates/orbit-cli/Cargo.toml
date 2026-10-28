@@ -18,6 +18,7 @@ code-graph-incremental = { path = "../code-graph-incremental" }
 duckdb-client = { path = "../duckdb-client" }
 labkit-events = { workspace = true }
 orbit-analytics = { path = "../orbit-analytics" }
+orbit-cli-graphql = { workspace = true }
 orbit-prompts = { path = "../orbit-prompts", features = ["skill-markers"] }
 orbit-search = { path = "../orbit-search" }
 orbit-utils = { path = "../utils" }
@@ -26,6 +27,7 @@ ontology = { path = "../ontology" }
 gitalisk-core = { workspace = true }
 clap = { workspace = true }
 cliclack = { workspace = true }
+cynic = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 orbit-log-fields = { workspace = true }
@@ -50,6 +52,7 @@ rustc-hash = { workspace = true }
 sha2 = { workspace = true }
 strum = { workspace = true }
 toml_edit = { workspace = true }
+toon-format = { workspace = true }
 uuid = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]

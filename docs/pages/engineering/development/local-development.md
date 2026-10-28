@@ -6,7 +6,7 @@ place of the Orbit pods.
 
 > Working on `orbit-cli`, the ontology, language parsers, or docs only?
 > You don't need a cluster. See the
-> [Orbit Local development quickstart](orbit-local-quickstart.md).
+> [GitLab Orbit CLI development quickstart](orbit-local-quickstart.md).
 
 ## What runs where
 

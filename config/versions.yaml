@@ -30,7 +30,7 @@ vendored:
     check_script: scripts/vendored/gitlab_system_note_actions/check.sh
 
   gitlab_graphql_schema:
-    version: "17448481030"
+    version: "17517691030"
     vendor_dir: crates/orbit-cli/graphql/schema
     vendor_script: scripts/vendored/gitlab_graphql_schema/vendor.sh
 
