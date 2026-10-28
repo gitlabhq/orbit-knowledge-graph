@@ -657,6 +657,94 @@ mod tests {
     }
 
     #[test]
+    fn target_keyed_edges_are_found_through_the_emitters_live_foreign_keys() {
+        let groups = groups();
+        for (stale_when, kind, foreign_keys) in [
+            (
+                StaleWhen::EmitterDeleted,
+                "HAS_JOB",
+                "pipeline_id, stage_id",
+            ),
+            (StaleWhen::EmitterChanged, "TRIGGERED", "user_id"),
+        ] {
+            let group = find(&groups, stale_when, "Job", "gl_ci_edge", "target_id");
+            assert!(group.relationship_kinds.contains(&kind.to_string()));
+            let sql = build_tombstone_statement(group, &[]);
+
+            assert!(
+                sql.contains(&format!(
+                    "prior AS MATERIALIZED ( SELECT traversal_path, id, \
+                     arrayJoin([{foreign_keys}]) AS foreign_key"
+                )),
+                "{sql}"
+            );
+            assert!(
+                sql.contains(
+                    "WHERE _deleted = false \
+                     AND (traversal_path, id) IN (SELECT traversal_path, id FROM emitter)"
+                ),
+                "{sql}"
+            );
+            assert!(
+                sql.contains("AND source_id IN (SELECT foreign_key FROM prior)"),
+                "{sql}"
+            );
+            assert!(
+                sql.contains(
+                    "AND target_id IN (SELECT id FROM emitter \
+                     WHERE (traversal_path, id) NOT IN (SELECT traversal_path, id FROM prior))"
+                ),
+                "{sql}"
+            );
+            assert!(
+                sql.contains("JOIN emitter ON emitter.id = edge.target_id"),
+                "{sql}"
+            );
+            assert!(
+                !sql.contains("AND target_id IN (SELECT id FROM emitter) "),
+                "{sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn array_valued_parent_keys_keep_the_target_read() {
+        let groups = groups();
+        let group = find(
+            &groups,
+            StaleWhen::EmitterDeleted,
+            "MergeRequest",
+            "gl_edge",
+            "target_id",
+        );
+        assert!(group.relationship_kinds.contains(&"REVIEWER".to_string()));
+        let sql = build_tombstone_statement(group, &[]);
+        assert!(!sql.contains("prior AS"), "{sql}");
+        assert!(
+            sql.contains("AND target_id IN (SELECT id FROM emitter) "),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn source_keyed_edges_keep_the_emitter_id_read() {
+        let groups = groups();
+        let group = find(
+            &groups,
+            StaleWhen::EmitterDeleted,
+            "Job",
+            "gl_ci_edge",
+            "source_id",
+        );
+        let sql = build_tombstone_statement(group, &[]);
+        assert!(!sql.contains("prior AS"), "{sql}");
+        assert!(
+            sql.contains("AND source_id IN (SELECT id FROM emitter) "),
+            "{sql}"
+        );
+    }
+
+    #[test]
     fn namespaces_with_pending_writes_are_excluded_from_the_scan() {
         for stale_when in [StaleWhen::EmitterChanged, StaleWhen::EmitterDeleted] {
             let sql = build_tombstone_statement(&fixture(stale_when), &[7, 42]);
