@@ -1,7 +1,8 @@
 export type Subcommand = { key: string; args: string[] }
 
-const HELPERS = new Set(['cd', 'head', 'tail'])
+const HELPERS = new Set(['cd', 'head', 'tail', 'true'])
 const SHELL_ONLY = new Set(['<', '>', '#'])
+const HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?![\w/.-])/
 
 export function simpleCommands(command: string): string[][] {
   const commands: string[][] = []
@@ -34,6 +35,12 @@ export function simpleCommands(command: string): string[][] {
     } else if (c === '\\' && i + 1 < command.length) {
       word += command[++i]
       inWord = true
+    } else if ('&>'.includes(c) && HARMLESS_REDIRECT.test(command.slice(i))) {
+      if (/^\d+$/.test(word) && /\d/.test(command[i - 1] ?? '')) {
+        word = ''
+        inWord = false
+      } else endWord()
+      i += (command.slice(i).match(HARMLESS_REDIRECT)?.[0].length ?? 1) - 1
     } else if (c === '\n' || ';&|()'.includes(c)) {
       endCommand()
     } else if ('<>'.includes(c) || (c === '#' && !inWord)) {

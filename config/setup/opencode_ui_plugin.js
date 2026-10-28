@@ -1,5 +1,6 @@
-var HELPERS = new Set(["cd", "head", "tail"]);
+var HELPERS = new Set(["cd", "head", "tail", "true"]);
 var SHELL_ONLY = new Set(["<", ">", "#"]);
+var HARMLESS_REDIRECT = /^(?:&>>?|>>?)(?:&\d+|\s*\/dev\/null)(?![\w/.-])/;
 function simpleCommands(command) {
   const commands = [];
   let words = [];
@@ -37,6 +38,13 @@ function simpleCommands(command) {
     } else if (c === "\\" && i + 1 < command.length) {
       word += command[++i];
       inWord = true;
+    } else if ("&>".includes(c) && HARMLESS_REDIRECT.test(command.slice(i))) {
+      if (/^\d+$/.test(word) && /\d/.test(command[i - 1] ?? "")) {
+        word = "";
+        inWord = false;
+      } else
+        endWord();
+      i += (command.slice(i).match(HARMLESS_REDIRECT)?.[0].length ?? 1) - 1;
     } else if (c === `
 ` || ";&|()".includes(c)) {
       endCommand();

