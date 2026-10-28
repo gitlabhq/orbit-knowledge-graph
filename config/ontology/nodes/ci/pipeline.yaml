@@ -132,6 +132,8 @@ properties:
       28: composite_identity_forbidden
       29: pipeline_ref_creation_failure
       30: filtered_by_no_pipeline
+      31: gitaly_unavailable
+      32: seed_timeout
 
   created_at:
     type: timestamp

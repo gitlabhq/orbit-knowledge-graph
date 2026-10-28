@@ -103,6 +103,7 @@ properties:
       2: always
       3: manual
       4: delayed
+      5: never
 
   retried:
     type: boolean
@@ -146,6 +147,11 @@ properties:
       28: no_updates_canceling
       29: server_timeout_running
       30: server_timeout_canceling
+      31: runner_configuration_error
+      32: runner_external_dependency_failure
+      33: runner_interrupted
+      34: runtime_environment_unavailable
+      35: rules_parse_failure
       1000: protected_environment_failure
       1001: insufficient_bridge_permissions
       1002: downstream_bridge_project_not_found
@@ -162,6 +168,12 @@ properties:
       1013: duo_workflow_not_allowed
       1014: job_router_failure
       1015: job_token_expired
+      1016: id_token_burned_project_path
+      1017: downstream_project_trigger_resolved_to_empty
+      1018: secrets_manager_access_denied
+      1019: duo_workflow_connection_failure
+      1020: pipeline_variables_file_missing
+      1021: secrets_manager_source_not_accessible
 
   created_at:
     type: timestamp
@@ -201,12 +213,17 @@ properties:
     description: "Queue time in seconds, up to started_at or, if never started, finished_at. Null while waiting, or when queued_at is after started_at (re-queued job; wait unknown)."
 
   type:
-    type: string
+    type: enum
     source: type
     nullable: false
     mutable: false
-    description: "STI class: Ci::Build, Ci::Bridge, or GenericCommitStatus."
+    description: "STI class."
+    enum_type: string
     selectivity: low
+    values:
+      0: "Ci::Build"
+      1: "Ci::Bridge"
+      2: GenericCommitStatus
 
   runner_id:
     type: int64

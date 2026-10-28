@@ -52,6 +52,7 @@ properties:
       7: Vulnerability
       8: AbuseReport
       9: "ComplianceManagement::Projects::ComplianceViolation"
+      10: Epic
 
   noteable_id:
     type: int64
