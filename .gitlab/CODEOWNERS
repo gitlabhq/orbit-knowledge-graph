@@ -13,6 +13,13 @@
 /crates/integration-tests/tests/billing_boundary.rs
 /crates/gitlab-client/src/cc_token.rs
 /config/default.yaml
+/.gitlab-ci.yml
+/Dockerfile
+/scripts/release/docker-build.sh
+/scripts/release/check-billing-enforcement.sh
+/scripts/release/publish-manifest.sh
+/scripts/release/sign-image.sh
+/scripts/release/test-billing-enforcement.sh
 /.gitlab/CODEOWNERS
 
 [Architecture] @gitlab-org/orbit/team

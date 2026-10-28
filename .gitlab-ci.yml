@@ -1347,6 +1347,15 @@ semantic-release:
   script:
     - bun x --bun semantic-release
 
+billing-image-gate-test:
+  stage: test
+  extends:
+    - .job-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - sh ./scripts/release/test-billing-enforcement.sh
+
 .docker-release:
   stage: build
   image: docker:29
@@ -1357,6 +1366,7 @@ semantic-release:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
     IMAGE_NAME: gkg
+    ORBIT_BILLING_ENFORCED: "true"
   artifacts:
     paths:
       - image-digests/
@@ -1365,6 +1375,7 @@ semantic-release:
   script:
     - export GKG_VERSION="${CI_COMMIT_TAG#v}"
     - ./scripts/release/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${GKG_VERSION}-${ARCH}"
+    - sh ./scripts/release/check-billing-enforcement.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}@$(cat "image-digests/${ARCH}")"
 
 release-build-amd64:
   extends: .docker-release
