@@ -48,6 +48,14 @@ struct ReconciliationGroup {
     emitting_node_kind_column: &'static str,
     relationship_kinds: Vec<String>,
     edge_sort_key: String,
+    parent_key_columns: Option<Vec<String>>,
+}
+
+#[derive(Default)]
+struct GroupMappings {
+    kinds: Vec<String>,
+    parent_key_columns: Vec<String>,
+    has_unkeyed_parent: bool,
 }
 
 /// Tombstones FK edges a node's pipeline stopped emitting, including every FK edge of a deleted
@@ -205,7 +213,7 @@ impl StaleEdgeReconciliation {
 
 fn group_fk_edges_by_emitting_node(ontology: &Ontology) -> Vec<ReconciliationGroup> {
     type GroupKey = (StaleWhen, String, String, &'static str);
-    let mut kinds_by_group: BTreeMap<GroupKey, Vec<String>> = BTreeMap::new();
+    let mut mappings_by_group: BTreeMap<GroupKey, GroupMappings> = BTreeMap::new();
     let mut tables_by_emitting_node: BTreeMap<String, String> = BTreeMap::new();
 
     for node in ontology.nodes() {
@@ -223,31 +231,56 @@ fn group_fk_edges_by_emitting_node(ontology: &Ontology) -> Vec<ReconciliationGro
                     node.name.clone(),
                     prefixed_table_name(&node.destination_table, *SCHEMA_VERSION),
                 );
+                let parent_key_column = mapping
+                    .array_field
+                    .is_none()
+                    .then(|| {
+                        node.fields.iter().find(|field| {
+                            field.column_name() == Some(mapping.source.field.as_str())
+                        })
+                    })
+                    .flatten()
+                    .map(|field| field.name.clone());
                 for edge_table in ontology
                     .edge_routes_for_mapping(mapping)
                     .into_iter()
                     .map(|edge| edge.destination_table.as_str())
                 {
-                    kinds_by_group
+                    let group = mappings_by_group
                         .entry((
                             StaleWhen::of(mapping),
                             node.name.clone(),
                             edge_table.to_string(),
                             emitting_node_id_column,
                         ))
-                        .or_default()
-                        .push(mapping.label.clone());
+                        .or_default();
+                    group.kinds.push(mapping.label.clone());
+                    match &parent_key_column {
+                        Some(column) => group.parent_key_columns.push(column.clone()),
+                        None => group.has_unkeyed_parent = true,
+                    }
                 }
             }
         }
     }
 
-    kinds_by_group
+    mappings_by_group
         .into_iter()
         .map(
-            |((stale_when, emitting_node, edge_table, emitting_node_id_column), mut kinds)| {
+            |((stale_when, emitting_node, edge_table, emitting_node_id_column), mappings)| {
+                let GroupMappings {
+                    mut kinds,
+                    mut parent_key_columns,
+                    has_unkeyed_parent,
+                } = mappings;
                 kinds.sort();
                 kinds.dedup();
+                parent_key_columns.sort();
+                parent_key_columns.dedup();
+                let parent_key_columns = (stale_when == StaleWhen::EmitterDeleted
+                    && emitting_node_id_column == "target_id"
+                    && !has_unkeyed_parent)
+                    .then_some(parent_key_columns);
                 let edge_sort_key = ontology
                     .edge_table_config(&edge_table)
                     .map(|config| config.sort_key.join(", "))
@@ -265,6 +298,7 @@ fn group_fk_edges_by_emitting_node(ontology: &Ontology) -> Vec<ReconciliationGro
                     },
                     relationship_kinds: kinds,
                     edge_sort_key,
+                    parent_key_columns,
                 }
             },
         )
@@ -296,6 +330,7 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
         emitting_node,
         relationship_kinds,
         edge_sort_key,
+        parent_key_columns,
     } = group;
 
     let emitter_state = match stale_when {
@@ -320,6 +355,45 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
         format!(" AND toInt64OrZero(extract(traversal_path, '^[0-9]+/([0-9]+)/')) NOT IN ({ids})")
     };
 
+    let edge_read = |endpoint_filter: &str| {
+        format!(
+            "SELECT {edge_sort_key}, _version, _deleted \
+             FROM {edge_table} \
+             WHERE relationship_kind IN ({kinds}) \
+               AND {emitting_node_kind_column} = '{emitting_node}' \
+               AND traversal_path IN (SELECT traversal_path FROM emitter) \
+               AND {endpoint_filter}"
+        )
+    };
+
+    let (prior, edge_rows) = match parent_key_columns {
+        None => (
+            String::new(),
+            edge_read(&format!(
+                "{emitting_node_id_column} IN (SELECT id FROM emitter)"
+            )),
+        ),
+        Some(columns) => (
+            format!(
+                "prior AS MATERIALIZED ( \
+                   SELECT traversal_path, id, arrayJoin([{columns}]) AS foreign_key \
+                   FROM {emitting_node_table} \
+                   WHERE _deleted = false \
+                     AND (traversal_path, id) IN (SELECT traversal_path, id FROM emitter) \
+                 ), ",
+                columns = columns.join(", "),
+            ),
+            format!(
+                "SELECT * FROM ({} UNION ALL {})",
+                edge_read("source_id IN (SELECT foreign_key FROM prior)"),
+                edge_read(
+                    "target_id IN (SELECT id FROM emitter \
+                     WHERE (traversal_path, id) NOT IN (SELECT traversal_path, id FROM prior))"
+                ),
+            ),
+        ),
+    };
+
     format!(
         "INSERT INTO {edge_table} \
            (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _version, _deleted) \
@@ -332,14 +406,10 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
              LIMIT 1 BY traversal_path, id \
            ){emitter_state} \
          ), \
+         {prior}\
          edge AS ( \
            SELECT {edge_sort_key}, _version FROM ( \
-             SELECT {edge_sort_key}, _version, _deleted \
-             FROM {edge_table} \
-             WHERE relationship_kind IN ({kinds}) \
-               AND {emitting_node_kind_column} = '{emitting_node}' \
-               AND traversal_path IN (SELECT traversal_path FROM emitter) \
-               AND {emitting_node_id_column} IN (SELECT id FROM emitter) \
+             {edge_rows} \
              ORDER BY {edge_sort_key}, _version DESC \
              LIMIT 1 BY {edge_sort_key} \
            ) WHERE _deleted = false \
@@ -396,6 +466,7 @@ mod tests {
             emitting_node_kind_column: "target_kind",
             relationship_kinds: vec!["TRIGGERED".to_string(), "AUTO_CANCELED_BY".to_string()],
             edge_sort_key: EDGE_SORT_KEY_FIXTURE.to_string(),
+            parent_key_columns: None,
         }
     }
 
@@ -659,15 +730,17 @@ mod tests {
     #[test]
     fn target_keyed_edges_are_found_through_the_emitters_live_foreign_keys() {
         let groups = groups();
-        for (stale_when, kind, foreign_keys) in [
-            (
-                StaleWhen::EmitterDeleted,
-                "HAS_JOB",
-                "pipeline_id, stage_id",
-            ),
-            (StaleWhen::EmitterChanged, "TRIGGERED", "user_id"),
+        for (node, kind, foreign_keys) in [
+            ("Job", "HAS_JOB", "pipeline_id, stage_id"),
+            ("Stage", "HAS_STAGE", "pipeline_id"),
         ] {
-            let group = find(&groups, stale_when, "Job", "gl_ci_edge", "target_id");
+            let group = find(
+                &groups,
+                StaleWhen::EmitterDeleted,
+                node,
+                "gl_ci_edge",
+                "target_id",
+            );
             assert!(group.relationship_kinds.contains(&kind.to_string()));
             let sql = build_tombstone_statement(group, &[]);
 
@@ -702,6 +775,20 @@ mod tests {
             );
             assert!(
                 !sql.contains("AND target_id IN (SELECT id FROM emitter) "),
+                "{sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn changed_keys_keep_the_target_read_because_merges_drop_old_key_values() {
+        let groups = groups();
+        for (node, table) in [("Job", "gl_ci_edge"), ("MergeRequest", "gl_edge")] {
+            let group = find(&groups, StaleWhen::EmitterChanged, node, table, "target_id");
+            let sql = build_tombstone_statement(group, &[]);
+            assert!(!sql.contains("prior AS"), "{sql}");
+            assert!(
+                sql.contains("AND target_id IN (SELECT id FROM emitter) "),
                 "{sql}"
             );
         }
