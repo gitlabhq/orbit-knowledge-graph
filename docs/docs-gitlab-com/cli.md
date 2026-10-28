@@ -233,7 +233,7 @@ To index without blocking a shell command that has a short timeout, use these op
 | `--wait` | Wait for a running index, then index in the foreground. Waiting is the default. |
 | `--timeout <seconds>` | How long to wait for a running index or open readers before the command exits with code `75`. Default: `ORBIT_WAIT_TIMEOUT_MS` if set, else 600 seconds. |
 
-With `--async`, if open readers hold the locks for up to 30 seconds, the command exits with code `75` and prints the `log` file path to stderr.
+With `--async`, if open readers still hold the locks after up to 30 seconds, the command exits with code `75` and prints the `log` file path to stderr.
 The background index keeps waiting, so you don't need to run it again.
 
 Commands that read the local graph also wait for a running index, up to 10 minutes, then exit with code `75`.
