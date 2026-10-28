@@ -23,7 +23,7 @@ test('a finished Orbit call draws the mark, the label, and the path', async ($, 
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
   const ui = await $.ui.mount(toolUse(QUERY))
   expect(await ui.find({ type: 'Text', text: 'Explored Orbit' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '  User → MergeRequest' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '  Users → Merge requests' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeUndefined()
 })
 

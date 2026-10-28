@@ -136,11 +136,15 @@ export function hopsOf(query: string): number {
 
 type Hop = 'left' | 'right' | 'none'
 
-type Path = { nodes: string[]; text: string }
+type PathNode = { type: string; one: boolean }
+
+type Path = { nodes: PathNode[]; text: string }
 
 export const NO_ENTITIES: ReadonlySet<string> = new Set()
 
-type Pin = { score: number; implied?: string }
+const UNIQUE_KEYS = new Set(['id', 'full_path', 'username'])
+
+type Pin = { score: number; one: boolean; implied?: string }
 
 function entityOfKey(key: string, known: ReadonlySet<string>): string | undefined {
   const m = key.match(/^(\w+)_id$/)
@@ -149,10 +153,34 @@ function entityOfKey(key: string, known: ReadonlySet<string>): string | undefine
   return known.has(name) ? name : undefined
 }
 
-function pinOf(keys: readonly string[], label: string, known: ReadonlySet<string>): Pin {
-  if (keys.length === 0) return { score: 0 }
+function pinOf(keys: readonly string[], equals: readonly string[], label: string, known: ReadonlySet<string>): Pin {
+  const one = equals.some((key) => UNIQUE_KEYS.has(key))
+  if (keys.length === 0) return { score: 0, one }
   const implied = keys.map((key) => entityOfKey(key, known)).find((name) => name && name !== label)
-  return { score: keys.includes('id') ? 2 : 1, ...(implied ? { implied } : {}) }
+  return { score: keys.includes('id') ? 2 : 1, one, ...(implied ? { implied } : {}) }
+}
+
+export function pluralize(word: string): string {
+  if (/[^aeiou]y$/i.test(word)) return word.slice(0, -1) + 'ies'
+  if (/(s|x|z|ch|sh)$/i.test(word)) return word + 'es'
+  return word + 's'
+}
+
+export function displayOf({ type, one }: PathNode): string {
+  if (type === 'any') return 'Anything'
+  const words = type.split(/(?<=[a-z0-9])(?=[A-Z])/).map((w, i) => (i === 0 ? w : w.toLowerCase()))
+  if (!one) words[words.length - 1] = pluralize(words[words.length - 1] ?? '')
+  return words.join(' ')
+}
+
+function pathOf(run: readonly PathNode[], separator = ' → '): Path {
+  const nodes: PathNode[] = []
+  for (const node of run) {
+    const last = nodes[nodes.length - 1]
+    if (last?.type === node.type) last.one &&= node.one
+    else nodes.push({ ...node })
+  }
+  return { nodes, text: nodes.map(displayOf).join(separator) }
 }
 
 export function entitiesOf(text: string, known: ReadonlySet<string> = NO_ENTITIES): string {
@@ -161,10 +189,13 @@ export function entitiesOf(text: string, known: ReadonlySet<string> = NO_ENTITIE
     if (m[1] && m[2]) labels[m[1]] ??= m[2]
   }
   const whereKeys: Record<string, string[]> = {}
+  const whereEquals: Record<string, string[]> = {}
   for (const clause of text.split(/\bWHERE\b/i).slice(1)) {
     const where = clause.split(/\b(?:MATCH|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT)\b/i)[0] ?? ''
-    for (const m of where.matchAll(/\b(\w+)\.(\w+)\s*(?:=|<>|!=|<=|>=|<|>|\bIN\b|\bSTARTS\b|\bENDS\b|\bCONTAINS\b)/gi)) {
-      if (m[1] && m[2]) (whereKeys[m[1]] ??= []).push(m[2])
+    for (const m of where.matchAll(/\b(\w+)\.(\w+)\s*(=|<>|!=|<=|>=|<|>|\bIN\b|\bSTARTS\b|\bENDS\b|\bCONTAINS\b)/gi)) {
+      if (!m[1] || !m[2]) continue
+      ;(whereKeys[m[1]] ??= []).push(m[2])
+      if (m[3] === '=') (whereEquals[m[1]] ??= []).push(m[2])
     }
   }
   const paths: Path[] = []
@@ -179,51 +210,49 @@ export function entitiesOf(text: string, known: ReadonlySet<string> = NO_ENTITIE
           const [, name = '', label] = m[1].match(/^\s*(\w*)\s*(?::\s*(\w+))?/) ?? []
           const node = label || labels[name] || 'any'
           const inline = [...(m[1].match(/\{([^}]*)\}/)?.[1] ?? '').matchAll(/(\w+)\s*:/g)].map((k) => k[1] ?? '')
+          const where = name ? (whereKeys[name] ?? []) : []
+          const equals = name ? (whereEquals[name] ?? []) : []
           nodes.push(node)
-          pins.push(pinOf([...inline, ...(name ? (whereKeys[name] ?? []) : [])], node, known))
+          pins.push(pinOf([...inline, ...where], [...inline, ...equals], node, known))
         } else hops.push(m[2] ? 'left' : m[3] ? 'right' : 'none')
       }
-      for (const path of readFromPin(nodes, pins) ?? readForward(nodes, hops)) {
+      const typed = nodes.map((type, i) => ({ type, one: pins[i]?.one ?? false }))
+      for (const path of readFromPin(typed, pins) ?? readForward(typed, hops)) {
         if (!paths.some((p) => p.text === path.text)) paths.push(path)
       }
     }
   }
   const walks = paths.filter((p) => p.nodes.length > 1)
-  const kept = paths.filter((p) => p.nodes.length > 1 || !walks.some((w) => w.nodes.includes(p.text)))
+  const kept = paths.filter((p) => p.nodes.length > 1 || !walks.some((w) => w.nodes.some((n) => n.type === p.nodes[0]?.type)))
   if (kept.length) return kept.map((p) => p.text).join(', ')
   const names: string[] = []
   for (const m of text.matchAll(/\\?"entity\\?"\s*:\s*\\?"(\w+)/g)) {
     if (m[1] && !names.includes(m[1])) names.push(m[1])
   }
-  return names.join(' → ')
+  return names.map((type) => displayOf({ type, one: false })).join(' → ')
 }
 
-function readFromPin(nodes: readonly string[], pins: readonly Pin[]): Path[] | null {
+function readFromPin(nodes: readonly PathNode[], pins: readonly Pin[]): Path[] | null {
   const best = Math.max(0, ...pins.map((p) => p.score))
   const at = pins.findIndex((p) => p.score === best)
   if (best === 0 || pins.filter((p) => p.score === best).length > 1) return null
   const implied = pins[at]?.implied
-  const sides: string[][] = []
+  const sides: PathNode[][] = []
   if (at < nodes.length - 1) sides.push(nodes.slice(at))
   if (at > 0) sides.push(nodes.slice(0, at + 1).reverse())
   if (sides.length === 0) sides.push(nodes.slice(at, at + 1))
-  return sides.map((side) => {
-    const run = implied ? [implied, ...side] : [...side]
-    const distinct = run.filter((node, k) => node !== run[k - 1])
-    return { nodes: distinct, text: distinct.join(' → ') }
-  })
+  return sides.map((side) => pathOf(implied ? [{ type: implied, one: true }, ...side] : side))
 }
 
-function readForward(nodes: string[], hops: Hop[]): Path[] {
-  if (hops.length === 0) return nodes[0] ? [{ nodes: [nodes[0]], text: nodes[0] }] : []
+function readForward(nodes: readonly PathNode[], hops: Hop[]): Path[] {
+  if (hops.length === 0) return nodes[0] ? [pathOf([nodes[0]])] : []
   const paths: Path[] = []
   let start = 0
   for (let i = 1; i <= hops.length; i++) {
     if (i < hops.length && hops[i] === hops[start]) continue
     const run = nodes.slice(start, i + 1)
     if (hops[start] === 'left') run.reverse()
-    const distinct = run.filter((node, k) => node !== run[k - 1])
-    paths.push({ nodes: distinct, text: distinct.join(hops[start] === 'none' ? ' — ' : ' → ') })
+    paths.push(pathOf(run, hops[start] === 'none' ? ' — ' : ' → '))
     start = i
   }
   return paths

@@ -31,31 +31,31 @@ test('a path the chain already holds is not repeated', () => {
 test('connected queries share one row with the joined path', () => {
   const rows = mergeRuns(calls(MR_PROJECT, USER_MR))
   expect(rows.length).toBe(1)
-  expect(rows[0]?.call).toMatchObject({ label: QUERY_LABEL, detail: 'User → MergeRequest → Project' })
+  expect(rows[0]?.call).toMatchObject({ label: QUERY_LABEL, detail: 'Users → Merge requests → Projects' })
 })
 
 test('a disconnected query starts its own row', () => {
   const rows = mergeRuns(calls(MR_PROJECT, PIPELINE_JOB, JOB_RUNNER))
-  expect(rows.map((row) => row.call.detail)).toEqual(['MergeRequest → Project', 'Pipeline → Job → Runner'])
+  expect(rows.map((row) => row.call.detail)).toEqual(['Merge requests → Projects', 'Pipelines → Jobs → Runners'])
 })
 
 test('a repeated call graph query stays on one row', () => {
   const rows = mergeRuns(calls(CALLS, CALLS))
   expect(rows.length).toBe(1)
-  expect(rows[0]?.call.detail).toBe('Definition')
+  expect(rows[0]?.call.detail).toBe('Definitions')
 })
 
 test('guide and schema calls stay on the row of the queries they follow', () => {
   const rows = mergeRuns(calls('glab orbit skills get orbit', q("CALL db.schema('MergeRequest')"), MR_PROJECT))
   expect(rows.length).toBe(1)
-  expect(rows[0]?.call).toMatchObject({ label: QUERY_LABEL, detail: 'MergeRequest → Project' })
+  expect(rows[0]?.call).toMatchObject({ label: QUERY_LABEL, detail: 'Merge requests → Projects' })
 })
 
 test('a running query shows the path walked so far', () => {
   const [first, second] = calls(MR_PROJECT, USER_MR)
   if (!first || !second) throw new Error('two calls expected')
   const rows = mergeRuns([first, { ...second, props: { isRunning: true } }])
-  expect(rows[0]).toMatchObject({ isRunning: true, call: { active: 'Exploring Orbit', detail: 'User → MergeRequest → Project' } })
+  expect(rows[0]).toMatchObject({ isRunning: true, call: { active: 'Exploring Orbit', detail: 'Users → Merge requests → Projects' } })
 })
 
 test('a shell call still being written does not break an Orbit group', () => {
@@ -69,4 +69,11 @@ test('a shell call still being written does not break an Orbit group', () => {
 test('a longer path that walks a whole chain replaces it', () => {
   expect(joinPaths(['Project → MergeRequest', 'Project → MergeRequest → User'])).toBe('Project → MergeRequest → User')
   expect(joinPaths(['Project → MergeRequest → User', 'Project → MergeRequest'])).toBe('Project → MergeRequest → User')
+})
+
+test('paths join on the node type whether it reads singular or plural', () => {
+  expect(joinPaths(['Project → Merge requests', 'Merge request → Users'])).toBe('Project → Merge requests → Users')
+  expect(joinPaths(['Project → Merge requests', 'Merge requests → Users'])).toBe('Project → Merge requests → Users')
+  expect(joinPaths(['Pipeline → Jobs', 'Job → Runners'])).toBe('Pipeline → Jobs → Runners')
+  expect(joinPaths(['Merge request → Users', 'Project → Merge requests'])).toBe('Project → Merge requests → Users')
 })

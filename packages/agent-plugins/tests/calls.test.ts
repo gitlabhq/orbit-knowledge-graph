@@ -84,66 +84,79 @@ test('the guide call shows the skill name, not the get subcommand', () => {
 })
 
 test('paths read from source to target', () => {
-  expect(query('MATCH (p:Project)<-[:IN_PROJECT]-(mr:MergeRequest) RETURN mr')?.detail).toBe('MergeRequest → Project')
+  expect(query('MATCH (p:Project)<-[:IN_PROJECT]-(mr:MergeRequest) RETURN mr')?.detail).toBe('Merge requests → Projects')
   expect(query('MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project) RETURN u')?.detail).toBe(
-    'User → MergeRequest → Project',
+    'Users → Merge requests → Projects',
   )
 })
 
 test('repeated node types collapse into one', () => {
-  expect(query('MATCH (c:Definition)-[:CALLS]->(d:Definition {project_id: 1}) RETURN c')?.detail).toBe('Definition')
-  expect(query('MATCH (d:Definition {project_id: 1})<-[:CALLS]-(c:Definition) RETURN c')?.detail).toBe('Definition')
-  expect(query('MATCH (child:Definition)-[:EXTENDS*1..3]->(parent:Definition) RETURN child')?.detail).toBe('Definition')
+  expect(query('MATCH (c:Definition)-[:CALLS]->(d:Definition {project_id: 1}) RETURN c')?.detail).toBe('Definitions')
+  expect(query('MATCH (d:Definition {project_id: 1})<-[:CALLS]-(c:Definition) RETURN c')?.detail).toBe('Definitions')
+  expect(query('MATCH (child:Definition)-[:EXTENDS*1..3]->(parent:Definition) RETURN child')?.detail).toBe('Definitions')
   expect(query('MATCH (c:Definition)-[:CALLS]->(d:Definition)<-[:DEFINES]-(f:File) RETURN f')?.detail).toBe(
-    'File → Definition',
+    'Files → Definitions',
   )
   expect(query('MATCH (c:Definition)-[:CALLS]->(d:Definition)-[:IN_FILE]->(f:File) RETURN f')?.detail).toBe(
-    'Definition → File',
+    'Definitions → Files',
   )
 })
 
 test('arrows both ways split into separate paths, and repeats show once', () => {
   expect(query('MATCH (a:User)-[:AUTHORED]->(mr:MergeRequest)<-[:REVIEWED]-(r:User) RETURN mr')?.detail).toBe(
-    'User → MergeRequest',
+    'Users → Merge requests',
   )
 })
 
 test('an undirected hop and an untyped node read plainly', () => {
-  expect(query('MATCH (mr:MergeRequest)--(x) RETURN x')?.detail).toBe('MergeRequest — any')
+  expect(query('MATCH (mr:MergeRequest)--(x) RETURN x')?.detail).toBe('Merge requests — Anything')
 })
 
 test('a reused variable keeps its label across MATCH clauses', () => {
   expect(
     query('MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project) MATCH (u:User)-[:AUTHORED]->(mr) RETURN u')?.detail,
-  ).toBe('MergeRequest → Project, User → MergeRequest')
+  ).toBe('Merge requests → Projects, Users → Merge requests')
 })
 
 test('the older JSON DSL falls back to entity names in order', () => {
-  expect(entitiesOf('{"nodes":[{"entity":"Project"},{"entity":"MergeRequest"}]}')).toBe('Project → MergeRequest')
+  expect(entitiesOf('{"nodes":[{"entity":"Project"},{"entity":"MergeRequest"}]}')).toBe('Projects → Merge requests')
 })
 
 test('a path starts from the node the query pins and reads outward', () => {
-  const mrs = 'Project → MergeRequest'
+  const mrs = 'Project → Merge requests'
   expect(query("MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {full_path: 'g/p'}) RETURN mr.iid")?.detail).toBe(mrs)
   expect(query("MATCH (p:Project {full_path: 'g/p'})<-[:IN_PROJECT]-(mr:MergeRequest) RETURN mr.iid")?.detail).toBe(mrs)
   expect(query("MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project) WHERE p.full_path = 'g/p' RETURN mr.iid")?.detail).toBe(mrs)
-  expect(query("MATCH (u:User {username: 'a'})-[:AUTHORED]->(mr:MergeRequest {id: 5}) RETURN u")?.detail).toBe('MergeRequest → User')
+  expect(query("MATCH (u:User {username: 'a'})-[:AUTHORED]->(mr:MergeRequest {id: 5}) RETURN u")?.detail).toBe('Merge request → User')
 })
 
 test('with no single pinned node, a path reads source to target', () => {
   expect(query("MATCH (u:User {username: 'a'})-[:AUTHORED]->(mr:MergeRequest {state: 'merged'}) RETURN mr")?.detail).toBe(
-    'User → MergeRequest',
+    'User → Merge requests',
   )
 })
 
 test('an entity id filter puts that entity first, once graph-status has listed it', () => {
   const fk = 'MATCH (mr:MergeRequest {project_id: 1}) RETURN mr.iid'
-  expect(query(fk)?.detail).toBe('MergeRequest')
+  expect(query(fk)?.detail).toBe('Merge requests')
   const known = new Set(['Project', 'MergeRequest', 'MergeRequestDiff', 'User', 'Definition'])
-  expect(query(fk, known)?.detail).toBe('Project → MergeRequest')
-  expect(query('MATCH (c:Definition)-[:CALLS]->(d:Definition {project_id: 1}) RETURN d.name', known)?.detail).toBe('Project → Definition')
+  expect(query(fk, known)?.detail).toBe('Project → Merge requests')
+  expect(query('MATCH (c:Definition)-[:CALLS]->(d:Definition {project_id: 1}) RETURN d.name', known)?.detail).toBe('Project → Definitions')
   expect(query('MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest {project_id: 1})-[:HAS_DIFF]->(d:MergeRequestDiff) RETURN d', known)?.detail).toBe(
-    'Project → MergeRequest → MergeRequestDiff, Project → MergeRequest → User',
+    'Project → Merge requests → Merge request diffs, Project → Merge requests → Users',
   )
-  expect(query('MATCH (mr:MergeRequest {pipeline_id: 1}) RETURN mr', known)?.detail).toBe('MergeRequest')
+  expect(query('MATCH (mr:MergeRequest {pipeline_id: 1}) RETURN mr', known)?.detail).toBe('Merge requests')
+})
+
+test('a node pinned to one item is singular and everything else plural, in plain words', () => {
+  const known = new Set(['Project', 'Vulnerability'])
+  expect(query('MATCH (j:Job)-[:IN_PIPELINE]->(pl:Pipeline {id: 9}) RETURN j.name')?.detail).toBe('Pipeline → Jobs')
+  expect(query('MATCH (mr:MergeRequest {id: 5})<-[:AUTHORED]-(u:User) RETURN u')?.detail).toBe('Merge request → Users')
+  expect(query("MATCH (mr:MergeRequest {state: 'merged'}) RETURN mr")?.detail).toBe('Merge requests')
+  expect(query('MATCH (mr:MergeRequest) WHERE mr.id IN [1, 2] RETURN mr')?.detail).toBe('Merge requests')
+  expect(query('MATCH (mr:MergeRequest) WHERE mr.id = 7 RETURN mr')?.detail).toBe('Merge request')
+  expect(query('MATCH (v:Vulnerability {project_id: 1}) RETURN v', known)?.detail).toBe('Project → Vulnerabilities')
+  expect(query('MATCH (f:MergeRequestDiffFile {project_id: 1}) RETURN f')?.detail).toBe('Merge request diff files')
+  expect(query('MATCH (d:Directory {project_id: 1}) RETURN d')?.detail).toBe('Directories')
+  expect(query('MATCH (b:Branch {project_id: 1}) RETURN b')?.detail).toBe('Branches')
 })
