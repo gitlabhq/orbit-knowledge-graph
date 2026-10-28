@@ -397,6 +397,17 @@ setup-schema-validate:
     - find config/setup/agents -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/setup_agent.schema.json
     - uvx check-jsonschema --verbose --schemafile config/schemas/setup.schema.json config/setup/setup.yaml
 
+setup-plugin-test:
+  stage: lint
+  image: oven/bun:1.4.4-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - bun test ./config/setup/opencode_plugin.test.js
+
 generate-config-schema:
   stage: lint
   extends:
