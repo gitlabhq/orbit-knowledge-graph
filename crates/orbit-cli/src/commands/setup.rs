@@ -1445,6 +1445,17 @@ mod tests {
     }
 
     #[test]
+    fn opencode_plugin_shows_a_toast_for_orbit_calls() {
+        let dir = tempfile::tempdir().unwrap();
+        install_with_mcp(&["opencode"], dir.path());
+
+        let plugin =
+            std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit.js")).unwrap();
+        assert!(plugin.contains(r#""tool.execute.before""#), "{plugin}");
+        assert!(plugin.contains("client.tui.showToast"), "{plugin}");
+    }
+
+    #[test]
     fn uninstall_keeps_a_template_file_the_user_edited() {
         let dir = tempfile::tempdir().unwrap();
         let plugin = dir.path().join(".opencode/plugins/orbit.js");
