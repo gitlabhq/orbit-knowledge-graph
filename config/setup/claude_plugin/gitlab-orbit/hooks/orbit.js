@@ -50,16 +50,47 @@ function clip(text, max = 60) {
   return flat.length > max ? flat.slice(0, max - 1) + '…' : flat
 }
 
-// The entity names a graph query walks, in order, as `Project → MergeRequest`.
-// Reads Cypher-style patterns, `(mr:MergeRequest)`, and the older JSON DSL, `"entity": "Project"`.
+// The paths a graph query walks, one per MATCH pattern, as `Definition → Definition` or
+// `Project ← MergeRequest`, arrows pointing the way the relationship does. Reads Cypher patterns,
+// and for the older JSON DSL the entity names in order.
 function entitiesOf(text) {
-  const seen = []
-  const patterns = [/\(\s*\w*\s*:\s*(\w+)/g, /\\?"entity\\?"\s*:\s*\\?"(\w+)/g]
-  const found = patterns.flatMap((re) => [...String(text).matchAll(re)].map((m) => ({ at: m.index, name: m[1] })))
-  for (const { name } of found.sort((a, b) => a.at - b.at)) {
-    if (!seen.includes(name)) seen.push(name)
+  const query = String(text)
+  const labels = {}
+  for (const m of query.matchAll(/\(\s*(\w+)\s*:\s*(\w+)/g)) labels[m[1]] ??= m[2]
+  const paths = []
+  for (const segment of query.split(/\bMATCH\b/i).slice(1)) {
+    const pattern = segment.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0]
+    for (const part of splitTopLevel(pattern)) {
+      let path = ''
+      for (const m of part.matchAll(/\(([^)]*)\)|(<)?-(?:\[[^\]]*\])?-(>)?/g)) {
+        if (m[1] !== undefined) {
+          const [, name, label] = m[1].match(/^\s*(\w*)\s*(?::\s*(\w+))?/) ?? []
+          path += label || labels[name] || 'any'
+        } else path += m[2] ? ' ← ' : m[3] ? ' → ' : ' — '
+      }
+      if (path && !paths.includes(path)) paths.push(path)
+    }
   }
-  return seen.join(' → ')
+  // A lone node that a longer path already walks adds nothing
+  const walks = paths.filter((p) => / [←→—] /.test(p))
+  const kept = paths.filter((p) => / [←→—] /.test(p) || !walks.some((w) => w.split(/ [←→—] /).includes(p)))
+  if (kept.length) return kept.join(', ')
+  const names = []
+  for (const m of query.matchAll(/\\?"entity\\?"\s*:\s*\\?"(\w+)/g)) if (!names.includes(m[1])) names.push(m[1])
+  return names.join(' → ')
+}
+
+// A MATCH clause's comma-separated patterns, split only outside (), [], and {}
+function splitTopLevel(text) {
+  const parts = ['']
+  let depth = 0
+  for (const ch of text) {
+    if ('([{'.includes(ch)) depth++
+    else if (')]}'.includes(ch)) depth--
+    if (ch === ',' && depth === 0) parts.push('')
+    else parts[parts.length - 1] += ch
+  }
+  return parts.map((p) => p.trim()).filter(Boolean)
 }
 
 function firstArg(rest) {
