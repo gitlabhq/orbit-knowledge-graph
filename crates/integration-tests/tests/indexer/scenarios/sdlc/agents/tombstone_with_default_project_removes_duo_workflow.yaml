@@ -1,0 +1,25 @@
+description: A workflow delete replicated as a tombstone with default column values (project_id 0 or null) still removes the DuoWorkflow node
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      projects:
+        - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+      siphon_duo_workflows_workflows:
+        - { id: 1, user_id: 7, project_id: 1000, status: 3, goal: Fix pipeline, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+        - { id: 2, user_id: 7, project_id: 1000, status: 3, goal: Write notes, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    expect:
+      nodes:
+        gl_duo_workflow: { count: 2 }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.DuoWorkflow, watermark: "2024-01-20 00:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 00:00:00.000000" }
+      siphon_duo_workflows_workflows:
+        - { id: 1, user_id: 0, project_id: 0, status: 0, goal: "", created_at: "1970-01-01 00:00:00", updated_at: "1970-01-01 00:00:00", traversal_path: "1/100/1000/", _siphon_deleted: true, _siphon_replicated_at: "2024-02-01 00:00:00" }
+        - { id: 2, user_id: 0, project_id: null, status: 0, goal: "", created_at: "1970-01-01 00:00:00", updated_at: "1970-01-01 00:00:00", traversal_path: "1/100/1000/", _siphon_deleted: true, _siphon_replicated_at: "2024-02-01 00:00:00" }
+    expect:
+      nodes:
+        gl_duo_workflow: { count: 0 }
