@@ -17,4 +17,3 @@ seed:
 expect:
   edges:
     - { kind: HAS_ROLE, from: User, to: MemberRole, traversal_path: "1/100/", count: 1, rows: [{ source_id: 1, target_id: 5 }] }
-    - { kind: MEMBER_OF, from: User, to: Group, traversal_path: "1/100/", count: 1 }

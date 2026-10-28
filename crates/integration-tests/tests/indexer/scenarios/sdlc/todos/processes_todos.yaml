@@ -22,5 +22,4 @@ expect:
         - { id: 2, user_id: 7, action: assigned, state: done, target_type: Issue }
         - { id: 3, user_id: 9, action: mentioned, target_type: Epic, group_id: 100 }
   edges:
-    - { kind: HAS_TODO, from: User, to: Todo, traversal_path: "1/100/1000/", count: 2 }
-    - { kind: HAS_TODO, from: User, to: Todo, traversal_path: "1/100/", count: 1, rows: [{ source_id: 9, target_id: 3 }] }
+    - { kind: HAS_TODO, from: User, to: Todo, count: 3, rows: [{ source_id: 7, target_id: 1, traversal_path: "1/100/1000/" }, { source_id: 7, target_id: 2, traversal_path: "1/100/1000/" }, { source_id: 9, target_id: 3, traversal_path: "1/100/" }] }
