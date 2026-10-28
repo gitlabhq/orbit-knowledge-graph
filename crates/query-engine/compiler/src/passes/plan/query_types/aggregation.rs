@@ -9,7 +9,8 @@ use query_data_model::{AuthorizedBy, OrbitQueryModel};
 
 use crate::error::Result;
 use crate::input::{
-    AggExpr, AggFunction, Input, InputAggSort, InputGroupByKey, TruncateUnit, group_by_output_names,
+    AggExpr, AggFunction, Input, InputAggSort, InputGroupByKey, TruncateUnit,
+    group_by_output_names, property_groups,
 };
 use crate::passes::plan::graph::{ExecutionPlan, RelationNode};
 use crate::passes::plan::pattern::Pattern;
@@ -124,8 +125,9 @@ fn aggregation_plan<M: OrbitQueryModel + ?Sized>(
             }
         }
     }
-    for (node, authorized_by) in input.aggregation_row_nodes(model) {
-        let AuthorizedBy::Owner { columns, split } = authorized_by else {
+    let row_nodes = input.aggregation_row_nodes(model);
+    for (node, _) in property_groups(&aggregation.group_by) {
+        let Some(AuthorizedBy::Owner { columns, split }) = row_nodes.get(node) else {
             continue;
         };
         for column in columns {

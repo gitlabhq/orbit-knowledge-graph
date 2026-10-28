@@ -2,6 +2,7 @@
 
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use orbit_utils::traversal_path::TraversalPath;
+use query_data_model::AuthorizedBy;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
@@ -96,27 +97,27 @@ pub struct Input {
     pub relationship_return: RelationshipReturn,
 }
 
-pub(crate) static ENTITY_ROWS: query_data_model::AuthorizedBy =
-    query_data_model::AuthorizedBy::Entity;
-
 impl Input {
     pub(crate) fn aggregation_row_nodes<'a, M>(
         &'a self,
         model: &'a M,
-    ) -> HashMap<&'a str, &'a query_data_model::AuthorizedBy>
+    ) -> HashMap<&'a str, &'a AuthorizedBy>
     where
         M: query_data_model::OrbitQueryModel + ?Sized,
     {
         let groups = &self.aggregation.group_by;
-        let mut rows: HashMap<&str, &query_data_model::AuthorizedBy> = property_groups(groups)
+        let mut rows: HashMap<&str, &AuthorizedBy> = property_groups(groups)
             .filter_map(|(node, property)| {
                 let entity = self.entity_of(node)?;
-                model
-                    .property_is_free_text(entity, property)
-                    .then(|| (node, model.authorized_by(entity).unwrap_or(&ENTITY_ROWS)))
+                model.property_is_free_text(entity, property).then(|| {
+                    (
+                        node,
+                        model.authorized_by(entity).unwrap_or(&AuthorizedBy::Entity),
+                    )
+                })
             })
             .collect();
-        rows.extend(node_group_ids(groups).map(|node| (node, &ENTITY_ROWS)));
+        rows.extend(node_group_ids(groups).map(|node| (node, &AuthorizedBy::Entity)));
         rows
     }
 

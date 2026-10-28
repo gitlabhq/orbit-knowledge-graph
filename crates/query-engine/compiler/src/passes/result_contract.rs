@@ -3,7 +3,7 @@ use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
 use crate::error::{QueryError, Result};
-use crate::input::{AggFunction, ENTITY_ROWS, Input, QueryType};
+use crate::input::{AggFunction, Input, QueryType};
 use crate::passes::lower::{LoweredMetadata, NodeBinding};
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use query_data_model::{AuthorizedBy, EntityAuthConfig};
@@ -131,7 +131,7 @@ fn apply_with(
         QueryType::Traversal | QueryType::Neighbors => input
             .nodes
             .iter()
-            .map(|n| (n.id.as_str(), &ENTITY_ROWS))
+            .map(|n| (n.id.as_str(), &AuthorizedBy::Entity))
             .collect(),
         QueryType::PathFinding | QueryType::Hydration => HashMap::new(),
     };
@@ -257,18 +257,16 @@ fn enforce_return_columns(
         };
 
         match authorized_by {
-            AuthorizedBy::Owner { .. } if !needs_separate_pk => {
-                let representative = Expr::Aggregate {
-                    function: AggFunction::Min,
-                    argument: Some(Box::new(authorization_id)),
-                    distinct: false,
-                    condition: None,
-                };
-                set_output(q, SelectExpr::new(representative, id_col.clone()));
-            }
             AuthorizedBy::Owner { .. } => {
-                set_output(q, SelectExpr::new(authorization_id.clone(), id_col.clone()));
-                ensure_in_group_by(q, input.query_type, authorization_id);
+                let representative = |expr: Expr| Expr::aggregate(AggFunction::Min, Some(expr));
+                if needs_separate_pk {
+                    let name = primary_key_column(&node.id);
+                    set_output(q, SelectExpr::new(representative(identity.clone()), name));
+                }
+                set_output(
+                    q,
+                    SelectExpr::new(representative(authorization_id), id_col.clone()),
+                );
             }
             AuthorizedBy::Entity => {
                 if needs_separate_pk {
