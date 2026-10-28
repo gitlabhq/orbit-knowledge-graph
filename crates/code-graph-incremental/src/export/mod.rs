@@ -21,15 +21,20 @@ type Cursor<'a> = crate::tree::Cursor<'a, Compact>;
 
 mod parse;
 
-use parse::{EntityColumn, EntityPlan, IdPart, On, Position, RowSource, Source, SpanCandidate};
+use parse::{
+    EntityColumn, EntityPlan, IdPart, On, Over, Position, RowSource, Source, SpanCandidate,
+};
 pub use parse::{ExportConfig, ExportPlan};
 
 /// A value the caller hands in with every export.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum Scalar<'a> {
     Int(i64),
     Str(&'a str),
     Bool(bool),
+    Text(Cow<'a, str>),
+    List(Vec<Cow<'a, str>>),
+    Null,
 }
 
 impl Scalar<'_> {
@@ -38,6 +43,9 @@ impl Scalar<'_> {
             Scalar::Int(n) => Cow::Owned(n.to_string()),
             Scalar::Str(s) => Cow::Borrowed(s),
             Scalar::Bool(value) => Cow::Owned(value.to_string()),
+            Scalar::Text(s) => Cow::Borrowed(s),
+            Scalar::List(values) => Cow::Owned(values.join("\u{1f}")),
+            Scalar::Null => Cow::Borrowed(""),
         }
     }
 
@@ -60,6 +68,19 @@ impl Scalar<'_> {
             (Self::Str(""), ColumnType::IntList) => builder.col(name)?.push_int_list(&[]),
             (Self::Str(value), ColumnType::Str | ColumnType::DictStr) => {
                 builder.col(name)?.push_str(value)
+            }
+            (Self::Text(value), ColumnType::Str | ColumnType::DictStr) => {
+                builder.col(name)?.push_str(value)
+            }
+            (Self::Str(value), ColumnType::Bool) if matches!(value, "true" | "false") => {
+                builder.col(name)?.push_bool(value == "true")
+            }
+            (Self::List(values), ColumnType::StrList | ColumnType::DictStrList) => {
+                let values: Vec<&str> = values.iter().map(Cow::as_ref).collect();
+                builder.col(name)?.push_str_list(&values)
+            }
+            (Self::Null, ColumnType::Str | ColumnType::DictStr) => {
+                builder.col(name)?.push_opt_str(None::<&str>)
             }
             _ => Err(arrow::error::ArrowError::SchemaError(format!(
                 "invalid value for export column '{name}'"
@@ -87,7 +108,7 @@ impl<'a> Envelope<'a> {
         self.values
             .iter()
             .find(|(n, _)| *n == name)
-            .map(|(_, v)| *v)
+            .map(|(_, v)| v.clone())
     }
 
     /// Confirms every name the plan refers to was handed in.
@@ -219,6 +240,69 @@ impl<'a> Row<'a> {
             }
             Source::Position(p, span) => Scalar::Int(position(measured(node, span), *p)),
         }
+    }
+
+    fn finish(
+        &self,
+        column: &'a EntityColumn,
+        value: Scalar<'a>,
+    ) -> Result<Option<Scalar<'a>>, Error> {
+        let Scalar::Str(text) = value else {
+            return Ok(Some(value));
+        };
+        let bounds = &column.bounds;
+        let capped = |text: &'a str| match bounds.cap {
+            Some(cap) if text.len() > cap => match bounds.over {
+                Over::Cut | Over::Words => Some(orbit_utils::strings::truncate_bytes(
+                    text,
+                    cap,
+                    "…",
+                    bounds.over == Over::Words,
+                )),
+                Over::Empty => Some(Cow::Borrowed("")),
+                Over::Drop => None,
+            },
+            _ => Some(Cow::Borrowed(text)),
+        };
+        if let Some(sep) = &bounds.split {
+            let mut values: Vec<Cow<str>> = text
+                .split(sep.as_str())
+                .filter(|part| !part.is_empty())
+                .filter_map(capped)
+                .collect();
+            if bounds.sort {
+                values.sort_unstable();
+                values.dedup();
+            }
+            values.truncate(bounds.max.unwrap_or(usize::MAX));
+            if let Some(bad) = values.iter().find(|v| !column.admits(v)) {
+                return Err(self.not_allowed(column, bad));
+            }
+            return Ok(Some(Scalar::List(values)));
+        }
+        let Some(text) = capped(text) else {
+            return Ok(None);
+        };
+        if column.nullable && text.is_empty() {
+            return Ok(Some(Scalar::Null));
+        }
+        if !column.admits(&text) {
+            return Err(self.not_allowed(column, &text));
+        }
+        Ok(Some(match text {
+            Cow::Borrowed(text) => Scalar::Str(text),
+            owned => Scalar::Text(owned),
+        }))
+    }
+
+    fn not_allowed(&self, column: &EntityColumn, value: &str) -> Error {
+        LoadError::new(format!(
+            "export: column '{}' has {value:?} in {}, which is not one of {:?}",
+            column.name,
+            self.tree.label,
+            column.allowed.as_deref().unwrap_or_default()
+        ))
+        .into()
     }
 
     fn span(&self) -> String {
@@ -384,6 +468,11 @@ fn write_entity(
                 entity
                     .exclude_parent
                     .is_none_or(|ep| !c.parent().is_some_and(|p| p.kind() == ep))
+            })
+            .filter(|c| {
+                entity
+                    .exclude_child
+                    .is_none_or(|ec| !c.children().any(|ch| ch.kind() == ec))
             });
         for node in nodes {
             let mut expansions: Vec<Cursor> = match entity.expand {
@@ -413,6 +502,14 @@ fn write_entity(
                     })
                     .collect();
                 let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+                let values = entity
+                    .columns
+                    .iter()
+                    .map(|column| row.finish(column, row.value(column, lang)))
+                    .collect::<Result<Option<Vec<_>>, Error>>()?;
+                let Some(values) = values else {
+                    continue;
+                };
                 let id = envelope.id(plan, &entity.id_seed, &parts);
                 let emitted = emit(ti, tree);
                 ids.insert((ti, expanded.index()), (id, index, emitted));
@@ -427,9 +524,8 @@ fn write_entity(
                     };
                     value.write(b, &column.name, column.col_type)?;
                 }
-                for column in &entity.columns {
-                    row.value(column, lang)
-                        .write(b, &column.name, column.col_type)?;
+                for (column, value) in entity.columns.iter().zip(values) {
+                    value.write(b, &column.name, column.col_type)?;
                 }
                 if let Some(batch) = b.take_if_over(plan.batch_bytes)? {
                     tables.push((entity.table.clone(), batch));

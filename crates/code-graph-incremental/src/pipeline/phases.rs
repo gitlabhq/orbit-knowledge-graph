@@ -636,9 +636,13 @@ impl Phase<Resolved> for Display {
                 if rules.is_empty() || !touched.contains(&(fi as u32)) {
                     return Ok(tree);
                 }
+                let text = context.repository.read(&tree.label).ok();
                 let ctx = EdgeCtx {
                     tree_index: fi as u32,
                     edges: &edges,
+                    source: text
+                        .as_deref()
+                        .and_then(|bytes| std::str::from_utf8(bytes).ok()),
                 };
                 let (tree, kept) =
                     pattern::apply_display(tree, &env.lang, rules, &ctx, &context.run)?;

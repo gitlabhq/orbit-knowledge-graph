@@ -49,6 +49,18 @@ pub enum Tf {
     RegexFirst(regex::Regex, Box<str>),
     RegexLoop(regex::Regex, Box<str>),
     RegexMatch(regex::Regex),
+    Source(usize),
+    SourceBefore(usize),
+    TopUntil(regex::Regex, Pairs),
+    TopAfter(regex::Regex, Pairs),
+    TopSplit(Box<str>, Pairs),
+}
+
+#[derive(Clone)]
+pub struct Pairs {
+    pub(crate) open: Vec<char>,
+    pub(crate) close: Vec<char>,
+    pub(crate) quotes: Vec<char>,
 }
 
 impl Tf {
@@ -74,7 +86,18 @@ impl Tf {
                 | Tf::TreeNodeId
                 | Tf::KindName
                 | Tf::HasEdge(_, _)
+                | Tf::Source(_)
+                | Tf::SourceBefore(_)
         )
+    }
+
+    pub fn reads_source(&self) -> bool {
+        match self {
+            Tf::Source(_) | Tf::SourceBefore(_) => true,
+            Tf::Pipeline(steps) => steps.iter().any(Tf::reads_source),
+            Tf::Concat(_, a, b) | Tf::Or(a, b) => a.reads_source() || b.reads_source(),
+            _ => false,
+        }
     }
 }
 
@@ -116,6 +139,7 @@ impl EdgeIndex {
 pub struct EdgeCtx<'a> {
     pub tree_index: u32,
     pub edges: &'a EdgeIndex,
+    pub source: Option<&'a str>,
 }
 
 pub enum Text {

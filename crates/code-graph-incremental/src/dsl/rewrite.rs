@@ -362,6 +362,10 @@ fn apply_rewrites_inner<S: Storage<Node = Node>>(
                 Out::Tag(entries, tag_on) => {
                     let raw = S::index(tag_target(t, target, *tag_on));
                     for entry in entries {
+                        if entry.val.reads_source() && edge_ctx.is_some_and(|c| c.source.is_none())
+                        {
+                            continue;
+                        }
                         let src = caps[entry.slot as usize].first().copied().unwrap_or(target);
                         let val = if entry.val.is_node_tf() {
                             entry.val.apply_sym(t, lang, src, edge_ctx)
