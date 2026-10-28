@@ -141,3 +141,19 @@ export function cypherSegments(markdown: string): Segment[] {
   if (rest) out.push({ kind: 'prose', text: rest })
   return out
 }
+
+/**
+ * The fewest relationship hops one match of the query walks, across all its MATCH patterns.
+ * A variable-length hop counts its lower bound, so `*1..3` is 1: each counted row walked at least this many edges.
+ */
+export function hopsOf(query: string): number {
+  let hops = 0
+  for (const clause of query.split(/\bMATCH\b/i).slice(1)) {
+    const pattern = clause.split(/\b(?:WHERE|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT|CALL)\b/i)[0] ?? ''
+    for (const m of pattern.matchAll(/<?-(?:\[([^\]]*)\])?->?/g)) {
+      const range = (m[1] ?? '').match(/\*\s*(\d+)?/)
+      hops += range ? Number(range[1] ?? 1) : 1
+    }
+  }
+  return hops
+}

@@ -1,6 +1,6 @@
 import type { Elements, Register, RenderElement } from 'claude-code'
 
-import { TOKEN_STYLE, codeLines, cypherSegments, layout, queryOf, type Token } from './cypher.ts'
+import { TOKEN_STYLE, codeLines, cypherSegments, hopsOf, layout, queryOf, type Token } from './cypher.ts'
 import type { MarkProps } from './orbit-mark.ts'
 import { BLUE, MARK, QUERY_LABEL, describeOrbitCall, type OrbitCall } from './orbit.ts'
 import { isPendingCall, mergeRuns } from './rows.ts'
@@ -15,7 +15,7 @@ function clientOf(ui: Resolved): Elements['terminal']['Client'] | undefined {
 }
 type RowState = { isErrored?: boolean; isInterrupted?: boolean }
 
-const stats = { calls: 0, nodes: 0 }
+const stats = { calls: 0, nodes: 0, edges: 0 }
 // Asked on the first Orbit call, so a session that never uses Orbit never runs graph-status
 let graphTotal: number | null = null
 let graphTotalAsked = false
@@ -33,7 +33,7 @@ function outputText(result: unknown): string {
 }
 
 // A large output reaches the hook as a stub, with the full text saved to a file.
-async function record(read: (path: string) => Promise<unknown>, call: OrbitCall, answer: unknown) {
+async function record(read: (path: string) => Promise<unknown>, call: OrbitCall, command: string, answer: unknown) {
   stats.calls += 1
   const { result, isError } = (answer ?? {}) as { result?: unknown; isError?: boolean }
   if (call.label !== QUERY_LABEL || !answer || isError) return
@@ -41,6 +41,8 @@ async function record(read: (path: string) => Promise<unknown>, call: OrbitCall,
   const text = typeof saved === 'string' ? String(await read(saved)) : outputText(result)
   const parsed = parseResponse(text)
   stats.nodes += parsed.nodes + parsed.aggregated
+  // A count answers with totals and no edges, yet every counted row matched the whole pattern
+  stats.edges += parsed.edges + parsed.aggregated * hopsOf(queryOf(command))
 }
 
 function finishedRow({ Box, Text }: Ui, call: OrbitCall, state: RowState): RenderElement {
@@ -88,7 +90,8 @@ export const register: Register = (on) => {
     } finally {
       // A parsing slip must not fail the hook after the tool has run
       try {
-        await record((path) => $.fs.read(path), call, answer)
+        const { command } = e as { command?: unknown }
+        await record((path) => $.fs.read(path), call, typeof command === 'string' ? command : '', answer)
       } catch {}
       if (!graphTotalAsked) {
         graphTotalAsked = true
@@ -163,6 +166,7 @@ export const register: Register = (on) => {
       graphTotal
         ? [compact(stats.nodes) + ' / ' + grouped(graphTotal), ' nodes total']
         : [compact(stats.nodes), stats.nodes === 1 ? ' node' : ' nodes'],
+      [compact(stats.edges), stats.edges === 1 ? ' edge' : ' edges'],
     ]
     const children = words.flatMap(([value, unit], i) => [...(i > 0 ? [dim('  ·  ')] : []), blue(value), dim(unit)])
     children.push(blue('  ' + MARK + ' GitLab Orbit'))

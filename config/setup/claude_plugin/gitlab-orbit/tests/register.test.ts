@@ -50,7 +50,7 @@ test('the status line counts finished Orbit queries and passes every call throug
   expect(await ui.find({ type: 'Text', text: '1' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' query' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' nodes' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: ' edges' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: ' edges' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '  ◎ GitLab Orbit' })).toBeDefined()
 })
 
@@ -84,4 +84,15 @@ test('a reply without cypher stays Claude Code', async ($, on) => {
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
   const ui = await $.ui.mount({ ...SITE, component: 'AssistantMessage', props: { text: '```bash\nls\n```', isFirstOfReply: true } })
   expect(await ui.find({ type: 'Text', text: 'drawn by Claude Code' })).toBeDefined()
+})
+
+test('a count query adds the edges its counted rows walked', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  const aggregation = 'query_type: aggregation\ncolumns[1]{name,function,target}:\n  n,count,mr\nrows[1]{n}:\n  40\npagination:\n  has_more: false\n'
+  on('tool.call', () => ({ result: { stdout: aggregation } }))
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN count(mr) AS n"' })
+
+  const ui = await $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
+  expect(await ui.find({ type: 'Text', text: '80' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' edges' })).toBeDefined()
 })

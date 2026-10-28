@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { codeLines, cypherSegments, layout, queryOf, tokenize } from '../hooks/cypher.ts'
+import { codeLines, cypherSegments, hopsOf, layout, queryOf, tokenize } from '../hooks/cypher.ts'
 import { compact, graphNodes, grouped, parseResponse } from '../hooks/stats.ts'
 
 test('the llm format counts nodes by entity and edges', () => {
@@ -97,4 +97,13 @@ test('a reply splits around its cypher blocks and leaves other code alone', () =
   ])
   expect(cypherSegments('No code here.')).toEqual([{ kind: 'prose', text: 'No code here.' }])
   expect(cypherSegments('```cypher\nMATCH (n)\n')).toEqual([{ kind: 'prose', text: '```cypher\nMATCH (n)' }])
+})
+
+test('hops count each relationship in the MATCH patterns, a variable-length one by its lower bound', () => {
+  expect(hopsOf('MATCH (mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN count(mr) AS n')).toBe(1)
+  expect(hopsOf('MATCH (u:User)-[:AUTHORED]->(mr:MergeRequest)-[:IN_PROJECT]->(p:Project {id: 1}) RETURN u, count(mr) AS n')).toBe(2)
+  expect(hopsOf('MATCH (c:Definition)-[:EXTENDS*2..3]->(d:Definition {id: 1}) RETURN count(c) AS n')).toBe(2)
+  expect(hopsOf('MATCH (mr:MergeRequest {id: 1})--(n) RETURN n')).toBe(1)
+  expect(hopsOf('MATCH (p:Project {id: 1}) RETURN count(p) AS n')).toBe(0)
+  expect(hopsOf("CALL db.schema('Project')")).toBe(0)
 })
