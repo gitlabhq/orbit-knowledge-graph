@@ -192,13 +192,13 @@ properties:
     type: int64
     source: duration
     nullable: true
-    description: "Execution time in seconds (finished_at - started_at). Null until the job has started and finished."
+    description: "Execution time in seconds (finished_at - started_at). Null until the job has started and finished. Trigger (bridge) jobs cover downstream pipeline time, not runner time."
 
   queued_duration:
     type: int64
     source: queued_duration
     nullable: true
-    description: "Time spent queued in seconds (started_at - queued_at). Null until the job has been queued and started."
+    description: "Time spent queued in seconds: queued_at to started_at, or to finished_at when the job finished without starting. Null while it is still waiting."
 
   type:
     type: string

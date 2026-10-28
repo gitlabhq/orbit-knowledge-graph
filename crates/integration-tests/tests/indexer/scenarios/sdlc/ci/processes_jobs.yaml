@@ -17,6 +17,7 @@ seed:
     - { id: 7004, partition_id: 1, stage_id: 6001, project_id: 1000, user_id: 1, name: test, status: running, ref: main, tag: false, allow_failure: false, when: on_success, retried: false, created_at: "2024-01-15 10:00:00", started_at: "2024-01-15 10:00:30", finished_at: null, queued_at: "2024-01-15 10:00:00", failure_reason: null, traversal_path: "1/100/1000/" }
     - { id: 7005, partition_id: 1, stage_id: 6001, project_id: 1000, user_id: 1, name: package, status: pending, ref: main, tag: false, allow_failure: false, when: on_success, retried: false, created_at: "2024-01-15 10:00:00", started_at: null, finished_at: null, queued_at: "2024-01-15 10:00:00", failure_reason: null, traversal_path: "1/100/1000/" }
     - { id: 7006, partition_id: 1, stage_id: 6001, project_id: 1000, user_id: 1, name: fast, status: success, ref: main, tag: false, allow_failure: false, when: on_success, retried: false, created_at: "2024-01-15 10:00:00", started_at: "2024-01-15 10:00:30.900000", finished_at: "2024-01-15 10:01:00.100000", queued_at: "2024-01-15 10:00:00.500000", failure_reason: null, traversal_path: "1/100/1000/" }
+    - { id: 7007, partition_id: 1, stage_id: 6001, project_id: 1000, user_id: 1, name: stuck, status: failed, ref: main, tag: false, allow_failure: false, when: on_success, retried: false, created_at: "2024-01-15 10:00:00", started_at: null, finished_at: "2024-01-15 10:05:00", queued_at: "2024-01-15 10:00:00", failure_reason: 3, traversal_path: "1/100/1000/" }
 
 expect:
   nodes:
@@ -28,7 +29,8 @@ expect:
         - { id: 7004, name: test, duration: null, queued_duration: 30 }
         - { id: 7005, name: package, duration: null, queued_duration: null }
         - { id: 7006, name: fast, duration: 29, queued_duration: 30 }
+        - { id: 7007, name: stuck, duration: null, queued_duration: 300 }
   edges:
-    - { kind: IN_PROJECT, from: Job, to: Project, traversal_path: "1/100/1000/", count: 6 }
-    - { kind: HAS_JOB, from: Stage, to: Job, traversal_path: "1/100/1000/", count: 6 }
-    - { kind: TRIGGERED, from: User, to: Job, traversal_path: "1/100/1000/", count: 6 }
+    - { kind: IN_PROJECT, from: Job, to: Project, traversal_path: "1/100/1000/", count: 7 }
+    - { kind: HAS_JOB, from: Stage, to: Job, traversal_path: "1/100/1000/", count: 7 }
+    - { kind: TRIGGERED, from: User, to: Job, traversal_path: "1/100/1000/", count: 7 }

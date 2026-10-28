@@ -14,15 +14,13 @@ SELECT
   started_at,
   finished_at,
   queued_at,
-  if(
-    started_at IS NULL OR finished_at IS NULL,
-    NULL,
-    intDiv(toUnixTimestamp64Micro(finished_at) - toUnixTimestamp64Micro(started_at), 1000000)
+  intDiv(
+    toUnixTimestamp64Micro(finished_at) - toUnixTimestamp64Micro(started_at),
+    1000000
   ) AS duration,
-  if(
-    queued_at IS NULL OR started_at IS NULL,
-    NULL,
-    intDiv(toUnixTimestamp64Micro(started_at) - toUnixTimestamp64Micro(queued_at), 1000000)
+  intDiv(
+    toUnixTimestamp64Micro(coalesce(started_at, finished_at)) - toUnixTimestamp64Micro(queued_at),
+    1000000
   ) AS queued_duration,
   type,
   runner_id,
