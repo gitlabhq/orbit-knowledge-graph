@@ -337,6 +337,7 @@ pipelines:
             field: source_project_id
             kind: Project
           label: SOURCE_PROJECT
+          mutable: true
         - from:
             field: id
             kind: MergeRequest
@@ -360,6 +361,7 @@ pipelines:
             field: id
             kind: MergeRequest
           label: AUTHORED
+          mutable: true
         - from:
             field: merge_user_id
             kind: User
@@ -391,6 +393,7 @@ pipelines:
             field: id
             kind: MergeRequest
           label: CLOSED
+          mutable: true
         - from:
             field: id
             kind: MergeRequest

@@ -175,6 +175,7 @@ pipelines:
             field: id
             kind: WorkItem
           label: AUTHORED
+          mutable: true
         - from:
             field: id
             kind: WorkItem

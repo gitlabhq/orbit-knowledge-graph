@@ -160,6 +160,7 @@ pipelines:
             field: id
             kind: Note
           label: AUTHORED
+          mutable: true
         - from:
             field: id
             kind: Note

@@ -182,6 +182,7 @@ pipelines:
             field: merge_request_id
             kind: MergeRequest
           label: CREATED_FOR_MR
+          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:

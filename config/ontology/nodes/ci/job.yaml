@@ -319,6 +319,7 @@ pipelines:
             field: id
             kind: Job
           label: TRIGGERED
+          mutable: true
         - from:
             field: id
             kind: Job
@@ -340,6 +341,7 @@ pipelines:
             field: runner_id
             kind: Runner
           label: RUNS_ON
+          mutable: true
         - from:
             field: id
             kind: Job
@@ -354,6 +356,7 @@ pipelines:
             field: auto_canceled_by_id
             kind: Pipeline
           label: AUTO_CANCELED_BY
+          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:

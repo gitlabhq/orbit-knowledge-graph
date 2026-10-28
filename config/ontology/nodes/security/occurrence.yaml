@@ -214,6 +214,7 @@ pipelines:
             field: vulnerability_id
             kind: Vulnerability
           label: OCCURRENCE_OF
+          mutable: true
 storage:
   primary_key: [traversal_path, id]
   settings:
