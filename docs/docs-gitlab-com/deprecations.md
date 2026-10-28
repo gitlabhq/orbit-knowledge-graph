@@ -136,8 +136,24 @@ GitLab.com removed them first.
 | `GET /api/v4/orbit/schema` | GraphQL `Query.orbit.schema` |
 | `GET /api/v4/orbit/status` | GraphQL `Query.orbit.serviceStatus` |
 | `GET /api/v4/orbit/query/templates` | GraphQL `Query.orbit.queryTemplates` |
+| `GET /api/v4/orbit/tools` | MCP `tools/list` at `/api/v4/orbit/mcp` |
 | `GET /api/v4/orbit/schema/format` | No replacement |
 | `GET /api/v4/orbit/schema/dsl` | No replacement |
+
+## GraphQL API fields
+
+GitLab 19.6 removed these GraphQL fields and mutations.
+GitLab.com removed them first.
+
+| Removed field or mutation | Use instead |
+|---------------------------|-------------|
+| `Group.knowledgeGraphEnabled` | `Group.orbit.enabled` |
+| `Group.knowledgeGraphAvailable` | `Group.userPermissions.updateKnowledgeGraphSetting` |
+| `Group.orbitAccess` | `Group.orbit.access` |
+| `Group.orbitTrial` | `Group.orbit.trial` |
+| `Query.knowledgeGraphExcludedNamespaces` | `Query.orbit.excludedGroups` |
+| `knowledgeGraphExcludedNamespaceCreate` | `orbitExcludedGroupCreate` |
+| `knowledgeGraphExcludedNamespaceDestroy` | `orbitExcludedGroupDestroy` |
 
 ## GitLab Orbit CLI commands
 
