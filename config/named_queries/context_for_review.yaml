@@ -1,5 +1,5 @@
 name: context_for_review
-description: "Merge request context: expand_merge_request neighbors plus approvers, the merge commit, and mentioned MRs and work items. Cut at limit in no set order; check pagination.truncated."
+description: "Merge request context the Orbit context summary lacks: assignees, approvers, labels, milestone, and the MRs and work items it mentions or that mention it. Cut at limit in no set order; check pagination.truncated."
 parameters:
   node_ids:
     schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }
@@ -16,10 +16,10 @@ query:
         node_ids: { $param: node_ids }
     neighbors:
       direction: both
-      rel_types: [AUTHORED, ASSIGNED, REVIEWER, APPROVED, HAS_LABEL, IN_PROJECT, HAS_HEAD_PIPELINE, CLOSES, MENTIONS, MERGED_AT_COMMIT]
+      rel_types: [ASSIGNED, APPROVED, HAS_LABEL, IN_MILESTONE, MENTIONS]
     limit: { $param: limit }
   gql: |
-    MATCH (center:MergeRequest)-[:AUTHORED|ASSIGNED|REVIEWER|APPROVED|HAS_LABEL|IN_PROJECT|HAS_HEAD_PIPELINE|CLOSES|MENTIONS|MERGED_AT_COMMIT]-(neighbor)
+    MATCH (center:MergeRequest)-[:ASSIGNED|APPROVED|HAS_LABEL|IN_MILESTONE|MENTIONS]-(neighbor)
     WHERE center.id IN {{ param("node_ids") }}
     RETURN center, neighbor
     LIMIT {{ param("limit") }}
