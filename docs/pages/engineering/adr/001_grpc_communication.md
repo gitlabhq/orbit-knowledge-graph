@@ -98,7 +98,7 @@ The Rails integration copies the patterns of Gitaly.
 A Ruby gem, generated from the Orbit protocol definition, is published to RubyGems.
 Rails uses it for client stubs, as it uses the Gitaly protocol gem.
 
-The design has Rails keep a gRPC channel pool to Orbit, configured with the Orbit service address.
+Rails keeps a pool of gRPC channels to Orbit, configured with the Orbit service address.
 Connection settings, such as keepalive, maximum message size, and timeouts, follow the Gitaly configuration model.
 
 The error handling middleware mirrors Gitaly.
@@ -153,7 +153,7 @@ This halves the connection overhead and removes the cost to open a callback conn
   Breaking changes, such as a removed field or a changed type, follow the standard deprecation process.
 - Standard HTTP tools cannot inspect a bidirectional stream.
   Teams need gRPC-aware tools, such as `grpcurl`, Bloom RPC, or logging interceptors.
-- If Rails is down or slow, Orbit cannot finish a query that needs Layer 3 redaction checks.
+- If Rails is down or slow, Orbit cannot finish a query that needs tier 3 redaction checks.
   We accept this, because to skip redaction would be a security violation.
 - Requests carry no key for deduplication or replay detection, so a failed request is retried from the start.
   Queries are read-only, so a retry is safe, but it runs the same ClickHouse work again.
@@ -162,13 +162,19 @@ This halves the connection overhead and removes the cost to open a callback conn
 
 A bidirectional stream adds denial-of-service risks:
 
-- A query with millions of rows would make a very large redaction request. The row limit of the query engine prevents this.
-- A slow client holds the stream open on the server. Neither Rails nor Orbit sets a stream deadline yet, so only TCP keepalive bounds the wait. We must add per-RPC deadlines before the production rollout.
-- An attacker can open many streams and send no messages. Orbit does not limit concurrent streams, and each stream starts its own task and ClickHouse query. The gRPC concurrent stream limit and Kubernetes resource limits are the only controls, and we must add server-side stream limits.
+- A query with millions of rows would make a very large redaction request.
+  The row limit of the query engine prevents this.
+- A slow client holds the stream open on the server.
+  Neither Rails nor Orbit sets a stream deadline yet, so only TCP keepalive bounds the wait.
+  We must add a deadline for each RPC before the production rollout.
+- An attacker can open many streams and send no messages.
+  Orbit does not limit concurrent streams, and each stream starts its own task and ClickHouse query.
+  The gRPC limit on concurrent streams and the Kubernetes resource limits are the only controls.
+  We must add stream limits on the server.
 
-### Postgres load from redaction checks
+### PostgreSQL load from redaction checks
 
-Each Rails permission check evaluates DeclarativePolicy rules against Postgres.
+Each Rails permission check evaluates the Rails policy rules against PostgreSQL.
 A result with a full row limit across several resource types could cause one check for each row.
 Each check can load the resource and evaluate several policy conditions.
 
@@ -178,9 +184,9 @@ The Rails handler must preload resources and their policy dependencies instead o
 The redaction of search results in Rails gives the template.
 
 The Auth Architecture team is building GLAZ, a Zanzibar-like authorization service in Rust.
-GLAZ is to control access based on relationships, roles, and attributes.
+GLAZ will control access based on relationships, roles, and attributes.
 PostgreSQL or YugabyteDB stores its data.
-When GLAZ is available, Rails can send Layer 3 redaction checks to it over gRPC instead of Postgres.
+When GLAZ is available, Rails can send tier 3 redaction checks to it over gRPC instead of PostgreSQL.
 The stream protocol does not change, and only the Rails handler changes.
 Until then, the batch caps and row limits bound the load.
 
@@ -213,7 +219,7 @@ Orbit could stream results to Rails, but Rails could not send redaction decision
 
 ### Shared database
 
-Orbit would read from Postgres.
+Orbit would read from PostgreSQL.
 That couples Orbit to the Rails schema and bypasses the change data capture pipeline.
 It also breaks the boundary between transactional and analytical storage.
 

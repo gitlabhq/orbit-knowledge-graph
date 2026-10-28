@@ -35,7 +35,7 @@ PostgreSQL is the fallback option.
 The data model is the most important part of the product.
 Property graphs with arbitrary nodes and edges give Orbit its graph capabilities, whatever the database.
 GitLab has much more operational experience with ClickHouse and PostgreSQL than with graph databases.
-The existing stack means one less database to deploy and maintain, which reduces site reliability and database reliability engineering costs.
+The existing stack means one fewer database to deploy and maintain, which reduces site reliability and database reliability engineering costs.
 Engineering effort goes into ClickHouse instead of an extract, transform, and load (ETL) pipeline from ClickHouse to a graph database.
 The Orbit team can then help with Siphon and NATS.
 The query layer also gets Orbit to market faster.

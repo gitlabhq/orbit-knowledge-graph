@@ -18,8 +18,8 @@ Proposed
 The Orbit API serves three consumers:
 
 - The Orbit dashboard, a Vue app that renders graphs, tables, and schema views
-- AI agents that call the query and schema tools through MCP
-- The GitLab CLI, which runs queries and prints them for people or for agents
+- AI agents that call the query and schema tools through the Model Context Protocol (MCP)
+- The GitLab command-line interface (CLI), which runs queries and prints them for people or for agents
 
 The gRPC service had five operations at the time of this decision.
 Two listed tools and dispatched a generic tool call.
@@ -80,7 +80,7 @@ The service goes from five operations to four:
 | Before | After |
 | ------ | ----- |
 | List tools | List tools |
-| Generic call to the query tool | Run query, LLM format |
+| Generic call to the query tool | Run query, large language model (LLM) format |
 | Raw query | Run query, raw format |
 | Generic call to the schema tool | Get schema with expanded nodes, LLM format |
 | Get ontology | Get schema, raw format |
@@ -103,12 +103,12 @@ They stay out of the agent command catalog, because skills are CLI artifacts and
 ### One response format parameter
 
 The response format answers one question: who consumes the response?
-The two values are `raw` for structured data and `llm` for a large language model (LLM).
+The two values are `raw` for structured data and `llm` for an LLM.
 
 | Operation | Raw format | LLM format |
 | --------- | ---------- | ---------- |
 | Run query | Tabular JSON rows and query metadata | Graph Object Output Notation (GOON) with deduplicated nodes and edges that saves 25% to 50% of tokens |
-| Get schema | Structured domains, nodes, edges, properties, and styles | TOON text |
+| Get schema | Structured domains, nodes, edges, properties, and styles | Token-Oriented Object Notation (TOON) text |
 | Get cluster health | Structured status, version, and components | TOON key-value notation |
 | List tools | Tool names, descriptions, and parameter JSON schemas | Same as raw |
 
@@ -123,7 +123,7 @@ A feature flag gates every endpoint, and the endpoint returns not found when the
 Each data endpoint accepts the response format parameter, and raw is the default.
 
 The query endpoint accepts a query, a query language, and a format.
-The only query language at the time was a structured JSON DSL, and an openCypher-like language was a future option.
+The only query language at the time was a structured JSON DSL, and an OpenCypher-like language was a future option.
 The response holds the result, the query type, the generated SQL strings, and the row count.
 An illustrative exchange with placeholder values:
 

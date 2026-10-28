@@ -17,7 +17,7 @@ Accepted
 
 The code indexer re-indexes a repository after a push to the default branch of an Orbit-enabled project.
 Before this decision, the indexer read raw push event payloads from the Siphon change data capture (CDC) stream.
-On GitLab.com, that table receives roughly 40 inserts per second.
+On GitLab.com, the push event table receives roughly 40 inserts per second.
 Fewer than 1% of those pushes are for Orbit-enabled projects.
 For each event, the indexer made a Rails API call and a ClickHouse query, and then dropped almost every event.
 
@@ -46,13 +46,15 @@ The indexer no longer does these steps:
 - Query ClickHouse for the traversal path of the project
 - Filter out other actions and other ref types
 
-## Consequences
+## Benefits of this approach
 
 The indexer processes only the events that matter to Orbit, instead of filtering out 99% of the stream.
 Each event saves two network round trips: the Rails API call and the ClickHouse query.
 The PostgreSQL partitioning automation removes old rows, so we do not manage a time to live (TTL).
 The flow matches the rest of the Siphon CDC pipeline: Rails writes to PostgreSQL, Siphon replicates through NATS, and Orbit consumes from NATS.
 Zoekt and other teams that need filtered push events can use the same pattern.
+
+## Consequences
 
 The cost is a new table and model in the Rails monolith.
 A change to the task schema needs a Rails migration.
@@ -78,7 +80,7 @@ The Siphon CDC pipeline already replicates PostgreSQL to ClickHouse, so a second
 
 ### Send events from Rails to Orbit through gRPC
 
-Rails could call the Orbit webserver on each push, and Orbit would put the event into NATS.
+Rails could call the Orbit web server on each push, and Orbit would put the event into NATS.
 This approach needs no table.
 The cost is per-event overhead in Rails for signing, connection management, and flow control when Orbit is slow.
 Batching reduces the overhead, but it adds complexity to Rails for a small gain over the table.

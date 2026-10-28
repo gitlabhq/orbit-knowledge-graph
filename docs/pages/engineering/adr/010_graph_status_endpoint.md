@@ -49,7 +49,7 @@ Rails sends the scope type, group or project, with the traversal path.
 Rails already knows the scope from the request, so Orbit does not spend ClickHouse queries to find it.
 
 Orbit counts every node type under the traversal path with a prefix match, so a parent group includes its subgroups.
-Each type is counted with an approximate distinct count of IDs.
+Orbit counts each type with an approximate distinct count of IDs.
 That count reads a small per-table aggregate projection and does not scan the namespace.
 It also removes the duplicate row versions that a plain count includes.
 At the time of the decision, plain counts were up to 300% too high for types that change often.
@@ -121,7 +121,8 @@ A run that completed without writes, for example on an empty data lake or after 
 The response now reports an SDLC state and a code state, and the combined state is the worse of the two:
 
 - The SDLC state is the worst state across the progress of every namespaced pipeline, including node, edge, and derived pipelines.
-- The code state comes from project coverage: none indexed is not indexed, some is backfilling, and all is indexed.
+- The code state comes from project coverage.
+  With no projects indexed, it is not indexed, with some it is backfilling, and with all it is indexed.
 - The code state is absent when the scope has no known projects.
 - Each domain item has an optional state from its own pipeline or from code coverage.
 
@@ -146,7 +147,7 @@ The indexing status service reads the checkpoint tables of the served schema ver
 
 The read takes the newest completion time after the last deletion marker, not the deduplicated row.
 A background merge keeps only the newest row, so a late page write from an overlapping run could hide a completion.
-In that case the plan reads as syncing until the overlapping run completes.
+In that case, the plan reads as syncing until the overlapping run completes.
 
 A domain combines the plans that feed it and, for code entities, the project coverage.
 A scope combines its domains.
@@ -183,15 +184,17 @@ The value is absent until each plan has completed once.
 
 Item counts now use the ClickHouse query cache with its default short TTL.
 The count queries were the largest share of ClickHouse time and bytes read.
-A count can be as old as the TTL, also after a backfill ends.
+A count can be as old as the TTL, even after a backfill ends.
 Checkpoint and coverage reads still skip the cache, so a phase change shows on the next call.
 
-## Consequences
+## Benefits of this approach
 
 One RPC answers what data exists and how fresh it is.
 Operators get the coverage ratio of indexed projects to known projects.
 Distinct counts remove the excess from duplicate row versions.
 The response cache protects ClickHouse from repeated calls.
+
+## Consequences
 
 Each request runs several queries and lookups instead of one.
 A subgroup request must resolve its top-level group for SDLC indexing metadata.

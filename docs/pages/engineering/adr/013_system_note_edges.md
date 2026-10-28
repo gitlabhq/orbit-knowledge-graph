@@ -33,8 +33,11 @@ It passed continuous integration (CI).
 The author closed it to write this ADR first, which was a process decision and not a correctness one.
 It taught us three things:
 
-- The old edge extract shape had no filter clause, so it needed one view per action. That does not scale to more than 10 actions on three noteable types. The unified pipeline shape that replaced it has a filter predicate.
-- The lifecycle slice adds little, because foreign keys already cover most of it. Only reopen is new.
+- The old edge extract shape had no filter clause, so it needed one view per action.
+  That does not scale to more than 10 actions on three noteable types.
+  The unified pipeline shape that replaced it has a filter predicate.
+- The lifecycle slice adds little, because foreign keys already cover most of it.
+  Only reopen is new.
 - Nobody filed the Siphon prerequisite, so the MR would have done nothing in production.
 
 Rails owns authorization and writes the note bodies.
@@ -46,7 +49,7 @@ The schema migration framework was complete and validated on staging, so a new e
 
 **The software development lifecycle (SDLC) indexer parses system notes in a Rust transform and resolves the targets with batched ClickHouse lookups.**
 
-The design depends on a one-time Siphon replication of the system note metadata table.
+The transform depends on a one-time Siphon replication of the system note metadata table.
 We ask for a skip index on the action and a primary key on the traversal path and note ID.
 A proof of concept (POC) harness backs the decision, with results under [Benefits of this approach](#benefits-of-this-approach).
 
@@ -139,7 +142,7 @@ The transform reuses the SDLC pipeline metrics and adds one general metric for e
 The transform ships behind a configuration flag that is off by default and on in staging first.
 The flag lives in the existing per-entity handler configuration, so a change needs no code change.
 Staging benchmarks are the gate to general availability.
-The implementation MR does not turn the flag on until benchmarks four and five have results.
+The implementation MR does not turn the flag on until the two staging benchmarks have results.
 
 ### Amendment: containment comes from parent links (2026-06-17)
 
@@ -175,6 +178,10 @@ We bumped the schema version, so a migration reindexes into new tables.
 
 ## Benefits of this approach
 
+The design closes the edge gap between MRs, work items, and commits.
+A new Rails cross-reference action becomes a parser change, not an ontology, fixture, and ETL change.
+A slow system note pass does not redeliver messages for other entities in the namespace.
+
 The POC measured parse speed on one CPU core with a release build:
 
 | Corpus | Notes | Median time per note | Median notes per second |
@@ -184,7 +191,7 @@ The POC measured parse speed on one CPU core with a release build:
 
 The real corpus parsed about 16% faster, because about 40% of its notes are lifecycle actions that skip pattern work.
 Over 100 iterations, it had no panics, wrong parses, or false positives across 16 action types.
-Seeded unknown actions were dropped with a warning.
+The transform dropped the seeded unknown actions with a warning.
 Both rates are about three times the pass criterion of 500,000 notes per second.
 For 6.7 million notes, parsing takes about four seconds on one core.
 
@@ -197,15 +204,14 @@ Few references resolved, because the seed data references IDs that do not exist,
 These runs validate the query plan but not production scale.
 Two benchmarks need staging ClickHouse and the Siphon replication:
 
-- A full pass over the large top-level group in 10 minutes or less. Compute alone extrapolates to about 54 seconds.
-- An edge density gain of at least three times for MR-to-work-item edges and ten times for MR-to-MR edges. We propose these numbers for the upstream acceptance criterion.
+- A full pass over the large top-level group in 10 minutes or less.
+  Compute alone extrapolates to about 54 seconds.
+- An edge density gain of at least three times for MR-to-work-item edges and 10 times for MR-to-MR edges.
+  We propose these numbers for the upstream acceptance criterion.
+
+The POC numbers are a regression baseline.
 
 ## Consequences
-
-The design closes the edge gap between MRs, work items, and commits.
-A new Rails cross-reference action becomes a parser change, not an ontology, fixture, and ETL change.
-A slow system note pass does not redeliver messages for other entities in the namespace.
-The POC numbers are a regression baseline.
 
 We maintain a new Rust module, and template drift is an ongoing cost.
 Siphon must replicate the metadata table, and probably add a skip index on the route path.

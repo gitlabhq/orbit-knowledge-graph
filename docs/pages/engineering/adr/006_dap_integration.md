@@ -28,24 +28,24 @@ With these tools, agents make fewer calls and give better answers, because one c
 Agents reach these tools through the Rails REST API and the Orbit Model Context Protocol (MCP) server.
 The GitLab Duo Agent Platform (DAP) runs agents in the Duo Workflow Service (DWS).
 DWS is a separate service with no direct connection to the Orbit server.
-This decision defines how Orbit tools reach DAP agents.
+This decision is about how Orbit tools reach DAP agents.
 [ADR 007](007_monetization_engineering.md) covers billing and usage tracking.
 
 Orbit has four consumption channels, each with its own authentication and billing:
 
 | Channel | Path | Authentication | Billing |
 |---------|------|----------------|---------|
-| DAP (DWS) | User to Rails to DWS to Workhorse to Rails (Orbit MCP) to Orbit | User OAuth token with the `ai_workflows` scope | Zero-rated, bundled with the Duo seat |
-| Frontend dashboard | User to Rails to Orbit over gRPC | User JWT | Included in the license |
+| DAP (DWS) | User to Rails to DWS to Workhorse to Rails (Orbit MCP) to Orbit | User OAuth token with the workflow scope | Zero-rated, bundled with the Duo seat |
+| Frontend dashboard | User to Rails to Orbit over gRPC | User JSON Web Token (JWT) | Included in the license |
 | Core features | Internal Rails service to Orbit | System JWT | Infrastructure, not billed |
-| External agents (MCP, GitLab CLI) | Agent to Rails OAuth to Orbit | OAuth and user JWT | Metered, paid add-on |
+| External agents through MCP or the GitLab command-line interface (CLI) | Agent to Rails OAuth to Orbit | OAuth and user JWT | Metered, paid add-on |
 
 Rails creates the DWS OAuth token when the workflow starts.
 The DWS executor sends all GitLab API traffic through Workhorse, and DWS makes no direct HTTP calls to Rails.
 The Orbit REST API accepts the workflow scope through the same shared check that other DWS-called APIs use.
 So the integration needs no new authentication mechanism on the data plane.
-The scope covers more than Orbit, so every Orbit route also requires the Orbit read permission.
-The scope only admits the token type.
+The scope covers more than Orbit, so it only admits the token type.
+Every Orbit route also requires the Orbit read permission.
 
 ## Decision
 
@@ -124,7 +124,7 @@ The trusted tool set holds the query tool, the schema tool, and the two named-co
 A feature flag switches the visible tools between the legacy query pair and the named-command pair.
 So we can retire the legacy tools without a change to the transport.
 
-The design depends on these properties:
+The integration depends on these properties:
 
 - DWS has no code for each tool.
   Tool loading is dynamic, and the descriptions come from the MCP tool listing, so they stay in sync with the ontology.
@@ -133,8 +133,8 @@ The design depends on these properties:
 
 ### Gating
 
-One Rails facade controls enablement, instead of feature flag checks spread through the code.
-The facade has three layers:
+One Rails check controls enablement, instead of feature flag checks spread through the code.
+The check has three layers:
 
 1. Platform kill switches.
    Two feature flags disable Orbit everywhere when either one is off.
@@ -158,7 +158,7 @@ Each surface gets Orbit in its own way:
   The injected tool list is the intersection of the agent selection and the pre-approved set.
 
 Duo Developer takes a different route and does not use the MCP tools.
-When Orbit is on for the user, the flow version resolver swaps in an Orbit variant of the developer flow.
+When Orbit is on for the user, Duo Developer runs an Orbit variant of its flow.
 That variant is a single agent with shell access in its execution environment.
 Its system prompt includes a shared Orbit skill.
 The skill teaches the agent to reach Orbit through the pre-authenticated GitLab CLI.
@@ -195,7 +195,7 @@ Traversal IDs and redaction work the same for every channel.
 ### Prompt engineering
 
 Orbit tools need prompt guidance, not only registration.
-Each tool description embeds the full query language grammar, encoded as TOON.
+Each tool description embeds the full query language grammar, encoded as Token-Oriented Object Notation (TOON).
 So the descriptions are large, a few thousand tokens each.
 In a crowded tool list with no guidance, they can confuse the agent about when to prefer them.
 They also fill the context window.
@@ -229,12 +229,10 @@ We treat such a prompt as a defect.
 
 Orbit prompt content lives inline in the DWS flow configurations and in a shared skill partial, next to the agent definitions.
 So prompts stay under flow version pinning, and prompt changes get review in one place.
-The design also avoids a runtime fetch on every workflow.
+This also avoids a runtime fetch on every workflow.
 The Orbit repository documents the intended guidance, and the flow definitions are the runtime source of truth.
 
-## Consequences
-
-The design enables these results:
+## Benefits of this approach
 
 - Agents get relational answers in one tool call instead of a chain of REST calls.
 - New Orbit capabilities reach agents with no deploy of DWS or Rails.
@@ -242,7 +240,7 @@ The design enables these results:
   Agents fetch tool descriptions at session start.
 - Gating for each surface and user preferences allow a gradual rollout and a quick kill.
 
-The design has these costs:
+## Consequences
 
 - Latency expectations must cover the full round trip through DWS, Workhorse, Rails, and Orbit, not only query execution.
   Single-entity lookups return quickly.

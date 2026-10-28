@@ -78,22 +78,18 @@ It also loses the Rails configuration and the Rails signing key.
 SDLC indexing does not call Rails.
 The health-check service also monitors the new deployment, together with the indexer and the dispatcher.
 
-These parts do not change:
+The rest of the pipeline stays the same:
 
-- Dispatch.
-  The dispatcher already publishes code tasks independently of the consumer.
-- NATS subjects.
-  Code tasks and SDLC requests already use separate subjects, so routing does not change.
-- Namespace deletion.
-  Deletion removes rows from all ontology tables, including code tables.
-  It is a light ClickHouse delete and does not need code resources, so it stays in the indexer.
-- Schema migration coordination.
-  Both services check the schema version on startup in the same way.
-  The dispatcher triggers code backfill during a migration, and the code indexer consumes those messages.
-- The code indexing module.
-  The module is already self-contained, so it needs no structural change.
+- The dispatcher already publishes code tasks independently of the consumer.
+- Code tasks and SDLC requests already use separate NATS subjects, so routing does not change.
+- Namespace deletion stays in the indexer.
+  It removes rows from all ontology tables, including code tables.
+  It is a light ClickHouse delete and does not need code resources.
+- Both services check the schema version on startup in the same way.
+  During a migration, the dispatcher triggers code backfill, and the code indexer consumes those messages.
+- The code indexing module is already self-contained, so it needs no structural change.
 
-## Consequences
+## Benefits of this approach
 
 Code and SDLC indexing scale independently.
 Operators can run many code indexer replicas and few SDLC indexer replicas, based on the workload.
@@ -103,7 +99,7 @@ SDLC pods drop to a fraction of the old memory limit, and code pods keep the hig
 Parser changes deploy and test on the code indexer without an effect on SDLC indexing.
 Monitoring and alerts can separate code indexing health from SDLC indexing health at the pod level.
 
-The change also has costs:
+## Consequences
 
 - Operators manage one more deployment, and the Helm values grow by one top-level section.
 - During the transition, operators deploy the updated indexer and the new code indexer.
@@ -119,7 +115,7 @@ The change also has costs:
 A configuration list of modules could let operators choose the handlers for each pod.
 This works, but it puts deployment topology into application configuration.
 A separate run mode keeps the deployment intent explicit.
-It also matches the existing pattern of one mode for each of the webserver, indexer, dispatcher, and health check.
+It also matches the existing pattern of one mode for each of the web server, indexer, dispatcher, and health check.
 
 ### Separate binary
 

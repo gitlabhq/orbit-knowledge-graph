@@ -130,10 +130,10 @@ The proxy therefore cannot read a project that the indexer would not index.
 
 ### Capacity
 
-Active archive proxy connections are bounded by the archive fetch concurrency per indexer pod times the number of pods.
+The archive fetch concurrency per indexer pod, times the number of pods, bounds the active archive proxy connections.
 The repository count does not change this bound, and more worker slots do not raise it.
 Backfill and incremental indexing share the concurrency.
-A NATS key-value (KV) lease also caps archive downloads per Gitaly storage across all pods.
+A NATS key-value lease also caps archive downloads per Gitaly storage across all pods.
 At the time of this decision, the GitLab.com indexer pool had about 40 archive fetch slots.
 In each connection, Rails returns a stream cap that can narrow the Workhorse default.
 Workhorse also caps total connections, in-flight pre-authorizations, idle time, and message size.
@@ -160,7 +160,7 @@ Archive durations over 24 hours, about 81,000 calls, were bimodal, with a long t
 Incremental indexing therefore uses one or two concurrent connections, and a backfill stays at the configured cap.
 The average and p99 show that some slots stay busy for tens of seconds, and the stream deadline accommodates the largest repositories.
 
-Rails serves cheap pre-authorization calls at about the current archive rate, and leaves the archive data path.
+Rails serves cheap pre-authorization calls at about the current archive rate, and it is no longer in the archive data path.
 A proxy connection lives slightly longer than its RPC and can carry several RPCs, so the archive rate is an upper bound.
 
 ### New consumers and RPCs

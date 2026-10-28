@@ -9,10 +9,14 @@ toc_hide: true
 
 Proposed
 
+## Date
+
+2026-09-28
+
 ## Context
 
-Agents write graph patterns in GQL, for example a user who authored a merge request.
-Orbit returns the result as raw JSON or in the GOON format ([ADR 012](012_goon_format.md)).
+Agents write graph patterns in GQL, such as a user who authored a merge request.
+Orbit returns the result as raw JSON or in the Graph Object Output Notation (GOON) format ([ADR 012](012_goon_format.md)).
 In both forms, the agent must join each edge back to the node bodies.
 
 ## Decision
@@ -51,7 +55,7 @@ Traversals and aggregations keep every row.
 The formatter reads the authorized, hydrated result rows.
 It does not know the return expressions, so a returned property prints inside its node.
 Only the query execution call renders GQL results, and it rejects unknown format values.
-Schema queries return TOON text for `gql`, as they do for the `llm` agent format.
+Schema queries return Token-Oriented Object Notation (TOON) text for `gql`, as they do for the `llm` agent format.
 
 ## Consequences
 

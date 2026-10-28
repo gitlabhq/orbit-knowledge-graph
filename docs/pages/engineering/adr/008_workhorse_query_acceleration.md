@@ -18,9 +18,9 @@ Superseded by [ADR 022](022_queries_in_rails.md).
 Every Orbit graph query holds a Rails Puma worker for the full duration of a bidirectional gRPC stream.
 The request flows this way:
 
-1. The client sends a query to the Orbit query API, or a query tool call to the Orbit MCP endpoint.
+1. The client sends a query to the Orbit query API, or a query tool call to the Orbit Model Context Protocol (MCP) endpoint.
 1. Workhorse proxies the request to Rails.
-1. A Puma worker authenticates the user, builds a JWT, and opens a bidirectional gRPC stream to the Orbit server.
+1. A Puma worker authenticates the user, builds a JSON Web Token (JWT), and opens a bidirectional gRPC stream to the Orbit server.
 1. The Orbit server compiles and runs a ClickHouse query.
    It sends back a redaction request, a batch of resource IDs that need permission checks.
 1. Rails loads each resource, checks the permission, and sends a redaction response.
@@ -38,7 +38,7 @@ Each one is a thread that cannot serve other requests while it waits on a gRPC s
 Orbit query traffic grows, mainly from AI agents on the MCP endpoint.
 More traffic means more threads that wait on ClickHouse and redaction.
 
-The Model Context Protocol (MCP) endpoint handles JSON-RPC calls and has the same problem.
+The MCP endpoint handles JSON-RPC calls and has the same problem.
 A query tool call opens the same bidirectional stream and blocks Puma the same way.
 MCP uses OAuth with an Orbit MCP scope instead of standard GitLab authentication, but the gRPC layer is the same.
 AI agents call the query tool repeatedly, so MCP generates more sustained streaming load than the REST endpoint.
@@ -119,7 +119,7 @@ The response maps each ID to an authorized or unauthorized result.
 The endpoint rejects a request with a duplicate resource type.
 It calls the shared redaction service for batch permission checks and records metrics for duration, batch size, and filtered count.
 
-The precomputed member access map gives each namespace that the user can access with the highest access level.
+The precomputed member access map lists each namespace that the user can access, with the highest access level in it.
 On large instances, the map can have millions of entries.
 So the map cannot cross the HTTP boundary from Workhorse to Rails.
 The computation stays inside the Rails redaction request:
@@ -127,7 +127,7 @@ The computation stays inside the Rails redaction request:
 1. In the send-data call, Rails computes traversal IDs and caches them for a few minutes.
    The JWT embeds the compacted traversal IDs.
 1. In the redaction call, Rails reads the same cache.
-   The group lookup fills the member access levels into the request store, and the redaction service reads them.
+   The group lookup stores the member access levels for the request, and the redaction service reads them.
 
 All of this happens in one Rails request, and nothing goes over the wire.
 Workhorse passes only the user credentials and the resource IDs.
@@ -144,7 +144,7 @@ A change to the gRPC contract requires a new module version in Workhorse.
 
 ### Transport security
 
-The design has three network legs:
+The path has three network legs:
 
 | Leg | Security |
 |-----|----------|
@@ -175,9 +175,7 @@ The Orbit query pipeline runs the same way.
 The existing instance-level Orbit infrastructure feature flag gates the Workhorse path.
 That flag gates all Orbit internal endpoints, so the rollout needs no other mechanism.
 
-## Consequences
-
-The improvements are:
+## Benefits of this approach
 
 - Puma workers are free in about 10 ms instead of 500 ms to 8 seconds.
   On staging, this would have prevented the 70% saturation at 1,000 requests per second.
@@ -186,7 +184,7 @@ The improvements are:
 - The design reuses the send-data pattern that Workhorse already uses for Gitaly gRPC streams.
 - The internal redaction endpoint makes the authorization contract explicit and testable on its own.
 
-The costs are:
+## Consequences
 
 - Debugging now spans three processes instead of two.
   Correlation IDs must propagate through all three legs.

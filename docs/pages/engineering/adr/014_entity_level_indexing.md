@@ -61,7 +61,7 @@ The handler follows these steps:
    Slice that range into equal parts.
    The handler skips this probe for scopes with few rows.
 1. Run one prepared query for each range, with a checkpoint for each partition.
-1. After all partitions finish, write the parent checkpoint and tombstone the partition checkpoints.
+1. After all partitions finish, write the parent checkpoint and mark the partition checkpoints as deleted.
 
 If a partition fails, the handler does not write the parent checkpoint.
 The next message enters the partition path again.
@@ -80,7 +80,8 @@ An entity whose first column after the traversal path has low cardinality is a b
 An example is the type column of notes, which has about 10 values.
 
 We use range partitions and not hash partitions.
-Benchmarks ran on the CI builds source table, with 100 million rows and a primary key of traversal path, ID, and partition ID.
+Benchmarks ran on the source table for continuous integration (CI) builds, which has 100 million rows.
+Its primary key is the traversal path, the ID, and the partition ID.
 They ran on a ClickHouse Cloud development instance on 2026-05-08, with four partitions inside one top-level group.
 
 | Filter | Rows read | Bytes read | Duration |
@@ -126,14 +127,14 @@ About 36 reads at under one millisecond each took about 18 ms in total.
 The existing global and namespace topic configurations still set engine-level policy for retries, concurrency groups, and the dead letter queue.
 The entity handlers subscribe to those topics.
 
-## Consequences
+## Benefits of this approach
 
 Each entity type has its own NATS consumer on the shared subscription.
 A slow merge request run does not delay issue or job runs.
 To partition a large entity, a developer declares a partition count in the ontology, and the message bus does not change.
 Checkpoint keys stay compatible, so a deploy does not reprocess data.
 
-The change also has costs:
+## Consequences
 
 - The refactor is breaking.
   The global and namespace handlers are gone, together with the pipeline path that ran many plans.

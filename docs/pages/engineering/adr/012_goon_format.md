@@ -9,8 +9,8 @@ toc_hide: true
 ## Status
 
 Superseded.
-Query results in the large language model (LLM) format now use TOON, with one table for each node type.
-We removed the GOON encoder.
+Query results in the large language model (LLM) format now use Token-Oriented Object Notation (TOON), with one table for each node type.
+We removed the Graph Object Output Notation (GOON) encoder.
 
 ## Date
 
@@ -21,7 +21,7 @@ We removed the GOON encoder.
 The Orbit server returns a graph query result in one of two formats.
 The raw format is structured JSON.
 The LLM format is text for an agent.
-The server, the gRPC contract, and the CLI supported the LLM format before any encoding shipped.
+The server, the gRPC contract, and the command-line interface (CLI) supported the LLM format before any encoding shipped.
 Until then, the LLM format returned the same JSON as the raw format.
 
 An agent that ran a graph query received the full JSON response.
@@ -128,20 +128,20 @@ Property tests lock the output.
 A shuffled input encodes to the same bytes, the header is always first, and no unescaped control character gets through.
 
 GOON has its own semantic version, with the same rules as the raw format in ADR 004.
-A CI check requires a version bump on any encoder change, unless the change does not affect the wire output.
+A continuous integration (CI) check requires a version bump on any encoder change, unless the change does not affect the wire output.
 
 The HTTP response body is out of scope.
 Workhorse owns the HTTP response and puts the GOON text in a field of a JSON envelope.
 A plain text body would show real line breaks, and needs a change in Workhorse only.
 
-## Consequences
+## Benefits of this approach
 
 The LLM path used 40% to 60% fewer tokens, across all five query shapes on production data.
 The format matches what models produce and read for graph data, as 316 session transcripts showed.
 The output is a pure function of the raw response, and only a new field in the wire response can extend the format.
 The CLI shows readable text for the LLM format, in place of dense JSON.
 
-The format also has costs:
+## Consequences
 
 - GOON is specific to Orbit.
   A change to the raw response needs a matching change in the encoder, and the version check catches a missed change.
@@ -150,7 +150,7 @@ The format also has costs:
 - Snapshot tests catch unintended format drift.
   A deliberate format change is therefore a large snapshot diff.
 
-The benchmark used a Python prototype encoder, and byte-identical output from both encoders is deferred.
+The benchmark used a Python prototype encoder, and we deferred a check that both encoders give byte-identical output.
 
 ## Why not the alternatives
 

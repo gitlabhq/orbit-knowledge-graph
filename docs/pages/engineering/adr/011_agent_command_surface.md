@@ -35,12 +35,12 @@ The query tool could not move into the Orbit executor.
 It ran through Workhorse for streaming and for redaction scoped to the caller token, and it needed context that only Rails had.
 
 We already used the lazy-mcp pattern internally.
-It is a pair of tools, one for discovery and one for invocation, behind which a catalog of typed commands sits.
+It puts a catalog of typed commands behind two tools, one for discovery and one for invocation.
 We applied the same pattern to Orbit, with one change: Rails must handle the commands that need Rails context.
 
 ## Decision
 
-**Agents see two MCP tools, `list_commands` and `invoke_command`, backed by a typed command registry in Orbit.**
+**Agents see two MCP tools, one to list commands and one to invoke a command, backed by a typed command registry in Orbit.**
 
 Rails intercepts the commands that depend on Rails-only behavior.
 Every other command goes directly to Orbit.
@@ -74,7 +74,7 @@ The first catalog had four commands:
 The query language and response format commands answer the discovery problems above.
 Direct API consumers can call the matching gRPC method or a REST endpoint.
 Like the schema command, both accept a raw format, which returns the JSON Schema as stored.
-They also accept an LLM format, which returns a condensed Token-Oriented Object Notation (TOON) form to save tokens.
+They also accept a large language model (LLM) format, which returns a condensed Token-Oriented Object Notation (TOON) form to save tokens.
 
 GQL has no query language command.
 Instead, the GQL query command description holds brief OpenCypher-like syntax rules under a small size cap.
@@ -121,8 +121,10 @@ Other callers keep the short description.
 
 The Orbit agent prompt in GitLab Duo Agent Platform encodes the contract for agents:
 
-1. List the commands once for each session. Agent Platform callers can skip this step.
-1. Before the first query, fetch the query language and the graph schema. Do not guess names from GitLab API terms.
+1. List the commands once for each session.
+   Agent Platform callers can skip this step.
+1. Before the first query, fetch the query language and the graph schema.
+   Do not guess names from GitLab API terms.
 1. Invoke the graph query command for queries.
 1. On a schema violation, fetch the schema again with the relevant node expanded, then retry.
 
@@ -130,7 +132,7 @@ Agents keep one model of the surface, whether a command runs in Orbit, Rails, or
 
 ### Skills are not commands
 
-Skills are a delivery channel for the CLI, not an agent capability.
+Skills are a delivery channel for the command-line interface (CLI), not an agent capability.
 Separate gRPC methods serve the deployed skills to Rails, and the Rails skill endpoints are their only consumer.
 These methods sit outside the command registry, so MCP agents cannot list or invoke skills.
 

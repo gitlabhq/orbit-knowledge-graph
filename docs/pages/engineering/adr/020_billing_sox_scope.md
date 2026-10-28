@@ -34,7 +34,7 @@ The gate skips the check in two cases:
 
 Any other quota-check failure denies the request.
 
-Orbit can be built with billing enforcement turned on.
+We can build Orbit with billing enforcement turned on.
 An enforced build validates its configuration at startup.
 It refuses to start unless billing and quota checks are on, the endpoints match an approved environment pair, and the authentication modes are compatible.
 A build without enforcement can turn off billing and quota checks through configuration.
@@ -60,7 +60,7 @@ It does not isolate every dependency that can change billing correctness.
 
 **We scope SOX to the billing component, the claims-conversion adapter, and a list of extended hook points.**
 
-The SOX-scoped section of `.gitlab/CODEOWNERS` is the list of in-scope files.
+The SOX-scoped section of the code owners file is the list of in-scope files.
 Each file in that section has a required-reviewer rule.
 
 A change is in scope when it can change any of these:
@@ -84,8 +84,8 @@ It is the one declared conversion point from authenticated request claims to bil
 
 These parts live outside the billing component.
 Each can change billing correctness without a change to billing code, so each is in scope.
-When a hook point is added or moved, update the file list in the SOX-scoped section of the code owners file.
-When a change adds a new kind of hook point, also add a row to this table.
+A change that adds or moves a hook point must update the file list in the SOX-scoped section of the code owners file.
+A change that adds a new kind of hook point must also add a row to this table.
 
 | Hook point | Why it is in scope |
 |---|---|
@@ -105,8 +105,6 @@ When a change adds a new kind of hook point, also add a row to this table.
 Files outside the SOX-scoped section of the code owners file are outside this declared scope.
 The section is a maintained review boundary.
 It does not prove that other code cannot affect billing.
-A change that adds or moves a billing hook point must update the scoped files.
-A change that adds a new kind of hook point must also update the table above.
 The controls below reduce the risk that an unknown dependency expands the surface, but they do not remove it.
 
 ### Controls
@@ -138,19 +136,21 @@ A formal maintainer nomination is optional, as the compliance discussion clarifi
 The operational process and the retention of approval evidence are still follow-up work.
 The code owners rules and CI checks do not show that this access process is in place.
 
-## Consequences
+## Benefits of this approach
 
 Compliance can audit one declared SOX surface without a review of every file in the repository.
 Work outside the billing surface has no SOX merge requirements.
 The ADR, the adapter header, and the code owners rules all point at the same set of files.
 Contributors and agents can find the boundary from any of them.
 
+## Consequences
+
 The hook-point list needs upkeep.
 A future change can add a new path that silently affects billing correctness.
 The author must add that path to the code owners section, and update this ADR only for a new kind of hook point.
 Reviewers of in-scope code must notice when a refactor expands the hook-point surface.
 
-A cross-component refactor of the pipeline observer interface needs SOX-reviewer approval, also when its intent has no relation to billing.
+A cross-component refactor of the pipeline observer interface needs SOX-reviewer approval, even when its intent has no relation to billing.
 The dependency boundary test adds a small CI step.
 
 ## Why not the alternatives
@@ -158,7 +158,7 @@ The dependency boundary test adds a small CI step.
 ### Whole-repository SOX scope
 
 This scope matches AI Gateway and leaves no doubt about the surface.
-We rejected it because every change in the repository would carry SOX requirements, also when it cannot affect billing correctness.
+We rejected it because every change in the repository would carry SOX requirements, even when it cannot affect billing correctness.
 That slows non-billing work and gives no compliance benefit.
 
 ## References

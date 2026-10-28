@@ -58,7 +58,8 @@ The limit also applies to requests for summaries only, a deliberate change from 
 We keep an array, so a later change to allow more tokens is not a breaking change.
 An expand flag defaults to false.
 A wrong array length, an element that is not a string, or an expand flag that is not a boolean is a validation error.
-The response format is raw by default, or LLM, and the GQL format is a validation error.
+The response format is raw by default, or the large language model (LLM) format.
+The GQL format is a validation error.
 The endpoint declares the Orbit read permission, and fine-grained tokens list the route.
 
 A token is a typed ID, a global ID, an instance URL, or a short reference for a merge request, issue, or epic.
@@ -130,7 +131,7 @@ Version `1.1.0` is deliberate.
 The closed prototype described version 1.0.0 with reference fields, which this contract renames to token fields.
 The prototype never merged, and the new version lets clients built against it detect the change.
 
-The LLM format returns plain text with the Rails summary, then one labeled graph section in TOON, or a one-line error.
+The LLM format returns plain text with the Rails summary, then one labeled graph section in Token-Oriented Object Notation (TOON), or a one-line error.
 Raw results carry their format version, and TOON output carries its own version.
 
 ### Transport
@@ -159,7 +160,7 @@ After the queries ship, clients can also call them directly through the named qu
 
 **Rails never reveals an ID that the caller cannot read.**
 
-Rails decides an invalid token, such as text it cannot parse or another host, from the token text alone, before any lookup.
+Rails detects an invalid token, such as text it cannot parse or another host, from the token text alone, before any lookup.
 The same applies to an unsupported type.
 After a lookup starts, every failure returns the same not-found error with no extra fields.
 That covers an unknown project or group, an unknown internal ID, an unreadable record, and a namespace of the wrong kind.
@@ -189,7 +190,7 @@ A record that is not indexed yet can return an empty graph, so an empty result d
 We want the sub-queries of one context request to bill as one query.
 A candidate is a shared billable request ID that Rails puts in the signed claims.
 Orbit would set the ID on the billing event of each sub-query, and billing could collapse them.
-This needs sign-off from the billing owners, which are the Orbit team for emission and Fulfillment for billing mediation.
+This needs sign-off from the billing owners, who are the Orbit team for emission and Fulfillment for billing mediation.
 We have not built it, and the one-token limit stays until we do.
 We also defer an explicit Model Context Protocol (MCP) tool and an agent command.
 
@@ -205,7 +206,7 @@ We also defer an explicit Model Context Protocol (MCP) tool and an agent command
 - A confidential issue tracks authorization-safe pagination, with page flags and cursors computed after redaction.
   That work does not block expansion, because expansion runs only named queries that the caller can already run.
   The fix must keep the truncation flag, because the truncation rule above relies on it.
-- The CLI remote routing for context must use the POST request with tokens and the new response.
+- The command-line interface (CLI) remote routing for context must use the POST request with tokens and the new response.
   The closed CLI draft used a GET request with references.
   Whether a type and ID pair with a colon is a valid token form is still open.
 - We do not decide these future items:

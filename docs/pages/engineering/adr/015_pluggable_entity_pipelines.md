@@ -43,8 +43,8 @@ None of its optimizations are entity-specific:
 | Adaptive retry | Shrinks the block size on a data lake failure, down to a floor |
 | Lazy bulk writers per destination table | Opens no insert for an empty table |
 | Checkpoints at page boundaries | Resumes from the cursor after a crash |
-| Replacing merge tree tables | Make re-processing idempotent |
-| Read and write statistics | Feed the pipeline observers |
+| Replacing merge tree tables | Makes reprocessing idempotent |
+| Read and write statistics | Feeds the pipeline observers |
 
 An Arrow string-offset overflow makes the adaptive retry drop straight to the floor.
 The only entity-specific part of this machinery was the SQL transformer.
@@ -52,7 +52,7 @@ The only entity-specific part of this machinery was the SQL transformer.
 [ADR 014](014_entity_level_indexing.md) named an entity pipeline extension point with system notes as the custom example.
 Taken literally, one custom pipeline per hard entity reintroduces the duplication above.
 This decision refines the granularity of that extension point.
-ADR 014 dispatch, per-entity NATS subjects, and partitioning do not change.
+The dispatch, per-entity NATS subjects, and partitioning from ADR 014 do not change.
 
 ## Decision
 
@@ -127,7 +127,7 @@ It sets the Rust spec for a derived entity pipeline.
 At the start of each run, the pipeline asks its transform registry to build the transform for the plan.
 A SQL spec calls the injected SQL transform factory, and a Rust spec looks up a registered factory by name.
 The SQL transform is the default path and has no registry entry.
-Each Rust transform registers itself from its own module, with one additive line per transform.
+Each Rust transform registers itself from its own module, so a new transform adds one registration line.
 Handler registration skips a Rust plan whose transform has no registration, so the derived entity stays dormant until its transform lands.
 
 The indexer builds one pipeline at handler registration and shares it with every handler.
@@ -163,7 +163,7 @@ It hands each stage only its inputs, so data flows top-down:
 - The extract stage produces one validated extract spec with its version, watermark, and deletion expressions.
 - The transform stage produces the transform spec: node columns with foreign key edge rows, a standalone edge row, or a named Rust transform.
 
-The extract stage imports nothing from the transform stage, and the transform stage imports nothing from the extract stage.
+The extract stage and the transform stage do not depend on each other.
 The schema of the batch at runtime is the contract between them, and planning keeps no second schema model.
 Edge endpoints map ontology properties to fields in the extracted batch.
 The SQL transform uses those bindings to build denormalized edge tags.
@@ -173,11 +173,14 @@ An ontology unit test checks that every authored template projects the version a
 The same test checks that the template uses the watermark and deletion markers instead of literal column names.
 The indexer integration scenarios check projection completeness from end to end.
 
-## Consequences
+## Benefits of this approach
 
 The transform stage is no longer SQL-only, and every entity inherits the extraction and writing optimizations.
 A new Rust entity, such as the system note entity of [ADR 013](013_system_note_edges.md), is one transform plus an extract plan.
 Existing entities do not change behavior, because they run the SQL transform over the same pipeline and plans.
+
+## Consequences
+
 A contract boundary replaced the concrete SQL transformer, which needed a mechanical refactor where the transformer was built.
 
 Hand-written transforms can multiply.

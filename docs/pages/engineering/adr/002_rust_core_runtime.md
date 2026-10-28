@@ -22,7 +22,7 @@ Rust compiles to WebAssembly for client-side use in the Language Server and the 
 Rust also parses large repositories in memory with no garbage collection (GC) pauses.
 The One Parser initiative later made Rust the GitLab standard for static code analysis in Orbit, embeddings, and language server features.
 
-Orbit then changed from a local CLI tool into a server-side service.
+Orbit then changed from a local command-line interface (CLI) tool into a server-side service.
 We had to keep the core runtime in Rust or rewrite the components that do not parse code in Go.
 At first, we embedded the Rust code in a Go-based indexer through a foreign function interface (FFI).
 That choice satisfied a packaging constraint of the Linux package.
@@ -38,7 +38,7 @@ One multi-tenant deployment serves all of GitLab.com.
 A three-hop traversal must finish in less than 300 ms at p95.
 
 The columnar data stack that Orbit uses is native to Rust, and includes Arrow, DataFusion, and Parquet.
-The Arrow Rust implementation is the reference for DataFusion, and Polars, Delta Lake, and Databend use it.
+DataFusion builds on the Arrow Rust implementation, and Polars, Delta Lake, and Databend also use it.
 Throughput needs grow with larger instances and more indexed entities.
 
 ## Decision
@@ -80,7 +80,7 @@ The compiler checks thread-safety bounds, so a data race between async tasks fai
 ### Native FFI for tree-sitter
 
 Tree-sitter is a C library, and Rust calls C directly through a thin layer of safe Rust types.
-This path has no marshaling cost, no JNI bridge, and no cgo step.
+The call has no marshaling cost and needs no bridge such as JNI or cgo.
 The parser reads repository archives in memory, with no intermediate files, and extracts definitions, imports, references, and call graphs.
 SWC is a Rust-native JavaScript and TypeScript parser, and it runs next to tree-sitter.
 Both parsers share one allocator and compose with no cross-language cost.
@@ -104,7 +104,7 @@ The type system catches whole classes of bugs before the code runs:
 
 - Each protobuf `oneof` maps to a Rust enum, and the compiler requires a match arm for each variant.
 - A new message type in the contract forces an update to every handler.
-- The ontology loads and validates at startup and exposes typed accessors, so an invalid reference fails CI and not a production query.
+- The ontology loads and validates at startup and exposes typed accessors, so an invalid reference fails continuous integration (CI) and not a production query.
 - CI treats lint warnings as errors and checks licenses, known vulnerabilities, and unsafe code.
 
 ## Consequences
@@ -159,7 +159,7 @@ Other GitLab projects had similar problems with FFI.
 
 We never planned to rewrite the service in Go.
 The question was how the Rust code should connect to GitLab infrastructure.
-When the packaging constraint went away, a standalone Rust service was the clear choice.
+When the packaging constraint went away, we moved the Rust code into its own service.
 
 ### Go
 
@@ -184,7 +184,7 @@ The Consequences section addresses them.
 ### Ruby
 
 Ruby is the main language at GitLab.
-Rails already handles authorization, the MCP endpoint, and the gRPC client that calls Orbit.
+Rails already handles authorization, the Model Context Protocol (MCP) endpoint, and the gRPC client that calls Orbit.
 
 The parser must call tree-sitter, a C library, and SWC, a Rust library, with no serialization cost.
 A Ruby C extension can wrap tree-sitter, but that code is harder to make memory-safe than Rust FFI.
@@ -198,7 +198,7 @@ Interpreter overhead and GC pauses make the p95 query target harder to meet.
 Ruby has no mature equivalent for Arrow IPC streaming or DataFusion.
 We would have to wrap the Rust libraries through FFI from Ruby, with the same problems we had in Go.
 
-Ruby is the correct choice for the Rails integration layer, but not for the compute-heavy service behind it.
+We keep Ruby for the Rails integration layer, and Rust for the compute-heavy service behind it.
 
 ## References
 

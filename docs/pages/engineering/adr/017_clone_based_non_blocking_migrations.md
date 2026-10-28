@@ -23,7 +23,7 @@ The schema management design describes that layout, and this decision does not c
 The problem is cost.
 The original flow rebuilt every table on every schema version change.
 It created the full new set empty, then indexed every namespace and repository into it again.
-A one-column change to one SDLC entity pulled billions of Siphon rows and every code archive again before promotion.
+A one-column change to one software development lifecycle (SDLC) entity pulled billions of Siphon rows and every code archive again before promotion.
 Most tables were identical, byte for byte, to the old version.
 
 The indexer could compare ontology versions at runtime and guess which tables changed.
@@ -44,13 +44,14 @@ The ledger has one entry for each schema version.
 The tool that bumps the version adds the entry.
 An entry has one of these scopes:
 
-- Full: rebuild all tables. A version with no entry gets this scope.
+- Full: rebuild all tables.
+  A version with no entry gets this scope.
 - SDLC: rebuild the SDLC tables, with an optional list of entities to narrow the scope.
 - Code: rebuild the code graph tables and their edge table.
 
 A person can widen an entry.
 A person cannot narrow it below the drift that the schema fingerprint snapshot detects.
-A CI check and a unit test enforce that floor.
+A continuous integration (CI) check and a unit test enforce that floor.
 A migration across several versions uses the union of their scopes.
 A gap in the ledger or a backward range widens the scope to full.
 
@@ -59,12 +60,14 @@ A gap in the ledger or a backward range widens the scope to full.
 A declared scope is a request.
 The indexer widens it to full when a clone would corrupt data:
 
-- The scope touches the shared edge table. A clone that rebuilds only some of its writers keeps rows with old keys that the corrected writer no longer emits.
-- A rebuilt table has writers outside the scope. The clone would drop their rows.
+- The scope touches the shared edge table.
+  A clone that rebuilds only some of its writers keeps rows with old keys that the corrected writer no longer emits.
+- A rebuilt table has writers outside the scope.
+  The clone would drop their rows.
 
 The code scope is the exception.
 It clones the shared edge table intact.
-The code stale sweep marks old code edge rows as deleted after each namespace finishes its new index run.
+A sweep for stale code rows marks old code edge rows as deleted after each namespace finishes its new index run.
 A code version change touches only code.
 
 The indexer then marks each table as clone or rebuild.
@@ -103,7 +106,7 @@ The gate uses checkpoints, not row counts.
 Full correctness validation stays in the staging end-to-end tests.
 The schema management design describes this trade-off.
 
-## Enabling blue-green deployment
+### Blue-green deployment
 
 The prefix layout is already a blue-green split.
 The active version keeps serving queries and streaming updates from its tables.
@@ -132,15 +135,13 @@ Cloning brings the green tables up almost complete at once and indexes only what
 The blue side is never disturbed, and the window shrinks to the size of the change.
 Promotion happens when that change is indexed, as the gate in [Promotion gates on the plan](#promotion-gates-on-the-plan) describes.
 
-## Consequences
-
-The benefits:
+## Benefits of this approach
 
 - A narrow version change indexes only what it invalidates, so the migration window and the Siphon and Gitaly load are smaller.
 - The invalidation set is a reviewed file with a floor that CI enforces.
 - Unmapped versions, ledger gaps, shared edge tables, and writers outside the scope all widen to full.
 
-The costs:
+## Consequences
 
 - Each breaking version change needs a ledger entry.
 - A scope that is too narrow is a data correctness bug, not only wasted work.
@@ -150,10 +151,10 @@ The costs:
 
 These items are out of scope:
 
-- Changes to the prefix layout or the promotion mechanism.
-- Row-count validation at the gate, which stays in staging end-to-end tests.
-- Runtime comparison of ontology versions. The scope is declared, and the runtime can only widen it.
-- Cleanup of single rows in shared SDLC edge tables. Those changes widen to full instead.
+- Changes to the prefix layout or the promotion mechanism
+- Row-count validation at the gate, which stays in staging end-to-end tests
+- Runtime comparison of ontology versions, because the scope is declared and the runtime can only widen it
+- Cleanup of single rows in shared SDLC edge tables, because those changes widen to full instead
 
 ## References
 

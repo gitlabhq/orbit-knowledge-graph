@@ -31,7 +31,7 @@ That module depended on hardcoded assumptions:
 - Column name pattern matching to extract entities
 
 The response had no metadata envelope.
-The frontend could not tell the query type, the column types, or the row count without a scan of the data.
+The frontend could not tell the query type, the column types, or the row count unless it scanned the data.
 The ontology defines a label field and a primary key for each entity, but query results did not refer to them.
 So the frontend kept a parallel mapping.
 
@@ -56,7 +56,7 @@ For a graph view, the edges feed the visualization directly.
 
 **Every query returns one graph-native shape: a list of deduplicated nodes and a list of edges.**
 
-The design has two layers.
+Orbit splits the data into two layers.
 
 The first layer is the ontology.
 It holds entity types, property definitions, label fields, domains, styles, and edge definitions.
@@ -159,9 +159,7 @@ A stub formatter that delegates to another formatter reports no version.
 The metadata then carries an empty string, so telemetry shows stub output.
 The LLM text format gets its own version when its encoding ships ([ADR 012](012_goon_format.md)).
 
-## Consequences
-
-The improvements are:
+## Benefits of this approach
 
 - The frontend no longer rebuilds topology from column names.
 - All five query types use one parse path, with no dispatch for each type.
@@ -170,7 +168,7 @@ The improvements are:
 - Graph data goes to the renderer with no extraction step.
 - Tables stack by entity type, with columns from the ontology.
 
-The costs are:
+## Consequences
 
 - The JSON result is a breaking change.
   Rails passes the JSON through without a parse, so Rails needs no change.

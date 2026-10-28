@@ -23,7 +23,7 @@ The labels hide large differences.
 A high-selectivity string filter on a column with 50,000 distinct values gets the same treatment as one on a column with three.
 
 Profiling showed that this matters.
-Replacing filter-only common table expressions (CTEs) with joins cut rows read by 70% on code-graph queries.
+When the compiler replaced filter-only common table expressions (CTEs) with joins, rows read on code-graph queries dropped by 70%.
 That improvement was accidental, because the compiler happened to emit a better shape for that query.
 For a different filter combination, the old shape might have been better.
 Without cardinality data, the compiler cannot make this choice systematically.
@@ -65,7 +65,7 @@ Its anchor selection is still a join ordering choice: which endpoint expands fir
 
 ### Statistics
 
-We keep three types of statistics, each in its own AggregatingMergeTree table:
+We keep three types of statistics, each in its own aggregating merge tree table:
 
 | Statistic | Covers | Key |
 |---|---|---|
@@ -74,8 +74,8 @@ We keep three types of statistics, each in its own AggregatingMergeTree table:
 | Equi-depth histogram | Integers, timestamps, dates, and floats | Table, column, traversal path, and bucket |
 
 The ontology property types decide the category of each column at load time, so nobody lists columns by hand.
-UUID columns are skipped, because their selectivity is always one row.
-Virtual columns and columns that cannot be filtered are also skipped.
+The statistics skip UUID columns, because their selectivity is always one row.
+They also skip virtual columns and columns that cannot be filtered.
 
 One materialized view per node table fires on insert and writes aggregate states to the stats tables.
 The view counts distinct entities per value or bucket with a HyperLogLog-based state.
@@ -156,7 +156,7 @@ The planner estimates the intermediate row count at each step and picks the orde
 
 The query language caps the number of nodes and relationships, so the search space is small.
 Brute-force evaluation takes less than a microsecond, and no dynamic programming is necessary.
-The compiler lowering must be able to start a flat chain from either a node or an edge.
+The compiler must be able to start a flat chain from either a node or an edge.
 
 ### Pipeline placement
 
@@ -177,7 +177,7 @@ The server passes the statistics to the compiler as a map from table and column 
 A statistics section in the schema configuration declares the table names and dictionary settings.
 The same section sets the histogram bucket count, the top token count, the partition key, and the excluded columns.
 
-## Consequences
+## Benefits of this approach
 
 Queries with several filtered nodes get the cheapest estimated join order instead of a fixed strategy.
 The planner can skip narrowing CTEs when statistics show that a filter does not narrow much.
@@ -185,7 +185,7 @@ Measured numbers replace the high and low selectivity labels.
 Code-graph queries over files, definitions, or imported symbols benefit most.
 Their tables are large, and their filter selectivity varies widely.
 
-The costs are these:
+## Consequences
 
 - Schema migrations must create and drop the stats tables, views, and dictionary with the graph tables.
 - Each node table gets one materialized view, and each view fires on every insert, which adds write amplification.
