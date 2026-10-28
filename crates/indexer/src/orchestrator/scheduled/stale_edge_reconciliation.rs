@@ -15,8 +15,32 @@ use orbit_server_config::{ScheduleConfiguration, StaleEdgeReconciliationConfig};
 
 const CHECKPOINT_KEY: &str = "maintenance.stale_edge_reconciliation";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum StaleWhen {
+    EmitterChanged,
+    EmitterDeleted,
+}
+
+impl StaleWhen {
+    fn of(mapping: &EdgeMapping) -> Self {
+        if mapping.mutable {
+            Self::EmitterChanged
+        } else {
+            Self::EmitterDeleted
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::EmitterChanged => "emitter_changed",
+            Self::EmitterDeleted => "emitter_deleted",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReconciliationGroup {
+    stale_when: StaleWhen,
     emitting_node: String,
     emitting_node_table: String,
     edge_table: String,
@@ -26,8 +50,8 @@ struct ReconciliationGroup {
     edge_sort_key: String,
 }
 
-/// Tombstones edges a node's pipeline stopped emitting. Stateless: each run scans a
-/// fixed lookback rather than resuming from a cursor.
+/// Tombstones FK edges a node's pipeline stopped emitting, including every FK edge of a deleted
+/// node. Stateless: each run scans a fixed lookback rather than resuming from a cursor.
 pub struct StaleEdgeReconciliation {
     graph: ArrowClickHouseClient,
     checkpoint_store: Arc<dyn CheckpointStore>,
@@ -44,7 +68,7 @@ impl StaleEdgeReconciliation {
         metrics: ScheduledTaskMetrics,
         config: StaleEdgeReconciliationConfig,
     ) -> Self {
-        let groups = group_mutable_edges_by_emitting_node(ontology);
+        let groups = group_fk_edges_by_emitting_node(ontology);
         let kinds: Vec<&str> = groups
             .iter()
             .flat_map(|group| group.relationship_kinds.iter().map(String::as_str))
@@ -95,6 +119,7 @@ impl StaleEdgeReconciliation {
         for group in &self.groups {
             info!(
                 safe(ENTITY) = group.emitting_node.as_str(),
+                safe(KIND) = group.stale_when.as_str(),
                 safe(SOURCE_TABLE) = group.emitting_node_table.as_str(),
                 safe(TABLE) = group.edge_table.as_str(),
                 safe(RELATIONSHIP_KINDS) = group.relationship_kinds.join(","),
@@ -177,8 +202,9 @@ impl StaleEdgeReconciliation {
     }
 }
 
-fn group_mutable_edges_by_emitting_node(ontology: &Ontology) -> Vec<ReconciliationGroup> {
-    let mut kinds_by_group: BTreeMap<(String, String, &'static str), Vec<String>> = BTreeMap::new();
+fn group_fk_edges_by_emitting_node(ontology: &Ontology) -> Vec<ReconciliationGroup> {
+    type GroupKey = (StaleWhen, String, String, &'static str);
+    let mut kinds_by_group: BTreeMap<GroupKey, Vec<String>> = BTreeMap::new();
     let mut tables_by_emitting_node: BTreeMap<String, String> = BTreeMap::new();
 
     for node in ontology.nodes() {
@@ -187,9 +213,6 @@ fn group_mutable_edges_by_emitting_node(ontology: &Ontology) -> Vec<Reconciliati
         }
         for pipeline in &node.pipelines {
             for mapping in pipeline.transform.edges() {
-                if !mapping.mutable {
-                    continue;
-                }
                 let Some(emitting_node_id_column) =
                     find_emitting_node_id_column(mapping, &node.name)
                 else {
@@ -206,6 +229,7 @@ fn group_mutable_edges_by_emitting_node(ontology: &Ontology) -> Vec<Reconciliati
                 {
                     kinds_by_group
                         .entry((
+                            StaleWhen::of(mapping),
                             node.name.clone(),
                             edge_table.to_string(),
                             emitting_node_id_column,
@@ -220,7 +244,7 @@ fn group_mutable_edges_by_emitting_node(ontology: &Ontology) -> Vec<Reconciliati
     kinds_by_group
         .into_iter()
         .map(
-            |((emitting_node, edge_table, emitting_node_id_column), mut kinds)| {
+            |((stale_when, emitting_node, edge_table, emitting_node_id_column), mut kinds)| {
                 kinds.sort();
                 kinds.dedup();
                 let edge_sort_key = ontology
@@ -228,6 +252,7 @@ fn group_mutable_edges_by_emitting_node(ontology: &Ontology) -> Vec<Reconciliati
                     .map(|config| config.sort_key.join(", "))
                     .unwrap_or_default();
                 ReconciliationGroup {
+                    stale_when,
                     emitting_node_table: tables_by_emitting_node[&emitting_node].clone(),
                     emitting_node,
                     edge_table: prefixed_table_name(&edge_table, *SCHEMA_VERSION),
@@ -262,6 +287,7 @@ fn find_emitting_node_id_column(mapping: &EdgeMapping, node_name: &str) -> Optio
 
 fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &[i64]) -> String {
     let ReconciliationGroup {
+        stale_when,
         emitting_node_table,
         edge_table,
         emitting_node_id_column,
@@ -270,6 +296,11 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
         relationship_kinds,
         edge_sort_key,
     } = group;
+
+    let emitter_state = match stale_when {
+        StaleWhen::EmitterChanged => "",
+        StaleWhen::EmitterDeleted => " WHERE _deleted = true",
+    };
 
     let kinds = relationship_kinds
         .iter()
@@ -298,7 +329,7 @@ fn build_tombstone_statement(group: &ReconciliationGroup, excluded_namespaces: &
              WHERE _version >= {{cursor:String}}{namespace_guard} \
              ORDER BY traversal_path, id, _version DESC \
              LIMIT 1 BY traversal_path, id \
-           ) WHERE _deleted = false \
+           ){emitter_state} \
          ), \
          edge AS ( \
            SELECT {edge_sort_key}, _version FROM ( \
@@ -329,11 +360,12 @@ mod tests {
 
     fn groups() -> Vec<ReconciliationGroup> {
         let ontology = Ontology::load_embedded().expect("ontology must load");
-        group_mutable_edges_by_emitting_node(&ontology)
+        group_fk_edges_by_emitting_node(&ontology)
     }
 
     fn find<'a>(
         groups: &'a [ReconciliationGroup],
+        stale_when: StaleWhen,
         emitting_node: &str,
         edge_table_suffix: &str,
         endpoint: &str,
@@ -341,17 +373,21 @@ mod tests {
         groups
             .iter()
             .find(|g| {
-                g.emitting_node == emitting_node
+                g.stale_when == stale_when
+                    && g.emitting_node == emitting_node
                     && g.edge_table.ends_with(edge_table_suffix)
                     && g.emitting_node_id_column == endpoint
             })
             .unwrap_or_else(|| {
-                panic!("expected group {emitting_node}/*{edge_table_suffix}/{endpoint}")
+                panic!(
+                    "expected {stale_when:?} group {emitting_node}/*{edge_table_suffix}/{endpoint}"
+                )
             })
     }
 
-    fn fixture() -> ReconciliationGroup {
+    fn fixture(stale_when: StaleWhen) -> ReconciliationGroup {
         ReconciliationGroup {
+            stale_when,
             emitting_node: "Pipeline".to_string(),
             emitting_node_table: "v57_gl_pipeline".to_string(),
             edge_table: "v57_gl_ci_edge".to_string(),
@@ -365,7 +401,13 @@ mod tests {
     #[test]
     fn outgoing_edge_is_emitted_from_source_endpoint() {
         let groups = groups();
-        let diff = find(&groups, "MergeRequest", "gl_diff_edge", "source_id");
+        let diff = find(
+            &groups,
+            StaleWhen::EmitterChanged,
+            "MergeRequest",
+            "gl_diff_edge",
+            "source_id",
+        );
         assert_eq!(diff.emitting_node_kind_column, "source_kind");
         assert!(
             diff.relationship_kinds
@@ -376,7 +418,13 @@ mod tests {
     #[test]
     fn incoming_edge_is_emitted_from_target_endpoint() {
         let groups = groups();
-        let incoming = find(&groups, "MergeRequest", "gl_edge", "target_id");
+        let incoming = find(
+            &groups,
+            StaleWhen::EmitterChanged,
+            "MergeRequest",
+            "gl_edge",
+            "target_id",
+        );
         assert_eq!(incoming.emitting_node_kind_column, "target_kind");
         assert!(
             incoming
@@ -388,7 +436,13 @@ mod tests {
     #[test]
     fn kinds_sharing_emitting_node_and_table_collapse_into_one_group() {
         let groups = groups();
-        let incoming = find(&groups, "MergeRequest", "gl_edge", "target_id");
+        let incoming = find(
+            &groups,
+            StaleWhen::EmitterChanged,
+            "MergeRequest",
+            "gl_edge",
+            "target_id",
+        );
         assert!(
             incoming.relationship_kinds.len() > 1,
             "UPDATED_BY and LAST_EDITED_BY share an emitting node, table and endpoint so they \
@@ -397,25 +451,85 @@ mod tests {
     }
 
     #[test]
-    fn only_mutable_mappings_are_swept() {
+    fn only_mutable_mappings_are_swept_on_change() {
         let groups = groups();
-        let swept: std::collections::BTreeSet<&str> = groups
+        let swept_on_change: std::collections::BTreeSet<(&str, &str)> = groups
             .iter()
-            .flat_map(|g| g.relationship_kinds.iter().map(String::as_str))
+            .filter(|g| g.stale_when == StaleWhen::EmitterChanged)
+            .flat_map(|g| {
+                g.relationship_kinds
+                    .iter()
+                    .map(|kind| (g.emitting_node.as_str(), kind.as_str()))
+            })
             .collect();
         for immutable in [
-            "IN_PROJECT",
-            "AUTHORED",
-            "HAS_JOB",
-            "IN_PIPELINE",
-            "MERGED_AT_COMMIT",
-            "HAS_IDENTIFIER",
+            ("MergeRequest", "IN_PROJECT"),
+            ("Job", "IN_PROJECT"),
+            ("Job", "HAS_JOB"),
+            ("Job", "IN_PIPELINE"),
+            ("MergeRequest", "MERGED_AT_COMMIT"),
+            ("VulnerabilityOccurrence", "HAS_IDENTIFIER"),
         ] {
             assert!(
-                !swept.contains(immutable),
-                "{immutable} is not marked mutable in the ontology and must not be swept",
+                !swept_on_change.contains(&immutable),
+                "{immutable:?} is not marked mutable in the ontology and must not be swept on change",
             );
         }
+    }
+
+    #[test]
+    fn every_fk_mapping_is_swept_when_its_emitter_is_deleted() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let groups = group_fk_edges_by_emitting_node(&ontology);
+        let mut checked = 0;
+        for node in ontology.nodes().filter(|node| !node.global) {
+            for mapping in node.pipelines.iter().flat_map(|p| p.transform.edges()) {
+                let Some(endpoint) = find_emitting_node_id_column(mapping, &node.name) else {
+                    continue;
+                };
+                for route in ontology.edge_routes_for_mapping(mapping) {
+                    let swept = groups.iter().any(|g| {
+                        g.emitting_node == node.name
+                            && g.edge_table
+                                == prefixed_table_name(&route.destination_table, *SCHEMA_VERSION)
+                            && g.emitting_node_id_column == endpoint
+                            && g.relationship_kinds.contains(&mapping.label)
+                    });
+                    assert!(swept, "{}/{} is never swept", node.name, mapping.label);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 50, "only {checked} FK routes were checked");
+    }
+
+    #[test]
+    fn immutable_fk_edges_are_swept_for_deleted_emitters() {
+        let groups = groups();
+        let job_incoming = find(
+            &groups,
+            StaleWhen::EmitterDeleted,
+            "Job",
+            "gl_ci_edge",
+            "target_id",
+        );
+        assert!(
+            job_incoming
+                .relationship_kinds
+                .contains(&"HAS_JOB".to_string())
+        );
+        let mr_outgoing = find(
+            &groups,
+            StaleWhen::EmitterDeleted,
+            "MergeRequest",
+            "gl_edge",
+            "source_id",
+        );
+        assert!(
+            mr_outgoing
+                .relationship_kinds
+                .contains(&"IN_PROJECT".to_string())
+        );
     }
 
     #[test]
@@ -457,7 +571,7 @@ mod tests {
 
     #[test]
     fn sql_pins_emitting_node_kind_and_batches_every_relationship_kind() {
-        let sql = build_tombstone_statement(&fixture(), &[]);
+        let sql = build_tombstone_statement(&fixture(StaleWhen::EmitterChanged), &[]);
 
         assert!(sql.contains("INSERT INTO v57_gl_ci_edge"), "{sql}");
         assert!(sql.contains("FROM v57_gl_pipeline "), "{sql}");
@@ -472,44 +586,66 @@ mod tests {
 
     #[test]
     fn staleness_compares_versions_and_stamps_from_the_emitting_node() {
-        let sql = build_tombstone_statement(&fixture(), &[]);
+        for stale_when in [StaleWhen::EmitterChanged, StaleWhen::EmitterDeleted] {
+            let sql = build_tombstone_statement(&fixture(stale_when), &[]);
 
-        assert!(sql.contains("edge._version < emitter._version"), "{sql}");
-        assert!(sql.contains("target_kind, _version, _deleted)"), "{sql}");
-        assert!(sql.contains("emitter._version, true"), "{sql}");
-        assert!(!sql.contains("now64"), "{sql}");
-    }
-
-    #[test]
-    fn both_sides_dedup_without_final_and_filter_deleted_after() {
-        let sql = build_tombstone_statement(&fixture(), &[]);
-
-        assert!(!sql.contains("FINAL"), "{sql}");
-        assert_eq!(sql.matches("LIMIT 1 BY").count(), 2, "{sql}");
-
-        // A `_deleted` filter inside either dedup would drop a tombstoned newest
-        // row and let a superseded one win, which is how valid edges get retired.
-        for dedup in [
-            "LIMIT 1 BY traversal_path, id",
-            "LIMIT 1 BY traversal_path, relationship_kind",
-        ] {
-            let at = sql
-                .find(dedup)
-                .unwrap_or_else(|| panic!("{dedup} missing: {sql}"));
-            let filter = sql[at..].find("_deleted = false").map(|i| i + at);
-            assert!(
-                filter.is_some(),
-                "{dedup} has no trailing _deleted filter: {sql}"
-            );
+            assert!(sql.contains("edge._version < emitter._version"), "{sql}");
+            assert!(sql.contains("target_kind, _version, _deleted)"), "{sql}");
+            assert!(sql.contains("emitter._version, true"), "{sql}");
+            assert!(!sql.contains("now64"), "{sql}");
         }
     }
 
     #[test]
-    fn namespaces_with_pending_writes_are_excluded_from_the_scan() {
-        let sql = build_tombstone_statement(&fixture(), &[7, 42]);
-        assert!(sql.contains("NOT IN (7, 42)"), "{sql}");
+    fn both_sides_dedup_without_final_and_filter_deleted_after() {
+        for stale_when in [StaleWhen::EmitterChanged, StaleWhen::EmitterDeleted] {
+            let sql = build_tombstone_statement(&fixture(stale_when), &[]);
 
-        let clean = build_tombstone_statement(&fixture(), &[]);
-        assert!(!clean.contains("NOT IN ("), "{clean}");
+            assert!(!sql.contains("FINAL"), "{sql}");
+            assert_eq!(sql.matches("LIMIT 1 BY").count(), 2, "{sql}");
+
+            // A `_deleted` filter inside either dedup would drop a tombstoned newest
+            // row and let a superseded one win, which is how valid edges get retired.
+            let emitter_scan = &sql[sql.find("FROM v57_gl_pipeline").unwrap()..];
+            let emitter_dedup = emitter_scan.find("LIMIT 1 BY traversal_path, id").unwrap();
+            assert!(
+                !emitter_scan[..emitter_dedup].contains("_deleted ="),
+                "{sql}"
+            );
+            let edge_dedup = sql
+                .find("LIMIT 1 BY traversal_path, relationship_kind")
+                .unwrap_or_else(|| panic!("edge dedup missing: {sql}"));
+            assert!(sql[edge_dedup..].contains("_deleted = false"), "{sql}");
+        }
+    }
+
+    #[test]
+    fn changed_emitters_include_deleted_ones() {
+        let sql = build_tombstone_statement(&fixture(StaleWhen::EmitterChanged), &[]);
+        let emitter = &sql[..sql.find("edge AS").unwrap()];
+        assert!(!emitter.contains("_deleted = false"), "{sql}");
+        assert!(!emitter.contains("_deleted = true"), "{sql}");
+    }
+
+    #[test]
+    fn deleted_emitters_keep_only_a_deleted_latest_row() {
+        let sql = build_tombstone_statement(&fixture(StaleWhen::EmitterDeleted), &[]);
+        let emitter = &sql[..sql.find("edge AS").unwrap()];
+        let dedup = emitter.find("LIMIT 1 BY traversal_path, id").unwrap();
+        assert!(
+            emitter[dedup..].contains(") WHERE _deleted = true"),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn namespaces_with_pending_writes_are_excluded_from_the_scan() {
+        for stale_when in [StaleWhen::EmitterChanged, StaleWhen::EmitterDeleted] {
+            let sql = build_tombstone_statement(&fixture(stale_when), &[7, 42]);
+            assert!(sql.contains("NOT IN (7, 42)"), "{sql}");
+
+            let clean = build_tombstone_statement(&fixture(stale_when), &[]);
+            assert!(!clean.contains("NOT IN ("), "{clean}");
+        }
     }
 }
