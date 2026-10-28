@@ -39,16 +39,8 @@ static GQL_CATALOG: LazyLock<SkillCatalog> = LazyLock::new(|| {
         .expect("embedded skills have valid frontmatter in GQL mode")
 });
 
-fn served_in(path: &str, frontend: Frontend) -> bool {
-    match path {
-        GQL_MANIFEST => false,
-        "references/gql.md" => frontend == Frontend::Gql,
-        "references/query_language.md"
-        | "references/recipes.md"
-        | "references/remote_repo_map.md"
-        | "scripts/remote_repo_map.py" => frontend == Frontend::JsonDsl,
-        _ => true,
-    }
+fn served_in(path: &str) -> bool {
+    path != GQL_MANIFEST
 }
 
 fn catalog(frontend: Frontend) -> &'static SkillCatalog {
@@ -102,7 +94,7 @@ struct SkillCatalog {
 impl SkillCatalog {
     fn load_embedded(frontend: Frontend) -> Result<Self, String> {
         let orbit = load_skill::<SkillAssets>(SKILL_NAME, |path| {
-            served_in(path, frontend).then(|| {
+            served_in(path).then(|| {
                 if path == MANIFEST && frontend == Frontend::Gql {
                     GQL_MANIFEST
                 } else {
@@ -270,13 +262,10 @@ mod tests {
                 Frontend::JsonDsl,
                 &[
                     "SKILL.md",
+                    "references/gql.md",
                     "references/maintaining.md",
-                    "references/query_language.md",
-                    "references/recipes.md",
-                    "references/remote_repo_map.md",
                     "references/reporting.md",
                     "references/troubleshooting.md",
-                    "scripts/remote_repo_map.py",
                 ][..],
             ),
             (
