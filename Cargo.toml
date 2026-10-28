@@ -58,7 +58,7 @@ labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.1
 labkit-fields = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0" }
 # No bundled ring provider: every binary installs its rustls provider before building a Tracker.
 labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", tag = "v0.10.0", default-features = false }
-arrow = "58.0.0"
+arrow = "60.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
 cpu-time = "1.0.0"
@@ -66,7 +66,7 @@ cargo-util-schemas = "0.14.0"
 cargo_metadata = "0.23.1"
 enum-as-inner = "0.7.0"
 either = "1.15.0"
-datafusion = { version = "54.1.0", default-features = false, features = ["sql", "nested_expressions"] }
+datafusion = { version = "55.2.0", default-features = false, features = ["sql", "nested_expressions"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
 cliclack = "0.5"
 comrak = { version = "0.53.0", default-features = false }
@@ -108,7 +108,7 @@ anyhow = "1.0.100"
 # Keep this a different major than DataFusion's object_store so the cloud features stay off its build path.
 object_store = { version = "0.14.2", features = ["aws", "gcp"] }
 config = { version = "0.15", default-features = false, features = ["yaml"] }
-parquet = { version = "58", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
+parquet = { version = "60", default-features = false, features = ["arrow", "snap", "zstd", "lz4"] }
 tokio = { version = "1.49.0", features = ["full"] }
 strum = { version = "0.28.0", features = ["derive"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
@@ -122,7 +122,7 @@ lz4_flex = "0.11.6"
 circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }
 nats-client = { path = "crates/nats-client" }
-duckdb = { version = "1.10506.1", features = ["vtab-arrow", "appender-arrow"] }
+duckdb = { version = "1.20000.0", features = ["vtab-arrow", "appender-arrow"] }
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.8.1" }
 siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.git", tag = "0.0.103-beta" }
 thiserror = "2.0.18"
@@ -150,7 +150,7 @@ async-nats = { version = "0.49.0", default-features = false, features = [
   "nuid",
   "aws-lc-rs",
 ] }
-arrow-ipc = "58.0.0"
+arrow-ipc = "60.0.0"
 clickhouse = { version = "0.15", features = ["inserter", "rustls-tls-aws-lc", "rustls-tls-native-roots"] }
 testcontainers = "0.27.3"
 testcontainers-modules = { version = "0.15.0", features = ["nats"] }
