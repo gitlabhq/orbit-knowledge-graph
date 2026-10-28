@@ -48,11 +48,15 @@ properties:
     description: "Description text."
 
   state:
-    type: string
+    type: enum
     source: state
     nullable: false
-    description: "State (active, closed)."
+    description: "State."
+    enum_type: string
     selectivity: low
+    values:
+      0: active
+      1: closed
 
   due_date:
     type: date

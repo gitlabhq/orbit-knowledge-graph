@@ -37,11 +37,21 @@ properties:
     description: "Parent merge request ID."
 
   state:
-    type: string
+    type: enum
     source: state
     nullable: false
-    description: "Diff state: empty, without_files, collected, overflow. Deprecated values may still appear: timeout, overflow_commits_safe_size, overflow_diff_files_limit, overflow_diff_lines_limit."
+    description: "Diff state. timeout and the overflow_* values are deprecated but may still appear."
+    enum_type: string
     selectivity: low
+    values:
+      0: empty
+      1: collected
+      2: overflow
+      3: without_files
+      4: timeout
+      5: overflow_commits_safe_size
+      6: overflow_diff_files_limit
+      7: overflow_diff_lines_limit
 
   base_commit_sha:
     type: string
