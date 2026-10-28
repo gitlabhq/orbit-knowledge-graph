@@ -513,11 +513,18 @@
           "type": "integer",
           "format": "uint",
           "minimum": 1
+        },
+        "edge_diff_max_concurrent_statements": {
+          "description": "Edge-retirement statements a page runs at once against the graph.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 1
         }
       },
       "additionalProperties": false,
       "required": [
-        "system_notes_resolve_lookup_batch_size"
+        "system_notes_resolve_lookup_batch_size",
+        "edge_diff_max_concurrent_statements"
       ]
     },
     "CodeIndexingTaskHandlerConfig": {

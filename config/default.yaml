@@ -116,6 +116,7 @@ engine:
     entity-handler:
       # datalake_batch_size: 500000  # unset = derived from the container memory limit
       system_notes_resolve_lookup_batch_size: 1000
+      edge_diff_max_concurrent_statements: 4
       batch_size_overrides: {}       # per-entity overrides; deployments set their own
     code-indexing-task:
       pipeline:

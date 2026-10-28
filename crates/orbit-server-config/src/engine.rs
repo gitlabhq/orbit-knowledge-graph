@@ -196,6 +196,10 @@ pub struct EntityHandlerConfig {
     /// Maximum number of items bound into each SystemNote resolver lookup.
     #[schemars(range(min = 1))]
     pub system_notes_resolve_lookup_batch_size: usize,
+
+    /// Edge-retirement statements a page runs at once against the graph.
+    #[schemars(range(min = 1))]
+    pub edge_diff_max_concurrent_statements: usize,
 }
 
 impl EntityHandlerConfig {
@@ -709,7 +713,7 @@ mod tests {
 
     #[test]
     fn system_notes_lookup_batch_size_overrides_from_yaml() {
-        let yaml = "system_notes_resolve_lookup_batch_size: 2048\n";
+        let yaml = "system_notes_resolve_lookup_batch_size: 2048\nedge_diff_max_concurrent_statements: 4\n";
         let cfg: EntityHandlerConfig = orbit_utils::yaml::from_str(yaml).expect("valid yaml");
         assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 2_048);
         assert!(cfg.batch_size_overrides.is_empty());

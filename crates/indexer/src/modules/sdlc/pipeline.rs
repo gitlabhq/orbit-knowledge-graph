@@ -11,7 +11,7 @@ use orbit_log_fields::{debug, info, warn};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::clickhouse::ArrowClickHouseClient;
+use super::edge_diff::EdgeDiffClient;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::IndexingObserver;
@@ -143,7 +143,7 @@ pub(in crate::modules::sdlc) struct Pipeline {
     metrics: SdlcMetrics,
     retry_config: DatalakeRetryConfig,
     registry: Arc<TransformRegistry>,
-    graph: ArrowClickHouseClient,
+    edge_diff: EdgeDiffClient,
 }
 
 impl Pipeline {
@@ -153,7 +153,7 @@ impl Pipeline {
         metrics: SdlcMetrics,
         retry_config: DatalakeRetryConfig,
         registry: Arc<TransformRegistry>,
-        graph: ArrowClickHouseClient,
+        edge_diff: EdgeDiffClient,
     ) -> Self {
         Self {
             datalake,
@@ -161,7 +161,7 @@ impl Pipeline {
             metrics,
             retry_config,
             registry,
-            graph,
+            edge_diff,
         }
     }
 
@@ -191,6 +191,22 @@ impl Pipeline {
 
         let transform = self.registry.build(plan)?;
         let outputs = transform.outputs().to_vec();
+        let node_output = plan
+            .edge_diff
+            .as_ref()
+            .map(|diff| {
+                outputs
+                    .iter()
+                    .position(|table| table == diff.node_table())
+                    .ok_or_else(|| {
+                        HandlerError::Processing(format!(
+                            "plan {} writes no {} output to diff edges against",
+                            plan.name,
+                            diff.node_table()
+                        ))
+                    })
+            })
+            .transpose()?;
         let params = base_query.params();
         let plan_limit = base_query.batch_size();
         base_query.set_batch_size(first_page_limit(plan_limit));
@@ -250,30 +266,17 @@ impl Pipeline {
                 .record_transform_duration(transform_elapsed.as_secs_f64());
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
-            let tombstones = match &plan.edge_diff {
-                Some(diff) => {
-                    let node_rows = outputs
-                        .iter()
-                        .position(|table| table == diff.node_table())
-                        .map(|index| grouped[index].as_slice())
-                        .unwrap_or_default();
-                    diff.tombstones(&self.graph, node_rows).await?
-                }
-                None => Vec::new(),
+            let diff_page = match (&plan.edge_diff, node_output) {
+                (Some(diff), Some(index)) => diff.page(&grouped[index])?,
+                _ => None,
             };
-            let writes = tombstones
-                .into_iter()
-                .map(|(table, batch)| (table, vec![batch]))
-                .chain(
-                    grouped
-                        .into_iter()
-                        .enumerate()
-                        .filter(|(_, batches)| !batches.is_empty())
-                        .map(|(index, batches)| (outputs[index].clone(), batches)),
-                );
 
             let mut write_futures = FuturesUnordered::new();
-            for (table, batches) in writes {
+            for (index, batches) in grouped.into_iter().enumerate() {
+                if batches.is_empty() {
+                    continue;
+                }
+                let table = outputs[index].clone();
                 let w = Arc::clone(&context.writer);
                 let d = durability.data_writes;
                 write_futures.push(async move {
@@ -304,6 +307,9 @@ impl Pipeline {
                     observer.record_graph_write(&report.table, report.rows, report.bytes);
                     stats.written_rows += report.rows;
                     stats.written_bytes += report.bytes;
+                }
+                if let (Some(diff), Some(page)) = (&plan.edge_diff, &diff_page) {
+                    diff.retire(&self.edge_diff, page).await?;
                 }
                 Ok::<_, HandlerError>(write_start.elapsed())
             };
@@ -536,7 +542,7 @@ mod tests {
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
     use crate::modules::sdlc::partitioning::PartitionAssignment;
     use crate::modules::sdlc::test_helpers::{
-        passthrough_registry, test_graph_client, test_metrics,
+        passthrough_registry, test_edge_diff_client, test_metrics,
     };
     use crate::observer::NoOpObserver;
     use crate::testkit::test_writer;
@@ -758,7 +764,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
         let plan = simple_plan("Test");
 
@@ -789,7 +795,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
         let result = pipeline
             .run_plan(
@@ -838,7 +844,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
 
         pipeline
@@ -899,7 +905,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
         pipeline
             .run_plan(
@@ -928,7 +934,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
         let plan = simple_plan("Failing");
 
@@ -1005,7 +1011,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
 
         let plan = simple_plan("Missing");
@@ -1035,7 +1041,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
 
         let plan = simple_plan("Unavailable");
@@ -1071,7 +1077,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
 
         let plan = simple_plan("Test");
@@ -1111,7 +1117,7 @@ mod tests {
                 halving_min_block_size: 1024,
             },
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
 
         let plan = simple_plan("Test");
@@ -1152,7 +1158,7 @@ mod tests {
                 halving_min_block_size: 2_048,
             },
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
 
         let plan = simple_plan("Test");
@@ -1234,7 +1240,7 @@ mod tests {
                 halving_min_block_size: 1_024,
             },
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
 
         let plan = simple_plan("Test");
@@ -1271,7 +1277,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
         let plan = simple_plan("Test");
 
@@ -1353,7 +1359,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
-            test_graph_client(),
+            test_edge_diff_client(),
         );
         let plan = simple_plan("Test");
 

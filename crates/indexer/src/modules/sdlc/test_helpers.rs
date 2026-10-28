@@ -16,12 +16,15 @@ pub(crate) fn test_metrics() -> SdlcMetrics {
     SdlcMetrics::with_meter(&crate::testkit::test_meter())
 }
 
-pub(crate) fn test_graph_client() -> crate::clickhouse::ArrowClickHouseClient {
+pub(in crate::modules::sdlc) fn test_edge_diff_client() -> super::edge_diff::EdgeDiffClient {
     use clickhouse_client::ClickHouseConfigurationExt;
 
-    orbit_server_config::AppConfig::embedded_defaults()
-        .graph
-        .build_client("graph")
+    super::edge_diff::EdgeDiffClient::new(
+        orbit_server_config::AppConfig::embedded_defaults()
+            .graph
+            .build_client("graph"),
+        1,
+    )
 }
 
 struct PassthroughTransform {

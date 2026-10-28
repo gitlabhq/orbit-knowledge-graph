@@ -98,7 +98,10 @@ pub async fn register_handlers(
         metrics.clone(),
         config.engine.datalake_retry.clone(),
         Arc::clone(&transform_registry),
-        clients.graph.clone(),
+        edge_diff::EdgeDiffClient::new(
+            clients.graph.clone(),
+            entity_handler_config.edge_diff_max_concurrent_statements,
+        ),
     ));
 
     let global_policy = sdlc_dispatch_topic_policy()
