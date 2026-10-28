@@ -125,7 +125,7 @@ fn main() {
     check_grammar_bound(
         &grammar,
         "ListLiteral",
-        &format!("Value){{0,{MAX_NODE_IDS}}}"),
+        &format!("Value){{0,{MAX_IN_VALUES}}}"),
     );
     check_grammar_bound(
         &grammar,
