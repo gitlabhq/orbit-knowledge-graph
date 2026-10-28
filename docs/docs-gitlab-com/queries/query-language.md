@@ -123,6 +123,7 @@ LIMIT 20
 To find the shortest path between two [bounded nodes](#bounded-nodes), use `ANY SHORTEST`.
 Name the relationship type and keep the hop range small.
 A pattern with no relationship type, such as `-[*1..3]->`, follows every relationship and might time out.
+If the filter on an endpoint matches more than 500 nodes, the search starts from the 500 nodes with the lowest IDs.
 
 ```gql orbit-query
 MATCH path = ANY SHORTEST (g:Group {id: 9970})-[:CONTAINS*1..2]->(p:Project {full_path: 'gitlab-org/gitlab'})
@@ -146,10 +147,12 @@ A string is in single or double quotes, and has at most 1024 characters.
 Write a newline, a tab, or another control character as an escape, such as `\n` or `\t`.
 A string that contains a raw newline or tab fails.
 
-For dates, use a string in the format `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SS`,
+For a timestamp property, such as `mr.created_at`, use a string in the format `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SS`,
 with optional fractional seconds and a trailing `Z`, such as `'2026-01-31'` or `'2026-01-31T12:00:00Z'`.
-A date with a time zone offset, such as `+02:00`, fails.
+A date property, such as `WorkItem.due_date`, takes only `YYYY-MM-DD`.
+A value with a time zone offset, such as `+02:00`, fails.
 You can wrap the string in `date()` or `datetime()`, but the result is the same.
+When you compare a date property with a timestamp property, the date counts as midnight.
 
 An enum property, such as `mr.state`, accepts only its declared values with `=`, `<>`, and `IN`.
 Enum values have no order, so `<`, `<=`, `>`, and `>=` fail.
@@ -233,6 +236,7 @@ These properties have a text index:
 - The response always includes the identity of each node and the metadata of each relationship.
 - `type(r)` returns the type of a one-hop relationship variable in `WHERE`, `RETURN`, and `ORDER BY`,
   but not as an aggregation group key.
+- `ORDER BY` sorts by a node property, an alias, or `type(r)`. A relationship property fails.
 
 ### Aggregate results
 
