@@ -124,6 +124,7 @@ var KEYWORDS = new Set([
 ]);
 var CLAUSES = new Set(["MATCH", "OPTIONAL", "WHERE", "RETURN", "ORDER", "SKIP", "OFFSET", "LIMIT", "CALL", "UNION"]);
 var NO_ENTITIES = new Set;
+var UNIQUE_KEYS = new Set(["id", "full_path", "username"]);
 function entityOfKey(key, known) {
   const m = key.match(/^(\w+)_id$/);
   if (!m?.[1])
@@ -131,11 +132,38 @@ function entityOfKey(key, known) {
   const name = m[1].split("_").map((w) => (w[0]?.toUpperCase() ?? "") + w.slice(1)).join("");
   return known.has(name) ? name : undefined;
 }
-function pinOf(keys, label, known) {
+function pinOf(keys, equals, label, known) {
+  const one = equals.some((key) => UNIQUE_KEYS.has(key));
   if (keys.length === 0)
-    return { score: 0 };
+    return { score: 0, one };
   const implied = keys.map((key) => entityOfKey(key, known)).find((name) => name && name !== label);
-  return { score: keys.includes("id") ? 2 : 1, ...implied ? { implied } : {} };
+  return { score: keys.includes("id") ? 2 : 1, one, ...implied ? { implied } : {} };
+}
+function pluralize(word) {
+  if (/[^aeiou]y$/i.test(word))
+    return word.slice(0, -1) + "ies";
+  if (/(s|x|z|ch|sh)$/i.test(word))
+    return word + "es";
+  return word + "s";
+}
+function displayOf({ type, one }) {
+  if (type === "any")
+    return "Anything";
+  const words = type.split(/(?<=[a-z0-9])(?=[A-Z])/).map((w, i) => i === 0 ? w : w.toLowerCase());
+  if (!one)
+    words[words.length - 1] = pluralize(words[words.length - 1] ?? "");
+  return words.join(" ");
+}
+function pathOf(run, separator = " \u2192 ") {
+  const nodes = [];
+  for (const node of run) {
+    const last = nodes[nodes.length - 1];
+    if (last?.type === node.type)
+      last.one &&= node.one;
+    else
+      nodes.push({ ...node });
+  }
+  return { nodes, text: nodes.map(displayOf).join(separator) };
 }
 function entitiesOf(text, known = NO_ENTITIES) {
   const labels = {};
@@ -144,11 +172,15 @@ function entitiesOf(text, known = NO_ENTITIES) {
       labels[m[1]] ??= m[2];
   }
   const whereKeys = {};
+  const whereEquals = {};
   for (const clause of text.split(/\bWHERE\b/i).slice(1)) {
     const where = clause.split(/\b(?:MATCH|RETURN|ORDER\s+BY|SKIP|OFFSET|LIMIT)\b/i)[0] ?? "";
-    for (const m of where.matchAll(/\b(\w+)\.(\w+)\s*(?:=|<>|!=|<=|>=|<|>|\bIN\b|\bSTARTS\b|\bENDS\b|\bCONTAINS\b)/gi)) {
-      if (m[1] && m[2])
-        (whereKeys[m[1]] ??= []).push(m[2]);
+    for (const m of where.matchAll(/\b(\w+)\.(\w+)\s*(=|<>|!=|<=|>=|<|>|\bIN\b|\bSTARTS\b|\bENDS\b|\bCONTAINS\b)/gi)) {
+      if (!m[1] || !m[2])
+        continue;
+      (whereKeys[m[1]] ??= []).push(m[2]);
+      if (m[3] === "=")
+        (whereEquals[m[1]] ??= []).push(m[2]);
     }
   }
   const paths = [];
@@ -163,19 +195,22 @@ function entitiesOf(text, known = NO_ENTITIES) {
           const [, name = "", label] = m[1].match(/^\s*(\w*)\s*(?::\s*(\w+))?/) ?? [];
           const node = label || labels[name] || "any";
           const inline = [...(m[1].match(/\{([^}]*)\}/)?.[1] ?? "").matchAll(/(\w+)\s*:/g)].map((k) => k[1] ?? "");
+          const where = name ? whereKeys[name] ?? [] : [];
+          const equals = name ? whereEquals[name] ?? [] : [];
           nodes.push(node);
-          pins.push(pinOf([...inline, ...name ? whereKeys[name] ?? [] : []], node, known));
+          pins.push(pinOf([...inline, ...where], [...inline, ...equals], node, known));
         } else
           hops.push(m[2] ? "left" : m[3] ? "right" : "none");
       }
-      for (const path of readFromPin(nodes, pins) ?? readForward(nodes, hops)) {
+      const typed = nodes.map((type, i) => ({ type, one: pins[i]?.one ?? false }));
+      for (const path of readFromPin(typed, pins) ?? readForward(typed, hops)) {
         if (!paths.some((p) => p.text === path.text))
           paths.push(path);
       }
     }
   }
   const walks = paths.filter((p) => p.nodes.length > 1);
-  const kept = paths.filter((p) => p.nodes.length > 1 || !walks.some((w) => w.nodes.includes(p.text)));
+  const kept = paths.filter((p) => p.nodes.length > 1 || !walks.some((w) => w.nodes.some((n) => n.type === p.nodes[0]?.type)));
   if (kept.length)
     return kept.map((p) => p.text).join(", ");
   const names = [];
@@ -183,7 +218,7 @@ function entitiesOf(text, known = NO_ENTITIES) {
     if (m[1] && !names.includes(m[1]))
       names.push(m[1]);
   }
-  return names.join(" \u2192 ");
+  return names.map((type) => displayOf({ type, one: false })).join(" \u2192 ");
 }
 function readFromPin(nodes, pins) {
   const best = Math.max(0, ...pins.map((p) => p.score));
@@ -198,15 +233,11 @@ function readFromPin(nodes, pins) {
     sides.push(nodes.slice(0, at + 1).reverse());
   if (sides.length === 0)
     sides.push(nodes.slice(at, at + 1));
-  return sides.map((side) => {
-    const run = implied ? [implied, ...side] : [...side];
-    const distinct = run.filter((node, k) => node !== run[k - 1]);
-    return { nodes: distinct, text: distinct.join(" \u2192 ") };
-  });
+  return sides.map((side) => pathOf(implied ? [{ type: implied, one: true }, ...side] : side));
 }
 function readForward(nodes, hops) {
   if (hops.length === 0)
-    return nodes[0] ? [{ nodes: [nodes[0]], text: nodes[0] }] : [];
+    return nodes[0] ? [pathOf([nodes[0]])] : [];
   const paths = [];
   let start = 0;
   for (let i = 1;i <= hops.length; i++) {
@@ -215,8 +246,7 @@ function readForward(nodes, hops) {
     const run = nodes.slice(start, i + 1);
     if (hops[start] === "left")
       run.reverse();
-    const distinct = run.filter((node, k) => node !== run[k - 1]);
-    paths.push({ nodes: distinct, text: distinct.join(hops[start] === "none" ? " \u2014 " : " \u2192 ") });
+    paths.push(pathOf(run, hops[start] === "none" ? " \u2014 " : " \u2192 "));
     start = i;
   }
   return paths;
