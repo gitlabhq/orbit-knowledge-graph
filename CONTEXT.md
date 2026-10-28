@@ -19,7 +19,7 @@ The REST, GraphQL, and MCP endpoints of **GitLab Orbit** on a GitLab instance. T
 _Avoid_: remote graph, "the server", "production GKG"
 
 **GitLab Orbit CLI**:
-The `orbit` binary. `glab orbit` installs it and forwards all verbs to it. `query`, `status`, and `schema` call the **GitLab Orbit API**, and `skills` calls it when a credential is available. The `workspace` group (`index`, `sql`, `schema`, `list`, `mcp serve`) uses only the **Local graph**. `grep` and `context` combine both. They read the **Local graph**, and they search GitLab entities through the **GitLab Orbit API** grep endpoint. `context` also reads GitLab entity tokens such as `MergeRequest[42]` through the context endpoint.
+The `orbit` binary. `glab orbit` installs it and forwards all verbs to it. `query`, `status`, and `schema` call the **GitLab Orbit API**, and `skills` calls it when a credential is available. The `workspace` group (`index`, `sql`, `schema`, `list`, `mcp serve`) uses only the **Local graph**. `grep` and `context` combine both. Both read the **Local graph**. `grep` also searches GitLab entities through the **GitLab Orbit API** grep endpoint. `context` also reads GitLab entity tokens such as `MergeRequest[42]` through the context endpoint.
 _Avoid_: Orbit CLI, Orbit Local, "local mode", "remote mode"
 
 **Local graph**:
