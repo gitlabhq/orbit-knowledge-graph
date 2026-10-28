@@ -139,6 +139,7 @@ In each connection, Rails returns a stream cap that can narrow the Workhorse def
 Workhorse also caps total connections, in-flight pre-authorizations, idle time, and message size.
 
 Over seven days, Gitaly logs for the indexer client showed 2.97 million archive calls.
+The counts come from logs, because metrics undercount across indexer pod restarts.
 Blob listing had about 8,000 calls, and other RPCs were noise.
 
 | Window | p50 | p95 | p99 | Maximum |

@@ -59,9 +59,9 @@ It runs the same schema migration check as the indexer, and it registers only th
 It has its own engine configuration, with concurrency groups sized for code work.
 
 The indexer stops registering the code handlers.
-A configuration flag keeps code indexing in the indexer until the migration is complete.
-So operators can deploy the new indexer before the code indexer exists.
-We remove the flag after the migration.
+A configuration flag could gate the change, with code indexing in the indexer off by default.
+An operator could then turn it on to deploy the new indexer before the code indexer exists.
+The flag would be removed after the migration.
 
 The Helm chart gets a separate code indexer deployment with these properties:
 
@@ -98,7 +98,7 @@ Monitoring and alerts can separate code indexing health from SDLC indexing healt
 
 - Operators manage one more deployment, and the Helm values grow by one top-level section.
 - During the transition, operators deploy the updated indexer and the new code indexer.
-  The configuration flag on the indexer reduces this risk.
+  A configuration flag on the indexer could reduce this risk.
 - The health-check targets need an update.
 - Three handler groups in two deployments share one NATS stream.
   NATS consumer groups already support this, but operators must make sure that consumer names do not collide.

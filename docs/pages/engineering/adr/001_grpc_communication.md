@@ -106,9 +106,9 @@ gRPC interceptors handle request logging, tracing with LabKit, and metrics, as t
 ### Response compression
 
 The server compresses responses with Gzip or Zstandard, and accepts either on requests.
-It prefers Gzip, then Zstandard, and sends no compression if the client accepts neither.
-The Ruby and Python clients accept Gzip, so they get Gzip.
-Only clients that accept Zstandard and not Gzip, such as some Rust or Go clients, get Zstandard.
+It uses the first of those two encodings in the order that the client lists them, and sends no compression if the client lists neither.
+The Ruby and Python clients list Gzip and not Zstandard, so they get Gzip.
+Only clients that list Zstandard, such as some Rust or Go clients, can get Zstandard.
 
 ### Authentication
 

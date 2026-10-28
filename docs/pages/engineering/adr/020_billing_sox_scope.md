@@ -60,7 +60,7 @@ The adapter puts claim mapping in one place, but it does not isolate every such 
 The SOX-scoped section of the code owners file is the list of in-scope files.
 Each file in that section has a required-reviewer rule.
 
-A component outside the billing component is in scope when a change to it can change billing correctness without a change to billing code.
+A file outside the billing component belongs on the list when a change to it can change billing correctness without a change to billing code.
 
 ### Primary scope
 
@@ -107,7 +107,7 @@ The code owners file and the dependency boundary test are in the same section, s
 Ownership is per file, so an unrelated change inside a scoped file also needs approval.
 
 The adapter has a header comment that names it the one claims-conversion seam between the server and the billing component.
-The comment links to this ADR and names the extended hook points.
+The comment links to this ADR and refers to the extended hook points.
 It does not claim that configuration, credentials, or observer callbacks pass through claim conversion.
 
 The agent instruction files link to this ADR, so agents and contributors who change billing emission or quota-check code see the policy first.

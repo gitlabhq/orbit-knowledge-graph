@@ -77,7 +77,7 @@ Siphon already copies PostgreSQL to ClickHouse, so a second path has no benefit.
 ### Send events from Rails to Orbit through gRPC
 
 Rails could call Orbit on each push, and Orbit would put the event into NATS.
-This needs no table, but Rails pays for each event in token signing, connections, and backoff when Orbit is slow.
+This needs no table, but Rails pays for each event in token signing, connections, and backpressure from Orbit.
 Batching reduces that cost, but it adds complexity to Rails for a small gain over the table.
 
 ### Use the Data Ingestion Pipeline with OpenTelemetry-like events

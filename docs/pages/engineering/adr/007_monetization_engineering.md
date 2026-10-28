@@ -282,7 +282,8 @@ Orbit billing code joins one or more of these control sets.
 | Program changes, PC.1 to PC.3 | Code owner approval before a billing change merges, a monthly audit log review for separation of duties, and limited production deploy access |
 | Computer operations, CO.1 to CO.2 | Restricted access to billing continuous integration (CI) jobs, and job monitoring with documented issue resolution |
 
-We limit the scope to code owner rules on the billing paths, so the full Orbit repository stays out of SOX scope.
+We prefer to limit the scope to code owner rules on the billing paths, so the full Orbit repository stays out of SOX scope.
+ADR 020 records the decision.
 Billing event emission lives in its own module, with one conversion point from token claims to billing inputs, so the audit surface stays small.
 Code owner rules require approval from the billing owners for the module and the conversion point, which satisfies PC.2 and LA.4.
 [ADR 020](020_billing_sox_scope.md) records the detailed scope.

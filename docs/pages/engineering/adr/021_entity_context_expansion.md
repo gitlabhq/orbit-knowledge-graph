@@ -60,11 +60,11 @@ An expand flag defaults to false.
 A wrong array length, an element that is not a string, or an expand flag that is not a boolean is a validation error.
 The response format is raw by default, or the large language model (LLM) format.
 The GQL format is a validation error.
-The endpoint requires the Orbit read permission, and fine-grained access tokens can include the route.
 
 A token is a typed ID, a global ID, an instance URL, or a short reference for a merge request, issue, or epic.
 The endpoint supports merge requests and work items, including group-level work items.
 Issue and epic are aliases for work item, because Orbit models epics as work items.
+An issue or epic token returns a work item entity and expands with the work item query.
 An epic resolves to its work item, and the summary shows the epic work item type.
 An epic typed ID or global ID takes the epic ID, and not the work item ID.
 Epic URLs follow the URL rules for host, scheme, port, and relative root, and an epic URL inside a project is invalid.
@@ -110,15 +110,17 @@ These two cases take precedence over every error.
 Otherwise, the expansion holds a deduplicated graph result or an error, and an expansion failure never fails the summary.
 Edges name their endpoints by type and ID, because IDs are unique only inside a type.
 
-| Expansion error | When | Echoes the query |
+| Error code | When | Echoes the query |
 |---|---|---|
-| Expansion unavailable | Expansion is not enabled for the user yet | Yes |
-| Unsupported type | The type has no expansion query | No |
-| Outside graph scope | The record is outside the user's graph scope | Yes |
-| Billing namespace required | The query path needs a billing namespace, and the error lists the candidate groups and the preferences link | Yes |
-| Quota exhausted | The query path reports no quota | Yes |
-| Timeout | The query timed out | Yes |
-| Execution error | The query failed | Yes |
+| `expansion_unavailable` | Expansion is not enabled for the user yet | Yes |
+| `expansion_unsupported_type` | The type has no expansion query | No |
+| `outside_graph_scope` | The record is outside the user's graph scope | Yes |
+| `billing_namespace_required` | The query path needs a billing namespace, and the error lists the candidate groups and the preferences link | Yes |
+| `quota_exhausted` | The query path reports no quota | Yes |
+| `timeout` | The query timed out | Yes |
+| `execution_error` | The query failed | Yes |
+
+The error codes are the wire contract, and the context endpoint is built in Rails, so this table is their only record in this repository.
 
 When the type has an expansion query, the expansion echoes the query name and parameters.
 The parameters are the node IDs and the limit.
@@ -210,6 +212,8 @@ We also defer a dedicated Model Context Protocol (MCP) tool and an agent command
 - The Orbit command-line interface (CLI) must call the context endpoint with a POST request with tokens and read the new response.
   The closed CLI draft used a GET request with references.
   Whether a type and ID pair with a colon is a valid token form is still open.
+- The Rails implementation that replaces the closed prototype must require the Orbit read permission, which the prototype did not use.
+  It must also register the route for fine-grained access tokens.
 - Follow-up work covers the Rails resolver, group-level work items, and the per-type named queries in Orbit.
 - We do not decide these future items:
   - More types, such as notes, milestones, users, projects, and groups, through a generic neighbors query.

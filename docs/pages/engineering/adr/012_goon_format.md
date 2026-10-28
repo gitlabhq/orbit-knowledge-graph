@@ -27,7 +27,7 @@ A columnar text format held the same information in 5,000 to 7,000 tokens, with 
 A session with 5 to 10 graph queries spent 50,000 to 80,000 tokens of context on JSON syntax.
 
 The encoding also affects correctness.
-In a Google study, the encoding alone changed graph reasoning accuracy by 4.8 to 61.8 percentage points, depending on the task.
+In a Google study, the encoding alone changed graph reasoning accuracy by 4.8% to 61.8%, depending on the task.
 Incident encoding, which groups edges by source node, did better than flat edge lists and adjacency matrices on most tasks.
 Dense encodings with many edges distracted the model.
 Application-context framing, such as "who authored which merge requests", did better than abstract graph framing by up to 18 percentage points.
