@@ -683,6 +683,15 @@ fn planned_value(value: &OutputValue) -> String {
         OutputValue::Column(value) | OutputValue::EpochAsNull(value) => planned_column(value),
         OutputValue::Text(value) => text_literal(value),
         OutputValue::Depth(value) => value.to_string(),
+        OutputValue::OneOf { column, values } => format!(
+            "{} IN ({})",
+            planned_column(column),
+            values
+                .iter()
+                .map(|value| text_literal(value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         OutputValue::Path(steps) => format!(
             "path[{}]",
             steps

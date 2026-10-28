@@ -221,7 +221,7 @@ fn node_access<M: OrbitQueryModel + ?Sized>(
     let returned = !pattern.aggregate()
         || input
             .aggregation_row_nodes(pattern.model)
-            .contains(node.alias.as_str());
+            .contains_key(node.alias.as_str());
     let role_floor = node.entity.as_deref().is_some_and(|entity| {
         pattern
             .model

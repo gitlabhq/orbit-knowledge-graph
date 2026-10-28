@@ -167,6 +167,10 @@ pub enum OutputValue {
     EpochAsNull(Column),
     Text(String),
     Depth(u32),
+    OneOf {
+        column: Column,
+        values: Vec<String>,
+    },
     Path(Vec<(Column, Column)>),
     PathAppend {
         path: Column,
@@ -191,7 +195,9 @@ impl OutputValue {
 
     pub fn column(&self) -> Option<&Column> {
         match self {
-            Self::Column(column) | Self::EpochAsNull(column) => Some(column),
+            Self::Column(column) | Self::EpochAsNull(column) | Self::OneOf { column, .. } => {
+                Some(column)
+            }
             _ => None,
         }
     }

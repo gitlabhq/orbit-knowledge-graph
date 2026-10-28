@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 
-use query_data_model::OrbitQueryModel;
+use query_data_model::{AuthorizedBy, OrbitQueryModel};
 
 use crate::error::Result;
 use crate::input::{
@@ -48,12 +48,13 @@ pub(crate) fn plan<M: OrbitQueryModel + ?Sized>(
 ) -> Result<Plan<Aggregation>> {
     let pattern = Pattern::new(input, model)?;
     let execution = pattern.execution()?;
-    let result = aggregation_plan(input, &pattern.nodes, &execution);
+    let result = aggregation_plan(input, model, &pattern.nodes, &execution);
     Ok(pattern.into_plan(execution, |execution| Aggregation { execution, result }))
 }
 
-fn aggregation_plan(
+fn aggregation_plan<M: OrbitQueryModel + ?Sized>(
     input: &Input,
+    model: &M,
     nodes: &HashMap<String, NodePlan>,
     execution: &ExecutionPlan,
 ) -> AggregationPlan {
@@ -121,6 +122,32 @@ fn aggregation_plan(
                     },
                 );
             }
+        }
+    }
+    for (node, authorized_by) in input.aggregation_row_nodes(model) {
+        let AuthorizedBy::Owner { columns, split } = authorized_by else {
+            continue;
+        };
+        for column in columns {
+            add_group(
+                &mut plan.groups,
+                Group {
+                    value: OutputValue::Column(execution.property(node, column)),
+                    truncate: None,
+                },
+            );
+        }
+        if let Some(split) = split {
+            add_group(
+                &mut plan.groups,
+                Group {
+                    value: OutputValue::OneOf {
+                        column: execution.property(node, &split.property),
+                        values: split.values.clone(),
+                    },
+                    truncate: None,
+                },
+            );
         }
     }
     for metric in &aggregation.metrics {

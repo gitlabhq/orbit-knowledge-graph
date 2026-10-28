@@ -1,0 +1,69 @@
+config:
+  redaction:
+    allow:
+      ci_build: [9601, 9602, 9603, 9604, 9611, 9612]
+      ci_pipeline: [8200, 8201, 8210]
+      merge_request: [2000, 2004, 2005]
+    deny:
+      ci_build: [9621, 9622, 9623, 9624]
+      ci_pipeline: [8202]
+      merge_request: [2001]
+  extra_seed:
+    gl_job:
+      - { id: 9601, name: rspec, status: failed, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 9602, name: rspec, status: failed, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 9603, name: rspec, status: success, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 9604, name: lint, status: success, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 9611, name: rspec, status: failed, project_id: 1002, traversal_path: "1/100/1002/" }
+      - { id: 9612, name: rspec, status: success, project_id: 1002, traversal_path: "1/100/1002/" }
+      - { id: 9621, name: rspec, status: failed, project_id: 1010, traversal_path: "1/100/200/1010/" }
+      - { id: 9622, name: rspec, status: failed, project_id: 1010, traversal_path: "1/100/200/1010/" }
+      - { id: 9623, name: rspec, status: failed, project_id: 1010, traversal_path: "1/100/200/1010/" }
+      - { id: 9624, name: rspec, status: failed, project_id: 1010, traversal_path: "1/100/200/1010/" }
+    gl_pipeline:
+      - { id: 8200, iid: 1, status: success, ref: main, source: push, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 8201, iid: 2, status: failed, ref: main, source: push, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 8202, iid: 3, status: success, ref: main, source: external, project_id: 1000, traversal_path: "1/100/1000/" }
+      - { id: 8210, iid: 1, status: success, ref: main, source: push, project_id: 1002, traversal_path: "1/100/1002/" }
+
+cases:
+  - name: job_name_counts_per_project
+    description: Jobs that share a name count once per project, and a denied project drops out
+    query:
+      gql: |
+        MATCH (j:Job) WHERE j.project_id IN [1000, 1002, 1010] RETURN j.name AS name, count(j) AS n ORDER BY n DESC
+    expect:
+      skip_requirements: [filter:project_id, aggregation_sort]
+      sql_contains: ["MIN(j.id) AS _orbit_j_id", "GROUP BY j.name, j.project_id "]
+      row_count: 3
+      row_values:
+        - { name: rspec, n: 3 }
+        - { name: rspec, n: 2 }
+        - { name: lint, n: 1 }
+
+  - name: pipeline_ref_counts_split_external
+    description: External pipelines of a project count apart from the others, so a denied external pipeline drops out
+    query:
+      gql: |
+        MATCH (pl:Pipeline) WHERE pl.project_id IN [1000, 1002] RETURN pl.ref AS ref, count(pl) AS n ORDER BY n DESC
+    expect:
+      skip_requirements: [filter:project_id, aggregation_sort]
+      sql_contains: ["MIN(pl.id) AS _orbit_pl_id", "GROUP BY pl.ref, pl.project_id, (pl.source = 'external')"]
+      row_count: 2
+      row_values:
+        - { ref: main, n: 2 }
+        - { ref: main, n: 1 }
+
+  - name: per_entity_text_key_counts_each_entity
+    description: A free-text key of a node read per entity still groups by the entity id
+    query:
+      gql: |
+        MATCH (mr:MergeRequest) WHERE mr.project_id = 1000 RETURN mr.target_branch AS branch, count(mr) AS n
+    expect:
+      skip_requirements: [filter:project_id]
+      sql_contains: ["mr.id AS _orbit_mr_id", "GROUP BY mr.target_branch, mr.id "]
+      row_count: 3
+      row_values:
+        - { branch: main, n: 1 }
+        - { branch: main, n: 1 }
+        - { branch: main, n: 1 }

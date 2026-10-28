@@ -96,19 +96,28 @@ pub struct Input {
     pub relationship_return: RelationshipReturn,
 }
 
+pub(crate) static ENTITY_ROWS: query_data_model::AuthorizedBy =
+    query_data_model::AuthorizedBy::Entity;
+
 impl Input {
-    pub(crate) fn aggregation_row_nodes(
-        &self,
-        model: &(impl query_data_model::OrbitQueryModel + ?Sized),
-    ) -> std::collections::HashSet<&str> {
+    pub(crate) fn aggregation_row_nodes<'a, M>(
+        &'a self,
+        model: &'a M,
+    ) -> HashMap<&'a str, &'a query_data_model::AuthorizedBy>
+    where
+        M: query_data_model::OrbitQueryModel + ?Sized,
+    {
         let groups = &self.aggregation.group_by;
-        let text_groups = property_groups(groups)
-            .filter(|(node, property)| {
-                self.entity_of(node)
-                    .is_some_and(|entity| model.property_is_free_text(entity, property))
+        let mut rows: HashMap<&str, &query_data_model::AuthorizedBy> = property_groups(groups)
+            .filter_map(|(node, property)| {
+                let entity = self.entity_of(node)?;
+                model
+                    .property_is_free_text(entity, property)
+                    .then(|| (node, model.authorized_by(entity).unwrap_or(&ENTITY_ROWS)))
             })
-            .map(|(node, _)| node);
-        node_group_ids(groups).chain(text_groups).collect()
+            .collect();
+        rows.extend(node_group_ids(groups).map(|node| (node, &ENTITY_ROWS)));
+        rows
     }
 
     /// Whether this query has the "search shape": a single-node table scan

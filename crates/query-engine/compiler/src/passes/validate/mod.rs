@@ -379,7 +379,7 @@ impl<'a, M: query_data_model::OrbitQueryModel> Validator<'a, M> {
             let Some(entity) = input.entity_of(alias) else {
                 continue;
             };
-            if row_nodes.contains(alias)
+            if row_nodes.contains_key(alias)
                 || model.entity_authorized_by_namespace(entity)
                 || !model.property_is_free_text(entity, property)
             {
