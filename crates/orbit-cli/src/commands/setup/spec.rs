@@ -468,7 +468,7 @@ mod tests {
             .split_once(start)
             .unwrap_or_else(|| panic!("{file} has no `{start}`"));
         let (table, _) = table
-            .split_once("};")
+            .split_once("\n}")
             .unwrap_or_else(|| panic!("{file}: `{start}` is not closed"));
         table
             .lines()
