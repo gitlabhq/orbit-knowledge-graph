@@ -1,0 +1,22 @@
+description: A project whose creator moves to the ghost user keeps only the ghost user's CREATOR edge
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      projects:
+        - { id: 1000, namespace_id: 100, creator_id: 1, traversal_path: "1/100/1000/" }
+    expect:
+      edges:
+        - { kind: CREATOR, from: User, to: Project, count: 1, rows: [{ source_id: 1, target_id: 1000 }] }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.Project, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 12:00:00.000000" }
+      siphon_projects:
+        - { id: 1000, name: project-1000, path: project-1000, visibility_level: 0, namespace_id: 100, creator_id: 99, created_at: "2023-01-01", updated_at: "2024-01-20", archived: false, star_count: 0, last_activity_at: "2024-01-20", _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      edges:
+        - { kind: CREATOR, from: User, to: Project, count: 1, rows: [{ source_id: 99, target_id: 1000 }] }
+        - { kind: CONTAINS, from: Group, to: Project, count: 1, rows: [{ source_id: 100, target_id: 1000 }] }
