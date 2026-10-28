@@ -31,6 +31,10 @@ fn compile(
         .unwrap_or_else(|error| panic!("{} ({language:?}): {error}\n{rendered}", query.name))
 }
 
+/// Queries whose gql spelling compares two nodes' properties, which the json DSL cannot express; their json
+/// spelling still has to compile.
+const GQL_ONLY: &[&str] = &["context_for_branch"];
+
 #[test]
 fn every_named_query_compiles_identically_in_both_languages() {
     let queries = NamedQueries::load_embedded().unwrap();
@@ -38,6 +42,9 @@ fn every_named_query_compiles_identically_in_both_languages() {
         let params = query.example_parameters();
         let json = compile(query, Language::Json, &params);
         let gql = compile(query, Language::Gql, &params);
+        if GQL_ONLY.contains(&query.name.as_str()) {
+            continue;
+        }
         assert_eq!(
             (&json.base.sql, &json.base.params, &json.query_type),
             (&gql.base.sql, &gql.base.params, &gql.query_type),

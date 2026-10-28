@@ -1,0 +1,32 @@
+name: context_for_commit
+description: "Commit context: the merge request that merged the commit, with its title, state, target branch, merge time, and author. Empty when no merge request merged it."
+parameters:
+  node_ids:
+    schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }
+    example: [1]
+  limit:
+    schema: { type: integer, minimum: 1, maximum: 500 }
+    example: 100
+query:
+  json:
+    query_type: traversal
+    nodes:
+      - id: author
+        entity: User
+        columns: [id, username]
+      - id: mr
+        entity: MergeRequest
+        columns: [id, iid, title, state, target_branch, merged_at, project_id]
+      - id: center
+        entity: Commit
+        node_ids: { $param: node_ids }
+        columns: [id, sha]
+    relationships:
+      - { type: AUTHORED, from: author, to: mr }
+      - { type: MERGED_AT_COMMIT, from: mr, to: center }
+    limit: { $param: limit }
+  gql: |
+    MATCH (author:User)-[:AUTHORED]->(mr:MergeRequest)-[:MERGED_AT_COMMIT]->(center:Commit)
+    WHERE center.id IN {{ param("node_ids") }}
+    RETURN center.id, center.sha, mr.id, mr.iid, mr.title, mr.state, mr.target_branch, mr.merged_at, mr.project_id, author.id, author.username
+    LIMIT {{ param("limit") }}

@@ -1,0 +1,34 @@
+name: context_for_pipeline
+description: "Pipeline context: each job that did not pass, with its stage, status, why it failed, and whether failure is allowed, alongside the pipeline's status, ref, sha, source, and merge request. Empty when every job passed or was skipped."
+parameters:
+  node_ids:
+    schema: { type: array, items: { type: integer, minimum: 1 }, minItems: 1, maxItems: 500 }
+    example: [1]
+  limit:
+    schema: { type: integer, minimum: 1, maximum: 500 }
+    example: 100
+query:
+  json:
+    query_type: traversal
+    nodes:
+      - id: center
+        entity: Pipeline
+        node_ids: { $param: node_ids }
+        columns: [id, status, ref, sha, source, failure_reason, merge_request_id, duration]
+      - id: stage
+        entity: Stage
+        columns: [id, name]
+      - id: job
+        entity: Job
+        not:
+          status: { in: [success, skipped] }
+        columns: [id, name, status, failure_reason, allow_failure, retried]
+    relationships:
+      - { type: HAS_STAGE, from: center, to: stage }
+      - { type: HAS_JOB, from: stage, to: job }
+    limit: { $param: limit }
+  gql: |
+    MATCH (center:Pipeline)-[:HAS_STAGE]->(stage:Stage)-[:HAS_JOB]->(job:Job)
+    WHERE center.id IN {{ param("node_ids") }} AND NOT job.status IN ["success", "skipped"]
+    RETURN center.id, center.status, center.ref, center.sha, center.source, center.failure_reason, center.merge_request_id, center.duration, stage.id, stage.name, job.id, job.name, job.status, job.failure_reason, job.allow_failure, job.retried
+    LIMIT {{ param("limit") }}
