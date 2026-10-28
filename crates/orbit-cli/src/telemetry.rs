@@ -452,7 +452,7 @@ mod tests {
         SetupRun {
             detected_agents: vec!["claude".into(), "codex".into()],
             selected_agents: vec!["claude".into()],
-            components: Component::from_flags(true, false, &[]),
+            components: Component::from_flags(&[Component::Mcp], &[]).unwrap(),
             global: true,
             interactive: false,
             graph_first: Some(false),

@@ -5,10 +5,10 @@ use anyhow::{Context, Result};
 use ontology::migrations::sha256_hex;
 use serde_json::{Value, json};
 
-use super::json;
 use super::{
     Installer, Report, backup_once, file_mentions, remove_file_and_empty_parents, write_file,
 };
+use super::{hooks, json};
 use crate::commands::setup::Target;
 use crate::commands::setup::spec::{Agent, PluginSpec};
 
@@ -18,13 +18,17 @@ pub(super) struct AgentPlugins;
 
 impl Installer for AgentPlugins {
     fn plan(&self, agent: Agent, target: &Target) -> Result<Vec<String>> {
-        let Some(plugin) = &agent.plugin else {
-            return Ok(Vec::new());
-        };
-        Ok(vec![
-            target.resolve(&plugin.dir)?.1,
-            target.resolve(&plugin.settings)?.1,
-        ])
+        let plugin = agent
+            .plugin
+            .iter()
+            .flat_map(|plugin| [&plugin.dir, &plugin.settings]);
+        let files = agent.ui_files(true).map(|file| &file.path);
+        let registrations = agent.ui_registrations(true).map(|entry| &entry.file);
+        plugin
+            .chain(files)
+            .chain(registrations)
+            .map(|scoped| target.resolve(scoped).map(|(_, label)| label))
+            .collect()
     }
 
     fn install(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
@@ -32,23 +36,43 @@ impl Installer for AgentPlugins {
             if let Some(plugin) = &agent.plugin {
                 install_plugin(*agent, plugin, target, report)?;
             }
+            hooks::install_files(
+                agent.ui_files(true),
+                agent.ui_registrations(true),
+                target,
+                report,
+            )?;
         }
         Ok(())
     }
 
     fn remove(&self, agents: &[Agent], target: &Target, report: &mut Report) -> Result<()> {
-        for plugin in agents.iter().filter_map(|agent| agent.plugin.as_ref()) {
-            remove_plugin(plugin, target, report)?;
+        for agent in agents {
+            if let Some(plugin) = &agent.plugin {
+                remove_plugin(plugin, target, report)?;
+            }
+            hooks::remove_files(
+                agent.ui_files(true),
+                agent.ui_registrations(true),
+                target,
+                report,
+            )?;
         }
         Ok(())
     }
 
     fn is_installed(&self, agent: Agent, target: &Target) -> bool {
-        agent.plugin.as_ref().is_some_and(|plugin| {
+        let plugin = agent.plugin.as_ref().is_some_and(|plugin| {
             target
                 .resolve(&plugin.dir)
                 .is_ok_and(|(dir, _)| dir.join(MANIFEST).is_file())
-        })
+        });
+        plugin
+            || agent.ui_files(true).any(|file| {
+                target
+                    .resolve(&file.path)
+                    .is_ok_and(|(path, _)| path.exists())
+            })
     }
 }
 
@@ -67,8 +91,8 @@ fn install_plugin(
         report.note(
             &dir_label,
             format!(
-                "skipped: needs {} {} or later (found {})",
-                plugin.version_command[0],
+                "Orbit UI skipped: needs {} {}+ (you have {})",
+                agent.title,
                 plugin.min_version,
                 found.as_deref().unwrap_or("none")
             ),

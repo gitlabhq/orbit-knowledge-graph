@@ -175,6 +175,7 @@
       "required": ["path", "template"],
       "additionalProperties": false,
       "properties": {
+        "ui": { "type": "boolean", "description": "Installed with the agent-plugins component instead of hooks." },
         "path": { "$ref": "#/definitions/scopedPath" },
         "template": {
           "type": "string",
@@ -188,6 +189,7 @@
       "required": ["file", "path", "value"],
       "additionalProperties": false,
       "properties": {
+        "ui": { "type": "boolean", "description": "Installed with the agent-plugins component instead of hooks." },
         "file": { "$ref": "#/definitions/scopedPath" },
         "path": { "$ref": "#/definitions/jsonPath" },
         "value": {

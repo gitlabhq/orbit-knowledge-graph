@@ -6,7 +6,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test ./opencode",
     "test:claude": "${CLAUDE_BIN:-claude} plugin validate --strict . && ${CLAUDE_BIN:-claude} plugin test .",
-    "build": "bun build opencode/index.ts --target=bun | grep -v '^// .*\\.ts$' > ../../config/setup/opencode_plugin.js && bun build vendor/shiki.ts --target=bun --minify | grep -v '^// @bun' > hooks/shiki.js"
+    "build": "bun build opencode/index.ts --target=bun | grep -v '^// .*\\.ts$' | grep -v '^// @bun' > ../../config/setup/opencode_ui_plugin.js && bun build vendor/shiki.ts --target=bun --minify | grep -v '^// @bun' > hooks/shiki.js"
   },
   "devDependencies": {
     "@types/bun": "catalog:",

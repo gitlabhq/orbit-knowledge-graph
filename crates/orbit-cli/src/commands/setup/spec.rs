@@ -271,6 +271,8 @@ pub(super) struct JsonMerge {
 pub(super) struct TemplateFile {
     pub(super) path: ScopedPath,
     pub(super) template: String,
+    #[serde(default)]
+    pub(super) ui: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -279,6 +281,8 @@ pub(super) struct Registration {
     pub(super) file: ScopedPath,
     pub(super) path: Vec<String>,
     pub(super) value: ScopedPath,
+    #[serde(default)]
+    pub(super) ui: bool,
 }
 
 static AGENT_SPECS: LazyLock<Vec<AgentSpec>> = LazyLock::new(|| {
@@ -308,6 +312,26 @@ impl std::ops::Deref for Agent {
 
     fn deref(&self) -> &AgentSpec {
         self.0
+    }
+}
+
+impl Agent {
+    pub(super) fn ui_files(self, ui: bool) -> impl Iterator<Item = &'static TemplateFile> {
+        self.0
+            .template_files
+            .iter()
+            .filter(move |file| file.ui == ui)
+    }
+
+    pub(super) fn ui_registrations(self, ui: bool) -> impl Iterator<Item = &'static Registration> {
+        self.0
+            .registrations
+            .iter()
+            .filter(move |entry| entry.ui == ui)
+    }
+
+    pub(super) fn has_ui(self) -> bool {
+        self.plugin.is_some() || self.ui_files(true).next().is_some()
     }
 }
 

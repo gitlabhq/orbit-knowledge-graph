@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test'
 
-import { OrbitPlugin } from './index.ts'
+import { OrbitUiPlugin } from './index.ts'
 
 type ShowToast = (options: { body: { message: string } }) => unknown
 
 async function hooksWith(showToast: ShowToast) {
-  return OrbitPlugin({ client: { tui: { showToast: async (toast) => showToast(toast) } } })
+  return OrbitUiPlugin({ client: { tui: { showToast: async (toast) => showToast(toast) } } })
 }
 
 async function toastsFor(commands: string[], tool = 'bash'): Promise<string[]> {
@@ -48,5 +48,5 @@ test('a toast that throws or rejects never fails the call', async () => {
 })
 
 test('the module exports only the plugin', async () => {
-  expect(Object.keys(await import('./index.ts'))).toEqual(['OrbitPlugin'])
+  expect(Object.keys(await import('./index.ts'))).toEqual(['OrbitUiPlugin'])
 })

@@ -96,6 +96,25 @@ pub(crate) async fn install(
             &location_hints,
         )?;
     }
+    let ui_agents: Vec<&str> = selection
+        .agents
+        .iter()
+        .filter(|agent| agent.has_ui())
+        .map(|agent| agent.title.as_str())
+        .collect();
+    if interactive
+        && options.ask_agent_plugins
+        && !ui_agents.is_empty()
+        && !tui::confirm(
+            &format!(
+                "Show Orbit calls in {} (Orbit UI)?",
+                ui_agents.join(" and ")
+            ),
+            true,
+        )?
+    {
+        selection.components.remove(&Component::AgentPlugins);
+    }
     if selection.agents.is_empty() {
         tui::outro_cancel(format!(
             "No agent selected. Name one to configure it: orbit setup <{}>",
@@ -261,13 +280,23 @@ impl Component {
         Component::AgentPlugins,
     ];
 
-    pub(crate) fn from_flags(mcp: bool, plugin: bool, skip: &[Component]) -> BTreeSet<Component> {
-        Component::ALL
+    pub(crate) fn from_flags(
+        install: &[Component],
+        skip: &[Component],
+    ) -> Result<BTreeSet<Component>> {
+        if let Some(both) = install.iter().find(|component| skip.contains(component)) {
+            let name =
+                clap::ValueEnum::to_possible_value(both).map(|value| value.get_name().to_string());
+            anyhow::bail!(
+                "--install and --skip both name {}",
+                name.unwrap_or_default()
+            );
+        }
+        Ok(Component::ALL
             .into_iter()
-            .filter(|component| *component != Component::Mcp || mcp)
-            .filter(|component| *component != Component::AgentPlugins || plugin)
+            .filter(|component| *component != Component::Mcp || install.contains(component))
             .filter(|component| !skip.contains(component))
-            .collect()
+            .collect())
     }
 
     fn label(self) -> &'static str {
@@ -329,6 +358,7 @@ pub(crate) struct Options {
     pub(crate) verbose: bool,
     pub(crate) index: bool,
     pub(crate) components: BTreeSet<Component>,
+    pub(crate) ask_agent_plugins: bool,
     pub(crate) skill: SkillRequest,
 }
 
@@ -429,27 +459,21 @@ mod tests {
             dry_run: false,
             verbose: false,
             index: false,
-            components: Component::from_flags(false, false, &[]),
+            components: Component::from_flags(&[], &[]).unwrap(),
+            ask_agent_plugins: false,
             skill: SkillRequest::default(),
         }
     }
 
     fn options_with_mcp(names: &[&str]) -> Options {
         Options {
-            components: Component::from_flags(true, false, &[]),
+            components: Component::from_flags(&[Component::Mcp], &[]).unwrap(),
             ..options_for(names)
         }
     }
 
-    fn options_with_plugin(names: &[&str]) -> Options {
-        Options {
-            components: Component::from_flags(false, true, &[]),
-            ..options_for(names)
-        }
-    }
-
-    fn install_with_plugin(names: &[&str], dir: &Path) {
-        install(options_with_plugin(names), project(dir), &bare_machine()).unwrap();
+    fn install_default(names: &[&str], dir: &Path) {
+        install(options_for(names), project(dir), &bare_machine()).unwrap();
     }
 
     fn bare_machine() -> Machine {
@@ -537,8 +561,11 @@ mod tests {
     fn skipped_components_are_left_alone() {
         let dir = tempfile::tempdir().unwrap();
         let mut only_instructions = options_for(&["claude", "opencode"]);
-        only_instructions.components =
-            Component::from_flags(false, false, &[Component::Hooks, Component::Skill]);
+        only_instructions.components = Component::from_flags(
+            &[],
+            &[Component::Hooks, Component::Skill, Component::AgentPlugins],
+        )
+        .unwrap();
         install(only_instructions, project(dir.path()), &bare_machine()).unwrap();
 
         assert!(dir.path().join("CLAUDE.md").is_file());
@@ -581,7 +608,11 @@ mod tests {
         assert!(dir.path().join(".opencode/plugins/orbit.js").is_file());
         assert_eq!(
             read_json(&opencode_config)["plugin"],
-            json!(["other.js", ".opencode/plugins/orbit.js"])
+            json!([
+                "other.js",
+                ".opencode/plugins/orbit.js",
+                ".opencode/plugins/orbit-ui.js"
+            ])
         );
         assert_eq!(
             read_json(&dir.path().join("opencode.json"))["mcp"]["orbit"],
@@ -1465,7 +1496,7 @@ mod tests {
         install_with_mcp(&["opencode"], dir.path());
 
         let plugin =
-            std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit.js")).unwrap();
+            std::fs::read_to_string(dir.path().join(".opencode/plugins/orbit-ui.js")).unwrap();
         assert!(plugin.contains(r#""tool.execute.before""#), "{plugin}");
         assert!(plugin.contains("client.tui.showToast"), "{plugin}");
     }
@@ -1519,18 +1550,15 @@ mod tests {
     }
 
     #[test]
-    fn the_claude_plugin_installs_only_when_asked() {
+    fn the_claude_plugin_installs_by_default_and_skips_when_asked() {
         let dir = tempfile::tempdir().unwrap();
-        install(
-            options_for(&["claude"]),
-            project(dir.path()),
-            &bare_machine(),
-        )
-        .unwrap();
+        let mut skipped = options_for(&["claude"]);
+        skipped.components = Component::from_flags(&[], &[Component::AgentPlugins]).unwrap();
+        install(skipped, project(dir.path()), &bare_machine()).unwrap();
         assert!(!dir.path().join(".claude/orbit").exists());
         assert!(!dir.path().join(".claude/settings.local.json").exists());
 
-        install_with_plugin(&["claude", "codex"], dir.path());
+        install_default(&["claude", "codex"], dir.path());
 
         let marketplace = dunce::canonicalize(dir.path())
             .unwrap()
@@ -1561,6 +1589,13 @@ mod tests {
     }
 
     #[test]
+    fn install_and_skip_of_one_component_is_an_error() {
+        assert!(Component::from_flags(&[Component::Mcp], &[Component::Mcp]).is_err());
+        let defaults = Component::from_flags(&[], &[]).unwrap();
+        assert!(defaults.contains(&Component::AgentPlugins) && !defaults.contains(&Component::Mcp));
+    }
+
+    #[test]
     fn each_project_gets_its_own_claude_plugin_marketplace() {
         let claude = spec::agent_named("claude").unwrap();
         let plugin = claude.plugin.as_ref().unwrap();
@@ -1576,7 +1611,7 @@ mod tests {
             components::agent_plugins::TEST_VERSION
                 .with(|fake| *fake.borrow_mut() = version.map(str::to_string));
             let dir = tempfile::tempdir().unwrap();
-            install_with_plugin(&["claude"], dir.path());
+            install_default(&["claude"], dir.path());
             assert!(!dir.path().join(".claude/orbit").exists(), "{version:?}");
             assert!(
                 !dir.path().join(".claude/settings.local.json").exists(),
@@ -1597,8 +1632,8 @@ mod tests {
         )
         .unwrap();
 
-        install_with_plugin(&["claude"], dir.path());
-        install_with_plugin(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
         uninstall_named(&["claude"], dir.path());
 
         assert_eq!(
@@ -1611,7 +1646,7 @@ mod tests {
     #[test]
     fn uninstall_keeps_a_claude_plugin_file_the_user_edited() {
         let dir = tempfile::tempdir().unwrap();
-        install_with_plugin(&["claude"], dir.path());
+        install_default(&["claude"], dir.path());
         let register = dir
             .path()
             .join(".claude/orbit/claude_plugin/gitlab-orbit/hooks/register.ts");

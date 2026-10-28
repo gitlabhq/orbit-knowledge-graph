@@ -149,7 +149,8 @@ fn write_unless_unchanged(
 
 fn backup_once(path: &Path, label: &str, report: &mut Report) -> Result<()> {
     let backup = backup_path(path);
-    if backup.exists() || !path.exists() {
+    let written_this_run = report.outcomes.iter().any(|outcome| outcome.label == label);
+    if backup.exists() || !path.exists() || written_this_run {
         return Ok(());
     }
     std::fs::copy(path, &backup)

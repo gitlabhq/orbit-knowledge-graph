@@ -552,7 +552,8 @@ enum SkillsCommands {
 
 #[derive(Args, Debug, PartialEq)]
 struct SetupFlags {
-    /// Skip the agent picker and apply to the pre-selected agents.
+    /// Skip the prompts: use the pre-selected agents and the default components, minus
+    /// `--skip`, plus `--install`.
     #[arg(long, short = 'y')]
     yes: bool,
 
@@ -581,6 +582,7 @@ impl SetupFlags {
         all: bool,
         index: bool,
         components: std::collections::BTreeSet<commands::setup::Component>,
+        ask_agent_plugins: bool,
         skill: commands::setup::SkillRequest,
     ) -> commands::setup::Options {
         commands::setup::Options {
@@ -591,6 +593,7 @@ impl SetupFlags {
             verbose: self.verbose,
             index,
             components,
+            ask_agent_plugins,
             skill,
         }
     }
@@ -632,16 +635,15 @@ enum Commands {
         #[arg(long, conflicts_with = "agents")]
         all: bool,
 
-        /// Also register the `orbit` MCP server. Off by default.
-        #[arg(long)]
+        /// Add a component that is off by default, such as `mcp` (repeatable).
+        #[arg(long, value_enum, value_name = "COMPONENT")]
+        install: Vec<commands::setup::Component>,
+
+        #[arg(long, hide = true)]
         mcp: bool,
 
-        /// Also install the Orbit plugin for Claude Code, which marks Orbit calls in the
-        /// transcript. Needs Claude Code 2.1.287 or later. Off by default.
-        #[arg(long)]
-        claude_ui: bool,
-
-        /// Leave a component out (repeatable).
+        /// Leave a component out (repeatable). By default setup installs instructions, hooks,
+        /// skill, and agent-plugins, which shows Orbit calls in Claude Code and OpenCode.
         #[arg(long, value_enum, value_name = "COMPONENT")]
         skip: Vec<commands::setup::Component>,
 
@@ -951,14 +953,20 @@ async fn dispatch(
         Commands::Setup {
             agents,
             all,
+            mut install,
             mcp,
-            claude_ui,
             skip,
             no_index,
             skill,
             flags,
         } => {
-            let components = commands::setup::Component::from_flags(mcp, claude_ui, &skip);
+            if mcp {
+                install.push(commands::setup::Component::Mcp);
+            }
+            let components = commands::setup::Component::from_flags(&install, &skip)?;
+            let agent_plugins = commands::setup::Component::AgentPlugins;
+            let ask_agent_plugins =
+                !install.contains(&agent_plugins) && !skip.contains(&agent_plugins);
             let machine = commands::setup::detect::Machine::current()?;
             let target = flags.target()?;
             let options = flags.to_options(
@@ -966,6 +974,7 @@ async fn dispatch(
                 all,
                 !no_index,
                 components,
+                ask_agent_plugins,
                 commands::setup::SkillRequest {
                     kind: skill,
                     full_tree: None,
@@ -984,8 +993,14 @@ async fn dispatch(
             Ok(())
         }
         Commands::Uninstall { agents, flags } => {
-            let options =
-                flags.to_options(agents, false, false, Default::default(), Default::default());
+            let options = flags.to_options(
+                agents,
+                false,
+                false,
+                Default::default(),
+                false,
+                Default::default(),
+            );
             let machine = commands::setup::detect::Machine::current()?;
             let run = commands::setup::uninstall(options, flags.target()?, &machine)?;
             if let Some(tracker) = &tracker {
