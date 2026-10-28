@@ -22,7 +22,10 @@ Definition
 : A named code element, such as a class, function, method, or module. Its fully qualified name (`fqn`) includes the enclosing names.
 
 GitLab Orbit
-: The product that builds a graph for each top-level group where GitLab Orbit is turned on, and answers queries on the graph. The graph holds the code of your repositories and software development lifecycle (SDLC) data, such as merge requests, pipelines, work items, and security findings. Queries run on GitLab and return only the data your role lets you see.
+: The product that builds a graph of GitLab data and code for each top-level group that has the feature turned on, and answers queries on the graph. The graph holds the code of your repositories and software development lifecycle (SDLC) data, such as merge requests, pipelines, work items, and security findings. Queries run on GitLab and return only the data your role lets you see.
+
+GitLab Orbit API
+: The REST, GraphQL, and MCP endpoints of GitLab Orbit on your GitLab instance. The GitLab Orbit CLI and agents call these endpoints.
 
 GitLab Orbit CLI
 : The `orbit` binary. `glab orbit` installs it and forwards every command to it. The CLI queries the GitLab Orbit API, and also builds a local graph of the code on your machine. Some commands combine results from both.

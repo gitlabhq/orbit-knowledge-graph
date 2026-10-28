@@ -66,7 +66,6 @@ To see the current schema, use one of these methods:
 
 ## Supported languages
 
-GitLab Orbit on your instance and the local graph use the same parser.
 Each language gets files, directories, and definitions.
 Most languages also get imports and cross-file calls.
 

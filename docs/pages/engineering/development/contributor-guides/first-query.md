@@ -1,7 +1,7 @@
 # Write your first Orbit query
 
 This tutorial takes you from a clean checkout to your first useful queries on
-the local graph of the Orbit CLI. The local graph lives entirely on your machine,
+the local graph of the GitLab Orbit CLI. The local graph lives entirely on your machine,
 in DuckDB. It does not need Rails, ClickHouse, NATS,
 Docker, or a GitLab account.
 
@@ -17,9 +17,9 @@ The `workspace sql` command queries the local DuckDB graph with SQL. The
 GitLab Orbit query language is linked at the end after the local graph concepts
 are familiar.
 
-## Install the Orbit CLI
+## Install the GitLab Orbit CLI
 
-Install the managed Orbit CLI binary:
+Install the managed GitLab Orbit CLI binary:
 
 ```shell
 glab orbit --install --yes
@@ -215,7 +215,7 @@ between them.
 
 - [Local graph schema reference](../../../../docs-gitlab-com/cli.md#local-graph) for the four
   local node types and their properties.
-- [Orbit CLI access methods](../../../../docs-gitlab-com/cli.md) for
+- [GitLab Orbit CLI access methods](../../../../docs-gitlab-com/cli.md) for
   direct `orbit`, `glab orbit`, and MCP usage.
 - [Orbit query language reference](../../../../docs-gitlab-com/queries/query-language.md)
   for the query language of GitLab Orbit and agent-facing graph queries.

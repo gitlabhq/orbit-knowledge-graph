@@ -28,10 +28,10 @@ title: GitLab Orbit CLI
 The GitLab Orbit CLI (`orbit`) queries GitLab Orbit from the terminal.
 Your agent runs the same commands for you.
 
-The CLI uses two sources of data:
+The CLI reads two graphs:
 
-- GitLab Orbit on your GitLab instance holds your GitLab data and the code on the default branch of each project.
-- A [local graph](#local-graph) on your machine holds the code in your checkout, including commits that you have not pushed.
+- The graph on your GitLab instance holds your GitLab data and the code on the default branch of each project.
+- The [local graph](#local-graph) on your machine holds the code in your checkout, including commits that you have not pushed.
 
 ## Install the CLI
 
@@ -187,18 +187,20 @@ Use only one of `--full-path`, `--namespace-id`, and `--project-id`.
 
 ## Local graph
 
-The local graph holds the code on your machine, so your agent can find definitions, callers, and imports
-in code that you committed but have not pushed. It works offline and needs no GitLab account.
-For merge requests, pipelines, work items, and vulnerabilities, use [GitLab Orbit](#query-gitlab-orbit).
+The local graph is part of the GitLab Orbit CLI.
+The local graph covers the code on your machine, which the graph on your GitLab instance does not have.
+Your agent can find definitions, callers, and imports in code that you committed but have not pushed.
+The local graph works offline and needs no GitLab account.
+For merge requests, pipelines, work items, and vulnerabilities, [query GitLab Orbit](#query-gitlab-orbit).
 
-| Attribute | Local graph | GitLab Orbit |
-|-----------|-------------|--------------|
+| Attribute | Local graph | Graph on your GitLab instance |
+|-----------|-------------|-------------------------------|
 | Data | Code only | GitLab data and code |
 | Code version | The checkout on your machine, including commits that you have not pushed | The default branch of each project |
 | Refresh | `grep` and `context` index new commits and edited files, or you run `glab orbit workspace index` | Automatic |
 | Query with | `grep`, `context`, and `workspace sql` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
 
-Your agent can use the local graph and GitLab Orbit in the same conversation.
+Your agent can use both graphs in the same conversation.
 
 ### Index a repository
 
@@ -210,7 +212,7 @@ glab orbit workspace index .
 
 The CLI parses the files in the working tree, skips the files that `.gitignore` excludes,
 and writes definitions, imports, and cross-file references to the graph.
-The parser and [supported languages](schema.md#supported-languages) are the same as for GitLab Orbit on your instance.
+The parser and [supported languages](schema.md#supported-languages) are the same as for the graph on your GitLab instance.
 
 - When you pass the path of a directory, the CLI indexes each repository in the directory.
 - Each indexed commit keeps its own graph. When you index the same commit again, the CLI reindexes only the files that changed since the last run.

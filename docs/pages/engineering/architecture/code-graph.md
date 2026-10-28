@@ -13,8 +13,8 @@ authors:
 The code graph holds the structure of a repository. That means directories,
 files, definitions like classes and functions, and imported symbols. Its edges
 record what contains what, which code calls which, what each import points to,
-and which class extends which. One engine builds it for Orbit and for the Orbit
-CLI. The engine knows no language on its own. Each language brings a
+and which class extends which. One engine builds it for GitLab Orbit and for the
+GitLab Orbit CLI. The engine knows no language on its own. Each language brings a
 spec that rewrites its syntax trees into one shared shape. Here is a
 simplified view of how source files become the graph.
 
@@ -143,7 +143,7 @@ Each row ID is a hash of the project, the branch, and what the row is. For a
 definition, that's its file, its qualified name, and its position. The same
 code gets the same ID on every run.
 
-Rows leave in batches as each family finishes. Orbit writes them to
+Rows leave in batches as each family finishes. GitLab Orbit writes them to
 ClickHouse and adds the branch that ties the code graph to its project. The
 Orbit CLI writes them to DuckDB.
 
@@ -161,8 +161,8 @@ parses only the changed files.
 
 Files that imported a dropped file are marked dirty. Resolution then redoes
 the dirty files and the files that import them, and keeps every other edge.
-The Orbit CLI uses this between runs on the same commit. Orbit builds
-the whole graph again on each push.
+The GitLab Orbit CLI uses this between runs on the same commit. GitLab
+Orbit builds the whole graph again on each push.
 
 ## When things go wrong
 
@@ -208,7 +208,7 @@ not from the run. So a rebuild replaces rows instead of adding copies.
   components aren't parsed.
 - **Resolution reads code and doesn't run it.** A call made through reflection
   or code generated at runtime gets no edge.
-- **Orbit doesn't keep snapshots.** It builds the whole graph again on
+- **GitLab Orbit doesn't keep snapshots.** It builds the whole graph again on
   each push, even when one file changed. The engine can already re-index only
   the changed files.
 - **Type flow stays inside the engine.** The engine tracks which call produced

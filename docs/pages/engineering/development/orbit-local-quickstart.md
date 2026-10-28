@@ -1,4 +1,4 @@
-# Orbit CLI development quickstart
+# GitLab Orbit CLI development quickstart
 
 Build and test the `orbit` CLI and related crates without a Caproni cluster, NATS, Siphon,
 ClickHouse, or PostgreSQL. Many contributions only need the tools on this
@@ -54,8 +54,8 @@ embedded copy, so another skill needs a credential and fails when the fetch
 does. The cache uses the operating system's user cache directory and keeps
 instance origins isolated.
 
-The command finds credentials like the other Orbit API commands: the Orbit API
-variables from glab, then `GITLAB_TOKEN` with an optional `GITLAB_URL`, then
+The command finds credentials like the other GitLab Orbit API commands: the
+Orbit API variables from glab, then `GITLAB_TOKEN` with an optional `GITLAB_URL`, then
 `glab auth credential-helper`. Without a credential, it prints a warning on
 stderr and serves the embedded local tree. The local guidance therefore stays
 available in offline development builds:
