@@ -89,6 +89,10 @@ else
   warn "license activated: plan=#{l.plan} expires=#{l.expires_at} cloud=#{l.cloud_license?}"
 end
 
+# Turned off here, minutes before the tests: each Puma worker caches flag values for about a minute.
+%i[orbit_promo_access_gate orbit_trial].each { |flag| ::Feature.disable(flag) }
+warn 'orbit_promo_access_gate and orbit_trial turned off'
+
 user = User.find_by(username: 'root') or abort 'no root user'
 token = user.personal_access_tokens.find_or_create_by!(name: 'e2e-bootstrap') do |t|
   t.scopes = %w[api read_api admin_mode]

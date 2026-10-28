@@ -109,15 +109,6 @@ Enable Feature Flag
     Should Be True    ${resp.status_code} in [200, 201]
     ...    Failed to enable ${flag}: ${resp.status_code} ${resp.text}
 
-Disable Feature Flag
-    [Arguments]    ${flag}
-    ${headers}=    Create Dictionary    PRIVATE-TOKEN=${GITLAB_PAT}
-    ${data}=    Create Dictionary    value=false
-    ${resp}=    POST    ${GITLAB_URL}/api/v4/features/${flag}
-    ...    headers=${headers}    data=${data}    expected_status=any
-    Should Be True    ${resp.status_code} in [200, 201]
-    ...    Failed to disable ${flag}: ${resp.status_code} ${resp.text}
-
 Feature Flag Is Enabled
     [Arguments]    ${flag}
     ${headers}=    GitLab Auth Headers
