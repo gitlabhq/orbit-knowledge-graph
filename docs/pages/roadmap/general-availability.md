@@ -11,7 +11,7 @@ tracking: https://gitlab.com/groups/gitlab-org/-/work_items/19744
 ---
 
 GitLab will support Orbit for production use on GitLab.com.
-On GitLab Self-Managed and GitLab Dedicated, production support starts with GitLab 19.5.
+On GitLab Self-Managed and GitLab Dedicated, production support follows in early November 2026.
 On GitLab Dedicated, GitLab runs Orbit for you, next to your instance.
 
 ## Included at general availability

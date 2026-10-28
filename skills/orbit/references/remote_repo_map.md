@@ -1,14 +1,14 @@
-# Orbit remote repo map reference
+# Repository map reference
 
-`remote_repo_map.py` maps code structure for any project indexed in Orbit Remote by shelling out to `glab orbit query`. It needs no local checkout or Orbit Local index.
+`remote_repo_map.py` maps code structure for any project that GitLab Orbit indexed, by shelling out to `glab orbit query`. It needs no local checkout or local graph.
 
-Use it for inheritance trees, ancestor chains, included concerns, class members, directory API surfaces, or call sites in a project that Orbit Remote has indexed. Prefer `glab orbit grep` and `glab orbit context` when you are in a checkout and need branch-local or unmerged code. Prefer a raw query from [`recipes.md`](recipes.md) for a single known entity or a cross-domain SDLC question.
+Use it for inheritance trees, ancestor chains, included concerns, class members, directory API surfaces, or call sites in a project that GitLab Orbit has indexed. Prefer `glab orbit grep` and `glab orbit context` when you are in a checkout and need branch-local or unmerged code. Prefer a raw query from [`recipes.md`](recipes.md) for a single known entity or a cross-domain SDLC question.
 
 ## Prerequisites
 
 - glab v1.117.0 or later, authenticated against GitLab.com.
 - The `knowledge_graph` feature flag enabled for the user.
-- The target project and branch indexed in Orbit Remote.
+- The target project and branch indexed by GitLab Orbit.
 - A token with access to the target project.
 
 ## Invocation
@@ -43,7 +43,7 @@ python3 ./scripts/remote_repo_map.py --project-id 77960826 --branch main api cra
 
 Output is plain text with `file_path:line` locators that file-reading tools accept directly.
 
-Known limits of Orbit Remote's Code Graph coverage:
+Known limits of the GitLab Orbit code graph coverage:
 
 - `EXTENDS` depth is capped at 3 server-side, so large inheritance trees can be incomplete.
 - `CALLS` edges are not fully indexed for every language and project.
@@ -54,4 +54,4 @@ Known limits of Orbit Remote's Code Graph coverage:
 
 - Start with one targeted subcommand. This helper has no broad `overview` equivalent.
 - Keep path prefixes narrow for `api`.
-- Do not use it for local uncommitted or branch-local code. Use Orbit Local.
+- Do not use it for local uncommitted or branch-local code. Use the local graph (`glab orbit grep` and `glab orbit context`).

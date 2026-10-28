@@ -1,9 +1,12 @@
 use std::fmt;
 use std::path::Path;
 
+use serde::Deserialize;
+
+use crate::remote::client::OrbitClient;
 use crate::remote::error::{EXIT_GENERIC, RemoteError};
 
-pub(super) enum Scope {
+pub(crate) enum Scope {
     FullPath(String),
     NamespaceId(i64),
     ProjectId(i64),
@@ -36,13 +39,34 @@ impl Scope {
         Ok(Scope::FullPath(full_path))
     }
 
-    pub(super) fn to_query_param(&self) -> (&'static str, String) {
-        match self {
-            Scope::FullPath(path) => ("full_path", path.clone()),
-            Scope::NamespaceId(id) => ("namespace_id", id.to_string()),
-            Scope::ProjectId(id) => ("project_id", id.to_string()),
-        }
+    pub(super) async fn resolve_full_path(
+        &self,
+        client: &OrbitClient,
+    ) -> Result<String, RemoteError> {
+        let (path, params) = match self {
+            Scope::FullPath(path) => return Ok(path.clone()),
+            Scope::NamespaceId(id) => (
+                format!("/api/v4/groups/{id}"),
+                vec![("with_projects", "false".to_string())],
+            ),
+            Scope::ProjectId(id) => (format!("/api/v4/projects/{id}"), Vec::new()),
+        };
+        let body = client.get_bytes(&path, &params).await?;
+        serde_json::from_slice::<Namespace>(&body)
+            .map(|namespace| namespace.full_path)
+            .map_err(|error| {
+                RemoteError::new(
+                    EXIT_GENERIC,
+                    format!("unexpected response from {path}: {error}"),
+                )
+            })
     }
+}
+
+#[derive(Deserialize)]
+struct Namespace {
+    #[serde(alias = "path_with_namespace")]
+    full_path: String,
 }
 
 impl fmt::Display for Scope {

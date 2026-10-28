@@ -1,9 +1,9 @@
 ---
 name: orbit-start
 description: Walk a user through their first GitLab Orbit session. Check the setup, then answer a simple first question and a workflow from the prompt examples with Orbit. Offer to run a prompt again without Orbit, and to show how Orbit works. Use when the user asks to get started with Orbit, try Orbit, or see what Orbit can do.
-version: 0.2.1
+version: 0.2.2
 license: MIT
-compatibility: Requires the Orbit CLI (directly or through glab) and network access to the GitLab instance.
+compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance.
 metadata:
   audience: developers
   keywords: orbit, knowledge-graph, onboarding, getting-started, glab

@@ -2,12 +2,14 @@ use std::io::Write;
 
 use self::error::{EXIT_GENERIC, RemoteError};
 
+pub(crate) mod api;
 pub(crate) mod client;
 pub(crate) mod code;
 pub(crate) mod context;
 pub(crate) mod error;
 pub(crate) mod graph_status;
 pub(crate) mod grep;
+mod legacy;
 pub(crate) mod ontology;
 pub(crate) mod origin;
 pub(crate) mod query;
@@ -45,7 +47,7 @@ pub(crate) fn pretty_json(body: &[u8]) -> Vec<u8> {
     }
 }
 
-pub(crate) fn pretty_value(value: &serde_json::Value) -> Vec<u8> {
+pub(crate) fn pretty_value(value: &impl serde::Serialize) -> Vec<u8> {
     serde_json::to_vec_pretty(value).unwrap_or_default()
 }
 
