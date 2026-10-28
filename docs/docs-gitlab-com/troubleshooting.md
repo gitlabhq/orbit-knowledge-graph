@@ -13,6 +13,16 @@ title: Troubleshooting GitLab Orbit
 
 {{< /details >}}
 
+For TLS, network, or data loss problems in the GitLab Orbit service on GitLab Self-Managed,
+see [Troubleshooting GitLab Orbit on GitLab Self-Managed](self-managed/troubleshooting.md).
+
+If you cannot resolve your problem:
+
+- To get help, [contact GitLab Support](https://about.gitlab.com/support/).
+- To report a bug, check the [open issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/?state=opened).
+  If an issue matches your problem, add your details to it.
+  If no issue matches, [create an issue](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/new?issuable_template=Bug_Report).
+
 When working with GitLab Orbit, you might encounter the following issues.
 
 ## CLI install and update
@@ -334,3 +344,4 @@ To resolve this issue, index your repositories again.
 - [Security](security.md)
 - [GitLab Orbit architecture](how-it-works.md)
 - [GitLab Orbit MCP endpoint](agents/mcp.md)
+- [Monitor GitLab Orbit](self-managed/observability.md)
