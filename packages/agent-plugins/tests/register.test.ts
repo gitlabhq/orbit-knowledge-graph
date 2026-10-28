@@ -55,19 +55,59 @@ test('the status line counts finished Orbit queries and passes every call throug
   expect(await ui.find({ type: 'Text', text: ' API call replaced' })).toBeDefined()
 })
 
-test('the status line shows the nodes out of the project graph total once graph-status answers', async ($, on) => {
+function graphOf(total: number) {
+  const graph = { itemCounts: { domains: [{ entities: [{ name: 'Job', count: String(total - 1) }, { name: 'Project', count: '1' }] }] } }
+  return { exitCode: 0, stdout: JSON.stringify(graph), stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+}
+
+async function statusLine($: Parameters<TestBody>[0]) {
+  return $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
+}
+
+test('the node total is the graph of the project the query asks about', async ($, on) => {
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
   on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\n' } }))
-  const graph = { itemCounts: { domains: [{ entities: [{ name: 'Job', count: '1675399' }, { name: 'Project', count: '1' }] }] } }
-  on('process.run', () => ({
-    value: { exitCode: 0, stdout: JSON.stringify(graph), stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
-  }))
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    runs.push(e.argv)
+    return { value: graphOf(1675400) }
+  })
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (mr:MergeRequest {project_id: 7}) RETURN mr"' })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+
+  expect(runs).toEqual([['glab', 'orbit', 'graph-status', '--project-id', '7', '--response-format', 'raw']])
+  const ui = await statusLine($)
+  expect(await ui.find({ type: 'Text', text: '3 / 1,675,400' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' nodes' })).toBeDefined()
+})
+
+test('queries over several projects add their graphs, each looked up once', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\n' } }))
+  const runs: (readonly string[])[] = []
+  on('process.run', (_$, e) => {
+    runs.push(e.argv)
+    return { value: graphOf(e.argv.includes('a/b') ? 1000 : 500) }
+  })
+  await $.tool.call({ tool: 'Bash', command: "glab orbit query \"MATCH (p:Project {full_path: 'a/b'}) RETURN p\"" })
+  await $.tool.call({ tool: 'Bash', command: 'glab orbit query "MATCH (mr:MergeRequest) WHERE mr.project_id IN [9] RETURN mr"' })
+  await $.tool.call({ tool: 'Bash', command: "glab orbit query \"MATCH (p:Project {full_path: 'a/b'}) RETURN p.id\"" })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+
+  expect(runs.length).toBe(2)
+  expect(await (await statusLine($)).find({ type: 'Text', text: '9 / 1,500' })).toBeDefined()
+})
+
+test('a query that names no project shows the nodes without a total', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[3]{id}:\n    1\n' } }))
+  on('process.run', () => ({ value: graphOf(1675400) }))
   await $.tool.call({ tool: 'Bash', command: QUERY })
   for (let i = 0; i < 10; i++) await Promise.resolve()
 
-  const ui = await $.ui.mount({ ...SITE, component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '' } })
-  expect(await ui.find({ type: 'Text', text: '3 / 1,675,400' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: ' nodes' })).toBeDefined()
+  const ui = await statusLine($)
+  expect(await ui.find({ type: 'Text', text: '3' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '3 / 1,675,400' })).toBeUndefined()
 })
 
 test('a cypher block in a reply draws highlighted, and the prose before it stays Claude Code', async ($, on) => {

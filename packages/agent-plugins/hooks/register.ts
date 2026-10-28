@@ -1,7 +1,7 @@
 import type { Elements, Register, RenderElement } from 'claude-code'
 
 import { QUERY_LABEL, describeOrbitCall, type OrbitCall } from '../core/calls.ts'
-import { cypherSegments, hopsOf, queryOf } from '../core/cypher.ts'
+import { cypherSegments, hopsOf, projectsOf, queryOf } from '../core/cypher.ts'
 import { apiCallsFor, compact, graphStatus, grouped, parseResponse } from '../core/stats.ts'
 import { codeLines, layout, type Token } from './highlight.ts'
 import type { MarkProps } from './orbit-mark.ts'
@@ -17,8 +17,8 @@ function clientOf(ui: Resolved): Elements['terminal']['Client'] | undefined {
 type RowState = { isErrored?: boolean; isInterrupted?: boolean }
 
 const stats = { calls: 0, nodes: 0, edges: 0, apiCalls: 0 }
-let graphTotal: number | null = null
-let graphTotalAsked = false
+const projectTotals = new Map<string, number | null>()
+let entitiesAsked = false
 let knownEntities: ReadonlySet<string> = new Set()
 const narration = new Set<string>()
 
@@ -95,19 +95,22 @@ export const register: Register = (on) => {
           stats.nodes += parsed.nodes + parsed.aggregated
           stats.apiCalls += apiCallsFor(parsed)
           stats.edges += parsed.edges + parsed.aggregated * hopsOf(queryOf(command))
-          if (!graphTotalAsked) {
-            graphTotalAsked = true
-            void (async () => {
+          const lookUps: { key: string; flags: readonly string[] }[] = projectsOf(queryOf(command)).filter((scope) => !projectTotals.has(scope.key))
+          if (!entitiesAsked && lookUps.length === 0) lookUps.push({ key: '', flags: [] })
+          entitiesAsked = true
+          for (const { key } of lookUps) if (key) projectTotals.set(key, null)
+          void Promise.all(
+            lookUps.map(async ({ key, flags }) => {
               for (const launcher of [['glab', 'orbit'], ['orbit']]) {
-                const run = await $.process.run([...launcher, 'graph-status', '--response-format', 'raw'], { timeoutMs: 30000 }).catch(() => null)
+                const run = await $.process.run([...launcher, 'graph-status', ...flags, '--response-format', 'raw'], { timeoutMs: 30000 }).catch(() => null)
                 const graph = run?.exitCode === 0 ? graphStatus(run.stdout) : null
                 if (!graph) continue
-                graphTotal = graph.total
-                knownEntities = new Set(graph.entities)
+                if (key) projectTotals.set(key, graph.total)
+                knownEntities = new Set([...knownEntities, ...graph.entities])
                 return $.ui.invalidate('ui.render')
               }
-            })()
-          }
+            }),
+          )
         }
       } catch {}
       $.ui.invalidate('ui.render')
@@ -164,6 +167,7 @@ export const register: Register = (on) => {
     const { Box, Text } = $.ui.resolve(e)
     const blue = (text: string) => Text({ color: BLUE, children: [text] })
     const dim = (text: string) => Text({ dimColor: true, children: [text] })
+    const graphTotal = [...projectTotals.values()].reduce<number>((sum, total) => sum + (total ?? 0), 0)
     const words: [string, string][] = [
       [compact(stats.calls), stats.calls === 1 ? ' query' : ' queries'],
       [compact(stats.apiCalls), stats.apiCalls === 1 ? ' API call replaced' : ' API calls replaced'],
