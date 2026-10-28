@@ -39,7 +39,7 @@ watchexec = "2.8.0"
 "sccache" = "0.13.0"
 "zig" = "0.15.2"
 clickhouse = "26.6.8.7-stable"
-"ubi:duckdb/duckdb" = { version = "2.0.0", matching = "duckdb-cli", exe = "duckdb" }
+"github:duckdb/duckdb" = { version = "2.0.0", matching = "duckdb-cli-" }
 uv = "0.9.28"
 bun = "1.4.4"
 lychee = "0.23"
