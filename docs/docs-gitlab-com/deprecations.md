@@ -174,6 +174,9 @@ GitLab Orbit does not support SQL on the local graph.
 | `orbit tools` | Removed in 0.160.0 | No replacement |
 | `orbit repo-map` | Removed in 0.160.0 | No replacement |
 
+`orbit index`, `orbit sql`, `orbit list`, and `orbit schema <table>` print a warning that names the new command.
+The other deprecated commands work with no warning.
+
 In GitLab Orbit CLI 0.160.0 and later, `orbit schema` with no argument shows the graph schema of your GitLab instance.
 
 ## Output of `orbit status`
