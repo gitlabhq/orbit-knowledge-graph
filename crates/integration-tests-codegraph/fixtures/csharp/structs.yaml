@@ -1,6 +1,6 @@
 name: "C# structs — struct definitions, properties, fields, methods, readonly struct"
 
-# Coverage note: csharp.rs maps struct_declaration to definition_type "Struct"
+# Coverage note: csharp.rs maps struct_declaration to kind "Struct"
 # (scope("struct_declaration", "Struct")), property_declaration to "Property",
 # constructor_declaration to "Constructor", and method_declaration to "Method".
 # Existing C# fixtures cover classes and resolution but not struct extraction or
@@ -55,11 +55,11 @@ fixtures:
       }
 
 tests:
-  - name: "struct Point is extracted as definition_type Struct"
+  - name: "struct Point is extracted as kind Struct"
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Geometry.Point'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { name: "Point", type: "Struct" } }
@@ -68,7 +68,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Geometry.Size'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Struct" } }
@@ -77,7 +77,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Geometry.Point.DistanceToOrigin'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Method" } }
@@ -86,7 +86,7 @@ tests:
     query: |
       MATCH (s:Definition)-[e:DEFINES]->(c:Definition)
       WHERE s.fqn = 'Geometry.Point'
-        AND c.definition_type = 'Constructor'
+        AND c.kind = 'Constructor'
       RETURN c.name AS name
     assert:
       - { row_count: 1 }
@@ -96,7 +96,7 @@ tests:
     query: |
       MATCH (s:Definition)-[:CALLS|DEFINES|EXTENDS]->(p:Definition)
       WHERE s.fqn = 'Geometry.Size'
-        AND p.definition_type = 'Property'
+        AND p.kind = 'Property'
       RETURN p.name AS name
       ORDER BY p.name
     assert:

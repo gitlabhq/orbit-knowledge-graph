@@ -160,7 +160,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'data::Record'
-      RETURN d.fqn AS fqn, d.file_path AS path, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.file_path AS path, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "data::Record", path: "alt/data.hxx", type: Struct } }

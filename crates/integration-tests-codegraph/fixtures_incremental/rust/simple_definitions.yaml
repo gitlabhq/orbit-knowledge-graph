@@ -30,8 +30,8 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.rs'
-        AND d.definition_type IN ['Struct', 'Enum', 'Trait', 'Function', 'Constant', 'TypeAlias']
-      RETURN d.name AS name, d.definition_type AS type
+        AND d.kind IN ['Struct', 'Enum', 'Trait', 'Function', 'Constant', 'TypeAlias']
+      RETURN d.name AS name, d.kind AS type
       ORDER BY name
     assert:
       - { row_count: 6 }

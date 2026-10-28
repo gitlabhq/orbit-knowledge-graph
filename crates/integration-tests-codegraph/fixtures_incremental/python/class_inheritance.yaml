@@ -19,7 +19,7 @@ tests:
   - name: All classes exist
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Class'
+      WHERE d.kind = 'Class'
       RETURN count(d) AS n
     assert:
       - { count_equals: { field: n, value: 3 } }

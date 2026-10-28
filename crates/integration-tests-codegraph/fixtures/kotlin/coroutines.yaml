@@ -28,7 +28,7 @@ tests:
   - name: "suspend fun fetchUser extracted as Function"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'fetchUser' AND d.definition_type = 'Function'
+      WHERE d.name = 'fetchUser' AND d.kind = 'Function'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row: { name: "fetchUser", fqn: "com.example.UserService.fetchUser" } }
@@ -36,7 +36,7 @@ tests:
   - name: "suspend interface method findById extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'findById' AND d.definition_type = 'Function'
+      WHERE d.name = 'findById' AND d.kind = 'Function'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row: { name: "findById", fqn: "com.example.UserRepository.findById" } }
@@ -44,7 +44,7 @@ tests:
   - name: "non-suspend fun startLoading extracted as Function"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'startLoading' AND d.definition_type = 'Function'
+      WHERE d.name = 'startLoading' AND d.kind = 'Function'
       RETURN d.name AS name
     assert:
       - { row: { name: "startLoading" } }
@@ -52,7 +52,7 @@ tests:
   - name: "UserService class extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'UserService' AND d.definition_type = 'Class'
+      WHERE d.name = 'UserService' AND d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: "com.example.UserService" } }
@@ -60,7 +60,7 @@ tests:
   - name: "UserRepository interface extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'UserRepository' AND d.definition_type = 'Interface'
+      WHERE d.name = 'UserRepository' AND d.kind = 'Interface'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: "com.example.UserRepository" } }

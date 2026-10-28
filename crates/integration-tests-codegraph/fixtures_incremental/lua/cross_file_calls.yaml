@@ -24,7 +24,7 @@ tests:
   - name: "log is defined in logger.lua"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'log' AND d.definition_type = 'Function'
+      WHERE d.name = 'log' AND d.kind = 'Function'
         AND d.file_path ENDS WITH 'logger.lua'
       RETURN d.name AS name
     assert:
@@ -33,7 +33,7 @@ tests:
   - name: "warn is defined in logger.lua"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'warn' AND d.definition_type = 'Function'
+      WHERE d.name = 'warn' AND d.kind = 'Function'
         AND d.file_path ENDS WITH 'logger.lua'
       RETURN d.name AS name
     assert:
@@ -42,7 +42,7 @@ tests:
   - name: "run is defined in service.lua"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'run' AND d.definition_type = 'Function'
+      WHERE d.name = 'run' AND d.kind = 'Function'
         AND d.file_path ENDS WITH 'service.lua'
       RETURN d.name AS name
     assert:
@@ -50,7 +50,7 @@ tests:
 
   - name: "service.lua imports logger"
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path ENDS WITH 'service.lua' AND i.import_path = 'logger'
       RETURN i.import_path AS path
     assert:

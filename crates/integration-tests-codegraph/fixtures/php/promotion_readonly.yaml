@@ -184,7 +184,7 @@ tests:
   - name: "Readonly class Money indexed as Class with full FQN"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'App\Domain\Money' AND d.definition_type = 'Class'
+      WHERE d.fqn = 'App\Domain\Money' AND d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -192,7 +192,7 @@ tests:
   - name: "Final readonly class Order indexed as Class"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'App\Domain\Order' AND d.definition_type = 'Class'
+      WHERE d.fqn = 'App\Domain\Order' AND d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -218,7 +218,7 @@ tests:
   - name: "Methods on readonly class Money carry class-scoped FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method'
+      WHERE d.kind = 'Method'
         AND d.fqn IN ['App\Domain\Money\__construct',
                       'App\Domain\Money\add',
                       'App\Domain\Money\scale']
@@ -230,7 +230,7 @@ tests:
   - name: "Promoted parameters of Service become Property definitions on the class"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Property'
+      WHERE d.kind = 'Property'
         AND d.fqn IN ['App\Domain\Service\logger',
                       'App\Domain\Service\mailer',
                       'App\Domain\Service\name',
@@ -243,7 +243,7 @@ tests:
   - name: "Promoted parameters of readonly Money become Property definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Property'
+      WHERE d.kind = 'Property'
         AND d.fqn IN ['App\Domain\Money\amount',
                       'App\Domain\Money\currency']
       RETURN d.fqn AS fqn
@@ -254,7 +254,7 @@ tests:
   - name: "Explicit readonly properties of Identity become Property definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Property'
+      WHERE d.kind = 'Property'
         AND d.fqn IN ['App\Domain\Identity\id',
                       'App\Domain\Identity\tag',
                       'App\Domain\Identity\secret']
@@ -347,7 +347,7 @@ tests:
   - name: "Concrete.describe reads protected promoted property of parent (App\\Domain\\Base\\kind)"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Property' AND d.fqn = 'App\Domain\Base\kind'
+      WHERE d.kind = 'Property' AND d.fqn = 'App\Domain\Base\kind'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -355,7 +355,7 @@ tests:
   - name: "Point.__construct and methods present on readonly class with promoted floats"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method'
+      WHERE d.kind = 'Method'
         AND d.fqn IN ['App\Geometry\Point\__construct',
                       'App\Geometry\Point\magnitude',
                       'App\Geometry\Vector\__construct',

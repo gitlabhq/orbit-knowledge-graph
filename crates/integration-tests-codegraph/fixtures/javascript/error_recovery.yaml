@@ -35,7 +35,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'valid.js'
         AND d.name IN ['processOrder', 'OrderService', 'create']
-      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.name AS name, d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 3 }
       - { row: { name: "processOrder", fqn: "processOrder", type: "Function" } }

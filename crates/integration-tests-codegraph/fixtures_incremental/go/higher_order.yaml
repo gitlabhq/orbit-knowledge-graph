@@ -42,6 +42,6 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'main.apply'
-      RETURN d.definition_type AS kind
+      RETURN d.kind AS kind
     assert:
       - { row: { kind: "Function" } }

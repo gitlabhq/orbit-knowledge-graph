@@ -26,7 +26,7 @@ tests:
   - name: "Both same-named definitions exist (one per source file)"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'compute' AND d.definition_type = 'Function'
+      WHERE d.name = 'compute' AND d.kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }

@@ -1,7 +1,7 @@
 name: "Kotlin sealed classes and interfaces — hierarchy members and methods"
 
 # Coverage note: classify_kotlin_class in kotlin.rs has no dedicated branch for
-# the `sealed` modifier, so a sealed class is reported as definition_type "Class"
+# the `sealed` modifier, so a sealed class is reported as kind "Class"
 # and a sealed interface as "Interface" (the "interface" keyword branch). The
 # `sealed`-ness itself is not captured as metadata. Kotlin already had
 # data_classes.yaml and companion_object.yaml, but no fixture for a sealed
@@ -34,7 +34,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.sealed.Expr'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { name: "Expr", type: "Interface" } }
@@ -43,7 +43,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.sealed.Expr.eval'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Function" } }
@@ -52,7 +52,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.sealed.Const'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "DataClass" } }
@@ -61,7 +61,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.sealed.Add'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "DataClass" } }
@@ -70,7 +70,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'com.example.sealed.Zero'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Object" } }
@@ -83,7 +83,7 @@ tests:
           'com.example.sealed.Add.eval',
           'com.example.sealed.Zero.eval'
         ]
-        AND d.definition_type = 'Function'
+        AND d.kind = 'Function'
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:
@@ -98,7 +98,7 @@ tests:
           'com.example.sealed.Add',
           'com.example.sealed.Zero'
         ]
-        AND m.definition_type = 'Function'
+        AND m.kind = 'Function'
       RETURN m.fqn AS fqn
       ORDER BY m.fqn
     assert:
@@ -129,7 +129,7 @@ tests:
           'com.example.sealed.Const',
           'com.example.sealed.Add'
         ]
-        AND d.definition_type = 'DataClass'
+        AND d.kind = 'DataClass'
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:

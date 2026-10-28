@@ -1,6 +1,6 @@
 # Code-graph query corpus.
 #
-# CALLS / EXTENDS / DEFINES / IMPORTS over File / Definition / ImportedSymbol.
+# CALLS / EXTENDS / DEFINES / IMPORTS over File / Definition / Import.
 # Canonical corpus entry: desc / category / suite / query (inline GQL).
 # Placeholders: `x.id IN $sample` / `$sample:N` bind to real in-scope ids at run time.
 
@@ -10,7 +10,7 @@ q1:
   suite: code_graph
   query: |
     MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
-    WHERE caller.definition_type IN ['Class', 'Module', 'Method', 'Function']
+    WHERE caller.kind IN ['Class', 'Module', 'Method', 'Function']
     RETURN *
     LIMIT 30
 
@@ -19,8 +19,8 @@ q2:
   category: code_graph
   suite: code_graph
   query: |
-    MATCH (caller:Definition)-[:CALLS]->(sym:ImportedSymbol)
-    WHERE caller.definition_type IN ['Class', 'Module', 'Method', 'Function']
+    MATCH (caller:Definition)-[:CALLS]->(sym:Import)
+    WHERE caller.kind IN ['Class', 'Module', 'Method', 'Function']
     RETURN *
     LIMIT 30
 
@@ -29,7 +29,7 @@ q3:
   category: code_graph
   suite: code_graph
   query: |
-    MATCH (child:Definition {definition_type: 'Class'})-[:EXTENDS]->(parent:Definition)
+    MATCH (child:Definition {kind: 'Class'})-[:EXTENDS]->(parent:Definition)
     RETURN *
     LIMIT 30
 
@@ -49,8 +49,8 @@ q5:
   suite: code_graph
   query: |
     MATCH (d:Definition)
-    WHERE d.definition_type IN ['Class', 'Module', 'Method', 'Function']
-    RETURN d.definition_type, count(d) AS definition_count
+    WHERE d.kind IN ['Class', 'Module', 'Method', 'Function']
+    RETURN d.kind, count(d) AS definition_count
     ORDER BY definition_count DESC
     LIMIT 20
 
@@ -72,7 +72,7 @@ q7:
   query: |
     MATCH (f:File)-[:DEFINES]->(d:Definition)
     WHERE f.language IN ['ruby', 'javascript', 'typescript', 'python']
-    RETURN f{.path, .language}, d.definition_type, count(d) AS definition_count
+    RETURN f{.path, .language}, d.kind, count(d) AS definition_count
     ORDER BY definition_count DESC
     LIMIT 20
 
@@ -81,8 +81,8 @@ q8:
   category: code_graph
   suite: code_graph
   query: |
-    MATCH (sym:ImportedSymbol)
-    WHERE sym.import_type IN ['Import', 'NamedImport', 'DefaultImport', 'FromImport', 'Require', 'Include', 'WildcardImport']
-    RETURN sym.import_type, count(sym) AS import_count
+    MATCH (sym:Import)
+    WHERE sym.language_kind IN ['Import', 'NamedImport', 'DefaultImport', 'FromImport', 'Require', 'Include', 'WildcardImport']
+    RETURN sym.language_kind, count(sym) AS import_count
     ORDER BY import_count DESC
     LIMIT 20

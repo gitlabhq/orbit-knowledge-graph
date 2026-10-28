@@ -77,7 +77,7 @@ tests:
   - name: "Sealed interface Shape is extracted as an Interface definition"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'Shape' AND d.definition_type = 'Interface'
+      WHERE d.name = 'Shape' AND d.kind = 'Interface'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -87,7 +87,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name IN ['Circle', 'Rectangle', 'Triangle']
-        AND d.definition_type = 'Class'
+        AND d.kind = 'Class'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 3 }

@@ -25,9 +25,9 @@ fixtures:
 tests:
   - name: All import variants extracted
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'main.ts'
-      RETURN i.identifier_name AS name, i.identifier_alias AS alias
+      RETURN i.name AS name, i.alias AS alias
       ORDER BY alias, name
     assert:
       - { row_count: 5 }
@@ -37,7 +37,7 @@ tests:
 
   - name: All imports point to the same source
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'main.ts'
       RETURN i.import_path AS path
     assert:

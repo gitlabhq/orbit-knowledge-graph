@@ -3,7 +3,7 @@ name: "Ruby constant definitions — covers gitlab-org/gitlab#600282 and gitlab-
 # Constants in Ruby are uppercase-leading identifiers assigned at any
 # lexical scope. Tree-sitter tags the LHS of `MAX = 2` as `constant`
 # and the LHS of `Foo::Bar = obj` as `scope_resolution`. Both must
-# produce Definition nodes with definition_type = "Constant" so that
+# produce Definition nodes with kind = "Constant" so that
 # queries like "where is MAX_TRACKED_REFS_PER_PROJECT defined?" return
 # a result. Lowercase locals must not be indexed.
 
@@ -110,13 +110,13 @@ fixtures:
 
 tests:
   # ══════════════════════════════════════════════════════════════
-  # BASIC: definition_type = "Constant" is emitted at all
+  # BASIC: kind = "Constant" is emitted at all
   # ══════════════════════════════════════════════════════════════
 
-  - name: "constants are indexed with definition_type = Constant"
+  - name: "constants are indexed with kind = Constant"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Constant'
+      WHERE d.kind = 'Constant'
       RETURN d.name AS name
     assert:
       - { row: { name: "TOP_LEVEL_LIMIT" } }
@@ -130,7 +130,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/top_level.rb'
-        AND d.definition_type = 'Constant'
+        AND d.kind = 'Constant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -146,7 +146,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'MAX_TRACKED_REFS_PER_PROJECT'
-        AND d.definition_type = 'Constant'
+        AND d.kind = 'Constant'
       RETURN d.fqn AS fqn, d.file_path AS file_path
     assert:
       - { row_count: 1 }
@@ -156,7 +156,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/security/project_tracked_context.rb'
-        AND d.definition_type = 'Constant'
+        AND d.kind = 'Constant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -172,7 +172,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/deeply_nested.rb'
-        AND d.definition_type = 'Constant'
+        AND d.kind = 'Constant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -187,7 +187,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/qualified_assignment.rb'
-        AND d.definition_type = 'Constant'
+        AND d.kind = 'Constant'
       RETURN d.name AS name
     assert:
       - { row_count: 2 }
@@ -207,7 +207,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/mixed_kinds.rb'
-        AND d.definition_type = 'Constant'
+        AND d.kind = 'Constant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }
@@ -221,7 +221,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Mixed::PROC_CONST'
-      RETURN d.definition_type AS dt
+      RETURN d.kind AS dt
     assert:
       - { row_count: 1 }
       - { row: { dt: "Lambda" } }
@@ -234,7 +234,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/singleton_constants.rb'
-        AND d.definition_type = 'Constant'
+        AND d.kind = 'Constant'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -248,7 +248,7 @@ tests:
   - name: "lowercase locals are not Constants"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Constant'
+      WHERE d.kind = 'Constant'
         AND d.name IN ['counter', 'result', 'local_var']
       RETURN d.name AS name
     assert:
@@ -273,7 +273,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Security::ProjectTrackedContext::allow?'
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -281,7 +281,7 @@ tests:
   - name: "no Constant definition exists with a method-shaped FQN"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Constant'
+      WHERE d.kind = 'Constant'
         AND d.name = 'initialize'
       RETURN d.name AS name
     assert:
@@ -294,7 +294,7 @@ tests:
   - name: "total Constant count across all fixtures is exact"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Constant'
+      WHERE d.kind = 'Constant'
       RETURN count(d) AS n
     assert:
       - { row_count: 1 }
@@ -314,7 +314,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/constant_users.rb'
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
@@ -327,7 +327,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'ContextUser::allowed_refs'
         AND callee.fqn = 'Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT'
-      RETURN callee.definition_type AS type
+      RETURN callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: Constant } }
@@ -337,7 +337,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'ContextUser::default_label'
         AND callee.fqn = 'Security::ProjectTrackedContext::DEFAULT_NAME'
-      RETURN callee.definition_type AS type
+      RETURN callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: Constant } }
@@ -347,7 +347,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'ContextUser::deep_value'
         AND callee.fqn = 'Outer::Middle::Inner::DEEP_CONST'
-      RETURN callee.definition_type AS type
+      RETURN callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: Constant } }
@@ -367,7 +367,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Security::ProjectTrackedContext::allow?'
         AND callee.fqn = 'Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT'
-      RETURN callee.definition_type AS type
+      RETURN callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: Constant } }
@@ -377,7 +377,7 @@ tests:
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'Security::ProjectTrackedContext::initialize'
         AND callee.fqn = 'Security::ProjectTrackedContext::DEFAULT_NAME'
-      RETURN callee.definition_type AS type
+      RETURN callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: Constant } }

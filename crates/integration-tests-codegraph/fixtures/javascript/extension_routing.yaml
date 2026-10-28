@@ -111,7 +111,7 @@ tests:
 
   - name: Generic pipeline resolves imports across JS-family extensions
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path IN [
         'jsx/consumer.js',
         'tsx/consumer.ts',
@@ -120,16 +120,16 @@ tests:
         'mts/consumer.ts',
         'cts/consumer.ts'
       ]
-      RETURN i.file_path AS file_path, i.import_path AS path, i.identifier_name AS name, i.import_type AS import_type, d.fqn AS target
+      RETURN i.file_path AS file_path, i.import_path AS path, i.name AS name, i.language_kind AS language_kind, d.fqn AS target
       ORDER BY file_path
     assert:
       - { row_count: 6 }
-      - { row: { file_path: "cjs/consumer.js", path: "./component.cjs", name: "runCjs", import_type: "CjsRequire", target: "runCjs" } }
-      - { row: { file_path: "cts/consumer.ts", path: "./component.cts", name: "formatCts", import_type: "NamedImport", target: "formatCts" } }
-      - { row: { file_path: "esm/consumer.js", path: "./component.mjs", name: "normalizeMjs", import_type: "NamedImport", target: "normalizeMjs" } }
-      - { row: { file_path: "jsx/consumer.js", path: "./component.jsx", name: "renderBadge", import_type: "NamedImport", target: "renderBadge" } }
-      - { row: { file_path: "mts/consumer.ts", path: "./component.mts", name: "formatMts", import_type: "NamedImport", target: "formatMts" } }
-      - { row: { file_path: "tsx/consumer.ts", path: "./component.tsx", name: "renderPanel", import_type: "NamedImport", target: "renderPanel" } }
+      - { row: { file_path: "cjs/consumer.js", path: "./component.cjs", name: "runCjs", language_kind: "CjsRequire", target: "runCjs" } }
+      - { row: { file_path: "cts/consumer.ts", path: "./component.cts", name: "formatCts", language_kind: "NamedImport", target: "formatCts" } }
+      - { row: { file_path: "esm/consumer.js", path: "./component.mjs", name: "normalizeMjs", language_kind: "NamedImport", target: "normalizeMjs" } }
+      - { row: { file_path: "jsx/consumer.js", path: "./component.jsx", name: "renderBadge", language_kind: "NamedImport", target: "renderBadge" } }
+      - { row: { file_path: "mts/consumer.ts", path: "./component.mts", name: "formatMts", language_kind: "NamedImport", target: "formatMts" } }
+      - { row: { file_path: "tsx/consumer.ts", path: "./component.tsx", name: "renderPanel", language_kind: "NamedImport", target: "renderPanel" } }
 
   - name: Generic pipeline resolves cross-file calls for JS-family extensions
     query: |

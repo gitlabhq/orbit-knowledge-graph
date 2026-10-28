@@ -24,9 +24,9 @@ fixtures:
 tests:
   - name: Exactly 2 named imports extracted
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'main.ts'
-      RETURN i.identifier_name AS name, i.import_path AS path
+      RETURN i.name AS name, i.import_path AS path
       ORDER BY name
     assert:
       - { row_count: 2 }
@@ -36,7 +36,7 @@ tests:
 
   - name: No imports from models.ts (it only exports)
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'models.ts'
       RETURN count(i) AS n
     assert:
@@ -66,7 +66,7 @@ tests:
   - name: Exactly 3 definitions across both files
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['Class', 'Function']
+      WHERE d.kind IN ['Class', 'Function']
       RETURN d.name AS name, d.file_path AS file
       ORDER BY name
     assert:

@@ -358,7 +358,7 @@ tests:
   - name: "All variable definitions extracted (16 total)"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Variable'
+      WHERE d.kind = 'Variable'
       RETURN d.name AS name
     assert:
       - { row_count: 16 }
@@ -383,7 +383,7 @@ tests:
   - name: "Resource type scopes extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Resource'
+      WHERE d.kind = 'Resource'
         AND d.fqn = d.name
       RETURN d.name AS name
     assert:
@@ -405,7 +405,7 @@ tests:
   - name: "Named resource defs have type.name FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Resource'
+      WHERE d.kind = 'Resource'
         AND d.fqn <> d.name
       RETURN d.fqn AS fqn
     assert:
@@ -424,7 +424,7 @@ tests:
   - name: "Data source definitions with correct type"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'DataSource'
+      WHERE d.kind = 'DataSource'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row: { name: "aws_iam_policy_document" } }
@@ -434,7 +434,7 @@ tests:
   - name: "Local definitions extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Local'
+      WHERE d.kind = 'Local'
       RETURN d.name AS name
     assert:
       - { row: { name: "common_tags" } }
@@ -446,7 +446,7 @@ tests:
   - name: "Output definitions extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Output'
+      WHERE d.kind = 'Output'
       RETURN d.name AS name
     assert:
       - { row_count: 6 }
@@ -460,7 +460,7 @@ tests:
   - name: "Dynamic block iterator def"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Dynamic'
+      WHERE d.kind = 'Dynamic'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
@@ -469,7 +469,7 @@ tests:
   - name: "Terraform block extracted"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Terraform'
+      WHERE d.kind = 'Terraform'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
@@ -509,7 +509,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'aws_iam_role'
-        AND callee.definition_type = 'DataSource'
+        AND callee.kind = 'DataSource'
       RETURN callee.fqn AS callee
     assert:
       - { row: { callee: "aws_iam_policy_document.eks_assume_role" } }
@@ -538,7 +538,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
       WHERE caller.fqn = 'locals'
-        AND callee.definition_type = 'Variable'
+        AND callee.kind = 'Variable'
       RETURN callee.name AS callee
     assert:
       - { row: { callee: "tags" } }

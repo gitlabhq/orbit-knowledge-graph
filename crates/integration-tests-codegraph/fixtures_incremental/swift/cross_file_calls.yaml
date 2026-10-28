@@ -23,7 +23,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Logger'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Class" } }
@@ -32,7 +32,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name = 'Service'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Class" } }

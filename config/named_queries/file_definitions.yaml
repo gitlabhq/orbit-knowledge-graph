@@ -18,7 +18,7 @@ query:
           path: { $param: file_path }
       - id: def
         entity: Definition
-        columns: [start_line, file_path, name, fqn, definition_type]
+        columns: [start_line, file_path, name, fqn, kind]
     relationships:
       - type: DEFINES
         from: file
@@ -27,5 +27,5 @@ query:
   gql: |
     MATCH (file:File)-[:DEFINES]->(def:Definition)
     WHERE file.project_id = {{ param("project_id") }} AND file.path = {{ param("file_path") }}
-    RETURN file, def.start_line, def.file_path, def.name, def.fqn, def.definition_type
+    RETURN file, def.start_line, def.file_path, def.name, def.fqn, def.kind
     LIMIT 100

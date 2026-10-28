@@ -44,7 +44,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'components/async_panel.vue'
         AND d.fqn IN ['AsyncPanel', 'AsyncPanel::setup']
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
       ORDER BY name
     assert:
       - { row_count: 2 }
@@ -66,9 +66,9 @@ tests:
     # Known gap: Vue SFC extraction is not implemented.
     skip: true
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'components/setup_panel.vue'
-      RETURN i.identifier_name AS name, d.fqn AS target
+      RETURN i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { name: "normalizeValue", target: "normalizeValue" } }

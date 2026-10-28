@@ -112,7 +112,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'same_file'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { column_values: { field: callee, values: ["buf::Buf::len"] } }
       - { column_values: { field: kind, values: ["Method"] } }
@@ -121,7 +121,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'same_file_read'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { column_values: { field: callee, values: ["buf::Buf::len"] } }
       - { column_values: { field: kind, values: ["Field"] } }
@@ -130,7 +130,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'cross_file'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { column_values: { field: callee, values: ["buf::Buf::len"] } }
       - { column_values: { field: kind, values: ["Method"] } }
@@ -139,7 +139,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'cross_file_read'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { not: true, row: { kind: "Method" } }
 
@@ -149,7 +149,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'cross_file_read'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { column_values: { field: callee, values: ["buf::Buf::len"] } }
       - { column_values: { field: kind, values: ["Field"] } }
@@ -166,7 +166,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'same_file_trait'
-      RETURN t.name AS callee, t.definition_type AS kind
+      RETURN t.name AS callee, t.kind AS kind
     assert:
       - { column_values: { field: callee, values: ["total"] } }
       - { column_values: { field: kind, values: ["Method"] } }
@@ -175,7 +175,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'cross_file_trait'
-      RETURN t.name AS callee, t.definition_type AS kind
+      RETURN t.name AS callee, t.kind AS kind
     assert:
       - { column_values: { field: callee, values: ["total"] } }
       - { column_values: { field: kind, values: ["Method"] } }
@@ -184,7 +184,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'cross_file_impl'
-      RETURN t.name AS callee, t.definition_type AS kind
+      RETURN t.name AS callee, t.kind AS kind
     assert:
       - { column_values: { field: callee, values: ["cap"] } }
       - { column_values: { field: kind, values: ["Method"] } }
@@ -193,7 +193,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.fqn = 'svc::Service::call'
-      RETURN t.name AS callee, t.definition_type AS kind
+      RETURN t.name AS callee, t.kind AS kind
     assert:
       - { column_values: { field: callee, values: ["handler"] } }
       - { column_values: { field: kind, values: ["Field"] } }
@@ -202,7 +202,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'cross_file_closure'
-      RETURN t.name AS callee, t.definition_type AS kind
+      RETURN t.name AS callee, t.kind AS kind
     assert:
       - { column_values: { field: callee, values: ["handler"] } }
       - { column_values: { field: kind, values: ["Field"] } }

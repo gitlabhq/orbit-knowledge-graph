@@ -41,7 +41,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.rs'
-        AND d.definition_type = 'Function'
+        AND d.kind = 'Function'
       RETURN d.name AS name
       ORDER BY name
     assert:
@@ -52,7 +52,7 @@ tests:
   - name: Enum definition exists
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'Shape' AND d.definition_type = 'Enum'
+      WHERE d.name = 'Shape' AND d.kind = 'Enum'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

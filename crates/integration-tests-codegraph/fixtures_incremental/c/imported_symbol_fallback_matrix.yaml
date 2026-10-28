@@ -30,8 +30,8 @@ fixtures:
 tests:
   - name: "includes are captured as imported symbols"
     query: |
-      MATCH (sym:ImportedSymbol)
-      RETURN sym.file_path AS file, sym.import_path AS path, sym.identifier_name AS name
+      MATCH (sym:Import)
+      RETURN sym.file_path AS file, sym.import_path AS path, sym.name AS name
       ORDER BY file, path
     assert:
       - { row_count: 3 }

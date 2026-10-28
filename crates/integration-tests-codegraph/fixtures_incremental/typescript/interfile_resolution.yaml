@@ -40,8 +40,8 @@ tests:
   - name: All definitions with correct types and files
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['Class', 'Function', 'Method']
-      RETURN d.name AS name, d.definition_type AS type, d.file_path AS file
+      WHERE d.kind IN ['Class', 'Function', 'Method']
+      RETURN d.name AS name, d.kind AS type, d.file_path AS file
       ORDER BY name
     assert:
       - { row_count: 4 }
@@ -53,8 +53,8 @@ tests:
 
   - name: All imports extracted correctly
     query: |
-      MATCH (i:ImportedSymbol)
-      RETURN i.file_path AS file, i.identifier_name AS name, i.import_path AS path
+      MATCH (i:Import)
+      RETURN i.file_path AS file, i.name AS name, i.import_path AS path
       ORDER BY file, name
     assert:
       - { row_count: 3 }

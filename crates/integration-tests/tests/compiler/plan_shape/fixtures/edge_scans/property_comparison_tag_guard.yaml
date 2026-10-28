@@ -6,7 +6,7 @@ missing_frontends:
 query:
   gql: |
     MATCH (a:Definition {id: 99000})-[:CALLS]->(b:Definition)
-    WHERE a.definition_type = a.name
+    WHERE a.kind = a.name
     RETURN count(b) AS n
 
 logical:
@@ -19,11 +19,11 @@ physical:
       expect:
         - (Scan Table(gl_definition) AS a)
       reject:
-        - (Filter _orbit_edge_0.source_tags HAS ANY ['definition_type:'], ... (_))
+        - (Filter _orbit_edge_0.source_tags HAS ANY ['kind:'], ... (_))
     emitted:
       expect:
-        - (Filter a.definition_type = a.name, ... (_))
+        - (Filter a.kind = a.name, ... (_))
         - (Deduplicate LimitBy ... (_))
         - (Scan Table(gl_definition) AS a)
       reject:
-        - (Filter ArrayContains(_orbit_edge_0.source_tags, 'definition_type:'), ... (_))
+        - (Filter ArrayContains(_orbit_edge_0.source_tags, 'kind:'), ... (_))

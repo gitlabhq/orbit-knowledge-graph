@@ -23,7 +23,7 @@ tests:
   - name: "Functions from every shell extension are indexed"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
+      WHERE d.kind = 'Function'
       RETURN d.name AS name
     assert:
       - { row_count: 3 }

@@ -26,7 +26,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'copy' AND t.name = 'u'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { column_values: { field: callee, values: ["s::S::u"] } }
       - { column_values: { field: kind, values: ["Field"] } }

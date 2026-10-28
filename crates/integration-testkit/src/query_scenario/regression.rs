@@ -8,7 +8,7 @@ fn run_suite(query: Value, expect: &str) {
     let definitions: Vec<_> = ["alpha", "beta", "gamma", "delta"].iter().enumerate().map(|(index, name)| json!({
         "id": index + 1, "project_id": 1000, "traversal_path": "1/100/1000/", "branch": "main",
         "commit_sha": "abc123", "file_path": "src/test.rs", "fqn": name, "name": name,
-        "definition_type": "Function", "start_line": 1, "end_line": 2, "start_byte": 0,
+        "kind": "Function", "start_line": 1, "end_line": 2, "start_byte": 0,
         "end_byte": 10, "start_char": 0, "end_char": 5,
     })).collect();
     let edges: Vec<_> = [(1, 2), (2, 3), (2, 4)]
@@ -184,7 +184,7 @@ fn page_uniqueness_checks_group_nodes_and_typed_edges() {
 
 #[test]
 fn repeated_aggregation_runs_check_row_values() {
-    let query = json!({"gql": "MATCH (d:Definition) RETURN d.definition_type, count(d) AS total"});
+    let query = json!({"gql": "MATCH (d:Definition) RETURN d.kind, count(d) AS total"});
     run_suite(
         query,
         "repeat_count: 3\nrow_count: 1\nrow_values: [{total: 4}]",

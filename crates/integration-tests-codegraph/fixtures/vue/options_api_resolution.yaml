@@ -105,13 +105,13 @@ fixtures:
 tests:
   - name: Vue child component default import targets primary export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND i.import_path = './child_badge.vue'
-      RETURN i.import_type AS import_type, d.fqn AS target
+      RETURN i.language_kind AS language_kind, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", target: "ChildBadge" } }
+      - { row: { language_kind: "DefaultImport", target: "ChildBadge" } }
 
   - name: Vue default import resolves to virtual component when SFC also exports classes
     query: |
@@ -125,13 +125,13 @@ tests:
 
   - name: Vue GraphQL default import targets primary export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND i.import_path = '../graphql/get_items.query.graphql'
-      RETURN i.import_type AS import_type, d.fqn AS target
+      RETURN i.language_kind AS language_kind, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/graphql/get_items.query.graphql::default" } }
+      - { row: { language_kind: "DefaultImport", target: "app/assets/javascripts/graphql/get_items.query.graphql::default" } }
 
   - name: Vue mounted hook resolves this-method call to local method
     query: |
@@ -188,10 +188,10 @@ tests:
 
   - name: Vue unresolved external namespace calls target imported symbols
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
         AND sym.import_path = '@external/tracking'
-      RETURN caller.name AS caller, sym.import_type AS import_type, sym.identifier_alias AS alias
+      RETURN caller.name AS caller, sym.language_kind AS language_kind, sym.alias AS alias
     assert:
       - { row_count: 1 }
-      - { row: { caller: "emitExternal", import_type: "NamespaceImport", alias: "ExternalTracking" } }
+      - { row: { caller: "emitExternal", language_kind: "NamespaceImport", alias: "ExternalTracking" } }

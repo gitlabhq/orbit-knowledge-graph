@@ -232,12 +232,12 @@ fn dump_datasets(client: &DuckDbClient, ontology: &Arc<Ontology>) {
     let debug_queries = [
         (
             "Definitions",
-            "MATCH (d:Definition) RETURN d.name, d.fqn, d.definition_type, d.file_path",
+            "MATCH (d:Definition) RETURN d.name, d.fqn, d.kind, d.file_path",
         ),
         ("Files", "MATCH (f:File) RETURN f.path, f.language"),
         (
             "Imports",
-            "MATCH (i:ImportedSymbol) RETURN i.file_path, i.import_path, i.identifier_name, i.identifier_alias",
+            "MATCH (i:Import) RETURN i.file_path, i.import_path, i.name, i.alias",
         ),
     ];
 

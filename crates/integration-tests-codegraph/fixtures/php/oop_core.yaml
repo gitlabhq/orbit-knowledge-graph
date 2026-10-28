@@ -164,7 +164,7 @@ tests:
   - name: "Deep inheritance — every abstract/final class is indexed with correct FQN"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Class'
+      WHERE d.kind = 'Class'
         AND d.fqn IN ['App\Zoo\Animal', 'App\Zoo\Mammal', 'App\Zoo\Canine', 'App\Zoo\Dog']
       RETURN d.fqn AS fqn
     assert:
@@ -206,7 +206,7 @@ tests:
   - name: "Abstract method indexed and overridden — Dog.speak and Animal.speak both exist"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method'
+      WHERE d.kind = 'Method'
         AND d.fqn IN ['App\Zoo\Animal\speak', 'App\Zoo\Dog\speak']
       RETURN d.fqn AS fqn
     assert:
@@ -245,7 +245,7 @@ tests:
   - name: "Interfaces are tagged as Interface, not Class"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Interface'
+      WHERE d.kind = 'Interface'
         AND d.fqn IN ['App\Io\Readable', 'App\Io\Writable', 'App\Io\Closable', 'App\Io\ReadWrite', 'App\Io\Stream']
       RETURN d.fqn AS fqn
     assert:
@@ -255,7 +255,7 @@ tests:
   - name: "Class constants indexed regardless of visibility (public/protected/private)"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Constant'
+      WHERE d.kind = 'Constant'
         AND d.fqn IN ['App\Conf\Config\VERSION', 'App\Conf\Config\SECRET', 'App\Conf\Config\KEY']
       RETURN d.fqn AS fqn
     assert:
@@ -265,7 +265,7 @@ tests:
   - name: "Typed constant (PHP 8.3) indexed under Config"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Constant'
+      WHERE d.kind = 'Constant'
         AND d.fqn = 'App\Conf\Config\TYPED'
       RETURN d.fqn AS fqn
     assert:
@@ -274,7 +274,7 @@ tests:
   - name: "Final constant (PHP 8.1) indexed under Config"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Constant'
+      WHERE d.kind = 'Constant'
         AND d.fqn = 'App\Conf\Config\FINAL_CONST'
       RETURN d.fqn AS fqn
     assert:
@@ -283,7 +283,7 @@ tests:
   - name: "Static properties indexed: Counter.count"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Property'
+      WHERE d.kind = 'Property'
         AND d.fqn = 'App\Util\Counter\count'
       RETURN d.fqn AS fqn
     assert:
@@ -292,7 +292,7 @@ tests:
   - name: "Static methods indexed: Counter.{increment, reset, value}"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method'
+      WHERE d.kind = 'Method'
         AND d.fqn IN ['App\Util\Counter\increment', 'App\Util\Counter\reset', 'App\Util\Counter\value']
       RETURN d.fqn AS fqn
     assert:
@@ -330,7 +330,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Zoo\Dog\speak'
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

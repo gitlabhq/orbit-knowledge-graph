@@ -22,7 +22,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/widget.ts'
         AND d.name IN ['Widget', 'WidgetImpl', 'VERSION', 'make', 'bootstrap', 'privateHelper']
-      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.name AS name, d.fqn AS fqn, d.kind AS type
       ORDER BY name
     assert:
       - { row_count: 6 }
@@ -51,7 +51,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/barrel.ts'
-        AND d.definition_type = 'ModuleExport'
+        AND d.kind = 'ModuleExport'
       RETURN d.name AS name
       ORDER BY name
     assert:

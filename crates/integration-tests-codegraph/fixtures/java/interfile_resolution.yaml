@@ -87,7 +87,7 @@ tests:
   - name: "User FQN is correct"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'User' AND d.definition_type = 'Class'
+      WHERE d.name = 'User' AND d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row: { fqn: "com.example.model.User" } }

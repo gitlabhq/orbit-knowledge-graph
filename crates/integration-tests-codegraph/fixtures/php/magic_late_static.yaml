@@ -189,7 +189,7 @@ tests:
   - name: "Magic methods indexed as Method definitions under their class"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method' AND d.fqn IN [
+      WHERE d.kind = 'Method' AND d.fqn IN [
         'App\Container\__construct',
         'App\Container\__call',
         'App\Container\__get',
@@ -207,7 +207,7 @@ tests:
   - name: "Container class definition exists with namespace FQN"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'App\Container' AND d.definition_type = 'Class'
+      WHERE d.fqn = 'App\Container' AND d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -215,7 +215,7 @@ tests:
   - name: "Model is indexed as a Class (abstract still Class)"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'App\Model' AND d.definition_type = 'Class'
+      WHERE d.fqn = 'App\Model' AND d.kind = 'Class'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -338,7 +338,7 @@ tests:
     query: |
       MATCH (a:Definition)-[e:CALLS]->(b:Definition)
       WHERE a.fqn = 'App\Service\__construct'
-        AND b.definition_type = 'Method'
+        AND b.kind = 'Method'
       RETURN b.fqn AS b
     assert:
       - { empty: true }
@@ -346,7 +346,7 @@ tests:
   - name: "Model::create method indexed under abstract base"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'App\Model\create' AND d.definition_type = 'Method'
+      WHERE d.fqn = 'App\Model\create' AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -354,7 +354,7 @@ tests:
   - name: "Query::from, Query::where, Query::get all indexed"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Method' AND d.fqn IN [
+      WHERE d.kind = 'Method' AND d.fqn IN [
         'App\Query\from',
         'App\Query\where',
         'App\Query\get'

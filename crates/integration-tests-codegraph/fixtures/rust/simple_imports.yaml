@@ -22,16 +22,16 @@ fixtures:
 tests:
   - name: Exactly 1 import extracted
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'main.rs'
-      RETURN i.identifier_name AS name
+      RETURN i.name AS name
     assert:
       - { row_count: 1 }
       - { row: { name: "create_user" } }
 
   - name: No imports from models.rs
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'models.rs'
       RETURN count(i) AS n
     assert:
@@ -60,7 +60,7 @@ tests:
   - name: All definitions across both files
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type IN ['Struct', 'Function']
+      WHERE d.kind IN ['Struct', 'Function']
       RETURN d.name AS name, d.file_path AS file
       ORDER BY name
     assert:

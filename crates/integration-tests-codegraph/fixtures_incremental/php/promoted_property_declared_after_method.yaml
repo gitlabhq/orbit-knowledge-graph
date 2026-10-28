@@ -46,7 +46,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'call' AND t.name = 'x'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Box\\x", kind: "Method" } }

@@ -75,25 +75,25 @@ fixtures:
 tests:
   - name: EE barrel named import resolves local EE export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
         AND i.import_path = 'ee/commit/constants'
-        AND i.identifier_name = 'verificationStatuses'
-      RETURN i.import_type AS import_type, d.fqn AS target
+        AND i.name = 'verificationStatuses'
+      RETURN i.language_kind AS language_kind, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", target: "verificationStatuses" } }
+      - { row: { language_kind: "NamedImport", target: "verificationStatuses" } }
 
   - name: EE barrel star reexport import resolves to CE export proxy
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'ee/app/assets/javascripts/commit/consumer.ts'
         AND i.import_path = 'ee/commit/constants'
-        AND i.identifier_name = 'VERIFIED_CONFIG'
-      RETURN i.import_type AS import_type, d.fqn AS target
+        AND i.name = 'VERIFIED_CONFIG'
+      RETURN i.language_kind AS language_kind, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", target: "VERIFIED_CONFIG" } }
+      - { row: { language_kind: "NamedImport", target: "VERIFIED_CONFIG" } }
 
   - name: Namespace import over EE barrel resolves to local EE function
     query: |

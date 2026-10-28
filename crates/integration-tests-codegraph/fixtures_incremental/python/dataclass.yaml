@@ -19,7 +19,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name IN ['id', 'name', 'roles']
-        AND d.definition_type = 'Field'
+        AND d.kind = 'Field'
       RETURN d.fqn AS fqn ORDER BY fqn
     assert:
       - { row_count: 3 }
@@ -30,7 +30,7 @@ tests:
   - name: "Regular method still extracted and is not a Field"
     query: |
       MATCH (d:Definition) WHERE d.name = 'greet'
-      RETURN d.fqn AS fqn, d.definition_type AS kind
+      RETURN d.fqn AS fqn, d.kind AS kind
     assert:
       - { row: { fqn: "main.User.greet", kind: "Method" } }
 

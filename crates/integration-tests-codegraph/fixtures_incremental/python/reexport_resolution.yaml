@@ -87,7 +87,7 @@ fixtures:
       def make_deep():
           return Deep()
 
-  # External symbol with no local definition must stay an ImportedSymbol.
+  # External symbol with no local definition must stay an Import.
   - path: ext/caller.py
     content: |
       from thirdparty import Widget
@@ -148,9 +148,9 @@ tests:
         assert:
           - { row_count: 1 }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
           WHERE caller.fqn = 'api.handler.build_registry'
-            AND sym.identifier_name = 'BasePromptRegistry'
+            AND sym.name = 'BasePromptRegistry'
           RETURN caller.fqn AS caller
         assert:
           - { empty: true }
@@ -191,7 +191,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  - name: "external import without a local definition stays an ImportedSymbol"
+  - name: "external import without a local definition stays an Import"
     queries:
       - query: |
           MATCH (caller:Definition)-[e:CALLS]->(callee:Definition)
@@ -200,10 +200,10 @@ tests:
         assert:
           - { empty: true }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
           WHERE caller.fqn = 'ext.caller.build_widget'
             AND sym.import_path = 'thirdparty'
-            AND sym.identifier_name = 'Widget'
+            AND sym.name = 'Widget'
           RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }
@@ -217,9 +217,9 @@ tests:
         assert:
           - { empty: true }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
           WHERE caller.fqn = 'empty_pkg.caller.use_absent'
-            AND sym.identifier_name = 'Absent'
+            AND sym.name = 'Absent'
           RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }
@@ -233,9 +233,9 @@ tests:
         assert:
           - { empty: true }
       - query: |
-          MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+          MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
           WHERE caller.fqn = 'amb.caller.make_thing'
-            AND sym.identifier_name = 'Thing'
+            AND sym.name = 'Thing'
           RETURN caller.fqn AS caller
         assert:
           - { row_count: 1 }

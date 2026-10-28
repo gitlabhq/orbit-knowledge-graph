@@ -69,7 +69,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'new'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
       - { row_count: 2 }
       - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "AssociatedFunction" } }
@@ -78,7 +78,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'run'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "Method" } }
@@ -96,7 +96,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'make_worker'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/api.rs", tgt: "src/macros.rs", type: "Macro" } }

@@ -110,7 +110,7 @@ Java Project Code Graph Has Expected Containment Edges
     ...    src/main/java/com/example/weather/model/Forecast.java    com.example.weather.model.Forecast
 
 Java Project Has Expected Imports
-    [Documentation]    Assert IMPORTS edges from project Files into ImportedSymbol nodes
+    [Documentation]    Assert IMPORTS edges from project Files into Import nodes
     ...                originating from java.* packages and from intra-project packages.
     [Tags]    code-indexing    code-graph
     ${pid}=    Set Variable    ${JAVA_PROJECT}[id]

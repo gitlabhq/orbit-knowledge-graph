@@ -87,7 +87,7 @@ async fn deleted_rows_are_excluded(ctx: &TestContext) {
 async fn duplicate_versions_count_once(ctx: &TestContext) {
     let db = ctx.fork("item_counts_duplicate_versions").await;
     db.execute(&format!(
-        "INSERT INTO {} (id, traversal_path, project_id, branch, commit_sha, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char, _version, _deleted) VALUES
+        "INSERT INTO {} (id, traversal_path, project_id, branch, commit_sha, file_path, fqn, name, kind, start_line, end_line, start_byte, end_byte, start_char, end_char, _version, _deleted) VALUES
          (9001, '1/100/1000/', 1000, 'main', 'sha-a', 'a.rb', 'A#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-01-01 00:00:00', false),
          (9002, '1/100/1000/', 1000, 'main', 'sha-c', 'b.rb', 'B#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-01-01 00:00:00', false),
          (9002, '1/100/1000/', 1000, 'main', 'sha-c', 'b.rb', 'B#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-06-01 00:00:00', false)",

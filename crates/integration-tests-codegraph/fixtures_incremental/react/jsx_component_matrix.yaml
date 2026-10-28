@@ -163,7 +163,7 @@ tests:
           'NativeOnly',
           'PlainJsx'
         ]
-      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.kind AS type
       ORDER BY file_path, fqn
     assert:
       - { row_count: 16 }
@@ -186,26 +186,26 @@ tests:
 
   - name: React barrel imports resolve to concrete definitions
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'src/Home.tsx'
-        AND i.import_type <> 'NamespaceImport'
-      RETURN i.import_type AS import_type, i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias, d.fqn AS target
-      ORDER BY import_type, name, target
+        AND i.language_kind <> 'NamespaceImport'
+      RETURN i.language_kind AS language_kind, i.import_path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+      ORDER BY language_kind, name, target
     assert:
       - { row_count: 7 }
-      - { row: { import_type: "DefaultImport", path: "./components/card", name: "default", alias: "DefaultCard", target: "Card" } }
-      - { row: { import_type: "NamedImport", path: "./components/button", name: "Button", alias: "RenamedButton", target: "Button" } }
-      - { row: { import_type: "NamedImport", path: "./components", name: "Card", alias: null, target: "Card" } }
-      - { row: { import_type: "NamedImport", path: "./components", name: "CardFooter", alias: null, target: "CardFooter" } }
-      - { row: { import_type: "NamedImport", path: "./components", name: "Icons", alias: null, target: "Icons" } }
-      - { row: { import_type: "NamedImport", path: "./components", name: "PrimaryButton", alias: null, target: "Button" } }
-      - { row: { import_type: "NamedImport", path: "./components", name: "StatusIcon", alias: null, target: "StatusIcon" } }
+      - { row: { language_kind: "DefaultImport", path: "./components/card", name: "default", alias: "DefaultCard", target: "Card" } }
+      - { row: { language_kind: "NamedImport", path: "./components/button", name: "Button", alias: "RenamedButton", target: "Button" } }
+      - { row: { language_kind: "NamedImport", path: "./components", name: "Card", alias: null, target: "Card" } }
+      - { row: { language_kind: "NamedImport", path: "./components", name: "CardFooter", alias: null, target: "CardFooter" } }
+      - { row: { language_kind: "NamedImport", path: "./components", name: "Icons", alias: null, target: "Icons" } }
+      - { row: { language_kind: "NamedImport", path: "./components", name: "PrimaryButton", alias: null, target: "Button" } }
+      - { row: { language_kind: "NamedImport", path: "./components", name: "StatusIcon", alias: null, target: "StatusIcon" } }
 
   - name: Namespace imports resolve only the definitions accessed through their binding
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
-      WHERE i.file_path = 'src/Home.tsx' AND i.import_type = 'NamespaceImport'
-      RETURN i.identifier_alias AS alias, d.name AS name, d.file_path AS file
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'src/Home.tsx' AND i.language_kind = 'NamespaceImport'
+      RETURN i.alias AS alias, d.name AS name, d.file_path AS file
     assert:
       - { row_count: 2 }
       - { row: { alias: Reexported, name: IconButton, file: "src/components/button.tsx" } }
@@ -222,9 +222,9 @@ tests:
 
   - name: React namespace imports retain their source and alias
     query: |
-      MATCH (i:ImportedSymbol)
-      WHERE i.file_path = 'src/Home.tsx' AND i.import_type = 'NamespaceImport'
-      RETURN i.import_path AS path, i.identifier_name AS name, i.identifier_alias AS alias
+      MATCH (i:Import)
+      WHERE i.file_path = 'src/Home.tsx' AND i.language_kind = 'NamespaceImport'
+      RETURN i.import_path AS path, i.name AS name, i.alias AS alias
     assert:
       - { row_count: 2 }
       - { row: { path: "./components/card", name: "*", alias: CardModule } }
@@ -232,10 +232,10 @@ tests:
 
   - name: External React and package imports stay unresolved
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'src/Home.tsx'
         AND i.import_path IN ['react', '@external/ui']
-      RETURN i.import_path AS path, i.identifier_name AS name
+      RETURN i.import_path AS path, i.name AS name
       ORDER BY path, name
     assert:
       - { row_count: 2 }
@@ -244,7 +244,7 @@ tests:
 
   - name: External React and package imports have no local targets
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'src/Home.tsx'
         AND i.import_path IN ['react', '@external/ui']
       RETURN i.import_path AS path, d.fqn AS target
@@ -253,10 +253,10 @@ tests:
 
   - name: External React and JSX package calls target imported symbols
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn = 'Home'
         AND sym.import_path IN ['react', '@external/ui']
-      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name
       ORDER BY path, name
     assert:
       - { row_count: 2 }
@@ -281,7 +281,7 @@ tests:
 
   - name: Resolved JSX component calls do not emit imported-symbol fallback
     query: |
-      MATCH (caller:Definition)-[e:CALLS]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:CALLS]->(sym:Import)
       WHERE caller.fqn IN [
         'Home',
         'FragmentHost',
@@ -290,7 +290,7 @@ tests:
         'PlainJsx'
       ]
         AND sym.import_path <> 'react' AND sym.import_path <> '@external/ui'
-      RETURN caller.fqn AS caller, sym.import_path AS path, sym.identifier_name AS name
+      RETURN caller.fqn AS caller, sym.import_path AS path, sym.name AS name
     assert:
       - { empty: true }
 
@@ -342,9 +342,9 @@ tests:
 
   - name: Plain JSX imports target TSX component definitions
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'src/Plain.jsx'
-      RETURN i.import_path AS path, i.identifier_name AS name, d.fqn AS target
+      RETURN i.import_path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
       - { row: { path: "./components/button", name: "Button", target: "Button" } }

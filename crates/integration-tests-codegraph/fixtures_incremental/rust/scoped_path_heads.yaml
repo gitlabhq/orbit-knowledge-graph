@@ -98,7 +98,7 @@ fixtures:
 tests:
   - name: a scoped call reaches the imported module past a value binding of the same name
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE target.import_path = 'std::ptr'
       RETURN caller.name AS caller
       ORDER BY caller
@@ -126,7 +126,7 @@ tests:
 
   - name: a let over an import at the same depth keeps the scoped call on that import
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name IN ['local_import', 'local_import_only']
       RETURN caller.name AS caller, target.import_path AS path
       ORDER BY caller

@@ -2,9 +2,9 @@ cases:
   - name: A project filter on one endpoint pins every endpoint scan of a code edge
     query:
       json: |
-        {"query_type":"traversal","nodes":[{"id":"i","entity":"ImportedSymbol","filters":{"project_id":42}},{"id":"d","entity":"Definition"}],"relationships":[{"type":"IMPORTS","from":"i","to":"d"}]}
+        {"query_type":"traversal","nodes":[{"id":"i","entity":"Import","filters":{"project_id":42}},{"id":"d","entity":"Definition"}],"relationships":[{"type":"IMPORTS","from":"i","to":"d"}]}
       gql: |
-        MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition) WHERE i.project_id = 42 RETURN i, d
+        MATCH (i:Import)-[:IMPORTS]->(d:Definition) WHERE i.project_id = 42 RETURN i, d
     logical:
       expect: ["(Filter i.project_id = 42 (_))"]
     physical:
@@ -12,11 +12,11 @@ cases:
         planned:
           expect:
             - (Filter _orbit_edge_0.project_id = 42, ... (Deduplicate Final (Scan Table(gl_code_edge) AS _orbit_edge_0)))
-            - (Filter i.project_id = 42 (Deduplicate Final (Scan Table(gl_imported_symbol) AS i)))
+            - (Filter i.project_id = 42 (Deduplicate Final (Scan Table(gl_import) AS i)))
             - (Filter d.project_id = 42 (Deduplicate Final (Scan Table(gl_definition) AS d)))
         emitted:
           expect:
-            - (Filter i.project_id = 42 (Deduplicate Final (Scan Table(gl_imported_symbol) AS i)))
+            - (Filter i.project_id = 42 (Deduplicate Final (Scan Table(gl_import) AS i)))
             - (Filter d.project_id = 42 (Deduplicate Final (Scan Table(gl_definition) AS d)))
 
   - name: A filter on the target endpoint pins the source endpoint scan
@@ -77,7 +77,7 @@ cases:
       json: The JSON frontend does not expose property-to-property comparisons.
     query:
       gql: |
-        MATCH (i:ImportedSymbol {id: 7})-[:IMPORTS]->(d:Definition) WHERE i.project_id = i.start_line RETURN i, d
+        MATCH (i:Import {id: 7})-[:IMPORTS]->(d:Definition) WHERE i.project_id = i.start_line RETURN i, d
     logical:
       expect: ["(Filter i.project_id = i.start_line, ... (_))"]
     physical:

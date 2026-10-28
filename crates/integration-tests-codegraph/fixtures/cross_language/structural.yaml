@@ -77,7 +77,7 @@ tests:
   - name: All definitions belong to service.py with exact FQNs
     query: |
       MATCH (d:Definition)
-      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file
+      RETURN d.name AS name, d.fqn AS fqn, d.kind AS type, d.file_path AS file
     assert:
       - { row_count: 3 }
       - { unique: fqn }
@@ -110,8 +110,8 @@ tests:
 
   - name: Import edge
     query: |
-      MATCH (i:ImportedSymbol)
-      RETURN i.file_path AS file, i.import_path AS path, i.identifier_name AS name
+      MATCH (i:Import)
+      RETURN i.file_path AS file, i.import_path AS path, i.name AS name
     assert:
       - { row_count: 1 }
       - { row: { file: "main.py", path: "service", name: "UserService" } }

@@ -36,9 +36,9 @@ fixtures:
 tests:
   - name: "Explicit annotation imports retain their declared symbol"
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(symbol:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(symbol:Import)
       WHERE caller.fqn = 'com.example.Traceable'
-      RETURN symbol.import_path AS path, symbol.identifier_name AS name
+      RETURN symbol.import_path AS path, symbol.name AS name
     assert:
       - { row_count: 1 }
       - { row: { path: "java.lang.annotation", name: Target } }

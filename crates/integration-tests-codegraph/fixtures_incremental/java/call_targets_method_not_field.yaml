@@ -58,7 +58,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'use'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 4 }
       - { column_values: { field: callee, values: ["Main.Converter", "Main.Converter.reverse", "Main.SampleElements", "Main.SampleElements.e4"] } }
@@ -68,7 +68,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'readField' AND t.name = 'e4'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Main.SampleElements.e4", kind: "Field" } }
@@ -77,7 +77,7 @@ tests:
     query: |
       MATCH (c:Definition)-[:CALLS]->(t:Definition)
       WHERE c.name = 'readLate' AND t.name = 'e4'
-      RETURN t.fqn AS callee, t.definition_type AS kind
+      RETURN t.fqn AS callee, t.kind AS kind
     assert:
       - { row_count: 1 }
       - { row: { callee: "Main.LateElements.e4", kind: "Field" } }

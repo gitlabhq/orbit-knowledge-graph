@@ -36,7 +36,7 @@ tests:
 
   - name: Explicit runtime spelling stays external
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name = 'runtime'
       RETURN target.import_path AS path
     assert:
@@ -61,7 +61,7 @@ steps:
           - { row: { file: other/constants/index.ts } }
       - name: Missing conditional target retains runtime fallback
         query: |
-          MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+          MATCH (caller:Definition)-[:CALLS]->(target:Import)
           WHERE caller.name = 'missingCandidate'
           RETURN target.import_path AS path
         assert:
@@ -124,7 +124,7 @@ steps:
           - { empty: true }
       - name: Bare name returns to runtime fallback
         query: |
-          MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+          MATCH (caller:Definition)-[:CALLS]->(target:Import)
           WHERE caller.name = 'run'
           RETURN target.import_path AS path
         assert:

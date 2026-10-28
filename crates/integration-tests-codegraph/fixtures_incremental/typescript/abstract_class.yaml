@@ -30,7 +30,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Animal::makeSound'
-      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.name AS name, d.fqn AS fqn, d.kind AS type
     assert:
       - { row: { name: "makeSound", fqn: "Animal::makeSound", type: "Method" } }
 
@@ -38,7 +38,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Animal::name'
-      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+      RETURN d.name AS name, d.fqn AS fqn, d.kind AS type
     assert:
       - { row: { name: "name", fqn: "Animal::name", type: "Method" } }
 
@@ -46,7 +46,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Animal::move'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row: { fqn: "Animal::move", type: "Method" } }
 
@@ -56,6 +56,6 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Dog::create'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row: { fqn: "Dog::create", type: "StaticMethod" } }

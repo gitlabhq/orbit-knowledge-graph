@@ -34,9 +34,9 @@ tests:
   # corrected: Python: `import os` binds the name `os` to the module, so the imported name is `os`.
   - name: Python imports are 1-indexed
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'pkg/imports.py'
-      RETURN i.import_path AS path, i.identifier_name AS name, i.start_line AS sl, i.end_line AS el, i.start_char AS sc, i.start_byte AS sb
+      RETURN i.import_path AS path, i.name AS name, i.start_line AS sl, i.end_line AS el, i.start_char AS sc, i.start_byte AS sb
       ORDER BY sl
     assert:
       - { row_count: 2 }

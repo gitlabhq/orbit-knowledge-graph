@@ -69,7 +69,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS]->(callee:Definition)
       WHERE caller.name IN ['direct_function_call', 'same_named_function_call']
-      RETURN caller.name AS caller, callee.name AS target, callee.definition_type AS type
+      RETURN caller.name AS caller, callee.name AS target, callee.kind AS type
     assert:
       - { row_count: 2 }
       - { row: { caller: direct_function_call, target: invoke_helper, type: Function } }

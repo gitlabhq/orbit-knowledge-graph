@@ -42,7 +42,7 @@ tests:
   - name: "Dynamic block produces iterator def"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Dynamic'
+      WHERE d.kind = 'Dynamic'
       RETURN d.name AS name
     assert:
       - { row_count: 1 }
@@ -71,7 +71,7 @@ tests:
   - name: "All definitions present"
     query: |
       MATCH (d:Definition)
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row: { name: "ports", type: "Variable" } }
       - { row: { name: "tags", type: "Variable" } }

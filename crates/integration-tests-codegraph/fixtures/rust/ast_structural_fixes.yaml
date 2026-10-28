@@ -50,10 +50,10 @@ fixtures:
 tests:
   - name: "restricted pub(crate) use is indexed as a private use"
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'src/lib.rs'
         AND i.import_path = 'foo::Bar'
-      RETURN i.import_type AS type
+      RETURN i.language_kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Use" } }
@@ -63,7 +63,7 @@ tests:
       MATCH (d:Definition)
       WHERE d.file_path = 'src/lib.rs'
         AND d.name = 'foo'
-        AND d.definition_type IN ['Method', 'AssociatedFunction']
+        AND d.kind IN ['Method', 'AssociatedFunction']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }

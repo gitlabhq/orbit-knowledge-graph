@@ -2,9 +2,9 @@ name: Incoming denormalized sets filter the physical target tags
 
 query:
   json: |
-    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"definition_type":{"in":["function","method"]}}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","direction":"incoming"}]}
+    {"query_type":"traversal","nodes":[{"id":"a","entity":"Definition","filters":{"kind":{"in":["function","method"]}}},{"id":"b","entity":"Definition"}],"relationships":[{"type":"CALLS","from":"a","to":"b","direction":"incoming"}]}
   gql: |
-    MATCH (a:Definition)<-[:CALLS]-(b:Definition) WHERE a.definition_type IN ['function', 'method'] RETURN a, b
+    MATCH (a:Definition)<-[:CALLS]-(b:Definition) WHERE a.kind IN ['function', 'method'] RETURN a, b
 
 logical:
   expect: ["(EdgeScan CALLS b->a AS e0)"]
@@ -12,6 +12,6 @@ logical:
 physical:
   clickhouse:
     planned:
-      expect: ["(Filter _orbit_edge_0.target_tags HAS ANY ['definition_type:function', 'definition_type:method'], ... (_))"]
+      expect: ["(Filter _orbit_edge_0.target_tags HAS ANY ['kind:function', 'kind:method'], ... (_))"]
     emitted:
-      expect: ["(Filter ArrayContainsAny(_orbit_edge_0.target_tags, Array('definition_type:function', 'definition_type:method')), ... (_))"]
+      expect: ["(Filter ArrayContainsAny(_orbit_edge_0.target_tags, Array('kind:function', 'kind:method')), ... (_))"]

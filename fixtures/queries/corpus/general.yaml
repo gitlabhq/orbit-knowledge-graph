@@ -229,7 +229,7 @@ q22_imports_traversal:
   category: code_graph
   suite: general
   query: |
-    MATCH (f:File)-[:IMPORTS]->(imp:ImportedSymbol)
+    MATCH (f:File)-[:IMPORTS]->(imp:Import)
     WHERE f.path ENDS WITH 'controller.rb'
     RETURN *
     LIMIT 15
@@ -551,11 +551,11 @@ g2_directory_file_count:
     LIMIT 10
 
 g3_importedsymbol_resolve:
-  desc: "ImportedSymbol resolve"
+  desc: "Import resolve"
   category: code_graph
   suite: general
   query: |
-    MATCH (imp:ImportedSymbol {identifier_name: 'ApplicationController'})-[:IMPORTS]->(def:Definition)
+    MATCH (imp:Import {name: 'ApplicationController'})-[:IMPORTS]->(def:Definition)
     RETURN *
     LIMIT 10
 

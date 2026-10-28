@@ -40,7 +40,7 @@ tests:
       WHERE d.file_path = 'types/contracts.ts'
         AND d.name IN ['User', 'UserId', 'Status', 'makeStatus']
         AND d.fqn = d.name
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
       ORDER BY name
     assert:
       - { row_count: 4 }
@@ -52,9 +52,9 @@ tests:
   - name: Type-only imports are preserved distinctly from runtime imports
     skip: true
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
       WHERE i.file_path = 'types/consumer.ts'
-      RETURN i.identifier_name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      RETURN i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
       ORDER BY name
     assert:
       - { row_count: 4 }

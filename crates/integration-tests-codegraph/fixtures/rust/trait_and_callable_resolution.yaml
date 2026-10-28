@@ -112,7 +112,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_trait_method' AND callee.name = 'run'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Method" } }
@@ -121,7 +121,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_trait_ufcs' AND callee.name = 'run'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Method" } }
@@ -130,7 +130,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_trait_method' AND callee.name = 'construct'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "AssociatedFunction" } }
@@ -139,7 +139,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_tuple_struct' AND callee.name = 'Wrapper'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Struct" } }
@@ -148,7 +148,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_enum_variant' AND callee.name = 'Start'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Variant" } }
@@ -184,7 +184,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_trait_associated_ufcs' AND callee.name = 'construct'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "AssociatedFunction" } }
@@ -193,7 +193,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_type_alias_associated' AND callee.name = 'construct'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "AssociatedFunction" } }
@@ -202,7 +202,7 @@ tests:
     query: |
       MATCH (caller:Definition)-[:CALLS|DEFINES|EXTENDS]->(callee:Definition)
       WHERE caller.name = 'call_autoderef_method' AND callee.name = 'run'
-      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { src: "src/usage.rs", tgt: "src/domain.rs", type: "Method" } }

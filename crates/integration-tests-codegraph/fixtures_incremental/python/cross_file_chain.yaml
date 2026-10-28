@@ -24,7 +24,7 @@ tests:
   - name: "the function is defined in the first module"
     query: |
       MATCH (d:Definition)
-      WHERE d.name = 'helper' AND d.definition_type = 'Function'
+      WHERE d.name = 'helper' AND d.kind = 'Function'
       RETURN d.file_path AS file
     assert:
       - { row_count: 1 }
@@ -41,8 +41,8 @@ tests:
 
   - name: "both imports resolve to the definition"
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
-      WHERE i.identifier_name = 'helper'
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      WHERE i.name = 'helper'
       RETURN i.file_path AS file, d.file_path AS target
     assert:
       - { row_count: 2 }

@@ -15,7 +15,7 @@ fixtures:
 tests:
   - name: Implicit and visible provider names do not become wildcard calls
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name IN ['standard', 'implicit']
       RETURN target.import_path
     assert:
@@ -23,7 +23,7 @@ tests:
 
   - name: Import-only provider symbol is not implicitly builtin
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name = 'unresolved'
       RETURN target.import_path AS path
     assert:

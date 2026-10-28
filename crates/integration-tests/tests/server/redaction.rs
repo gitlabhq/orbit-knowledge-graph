@@ -3157,7 +3157,7 @@ async fn setup_indirect_auth_data(ctx: &TestContext) {
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {} (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char) VALUES
+        "INSERT INTO {} (id, traversal_path, project_id, branch, file_path, fqn, name, kind, start_line, end_line, start_byte, end_byte, start_char, end_char) VALUES
          (5000, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'crate::MyStruct', 'MyStruct', 'class', 10, 50, 100, 500, 0, 0),
          (5001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'crate::my_func', 'my_func', 'function', 60, 80, 600, 900, 0, 0),
          (5002, '1/100/1000/', 1000, 'main', 'src/main.rs', 'crate::main', 'main', 'function', 1, 20, 0, 200, 0, 0)",
@@ -3173,7 +3173,7 @@ async fn setup_indirect_auth_data(ctx: &TestContext) {
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {} (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char) VALUES
+        "INSERT INTO {} (id, traversal_path, project_id, branch, file_path, fqn, name, kind, start_line, end_line, start_byte, end_byte, start_char, end_char) VALUES
          (5003, '1/101/1001/', 1001, 'main', 'src/secret.rs', 'crate::Secret', 'Secret', 'class', 1, 30, 0, 300, 0, 0)",
         table_definitions()
     ))

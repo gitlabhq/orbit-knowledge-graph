@@ -49,7 +49,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.name IN ['uses_closures', 'with_callback', 'named_function']
-      RETURN d.name AS name, d.definition_type AS kind
+      RETURN d.name AS name, d.kind AS kind
       ORDER BY name
     assert:
       - { row_count: 3 }

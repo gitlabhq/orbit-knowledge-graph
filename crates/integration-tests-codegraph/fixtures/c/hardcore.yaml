@@ -147,7 +147,7 @@ tests:
   - name: "Exact function count"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
+      WHERE d.kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 20 }
@@ -157,7 +157,7 @@ tests:
   - name: "Exact struct count with scoped FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Struct'
+      WHERE d.kind = 'Struct'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 6 }
@@ -172,7 +172,7 @@ tests:
   - name: "Exact typedef count"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Typedef'
+      WHERE d.kind = 'Typedef'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }
@@ -309,7 +309,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'nested::Outer::Inner'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "nested::Outer::Inner", type: Struct } }
@@ -332,7 +332,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'nested::Callback'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "nested::Callback", type: Typedef } }
@@ -341,7 +341,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'nested::Task'
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { fqn: "nested::Task", type: Typedef } }
@@ -353,7 +353,7 @@ tests:
   - name: "ErrorCode enum constants with full scope"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumConstant'
+      WHERE d.kind = 'EnumConstant'
         AND d.fqn STARTS WITH 'error::ErrorCode::'
       RETURN d.fqn AS fqn
     assert:
@@ -370,7 +370,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'io/reader.c'
-        AND d.definition_type = 'Function'
+        AND d.kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }
@@ -385,7 +385,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'unrelated.c'
-        AND d.definition_type = 'Function'
+        AND d.kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -397,7 +397,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'app.c'
-        AND d.definition_type = 'Function'
+        AND d.kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -475,7 +475,7 @@ tests:
   - name: "Generic list API functions exist"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
+      WHERE d.kind = 'Function'
         AND d.fqn STARTS WITH 'list::list_'
       RETURN d.fqn AS fqn
     assert:
@@ -490,7 +490,7 @@ tests:
   - name: "Generic list structs exist"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Struct'
+      WHERE d.kind = 'Struct'
         AND d.fqn STARTS WITH 'list::'
       RETURN d.fqn AS fqn
     assert:
@@ -502,7 +502,7 @@ tests:
     query: |
       MATCH (f:File)-[e:DEFINES|CALLS]->(d:Definition)
       WHERE f.path = 'generic/list.c'
-        AND d.definition_type = 'Function'
+        AND d.kind = 'Function'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 5 }

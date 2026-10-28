@@ -32,7 +32,7 @@ tests:
 
   - name: Standard calls do not become speculative header calls
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name = 'external_call'
       RETURN target.import_path
     assert:
@@ -40,7 +40,7 @@ tests:
 
   - name: A standard spelling alone does not suppress another provider
     query: |
-      MATCH (caller:Definition)-[:CALLS]->(target:ImportedSymbol)
+      MATCH (caller:Definition)-[:CALLS]->(target:Import)
       WHERE caller.name = 'vendor_call'
       RETURN target.import_path AS path
     assert:

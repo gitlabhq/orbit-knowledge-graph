@@ -114,7 +114,7 @@ pub fn convert_v2_graph(
                     .collect();
                 DefinitionRow::to_record_batch(&rows, &specs, &ctx)?
             }
-            "ImportedSymbol" => {
+            "Import" => {
                 let rows: Vec<_> = graph
                     .imports_iter()
                     .map(|(idx, file_path, import)| ImportRow {

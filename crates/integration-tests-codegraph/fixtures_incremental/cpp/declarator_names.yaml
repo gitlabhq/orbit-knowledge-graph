@@ -37,7 +37,7 @@ tests:
   - name: "Plain and storage-qualifier-prefixed functions keep the bare name"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.name IN ['plain', 'qualprefixed']
+      WHERE d.kind = 'Function' AND d.name IN ['plain', 'qualprefixed']
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -47,7 +47,7 @@ tests:
   - name: "Pointer-return function extracts bare identifier"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::ptr_return'
+      WHERE d.kind = 'Function' AND d.fqn = 'funcs::ptr_return'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -56,7 +56,7 @@ tests:
   - name: "Parenthesized declarator extracts bare identifier"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::paren_decl'
+      WHERE d.kind = 'Function' AND d.fqn = 'funcs::paren_decl'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -65,7 +65,7 @@ tests:
   - name: "Reference-return function extracts bare identifier"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::ref_return'
+      WHERE d.kind = 'Function' AND d.fqn = 'funcs::ref_return'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -74,7 +74,7 @@ tests:
   - name: "Postfix attribute is unwrapped, not captured as the name"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::attributed'
+      WHERE d.kind = 'Function' AND d.fqn = 'funcs::attributed'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -83,7 +83,7 @@ tests:
   - name: "MSVC call modifier before the declarator is skipped, not captured as the name"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'funcs::mscall'
+      WHERE d.kind = 'Function' AND d.fqn = 'funcs::mscall'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -92,7 +92,7 @@ tests:
   - name: "Out-of-line member keeps its class qualifier (single level)"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.name IN ['Foo::bar', 'Foo::baz']
+      WHERE d.kind = 'Function' AND d.name IN ['Foo::bar', 'Foo::baz']
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -102,7 +102,7 @@ tests:
   - name: "Out-of-line member keeps the full nested qualifier"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.fqn = 'members::A::B::deep'
+      WHERE d.kind = 'Function' AND d.fqn = 'members::A::B::deep'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }
@@ -111,7 +111,7 @@ tests:
   - name: "Operator and destructor names keep the qualifier, drop params"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.name IN ['Foo::operator==', 'Foo::~Foo']
+      WHERE d.kind = 'Function' AND d.name IN ['Foo::operator==', 'Foo::~Foo']
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 2 }
@@ -121,7 +121,7 @@ tests:
   - name: "Inline conversion operators normalize to operator <type>, keeping pointer/ref/cv"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.name STARTS WITH 'operator'
+      WHERE d.kind = 'Function' AND d.name STARTS WITH 'operator'
       RETURN d.name AS name
     assert:
       - { row_count: 6 }
@@ -136,7 +136,7 @@ tests:
   - name: "Out-of-line conversion operator keeps the qualifier at any depth"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
+      WHERE d.kind = 'Function'
         AND d.name IN ['Ptr::operator int', 'S::I::operator int']
       RETURN d.name AS name, d.fqn AS fqn
     assert:
@@ -147,7 +147,7 @@ tests:
   - name: "Comment before the parameter list does not leak into a conversion operator name"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.name STARTS WITH 'Widget::operator'
+      WHERE d.kind = 'Function' AND d.name STARTS WITH 'Widget::operator'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row_count: 1 }

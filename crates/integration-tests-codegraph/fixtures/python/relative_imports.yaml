@@ -21,9 +21,9 @@ fixtures:
 tests:
   - name: Relative import resolves to correct module
     query: |
-      MATCH (i:ImportedSymbol)
+      MATCH (i:Import)
       WHERE i.file_path = 'mypackage/services.py'
-      RETURN i.import_path AS path, i.identifier_name AS name
+      RETURN i.import_path AS path, i.name AS name
     assert:
       - { row: { path: "mypackage.models", name: "User" } }
 

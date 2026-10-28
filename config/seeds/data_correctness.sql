@@ -204,7 +204,7 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
 
 INSERT INTO gl_definition (
     id, traversal_path, project_id, branch, commit_sha, file_path, fqn, name,
-    definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char
+    kind, start_line, end_line, start_byte, end_byte, start_char, end_char
 ) VALUES
     (12000, '1/100/1000/', 1000, 'main', 'abc123', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200, 4, 11),
     (12001, '1/100/1000/', 1000, 'main', 'abc123', 'crates/compiler/src/lib.rs', 'compiler::helper', 'helper', 'Function', 22, 30, 220, 300, 4, 10),

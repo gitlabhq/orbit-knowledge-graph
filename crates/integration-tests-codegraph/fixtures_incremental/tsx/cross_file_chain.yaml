@@ -40,8 +40,8 @@ tests:
 
   - name: "the import resolves to the definition"
     query: |
-      MATCH (i:ImportedSymbol)-[:IMPORTS]->(d:Definition)
-      WHERE i.file_path = 'src/Toolbar.tsx' AND i.identifier_name = 'Button'
+      MATCH (i:Import)-[:IMPORTS]->(d:Definition)
+      WHERE i.file_path = 'src/Toolbar.tsx' AND i.name = 'Button'
       RETURN d.file_path AS target
     assert:
       - { row_count: 1 }

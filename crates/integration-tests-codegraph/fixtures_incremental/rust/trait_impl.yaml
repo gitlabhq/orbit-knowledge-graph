@@ -36,9 +36,9 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'main.rs'
-        AND d.definition_type IN ['Trait', 'Struct', 'Function']
+        AND d.kind IN ['Trait', 'Struct', 'Function']
         AND d.name IN ['Animal', 'Dog', 'greet']
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
       ORDER BY name
     assert:
       - { row_count: 3 }
@@ -49,7 +49,7 @@ tests:
   - name: impl methods are nested via Defines
     query: |
       MATCH (parent:Definition)-[e:DEFINES]->(child:Definition)
-      WHERE child.definition_type = 'Method'
+      WHERE child.kind = 'Method'
       RETURN child.name AS method
       ORDER BY method
     assert:

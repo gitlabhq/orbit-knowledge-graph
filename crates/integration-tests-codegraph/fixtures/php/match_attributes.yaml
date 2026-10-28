@@ -163,7 +163,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Http\Router'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: Class } }
@@ -172,7 +172,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Http\Router\route'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: Method } }
@@ -181,7 +181,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN ['App\Http\UserController\list', 'App\Http\UserController\show']
-      RETURN d.fqn AS fqn, d.definition_type AS type
+      RETURN d.fqn AS fqn, d.kind AS type
     assert:
       - { row_count: 2 }
       - { unique: fqn }
@@ -191,7 +191,7 @@ tests:
   - name: "Enum cases survive when enum body contains match"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'EnumCase'
+      WHERE d.kind = 'EnumCase'
         AND d.fqn IN ['App\Domain\Status\Active', 'App\Domain\Status\Archived']
       RETURN d.fqn AS fqn
     assert:
@@ -295,7 +295,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'App\Domain\Validator\require'
-        AND d.definition_type = 'Method'
+        AND d.kind = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }

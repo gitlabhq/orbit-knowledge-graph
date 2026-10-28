@@ -80,7 +80,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'PtyService::_terminalProcess'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { name: "_terminalProcess", type: "Property" } }
@@ -89,7 +89,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'Car::untyped'
-      RETURN d.definition_type AS type
+      RETURN d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { type: "Property" } }
@@ -107,7 +107,7 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.fqn = 'PersistentTerminalProcess::constructor::_terminalProcess'
-      RETURN d.name AS name, d.definition_type AS type
+      RETURN d.name AS name, d.kind AS type
     assert:
       - { row_count: 1 }
       - { row: { name: "_terminalProcess", type: "Property" } }

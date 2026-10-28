@@ -22,7 +22,7 @@ tests:
   - name: "Both function syntaxes are indexed as Function definitions"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function'
+      WHERE d.kind = 'Function'
       RETURN d.name AS name
     assert:
       - { row_count: 3 }
@@ -33,7 +33,7 @@ tests:
   - name: "Functions are FQN-scoped under the filename (file_scope)"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Function' AND d.name = 'greet'
+      WHERE d.kind = 'Function' AND d.name = 'greet'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
