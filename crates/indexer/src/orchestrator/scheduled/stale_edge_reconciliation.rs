@@ -731,7 +731,7 @@ mod tests {
     fn target_keyed_edges_are_found_through_the_emitters_live_foreign_keys() {
         let groups = groups();
         for (node, kind, foreign_keys) in [
-            ("Job", "HAS_JOB", "pipeline_id, stage_id"),
+            ("Job", "TRIGGERED", "pipeline_id, stage_id, user_id"),
             ("Stage", "HAS_STAGE", "pipeline_id"),
         ] {
             let group = find(
@@ -783,7 +783,7 @@ mod tests {
     #[test]
     fn changed_keys_keep_the_target_read_because_merges_drop_old_key_values() {
         let groups = groups();
-        for (node, table) in [("Job", "gl_ci_edge"), ("MergeRequest", "gl_edge")] {
+        for (node, table) in [("Pipeline", "gl_ci_edge"), ("MergeRequest", "gl_edge")] {
             let group = find(&groups, StaleWhen::EmitterChanged, node, table, "target_id");
             let sql = build_tombstone_statement(group, &[]);
             assert!(!sql.contains("prior AS"), "{sql}");

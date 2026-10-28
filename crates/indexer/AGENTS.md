@@ -92,8 +92,8 @@ Siphon replicates a delete as the lake key plus defaults, so the tombstone has n
 transform then writes no edge tombstone. The task runs one idempotent `INSERT … SELECT` per
 `(rule, FK-owner, edge table, endpoint)` group. The rule splits one owner's mappings in two.
 Mappings marked `mutable: true` retire an older edge on any newer owner row, live or deleted. Every
-other FK mapping retires its edges only when the owner's latest row is deleted. So Job's `HAS_JOB`
-and `TRIGGERED` edges on `(Job, gl_ci_edge, target_id)` run as two statements. Each statement reads
+other FK mapping retires its edges only when the owner's latest row is deleted. So a merge request's
+`AUTHORED` and `REVIEWER` edges on `(MergeRequest, gl_edge, target_id)` run as two statements. Each statement reads
 the owners whose latest row is within the lookback (`_version >= cursor`) once, as a materialized
 CTE. A dual `IN` on the edge PK prunes the edge read to that set. When a deleted owner is the edge
 target, the delete rule takes parent keys from the owner's surviving live rows. It then reads edges
