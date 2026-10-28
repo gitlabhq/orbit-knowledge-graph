@@ -113,9 +113,9 @@ Setup follows these rules:
 ## Show GitLab Orbit calls in Claude Code
 
 The GitLab Orbit plugin for Claude Code marks each GitLab Orbit call in the transcript with the GitLab Orbit icon and a short label.
-For example, a query shows as `◎ Explored Orbit  MergeRequest → Project`.
-After the first call, the number of GitLab Orbit calls, nodes, and edges in the session shows below the prompt.
-The plugin changes only what Claude Code shows.
+For example, a code search shows as `◎ Searched code  login`.
+After the first call, a summary of the session's GitLab Orbit calls shows below the prompt.
+After the first successful query, the plugin runs `glab orbit graph-status` once to show the size of the project's graph.
 
 Prerequisites:
 
