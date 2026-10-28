@@ -263,7 +263,7 @@ A runtime prompt fetch would break pinning and add a query to every workflow.
 
 ## References
 
-- [ADR 003: Orbit API design](003_api_design.md), Rails as the REST proxy
+- [ADR 003: Orbit API design (unified REST and GraphQL)](003_api_design.md), Rails as the REST proxy
 - [ADR 007: Orbit monetization engineering](007_monetization_engineering.md), billing, quotas, and channel attribution
 - [ADR 008: Workhorse query acceleration](008_workhorse_query_acceleration.md)
 - [ADR 011: Agent command surface](011_agent_command_surface.md), the named-command tools

@@ -111,7 +111,7 @@ For more information, see [ADR 010](010_graph_status_endpoint.md).
 Per-entity handlers broke the single status entry.
 When entity A completes and writes "indexed" while entity B still runs, the namespace status is wrong.
 
-Each entity handler now writes only its own status entry, keyed by the traversal path and the entity type.
+Each entity handler wrote only its own status entry, keyed by the traversal path and the entity type.
 NATS message deduplication serializes runs for the same entity and scope, so the handlers need no coordination.
 
 The status service gets the expected set of namespaced entity types from the ontology and reads one entry for each type.

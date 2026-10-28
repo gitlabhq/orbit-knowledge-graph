@@ -92,7 +92,7 @@ A scheduled check promotes the migrating version when each enabled namespace has
 Each required global pipeline must also have one.
 The required set is the plan that the scope produced, so a selective migration waits only for the work it dispatched.
 
-The check reads the enabled set each time, so a checkpoint from a namespace that was disabled after the migration started does not count.
+The check reads the enabled set each time, so a checkpoint from a namespace that is not enabled now does not count.
 The check reports code coverage but does not wait for it, because one slow or failing repository must not keep a migration open.
 
 The gate counts checkpoints and does not count rows.
@@ -136,7 +136,7 @@ Promotion happens when that change is indexed, as [Promotion gates on the plan](
 - Each breaking version change needs a ledger entry.
 - A scope that is too narrow is a data correctness bug, not only wasted work.
 - The shared edge table forces many SDLC scopes to full.
-- The savings are large for entities with their own tables and for code, and smaller for changes that touch edges.
+- The savings are real for entities with their own tables and for code, and smaller for changes that are mostly edges.
 - SDLC and code use two seeding paths with different cursor handling.
 
 These items are out of scope:

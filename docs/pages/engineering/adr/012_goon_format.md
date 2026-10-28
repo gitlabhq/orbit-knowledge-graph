@@ -203,6 +203,6 @@ The flat key-value shape, grouped by type, had the best balance of cost, duratio
 - [GOON format snippet](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205)
 - [TOON specification](https://github.com/toon-format/spec/blob/main/SPEC.md)
 - Fatemi, Halcrow, and Perozzi, "Talk like a Graph: Encoding Graphs for Large Language Models", ICLR 2024
-- [ADR 003: API design](003_api_design.md)
+- [ADR 003: Orbit API design (unified REST and GraphQL)](003_api_design.md)
 - [ADR 004: Unified query response schema](004_unified_response_schema.md)
 - [ADR 008: Workhorse query acceleration](008_workhorse_query_acceleration.md)

@@ -29,7 +29,7 @@ That constraint went away when GitLab committed to its segmentation strategy.
 We then compared FFI with a standalone Rust service and chose the service, which made Rust a permanent choice.
 
 Orbit builds a property graph from GitLab instance data and serves queries over gRPC.
-It runs as one binary in four modes: web server, indexer, scheduler, and health check.
+It runs as one binary in four modes: web server, indexer, dispatcher, and health check.
 It reads change data capture (CDC) events from NATS and compiles a JSON query language into ClickHouse SQL.
 It uses bidirectional gRPC streams for the authorization exchange with Rails.
 One multi-tenant deployment serves all of GitLab.com, and a three-hop traversal must finish in less than 300 ms at p95.
@@ -122,7 +122,7 @@ To close the gap, we build a Rust version of LabKit, the GitLab observability li
 It gives structured logging, correlation IDs, and OpenTelemetry metrics.
 We planned it in phases, and the logging foundation was complete when we made this decision.
 
-The Production Readiness review checks the binary size, the memory profile, crash behavior, and core dump analysis.
+The Production Readiness review will evaluate the binary size, the memory profile, crash behavior on panic or abort, and core dump analysis.
 
 ## Why not the alternatives
 
@@ -188,7 +188,7 @@ We keep Ruby for the Rails integration layer, and Rust for the compute-heavy ser
 - [Shared Rust builder images](https://gitlab.com/gitlab-org/rust/build-images)
 - [Orbit Helm charts](https://gitlab.com/gitlab-org/orbit/orbit-helm-charts)
 - [ADR 001: gRPC communication protocol](001_grpc_communication.md)
-- [ADR 003: API design](003_api_design.md)
+- [ADR 003: Orbit API design (unified REST and GraphQL)](003_api_design.md)
 - [Orbit design documents](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/README.md)
 - [Production Readiness review for Orbit](https://gitlab.com/gitlab-org/architecture/readiness/-/merge_requests/64)
 - [LabKit for Rust](https://gitlab.com/gitlab-org/rust/labkit-rs)

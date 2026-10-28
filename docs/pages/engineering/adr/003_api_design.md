@@ -44,7 +44,7 @@ check security -> compile -> run in ClickHouse -> extract IDs -> authorize
 
 **GraphQL serves Orbit settings, and REST serves Orbit data.**
 
-We also cut the gRPC service to four operations, each with one response format parameter.
+We also cut the gRPC service to four operations, and the data operations share one response format parameter.
 
 ```mermaid
 flowchart LR
@@ -105,7 +105,7 @@ They stay out of the agent command catalog, because skills belong to the CLI and
 ### One response format parameter
 
 The response format says who reads the response.
-Raw gives structured data for programs, and LLM gives compact text for a large language model (LLM).
+Raw gives structured data for people and programs, and LLM gives compact text for a large language model.
 
 | Operation | Raw format | LLM format |
 | --------- | ---------- | ---------- |
@@ -114,7 +114,7 @@ Raw gives structured data for programs, and LLM gives compact text for a large l
 | Get cluster health | Structured status, version, and components | TOON key-value notation |
 | List tools | Tool names, descriptions, and parameter JSON schemas | Same as raw |
 
-A follow-up ADR specifies the response formats in detail.
+A follow-up ADR will specify the response formats in detail.
 It covers the response envelope, the GOON encoding, and a shared JSON Schema contract between Orbit and the Vue frontend.
 
 ### REST contract
@@ -191,14 +191,14 @@ A separate epic tracks billing, tier gating, instrumentation, and monetization.
 - [ADR 001: gRPC communication protocol](001_grpc_communication.md)
 - [ADR 002: Rust core runtime](002_rust_core_runtime.md)
 - [ADR 011: Agent command surface](011_agent_command_surface.md)
-- [Orbit settings in GraphQL, first review](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/224831)
+- [Add Orbit dashboard namespace settings endpoints](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/224831)
 - [Review note: reuse the groups query](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/224831#note_3115671286)
 - [Review note: licensed fields and a dedicated mutation](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/224831#note_3118324266)
 - [Guidelines for implementing Enterprise Edition features](https://docs.gitlab.com/development/ee_features/)
-- [Add Orbit to the Premium features](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/224832)
+- [Add MCP Orbit API endpoint for Knowledge Graph queries](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/224832)
 - [AppSec review note on tool call validation](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/224832#note_3116878754)
-- [Orbit monetization engineering](https://gitlab.com/groups/gitlab-org/-/work_items/21198)
-- [Rewrite the gRPC contract for REST API alignment](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411)
+- [Integrate Monetization in Orbit](https://gitlab.com/groups/gitlab-org/-/work_items/21198)
+- [Align the gRPC contract for the API design](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411)
 - [GOON format specification](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205)
 - [TOON specification](https://github.com/toon-format/spec/blob/main/SPEC.md)
 - [Unified response format proposal](https://gitlab.com/gitlab-org/gitlab/-/snippets/5965027)

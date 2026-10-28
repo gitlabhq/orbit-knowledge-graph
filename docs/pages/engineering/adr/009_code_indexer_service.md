@@ -71,7 +71,7 @@ The Helm chart gets a separate code indexer deployment with these properties:
 - The scratch volume, which moves from the indexer
 - The same secret mounts as the current indexer
 
-The indexer deployment then drops the scratch volume and lowers its resource limits.
+The indexer deployment then drops the scratch volume and the code concurrency groups, and lowers its resource limits.
 It also loses the Rails configuration and the Rails signing key, because SDLC indexing does not call Rails.
 The health-check service also monitors the new deployment, together with the indexer and the dispatcher.
 
@@ -81,6 +81,7 @@ The rest of the pipeline stays the same:
 - Code tasks and SDLC requests already use separate NATS subjects, so routing does not change.
 - Namespace deletion stays in the indexer.
   It removes rows from all graph tables, including code tables, but it is a light ClickHouse delete that does not need code resources.
+  A move of namespace deletion to the code indexer would add complexity with no benefit.
 - Both services check the schema version on startup in the same way.
   During a migration, the dispatcher triggers code backfill, and the code indexer consumes those messages.
 - The code indexing module is already self-contained, so it needs no structural change.

@@ -90,7 +90,7 @@ A transform that needs wider batches can buffer internally.
 The SQL transform keeps the existing behavior.
 It owns a session of DataFusion, an in-process SQL engine, registers the block as the source table, and runs the SQL from the ontology.
 
-The system notes transform is hand-written Rust.
+The system notes transform, which a follow-up change adds, is hand-written Rust.
 It parses note bodies and collects distinct references.
 It resolves the references with data lake reads against the route table and the entity tables, and then emits edge rows.
 
@@ -167,7 +167,7 @@ The indexer integration scenarios check projection completeness from end to end.
 ## Benefits of this approach
 
 The transform stage is no longer SQL-only, and every entity inherits the extraction and writing optimizations.
-A new Rust entity, such as the system note entity of [ADR 013](013_system_note_edges.md), is one transform plus an extract plan.
+This unblocks [ADR 013](013_system_note_edges.md) with a smaller surface: the system note entity is one transform plus an extract plan.
 Existing entities do not change behavior, because they run the SQL transform over the same pipeline and plans.
 
 ## Consequences
@@ -177,7 +177,7 @@ The transform contract replaced the SQL transformer, which needed a mechanical r
 Hand-written transforms can multiply.
 The default stays an ontology plan with the SQL transform.
 A Rust transform is justified only when the projection cannot be SQL, such as multi-hop data lake reads or cross-row work.
-The indexer agent guide documents that bar beside the reuse checklist.
+The indexer agent guide must document that bar beside the reuse checklist.
 
 ## Why not the alternatives
 

@@ -17,7 +17,7 @@ Accepted
 
 Orbit returned query results as flat JSON rows, and the only sign of the graph shape was in the column names.
 A prefix on a column name marked a node alias, an edge, or a neighbor.
-Each of the five query types returned a different shape, and internal columns leaked into the output.
+Each query type returned a different shape, and internal columns leaked into the output.
 
 So the frontend had a whole module that only rebuilt nodes and edges from the flat rows.
 That module depended on fixed assumptions:
@@ -61,7 +61,7 @@ The gRPC envelope carries the query type, the row count, the format name, and th
 It also carries the generated ClickHouse SQL for debugging, which production returns only with a debug flag.
 The payload is structured JSON, or compact text for large language models (LLMs) as [ADR 012](012_goon_format.md) describes.
 
-The JSON payload holds the format version, the query type, the nodes, the edges, and pagination.
+The JSON payload holds the format version, the query type, the nodes, the edges, and pagination when the client requested a cursor.
 Aggregation queries also hold column descriptions and rows.
 For example, a one-hop traversal from a user to the projects they belong to returns this:
 
@@ -78,7 +78,7 @@ An edge names its source type and ID, its target type and ID, and its relationsh
 
 Each query type fills the same shape:
 
-- A lookup is a traversal with one node and no relationships, and it returns nodes with no edges.
+- A lookup is a traversal with one node and no relationships, formerly the separate search query type, and it returns nodes with no edges.
 - A traversal returns each node once and each edge between two nodes.
 - A variable-length traversal adds a depth to each edge.
 - Path finding adds a path ID and a step to each edge, and it deduplicates nodes across paths.
@@ -141,7 +141,7 @@ The LLM text format gets its own version when its encoding ships ([ADR 012](012_
 ## Benefits of this approach
 
 - The frontend no longer rebuilds the graph from column names.
-- All five query types use one parser, with no special case for each type.
+- All query types use one parser, with no special case for each type.
 - A user that appears in 50 rows becomes one node object, with no repeated data.
 - The JSON Schema prevents drift between the server and the frontend.
 - Graph data goes to the renderer with no extraction step.
@@ -173,9 +173,9 @@ A user in 50 traversal rows still had its properties repeated 50 times.
 
 - [Establish Orbit Response Format](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/243)
 - [Unified response schema](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/479)
-- [Align the gRPC contract for API design](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411), with the note on protobuf sync decisions
+- [Align the gRPC contract for the API design](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/411), with the note on protobuf sync decisions
 - [Spike: unified response format for graph queries, by Michael U.](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/snippets/5965027)
 - [Spike: unified query response, by Angelo](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/snippets/5965036)
 - [Orbit response format: combined research](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/snippets/5965394)
-- [ADR 003: Orbit API design](003_api_design.md)
+- [ADR 003: Orbit API design (unified REST and GraphQL)](003_api_design.md)
 - [ADR 012: GOON format](012_goon_format.md)

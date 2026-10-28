@@ -236,4 +236,4 @@ The redaction exchange needs both directions in one request.
 - [Gitaly client in Rails](https://gitlab.com/gitlab-org/gitlab/-/tree/master/lib/gitlab/gitaly_client)
 - [Gitaly protocol definitions](https://gitlab.com/gitlab-org/gitaly/-/tree/master/proto)
 - [GLAZ authorization service design document](https://gitlab.com/gitlab-org/architecture/auth-architecture/design-doc/-/merge_requests/74)
-- [ADR 003: API design, unified REST and GraphQL](003_api_design.md)
+- [ADR 003: Orbit API design (unified REST and GraphQL)](003_api_design.md)

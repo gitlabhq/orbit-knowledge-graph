@@ -23,7 +23,7 @@ Both forms return edges apart from the nodes, so the agent must join each edge b
 
 **We add a GQL response format that prints result rows as a table of node literals.**
 
-A node literal is the node type with all its properties, as in the example below.
+A node literal is the node type with its properties, as in the example below.
 The table looks like the output of OpenCypher-like shells.
 Each node alias in the query is one column, and each cell holds the full node literal.
 
@@ -64,9 +64,10 @@ Schema queries in the GQL format return Token-Oriented Object Notation (TOON) te
 - We must deploy the Orbit release with this change before GitLab turns on GQL responses.
   Older Orbit releases return raw JSON for the new format value.
   Workhorse must check the format of the returned content as well as the requested format.
-  It must treat a mismatch as an error or as an explicit fallback, or it returns an empty success response by mistake.
+  Workhorse must treat a mismatch as an error or as an explicit fallback.
+  Otherwise it can return an empty success response.
 - Query analytics must record the selected response format, and a version pin is not enough.
-  A separate analytics schema change adds that field before we measure adoption.
+  We add that field in a separate analytics schema change before we measure adoption through telemetry.
 - Rows repeat full node bodies, so the output is larger than the TOON output of the agent format.
   The agent format uses TOON for query results after the removal of GOON.
   We compare the formats in the evaluation harness before we change the default.
