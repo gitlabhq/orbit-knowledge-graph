@@ -269,7 +269,7 @@ mise schema:bump              # bumps the `schema:` pin in config/versions.yaml,
 mise run schema:generate:ddl  # regenerates the DDL (do NOT hand-edit graph.sql)
 ```
 
-This rewrites `config/graph.sql` (ClickHouse, for the Orbit API) and `config/graph_local.sql`
+This rewrites `config/graph.sql` (ClickHouse) and `config/graph_local.sql`
 (DuckDB, for the local graph). Expect:
 
 - `config/graph.sql`: a new `CREATE TABLE … gl_<node>` block + the version stamp.

@@ -21,8 +21,8 @@ Code layer
 Definition
 : A named code element, such as a class, function, method, or module. Its fully qualified name (`fqn`) includes the enclosing names.
 
-GitLab Orbit API
-: The API of GitLab Orbit on your GitLab instance. The API serves the graph that GitLab builds for each top-level group where GitLab Orbit is turned on. The graph holds the code of your repositories and software development lifecycle (SDLC) data, such as merge requests, pipelines, work items, and security findings. Queries run on GitLab and return only the data your role lets you see.
+GitLab Orbit
+: The product that builds a graph for each top-level group where GitLab Orbit is turned on, and answers queries on the graph. The graph holds the code of your repositories and software development lifecycle (SDLC) data, such as merge requests, pipelines, work items, and security findings. Queries run on GitLab and return only the data your role lets you see.
 
 GitLab Orbit CLI
 : The `orbit` binary. `glab orbit` installs it and forwards every command to it. The CLI queries the GitLab Orbit API, and also builds a local graph of the code on your machine. Some commands combine results from both.

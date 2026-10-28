@@ -15,7 +15,7 @@ Dashboard links and alert routing are on the [card](README.md).
 SLOs are defined in [`orbit.jsonnet`](https://gitlab.com/gitlab-com/runbooks/-/blob/master/metrics-catalog/services/orbit.jsonnet).
 SLO status per SLI: [Orbit overview](https://dashboards.gitlab.net/d/orbit-main/orbit3a-overview?var-PROMETHEUS_DS=mimir-analytics-eventsdot&var-environment=orbit-prd).
 The [error budget](https://dashboards.gitlab.net/d/product-orbit_error_budget) shows only the
-GitLab Rails part, not the Orbit service SLIs.
+GitLab Rails part, not the Orbit SLIs.
 
 ## Which page for which alert
 

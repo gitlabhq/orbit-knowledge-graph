@@ -7,31 +7,27 @@ A property graph built from GitLab instance data (SDLC metadata and source code 
 ### Product
 
 **Orbit**:
-The product. Previously named GitLab Knowledge Graph. Builds a property graph from GitLab data and serves queries against it.
-_Avoid_: KGaaS, Knowledge Graph Service
+The product, GitLab Orbit in user-facing text. Previously named GitLab Knowledge Graph. Builds a property graph from GitLab data and serves user-scoped, JWT-authenticated queries against it. One of the two products, with the **Orbit CLI**.
+_Avoid_: KGaaS, Knowledge Graph Service, Orbit Remote, "Orbit service"
 
 **GKG**:
 Retired engineering abbreviation for Orbit ("GitLab Knowledge Graph"). Still present in the binary name (`gkg-server`), metrics, and pinned wire/database names.
 _Avoid_: using GKG in user-facing contexts
 
 **Orbit API**:
-The Orbit service on a GitLab instance. Serves the graph that the **Orbit indexer** builds from GitLab SDLC and code data; queries are user-scoped and JWT-authenticated. Clients reach it through REST, GraphQL, MCP, GitLab Duo Agent Platform, and the **Orbit CLI**.
-_Avoid_: Orbit Remote, remote graph, "the server", "production GKG"
+The endpoints of **Orbit** on a GitLab instance (REST, GraphQL, and MCP) that the **Orbit CLI**, agents, and GitLab Duo Agent Platform call. A surface of **Orbit**, not a product.
+_Avoid_: remote graph, "the server", "production GKG"
 
 **Orbit CLI**:
-The `orbit` binary, a hybrid client of the **Orbit API** and the **Local graph**. `glab orbit` installs it and forwards all verbs to it. `query`, `status`, `schema`, and `skills` call the **Orbit API**. The `workspace` group (`index`, `sql`, `schema`, `list`, `mcp serve`) uses only the **Local graph**. `grep` and `context` combine both. They read the **Local graph**. They also search GitLab entities and read GitLab entity tokens such as `MergeRequest[42]` through the Orbit API grep and context endpoints.
+The second product, GitLab Orbit CLI in user-facing text: the `orbit` binary. It calls the **Orbit API** and also keeps a **Local graph**. `glab orbit` installs it and forwards all verbs to it. `query`, `status`, `schema`, and `skills` call the **Orbit API**. The `workspace` group (`index`, `sql`, `schema`, `list`, `mcp serve`) uses only the **Local graph**. `grep` and `context` combine both. They read the **Local graph**. They also search GitLab entities and read GitLab entity tokens such as `MergeRequest[42]` through the Orbit API grep and context endpoints.
 _Avoid_: Orbit Local, "local mode", "remote mode"
 
 **Local graph**:
 The DuckDB graph the **Orbit CLI** builds from a repository on the machine, for offline code analysis. `grep` and `context` index the working tree on their own.
 _Avoid_: Orbit Local
 
-**Orbit indexer**:
-The server-side Orbit process that builds the graph behind the **Orbit API** from SDLC data and repository code, and writes it to ClickHouse.
-_Avoid_: Orbit Remote
-
 **Skill Placeholder**:
-A line-oriented HTML comment that marks where a local section belongs in the standalone skill that the **Orbit API** serves. Builds require each placeholder to have one matching local section. Both source trees remain independently usable, and the current CLI still serves only its embedded local tree.
+A line-oriented HTML comment that marks where a local section belongs in the standalone skill that **Orbit** serves. Builds require each placeholder to have one matching local section. Both source trees remain independently usable, and the current CLI still serves only its embedded local tree.
 _Avoid_: include directive (the source files remain independently usable)
 
 ### Graph model
@@ -41,7 +37,7 @@ A data model where typed **Nodes** carry properties and typed directed **Relatio
 _Avoid_: knowledge graph (too vague), graph database (refers to the storage layer)
 
 **Node**:
-A typed entity in the property graph representing a GitLab object (e.g., Project, MergeRequest, File, Definition). Each node type is defined in the **Ontology** and stored in a dedicated table (ClickHouse behind the **Orbit API**, DuckDB in the **Local graph**). Called `entity` in the **Query DSL**.
+A typed entity in the property graph representing a GitLab object (e.g., Project, MergeRequest, File, Definition). Each node type is defined in the **Ontology** and stored in a dedicated table (ClickHouse in **Orbit**, DuckDB in the **Local graph**). Called `entity` in the **Query DSL**.
 _Avoid_: vertex
 
 **Relationship**:

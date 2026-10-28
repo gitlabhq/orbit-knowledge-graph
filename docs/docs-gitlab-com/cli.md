@@ -21,7 +21,7 @@ title: GitLab Orbit CLI
   - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment) in GitLab 18.10.
   - [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) from experiment to beta in GitLab 19.1.
 - [Generally available](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/259054) in GitLab 19.5.
-- Queries to the GitLab Orbit API [changed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/265010) to accept GQL by default in GitLab 19.4.4, 19.5.2, and 19.6.
+- GitLab Orbit queries [changed](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/265010) to accept GQL by default in GitLab 19.4.4, 19.5.2, and 19.6.
 
 {{< /history >}}
 
@@ -30,7 +30,7 @@ Your agent runs the same commands for you.
 
 The CLI uses two sources of data:
 
-- The GitLab Orbit API on your GitLab instance holds your GitLab data and the code on the default branch of each project.
+- GitLab Orbit on your GitLab instance holds your GitLab data and the code on the default branch of each project.
 - A [local graph](#local-graph) on your machine holds the code in your checkout, including commits that you have not pushed.
 
 ## Install the CLI
@@ -115,7 +115,7 @@ Commands that use only the local graph need no GitLab account and no network.
 
 For all flags, run `glab orbit <command> --help`.
 
-## Query the GitLab Orbit API
+## Query GitLab Orbit
 
 {{< details >}}
 
@@ -189,16 +189,16 @@ Use only one of `--full-path`, `--namespace-id`, and `--project-id`.
 
 The local graph holds the code on your machine, so your agent can find definitions, callers, and imports
 in code that you committed but have not pushed. It works offline and needs no GitLab account.
-For merge requests, pipelines, work items, and vulnerabilities, use the [GitLab Orbit API](#query-the-gitlab-orbit-api).
+For merge requests, pipelines, work items, and vulnerabilities, use [GitLab Orbit](#query-gitlab-orbit).
 
-| Attribute | Local graph | GitLab Orbit API |
-|-----------|-------------|------------------|
+| Attribute | Local graph | GitLab Orbit |
+|-----------|-------------|--------------|
 | Data | Code only | GitLab data and code |
 | Code version | The checkout on your machine, including commits that you have not pushed | The default branch of each project |
 | Refresh | `grep` and `context` index new commits and edited files, or you run `glab orbit workspace index` | Automatic |
 | Query with | `grep`, `context`, and `workspace sql` | `query`, the MCP endpoint, the REST API, and GitLab Duo Agent Platform |
 
-Your agent can use the local graph and the GitLab Orbit API in the same conversation.
+Your agent can use the local graph and GitLab Orbit in the same conversation.
 
 ### Index a repository
 

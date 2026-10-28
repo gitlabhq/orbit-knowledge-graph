@@ -116,7 +116,7 @@ To resolve this issue, ask your agent the example questions in
 If the command fails with `could not fetch the "orbit-start" skill` instead, the CLI cannot reach your instance.
 Sign in with `glab auth login`, then run the command again.
 
-## Queries to the GitLab Orbit API
+## Queries to GitLab Orbit
 
 {{< details >}}
 

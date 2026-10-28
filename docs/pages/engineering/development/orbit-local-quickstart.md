@@ -86,7 +86,7 @@ resulting DuckDB graph with SQL:
 
 Revision graphs and a separate manifest are written under `~/.gitlab/orbit/local/`. `orbit workspace schema` lists every
 table and column in it. The local graph is queried with DuckDB SQL only; the
-query language documented under `docs/docs-gitlab-com/queries/` applies to the Orbit API.
+query language documented under `docs/docs-gitlab-com/queries/` applies to GitLab Orbit.
 
 ## Run tests without infrastructure
 
