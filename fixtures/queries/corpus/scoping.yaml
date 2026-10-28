@@ -671,6 +671,7 @@ mr_ids_changed_paths_agg:
   desc: "Most-changed file paths across pinned MergeRequests: MergeRequest (pinned ids) HAS_LATEST_DIFF -> MergeRequestDiff HAS_FILE -> MergeRequestDiffFile, grouped by old_path. The pinned MR ids resolve to their project traversal_path, which floods across the same_namespace diff edges so both edge dedup scans and the diff-file aggregation seek the project's PK range instead of the whole authorized diff-file subtree."
   category: aggregation
   suite: scoping
+  expect: error # free-text group key across several owners
   query: |
     MATCH (mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
     WHERE mr.id IN $sample
@@ -682,6 +683,7 @@ pipeline_filter_changed_paths_agg:
   desc: "Most-changed file paths under a project's failed merge_request_event pipelines: Pipeline (project_id/status/source filters) <-TRIGGERED- MergeRequest -HAS_LATEST_DIFF-> MergeRequestDiff -HAS_FILE-> MergeRequestDiffFile, grouped by old_path. A filter-anchored FK-backed chain lowers to node FK joins (pl.merge_request_id, mr.latest_merge_request_diff_id, f.merge_request_diff_id) rather than edge scans, which is both faster and avoids stale HAS_LATEST_DIFF edge over-counting."
   category: aggregation
   suite: scoping
+  expect: error # free-text group key across several owners
   query: |
     MATCH (pl:Pipeline {project_id: {{PROJECT_ID}}, status: 'failed', source: 'merge_request_event'})<-[:TRIGGERED]-(mr:MergeRequest)-[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
     RETURN f.old_path, count(f) AS changes

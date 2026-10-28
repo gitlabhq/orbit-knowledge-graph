@@ -356,6 +356,7 @@ ci_pipeline_034_by_ref:
   desc: "Ci pipeline 034 by ref"
   category: aggregation
   suite: grouping_stress
+  expect: error # free-text group key across several owners
   query: |
     MATCH (pipe:Pipeline {status: 'success'})
     RETURN pipe.ref, count(pipe) AS pipeline_count
@@ -451,6 +452,7 @@ ci_job_043_by_ref:
   desc: "Ci job 043 by ref"
   category: aggregation
   suite: grouping_stress
+  expect: error # free-text group key across several owners
   query: |
     MATCH (job:Job {status: 'success'})
     RETURN job.ref, count(job) AS job_count
@@ -472,6 +474,7 @@ ci_stage_045_by_name:
   desc: "Ci stage 045 by name"
   category: aggregation
   suite: grouping_stress
+  expect: error # free-text group key across several owners
   query: |
     MATCH (stage:Stage {status: 'success'})
     RETURN stage.name, count(stage) AS stage_count
@@ -503,6 +506,7 @@ ci_deployment_048_by_ref:
   desc: "Ci deployment 048 by ref"
   category: aggregation
   suite: grouping_stress
+  expect: error # free-text group key across several owners
   query: |
     MATCH (dep:Deployment)
     WHERE dep.status IN ['success', 'failed', 'running']
@@ -633,6 +637,7 @@ code_review_mr_063_by_target_branch:
   desc: "Code review mr 063 by target branch"
   category: aggregation
   suite: grouping_stress
+  expect: error # free-text group key on a per-entity type
   query: |
     MATCH (mr:MergeRequest {state: 'merged'})
     RETURN mr.target_branch, count(mr) AS merge_request_count

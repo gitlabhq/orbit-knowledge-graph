@@ -755,6 +755,7 @@ e09_mr_notes_per_author:
 e10_mrs_per_label_project:
   desc: "MRs per label project"
   category: aggregation
+  expect: error # free-text group key across several owners
   query: |
     MATCH (mr:MergeRequest {project_id: {{KG_PROJECT_ID}}, state: 'merged'})-[:HAS_LABEL]->(l:Label)
     RETURN l.title, count(mr) AS n
@@ -764,6 +765,7 @@ e10_mrs_per_label_project:
 e11_weight_per_milestone:
   desc: "Weight per milestone"
   category: aggregation
+  expect: error # free-text group key across several owners
   query: |
     MATCH (w:WorkItem {project_id: {{GITLAB_PROJECT_ID}}})-[:IN_MILESTONE]->(m:Milestone)
     WHERE m.title STARTS WITH '18.'
@@ -858,6 +860,7 @@ e21_approvals_per_user_project:
 e22_runner_failed_jobs:
   desc: "Runner failed jobs"
   category: aggregation
+  expect: error # free-text group key on a per-entity type
   query: |
     MATCH (j:Job {project_id: {{GITLAB_PROJECT_ID}}, status: 'failed'})-[:RUNS_ON]->(r:Runner)
     WHERE j.created_at >= '2026-10-10'
@@ -1069,6 +1072,7 @@ i07_defs_fqn_contains:
 i08_callers_count_by_file:
   desc: "Callers count by file"
   category: code_graph
+  expect: error # free-text group key across several owners
   query: |
     MATCH (c:Definition)-[:CALLS]->(d:Definition {id: {{DEFINITION_ID}}})
     RETURN c.file_path, count(c) AS n
@@ -1139,6 +1143,7 @@ n06_mr_notes_contains:
 n07_failed_mr_pipeline_diff_files:
   desc: "Diff files behind failed MR pipelines (FK chain with the key on the target side)"
   category: aggregation
+  expect: error # free-text group key across several owners
   query: |
     MATCH (pl:Pipeline {status: 'failed', source: 'merge_request_event'})<-[:TRIGGERED]-(mr:MergeRequest)
       -[:HAS_LATEST_DIFF]->(d:MergeRequestDiff)-[:HAS_FILE]->(f:MergeRequestDiffFile)
