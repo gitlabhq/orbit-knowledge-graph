@@ -28,7 +28,7 @@ steps:
       checkpoint:
         - { key: ns.100.MergeRequest, watermark: "2024-01-20 00:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 00:00:00.000000" }
       merge_requests:
-        - { id: 10, iid: 101, title: Add auth v2, description: Auth feature, source_branch: feat-auth, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/", _siphon_replicated_at: "2024-02-01 00:00:00" }
+        - { id: 10, iid: 101, title: Add auth v2, description: Auth feature, source_branch: feat-auth, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-20 18:00:00" }
     expect:
       edges:
         - kind: APPROVED

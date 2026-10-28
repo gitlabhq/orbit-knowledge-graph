@@ -18,8 +18,8 @@ steps:
       checkpoint:
         - { key: ns.100.DuoWorkflow, watermark: "2024-01-20 00:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 00:00:00.000000" }
       siphon_duo_workflows_workflows:
-        - { id: 1, user_id: 0, project_id: 0, status: 0, goal: "", created_at: "1970-01-01 00:00:00", updated_at: "1970-01-01 00:00:00", traversal_path: "1/100/1000/", _siphon_deleted: true, _siphon_replicated_at: "2024-02-01 00:00:00" }
-        - { id: 2, user_id: 0, project_id: null, status: 0, goal: "", created_at: "1970-01-01 00:00:00", updated_at: "1970-01-01 00:00:00", traversal_path: "1/100/1000/", _siphon_deleted: true, _siphon_replicated_at: "2024-02-01 00:00:00" }
+        - { id: 1, user_id: 0, project_id: 0, status: 0, goal: "", created_at: "1970-01-01 00:00:00", updated_at: "1970-01-01 00:00:00", traversal_path: "1/100/1000/", _siphon_deleted: true, _siphon_replicated_at: "2024-01-20 18:00:00" }
+        - { id: 2, user_id: 0, project_id: null, status: 0, goal: "", created_at: "1970-01-01 00:00:00", updated_at: "1970-01-01 00:00:00", traversal_path: "1/100/1000/", _siphon_deleted: true, _siphon_replicated_at: "2024-01-20 18:00:00" }
     expect:
       nodes:
         gl_duo_workflow: { count: 0 }
