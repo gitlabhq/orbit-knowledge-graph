@@ -17,6 +17,7 @@ pipelines:
       tables: [siphon_merge_requests_closing_issues]
       fields: [merge_request_id, issue_id]
       order_by: [traversal_path, issue_id, id]
+      filter: "link_type = 0"
       query: generated
       lookups:
         - { node: MergeRequest, id: merge_request_id }

@@ -1,0 +1,41 @@
+description: Approval rows keep User source tags on APPROVED edges after a newer merge request row is indexed
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/" }
+      siphon_users:
+        - { id: 1, email: human@example.com, username: human, name: Human, state: active, admin: false, auditor: false, external: false, private_profile: false, user_type: 0, organization_id: 1 }
+        - { id: 2, email: bot@example.com, username: review-bot, name: Review Bot, state: active, admin: false, auditor: false, external: false, private_profile: false, user_type: 16, organization_id: 1 }
+      merge_requests:
+        - { id: 10, iid: 101, title: Add auth, description: Auth feature, source_branch: feat-auth, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-15 09:00:00" }
+      siphon_approvals:
+        - { id: 1, merge_request_id: 10, user_id: 1, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", project_id: 1000, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-15 10:00:00" }
+        - { id: 2, merge_request_id: 10, user_id: 2, created_at: "2024-01-15 11:00:00", updated_at: "2024-01-15 11:00:00", project_id: 1000, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-15 11:00:00" }
+    expect:
+      edges:
+        - kind: APPROVED
+          from: User
+          to: MergeRequest
+          traversal_path: "1/100/"
+          count: 2
+          source_tags:
+            1: ["is_admin:false", "is_auditor:false", "is_external:false", "private_profile:false", "state:active", "user_type:human"]
+            2: ["is_admin:false", "is_auditor:false", "is_external:false", "private_profile:false", "state:active", "user_type:duo_code_review_bot"]
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.MergeRequest, watermark: "2024-01-20 00:00:00.000000", cursor_values: "null", indexed_at: "2024-01-20 00:00:00.000000" }
+      merge_requests:
+        - { id: 10, iid: 101, title: Add auth v2, description: Auth feature, source_branch: feat-auth, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/", _siphon_replicated_at: "2024-02-01 00:00:00" }
+    expect:
+      edges:
+        - kind: APPROVED
+          from: User
+          to: MergeRequest
+          traversal_path: "1/100/"
+          count: 2
+          source_tags:
+            1: ["is_admin:false", "is_auditor:false", "is_external:false", "private_profile:false", "state:active", "user_type:human"]
+            2: ["is_admin:false", "is_auditor:false", "is_external:false", "private_profile:false", "state:active", "user_type:duo_code_review_bot"]
