@@ -1,4 +1,4 @@
-# Orbit engineering
+# Engineering
 
 These pages tell the Orbit team how GitLab Orbit is built, tested, and operated.
 The user documentation is in [`docs-gitlab-com`](../../docs-gitlab-com/).

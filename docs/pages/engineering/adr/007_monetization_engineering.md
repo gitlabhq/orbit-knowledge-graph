@@ -1,816 +1,373 @@
-# ADR 007: Orbit monetization engineering
-
-**Date:** 2026-03-26
-**Last updated:** 2026-06-26
-**Author:** `@michaelangeloio`, `@snachnolkar`
-**Status:** Draft
-**Epic:** [GKG Monetization Engineering (&21198)](https://gitlab.com/groups/gitlab-org/-/epics/21198)
-**Parent Epic:** [GKG Core Development Workstream &20357](https://gitlab.com/groups/gitlab-org/-/epics/20357)
-**Related:**
-
-- [ADR 006: Orbit + DAP integration (MR !709)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/709)
-- [GKG Instrumentation for Usage Billing epic &20762](https://gitlab.com/groups/gitlab-org/-/epics/20762)
-- [Zero-rating meeting notes (2026-03-11)](https://docs.google.com/document/d/1JbzhTtlF4rDMhmIjNkmDwLQyLovRmDlaGprw5yc-rOw)
-- [GA Launch Super Document](https://docs.google.com/document/d/1UD5E_53bMfX6IYRVu41KGZ7NGh-wObXrOA0EizI_d0U)
-
+---
+title: "ADR 007: Orbit monetization engineering"
+creation-date: "2026-03-26"
+last-updated: "2026-06-26"
+authors: [ "@michaelangeloio", "@snachnolkar" ]
+toc_hide: true
 ---
 
-## 1. Context
+## Status
 
-Orbit has four consumption channels with different billing models per deployment type:
+Draft
 
-| Channel | .com / Dedicated (GitLab-hosted) | Self-managed / customer-hosted |
-|---------|----------------------------------|-------------------------------|
-| **DAP (DWS)** | Zero-rated (bundled with Duo seat) | Included* |
-| **Frontend (Dashboard)** | Included in license | Included in license |
-| **Core (Internal)** | N/A (infrastructure) | N/A (infrastructure) |
-| **External (MCP, glab CLI)** | Metered per-query via Credits | Included* |
+## Date
 
-> **Note:** Pricing model for self-managed and customer-hosted Dedicated is subject to change. Phase 1 instrumentation covers all deployments so the billing pipeline can be extended if needed.
+2026-03-26
 
----
+## Context
 
-## 2. Decision
+Orbit needed a way to bill queries by channel that users cannot fake.
+Orbit has four consumption channels, and each deployment type bills them differently.
+GitLab Duo Agent Platform (DAP) agents call Orbit through the Duo Workflow Service (DWS).
+The frontend dashboard calls Orbit for a user in the browser.
+Core callers are internal services, such as the indexer.
+External callers use the Model Context Protocol (MCP) endpoint, the GitLab command-line interface (CLI), or the REST API.
 
-Split monetization into four phases. Phases 1 and 2 run in parallel from the start. Phase 3 depends on Phase 1. Phase 4 depends on both.
+| Channel | Request path | Authentication | GitLab.com and GitLab-hosted Dedicated | Customer-hosted GitLab Dedicated | GitLab Self-Managed |
+|---|---|---|---|---|---|
+| DAP | User to Rails to DWS to Rails to Orbit | OAuth token with the workflow scope, plus a signed service token from Phase 3 | Zero-rated, bundled with the Duo seat | Included, seat-based | Included, GB-based fee |
+| Frontend | User to Rails to Orbit | User JSON Web Token (JWT) | Included in the license | Included in the license | Included in the license |
+| Core | Rails service to Orbit | System JWT | Not applicable, infrastructure | Not applicable, infrastructure | Not applicable, infrastructure |
+| External | Agent to Rails OAuth to Orbit | OAuth and user JWT | Metered per query with credits | Metered per query with credits | Included, GB-based fee |
 
-1. **Instrumentation** (April): propagate source type from Rails to GKG via JWT claims. Wire the GKG webserver to emit billable events via `labkit-rs` (OIDC-authenticated Snowplow). Add a pre-execution CustomersDot quota check. No AIGW work.
-2. **Tier enforcement** (April, parallel): gate all Orbit endpoints behind `licensed_feature_available?(:orbit)` for Premium/Ultimate.
-3. **Zero-rate enforcement** (May): a signed service token (Workhorse-signed JWT) on DWS calls to tamper-proof the channel tag on .com and GitLab-hosted Dedicated.
-4. **CDot billing pipeline** (May to June): flat-rate multiplier pricing in CDot and a credits dashboard. Zero-rating is applied by the `source_type` multiplier on the GKG event, so no separate DAP-side flag is needed.
+On GitLab.com and GitLab-hosted Dedicated, DAP usage is zero-rated and MCP and CLI usage is charged.
+So a user must not be able to make a query look like DAP traffic to get it free.
+GitLab Self-Managed and customer-hosted GitLab Dedicated have no per-query billing today, so the channel is for analytics only.
+Their pricing model can change, so instrumentation covers every deployment and the billing pipeline can extend to them later.
 
-Rails does not emit billing events. It acts as a proxy. Billing events are emitted by the service that executes the work. The GKG webserver emits the per-query billable event. The indexer emits volume events where GB-based pricing applies.
+## Decision
 
-### Alternatives considered
+**The service that executes the work emits the billing event, and Rails only acts as a proxy.**
 
-**Emit billing events from Rails instead of GKG.** Rejected because Rails is a proxy. The GKG webserver has the actual execution data (latency, result count before redaction, cache hits) that Rails doesn't see. Emitting from GKG also aligns with the billing service connection pattern being built for other Rust/Go services.
+Orbit emits one billable event for each query.
+The indexer will emit volume events where GB-based pricing applies.
+The AI Gateway and DWS keep their own DAP completion event, and they do not annotate Orbit calls.
 
-**Suppress billing events for zero-rated channels instead of using multipliers.** Rejected per the zero-rating meeting. Fulfillment requires every access to emit an event. Zero-rating is a CDot-side multiplier, not event suppression.
+We split the work into four phases:
 
-**Use `ai_workflows` OAuth scope alone for zero-rate enforcement.** Insufficient. A user can extract the token from browser dev tools (valid 2 hours) and call the API directly. Good enough for Phase 1 analytics, but Phase 3 adds a signed service token for tamper-proof billing.
+1. Instrumentation, in April: Rails sends the source type, and Orbit emits billable events and checks quota before each metered query.
+1. Tier enforcement, in April and in parallel: every Orbit endpoint requires GitLab Premium or GitLab Ultimate.
+1. Zero-rate enforcement, in May, after Phase 1: a signed service token proves that a request came from DWS.
+1. CustomersDot billing pipeline, from May to June: flat-rate multiplier pricing in CustomersDot, plus a credits dashboard.
 
-**Use correlation IDs to zero-rate GKG billing events.** Rejected for billing purposes. The idea was to link the DAP billing event and the GKG billing event by correlation ID. Then CDot could suppress the GKG charge when it sees a matching DAP event. At the [zero-rating meeting](https://docs.google.com/document/d/1JbzhTtlF4rDMhmIjNkmDwLQyLovRmDlaGprw5yc-rOw), Fulfillment confirmed: *"We don't support that currently. We have a CorrelationId field but we use it for logging/tracing purposes only."* Each billing event must stand alone with its own `source_type` to determine its multiplier. Correlation IDs are still propagated end-to-end for observability and tracing (Rails → GKG via gRPC metadata, as they are today), just not used for billing decisions.
+Phase 1 needs no AI Gateway work.
+Phase 3 depends on Phase 1, because events must exist before their tags need to be accurate.
+Phase 4 depends on Phase 1 for the events and on Phase 3 for a trusted channel.
 
-**Do quota checks in Rails instead of GKG.** Considered since Rails already has CDot subscription data via `ServiceAccessToken`. Rejected because GKG already owns billable-event emission and integrates with CustomersDot, so it can run the quota check itself. Doing the check in GKG keeps the billing logic co-located with the service that executes queries and avoids adding latency to the Rails proxy layer. This also matches AIGW's pattern where the executing service (not the proxy) owns quota enforcement.
+The phases apply to each deployment type as follows:
 
-**Use Cloud Connector IJWTs for GKG auth.** Not needed for the Rails→GKG gRPC connection (co-located, HS256 shared secret is fine). Cloud Connector is designed for SM/Dedicated instances reaching GitLab-operated cloud services over the internet. GKG runs alongside the GitLab instance, not as a centralized cloud service. However, for GA, registering `orbit_query` as a [unit primitive](https://docs.gitlab.com/ee/development/cloud_connector/architecture.html) in `gitlab-cloud-connector` is the right path if Orbit becomes a separately purchasable add-on. This would let CDot control Orbit access via subscription status and is additive to the current approach.
+| Deployment | Instrumentation | Tier gate | Zero-rate enforcement | CustomersDot billing |
+|---|---|---|---|---|
+| GitLab.com | Yes | Yes | Yes | Yes, credits |
+| GitLab-hosted Dedicated | Yes | Yes | Yes, with the tenant secret | Yes, credits |
+| Customer-hosted GitLab Dedicated | Yes, analytics only | Yes | No, seat-based pricing | No |
+| GitLab Self-Managed | Yes, analytics only | Yes | No, GB-based fee | No |
 
----
-
-## 3. Architecture overview
-
-```plantuml
-@startuml
-skinparam componentStyle rectangle
-skinparam backgroundColor #FEFEFE
-skinparam package {
-  BackgroundColor<<rails>> #E8EAF6
-  BorderColor<<rails>> #3949AB
-  BackgroundColor<<gkg>> #E8F5E9
-  BorderColor<<gkg>> #2E7D32
-}
-skinparam component {
-  BackgroundColor #FFFFFF
-  BorderColor #546E7A
-}
-skinparam database {
-  BackgroundColor #FFF3E0
-  BorderColor #E65100
-}
-
-title Orbit billing event flow
-
-actor "User\n(Browser)" as user #B3E5FC
-actor "MCP Client\n(glab, agent)" as mcp_client #CE93D8
-actor "DWS\n(DAP Agent)" as dws #A5D6A7
-
-package "GitLab Rails" <<rails>> {
-  component "Orbit REST API\n/api/v4/orbit/*" as rest_api
-  component "Orbit MCP API\n/api/v4/orbit/mcp" as mcp_api
-  component "Internal API\n/api/v4/internal/orbit/*" as internal_api
-  component "Channel Detection\nfrontend_request? / ai_workflows / endpoint path" as channel_detect #C5CAE9
-}
-
-package "GKG Service (Rust)" <<gkg>> {
-  component "Webserver\n(gRPC, Tonic)" as gkg_web
-  component "Indexer\n(ETL engine)" as gkg_indexer
-  component "Query Pipeline\nSecurity → Compile → Execute → Redact → Output" as pipeline
-}
-
-database "ClickHouse" as ch
-cloud "GitLab Snowplow\ncollector → DAP → CDot" as snowplow #F3E5F5
-database "CustomersDot\n(quota)" as cdot #FFCCBC
-
-user --> rest_api : session + CSRF
-mcp_client --> mcp_api : OAuth (mcp_orbit scope)
-dws --> rest_api : OAuth (ai_workflows) + signed token
-
-rest_api --> channel_detect
-mcp_api --> channel_detect
-channel_detect --> gkg_web : gRPC + JWT\n(includes source_type claim)
-
-internal_api --> gkg_web : gRPC + JWT\n(gkg-indexer: subject)
-
-gkg_web --> pipeline
-pipeline --> ch : SQL query
-gkg_web -[#E65100]-> cdot : quota check\n(/consumers/resolve, mcp/rest)
-gkg_web -[#D84315]-> snowplow : billable_usage event\n(labkit-rs, OIDC)
-
-gkg_indexer --> ch : write indexed data
-gkg_indexer -[#D84315]-> snowplow : volume event (planned)
-@enduml
+```mermaid
+sequenceDiagram
+    accTitle: Orbit billing event flow
+    accDescr: A caller sends a request to Rails. Rails detects the channel and calls Orbit with a signed token that carries the source type. Orbit checks quota with CustomersDot for metered channels, runs the query on ClickHouse, and emits a billable event to the Snowplow collector. DWS emits its own DAP completion event.
+    participant C as Caller
+    participant R as Rails
+    participant O as Orbit
+    participant CD as CustomersDot
+    participant CH as ClickHouse
+    participant S as Snowplow collector
+    participant D as DWS
+    C->>R: API request
+    R->>R: Detect the channel
+    R->>O: gRPC call with a signed token and the source type
+    O->>CD: Quota check for metered channels
+    CD-->>O: Allow or deny
+    O->>CH: Run the query
+    CH-->>O: Results
+    O->>O: Redact and format the output
+    O-)S: Billable usage event
+    O-->>R: Query response
+    R-->>C: HTTP response
+    D-)S: DAP completion event
 ```
 
-## 4. Consumption matrix
+### Source type
 
-Four channels, each with different auth and billing per deployment type:
+Rails sends the source type to Orbit only as a claim in the signed JWT, and never as a field in the gRPC request body.
 
-| Channel | Request path | Auth | .com / Dedicated (GitLab-hosted) | Dedicated (customer-hosted) | Self-managed |
-|---------|-------------|------|----------------------------------|----------------------------|--------------|
-| **DAP (DWS)** | User → Rails → DWS → Rails → GKG | OAuth (`ai_workflows` scope) + signed service token (Phase 3) | Zero-rated (bundled with Duo seat) | Included (seat-based) | Included (GB-based fee) |
-| **Frontend (Dashboard)** | User → Rails → GKG (gRPC) | User JWT (HS256) | Included in license | Included in license | Included in license |
-| **Core (Internal)** | Rails service → GKG | System JWT (HS256) | N/A (infrastructure) | N/A (infrastructure) | N/A (infrastructure) |
-| **External (MCP, glab CLI)** | Agent → Rails OAuth → GKG | OAuth + User JWT | Metered per-query via Credits | Metered per-query via Credits | Included (GB-based fee) |
+Rails signs the JWT with the shared secret, so Orbit can trust the claim.
+Any caller could set an unsigned body field, so it would carry no trust.
+The claim is required, so Orbit rejects a token without it and reads an unknown value as REST.
+The source types are frontend, DWS, MCP, core, REST, and code intelligence.
 
-On .com and GitLab-hosted Dedicated, DAP usage is zero-rated while MCP/CLI usage is charged. The signed service token (Phase 3) prevents users from spoofing DAP origin to get free queries. On self-managed and customer-hosted Dedicated there is no per-query billing today, so the distinction is analytics-only.
+| Source type | Caller | How Rails detects it |
+|---|---|---|
+| MCP | MCP clients and the GitLab CLI | The request reaches the MCP endpoint, which is its own endpoint class, so the channel is MCP by definition |
+| Core | Internal services, such as the indexer | The request reaches the internal API, which accepts only an indexer token |
+| Frontend | The browser | The cross-site request forgery (CSRF) token matches the session |
+| DWS | DAP agents | In Phase 1, the OAuth token has the workflow scope. In Phase 3, the request carries a valid Workhorse-signed token. |
+| REST | External REST callers with a personal access token or OAuth | None of the other checks match |
 
-**Note on self-managed and customer-hosted Dedicated pricing:** The billing model for these deployments (currently seat-based and GB-based respectively) is subject to change. The instrumentation in Phase 1 captures usage data on all deployments regardless of billing model. So if pricing changes later, the data pipeline is already in place.
+The MCP and internal endpoints set the source type from the endpoint itself.
+On the REST endpoints, Rails checks the CSRF token first, and then the OAuth scope.
+In Phase 3, the Workhorse-signed token check comes first.
 
-### Billing event emission points
+Only the Rails workflow services create tokens with the workflow scope, and users cannot create personal access tokens with it.
+A user can still copy a short-lived DWS token from the browser developer tools and call the API directly.
+That risk is acceptable for Phase 1 analytics, and Phase 3 closes it.
 
-Rails does **not** emit billing events. It acts as a proxy only. Billing events are emitted from the services that actually execute the work:
+Orbit uses the source type in three places:
+
+- The billable event, as an Orbit feature name for each source type
+- The quota check, which runs only for MCP and REST
+- The quota metrics and the query analytics context, so dashboards show quota decisions and billing volume by channel
+
+Query pipeline latency metrics stay labeled by query type.
 
-| Emitter | What it captures | Transport | Notes |
-|---------|-----------------|-----------|-------|
-| **GKG webserver** (Rust) | Every query execution: source type, query type, namespace, execution metrics | Snowplow `billable_usage` event via `labkit-rs`, OIDC-authenticated ([orbit/kg#307](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307)) | Source of truth for per-query billing. Receives `source_type` from Rails via JWT claims. The `orbit-billing` crate builds and emits the event; the single `Claims` to `BillingInputs` conversion lives at `crates/orbit-server/src/billing_adapter.rs`. |
-| **GKG indexer** (Rust) | Indexing volume: entities indexed, bytes written, namespace | Same `labkit-rs` Snowplow path (planned) | Drives GB-based pricing on self-managed. `EngineMetrics` already tracks `destination_rows_written` and `destination_bytes_written`. |
-| **AIGW/DWS** (Python) | DAP usage, independent of Orbit | Snowplow `BillingEventsClient` (`iglu:com.gitlab/billable_usage/jsonschema/1-0-2`) | Emits the existing `DAP_FLOW_ON_COMPLETION` event as usual. It does not annotate GKG calls. GKG-from-DAP metering is the `source_type = 'dws'` GKG event, zero-rated by multiplier. |
+### Billing attribution
+
+An Orbit query has no namespace context, because every query covers all top-level namespaces that the user can access.
+Rails must resolve the billing namespace before it calls Orbit.
+
+Each user has an Orbit governing namespace preference, and Rails sends it as the root namespace claim.
 
-### Billing event transport (orbit/kg#307)
+The candidates are the Premium or Ultimate namespaces where the user is a member.
+If exactly one candidate exists, Rails sets the preference without asking.
+If the preference is empty and more than one candidate exists, MCP and REST queries return an error that points to the setting.
+The setting is in the user preferences, next to the Duo default namespace selector, and shows only when the user has more than one candidate.
+Rails resolves the preference on the server for each request, and Orbit reads only the signed claim.
+
+A GitLab.com request with no root namespace claim skips the quota check, and Orbit drops its billing event.
+CustomersDot attributes GitLab.com usage to the root namespace, so neither can work without it.
+Rails should block these requests before they reach Orbit.
 
-GKG emits billable events as Snowplow structured events through `labkit-rs` (the `labkit_events` tracker). Each event carries the `iglu:com.gitlab/billable_usage/jsonschema/1-0-2` self-describing context. Downstream, the Data Insights Platform ingests the events and CustomersDot's hourly mediation processes them. The OIDC support in `labkit-rs` is tracked in [orbit/kg#307](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307).
+We accept that every Orbit event bills to the governing namespace, even when the user queries content in other namespaces.
 
-The tracker's authentication is selected by `billing.auth_mode`. On GitLab.com (SaaS) it authenticates to the collector with OIDC tokens minted from the workload identity, so no static egress IP allowlist is required. On Self-Managed / Dedicated there is no workload identity. GKG instead pulls the Cloud Connector instance token (a CustomersDot-minted JWT held in the Rails DB) from a Rails internal route. It caches the token in memory and presents it as the collector `Authorization` header. The pull-and-cache design (rather than a per-request JWT claim) is required because indexer-path emission is CDC/cron-driven with no request JWT.
+### Billable events
 
-The token cache (`crates/gitlab-client/src/cc_token.rs`) refreshes inline on the send path:
+Orbit emits each event after a successful query execution.
+One conversion point in the billing code turns the token claims into billing inputs.
+The event carries these fields:
 
-- It schedules the next refresh 30 minutes (plus up to 30 seconds of jitter) before the token's `exp`. The synced token lives for days, so each pod usually calls Rails about once per token lifetime.
-- A fetch can fail with an HTTP error, a non-200 status, or a malformed JWT. If a cached token already exists, a failure keeps serving it and blocks further Rails calls for 60 seconds. The same 60-second limit applies to a token Rails returns already close to expiry, so it doesn't cause a fetch per event. Before any token has ever been fetched, there is nothing to rate-limit around, so every call retries immediately.
-- While the cached token is still valid, the fetch is capped at 15 seconds, matching labkit's own OIDC token source. Otherwise a hung Rails would stall the whole billing send loop, not just this refresh. With no cached token, or only an expired one, there's nothing to protect by giving up early. The collector would reject the expired token anyway, so the fetch waits out `GitlabClient`'s own timeouts instead.
-- If the cached token has expired and Rails still cannot supply a new one, the cache sends the expired token anyway. The GitLab-hosted collector rejects it with `401`, so the error is visible on the hosted collector instead of failing silently on the customer's instance.
+| Field | Source | Content |
+|---|---|---|
+| Realm | Token claims | GitLab.com or GitLab Self-Managed |
+| User and global user ID | Token claims | Caller identity |
+| Root namespace | Token claims, governing namespace | Attribution on GitLab.com |
+| Organization | Token claims | Attribution |
+| Instance and unique instance ID | Token claims | Attribution on GitLab Self-Managed and Dedicated |
+| Feature name | Source type | One Orbit feature name for each source type |
+| Unit and quantity | Constant | One request for each query |
+| Metadata | Pipeline context and server build | Query type, Orbit version, compile time, execute time, and row count |
 
-For the equivalent OIDC pattern in Go, see the [labkit-go proof of concept](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/98#note_3108588468) and the [server-side validation MR](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/merge_requests/106).
+Delivery is asynchronous: Orbit queues events in memory, sends them from a background task, and drains the queue at shutdown.
+The billing drain and the analytics drain run at the same time, so a slow collector on one side does not delay the other.
 
-The collector path is OIDC-authenticated rather than IP-allowlisted because GKG has no static egress IPs.
+The planned indexer events report, for each indexing batch, the namespace, the rows written, the bytes written, and the entity type.
+They drive GB-based pricing on GitLab Self-Managed.
 
-### Source type propagation
+### Event transport
 
-Rails determines the caller channel and passes it to GKG via JWT claims. GKG uses this to tag its billing events, gate its quota check, and label its quota metrics and analytics context:
+Orbit sends billable events as Snowplow structured events through the shared LabKit event library.
+Each event carries the self-describing billable usage context.
+The Data Insights Platform ingests the events, and the hourly CustomersDot mediation processes them.
 
-```plantuml
-@startuml
-skinparam backgroundColor #FEFEFE
-skinparam participant {
-  BorderColor #37474F
-}
-skinparam note {
-  BackgroundColor #E8EAF6
-  BorderColor #3949AB
-}
-skinparam sequence {
-  ArrowColor #37474F
-  LifeLineBorderColor #78909C
-}
+Orbit authenticates to the collector with tokens, because Orbit has no static egress IP addresses for an allowlist.
 
-title Source type propagation and billing event emission
+On GitLab.com, Orbit mints OpenID Connect (OIDC) tokens from its workload identity.
+GitLab Self-Managed and Dedicated have no workload identity.
+There, Orbit pulls the Cloud Connector instance token from an internal Rails endpoint and sends it in the authorization header.
+CustomersDot mints that token, and Rails stores it.
+A token claim for each request would not work, because indexer events come from change data capture and scheduled jobs with no request token.
 
-participant "Caller\n(Browser / MCP / DWS / Internal)" as caller #B3E5FC
-participant "Rails" as rails #C5CAE9
-participant "GKG Webserver" as gkg #C8E6C9
-database "ClickHouse" as ch #FFF3E0
-participant "CustomersDot" as cdot #FFE0B2
-participant "GitLab Snowplow\ncollector" as snowplow #F3E5F5
+Orbit caches the instance token in memory and refreshes it on the send path:
 
-caller -> rails : API request
-activate rails #C5CAE9
+- Orbit refreshes the token some time before it expires, with jitter.
+  The token lives for days, so each pod calls Rails about once for each token.
+- If a fetch fails and a cached token exists, Orbit keeps the cached token and waits a short time before it calls Rails again.
+- The same wait applies when Rails returns a token that is close to expiry, so a fetch does not happen for each event.
+- Before the first token arrives, every call retries immediately, because no token exists to protect.
+- While the cached token is valid, a fetch has a short timeout, so a hung Rails cannot stall the billing send loop.
+- With no valid token, the fetch waits for the client timeouts, because the collector rejects an expired token anyway.
+- If the token has expired and Rails cannot supply a new one, Orbit sends the expired token.
+  The hosted collector rejects it, so GitLab sees the error instead of it staying hidden on the customer instance.
 
-rails -> rails : detect channel\n(CSRF? ai_workflows? endpoint path?)
-note right of rails
-  source_type =
-    frontend | dws | mcp | core | rest
-end note
+### Quota check
 
-rails -[#2E7D32]> gkg : gRPC call + JWT\n(source_type in claims)
-activate gkg #C8E6C9
+Before it runs a query on a metered channel, Orbit asks CustomersDot whether the namespace has credits, and it fails closed.
 
-gkg -[#E65100]> cdot : quota check (mcp/rest only)\ncached, fail-closed
-cdot --[#E65100]> gkg : allow / deny
+The check runs before the query pipeline, and only for MCP and REST, because they are the charged channels.
+The other channels are zero-rated or included, so they skip the check.
 
-gkg -[#E65100]> ch : execute query
-ch --[#E65100]> gkg : results
+On GitLab.com, Orbit authenticates to CustomersDot with admin credentials.
+GitLab Self-Managed and Dedicated cannot hold those credentials.
+There, Rails adds the checksum of the online cloud license to the token, and Orbit sends it to CustomersDot.
+A request without the checksum skips the check.
+Orbit never logs or re-serializes the checksum.
 
-gkg -> gkg : redaction + output formatting
-gkg -[#D84315]> snowplow : billable_usage event (labkit-rs, OIDC)\n{source_type, root_namespace_id, ...}
-gkg -> gkg : label quota metrics + analytics\nwith source_type
+Orbit caches each decision for each namespace, so most requests skip the round trip.
+The time to live (TTL) comes from the cache headers of CustomersDot, with a default when the header is absent.
+A small jitter stops entries from expiring across the fleet at the same time.
+Orbit caches both allow and deny decisions, but not a failed check, so the next request tries CustomersDot again.
+Orbit does not follow redirects, and each request sends the Orbit version and the correlation ID.
 
-gkg --[#2E7D32]> rails : query response
-deactivate gkg
+Only a 200 response from CustomersDot allows the query.
+A 402 denies the query, and so does every other result: 401, 403, 422, any other status, a timeout, or a connection failure.
+This matches the AI Gateway, which denies on any quota-check error.
+So an outage or a rejected credential cannot turn into usage without a charge.
+A denied check returns the gRPC resource exhausted status with the credits-exhausted reason, and Workhorse maps that reason to a 402.
+A failed check returns the same status and reason, but its message says that Orbit could not verify credits.
+Metrics record failed checks as a separate fail-closed decision.
+Orbit logs any block reason that CustomersDot sends, for cached denials too.
 
-rails --> caller : HTTP response
-deactivate rails
+An enforced build validates the billing configuration at startup.
+The build exits unless all of these conditions are true:
 
-== DAP path only (parallel) ==
+- Billing and the quota check are on.
+- The CustomersDot and collector URLs are one built-in production or staging pair.
+- The quota and billing authentication modes belong to the same family.
 
-participant "DWS / AIGW" as dws #A5D6A7
-dws -[#7B1FA2]> snowplow : DAP_FLOW_ON_COMPLETION (DAP usage)
+The enforcement flag is set at compile time, so the deployed configuration cannot turn it off.
 
-@enduml
-```
-
-### JWT claims change
+### Tier enforcement
 
-`source_type` is propagated exclusively via JWT claims and is **not** added to the gRPC proto message body. This is intentional: the JWT is signed by Rails with the shared HS256 secret, so GKG can trust the value. An unsigned proto field in the request body would carry no trust guarantee and could be spoofed by any caller.
-
-```rust
-// In crates/orbit-server/src/auth/claims.rs
-pub struct Claims {
-    // ... existing fields ...
-    pub source_type: SourceType,        // required claim; tokens without it are rejected
-    pub root_namespace_id: Option<i64>, // governing namespace for billing attribution
-}
-
-pub enum SourceType {
-    Frontend, Dws, Mcp, Core, Rest, CodeIntelligence,
-}
-```
-
-Rails sets `source_type` when constructing the JWT before calling GKG. GKG reads it from the validated token and uses it for:
+Every Orbit endpoint requires the Orbit licensed feature, which is part of GitLab Premium.
+This covers the query, schema, tools, MCP, and health endpoints, the GraphQL update mutation, and the admin namespace pages.
+The MCP endpoint already had the check, and the health endpoint can be exempt because health checks are admin-only.
+On GitLab.com, Rails checks the license of each top-level namespace.
+On GitLab Self-Managed, Rails checks the instance license, and no per-query billing applies.
+The Orbit feature flag stays as a kill switch next to the tier gate.
 
-1. Billing events: carried on the `billable_usage` event (as `feature_qualified_name = orbit_{source_type}`) sent to the Snowplow collector
-2. Quota: only `mcp` and `rest` are metered; other channels bypass the check
-3. Metrics and analytics: labels the `gkg.billing.quota.*` metrics and the `orbit_query` analytics context
+### Zero-rate enforcement
 
----
-
-## 5. Phase 1: Instrumentation (minimal viable data collection)
+Zero-rate enforcement applies only to GitLab.com and GitLab-hosted Dedicated, where per-query credit billing is active.
 
-**Goal:** Propagate caller source type from Rails through gRPC to GKG. Wire up the GKG webserver to emit billable events via `labkit-rs` (OIDC-authenticated Snowplow). Add a pre-execution CustomersDot quota check, and label the billing and quota metrics with source type. No AIGW work in this phase.
+Workhorse stamps a short-lived signed token on DWS calls to Orbit, and Rails classifies a request as DWS only when the token is valid.
 
-**Depends on:** Nothing (can start immediately).
-**Blocks:** Phase 3 (zero-rating), Phase 4 (CDot billing pipeline).
-**Owner:** GKG team (@michaelangeloio, @bohdanpk, with @nbelokolodov for Rust Snowplow SDK)
+Workhorse signs the token with the existing Workhorse-to-Rails secret.
+Rails checks the signature, the expiry, and the claim that marks the request as DWS traffic.
+Rails still runs a request without a valid token, but tags it as frontend or REST.
+A valid token proves that the request came through the DWS path.
+A token with the workflow scope proves only that a workflow token was issued.
 
-### 1.1 Four instrumentation layers
+The secret lives only in Workhorse and Rails, so users cannot forge the token, and DWS manages no secret.
+The secret already exists in every deployment that runs Workhorse, so Phase 3 adds no new secret for each tenant.
 
-| Layer | Service | What it does | Billing-relevant? |
-|-------|---------|-------------|-------------------|
-| A. Source type propagation | Rails → GKG | Rails detects caller channel via OAuth scope and passes `source_type` to GKG in JWT claims. | Prerequisite. GKG needs this to tag billing events. |
-| B. GKG billable events | GKG webserver | Emits Snowplow `billable_usage` events via `labkit-rs` (OIDC). Carries source type, namespace, and execution metadata. | Yes, billing source of truth. |
-| C. source_type on metrics | GKG webserver | Labels the billing and quota metric families (`gkg.billing.*`) and the `orbit_query` analytics context with `source_type`. | Operational, for Grafana dashboards. |
-| D. Pre-execution quota check | GKG webserver | Checks namespace quota against CustomersDot before executing a query. Cached per namespace. Returns gRPC `RESOURCE_EXHAUSTED` when credits are exhausted. | Yes, enforces credit limits for metered channels (MCP, REST). |
+### CustomersDot pricing
 
-### 1.2 Layer A: Source type propagation (Rails → GKG)
+Orbit follows the flat-rate pricing pattern of the static application security testing (SAST) flows.
+CustomersDot applies a multiplier to each event by source type:
 
-Rails detects the caller channel and passes it to GKG via JWT claims so GKG can tag its own events.
+- An MCP event is charged with a flat credit multiplier, such as one credit for each query.
+- A DWS event has a zero multiplier.
+- A frontend or core event is not billed.
 
-**Channel detection (Phase 1, scope-based):**
+Attribution uses the root namespace on GitLab.com and the instance ID on Dedicated.
+The query type is for analytics only.
+The credits dashboard shows Orbit as its own line item.
+The line item shows the total queries in the billing period, the split by channel, and the credit spend.
 
-The monolith already has the primitives to distinguish all four channels. Each signal comes from a different layer of the auth stack:
+**A DAP workflow that calls Orbit is zero-rated by the multiplier, and no event is suppressed or annotated.**
 
-| Channel | How Rails detects it | Signal | Code location |
-|---------|---------------------|--------|---------------|
-| **Frontend** | CSRF token matches session | `Gitlab::RackAttack::Request#frontend_request?` checks `HTTP_X_CSRF_TOKEN` against `session[:_csrf_token]` via `Gitlab::RequestForgeryProtection.verified?`. If the API request has a valid CSRF token, it came from the browser. | `lib/gitlab/rack_attack/request.rb:285-292` |
-| **MCP** | Request hit the MCP endpoint | The MCP path (`/api/v4/orbit/mcp`) is a separate Grape class (`API::Orbit::Mcp`) with `allow_access_with_scope :mcp_orbit`. If we're in the MCP handler, it's MCP by definition. No scope check needed at the channel detection layer. | `ee/lib/api/orbit/mcp.rb` |
-| **DWS/DAP** | OAuth token has `ai_workflows` scope | `doorkeeper_token&.scopes&.include?('ai_workflows')`. This scope is exclusive to DWS-issued tokens (only created by `CreateOauthAccessTokenService`, `CreateCompositeOauthAccessTokenService`, `OnboardingService`). Users cannot create PATs with it. Note: this detection path will likely change in the future (Phase 3 adds a signed service token for tamper-proofing). | `lib/api/concerns/ai_workflows_access.rb` |
-| **Core** | JWT with `gkg-indexer:` subject prefix | Internal API (`/api/v4/internal/orbit/`) authenticates via `Gitlab-Orbit-Api-Request` header with `expected_sub_prefix: 'gkg-indexer:'`. Separate endpoint class entirely. | `ee/lib/api/internal/orbit.rb:14-21` |
-| **REST (external)** | PAT/OAuth without `ai_workflows`, no CSRF | Fallthrough: not frontend (no CSRF), not DWS (no `ai_workflows`), not MCP (different endpoint). Authenticated via PAT or standard OAuth token. | Default case |
+The DAP completion event stays the billable event for DAP usage itself.
+Each event stands alone with its own source type, which sets its multiplier.
+We dropped an earlier design that marked the DAP event with a flag when it called Orbit.
 
-```ruby
-# In ee/lib/api/orbit/data.rb, channel detection for the REST endpoints:
-def caller_channel
-  if frontend_request?
-    'frontend'
-  elsif doorkeeper_token&.scopes&.include?('ai_workflows')
-    'dws'
-  else
-    'rest'
-  end
-end
+### SOX compliance
 
-# frontend_request? leverages the existing RackAttack pattern:
-def frontend_request?
-  return false unless env.include?('HTTP_X_CSRF_TOKEN') && session.include?(:_csrf_token)
+Orbit billing code falls under the Sarbanes-Oxley (SOX) IT general controls (ITGC).
+The existing controls cover the AI Gateway, the Data Insights Platform, ClickHouse, and the Google Cloud infrastructure.
+Orbit billing code joins one or more of these control sets.
 
-  Gitlab::RequestForgeryProtection.verified?(env.merge('REQUEST_METHOD' => 'POST'))
-end
-```
+| Control family | Controls |
+|---|---|
+| Access to programs and data, LA.1 to LA.5 | Code owners on billing files, a quarterly review of who can merge to those paths, and single sign-on (SSO) enforcement |
+| Program changes, PC.1 to PC.3 | Code owner approval before a billing change merges, a monthly audit log review for separation of duties, and limited production deploy access |
+| Computer operations, CO.1 to CO.2 | Restricted access to billing continuous integration (CI) jobs, and job monitoring with documented issue resolution |
 
-MCP and Core don't need `caller_channel` in their endpoints because the channel is implicit in the endpoint class itself. The MCP handler always sets `source_type = 'mcp'` and the internal API always sets `source_type = 'core'` when constructing the JWT for GKG.
+We prefer to limit the scope to code owner rules on the billing paths, so the full Orbit repository stays out of SOX scope.
+ADR 020 records the decision.
+Billing event emission lives in its own module, with one conversion point from token claims to billing inputs, so the audit surface stays small.
+Code owner rules require approval from the billing owners for the module and the conversion point, which satisfies PC.2 and LA.4.
+[ADR 020](020_billing_sox_scope.md) records the detailed scope.
 
-```plantuml
-@startuml
-skinparam backgroundColor #FEFEFE
-skinparam ActivityBackgroundColor #FFFFFF
-skinparam ActivityBorderColor #546E7A
-skinparam ActivityDiamondBackgroundColor #E8EAF6
-skinparam ActivityDiamondBorderColor #3949AB
+## Consequences
 
-title Channel detection logic (Phase 1)
+- Correlation IDs still flow from Rails to Orbit in gRPC metadata for logs and traces, and billing does not use them.
+- The credit cost of an Orbit query is a product and pricing decision, informed by Phase 1 data.
+  The infrastructure does not depend on the number.
+- Different query rate limits for Premium and Ultimate need a product decision first, and then a follow-up.
+- Phase 2 decides whether Orbit gets its own Cloud Connector unit primitive, separate from DAP.
+- If GitLab Self-Managed or customer-hosted GitLab Dedicated moves to usage-based pricing, the signed-token approach must change.
+- Phase 3 must confirm that the Workhorse token covers every DWS entry point to Orbit.
+- Phase 3 must also set the token expiry and replay window for long-running DAP workflows.
 
-start
+## Why not the alternatives
 
-if (Which endpoint class?) then (Orbit::Mcp)
-  :source_type = "mcp"; <<#CE93D8>>
-  stop
-elseif (Internal::Orbit) then
-  :source_type = "core"; <<#B0BEC5>>
-  stop
-else (Orbit::Data)
-endif
+### Emit billing events from Rails
 
-if (frontend_request?\nCSRF token matches session?) then (yes)
-  :source_type = "frontend"; <<#B3E5FC>>
-elseif (doorkeeper_token has\nai_workflows scope?) then (yes)
-  :source_type = "dws"; <<#A5D6A7>>
-else (no)
-  :source_type = "rest"; <<#FFE0B2>>
-endif
+Rails is only a proxy, and Orbit has execution data that Rails does not see: latency, result count before redaction, and cache hits.
+Emission from Orbit also matches the billing service connection pattern for other Rust and Go services.
 
-:set claims[:source_type] in JWT; <<#E8EAF6>>
-:call GKG via gRPC; <<#C8E6C9>>
-stop
+### Suppress events for zero-rated channels
 
-@enduml
-```
+Fulfillment requires an event for every access, as agreed at the zero-rating meeting.
+Zero-rating is a multiplier in CustomersDot, and it does not suppress events.
 
-**On `ai_workflows` scope.** This is good enough for Phase 1 analytics. A user could extract the token from browser dev tools (valid 2 hours) and call the API directly, but this is negligible for usage data. The scope detection will likely not be the long-term path; Phase 3 adds signed-token verification for tamper-proof channel tagging.
+### Use only the workflow scope for zero-rating
 
-**JWT construction.** Each endpoint class sets `source_type` when building the JWT for the GrpcClient:
+A user can copy the token from the browser developer tools and call the API directly.
+The scope is enough for Phase 1 analytics, but billing needs the signed service token.
 
-```ruby
-# In the GrpcClient, when constructing JWT claims:
-claims[:source_type] = caller_channel  # "frontend", "dws", "mcp", "core", "rest"
-```
+### Link DAP and Orbit events with correlation IDs
 
-### 1.3 Billing attribution: namespace selection
+CustomersDot would suppress the Orbit charge when it saw a matching DAP event.
+At the zero-rating meeting, Fulfillment confirmed that CustomersDot does not support this.
+CustomersDot uses correlation IDs only for logs and traces.
+Each billing event must carry its own source type to set its multiplier.
 
-GKG queries have no per-request namespace context. Every query scopes across all top-level namespaces the user can access. So the JWT's `root_namespace_id` claim cannot be inferred from the request body. Rails must resolve it before the call.
+### Check quota in Rails
 
-**Decision.** Introduce a per-user preference `knowledge_graph_governing_namespace_id`. Do not reuse `duo_default_namespace_id`.
+Rails already has CustomersDot subscription data.
+Orbit already emits billable events and integrates with CustomersDot, so it can run the check itself.
+The check in Orbit keeps the billing logic with the service that runs queries, and it adds no latency to the Rails proxy.
+This matches the AI Gateway, where the executing service owns quota enforcement.
 
-**Alternatives considered:**
+### Use Cloud Connector instance tokens for Rails-to-Orbit authentication
 
-- *Generalize `duo_default_namespace_id`.* Rejected. Duo's setting carries governance semantics (tool policies, AI controls) that GKG doesn't inherit.
-- *Infer per-request namespace.* Rejected. Architecturally infeasible: every GKG query is global across all of the user's top-level namespaces by design.
+Rails and Orbit run side by side, so a shared signing secret is enough.
+Cloud Connector serves GitLab Self-Managed and Dedicated instances that reach GitLab cloud services over the internet.
+Orbit runs next to the GitLab instance, and it is not a central cloud service.
+If Orbit becomes an add-on that customers buy separately, the right path is to register an Orbit query unit primitive in Cloud Connector.
+That registration would come at general availability (GA).
+CustomersDot can then control Orbit access through subscription status, in addition to the current approach.
 
-**Candidate logic.** Namespaces where the user is a member AND the namespace has a Premium or Ultimate plan.
+### Reuse the Duo default namespace
 
-**Block-on-null behavior.** MCP and REST queries return a structured error pointing the user to the setting. This applies when `knowledge_graph_governing_namespace_id` is null and the user has more than one eligible namespace. Auto-set silently when exactly one candidate exists.
+The Duo setting carries governance meaning, such as tool policies and AI controls, that Orbit does not inherit.
 
-**Orbit behavior without a namespace.** A SaaS request whose JWT has no `root_namespace_id` skips the quota check, and its billing event is dropped (`reason=root_namespace_missing`). CustomersDot attributes SaaS usage to the root namespace, so neither can be resolved. Rails is expected to block these requests before they reach Orbit.
+### Infer the namespace for each request
 
-**UX surface.** User Preferences (`/-/profile/preferences`), placed alongside the Duo default namespace selector. Visible only when the user has more than one eligible Orbit namespace.
+Every Orbit query covers all top-level namespaces of the user by design, so a request has no single namespace.
 
-**JWT wiring.** Rails resolves `knowledge_graph_governing_namespace_id` server-side per request and sets `claims.root_namespace_id` before calling GKG. GKG continues to consume only the signed JWT claim, with no untrusted body field.
+## References
 
-**Accepted trade-off.** All GKG events bill to the governing namespace even when the user queries content owned by other namespaces.
-
-See [orbit/knowledge-graph#471](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/471) for the full discussion.
-
-### 1.4 Layer B: GKG billable event emission
-
-GKG emits billable events as Snowplow `billable_usage` events through `labkit-rs`, authenticated with OIDC ([orbit/kg#307](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307)).
-
-**Webserver events.** Emitted after each successful query execution by the `BillingObserver` in the `orbit-billing` crate. The single `Claims` to `BillingInputs` conversion is the SOX seam at `crates/orbit-server/src/billing_adapter.rs`. The event carries:
-
-| Field | Source | Notes |
-|-------|--------|-------|
-| `realm` | JWT claims | `saas` or `self_managed` |
-| `user_id` / `global_user_id` | JWT claims | caller identity |
-| `root_namespace_id` | JWT claims (governing namespace) | billing attribution on SaaS |
-| `organization_id` | JWT claims | attribution |
-| `instance_id` / `unique_instance_id` | JWT claims | attribution on self-managed and Dedicated |
-| `feature_qualified_name` | derived from `source_type` | `orbit_{source_type}`, for example `orbit_mcp` |
-| `unit_of_measure`, `quantity` | constant | `request`, `1.0` per query |
-| `metadata` | pipeline context and server build | `query_type`, `orbit_version`, plus execution metrics (compile and execute ms, rows) |
-
-Delivery is asynchronous. The tracker queues events in memory and sends them from a background task. When the webserver shuts down, it drains that queue before exiting. This runs concurrently with the analytics tracker's own drain, so a slow or dead collector on one side can't delay the other.
-
-**Indexer events (planned for GB-based deployments).** Emitted per indexing batch from the existing `EngineMetrics` at `crates/indexer/src/metrics.rs`:
-
-| Field | Source | Example |
-|-------|--------|---------|
-| `namespace_id` | Indexing context | `9970` |
-| `rows_written` | `destination_rows_written` | `1500` |
-| `bytes_written` | `destination_bytes_written` | `2048000` |
-| `entity_type` | Indexing pipeline | `merge_request`, `issue` |
-
-**Auth:** OIDC-authenticated Snowplow collector, not IP allowlist (GKG doesn't have static egress). Reference implementations of the OIDC pattern:
-
-- [labkit-go PoC](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/98#note_3108588468)
-- [Server-side validation MR](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/merge_requests/106)
-
-### 1.5 Layer C: source_type on metrics and analytics
-
-`source_type` is attached where channel breakdown matters for billing and operations: the quota metric families and the `orbit_query` analytics context.
-
-```rust
-// crates/orbit-billing/src/quota/metrics.rs: source_type labels the quota decision counters
-KeyValue::new("source_type", inputs.source_type.clone());
-```
-
-This lets Grafana break quota decisions and billing volume down by channel, for example `gkg.billing.quota.decisions{source_type="mcp"}`, without depending on the downstream CDot pipeline. The core query pipeline latency metrics stay labeled by `query_type`.
-
-### 1.6 Layer D: Pre-execution quota check
-
-Before executing a query, the GKG webserver checks whether the namespace has remaining quota by calling CustomersDot. The result is cached per namespace to avoid a round-trip on every request. The check runs in the gRPC handler before the query pipeline.
-
-```rust
-// In the gRPC service handler, before entering the query pipeline:
-self.quota.check(&QuotaCheckInputs::from(&claims)).await?;
-// A denied check returns tonic::Status::resource_exhausted("GitLab credits exhausted")
-```
-
-**Authentication.** On GitLab.com, Orbit authenticates to CustomersDot with the CDot admin credentials (`billing.quota.auth_mode: admin_token`). Self-managed and Dedicated deployments cannot hold those credentials, so they use `auth_mode: license_checksum`. When the instance has an online cloud license, Rails adds its checksum to the JWT as the `license_checksum` claim. Orbit sends it as `X-License-Token`. A request without the claim skips the check; a CustomersDot `401` fails closed and is not cached. Orbit never logs or re-serializes the claim.
-
-**Cache behavior.** GKG sends a `GET` to CustomersDot at `/api/v1/consumers/resolve`, then caches the decision in a `moka` cache. Redirects are not followed. Each request sends a `gkg-server/<version>` User-Agent and the request's `correlation_id` as a query parameter. The TTL comes from CDot's `Cache-Control: max-age` header (default one hour), with a small jitter so entries do not expire fleet-wide in lockstep. Both allow and deny decisions are cached; failed checks are not, so the next request retries CustomersDot.
-
-**Fail-closed.** Only a CustomersDot `200` allows the query. A `402` denies it, and so does every other outcome: `401`, `403`, `422`, any other status, a timeout, or a connection failure. This matches the AI Gateway, which denies on any quota-check error so an outage or a rejected credential cannot become unmetered usage. Failed checks return the same `RESOURCE_EXHAUSTED` status and `GITLAB_CREDITS_EXHAUSTED` reason as a `402`. Workhorse only maps that reason to a `402` response. The message differs: "Unable to verify GitLab credits" instead of "GitLab credits exhausted". Failed checks are recorded as `decision=fail_closed`. When the response body carries a CustomersDot `block_reason`, the gate logs it, including for cached denials.
-
-**Enforced builds.** A binary built with `ORBIT_BILLING_ENFORCED=true` validates the billing config at startup (`orbit_billing::enforcement::validate`) and exits unless all of these hold:
-
-- Billing and the quota gate are enabled.
-- The CustomersDot and collector URLs form one compiled-in production or staging pair.
-- The quota and billing auth modes belong to the same family.
-
-The flag is a compile-time cfg, so the deployed config cannot disable it. Builds without it behave as described here.
-
-**Which channels are checked.** Only `mcp` and `rest` source types are quota-checked (these are the charged channels). `dws`, `frontend`, and `core` are zero-rated or included, so they skip the quota check entirely.
-
-```rust
-// Skip quota check for zero-rated/included channels
-let needs_quota_check = matches!(
-    claims.source_type,
-    SourceType::Mcp | SourceType::Rest
-);
-```
-
-### 1.7 JWT claims change
-
-`source_type` is carried exclusively in the JWT claims, and the gRPC proto (`orbit.proto`) is **not** modified. Adding `source_type` to the proto request body would create an unsigned, untrusted field that any caller could set to any value, enabling spoofing. The JWT is signed by Rails with the shared HS256 secret, so GKG can trust the claim.
-
-`source_type` is a required field on the JWT claims struct in `crates/orbit-server/src/auth/claims.rs`:
-
-```rust
-pub struct Claims {
-    // ... existing fields ...
-    pub source_type: SourceType, // required; an unknown string deserializes to Rest
-}
-```
-
-`SourceType` is a Rust enum defined in the GKG codebase (not generated from proto), with variants `Frontend`, `Dws`, `Mcp`, `Core`, `Rest`, and `CodeIntelligence`. Rails sets the `source_type` claim when constructing the JWT before calling GKG. GKG reads it from the validated token.
-
-### 1.8 Validation
-
-- **Billing events:** Confirm events arrive at the Snowplow collector from the staging GKG deployment. Verify all source types produce events. Pipeline health can be observed via the `gkg.billing.events.*` counter family. `emitted` and `delivered` should rise with query traffic, while `dropped`, `rejected`, and `delivery_failed` stay at zero.
-- **Metrics:** Query Prometheus for `gkg.billing.quota.decisions` broken down by `source_type` and confirm the breakdown by channel.
-- **Quota check:** Verify that a namespace at quota receives gRPC `RESOURCE_EXHAUSTED` for MCP/REST queries, while DWS/frontend/core queries still succeed.
-
----
-
-## 6. Phase 2: Tier enforcement (parallel to Phase 1)
-
-**Goal:** Gate all Orbit endpoints behind `licensed_feature_available?(:orbit)` so only Premium and Ultimate customers can access Orbit features. The `:knowledge_graph` feature flag remains as a kill switch alongside tier enforcement.
-
-**Depends on:** Nothing (can start immediately, parallel to Phase 1)
-**Blocks:** Nothing (independent track)
-**Owner:** GKG team (@michaelangeloio)
-**Issue:** [orbit/knowledge-graph#221](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/221)
-
-### 2.1 Design
-
-- `:orbit` is a Premium feature in `ee/app/models/gitlab_subscriptions/features.rb` (`PREMIUM_FEATURES`).
-- The `:knowledge_graph` feature flag gates access at the code level and stays as a kill switch alongside the tier gate.
-- Orbit endpoints enforce the tier gate through `Analytics::KnowledgeGraph::OrbitLicense.available_for?`, which checks `licensed_feature_available?(:orbit)` per top-level namespace on SaaS and the instance license on self-managed.
-
-### 2.2 Endpoints requiring tier checks
-
-| Endpoint | Current Auth | Add Tier Check |
-|----------|-------------|----------------|
-| `POST /api/v4/orbit/query` | Feature flag + user auth | `licensed_feature_available?(:orbit)` on user's root namespace |
-| `GET /api/v4/orbit/schema` | Feature flag + user auth | Same |
-| `GET /api/v4/orbit/tools` | Feature flag + user auth | Same |
-| `POST /api/v4/orbit/mcp` | Feature flag + user auth + `mcp_orbit` scope | Already has it |
-| `GET /api/v4/orbit/health` | Feature flag + user auth | Same (or exempt, health checks are admin-only) |
-| GraphQL `orbitUpdate` mutation | Feature flag + admin auth | Same |
-| Admin namespace pages | Feature flag + admin auth | Same |
-
-### 2.3 Implementation pattern
-
-Use the existing `check_feature_availability!` pattern from EE APIs:
-
-```ruby
-# In ee/lib/api/orbit/data.rb, before_action or at top of each endpoint:
-before do
-  not_found! unless Feature.enabled?(:knowledge_graph, current_user)
-
-  namespace = current_user_root_namespace
-  forbidden! unless namespace&.licensed_feature_available?(:orbit)
-end
-```
-
-For the GraphQL mutation, add a `ready?` check:
-
-```ruby
-def ready?(**args)
-  raise_resource_not_available_error! unless
-    namespace.licensed_feature_available?(:orbit)
-
-  super
-end
-```
-
-### 2.4 Rate limiting per tier (follow-up)
-
-Not now. If Premium and Ultimate need different query limits later, add rate limiting via `Gitlab::ApplicationRateLimiter`. Needs a product decision on tier-specific limits first.
-
-### 2.5 Self-managed tier enforcement
-
-On self-managed, the license check works the same way. `licensed_feature_available?(:orbit)` checks the instance license. If the instance has a Premium or Ultimate license, Orbit is available. No per-query billing applies (SM uses GB-based platform fee).
-
-### 2.6 Deliverables
-
-| Issue | Deliverable | Status |
-|-------|-------------|--------|
-| [orbit/kg#221](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/221) | Gate Orbit endpoints behind `licensed_feature_available?(:orbit)` | In place via `OrbitLicense.available_for?` |
-| (follow-up) | Rate limiting per tier | Future |
-
----
-
-## 7. Phase 3: Zero-rate enforcement
-
-**Goal:** Zero-rate DAP (DWS) Orbit queries on .com and GitLab-hosted Dedicated while charging MCP/CLI queries. The Phase 1 `ai_workflows` OAuth scope is not tamper-proof (a user can extract the token and call the API directly). So this phase adds a signed service token that only the platform can mint.
-
-**Depends on:** Phase 1 (instrumentation must be in place to emit events).
-**Blocks:** Phase 4 (CDot needs the channel tag to apply the multiplier).
-**Owner:** GKG team (Rails side) + AF team (DWS side).
-**Issue:** [orbit/knowledge-graph#501](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/501)
-
-### 3.1 Scope
-
-This phase only applies to **.com** and **GitLab-hosted Dedicated** where per-query Credits billing is active. On self-managed and customer-hosted Dedicated, there is no per-query billing, so zero-rating is irrelevant.
-
-### 3.2 Workhorse-signed service token
-
-DuoWorkflow (DWS) calls to Orbit endpoints route through Workhorse. Workhorse stamps a short-lived JWT, signed with the Workhorse-to-Rails shared secret, onto those requests. Rails validates the JWT to confirm the request genuinely came from a DWS workflow rather than a user replaying a token. The secret lives only in Workhorse and Rails, so users cannot forge it.
-
-This reuses the existing Workhorse request-signing path in GitLab rather than provisioning a new shared secret. Workhorse already signs internal requests to Rails, so the same trust boundary carries the DWS classification.
-
-- Stamp the JWT on DWS Orbit calls: [monolith MR !242241](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/242241)
-- Validate the JWT to classify the request: [monolith MR !242242](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/242242)
-
-### 3.3 Validating the token
-
-Rails verifies the Workhorse JWT on the Orbit REST endpoints:
-
-1. The signature matches the Workhorse-to-Rails secret.
-2. The token is fresh (short expiry).
-3. The claims mark the request as DWS-originated.
-
-If valid, the request is classified as `dws` (zero-rated). If absent or invalid, the request still proceeds and is tagged as the appropriate non-DWS channel (`frontend` or `rest`).
-
-### 3.4 Updated channel detection (replaces Phase 1 stopgap)
-
-```ruby
-# In ee/lib/api/orbit/data.rb (REST endpoints only):
-def caller_channel
-  if workhorse_dws_request?   # validated Workhorse-signed JWT
-    'dws'
-  elsif frontend_request?
-    'frontend'
-  else
-    'rest'
-  end
-end
-```
-
-The Workhorse JWT check takes priority. A valid token proves the request actually came through the DWS path, not just that an `ai_workflows` token was issued. The `frontend_request?` CSRF check (same as Phase 1) identifies browser-originated requests. Everything else is external REST (PAT, standard OAuth).
-
-```plantuml
-@startuml
-skinparam backgroundColor #FEFEFE
-skinparam participant {
-  BorderColor #37474F
-}
-skinparam note {
-  BackgroundColor #E8F5E9
-  BorderColor #2E7D32
-}
-skinparam sequence {
-  ArrowColor #37474F
-  LifeLineBorderColor #78909C
-}
-
-title Phase 3: Workhorse-signed JWT flow (DWS → Workhorse → Rails → GKG)
-
-participant "DWS" as dws #A5D6A7
-participant "Workhorse" as wh #FFE0B2
-participant "Rails\nOrbit REST API" as rails #C5CAE9
-participant "GKG Webserver" as gkg #C8E6C9
-participant "GitLab Snowplow\ncollector" as snowplow #F3E5F5
-
-dws -[#2E7D32]> wh : POST /api/v4/orbit/query\nAuthorization: Bearer <oauth_token>
-wh -> wh : stamp Workhorse-signed JWT\n(DWS classification)
-wh -[#2E7D32]> rails : forward request + Workhorse JWT
-
-activate rails #C5CAE9
-rails -> rails : verify JWT signature + freshness
-rails -> rails : source_type = "dws"
-rails -[#2E7D32]> gkg : gRPC + JWT(source_type="dws")
-activate gkg #C8E6C9
-gkg -[#D84315]> snowplow : billable_usage event\nsource_type="dws" → 0x multiplier
-gkg --[#2E7D32]> rails : response
-deactivate gkg
-rails --> dws : response
-deactivate rails
-
-@enduml
-```
-
-### 3.5 DWS-side stamping
-
-Workhorse adds the signed token to DuoWorkflow Orbit calls, so DWS itself does not manage a secret ([monolith MR !242241](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/242241)). This keeps the secret out of the DWS application and reuses the Workhorse signing path.
-
-### 3.6 Secret provisioning
-
-The Workhorse-to-Rails secret already exists in every deployment that runs Workhorse, so Phase 3 introduces no new per-tenant secrets:
-
-| Deployment | Secret |
-|------------|--------|
-| .com | Existing Workhorse-to-Rails secret |
-| Dedicated (GitLab-hosted) | Existing per-tenant Workhorse secret |
-| Self-managed | N/A (no per-query billing) |
-| Dedicated (customer-hosted) | N/A (no per-query billing) |
-
-### 3.7 Open questions
-
-- Whether the Workhorse JWT covers every DWS entry point to Orbit, or whether some DAP flows reach Orbit by a path Workhorse does not sign.
-- Token freshness and replay window relative to long-running DAP workflows.
-
-See [orbit/knowledge-graph#501](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/501) for the current design discussion.
-
-### 3.8 Deliverables
-
-| Issue / MR | Deliverable | Owner |
-|-------|-------------|-------|
-| [monolith MR !242241](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/242241) | Stamp Workhorse-signed JWT on DWS Orbit calls | GKG + AF |
-| [monolith MR !242242](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/242242) | Validate Workhorse JWT and classify DWS requests | GKG |
-| [orbit/kg#501](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/501) | Tamper-proof DWS channel detection (tracking) | GKG |
-
----
-
-## 8. Phase 4: CDot / usage billing pipeline
-
-**Goal:** Wire GKG billable events (Phase 1) into CDot so MCP usage is charged via Credits and DAP usage is zero-rated. Split between Fulfillment (CDot pricing and dashboard) and GKG (event coordination).
-
-**Depends on:** Phase 1 (GKG events must be flowing), Phase 3 (source type must be tamper-proof)
-**Owner:** Fulfillment for CDot, GKG for coordination
-
-### 4.1 Billing event structure
-
-The billable events emitted by the GKG webserver (Phase 1) flow through Snowplow to the Data Insights Platform, and CDot's mediation processes them as follows:
-
-| Event field | CDot use |
-|-------------|----------|
-| `source_type` | Determines multiplier: `dws` → 0x (zero-rated), `mcp` → 1x (charged), `frontend`/`core` → ignored |
-| `root_namespace_id` | Billing attribution on .com (see [Section 1.3](#13-billing-attribution-namespace-selection) for how Rails resolves this) |
-| `instance_id` | Billing attribution on Dedicated |
-| `query_type` | Analytics only (not used for pricing in Phase 4) |
-
-### 4.2 Flat-rate multiplier pricing
-
-Per the zero-rating meeting, GKG follows the **flat-rate pricing** pattern (reference: SAST flows, [issue #592304](https://gitlab.com/gitlab-org/gitlab/-/issues/592304)). The CDot pricing entry is tracked in [issue #593193](https://gitlab.com/gitlab-org/gitlab/-/issues/593193):
-
-- Each GKG billable event with `source_type = 'mcp'` is charged
-- A flat credit multiplier is applied per event (e.g., 1 credit per query)
-- Events with `source_type = 'dws'` get a 0x multiplier (zero-rated)
-- Events with `source_type = 'frontend'` or `'core'` are not processed for billing
-
-**Open question:** Credit cost per Orbit query? Product/Pricing decision, informed by Phase 1 data. Infrastructure doesn't depend on the specific number.
-
-### 4.3 Credits dashboard
-
-Update the credits usage dashboard to display GKG/Orbit events as a separate line item ([issue #593194](https://gitlab.com/gitlab-org/gitlab/-/issues/593194)). Users should see:
-
-- Total Orbit queries this billing period
-- Breakdown by channel (MCP = charged, DAP = zero-rated)
-- Credit spend attributed to Orbit
-
-### 4.4 Zero-rating the DAP path
-
-A DAP workflow that calls GKG is zero-rated by the multiplier, not by suppressing or annotating events. GKG emits its own per-query `billable_usage` event tagged `source_type = 'dws'`, and CDot applies a 0x multiplier to it. The DAP completion event (`DAP_FLOW_ON_COMPLETION`) remains the billable event for DAP usage itself and is unaffected.
-
-There is no `gkg_called` flag and no correlation-ID linking between the two events. Each event stands alone with its own `source_type`, which is what determines its multiplier. The earlier two-sided design that annotated the DAP event with `gkg_called` was dropped in favor of this.
-
-### 4.5 Pricing multiplier registration
-
-CDot needs a new pricing entry for GKG billable events with multiplier logic that checks `source_type`:
-
-- `dws` → 0x (zero-rated)
-- `mcp` → 1x (charged)
-- `frontend` / `core` → not billed
-
----
-
-## 9. Consequences
-
-### 9.1 Phase dependencies
-
-```plantuml
-@startuml
-skinparam backgroundColor #FEFEFE
-skinparam component {
-  BorderColor #37474F
-}
-skinparam arrow {
-  Color #37474F
-}
-skinparam note {
-  BackgroundColor #FFF9C4
-  BorderColor #F9A825
-}
-
-title Phase dependencies
-
-[Phase 1\nInstrumentation\n(April)] as P1 #C5CAE9
-[Phase 2\nTier Enforcement\n(April)] as P2 #C8E6C9
-[Phase 3\nZero-rate Enforcement\n(May)] as P3 #FFCCBC
-[Phase 4\nCDot / Billing Pipeline\n(May-June)] as P4 #CE93D8
-
-P1 -[#3949AB]-> P3 : events flowing
-P3 -[#D84315]-> P4 : tamper-proof\nchannel tags
-P1 -[#3949AB]-> P4 : events flowing
-
-note right of P2
-  Independent track.
-  Can run in parallel
-  with all other phases.
-end note
-
-@enduml
-```
-
-Phases 1 and 2 can start immediately and run in parallel.
-Phase 3 depends on Phase 1 (events must exist before we worry about tagging accuracy).
-Phase 4 depends on Phase 1 (events must flow) and Phase 3 (channel must be trustworthy for billing).
-
-### 9.2 Deployment-specific impact
-
-| Deployment | Phase 1 (Instrumentation) | Phase 2 (Tier Gating) | Phase 3 (Zero-rate) | Phase 4 (CDot) |
-|------------|--------------------------|----------------------|--------------------|--------------------|
-| **.com** | Yes | Yes | Yes | Yes (Credits) |
-| **Dedicated (GitLab-hosted)** | Yes | Yes | Yes (per-tenant secret) | Yes (Credits) |
-| **Dedicated (customer-hosted)** | Yes (analytics only) | Yes | No (seat-based pricing)* | No* |
-| **Self-managed** | Yes (analytics only) | Yes | No (GB-based fee)* | No* |
-
-> **Note:** Pricing model for self-managed and customer-hosted Dedicated is subject to change. Phase 1 instrumentation covers all deployments so the billing pipeline can be extended if needed.
-
-### 9.3 Timeline
-
-| Phase | Target | Parallel? |
-|-------|--------|-----------|
-| Phase 1: Instrumentation | April 2026 | Yes (start now) |
-| Phase 2: Tier enforcement | April 2026 | Yes (start now) |
-| Phase 3: Zero-rate enforcement | May 2026 | After Phase 1 |
-| Phase 4: CDot billing pipeline | May-June 2026 | After Phase 1 + 3 |
-
----
-
-## 10. SOX compliance
-
-GKG billing code falls under SOX ITGC controls. The existing [SOX ITGC controls spreadsheet](https://docs.google.com/spreadsheets/d/1BGTZAriUYIubEJcVHoYqmXm7FLoqQcNiPJkylZidkeY/edit?gid=121873557#gid=121873557) covers AI Gateway, Data Insights Platform, ClickHouse, and GCP infrastructure. GKG billing code will need to be scoped into one or more of these control sets.
-
-### Applicable ITGC controls
-
-The controls that apply to GKG billing code fall into three categories:
-
-**Access to Programs and Data (LA.1-LA.5).** CODEOWNERS on billing-related files, quarterly user access review of who can merge to those paths, SSO enforcement. The scoping question is whether to cover the entire GKG project or limit to CODEOWNERS entries on billing code paths. The limited approach (CODEOWNERS only) is preferred since it avoids pulling the entire GKG repo into SOX scope.
-
-**Program Changes (PC.1-PC.3).** CODEOWNER approval required before merging billing code. Monthly audit log review to verify separation of duties (MR creator != approver) was enforced. Access to deploy to production limited to appropriate personnel.
-
-**Computer Operations (CO.1-CO.2).** Access to modify billing-related CI jobs restricted. Job monitoring in place with documented issue resolution.
-
-### GKG SOX compliance checklist
-
-1. **Isolate billing code.** Billing event emission lives in a dedicated crate, `crates/orbit-billing/`, with a single `Claims` to `BillingInputs` conversion seam at `crates/orbit-server/src/billing_adapter.rs`. The authoring rules for this boundary are in `docs/pages/engineering/development/sox-billing-boundary.md`. This keeps CODEOWNERS scoping practical and the SOX audit surface small.
-2. **Set up CODEOWNERS.** `.gitlab/CODEOWNERS` requires approval from designated billing code owners on the billing crate and the adapter seam. Satisfies PC.2 (change approval) and LA.4 (privileged access).
-3. **Finalize SOX scope.** The detailed control scoping is tracked in [orbit/knowledge-graph#507](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/507) and [ADR 020](020_billing_sox_scope.md).
-
----
-
-## 11. Notes
-
-1. **Credit cost per Orbit query.** What flat-rate multiplier for MCP queries? Needs Phase 1 data.
-2. **Separate unit primitive.** Should Orbit get its own CloudConnector unit primitive (`ORBIT_QUERY`) separate from DAP? Phase 2 decision per the billing spec.
-3. **Rate limits per tier.** Should Premium and Ultimate have different query rate limits? Product decision.
-4. **Self-managed / customer-hosted Dedicated pricing.** The billing model for these deployments is subject to change. If SM or customer-hosted Dedicated moves to usage-based pricing, the signed-token approach needs adaptation. Not a current requirement, but Phase 1 instrumentation already captures usage data on all deployments to support this if needed.
+- [Integrate monetization in Orbit](https://gitlab.com/groups/gitlab-org/-/epics/21198)
+- [Build Orbit core distributed system](https://gitlab.com/groups/gitlab-org/-/epics/20357)
+- [Orbit instrumentation for usage billing](https://gitlab.com/groups/gitlab-org/-/epics/20762)
+- [Add the Orbit and Duo Agent Platform integration ADR](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/709)
+- [ADR 006: Orbit and DAP integration](006_dap_integration.md)
+- [ADR 020: SOX scoping for billing event emission](020_billing_sox_scope.md)
+- [Zero-rating meeting notes, 2026-03-11](https://docs.google.com/document/d/1JbzhTtlF4rDMhmIjNkmDwLQyLovRmDlaGprw5yc-rOw)
+- [GA launch super document](https://docs.google.com/document/d/1UD5E_53bMfX6IYRVu41KGZ7NGh-wObXrOA0EizI_d0U)
+- [Connect the billing service with Orbit with OIDC tokens for LabKit](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307)
+- [Add JWT-based authentication for incoming platform requests](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/98#note_3108588468)
+- [Add an OIDC-based authentication stack for incoming platform requests](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/merge_requests/106)
+- [Decide the default enabled namespace for Orbit usage billing](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/471)
+- [Rails monolith tier gating](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/221)
+- [Tamper-proof DWS channel detection for zero-rated Orbit billing](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/501)
+- [Stamp a Workhorse-signed JWT on DuoWorkflow Orbit calls](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/242241)
+- [Validate the Workhorse JWT to classify DWS Orbit requests](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/242242)
+- [Implement flat-rate pricing for SAST false positive detection](https://gitlab.com/gitlab-org/gitlab/-/issues/592304)
+- [Add flat-rate multiplier pricing for Orbit billable events](https://gitlab.com/gitlab-org/gitlab/-/issues/593193)
+- [Update the credits dashboard to display Orbit billable events](https://gitlab.com/gitlab-org/gitlab/-/issues/593194)
+- [Cloud Connector architecture](https://docs.gitlab.com/ee/development/cloud_connector/architecture.html)
+- [SOX ITGC controls spreadsheet](https://docs.google.com/spreadsheets/d/1BGTZAriUYIubEJcVHoYqmXm7FLoqQcNiPJkylZidkeY/edit?gid=121873557#gid=121873557)
+- [Determine SOX compliance scope and controls for Orbit billing event emission](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/507)

@@ -1000,17 +1000,11 @@ const SERVICE_STATUS: &str =
 
 #[test]
 fn setup_instructions_leave_the_schema_to_failing_queries() {
-    let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS), ok_reply("[]")]);
+    let (url, server) = mock_server(vec![ok_reply(SERVICE_STATUS)]);
     let (output, instructions) = setup_instructions(Some(&url));
     let requests = server.join().unwrap();
     assert_remote_without_schema(&output, &instructions);
-    assert_eq!(
-        request_paths(&requests),
-        [
-            "/api/graphql",
-            "/api/v4/orbit/agent/commands?command_names=query_graph",
-        ]
-    );
+    assert_eq!(request_paths(&requests), ["/api/graphql"]);
 }
 
 #[test]
@@ -1021,18 +1015,13 @@ fn setup_instructions_read_the_rest_status_when_gitlab_has_no_orbit_graphql() {
                 "extensions":{"code":"undefinedField","typeName":"Query","fieldName":"orbit"}}]}"#,
         ),
         ok_reply("{}"),
-        ok_reply("[]"),
     ]);
     let (output, instructions) = setup_instructions(Some(&url));
     let requests = server.join().unwrap();
     assert_remote_without_schema(&output, &instructions);
     assert_eq!(
         request_paths(&requests),
-        [
-            "/api/graphql",
-            "/api/v4/orbit/status",
-            "/api/v4/orbit/agent/commands?command_names=query_graph",
-        ]
+        ["/api/graphql", "/api/v4/orbit/status"]
     );
 }
 

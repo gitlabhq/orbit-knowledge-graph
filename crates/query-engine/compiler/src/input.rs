@@ -543,7 +543,7 @@ pub struct InputAggregationMetric {
     pub expr: AggExpr,
     #[serde(rename = "as", default)]
     pub alias: Option<String>,
-    #[serde(skip)]
+    #[serde(default)]
     pub distinct: bool,
 }
 

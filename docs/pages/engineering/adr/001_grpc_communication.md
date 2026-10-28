@@ -15,263 +15,225 @@ Accepted
 
 ## Context
 
-GKG is a Rust service that queries ClickHouse. Rails owns all authorization decisions via `Ability.allowed?`. Neither can do the other's job, but they need to collaborate mid-request. GKG runs the query. Then it asks Rails to check permissions on the results before returning them.
+Orbit is a Rust service that queries ClickHouse, but Rails owns all authorization decisions.
+So Orbit runs a query, then asks Rails to check permissions on the results before it returns them.
 
-The problem is that GKG needs to call *back* to Rails during query execution. Standard request-response protocols can't express this. They would need a second connection from GKG to Rails, creating a circular dependency.
+This means Orbit must call back to Rails while the query runs.
+A plain request and response protocol cannot do this without a second connection from Orbit to Rails, which makes a circular dependency.
 
 ## Decision
 
-Use gRPC with bidirectional streaming for the RPC that requires redaction (`ExecuteQuery`), and standard unary RPCs for the three that do not (`ListTools`, `GetGraphSchema`, `GetClusterHealth`).
+**We use gRPC between Rails and Orbit, with a bidirectional stream for queries so that the redaction exchange runs inside one call.**
 
-### Service definition
-
-From `orbit.proto` (package `orbit.v1`; the server also answers the legacy gkg.v1 paths through a facade during the rename). The original 5-RPC design included `ExecuteTool` and `GetOntology`; these were consolidated into `ExecuteQuery` (with `ResponseFormat`) and `GetGraphSchema` respectively. See [ADR 003](003_api_design.md) for the rationale.
-
-```protobuf
-service KnowledgeGraphService {
-  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
-  rpc ExecuteQuery(stream ExecuteQueryMessage) returns (stream ExecuteQueryMessage);
-  rpc GetGraphSchema(GetGraphSchemaRequest) returns (GetGraphSchemaResponse);
-  rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
-}
-```
+Redaction is the step that removes the rows the user cannot see.
+The tool list, graph schema, and cluster health calls need no redaction, so they are unary, with one request and one response.
 
 | RPC | Pattern | Purpose |
-|-----|---------|---------|
-| `ListTools` | Unary | Return available tool definitions with JSON schemas |
-| `ExecuteQuery` | Bidi streaming | Execute a graph query with mid-stream redaction exchange |
-| `GetGraphSchema` | Unary | Return the graph schema with optional node expansion |
-| `GetClusterHealth` | Unary | Return cluster health for the Orbit dashboard |
+|---|---|---|
+| Tool list | Unary | Return the tool definitions with their JSON schemas |
+| Query | Bidirectional stream | Run a graph query with a redaction exchange in the stream |
+| Graph schema | Unary | Return the graph schema with optional node expansion |
+| Cluster health | Unary | Return cluster health for the Orbit dashboard |
 
-### The bidirectional streaming redaction exchange
+The first design had five RPCs.
+We merged tool execution into the query RPC, which now takes a response format.
+We also merged the ontology RPC into the graph schema RPC.
+[ADR 003](003_api_design.md) gives the reasons.
+During the product rename, the server also answers the old service paths.
 
-The `ExecuteQuery` bidi RPC follows a four-step message sequence:
+### Redaction exchange
 
-1. Client sends `ExecuteQueryRequest`
-2. Server sends `RedactionRequired` -- a list of `ResourceToAuthorize` messages, each containing a `resource_type`, `ability`, and batch of `ids` that need authorization
-3. Client sends `RedactionResponse` -- a map of `resource_id -> authorized (bool)` per resource type
-4. Server sends `ExecuteQueryResult`, with unauthorized rows already filtered
+The query stream carries four steps:
+
+1. Rails sends the query request.
+1. Orbit sends a redaction request with batches of resource IDs, each with a resource type and an ability to check.
+1. Rails sends a map from each resource ID to an authorized flag, for each resource type.
+1. Orbit sends the result, with the unauthorized rows already removed.
+
+One envelope message carries every phase of the stream: the request, the redaction exchange, the result, and an error.
 
 ```mermaid
 sequenceDiagram
+    accTitle: Redaction exchange in the query stream
+    accDescr: Rails sends a query to the Orbit server. The query pipeline runs it, groups the rows by entity type and permission, and asks Rails for redaction decisions on the same stream. It applies the decisions to each row and returns the redacted result through Rails to the client.
     actor Client
     participant Rails
-    participant WebServer as GKG Web Server
-    participant AuthEngine as Query Pipeline
-
-    Client->>Rails: Send Request
-    Rails->>WebServer: Query Orbit
-
-    activate WebServer
-    WebServer->>WebServer: Compile Graph Query & Execute
-    WebServer->>AuthEngine: Pass result set
-    activate AuthEngine
-
-    AuthEngine->>AuthEngine: Identify redactable columns
-    AuthEngine->>AuthEngine: Group rows by entity type + permission + resource IDs (unique auth config sets)
-
-    AuthEngine->>Rails: Request redaction decisions (grouped auth configs + resource IDs)
-    Rails-->>AuthEngine: Redaction decisions per group
-
-    AuthEngine->>AuthEngine: Map decisions back to individual rows
-    AuthEngine->>WebServer: Redacted result set
-    deactivate AuthEngine
-    deactivate WebServer
-
-    WebServer-->>Rails: Response
+    participant S as Orbit server
+    participant P as Query pipeline
+    Client->>Rails: Send the request
+    Rails->>S: Query Orbit
+    activate S
+    S->>S: Compile and run the graph query
+    S->>P: Pass the result set
+    activate P
+    P->>P: Find the redactable columns
+    P->>P: Group rows by entity type, permission, and resource IDs
+    P->>Rails: Request redaction decisions for each group
+    Rails-->>P: Redaction decisions for each group
+    P->>P: Map the decisions back to rows
+    P->>S: Redacted result set
+    deactivate P
+    deactivate S
+    S-->>Rails: Response
     Rails-->>Client: Response
 ```
 
-### Row-level authorization mapping
+### Row-level authorization
 
-The `ResourceToAuthorize` grouping works at the row level. After GKG executes a ClickHouse query, it scans the result set for columns prefixed with `_gkg_p_` (permission metadata injected during indexing). Rows are grouped by `(resource_type, ability)` to minimize round-trips to Rails:
+Indexing stores permission metadata with each entity, and Orbit reads it from each query result.
+Orbit groups the resource IDs by resource type and ability, so Rails gets one check for each group instead of one for each row.
+Orbit then removes the rows that Rails did not authorize.
 
 ```plaintext
--- SQL result (Arrow batches) --
-row 0: { _gkg_p_id: 1, _gkg_p_type: "Project", name: "foo" }
-row 1: { _gkg_p_id: 5, _gkg_p_type: "Project", name: "bar" }
-
--- from_batches() → QueryResult --
-rows = [
-  QueryResultRow { columns: { _gkg_p_id: 1, _gkg_p_type: "Project", ... }, authorized: true },
-  QueryResultRow { columns: { _gkg_p_id: 5, _gkg_p_type: "Project", ... }, authorized: true },
-]
-ctx.entity_auth = { "Project" → { resource_type: "projects", ability: "read" } }
-
--- resource_checks() --
-ids = {}
-  row 0 → node_ref(p) = NodeRef { id: 1, entity_type: "Project" }
-          auth = { resource_type: "projects", ability: "read" }
-          ids[("projects", "read")].insert(1)   → { ("projects","read"): {1} }
-  row 1 → node_ref(p) = NodeRef { id: 5, entity_type: "Project" }
-          ids[("projects", "read")].insert(5)   → { ("projects","read"): {1, 5} }
-
-→ ResourceToAuthorize { resource_type: "projects", ability: "read", ids: [1, 5] }
-
--- AuthorizationStage → redaction service --
-request:  { resource_type: "projects", ability: "read", ids: [1, 5] }
-response: ResourceAuthorization { resource_type: "projects", authorized: { 1: true, 5: false } }
-
--- apply_authorizations() --
-  row 0 → node_ref(p) = NodeRef { id: 1, entity_type: "Project" }
-          is_authorized? → authorized.get(1) = true  ✓  row stays
-  row 1 → node_ref(p) = NodeRef { id: 5, entity_type: "Project" }
-          is_authorized? → authorized.get(5) = false ✗  row.set_unauthorized()
-
-→ rows = [
-    QueryResultRow { ..., authorized: true  },   ← returned to caller
-    QueryResultRow { ..., authorized: false },   ← filtered out
-  ]
+rows:      Project 1, Project 5
+check:     can the user read projects 1 and 5?
+decision:  1 yes, 5 no
+returned:  Project 1
 ```
 
-### Message types
+### Gitaly pattern
 
-The bidi stream uses a `oneof` envelope that carries all four message phases:
+The Rails integration copies the patterns that Rails already uses for Gitaly, the gRPC service for Git repositories.
+We generate a Ruby gem from the Orbit protocol definition and publish it to RubyGems, and Rails uses it for client stubs.
 
-```protobuf
-message ExecuteQueryMessage {
-  oneof content {
-    ExecuteQueryRequest request = 1;
-    RedactionExchange redaction = 2;
-    ExecuteQueryResult result = 3;
-    ExecuteQueryError error = 4;
-  }
-}
+Rails keeps a pool of gRPC channels to Orbit.
+Connection settings, such as keepalive, maximum message size, and timeouts, follow the Gitaly configuration model.
 
-message RedactionExchange {
-  oneof content {
-    RedactionRequired required = 1;
-    RedactionResponse response = 2;
-  }
-}
-```
+Error handling also mirrors Gitaly.
+Rails retries an unavailable server with backoff, returns HTTP 403 for permission denied, and returns HTTP 504 for a deadline exceeded.
+gRPC interceptors handle request logging, tracing with LabKit, and metrics, as they do for Gitaly.
 
-## Why bidirectional streaming
+### Response compression
 
-Three alternatives were considered and rejected for the redaction exchange:
+The server compresses responses with Gzip or Zstandard, and accepts either on requests.
+It uses the first of those two encodings in the order that the client lists them, and sends no compression if the client lists neither.
+The Ruby and Python clients list Gzip and not Zstandard, so they get Gzip.
+Only clients that list Zstandard, such as some Rust or Go clients, can get Zstandard.
 
-REST callback (GKG calls a Rails HTTP endpoint mid-request): This creates a circular service dependency. Rails calls GKG, GKG calls Rails back over a separate HTTP connection. This doubles the connection surface and complicates load balancer configuration. It also means GKG needs its own HTTP client and separate auth credentials for the callback path. The callback can timeout independently of the original request.
+### Authentication
 
-Unary gRPC (separate RPC for each phase): Rails would need to call `StartQuery`, poll for `GetRedactionRequest`, send `SubmitRedactionResponse`, then poll for `GetResult`. This adds latency from polling intervals and requires server-side state management for in-flight queries. It also turns a single logical operation into four separate RPCs with their own failure modes.
+Service-to-service authentication has two layers, as the security design document describes.
+A JSON Web Token (JWT) carries the user context, such as the user ID, organization ID, and the groups the user can reach.
+A shared secret signs the token, the token expires after a few minutes, and each call carries it in gRPC metadata.
+Mutual TLS (mTLS) verifies the identity of each service at the transport layer.
 
-Server streaming (GKG streams results to Rails): This only solves the server-to-client direction. Rails still cannot send redaction responses back to GKG within the same stream.
-
-Bidirectional streaming lets both sides send messages on the same connection. The exchange happens in a single RPC with a single timeout. No polling or callback infrastructure needed.
-
-Without bidi streaming, a redaction-capable query requires two separate connections. One goes from the client through Rails to GKG. A second goes from GKG back to Rails for authorization checks. With bidi streaming, the entire exchange runs over a single connection. This halves the connection overhead and eliminates the latency from establishing the callback connection under load.
-
-## Why gRPC over REST
-
-`orbit.proto` is the contract. Rails generates a Ruby client gem from it; GKG implements the server in Rust with `tonic`. Schema mismatches are caught at compile time, not at runtime.
-
-HTTP/2 multiplexing is built into gRPC. The bidi streaming pattern described above has no clean equivalent in REST or GraphQL.
-
-Protobuf encoding is smaller and faster to parse than JSON, which matters when serializing batches of resource IDs and authorization results.
-
-GitLab already runs several gRPC services in production: Gitaly (Git storage), Praefect (Gitaly cluster proxy), and Duo Workflow (AI workflow execution). The operational patterns for channel management, error handling, monitoring, and deployment are already in place.
-
-### Following the Gitaly pattern
-
-The Rails-GKG integration copies the patterns Gitaly established.
-
-The `gitlab-orbit-proto` gem is published to rubygems.org, generated from `orbit.proto` (Ruby module `Orbit::V1`, wire service `orbit.v1.OrbitService`). Rails consumes this gem for client stubs, the same way it consumes `gitaly-proto`.
-
-Rails will maintain a gRPC channel pool to GKG, configured via `gitlab.yml` with the GKG service address. Connection settings (keepalive, max message size, timeouts) follow Gitaly's configuration model.
-
-gRPC status codes map to application errors: `UNAVAILABLE` triggers retry with backoff, `PERMISSION_DENIED` maps to a 403, `DEADLINE_EXCEEDED` maps to a 504. The error handling middleware mirrors Gitaly's.
-
-Request logging, tracing (via LabKit), and metrics collection use gRPC interceptors, same as Gitaly.
-
-## Response compression
-
-The server compresses responses with Gzip or zstd and accepts either on requests. It answers with the first of those encodings in the client's `grpc-accept-encoding` list, and with identity when the client lists neither. Ruby and Python C-core clients advertise `identity, deflate, gzip` and decode Gzip transparently, so they get Gzip. zstd only applies to clients that advertise it, such as tonic or Go.
-
-## Security
-
-### Authentication: JWT + mTLS
-
-Service-to-service authentication uses two layers, matching the model described in the [security design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md):
-
-- JWT tokens carry user context (`user_id`, `organization_id`, `traversal_ids`) and are signed with a shared secret (HS256). Tokens expire after 5 minutes.
-- mTLS provides transport-layer identity verification via Kubernetes service mesh or manual TLS configuration with cert-manager.
-
-JWT is passed as gRPC metadata (equivalent to HTTP headers) on every RPC call.
+A Kubernetes service mesh such as Istio or Linkerd can manage the TLS certificates and rotate them with no application configuration.
+cert-manager can also provision and renew them from a cluster-internal certificate authority.
+GitLab Self-Managed can configure them manually, with the same certificate setup as Gitaly.
 
 ### Authorization boundary
 
-GKG never makes authorization decisions. It executes queries, extracts resource IDs from results, and sends them to Rails for `Ability.allowed?` checks. Rails is the single source of truth for permissions. GKG only filters rows based on the boolean responses it receives.
+**Orbit never makes an authorization decision.**
 
-### DoS vectors
+It runs queries, collects the resource IDs from the results, and sends them to Rails for permission checks.
+Rails is the single source of truth for permissions, and Orbit only removes the rows that Rails marks unauthorized.
 
-The bidi streaming RPCs introduce specific denial-of-service risks:
+## Benefits of this approach
 
-- A query returning millions of rows would generate a massive `RedactionRequired` message. The existing 1000-row query limit in the GKG query engine prevents this.
-- A slow or unresponsive client holds the gRPC stream open on the server. Per-RPC deadlines should be configured (not yet implemented -- see "Known gaps" above) to bound the wait.
-- An attacker opening many bidi streams without sending messages. gRPC's `MAX_CONCURRENT_STREAMS` setting and Kubernetes resource limits are the current controls, but explicit server-side stream limits should be added.
+The protocol definition is the contract between Rails and Orbit.
+Rails generates a Ruby client from it and Orbit implements the server in Rust, so a schema mismatch fails at build time.
+REST and GraphQL have no clean way to do a two-way exchange inside one request.
+Protocol Buffers, the gRPC message format, are smaller and faster to parse than JSON for batches of resource IDs.
 
-### Certificate management
+GitLab already runs gRPC services in production, such as Gitaly, Praefect, and Duo Workflow.
+The operational patterns for channels, errors, monitoring, and deployment already exist.
 
-TLS certificates for mTLS are managed through one of:
-
-- Kubernetes service mesh (Istio/Linkerd), which handles automatic cert rotation with no application-level configuration
-- cert-manager, for automatic provisioning and renewal from a cluster-internal CA
-- Manual configuration for self-managed deployments, following the same certificate setup as Gitaly
-
-## Postgres load risk from Layer 3 checks
-
-Every `Ability.allowed?` call in Rails hits Postgres to evaluate DeclarativePolicy rules. A query returning 1000 rows across 5 resource types could trigger 1000 permission checks. Each check potentially loads the resource from Postgres and evaluates multiple policy conditions.
-
-### Mitigations
-
-The `ResourceToAuthorize` message groups IDs by `(resource_type, ability)`. GKG enforces a maximum of 100 resource IDs per check. For a 1000-row result with mixed types, this means at most 10 batched checks rather than 1000 individual ones.
-
-The GKG query engine already enforces a 1000-row limit per query, which caps the upper bound of permission checks per request.
-
-The authorization endpoint should use `Ability.allowed?` with batch loading (preloading resources and their policy dependencies) rather than N+1 individual checks. The existing `SearchService#redact_unauthorized_results` pattern provides the template.
-
-The Auth Architecture team is building [GLAZ](https://gitlab.com/gitlab-org/architecture/auth-architecture/design-doc/-/merge_requests/74), a custom Zanzibar-like authorization service in Rust. GLAZ will handle relationship-based, role-based, and attribute-based access control with its own graph traversal engine backed by PostgreSQL/YugabyteDB. Once GLAZ is available, Layer 3 redaction checks can be routed to it over gRPC instead of hitting Postgres through DeclarativePolicy. The bidi streaming protocol does not need to change -- only the Rails-side handler that evaluates `RedactionResponse` would swap from `Ability.allowed?` to a GLAZ client call. Until then, the batch limits and row caps keep the load bounded.
-
-## Puma thread implications
-
-Each KG query blocks a Puma thread for the full duration of the bidi stream. That covers the initial request, ClickHouse execution, the redaction exchange (including `Ability.allowed?` DB lookups), and the final result. The Rails gRPC client uses a synchronous `Queue` + `Enumerator` pattern; there is no async or non-blocking handling.
-
-This is still better than the REST callback alternative. With a REST callback, the original Puma thread blocks waiting for GKG's response while a *second* Puma thread handles the authorization callback from GKG. That means two threads consumed per query. With bidi streaming, the redaction exchange happens on the same thread that initiated the request -- one thread total.
-
-The blocking behavior is the same as any synchronous external service call in Rails (Gitaly, Elasticsearch, Zoekt). The mitigations are the same too: enforce request deadlines, keep query result sets small (the 1000-row limit bounds redaction work), and monitor thread pool saturation.
-
-### Known gaps
-
-Neither the Rails client nor the GKG server currently configures explicit timeouts or deadlines on bidi streams. The Rails client does not pass a `deadline:` parameter to stub calls, and the GKG server does not wrap stream handlers with `tokio::time::timeout()`. A stalled client or server can hold a stream open indefinitely, bounded only by TCP keepalive. This needs to be addressed before production rollout.
-
-There is no idempotency handling. Requests carry no idempotency key, and there is no deduplication or replay detection. If a request fails mid-stream, the client retries from scratch. Since KG queries are read-only, this is safe but wasteful -- a failed query that already ran against ClickHouse will re-execute the same work.
-
-There is no limit on concurrent bidi streams on the GKG server. Each stream spawns an independent tokio task with no cap. A burst of requests could spawn thousands of tasks, each running a ClickHouse query. gRPC's `MAX_CONCURRENT_STREAMS` setting and Kubernetes resource limits are the only controls.
-
-## Alternatives considered
-
-| Alternative | Why rejected |
-|---|---|
-| REST callbacks | Circular dependency between services. GKG needs its own HTTP client and credentials. Doubles failure surface. |
-| Shared database | GKG reading from Postgres would couple it to the Rails schema and bypass the CDC pipeline. Violates the boundary between OLTP and OLAP. |
-| Pre-computed authorization cache | Caching `Ability.allowed?` results requires invalidating on every permission change (role updates, confidentiality toggles, SAML changes). The invalidation problem is as hard as the original authorization problem. |
-| Message queue (NATS/Kafka) | The redaction exchange is synchronous -- GKG cannot proceed until it has authorization results. A queue adds infrastructure complexity for a request-response pattern that gRPC handles directly. |
-| HTTP/2 SSE | Server-Sent Events are unidirectional (server to client only). The redaction exchange requires both directions within a single request. |
+The whole exchange runs in one call on one connection with one timeout, with no polling and no callback service.
+Rails and Orbit use half the connections, and do not open a callback connection under load.
 
 ## Consequences
 
-Rails needs the `grpc` gem and the `gitlab-orbit-proto` generated client. This follows the Gitaly pattern and uses the same gem infrastructure.
+- Rails needs the gRPC gem and the generated Orbit client gem, through the same gem setup as Gitaly.
+- A change to the protocol definition needs a new gem release and a Rails update.
+  Compatible changes, such as a new field or RPC, need no lockstep deploy.
+  Breaking changes, such as a removed field or a changed type, follow the standard deprecation process.
+- Standard HTTP tools cannot inspect a bidirectional stream.
+  Teams need gRPC tools, such as grpcurl, Bloom RPC, or logging interceptors.
+- If Rails is down or slow, Orbit cannot finish a query that needs redaction checks.
+  We accept this, because to skip redaction would be a security violation.
+- Requests carry no key for deduplication or replay detection, so a failed request is retried from the start.
+  Queries are read-only, so a retry is safe, but it runs the same ClickHouse work again.
 
-Changes to `orbit.proto` require regenerating the proto gem, publishing it, and updating Rails. Backwards-compatible changes (adding fields, adding RPCs) do not require lockstep deploys. Breaking changes (removing fields, changing types) require the standard proto deprecation workflow.
+### Denial of service
 
-Bidi streaming RPCs are harder to inspect than unary calls. Standard HTTP debugging tools do not work. Teams will need gRPC-aware tooling (grpcurl, Bloom RPC, or custom logging interceptors) for debugging.
+A bidirectional stream adds denial-of-service risks:
 
-If Rails is down or slow, GKG cannot complete any query that requires Layer 3 checks. This is intentional -- the alternative (skipping redaction) would be a security violation.
+- A query with millions of rows would make a very large redaction request, but the row limit of the query engine prevents this.
+- A slow client holds the stream open on the server.
+  Neither Rails nor Orbit sets a stream deadline yet, so only TCP keepalive bounds the wait.
+  We must add a deadline for each RPC before the production rollout.
+- An attacker can open many streams and send no messages.
+  Orbit does not limit concurrent streams, and each stream starts its own task and ClickHouse query.
+  The gRPC limit on concurrent streams and the Kubernetes resource limits are the only controls.
+  We must add stream limits on the server.
+
+### PostgreSQL load from redaction checks
+
+Each Rails permission check evaluates the Rails policy rules against PostgreSQL, and it can load the resource and evaluate several conditions.
+A full result across several resource types could cause one check for each row.
+
+Grouped IDs and a cap on the IDs in each check reduce this load to a few batched checks.
+The row limit of the query engine also bounds the number of checks for each request.
+The Rails handler must preload resources and their policy dependencies instead of checking each ID alone, as Rails does for search results.
+
+The Auth Architecture team is building GLAZ, a Rust authorization service modeled on Google Zanzibar.
+GLAZ will control access based on relationships, roles, and attributes, and it stores its data in PostgreSQL or YugabyteDB.
+When GLAZ is available, Rails can send redaction checks to it over gRPC instead of to PostgreSQL.
+Only the Rails handler changes, and the stream protocol stays the same.
+Until then, the batch caps and row limits bound the load.
+
+### Puma threads
+
+The Rails gRPC client is synchronous, so each query blocks a Puma thread for the full stream, from the request to the result.
+A REST callback would use a second thread for the authorization callback, but the stream needs only one.
+Other synchronous services in Rails, such as Gitaly, Elasticsearch, and Zoekt, block the same way.
+The mitigations are the same: request deadlines, small result sets, and monitoring of thread pool use.
+
+## Why not the alternatives
+
+### REST callback
+
+Orbit would call a Rails HTTP endpoint during the request, which makes a circular service dependency.
+The second connection doubles the connection and failure surface and complicates load balancer configuration.
+Orbit would need its own HTTP client and separate credentials for the callback.
+The callback can also time out apart from the original request.
+
+### Unary gRPC for each phase
+
+Rails would start the query, poll for the redaction request, send the response, and poll for the result.
+Polling adds latency, and the server must keep state for each query in flight.
+One logical operation becomes four RPCs, each with its own failure modes.
+
+### Server streaming
+
+Orbit could stream results to Rails, but Rails could not send redaction decisions back on the same stream.
+
+### Shared database
+
+Orbit would read permissions from PostgreSQL directly.
+That couples Orbit to the Rails schema, bypasses the change data capture pipeline, and breaks the boundary between transactional and analytical storage.
+
+### Precomputed authorization cache
+
+The cache must change on every permission change, such as a role update, a confidentiality change, or a SAML change.
+That invalidation problem is as hard as the original authorization problem.
+
+### Message queue
+
+A queue such as NATS or Kafka adds infrastructure for a request-response exchange.
+Orbit cannot continue until it has the authorization results, and gRPC handles that exchange directly.
+
+### Server-sent events over HTTP/2
+
+Server-sent events go only from server to client.
+The redaction exchange needs both directions in one request.
 
 ## References
 
-- [Proto definition: `orbit.proto`](../../../../crates/orbit-server/proto/orbit.proto)
-- [Security design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md)
-- [MR !273: gRPC service implementation](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/273)
+- [Orbit gRPC service definition](../../../../crates/orbit-server/proto/orbit.proto)
+- [Orbit security design document](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/2da7a9340bb4ae77d07050e0b01f50cf507af66c/docs/design-documents/security.md)
+- [gRPC service implementation](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/merge_requests/273)
 - [Gitaly client in Rails](https://gitlab.com/gitlab-org/gitlab/-/tree/master/lib/gitlab/gitaly_client)
-- [Gitaly proto definitions](https://gitlab.com/gitlab-org/gitaly/-/tree/master/proto)
-- [ADR 003: API Design, Unified REST + GraphQL](003_api_design.md)
+- [Gitaly protocol definitions](https://gitlab.com/gitlab-org/gitaly/-/tree/master/proto)
+- [GLAZ authorization service design document](https://gitlab.com/gitlab-org/architecture/auth-architecture/design-doc/-/merge_requests/74)
+- [ADR 003: Orbit API design (unified REST and GraphQL)](003_api_design.md)

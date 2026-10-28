@@ -365,15 +365,8 @@ impl ArrowClickHouseClient {
     ) -> ArrowQuery {
         match value {
             Value::String(s) => {
-                // CH's HTTP-param parser for DateTime64/Date rejects the ISO
-                // 8601 trailing `Z` ("BAD_QUERY_PARAMETER, only 19 of 20 bytes
-                // was parsed"). Column already pins UTC, so dropping it
-                // preserves the value.
-                let normalized = match data_type {
-                    SqlType::Timestamp { .. } => s.strip_suffix('Z').unwrap_or(s),
-                    _ => s.as_str(),
-                };
-                query.param(key, normalized)
+                let temporal = matches!(data_type, SqlType::Timestamp { .. } | SqlType::Date);
+                query.param(key, parameter_text(s, temporal))
             }
             Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
@@ -403,10 +396,14 @@ impl ArrowClickHouseClient {
                     query.param(key, bools)
                 }
                 _ => {
+                    let temporal = matches!(
+                        data_type,
+                        SqlType::Array(ScalarType::Timestamp { .. } | ScalarType::Date)
+                    );
                     let strings: Vec<String> = arr
                         .iter()
                         .map(|v| match v {
-                            Value::String(s) => s.clone(),
+                            Value::String(s) => parameter_text(s, temporal).to_string(),
                             other => other.to_string(),
                         })
                         .collect();
@@ -415,6 +412,17 @@ impl ArrowClickHouseClient {
             },
             _ => query.param(key, value.to_string()),
         }
+    }
+}
+
+/// ClickHouse's HTTP parameter parser for DateTime64 and Date rejects the ISO 8601
+/// trailing `Z` ("only 19 of 20 bytes was parsed"). Columns already pin UTC, so
+/// dropping it keeps the value.
+fn parameter_text(text: &str, temporal: bool) -> &str {
+    if temporal {
+        text.strip_suffix('Z').unwrap_or(text)
+    } else {
+        text
     }
 }
 

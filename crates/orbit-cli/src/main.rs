@@ -263,6 +263,20 @@ const GREP_NOOP_LONGS: &[&str] = &[
     "with-filename",
 ];
 
+const GLAB_UPDATE_COMMAND: &str = "update";
+
+/// glab owns `update` but forwards `--help` here, so list it under glab.
+fn cli_command(launcher: &str) -> clap::Command {
+    let command = Cli::command();
+    if launcher != commands::setup::spec::GLAB_LAUNCHER {
+        return command;
+    }
+    command.bin_name(launcher).subcommand(
+        clap::Command::new(GLAB_UPDATE_COMMAND)
+            .about("Update the Orbit binary to the latest version"),
+    )
+}
+
 /// Lets `orbit grep` take rg and grep invocations as agents write them, so a stray flag costs no
 /// turn: flags it already behaves as are dropped, unsupported ones are dropped with a warning,
 /// and `-NUM` means `-C NUM`.
@@ -780,13 +794,16 @@ enum McpCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let matches = match Cli::command()
+    let matches = match cli_command(commands::setup::spec::launcher())
         .try_get_matches_from(tolerate_grep_flags(std::env::args_os().collect()))
     {
         Ok(matches) => matches,
         Err(_) if std::env::args().any(|arg| arg == "hook-guard") => return Ok(()),
         Err(error) => error.exit(),
     };
+    if matches.subcommand_name() == Some(GLAB_UPDATE_COMMAND) {
+        anyhow::bail!("run `glab orbit update` to update Orbit");
+    }
     let cli = Cli::from_arg_matches(&matches).expect("clap already validated the arguments");
     match &cli.command {
         Commands::HookGuard { kind, gitlab, .. } => {

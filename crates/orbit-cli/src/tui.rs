@@ -6,6 +6,10 @@ use std::io::IsTerminal;
 use anyhow::{Result, bail};
 use cliclack::{Theme, ThemeState};
 
+const COLUMN_GAP: &str = "   ";
+/// cliclack wraps card bodies to the terminal width minus this, without a hanging indent.
+const CARD_BORDERS: usize = 6;
+
 pub(crate) struct Choice {
     pub(crate) key: String,
     pub(crate) label: String,
@@ -61,8 +65,16 @@ pub(crate) fn align_columns<'a>(rows: impl Iterator<Item = (&'a str, String)>) -
         .map(|(name, _)| name.chars().count())
         .max()
         .unwrap_or_default();
+    let indent = format!("\n{}", " ".repeat(width + COLUMN_GAP.len()));
     rows.iter()
-        .map(|(name, detail)| format!("{name:<width$}   {detail}"))
+        .map(|(name, detail)| {
+            let detail =
+                cliclack::termwrap(detail, (CARD_BORDERS + width + COLUMN_GAP.len()) as u16);
+            format!(
+                "{name:<width$}{COLUMN_GAP}{}",
+                detail.replace('\n', &indent)
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }

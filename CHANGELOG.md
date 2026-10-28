@@ -1,3 +1,23 @@
+## [0.163.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.162.0...v0.163.0) (2026-10-28)
+
+### Features
+
+* **cli:** list the update command in help under glab ([5ebd5f3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5ebd5f344e082fbd591827af36b203018cae6c4c)) by Jean-Gabriel Doyon
+* **cli:** render orbit skills list as a card in a terminal ([280cf24](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/280cf2465422e9ae36a079481f290498965502bd)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **billing:** bypass quota check for GitLab team members on SaaS ([da558da](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/da558dadf9b8fac86c3c89dcc1607156ed0d03d9)) by Jean-Gabriel Doyon
+* **cli:** stop fetching the query_graph description during setup ([3116a22](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3116a223bbe46b6f1f8ca3d02e17f41ab90046e4)) by Aaron Algutifan
+* **cli:** take the libduckdb rpath from libduckdb-sys ([aa01408](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aa01408181a8dc34d88df0a61bbf4dbaf6b07a5d)) by Michael Usachenko
+* **gql:** harden grammar input bounds ([39db341](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/39db341d51450a2738045a9c4e0841d37c70fa68)) by Michael Usachenko
+* **query:** close query validation gaps found in GQL probing ([ee06d17](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ee06d17214a8186b37a895b91348d9d025490184)) by Michael Usachenko
+
+### Other
+
+* **cli:** document workspace index --async/--wait and waiting reads ([3755662](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3755662841349133399ca81163c81803a4e2fdc3)) by Dmitry Gruzd
+* **deps:** upgrade DuckDB to 2.0.0 and Arrow to 60 ([4cbb42f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4cbb42f2f010f760a9ef5f3ad15fc316a7e9da16)) by Michael Usachenko
+
 ## [0.162.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.161.0...v0.162.0) (2026-10-28)
 
 ### Features

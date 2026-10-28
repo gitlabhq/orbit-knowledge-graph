@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Use Orbit (`glab orbit` or `orbit`) to search code and read it with callers and tests. It reads MRs, issues, and failed jobs with the code they cite. Graph queries answer relationship and aggregation questions across GitLab. Skip it for writes that `glab` handles.
-version: 0.35.3+gql
+version: 0.35.7+gql
 license: MIT
 compatibility: Requires the GitLab Orbit CLI (directly or through glab) and network access to the GitLab instance for commands that call the GitLab Orbit API.
 metadata:
@@ -14,7 +14,7 @@ metadata:
 
 # Orbit skill
 
-Query GitLab Orbit (previously GitLab Knowledge Graph) through the flat `glab orbit` command tree. It needs glab v1.117.0 or later. Hosted commands handle authentication, response framing, and exit codes. Local commands use the managed binary and the local DuckDB graph.
+Query GitLab Orbit (previously GitLab Knowledge Graph) through the flat `glab orbit` command tree. It needs glab v1.126.0 or later. Hosted commands handle authentication, response framing, and exit codes. Local commands use the managed binary and the local DuckDB graph.
 
 ## Prerequisites
 
@@ -54,7 +54,7 @@ glab orbit query "CALL db.schema('Project')"
 glab orbit query "MATCH (p:Project {full_path: 'gitlab-org/gitlab'}) RETURN p.id, p.full_path LIMIT 1"
 ```
 
-With a standalone install, use `orbit query` instead of `glab orbit query`. Quote the whole query for the shell; single-quoted string literals then need double quotes around the query. Inline query text needs GitLab Orbit CLI 0.130.0 or later. If `glab orbit query` rejects the text argument, run `glab orbit --update`.
+With a standalone install, use `orbit query` instead of `glab orbit query`. Quote the whole query for the shell; single-quoted string literals then need double quotes around the query.
 
 `--file` reads a JSON request envelope whose `query` field holds the query text, not a bare query file. `--file -` reads that envelope from stdin. Default output is `llm` (compact, agent-friendly). Pass `--response-format raw` to pipe into `jq`. Endpoints are user-scoped, so do not pass `-R owner/repo`.
 
@@ -68,7 +68,7 @@ Read [`references/gql.md`](references/gql.md) before you construct a query. Thes
 - Prefer a single anchored node when you can bound the target directly. Extra anchor nodes can change the row shape and skew aggregate counts.
 - To find MRs that ever touched a file, use `HAS_DIFF`; see [file history](references/gql.md#merge-requests-that-touched-a-file). Use `HAS_LATEST_DIFF` for one MR's current revision.
 - Issues, epics, tasks, and incidents are the `WorkItem` node. There is no `Issue` node.
-- There is no `OR`, `XOR`, `DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`.
+- There is no `OR`, `XOR`, `RETURN DISTINCT`, `count(*)`, `OPTIONAL MATCH`, or `WITH`. `DISTINCT` works only inside `count()`: `count(DISTINCT pl)`.
 
 ## Iteration budget
 
