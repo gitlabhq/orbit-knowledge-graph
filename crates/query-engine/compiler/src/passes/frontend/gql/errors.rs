@@ -3,6 +3,7 @@ use pest::error::{Error, ErrorVariant, LineColLocation};
 
 use super::Rule;
 use crate::QueryError;
+use crate::query_limits::{MAX_LIMIT, MAX_SKIP};
 
 const INVARIANT_PREFIXES: [&str; 3] = [
     "grammar produced",
@@ -92,13 +93,19 @@ fn rule_label(rule: &Rule) -> String {
         Rule::SortItem => "a sort key",
         Rule::SortDirection => "ASC or DESC",
         Rule::UnsignedInteger => "a non-negative integer",
+        Rule::LimitCount => return format!("an integer from 1 to {MAX_LIMIT}"),
+        Rule::SkipCount => return format!("an integer from 0 to {MAX_SKIP}"),
+        Rule::PathCount => "1",
+        Rule::HopCount => "a hop count from 1 to 3",
         Rule::StringLiteral
         | Rule::NumberLiteral
         | Rule::BooleanLiteral
         | Rule::TemporalLiteral => "a value",
         Rule::FunctionName => "a function call",
-        Rule::ListLiteral => "a list",
-        Rule::MapLiteral | Rule::MapEntry => "a property map such as {name: 'x'}",
+        Rule::InListLiteral | Rule::ListLiteral => "a list",
+        Rule::NodeMapLiteral | Rule::RelationshipMapLiteral | Rule::MapEntry => {
+            "a property map such as {name: 'x'}"
+        }
         Rule::RangeLiteral => "a hop range such as *1..3",
         other => return format!("{other:?}"),
     }
