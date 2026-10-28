@@ -1,5 +1,6 @@
 import type { Elements, Register, RenderElement } from 'claude-code'
 
+import { orbitInvocations } from './command.ts'
 import { TOKEN_STYLE, codeLines, cypherSegments, hopsOf, layout, queryOf, type Token } from './cypher.ts'
 import type { MarkProps } from './orbit-mark.ts'
 import { BLUE, MARK, QUERY_LABEL, describeOrbitCall, type OrbitCall } from './orbit.ts'
@@ -83,6 +84,8 @@ export const register: Register = (on) => {
   on('tool.call', async ($, e, next) => {
     const call = describeOrbitCall(e.tool, e)
     if (!call) return next(e)
+    const raw = (e as { command?: unknown }).command
+    const command = typeof raw === 'string' ? raw : ''
     let answer: unknown
     try {
       answer = await next(e)
@@ -90,12 +93,13 @@ export const register: Register = (on) => {
     } finally {
       // A parsing slip must not fail the hook after the tool has run
       try {
-        const { command } = e as { command?: unknown }
-        await record((path) => $.fs.read(path), call, typeof command === 'string' ? command : '', answer)
+        await record((path) => $.fs.read(path), call, command, answer)
       } catch {}
       if (!graphTotalAsked) {
         graphTotalAsked = true
-        const argv = ['glab', 'orbit', 'graph-status', '--response-format', 'raw']
+        // A standalone-binary user has no glab, so ask graph-status the way the call itself ran
+        const launcher = orbitInvocations(command)[0]?.launcher ?? ['glab', 'orbit']
+        const argv = [...launcher, 'graph-status', '--response-format', 'raw']
         void $.process.run(argv, { timeoutMs: 30000 }).then((run) => {
           graphTotal = run.exitCode === 0 ? graphNodes(run.stdout) : null
           $.ui.invalidate('ui.render')

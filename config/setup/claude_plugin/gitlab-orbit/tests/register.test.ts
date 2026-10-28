@@ -96,3 +96,16 @@ test('a count query adds the edges its counted rows walked', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: '80' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: ' edges' })).toBeDefined()
 })
+
+test('graph-status runs through the launcher the Orbit call used', async ($, on) => {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['hint'] }))
+  on('tool.call', () => ({ result: { stdout: 'nodes:\n  User[1]{id}:\n    1\n' } }))
+  let argv: readonly string[] = []
+  on('process.run', (_$, e) => {
+    argv = e.argv
+    return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  await $.tool.call({ tool: 'Bash', command: '/opt/orbit/bin/orbit query "MATCH (u:User {id: 1}) RETURN u"' })
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+  expect(argv).toEqual(['/opt/orbit/bin/orbit', 'graph-status', '--response-format', 'raw'])
+})
