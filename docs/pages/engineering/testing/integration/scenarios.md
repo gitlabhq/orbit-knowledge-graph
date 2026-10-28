@@ -3,9 +3,9 @@ title: Scenarios
 description: How YAML query and indexer scenarios prove that Orbit returns and writes the right data.
 order: 2
 authors:
-  - michaelangeloio
   - michaelusa
   - jgdoyon1
+  - michaelangeloio
 ---
 
 ## Two kinds of scenario
