@@ -7,6 +7,7 @@ use ontology::{EtlScope, Extract, ExtractQuery, NodeEntity, Ontology, Pipeline, 
 use super::extract::{ClickHouseExtractDeclaration, ExtractSpec, compile_extract_spec};
 use super::transform;
 use super::{Plan, Plans, TransformDeclaration, TransformSpec};
+use crate::modules::sdlc::edge_diff::EdgeDiff;
 
 pub(in crate::modules::sdlc) struct Sizing<'a> {
     pub global_batch_size: u64,
@@ -91,13 +92,11 @@ fn build_node_plan(
     let spec = compile_extract_spec(&extract_declaration)?;
     let transform = transform::compile_transform_spec(transform_declaration, ontology)?;
 
-    Ok(assemble(
-        pipeline,
-        pipeline.name.clone(),
-        spec,
-        transform,
-        sizing,
-    ))
+    let mut plan = assemble(pipeline, pipeline.name.clone(), spec, transform, sizing);
+    if pipeline.scope == EtlScope::Namespaced {
+        plan.edge_diff = EdgeDiff::for_node(node, pipeline.transform.edges(), ontology);
+    }
+    Ok(plan)
 }
 
 fn build_edge_plan(
@@ -185,6 +184,7 @@ fn assemble(
         sort_key: extract.order_by.clone(),
         batch_size: sizing.resolve(&pipeline.name, pipeline.scope),
         transform,
+        edge_diff: None,
     }
 }
 
@@ -412,6 +412,7 @@ mod tests {
             deleted_column: String::new(),
             sort_key: vec![],
             batch_size: 1,
+            edge_diff: None,
             transform: TransformSpec::DataFusion(vec![]),
         }
         };

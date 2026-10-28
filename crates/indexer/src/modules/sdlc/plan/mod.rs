@@ -21,6 +21,7 @@ use ontology::sql_template;
 use orbit_arrow::ArrowUtils;
 use serde_json::Value;
 
+use super::edge_diff::EdgeDiff;
 use super::partitioning::PartitionAssignment;
 use crate::checkpoint::Checkpoint;
 use crate::clickhouse::TIMESTAMP_FORMAT;
@@ -263,6 +264,7 @@ pub(in crate::modules::sdlc) struct Plan {
     pub sort_key: Vec<String>,
     pub batch_size: u64,
     pub transform: TransformSpec,
+    pub edge_diff: Option<EdgeDiff>,
 }
 
 #[derive(Clone)]
@@ -441,6 +443,7 @@ mod tests {
             deleted_column: "_siphon_deleted".to_string(),
             sort_key,
             batch_size,
+            edge_diff: None,
             transform: TransformSpec::DataFusion(vec![]),
         }
     }

@@ -1,4 +1,5 @@
 mod datalake;
+mod edge_diff;
 mod error;
 mod handler;
 mod metrics;
@@ -97,6 +98,7 @@ pub async fn register_handlers(
         metrics.clone(),
         config.engine.datalake_retry.clone(),
         Arc::clone(&transform_registry),
+        clients.graph.clone(),
     ));
 
     let global_policy = sdlc_dispatch_topic_policy()

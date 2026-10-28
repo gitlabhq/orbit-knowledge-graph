@@ -11,6 +11,7 @@ use orbit_log_fields::{debug, info, warn};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::clickhouse::ArrowClickHouseClient;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::IndexingObserver;
@@ -142,6 +143,7 @@ pub(in crate::modules::sdlc) struct Pipeline {
     metrics: SdlcMetrics,
     retry_config: DatalakeRetryConfig,
     registry: Arc<TransformRegistry>,
+    graph: ArrowClickHouseClient,
 }
 
 impl Pipeline {
@@ -151,6 +153,7 @@ impl Pipeline {
         metrics: SdlcMetrics,
         retry_config: DatalakeRetryConfig,
         registry: Arc<TransformRegistry>,
+        graph: ArrowClickHouseClient,
     ) -> Self {
         Self {
             datalake,
@@ -158,6 +161,7 @@ impl Pipeline {
             metrics,
             retry_config,
             registry,
+            graph,
         }
     }
 
@@ -246,12 +250,30 @@ impl Pipeline {
                 .record_transform_duration(transform_elapsed.as_secs_f64());
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
-            let mut write_futures = FuturesUnordered::new();
-            for (index, batches) in grouped.into_iter().enumerate() {
-                if batches.is_empty() {
-                    continue;
+            let tombstones = match &plan.edge_diff {
+                Some(diff) => {
+                    let node_rows = outputs
+                        .iter()
+                        .position(|table| table == diff.node_table())
+                        .map(|index| grouped[index].as_slice())
+                        .unwrap_or_default();
+                    diff.tombstones(&self.graph, node_rows).await?
                 }
-                let table = outputs[index].clone();
+                None => Vec::new(),
+            };
+            let writes = tombstones
+                .into_iter()
+                .map(|(table, batch)| (table, vec![batch]))
+                .chain(
+                    grouped
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(_, batches)| !batches.is_empty())
+                        .map(|(index, batches)| (outputs[index].clone(), batches)),
+                );
+
+            let mut write_futures = FuturesUnordered::new();
+            for (table, batches) in writes {
                 let w = Arc::clone(&context.writer);
                 let d = durability.data_writes;
                 write_futures.push(async move {
@@ -513,7 +535,9 @@ mod tests {
     use crate::checkpoint::CheckpointError;
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
     use crate::modules::sdlc::partitioning::PartitionAssignment;
-    use crate::modules::sdlc::test_helpers::{passthrough_registry, test_metrics};
+    use crate::modules::sdlc::test_helpers::{
+        passthrough_registry, test_graph_client, test_metrics,
+    };
     use crate::observer::NoOpObserver;
     use crate::testkit::test_writer;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
@@ -546,6 +570,7 @@ mod tests {
             deleted_column: "_siphon_deleted".to_string(),
             sort_key: vec!["id".to_string()],
             batch_size,
+            edge_diff: None,
             transform: TransformSpec::DataFusion(vec![Transformation {
                 sql: format!(
                     "SELECT id, name FROM {}",
@@ -733,6 +758,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
+            test_graph_client(),
         );
         let plan = simple_plan("Test");
 
@@ -763,6 +789,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
+            test_graph_client(),
         );
         let result = pipeline
             .run_plan(
@@ -811,6 +838,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
+            test_graph_client(),
         );
 
         pipeline
@@ -871,6 +899,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
+            test_graph_client(),
         );
         pipeline
             .run_plan(
@@ -899,6 +928,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
+            test_graph_client(),
         );
         let plan = simple_plan("Failing");
 
@@ -975,6 +1005,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
+            test_graph_client(),
         );
 
         let plan = simple_plan("Missing");
@@ -1004,6 +1035,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
+            test_graph_client(),
         );
 
         let plan = simple_plan("Unavailable");
@@ -1039,6 +1071,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
+            test_graph_client(),
         );
 
         let plan = simple_plan("Test");
@@ -1078,6 +1111,7 @@ mod tests {
                 halving_min_block_size: 1024,
             },
             passthrough_registry(),
+            test_graph_client(),
         );
 
         let plan = simple_plan("Test");
@@ -1118,6 +1152,7 @@ mod tests {
                 halving_min_block_size: 2_048,
             },
             passthrough_registry(),
+            test_graph_client(),
         );
 
         let plan = simple_plan("Test");
@@ -1199,6 +1234,7 @@ mod tests {
                 halving_min_block_size: 1_024,
             },
             passthrough_registry(),
+            test_graph_client(),
         );
 
         let plan = simple_plan("Test");
@@ -1235,6 +1271,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
+            test_graph_client(),
         );
         let plan = simple_plan("Test");
 
@@ -1316,6 +1353,7 @@ mod tests {
             test_metrics(),
             AppConfig::embedded_defaults().engine.datalake_retry,
             passthrough_registry(),
+            test_graph_client(),
         );
         let plan = simple_plan("Test");
 

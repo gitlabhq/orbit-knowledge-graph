@@ -16,6 +16,14 @@ pub(crate) fn test_metrics() -> SdlcMetrics {
     SdlcMetrics::with_meter(&crate::testkit::test_meter())
 }
 
+pub(crate) fn test_graph_client() -> crate::clickhouse::ArrowClickHouseClient {
+    use clickhouse_client::ClickHouseConfigurationExt;
+
+    orbit_server_config::AppConfig::embedded_defaults()
+        .graph
+        .build_client("graph")
+}
+
 struct PassthroughTransform {
     outputs: Vec<String>,
 }
